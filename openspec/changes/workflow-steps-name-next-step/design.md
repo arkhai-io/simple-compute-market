@@ -60,37 +60,70 @@ cleanup each have one successor.
 
 The graph is one table in code beside the computation: each node is a step
 qualified by its review kind where it has one (`review` of kind `design` has other
-exits than `review` of kind `closeout`); each node declares its exits, the join it
+exits than `review` of kind `closeout`, and `triage` of a design review other exits
+than `triage` of a closeout review); each node declares its exits, the join it
 waits on (the round's triage waits for the owner's reading, the validation, and the
-implementation review), and the guards on each edge, each guard naming the step
-that satisfies it (D4). The computation interprets the table in place of the
-per-phase methods. `make change-graph` renders it as a Mermaid diagram, and the
-diagram in `openspec/specs/change-workflow/architecture.md` is held to that
-rendering by a test, so the documentation cannot drift from the code.
+implementation review), the guards on each edge, each guard naming the step
+that satisfies it (D4), and its entry guards. The computation interprets the table
+in place of the per-phase methods. `make change-graph` renders it as a Mermaid
+diagram, and the diagram in `openspec/specs/change-workflow/architecture.md` is
+held to that rendering by a test, so the documentation cannot drift from the code.
 
-Guards sit on a step's exits only; an owner's direction (D5) checks none. The table
-states today's routing, which round 1 reproduces exactly (13 F1):
+A guard is of one of two kinds (21 F1):
+
+- An *exit guard* sits on an edge: a condition on a step's chosen exit, such as
+  `HEAD` validated before closeout. An owner's direction (D5) checks none (13 F1).
+- An *entry guard* sits on a node: a condition without which its step cannot, or
+  should not, carry out its work, such as an archive for archive cleanup. It is
+  checked on every entry, by a step's exit or by a direction. One that is
+  *unwaivable* refuses every entry while unmet; one that is *waivable* takes the
+  owner's direction as its override, and on a step's exit is met first by the exit
+  guard that remedies it. An entry guard unmet on a step's exit names the owner.
+
+The table states today's routing, which round 1 reproduces exactly (13 F1); the
+triages' kinds and the entry guards are round 2's:
 
 | Node | Exits a step names | Join | Guards on the exits, and their remedy |
 |---|---|---|---|
 | `design` | `review` `design` | — | — |
-| `review` `design` | `triage` | — | — |
-| `triage` of a design review | `plan`; `review` `design`; `design` (a return) | — | `plan`: a dependency gating planning released (owner). A return: the owner's confirmation (owner) |
+| `review` `design` | `triage` `design` | — | — |
+| `triage` `design` | `plan`; `review` `design`; `design` (a return) | — | `plan`: a dependency gating planning released (owner). A return: the owner's confirmation (owner) |
 | `plan` | `round`; `review` `pre-closeout` when the plan adds nothing to implement | — | `round`: a dependency gating implementation released (owner). `review` `pre-closeout`: `HEAD` validated, records exempt (`validate`) |
-| `round` / `implement` | `triage` | the round's sections checked (`implement`, its next session), the owner's reading (`round-view`), its validation (`validate`), its implementation review (`review` `implementation`) | in a clone, the bootstrap finished (`wait`; failed: owner) |
-| `validate`, `review` `implementation` | `triage` | as above | — |
-| `triage` of an implementation round | `round`; `implement` with sections; `review` `pre-closeout` after the last round; `review` `implementation`; `plan` or `design` (a return) | — | `round`, `implement`, `review` `pre-closeout`: the fix commit validated, records exempt (`validate`; failed or inconclusive: owner). `review` `implementation`: a fix committed since the review is read (`round-view`) and validated (`validate`). A return: the owner's confirmation (owner) |
-| `review` `pre-closeout` | `triage` | — | — |
-| `triage` of a pre-closeout review | `closeout`; `review` `pre-closeout`; `plan` or `design` (a return) | — | `closeout`: `HEAD` validated, `openspec/` and `docs/` exempt (`validate`; failed or inconclusive: owner). `review` `pre-closeout`: a fix outside `openspec/` and `docs/` validated (`validate`). A return: the owner's confirmation (owner) |
+| `round` / `implement` | `triage` `implementation` | the round's sections checked (`implement`, its next session), the owner's reading (`round-view`), its validation (`validate`), its implementation review (`review` `implementation`) | in a clone, the bootstrap finished (`wait`; failed: owner) |
+| `review` `implementation` | `triage` `implementation` | as above | — |
+| `validate` | the target it carries: `triage` `implementation` in a round's join, or the exit whose guard it remedies | as above, in a round | the guards of the target, checked again |
+| `triage` `implementation` | `round`; `implement` with sections; `review` `pre-closeout` after the last round; `review` `implementation`; `plan` or `design` (a return) | — | `round`, `implement`, `review` `pre-closeout`: the fix commit validated, records exempt (`validate`; failed or inconclusive: owner). `review` `implementation`: a fix committed since the review is read (`round-view`) and validated (`validate`). A return: the owner's confirmation (owner) |
+| `review` `pre-closeout` | `triage` `pre-closeout` | — | — |
+| `triage` `pre-closeout` | `closeout`; `review` `pre-closeout`; `plan` or `design` (a return) | — | `closeout`: `HEAD` validated, `openspec/` and `docs/` exempt (`validate`; failed or inconclusive: owner). `review` `pre-closeout`: a fix outside `openspec/` and `docs/` validated (`validate`). A return: the owner's confirmation (owner) |
 | `closeout` | `review` `closeout` | — | — |
-| `review` `closeout` | `triage` | — | — |
-| `triage` of a closeout review | `archive-cleanup`; `review` `closeout` | — | `archive-cleanup`: when a path outside `openspec/` and `docs/` changed since the first closeout review, `HEAD` validated (`validate`; failed or inconclusive: owner) |
-| `archive-cleanup` | none: the change is done | — | — |
+| `review` `closeout` | `triage` `closeout` | — | — |
+| `triage` `closeout` | `archive-cleanup`; `review` `closeout` | — | `archive-cleanup`: when a path outside `openspec/` and `docs/` changed since the first closeout review, `HEAD` validated (`validate`; failed or inconclusive: owner) |
+| `archive-cleanup` | `done` | — | — |
+| `done` | none: the change is done, and no step runs | — | — |
 
-`validate`, named as a guard's remedy, carries the exit it clears as its `target`
-(D4). A triage's join is read from the files as today's; a step that waits on the
+The entry guards:
+
+| Node | Entry guard | Waivable |
+|---|---|---|
+| `design`, `plan`, `round` / `implement` | the change is not archived | no |
+| `review` `pre-closeout` | the latest validation passed for `HEAD`, or for an ancestor it differs from only in records — after a pre-closeout triage, only in paths under `openspec/` and `docs/` | yes: the owner's direction is its override, as `UNVALIDATED=1` is today |
+| `review` `closeout`, `triage` `closeout`, `archive-cleanup` | the change is archived | no |
+| `triage` of each kind | a review of its kind awaits triage | no |
+| `done` | reached only by archive cleanup's exit | no: never directed |
+
+Closeout has no archive guard, since it is the step that archives.
+
+The computation names `validate` always with a `target` (D4): in a round's join,
+the round's triage; as a guard's remedy, the exit it clears. Validation names that
+target as its exit, and the computation checks the target's guards again, so a
+passed validation clears the guard and a failed or inconclusive one names the owner
+(21 F2). Under orchestration validation takes the target from the computation's
+result; an interactive `make validate` reads it by running the computation. A
+triage's join is read from the files as today's; a step that waits on the
 owner — a question, a stop, a proposed return — holds its node until answered or
-resolved, as now.
+resolved, as now. `done` is the terminal node: archive cleanup names it, and the
+computation names it, as `{"step": "done", "reason": "archived"}` as it does today,
+so the orchestrating session stops (21 F2).
 
 A durable change to the workflow is an OpenSpec change, so changing the table is a
 code change reviewed as one; an intervention in one change's path is the owner's
@@ -112,9 +145,13 @@ Rejected:
 ### D2 — A target is an object in the computation's result shape
 
 A step's exit, an owner's direction, and the computation's result name a step the
-same way: an object `{"step": …}` with `kind` for a review and `sections` for
-implementation, as the computation already prints its results. A return names its
+same way: an object `{"step": …}` with `kind` for a review, and for a triage the
+kind of review it triages (`{"step": "triage", "kind": "pre-closeout"}`), and
+`sections` for implementation, as the computation already prints its results. A
+review or a triage without its kind, or with an empty or unknown one, is no node,
+and is refused wherever a target is written (21 F3). A return names its
 target as a step (`{"step": "plan"}`, `{"step": "design"}`), not as a phase.
+`{"step": "done"}` is the terminal node archive cleanup names.
 `{"step": "round"}` is the plan's next round, so a triage never copies the plan's
 mapping; `{"step": "implement", "sections": […]}` names sections out of the plan's
 order, and becomes, through the computation, a `round` result for those sections,
@@ -136,15 +173,17 @@ Rejected:
 ### D3 — The outcome is the record of a step's exit
 
 Every step's outcome carries its exit as the D2 target in `next`; the prose that
-`next` holds today moves into `message`. A step with one exit names it; validation
-and review name their join, the round's triage. A triage's outcome also names the
+`next` holds today moves into `message`. A step with one exit names it; a review
+names its triage, of its kind; validation names the target the computation gave it
+(D1); archive cleanup names `done`. A triage's outcome also names the
 records it triaged, in `triaged`, which the wrapper requires on a triage run. The
 computation routes on the governing review's latest triage outcome — the latest
 triage line whose `triaged` names it. A triage file with no finished or returned
 triage line naming its review is a triage in progress. A return is confirmed by the
 owner's decision that resolves its run, so neither `governing()` nor
 `return_confirmed()` reads a file's time; the file-time rules and the `## Gate`
-reading are deleted, since every older record is converted (D7).
+reading are deleted, since a change's records are converted before the new
+computation routes on them (D7).
 
 `triaged` is a non-empty list of distinct record names in the ledger's `NN-<kind>`
 form, the file name without `.md`. Each names a numbered record in the change's
@@ -188,7 +227,10 @@ a validation of `HEAD` that failed or was inconclusive, an unconfirmed return, a
 failed bootstrap — names the owner with the target and what is missing. A named
 exit its node does not declare names the owner, with the step's choice and the
 node's exits, single-exit nodes included: a step naming an exit it does not have is
-a skill's defect or an intervention, and an intervention is the owner's (D5).
+a skill's defect or an intervention, and an intervention is the owner's (D5). A
+validation naming a target other than the one the computation gave it is such an
+exit. An exit whose target's entry guard is not met names the owner too, with the
+guard (D1).
 
 The guards are today's: `HEAD` validated, with changes' records exempt, or paths
 under `openspec/` and `docs/` from the pre-closeout triage on; a fix committed
@@ -210,18 +252,23 @@ Rejected:
 - *The step names the whole path*: puts the guards in the model, and a path goes
   stale when a guard's state changes while the step runs.
 
-### D5 — The owner directs any node, and no guard is checked
+### D5 — The owner directs any node, past its exit guards, within its entry guards
 
 An intervention is a deliberate, per-change, irregular transition, and the owner's
 alone. The owner directs any node of the table with a decision line `by: owner`
 whose `next` is a D2 target, with a reason; it may resolve a waiting run. The
 computation names it until a later run of that node is logged. No edge from the
-change's current node is needed, and no guard is checked: a guard is a condition
-on a step's exit (D1, D4), and a direction the owner made deliberately is not
-refused by one. A direction that causes a problem is the owner's to correct, by
-another direction (13 F1). The directed step's entry check passes, since it asks
-the computation, which names it; the step sets its own status as it starts,
-accepting the change in that state because the log holds the owner's direction.
+change's current node is needed, and no exit guard is checked: an exit guard is a
+condition on a step's exit (D1, D4), and a direction the owner made deliberately is
+not refused by one. A direction that causes a problem is the owner's to correct, by
+another direction (13 F1). The target's entry guards are checked (21 F1): the log's
+writer refuses a direction whose target's unwaivable entry guard is not met, naming
+the guard, since the step could not carry out its work, and a waivable entry guard
+takes the direction as its override. The directed step's entry check — its own,
+as the pre-closeout review's validation check, or the computation it asks — accepts
+the direction in the log as that override; the step sets its own status as it
+starts, accepting the change in that state because the log holds the owner's
+direction.
 The waiver of another design review and the waiver of archive cleanup's validation
 are plain directions, whose `reason` says what they skip; archive cleanup, finding
 the direction in the log, still writes the waiver's ledger line. Every decision
@@ -238,20 +285,28 @@ repeat review on its own, and never records a step's exit on its behalf.
  "reason": "the only path outside openspec/ and docs/ is another change's ledger"}
 ```
 
-An archived change is not returned to an earlier phase: design, planning, and
-implementation refuse it, and its deltas are already merged into
-`openspec/specs/`. The log's writer refuses a direction of an archived change to
-design, planning, or implementation, naming the archive, so the computation never
+The archive is the boundary no direction crosses. An archived change is not
+returned to an earlier phase: design, planning, and implementation refuse it, and
+its deltas are already merged into `openspec/specs/`. A change not yet archived is
+not directed past it: the closeout review, its triage, and archive cleanup need the
+archive, and archive cleanup would otherwise mark `archived` a change whose deltas
+were never merged. Both are unwaivable entry guards, so the log's writer refuses
+either direction, naming the archive or its absence, and the computation never
 names a step that would refuse it. A closeout triage that needs a code correction
-stops for the owner, who directs it in that session, as now. A problem found while closeout runs,
-before it archives, is a direction like any other.
+stops for the owner, who directs it in that session, as now. A problem found while
+closeout runs, before it archives, is a direction like any other.
 
 Rejected:
 
-- *A direction checked against its target's entry guards*, guards declared on nodes
-  as well as on edges, with `waives` naming the guard a direction skips (review 13
-  F1's suggestion): a direction the owner made deliberately would be refused by a
-  guard, and the owner, not a guard, answers for an irregular transition.
+- *Every guard checked against a direction*, with `waives` naming the guard a
+  direction skips (review 13 F1's suggestion): a direction the owner made
+  deliberately would be refused by an exit guard, and the owner, not a guard,
+  answers for an irregular transition. Only entry guards are checked, and only the
+  unwaivable ones refuse (21 F1).
+- *Directions unrestricted, each step's entry check making way* (21 F1's first
+  alternative): a direction that no step could carry out, such as archive cleanup of
+  a change not archived, would be accepted and fail later as a stopped run, rather
+  than being refused while the owner is present.
 - *Interventions as declared owner-only edges*: the diagram would show every
   possible intervention, but each new kind would need an OpenSpec change before it
   could be used once, while an intervention is the transition the workflow did not
@@ -266,24 +321,32 @@ Rejected:
 
 A decision line's `next` is the D2 object, with `kind` folded into it; `resolves`
 and `reads` are unchanged. The CLI keeps its flags — `--next`, `--kind`, and
-`--sections` — and builds the object. `note_orchestrator` checks two things in
-place of its special cases: a `next` is the owner's, and its target is a node of
-the table. A direction checks no guard (D5), so a decision line names none.
+`--sections` — and builds the object. `note_orchestrator` checks three things in
+place of its special cases: a `next` is the owner's, its target is a node of the
+table, and its target's unwaivable entry guards are met. A direction checks no exit
+guard and overrides a waivable entry guard (D5), so a decision line names none.
 
 Rejected: keeping a string `next` and a `kind` field on decision lines alone, two
 shapes for one concept.
 
-### D7 — Records from before this change are migrated
+### D7 — A change's records are converted when it takes the new code
 
-The computation reads only the new format. The records of every change not yet
-cleaned up are converted to it as a task of this change, so once the task is done
-no record in an older format remains, and there is nothing to tell apart (13 F2).
-No migration command is committed, and the computation keeps no reading of, and no
-check for, an older format: the conversion is one-off work, done once.
+The computation reads only the new format, and never reads an older one as the new
+(13 F2). A change worked on another branch — in its own clone, whose orchestrating
+session runs that clone's `scripts/` — runs the older tooling until its branch
+merges the `dev` that carries this change: converting its records before then
+would leave its older computation reading shapes it does not know, and its older
+wrapper appending older lines after the conversion. So each change's records are
+converted at the one point that is safe for it, when its branch first carries the
+new code, and that point is not this change's to choose (21 F4).
 
-The task converts, for each change not yet cleaned up — archived ones in closeout
-included, this change among them — in the checkout that holds its records, its
-clone or the workspace:
+A committed command, `python3 scripts/run_change_step.py convert <change>`,
+converts one change's records in the checkout that holds them, its clone or the
+workspace. The computation detects a log not yet converted by its lines' shapes —
+an outcome or decision line whose `next` is a string, or a decision line with a
+`kind` field — and names the owner with the command for it, rather than routing on
+it. Detection reads the log only, never a triage file's first words, so a new
+triage awaiting its outcome is not taken for an older one. The command converts:
 
 - each triaged review whose triage file carries a `## Next` token or a `## Gate`
   and that no triage outcome names: a triage line is appended naming it in
@@ -295,10 +358,16 @@ clone or the workspace:
   `kind` become the D2 object, a `returned` outcome's `return_to` gains its target,
   and an outcome's prose `next`, which nothing routes on, moves into its `message`.
 
-A change with a triage in progress when the task runs is converted once that triage
-has finished. Cleaned-up changes are history and are left as they are. With no
-older reading, `## Next` is free prose, and a triage file whose outcome is not yet
-recorded is a triage in progress whatever its first words.
+Round 2 runs the command on this change, and the detection catches the converting
+run's own last line, which the wrapper that started it appends in the older shape.
+A change that takes the new code with a triage in progress finishes that triage on
+the code it started with, then converts. Cleaned-up changes are history and are left
+as they are. With no older reading, `## Next` is free prose, and a triage file whose
+outcome is not yet recorded is a triage in progress whatever its first words.
+
+The command and the detection are temporary: a change opened at this change's
+closeout removes both once no change not yet cleaned up holds a log in an older
+shape. The computation's routing keeps no older reading meanwhile.
 
 Rejected:
 
@@ -306,10 +375,15 @@ Rejected:
   same inputs as a new triage whose outcome is not yet recorded, so it could route a
   new `## Next` as an older token (review 13 F2), and the file-time rules would
   survive with it.
-- *A committed migration command, with a check for unmigrated changes*: the
-  conversion happens once, within this change, after which every record is in the
-  new format; a command and a check would be kept for records that no longer
-  exist.
+- *A reader of both formats, kept until every change has moved over* (21 F4): no
+  conversion, but the older routing — tokens and file times — stays inside the code
+  this change rewrites.
+- *A one-off conversion of every change, as a task of this change, with no command
+  and no check* (D7 as settled by 13 F2): a change on another branch still runs the
+  older tooling after the task, so no point exists at which every record is in the
+  new format, and a change the task misses would be read as the new format (21 F4).
+- *Cutting over when no other change is in flight*: a pause across every active
+  change, with nothing to detect one missed.
 
 ### D8 — Recovery
 
@@ -322,8 +396,11 @@ Rejected:
   resumed or recorded by hand with `record` (D11). Only the owner runs interactive
   sessions and knows whether one is open, so no start or stop marker is recorded
   (13 F3). Where the files have moved on past the log — a plan that set the status
-  `ready for implementation` and recorded no outcome — the `disagreement` names the
-  missing outcome and the `record` command.
+  `ready for implementation` and recorded no outcome — the step is still in
+  progress: the computation names it, and no step after it, with a `disagreement`
+  naming the missing outcome and the `record` command. A plan's outcome is what
+  carries its exit and its `rounds`, which no status can supply (21 F5).
+- A log in an older shape names the owner with the `convert` command (D7).
 - A status edited by hand: the files hold state and prevail on it; an exit or
   direction that contradicts the status is reported as a `disagreement`, as now.
 - A named target whose guard changed is routed on the current state (D4); one its
@@ -380,12 +457,15 @@ Two rounds:
   `make change-graph`, and the documentation check.
 - **Round 2**, two sessions: first the new records and routing on them — the
   schema's object `next` and `triaged`, the wrapper's requirement, `record`, the
-  decision lines' object `next` and owner-only directions, the result's `target` and
-  the undeclared-exit rule, routing on outcomes, and the `triaged` rule, the
-  file-time rules and the older readings deleted, with the conversion of every
-  change's records not yet cleaned up (D7), this change's included, since the
-  computation it lands reads only the new format; then every skill's handoff and interactive ending, triage's prose `## Next`, the
-  entry checks asking the computation, the orchestrate skill, the contributor guide,
+  decision lines' object `next` and owner-only directions, the triage's `kind`, the
+  entry guards and the writer's refusals on them, validation's carried target, the
+  terminal `done`, the result's `target` and the undeclared-exit rule, routing on
+  outcomes, and the `triaged` rule, the file-time rules and the older readings
+  deleted, with the `convert` command and the detection of older log shapes (D7),
+  run on this change's records, since the computation it lands reads only the new
+  format; then every skill's handoff and interactive ending, triage's prose
+  `## Next`, the entry checks asking the computation and the pre-closeout review's
+  accepting a direction as its override, the orchestrate skill, the contributor guide,
   and the step table's `printenv CLAUDE_CODE_SESSION_ID` rule, which the
   orchestrating session makes on the owner's word since no step may edit `.claude/`.
 
@@ -402,15 +482,16 @@ within round 2.
   `record` then refuses until it is given `--session`.
 - An interactive session closed before `record` leaves its step in progress with
   no trace of why; the computation's reason says what to do.
-- The conversion rewrites the field shapes of every in-flight change's log in place,
-  the first time the workflow rewrites a record; a change in a clone is converted in
-  its clone, and one the task misses is read as the new format, which it is not.
-- Round 2's first session converts this change's records, and its own outcome is
-  then appended by the wrapper that started it, running today's code; planning
-  orders round 2 so that line is in the new shape, or is converted, as it orders the
-  schema's string-or-object `next`.
+- The conversion rewrites the field shapes of a change's log in place, the first
+  time the workflow rewrites a record. A change whose branch takes the new code
+  stops at the owner until its records are converted, which the owner does by one
+  command when the computation names it.
+- Detection reads the log's shapes: a change with older triage files and no log
+  line at all is not detected, and its triage reads as in progress until converted.
+- The command and the detection outlive this change until every change not yet
+  cleaned up has taken the new code; their removal is a later change's.
 - A direction may name a node that makes no sense from where the change stands;
-  nothing but the owner holds it.
+  only its unwaivable entry guards and the owner hold it.
 
 ## Open Questions
 

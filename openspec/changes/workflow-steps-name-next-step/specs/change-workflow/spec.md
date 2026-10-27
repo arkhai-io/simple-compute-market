@@ -4,11 +4,20 @@
 
 The workflow's steps and the transitions between them MUST be declared as one table
 in code, which the next-step computation interprets: each node a step, qualified by
-its review kind where it has one; the exits it may take; the records a join waits
-for; and the guards on each exit, each naming the step that satisfies it, or the
-owner where no step can. Guards MUST apply to the exits steps take, and MUST NOT be
-checked against the owner's directions. A change to the table MUST be made as an
-OpenSpec change.
+its review kind where it has one — a review by its kind, a triage by the kind of
+review it triages; the exits it may take; the records a join waits for; the guards
+on each exit, each naming the step that satisfies it, or the owner where no step
+can; and its entry guards, the conditions without which its step cannot carry out
+its work, each unwaivable or waivable. Exit guards MUST apply to the exits steps
+take, and MUST NOT be checked against the owner's directions. Entry guards MUST be
+checked on every entry to their node: an unwaivable one MUST refuse every entry
+while unmet, and a waivable one MUST take the owner's direction as its override.
+The change's archive MUST be an unwaivable entry guard of the closeout review, its
+triage, and archive cleanup, and its absence one of design, planning, and
+implementation. A triage node's entry guard MUST be that a review of its kind
+awaits triage. Archive cleanup's exit MUST be the terminal node `done`, which has no
+exits and no step, and which no direction reaches. A change to the table MUST be
+made as an OpenSpec change.
 The table MUST be renderable as a diagram, and the diagram the `change-workflow`
 architecture shows MUST be checked against that rendering.
 
@@ -30,6 +39,18 @@ architecture shows MUST be checked against that rendering.
 - **WHEN** an implementation round's validation has finished and its review and the
   owner's reading have not
 - **THEN** the computation names the steps the join still waits for, and no triage
+
+#### Scenario: Archive cleanup finishes
+
+- **WHEN** archive cleanup ends finished, naming `{"step": "done"}`
+- **THEN** the computation names `done`, with the reason `archived`, and no step runs
+
+#### Scenario: A step's exit meets an unmet entry guard
+
+- **WHEN** closeout ends finished naming `{"step": "review", "kind": "closeout"}`,
+  and the change's directory is not under the archive
+- **THEN** the computation names the owner, with the exit and the entry guard, and
+  no closeout review
 
 ### Requirement: Interactive step runs record their outcome
 
@@ -61,8 +82,8 @@ allow it to print the session's id.
 
 - **WHEN** an interactive planning session wrote the task list and set the status
   `ready for implementation`, and was closed before it recorded its outcome
-- **THEN** the computation's result carries a `disagreement` naming the missing plan
-  outcome and the record command
+- **THEN** the computation names planning as in progress, and no round, its result
+  carrying a `disagreement` naming the missing plan outcome and the record command
 
 #### Scenario: The harness exports no session id
 
@@ -82,9 +103,12 @@ workflow log naming its target as an outcome names an exit, with a reason, which
 says what any skipped check was; the decision MAY resolve the run waiting on it.
 Only the owner MAY direct a step: the orchestrating session MUST NOT direct one of
 its own accord, nor record a step's exit on its behalf. The computation MUST name
-the directed step until a later run of it is logged, checking no guard, and the
-step sets its own status as it starts. A direction of an archived change to design,
-planning, or implementation MUST be refused, naming the archive.
+the directed step until a later run of it is logged, checking no exit guard, and the
+step sets its own status as it starts. A direction whose target's unwaivable entry
+guard is not met MUST be refused, naming the guard: an archived change MUST NOT be
+directed to design, planning, or implementation, nor a change not archived to the
+closeout review, its triage, or archive cleanup. A waivable entry guard, and the
+directed step's own entry check for it, MUST accept the direction as its override.
 
 #### Scenario: The owner directs past a guard
 
@@ -112,12 +136,32 @@ planning, or implementation MUST be refused, naming the archive.
 - **WHEN** a direction of an archived change to design is attempted
 - **THEN** the log's writer refuses it, naming the archive
 
+#### Scenario: A change not archived is directed to archive cleanup
+
+- **WHEN** a direction to archive cleanup of a change whose directory is not under
+  the archive is attempted
+- **THEN** the log's writer refuses it, naming the missing archive
+
+#### Scenario: The owner directs a pre-closeout review over a failed validation
+
+- **WHEN** the latest validation of `HEAD` failed, and the owner directs a
+  pre-closeout review
+- **THEN** the computation names the pre-closeout review, and the review starts,
+  taking the direction as its override of the validation check
+
+#### Scenario: A triage is directed with nothing to triage
+
+- **WHEN** a direction to `{"step": "triage", "kind": "design"}` is attempted and
+  every design review has its triage
+- **THEN** the log's writer refuses it, naming the entry guard
+
 ## MODIFIED Requirements
 
 ### Requirement: Phases and owner touchpoints
 
 A change MUST move through design, planning, implementation, and closeout, in that
-order. The design phase MUST end with a design review, the implementation phase
+order, except where the owner directs a step, as the requirement on the owner's
+directions allows; no direction crosses the archive. The design phase MUST end with a design review, the implementation phase
 with a pre-closeout review, and the closeout phase with a closeout review; a phase
 ending in a review MUST NOT be treated as finished until that review has been
 triaged and its triage's outcome names, as its exit, a step of the next phase. The
@@ -225,8 +269,11 @@ to the repository's outcome schema and is one of: finished, naming the exit it
 takes; a question for the owner; a proposed return, naming the step it returns to;
 blocked on a prerequisite; or stopped, with its reason and any tools it was denied.
 An exit or a return MUST be named as a target: an object naming a node of the
-workflow graph by its step, with its review kind for a review, and the sections for
-an implementation out of the plan's order. A triage's finished or returned outcome
+workflow graph by its step, with its review kind for a review, the kind of review it
+triages for a triage, and the sections for an implementation out of the plan's
+order; a review or a triage named without its kind, or with an empty or unknown one,
+MUST be refused. A validation MUST name as its exit the target the computation gave
+it, and archive cleanup the terminal node `done`. A triage's finished or returned outcome
 MUST name the review records it triaged, as a non-empty list of distinct record
 names in the form `NN-<kind>`, each a numbered record in the change's `reviews/`
 with its triage file beside it, at least one of them a review; the wrapper MUST NOT
@@ -334,6 +381,12 @@ step MUST name its target as an outcome names an exit, and MUST be the owner's.
 - **WHEN** a decision line directing `{"step": "review"}` with no kind is attempted
 - **THEN** the log's writer refuses it, since a review is a node only with its kind
 
+#### Scenario: A directed triage names no kind
+
+- **WHEN** a decision line directing `{"step": "triage"}` with no kind is attempted
+- **THEN** the log's writer refuses it, since a triage is a node only with the kind
+  of review it triages
+
 #### Scenario: The orchestrating session directs a step
 
 - **WHEN** a decision line by the orchestrating session directing a review is
@@ -362,10 +415,17 @@ is logged, and MUST NOT infer an exit from the phase. A review's triage MUST nam
 exit in its outcome, and MUST keep the target and the owner's words under its triage
 file's `## Next` as prose, which nothing routes on; a review whose triage file exists
 while no finished or returned triage outcome names it MUST be treated as a triage in
-progress. An exit its node does not declare MUST be brought to the owner. When a
-guard on a declared exit is not met, the computation MUST name the step that
-satisfies it, carrying the exit as its target, and MUST bring a guard no step can
-satisfy to the owner, naming the target and what is missing. Once the owner confirms
+progress. An exit its node does not declare, a validation's exit other than the
+target it was given, and an exit whose target's entry guard is not met MUST be
+brought to the owner. When a guard on a declared exit is not met, the computation
+MUST name the step that satisfies it, carrying the exit as its target, and MUST
+bring a guard no step can satisfy to the owner, naming the target and what is
+missing. The computation MUST name validation with a target always — the round's
+triage in a round's join — and MUST check the target's guards again on the
+validation's exit. A workflow log holding a line in an older shape — an outcome or
+decision line whose `next` is a string, or a decision line with a `kind` field — MUST
+be brought to the owner with the command that converts the change's records, and
+MUST NOT be read as the new format. Once the owner confirms
 a return, the returned review MUST NOT govern what follows, so the work the return
 leads to is implemented, validated, and reviewed afresh, as a round of its own even
 where it reworks a section the returned round implemented; a return the owner
@@ -455,8 +515,29 @@ routes on a triage file's `## Next`.
 - **WHEN** a review's triage file ends with a `## Gate` beginning `Passed`, and no
   triage outcome names the review
 - **THEN** the computation names the triage as in progress, since it reads no
-  `## Gate`; the records of every change were converted so that an outcome names
-  each such review
+  `## Gate`; a change's records are converted when it takes the new code, so that an
+  outcome names each such review
+
+#### Scenario: A log not yet converted
+
+- **WHEN** a change's workflow log holds a decision line whose `next` is the string
+  `review` beside a `kind` field
+- **THEN** the computation names the owner with the command that converts the
+  change's records, and routes on none of its lines
+
+#### Scenario: A validation before closeout passes
+
+- **WHEN** a pre-closeout review's triage named closeout, the computation named
+  validation of `HEAD` with closeout as its target, and the validation passed,
+  naming closeout as its exit
+- **THEN** the computation names closeout
+
+#### Scenario: A validation names another exit
+
+- **WHEN** the computation named validation with closeout as its target, and the
+  validation ends finished naming `{"step": "triage", "kind": "implementation"}`
+- **THEN** the computation names the owner, with the validation's choice and the
+  target it was given
 
 #### Scenario: A closeout correction awaits validation
 

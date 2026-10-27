@@ -24,32 +24,39 @@ step rather than inferring one.
 ## What Changes
 
 - The workflow's graph is stated as one table in code: each node a step, qualified
-  by its review kind; its exits; the join it waits on; and the guards on each edge,
-  each naming the step that satisfies it. The computation interprets the table in
-  place of its per-phase rules, and `make change-graph` renders it as the diagram
-  the `change-workflow` architecture shows.
+  by its review kind — a triage by the kind of review it triages; its exits; the
+  join it waits on; the guards on each edge, each naming the step that satisfies
+  it; and its entry guards, the conditions without which its step cannot carry out
+  its work. Archive cleanup exits to a terminal `done`. The computation interprets
+  the table in place of its per-phase rules, and `make change-graph` renders it as
+  the diagram the `change-workflow` architecture shows.
 - Every step's outcome names the exit it takes as a structured target in `next` —
   `{"step": "review", "kind": "pre-closeout"}`, `{"step": "round"}`,
   `{"step": "plan"}` — and a triage's outcome names the records it triaged. A
   triage chooses among its node's exits on the owner's disposition, so `Advance`,
-  `Another round`, and `Returned` give way to the target each leads to; validation
-  and review name their join, the round's triage. `## Next` stays in the triage
+  `Another round`, and `Returned` give way to the target each leads to; a review
+  names its triage, and a validation the target the computation gave it — the
+  round's triage, or the exit whose guard it remedies. `## Next` stays in the triage
   file as prose, and nothing routes on it.
 - The computation checks a named exit against the graph instead of inferring it: an
   exit whose guard is not met names the guard's remedy — a validation of `HEAD` —
   and keeps the exit as its target; a guard no step can satisfy, or an exit the node
   does not declare, names the owner.
 - The owner redirects one change by a decision naming any node as its target, and no
-  guard is checked against it; the waivers of a design review and of archive
-  cleanup's validation become such directions, whose reason says what they skip.
-  Every direction is the owner's.
+  exit guard is checked against it; the target's entry guards are, and an
+  unwaivable one — the archive, which no direction crosses either way — refuses it,
+  while a waivable one takes it as its override. The waivers of a design review and
+  of archive cleanup's validation become such directions, whose reason says what
+  they skip. Every direction is the owner's.
 - An interactive run records its own outcome with `run_change_step.py record`,
   which reads the session's id from `CLAUDE_CODE_SESSION_ID`; an interactive session
   of any step closed before it records leaves that step in progress, for the owner
   to resume or record by hand.
-- The records of every change not yet cleaned up are converted to the new format
-  as a task of this change, so no older record remains; the computation reads only
-  the new format, and no migration command is committed.
+- A change's records are converted to the new format when its branch first carries
+  the new code, by a committed `convert` command; the computation reads only the
+  new format, detects a log in an older shape, and names the owner with the command
+  for it. A later change removes the command and the detection once no change not
+  yet cleaned up holds an older log.
 
 ## Capabilities
 
@@ -80,8 +87,10 @@ None.
 
 - `scripts/change_next_step.py` and its tests; the outcome, log, wrapper, review,
   and command-line modules under `scripts/change_workflow/` and their tests;
-  `.agents/change-outcome.schema.json`; a `make change-graph` target.
-- The records and workflow logs of every change not yet cleaned up, converted once.
+  `.agents/change-outcome.schema.json`; a `make change-graph` target; a `convert`
+  command of `scripts/run_change_step.py`.
+- The records and workflow logs of every change not yet cleaned up, each converted
+  when its branch takes the new code; this change's in round 2.
 - Every leaf skill's handoff and a new interactive ending under `.agents/skills/`,
   the plan, closeout, and archive cleanup entry checks, and the orchestrate skill.
 - `.claude/change-steps.toml`: every step may run `printenv
@@ -120,8 +129,10 @@ None.
 - Interactive runs record their outcome through `record` (D11): `spec.md`,
   `architecture.md` ("Steps run headless and resume with the owner's answers"), and
   `docs/agents/change-workflow.md`.
-- The computation reads only the format in which outcomes name their exits (D7):
-  `spec.md`. The conversion of older records is this change's task, not permanent
-  knowledge.
+- The computation reads only the format in which outcomes name their exits, and
+  brings a log in an older shape to the owner with the conversion command (D7):
+  `spec.md`, until the later change that removes them.
+- Entry guards on nodes, unwaivable or waivable, and exit guards on edges (D1, D5):
+  `spec.md`, and the distinction's rationale in `architecture.md`.
 - Returning an archived change to an earlier phase is not supported (D5):
   `architecture.md`, "Current limits".
