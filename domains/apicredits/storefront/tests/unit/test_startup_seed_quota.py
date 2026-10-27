@@ -69,30 +69,11 @@ async def test_register_seed_quota_sends_expected_request_via_the_typed_client(m
     import apicredits_storefront.container as container
     monkeypatch.setattr(container, "resolved_marketplace_signer", _SELLER_SIGNER)
 
-    import market_site_client
-    real_client_cls = market_site_client.SiteCapacityAdminClient
-
-    def _client_with_test_transport(
-        base_url,
-        *,
-        signer,
-        expected_authorities,
-        **kwargs,
-    ):
-        return real_client_cls(
-            base_url,
-            signer=signer,
-            expected_authorities=expected_authorities,
-            timeout=kwargs["timeout"],
-            max_timestamp_skew=kwargs["max_timestamp_skew"],
-            transport=httpx.MockTransport(handle),
-        )
-
-    monkeypatch.setattr(
-        market_site_client, "SiteCapacityAdminClient", _client_with_test_transport,
+    await startup._register_seed_quota(
+        resource_id="demo-quota",
+        total_units=100,
+        transport=httpx.MockTransport(handle),
     )
-
-    await startup._register_seed_quota(resource_id="demo-quota", total_units=100)
 
     assert captured["path"] == "/api/v1/capacity/resources/demo-quota"
     assert captured["headers"]["x-market-role"] == "seller"
@@ -120,28 +101,9 @@ async def test_register_seed_quota_raises_runtime_error_on_client_failure(monkey
     import apicredits_storefront.container as container
     monkeypatch.setattr(container, "resolved_marketplace_signer", _SELLER_SIGNER)
 
-    import market_site_client
-    real_client_cls = market_site_client.SiteCapacityAdminClient
-
-    def _client_with_test_transport(
-        base_url,
-        *,
-        signer,
-        expected_authorities,
-        **kwargs,
-    ):
-        return real_client_cls(
-            base_url,
-            signer=signer,
-            expected_authorities=expected_authorities,
-            timeout=kwargs["timeout"],
-            max_timestamp_skew=kwargs["max_timestamp_skew"],
+    with pytest.raises(RuntimeError, match="demo-quota"):
+        await startup._register_seed_quota(
+            resource_id="demo-quota",
+            total_units=100,
             transport=httpx.MockTransport(handle),
         )
-
-    monkeypatch.setattr(
-        market_site_client, "SiteCapacityAdminClient", _client_with_test_transport,
-    )
-
-    with pytest.raises(RuntimeError, match="demo-quota"):
-        await startup._register_seed_quota(resource_id="demo-quota", total_units=100)

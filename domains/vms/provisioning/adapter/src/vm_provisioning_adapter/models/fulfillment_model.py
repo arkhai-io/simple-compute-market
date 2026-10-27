@@ -8,21 +8,18 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class VmConnectivitySettings(BaseModel):
-    """Buyer-reachability configuration, forwarded to the provider as-is.
+    """Buyer-reachability configuration a request may carry.
 
     Deliberately not part of ``VmFulfillmentRequirements``' flat field set:
-    these aren't sizing/feasibility requirements the provisioning server
-    (or, in principle, a future scheduler) would ever reason about — they're
-    opaque connectivity metadata the VM provider forwards verbatim to
-    Ansible. Storefront-configured for now; a negotiated, buyer-specified
-    second source for this same field is a plausible future addition, not
-    yet implemented.
+    these aren't sizing/feasibility requirements the provisioning server or
+    its scheduler reasons about. The fulfillment plan does not read them: a
+    request cannot select a relay, because which relay a host dials comes
+    from the relay its pool references, and the buyer's address and port
+    come back in the fulfillment result.
     """
 
     # Relay-neutral names: the buyer receives a host and a port and has no
-    # reason to learn which relay implementation produced them. The remote port
-    # is an input, leased by the service before dispatch; the playbook applies
-    # what it is given and chooses nothing.
+    # reason to learn which relay implementation produced them.
     relay_addr: str | None = None
     relay_port: int | None = None
     relay_token: str | None = None

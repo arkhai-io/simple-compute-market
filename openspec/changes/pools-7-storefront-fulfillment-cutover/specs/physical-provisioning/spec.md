@@ -131,12 +131,11 @@ from durably persisted fulfillment state; neither requires a separate
 delivery-acknowledgement mechanism, since a read reflects current state
 on demand rather than requiring retry-until-acknowledged delivery.
 
-Push-based delivery of `SettlementResult` to the storefront is out of
-scope for this requirement — see `replace-polling-with-authenticated-push`
-(separate change, not yet started). This requirement's durability
-guarantee is unaffected by that change's absence: a terminal or
-otherwise reportable fulfillment transition commits atomically with the
-state these queries read, regardless of whether or when it is polled.
+The provisioning service does not push `SettlementResult` to the
+storefront, and this requirement's durability guarantee does not depend
+on push delivery: a terminal or otherwise reportable fulfillment
+transition commits atomically with the state these queries read,
+regardless of whether or when it is polled.
 
 #### Scenario: Status query after process restart
 - **WHEN** `get_fulfillment_status` is called for a fulfillment whose
@@ -163,16 +162,7 @@ Raw credentials MUST NOT be persisted in settlement records, generic JSON
 columns, or any other durable storage. `get_fulfillment_result`'s handler
 MUST obtain or refresh credentials at the moment it is called, return
 them only in that response over the authenticated encrypted channel, and
-MUST NOT persist them afterward. Where credentials can rotate, each
-response MUST include a monotonic `credential_generation` so a caller
-holding an earlier cached response can detect staleness.
-
-#### Scenario: Credentials rotate between two queries
-- **WHEN** credentials are rotated between two `get_fulfillment_result`
-  calls for the same fulfillment
-- **THEN** the later call returns a higher `credential_generation` than
-  the earlier one, and the caller can detect that its cached copy is
-  stale
+MUST NOT persist them afterward.
 
 #### Scenario: Fulfillment succeeds but is never queried
 - **WHEN** a fulfillment reaches a successful terminal state and

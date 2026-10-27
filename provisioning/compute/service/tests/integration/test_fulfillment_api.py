@@ -1,11 +1,11 @@
 """Integration tests for the durable fulfillment-acceptance HTTP surface.
 
 Exercises ``POST /api/v1/fulfillment/{validate,begin}`` end to end: a real
-FastAPI app, a real SQLite-backed ``FulfillmentUnitOfWork``, a real
-``AnsibleFulfillmentProvider``, and a real ``AsyncJobQueue``-backed
+FastAPI app, a real SQLite-backed ``FulfillmentUnitOfWork``, VM's real
+``JobFulfillmentProvider``, and a real ``AsyncJobQueue``-backed
 job authority (only the Ansible runner itself is mocked, per this
 suite's usual boundary). Unlike the unit suites (``kit/fulfillment``'s
-orchestration tests, and this service's ``AnsibleFulfillmentProvider`` unit
+orchestration tests, and ``JobFulfillmentProvider``'s unit
 tests), nothing here is a fake or a mock of the persistence/dispatch path
 itself: assertions read the actual persisted ``prepared_create_operation``
 and ``provider_metadata`` columns back out of the database after a real
@@ -27,7 +27,7 @@ Coverage:
 Teardown dispatch through the durable orchestrator has its own HTTP
 endpoint, ``POST /fulfillment/{fulfillment_id}/begin-teardown``, covered by
 ``test_compute_contract_api.py``. The teardown test below instead drives
-``AnsibleFulfillmentProvider`` directly against this fixture's real
+the ``JobFulfillmentProvider`` directly against this fixture's real
 job engine and session, proving the provider-level contract the endpoint
 calls into.
 """
@@ -53,11 +53,18 @@ from compute_provisioning_contracts import FulfillmentRequestBody
 from compute_provisioning_service.main import app
 from .conftest import SERVICE_AUTHORITIES, STOREFRONT_SIGNER
 from market_fulfillment import (
+    FulfillmentOrchestrator,
     PhysicalSettlementRequest,
+    ProviderRegistry,
     SettlementRecord,
     SettlementRecordState,
     SettlementRepository,
+    SettlementResource,
     SettlementResult,
+)
+from market_fulfillment.fulfillment_persistence import (
+    SqlAlchemyFulfillmentTransaction,
+    SqlAlchemyFulfillmentUnitOfWork,
 )
 from market_core import VersionedEnvelope
 from vm_provisioning_adapter.db import RelayPortLease
@@ -476,9 +483,10 @@ class TestValidateIsSideEffectFree:
 
 
 class TestTeardownPreparation:
-    """AnsibleFulfillmentProvider.prepare_teardown/dispatch_teardown, driven
-    directly against this fixture's real job engine and session -- see module
-    docstring for why there is no HTTP path to exercise yet.
+    """JobFulfillmentProvider.prepare_teardown/dispatch_teardown, driven
+    directly against this fixture's real job engine and session -- the
+    provider-level contract the teardown endpoint calls into (see the module
+    docstring).
     """
 
     async def test_prepared_teardown_derives_exact_identity_from_create_metadata(
@@ -500,8 +508,6 @@ class TestTeardownPreparation:
         with session_factory() as db:
             pool = resource_pool_service.get_pool_in_session(db, pool_id)
             pool_config = dict(pool.provider_config)
-
-        from market_fulfillment import SettlementResource
 
         provider = app.container.vm_runtime().fulfillment_provider()
         settlement_result = SettlementResult(
@@ -637,12 +643,6 @@ class TestAcknowledgementFailureRecovery:
     async def test_retry_after_failed_acknowledgement_reuses_the_same_job(
         self, fulfillment: FulfillmentApi
     ):
-        from market_fulfillment import FulfillmentOrchestrator, ProviderRegistry
-        from market_fulfillment.fulfillment_persistence import (
-            SqlAlchemyFulfillmentTransaction,
-            SqlAlchemyFulfillmentUnitOfWork,
-        )
-
         capacity_reservation_id = await _scheduled_reservation(
             "pool-fulfillment-ack-failure"
         )
@@ -708,7 +708,7 @@ class TestStatusAndResultQueries:
     """Integration coverage for the pull-based `GET /fulfillment/{id}/status`
     and `GET /fulfillment/{id}/result` endpoints, against the real HTTP
     surface, a real SQLite-backed repository, and -- for the active-state
-    case -- a real `AnsibleFulfillmentProvider.fetch_credentials` read of a
+    case -- a real `JobFulfillmentProvider.fetch_credentials` read of a
     `Credential` row inserted the same way the job-completion path would
     have written one.
     """

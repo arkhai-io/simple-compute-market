@@ -8,9 +8,6 @@ resources, fulfillments, and provisioned resources MUST use globally unique
 opaque identifiers, while ownership remains explicit through `site_id` or an
 equivalent authority field rather than being inferred by parsing identifiers.
 
-Planning MUST review whether site-plus-pool composite identity is additionally
-required for routing or integrity.
-
 #### Scenario: Reservation routed to owning site
 - **WHEN** the storefront invokes scheduling or fulfillment for a capacity
   reservation
@@ -33,13 +30,12 @@ eligibility MUST use the same shared feasibility predicate.
 - **WHEN** any requested scheduling dimension exceeds the capacity reservation
 - **THEN** scheduling is rejected before resource assignment
 
-### Requirement: Broad capacity schema cleanup
+### Requirement: Capacity schema separation
 
-POOLS-7 MUST perform the approved breaking rename and schema cleanup,
-including `SiteAllocation` to `CapacityReservation`, `allocation_id` to
-`capacity_reservation_id`, explicit site ownership, globally unique
-identifiers, and the final separation of host identity, pool membership,
-reservable capacity, and settlement-resource assignment.
+The site-capacity schema MUST name a reservation `CapacityReservation`,
+keyed by `capacity_reservation_id`, with explicit site ownership and
+globally unique identifiers. It MUST keep host identity, pool membership,
+reservable capacity, and settlement-resource assignment separate.
 
 #### Scenario: Existing host migration
 - **WHEN** the schema migration runs

@@ -1751,12 +1751,296 @@ already-stated wheel-only policy rather than establishing new policy.
 - [x] 12.1 Update `ARCHITECTURE.md` service map, terminology table, ID definitions, lifecycle ownership, transaction boundaries, recovery workers, pull-based status/result query contract, and teardown flow. Note `replace-polling-with-authenticated-push` as planned future work, not implemented by this change. **Done:** fixed a broken terminology/identifiers table (a two-paragraph digression had split it mid-table, silently dropping the `pool_id` row from parsing); added a "Fulfillment status and results" subsection (pull-based queries, live credential fetch, `credential_fetch_failed`, and the `replace-polling-with-authenticated-push` follow-on); rewrote the "Release" section, which still described the pre-Section-10 generic teardown model, with the real two-state-machine ownership split (lease lifecycle vs. fulfillment convergence) and `begin_fulfillment_teardown`; added a new "Recovery workers" section documenting all three watchdogs (`CapacityReservationWatchdog`, `FulfillmentConvergenceWatchdog`, `LeaseWatchdog`) and the claim/lease/no-attempt-ceiling recovery pattern; updated the runtime service map and authority-boundary table to match. Added to the document map.
 - [x] 12.2 Update baseline `site-capacity` and `physical-provisioning` specs to incorporate completed POOLS-2/3/4/6/7 behavior when the change is archived. **Done, and found more than drift:** running `openspec validate --all --strict` for the first time in a working environment (see 8.15) surfaced that this wasn't just stale prose -- `resource-pool-management`, `physical-provisioning`, and `fulfillment` each had one or more requirements physically stranded outside the parsed `## Requirements` section (a `##`-level companion header, like "## Fulfillment convergence worker", ends the section OpenSpec parses; anything after it is invisible to `validate`/`list`/`archive`), plus several missing scenarios and missing MUST/SHALL language. Fixed all of it: moved every stranded requirement back into a contiguous `## Requirements` block, demoted two `fulfillment/spec.md` companion headers to bold lead-ins with preserved HTML anchors (`#fulfillment-convergence-worker`, `#durable-settlement-persistence` -- confirmed via repository-wide grep that many docstrings and `design.md`/`tasks.md` cross-references depend on those exact anchors still resolving), added missing scenarios, and added missing MUST/SHALL wording. Also found and fixed one genuinely stale content claim in `physical-provisioning/spec.md`: it described `PhysicalSettlementScheduler` and fulfillment-provider coordination as "process-local" with "no durable mechanism-neutral recovery guarantee" -- directly contradicted by Sections 3-6, which made both durable with a dedicated recovery worker. `site-capacity/spec.md`, `resource-pool-management/spec.md`, `physical-provisioning/spec.md`, `fulfillment/spec.md`, and `vm-storefront-fulfillment/spec.md` all now validate clean (`openspec validate --all --strict`: 37/43 passing, up from 32/43; the remaining 6 failures are unrelated other active changes, not POOLS-7's own specs).
 - [x] 12.3 Update compute provisioning service, VM adapter, storefront, and operator documentation for migrations, watchdog health, status/result query usage, and recovery procedures without lease-expiry sequencing instructions. **Done.** This repository's documentation model doesn't use separate operator-runbook files (`spec.md`/`architecture.md` are the documentation); checked each of the four service-scoped companions this task names against current behavior rather than inventing a new doc genre. Found and fixed one significant staleness: `openspec/specs/physical-provisioning/architecture.md`'s "Proof-driven release" section still described release as a single-owner, lease-expiry-triggered dispatch, and its "Current limits" section explicitly claimed the compute service "does not yet provide a durable generic fulfillment recovery aggregate" -- directly false since Sections 3-6 built exactly that. Rewrote "Proof-driven release" to describe the real two-owner split (lease lifecycle decides when to release; fulfillment convergence owns teardown dispatch/recovery) and removed the false limits claim. `vm-storefront-fulfillment/architecture.md`, `fulfillment/architecture.md`, and `domains/vms/storefront`/`domains/vms/provisioning` (no README exists; checked for stale references to the retired direct-dispatch/polling path and found none) were already accurate. Migrations: `docs/development/DEPLOYMENT_AND_CONFIG.md`'s "Migrations at startup" is repository-wide and already generic/accurate; `physical-provisioning/architecture.md`'s "Preserving provider operations across schema cutover" already covers the compute-provisioning-specific cutover model. Status/result query usage and watchdog health are covered normatively by `fulfillment/spec.md`'s "Fulfillment status and result queries" and "Fulfillment convergence worker" (structured per-cycle diagnostics), and now by `ARCHITECTURE.md`'s "Recovery workers" section (12.1).
-- [ ] 12.4 Verify the implementation against every POOLS-7 scenario and archive the OpenSpec change after validation. `proposal.md`'s "Permanent documentation impact" checklist (task 7.14) was added during Section 7 review rather than deferred here; confirmed it still reflects reality against the final Section 8-11 state. **Blocked, not merely unstarted:** this change cannot archive without a passing end-to-end result, which does not exist yet -- the test harness has not successfully mounted and submitted a result in the environment where that's attempted, independent of anything in this review pass (this review's own environment has no live docker-compose stack to attempt it in either). This is also the same live-services confirmation task 10.14 flagged as still outstanding after its otherwise-complete static/structural correction. Do not archive on the strength of 12.1-12.3's documentation work or this review's unit/integration suite results alone -- 11.18.5 and this review pass both explicitly waived strict OpenSpec validation's absence and later ran it for real (see 8.15), but no equivalent path exists yet for the e2e gate; it stays open until a real result exists.
-- [ ] 12.5 **Comment hygiene and import placement, before the pre-closeout review.** Run
+- [x] 12.4 Verify the implementation against every POOLS-7 scenario and archive the OpenSpec change after validation. `proposal.md`'s "Permanent documentation impact" checklist (task 7.14) was added during Section 7 review rather than deferred here; confirmed it still reflects reality against the final Section 8-11 state. **Blocked, not merely unstarted:** this change cannot archive without a passing end-to-end result, which does not exist yet -- the test harness has not successfully mounted and submitted a result in the environment where that's attempted, independent of anything in this review pass (this review's own environment has no live docker-compose stack to attempt it in either). This is also the same live-services confirmation task 10.14 flagged as still outstanding after its otherwise-complete static/structural correction. Do not archive on the strength of 12.1-12.3's documentation work or this review's unit/integration suite results alone -- 11.18.5 and this review pass both explicitly waived strict OpenSpec validation's absence and later ran it for real (see 8.15), but no equivalent path exists yet for the e2e gate; it stays open until a real result exists.
+      **Verification against the delta scenarios (2026-10-27).**
+      - **End-to-end.** This supersedes the "Blocked" paragraph above: a passing result
+        now exists. Validation `reviews/03-validation.md`
+        ran commit `02319877e` and passed every part: local, Helm (scenario pod exit
+        0), and pipeline run 40495699817 with all three lanes green.
+        - That record does not match scenarios to log lines. The run's own log does.
+          `.snapshot/e2e-logs/40495699817/actions.log`, `e2e-vm` lane, under marker
+          `e2e_deal`, shows `test_full_deal.py`'s stages 00 to 11b running:
+          - 09a: the provisioning job succeeds;
+          - 09b: settlement ready, with credentials;
+          - 10b: the lease cycle records the `fulfillment_id`;
+          - 11a: convergence dispatches teardown while capacity stays held;
+          - 11b: provider completion releases the lease and capacity.
+        - The lane's total is "134 passed, 162 deselected", with none failed. That is
+          the live-services confirmation this task and 10.14 were waiting on.
+        - Archival is closeout's 13.11, not this task's.
+      - **Scenarios.** The 24 scenarios in `specs/physical-provisioning/spec.md` (20)
+        and `specs/site-capacity/spec.md` (4) were mapped to the tests that exercise
+        them at HEAD. Levels below:
+        - "application integration" is the service's app over ASGI, as `TESTING.md`
+          defines it;
+        - "library integration" is a kit library against real SQLite;
+        - "service, real SQLite" marks a service's own components against real SQLite
+          without the app, which `TESTING.md` does not name as a level.
+      - **Asserted in full (nine):**
+        - Equivalent fulfillment retry:
+          `test_fulfillment_api.py::TestARepeatedBeginAdoptsTheAcceptedFulfillment`
+          (application integration).
+        - Crash during assignment:
+          `test_scheduling_composition.py::test_real_container_composed_schedule_rolls_back_all_participating_tables`
+          (service, real SQLite, through the real DI container).
+        - Recovery retries create submission:
+          `test_fulfillment_api.py::TestAcknowledgementFailureRecovery`
+          (application-composed) and
+          `test_job_fulfillment_migration.py::test_an_unrecorded_create_job_is_found_by_its_contract_and_redispatch_finds_it`.
+        - Worker dies after claiming: `test_fulfillment_convergence.py`'s
+          `test_worker_death_leaves_a_reclaimable_*` and
+          `test_concurrent_reclaim_cannot_be_clobbered_by_a_stale_outcome` (service,
+          real SQLite).
+        - Result query for a completed fulfillment:
+          `test_fulfillment_api.py::TestStatusAndResultQueries::test_result_on_an_active_fulfillment_includes_live_credentials`.
+        - Repeated result queries: `kit/fulfillment/tests/unit/test_fulfillment.py`'s
+          `test_get_fulfillment_result_does_not_mutate_fulfillment_state` and its
+          siblings (unit, fakes).
+        - Reservation expires before fulfillment:
+          `test_lease_release_api.py::test_a_lease_whose_fulfillment_never_began_is_released_directly`.
+        - Existing active VM:
+          `test_legacy_backfill_teardown.py::test_pre_cutover_vm_lease_backfills_and_tears_down_to_release`.
+        - Ambiguous active VM mapping: `test_legacy_vm_lease_migration.py`'s
+          conflict and rollback tests (service, real SQLite, under `unit/`).
+      - **Asserted in all but one point:**
+        - "Process restarts after acceptance": a fresh watchdog resumes from the
+          durable state, but the handlers are called directly rather than through
+          its periodic loop.
+        - "Unknown owning authority": the rejection is asserted. That nothing is
+          forwarded holds only because the site has no forwarding path.
+        - "Existing host migration": the migration still places every existing host
+          in `default` through the column default, ahead of the backfill. It now
+          refuses a database whose `default` pool is missing instead of creating the
+          pool (`_migrate_resource_pools_and_hosts_pool_id`). The requirement holds
+          for every database the chain accepts. "Before" is not itself asserted.
+      - **Behaviour the code no longer has, so the delta would promote a false
+        requirement at archive:**
+        - "Credentials rotate between two queries" and the `credential_generation`
+          clause of "Credentials are fetched on read". This change dropped the field
+          itself (Section 8 decisions, above), and no `.py` file names it.
+      - **Requirement text that is not system behaviour:**
+        - "Broad capacity schema cleanup" opens "POOLS-7 MUST perform the approved
+          breaking rename".
+        - "Unambiguous capacity reservation identity" ends with "Planning MUST review
+          whether site-plus-pool composite identity is additionally required".
+        - Both would land in `openspec/specs/site-capacity/spec.md` at archive as
+          written.
+      - **Holds, but has no production trigger or is only partly tested:**
+        - "Reservation requirements change": nothing mutates an assignment in place.
+          `resize_reservation` supersedes and is tested at library level
+          (`kit/site/tests/integration/test_ledger.py`'s `resize_*` tests), but has no
+          production caller. No test schedules the superseding reservation.
+          `openspec/specs/site-capacity/spec.md`'s "Reservation supersede and the
+          release guard" already states the current rule.
+        - "Reservation routed to owning site": every production caller names its
+          `site_id`. Targeted status and terminate calls are shown not to fall back
+          (`domains/vms/storefront/tests/integration/test_site_trust.py`). Targeted
+          schedule, begin, and result calls are not. `AggregateFulfillmentClient`
+          still falls back across sites when no `site_id` is given
+          (`market_storefront/services/capacity_client.py`, `_route_order`).
+      - **Covered only in part:**
+        - "Conflicting fulfillment retry": the job count after a conflict is not
+          asserted, and `begin` cannot carry a resource or provider.
+        - "Resource selected before fulfillment": "no provider command" is not
+          asserted.
+        - "Multi-resource fulfillment representation": unit fakes only; nothing
+          persists two outputs.
+        - "Pool configuration changes after acceptance": the frozen payload and the
+          retry are proven in separate tests.
+        - "Recovery retries teardown submission": a deterministic key plus generic
+          contract dedup, but no redispatched-teardown test.
+        - "Status query after process restart": a fresh composition reads durable
+          state (now `kit/fulfillment/tests/integration/test_fulfillment_restart.py`),
+          but nothing restarts mid-lifecycle.
+        - "Smaller scheduled shape" and "Scheduling exceeds reservation": "without
+          increasing" and "before assignment" are not asserted.
+        - "Fulfillment succeeds but is never queried": inferred only.
+      - **What this means for closeout.** Closeout's 13.9 note says this change's
+        delta specs "remain compatible and promote as written". The two groups
+        "Behaviour the code no longer has" and "Requirement text that is not system
+        behaviour" contradict that. The owner chose to reconcile them here
+        (2026-10-27), applying decisions already recorded rather than making new ones:
+        - `specs/physical-provisioning/spec.md`: the `credential_generation` sentence
+          and the "Credentials rotate between two queries" scenario are removed,
+          following this change's Section 8 decision to drop the field. "Durable
+          fulfillment status and result queries" no longer names
+          `replace-polling-with-authenticated-push` as "not yet started"; it says the
+          service does not push results and the guarantee does not depend on push.
+          That falls under the same rule against change names in permanent specs.
+        - `specs/site-capacity/spec.md`: "Broad capacity schema cleanup" ("POOLS-7
+          MUST perform…") is restated as "Capacity schema separation", the current
+          schema rule, and keeps its "Existing host migration" scenario. The
+          "Planning MUST review…" sentence is deleted from "Unambiguous capacity
+          reservation identity".
+
+        Every other delta requirement holds as written. The partial coverage is
+        recorded for the pre-closeout review; it is not a defect in the delta.
+        `make check-change` (strict OpenSpec validation included) passes after the
+        edits.
+      - **A further divergence, outside the delta.** `openspec/specs/physical-provisioning/spec.md`
+        says leftover `connectivity` content is "opaque metadata the adapter forwards
+        unchanged". The VM fulfillment plan validates the field and never reads it
+        (`vm_fulfillment_plan.py`). The model also still declares relay fields that
+        the same spec says `connectivity` must not carry.
+- [x] 12.5 **Comment hygiene and import placement, before the pre-closeout review.** Run
       `make check-comment-hygiene` and read the comments this change added for any that
       narrate the review or migration that introduced them; move each import the change
       added to module level unless a verified circular import or a recorded lazy-load
       reason keeps it local. Closeout only confirms both.
+      **Done (2026-10-27).** The change's code landed on `dev` as its section pull
+      requests. "Added by this change" was therefore read from `git diff 3e8c33554~1
+      9b2bd3fe2`, the first section commit's parent through the promotion record,
+      restricted to what still exists at HEAD.
+      - That range also carries other work merged to `dev` in the same weeks. The
+        comment rewrites were attributed one by one with `git blame`/`git log -S`.
+        The import moves were taken from the range as a whole, so a few may predate
+        this change, such as one of the two `resource_feasibility_view` imports in
+        `test_resource_satisfies_requirement.py`.
+      - **Comments.** `make check-comment-hygiene` passes. The narrative markers it
+        cannot catch were swept with grep across the tree: "review/finding",
+        "previously/originally/used to/no longer", "now lives/now acquires",
+        "gap/the fix", "for now/not yet/yet", "first pass", "POOLS". The
+        fresh-context check found more, with "yet" phrasings and retired class names
+        the grep missed. Every one this change added was rewritten as current
+        invariants or current names:
+        - `fulfillment_convergence.py`: the `_claim` and `_with_owned_record`
+          docstrings.
+        - `db/migrations.py`: the `settlement_resource_id` docstring's "no production
+          caller exists yet".
+        - `kit/site`'s `resize_reservation` docstring: "no caller uses this method
+          yet", and the retired `AnsibleFulfillmentProvider.prepare_create`, now
+          `VmFulfillmentPlan.prepare_create`.
+        - `kit/site`'s held-reservation lookup docstring ("a future caller ... a
+          not-yet-built direct-resource-reservation path").
+        - `core_storefront/sqlite_client.py`: the `escrows` schema comment and
+          `update_escrow`'s docstring. Both said the three fulfillment-identity
+          columns let a caller resume by escrow after a restart, but nothing does.
+        - `vm_job_spec_service.py`'s resource-type comment ("needs to carry yet").
+        - The VM storefront's `terminate_vm_lease` docstring
+          (`market_storefront/services/fulfillment_service.py`).
+        - `VmConnectivitySettings`'s docstring and field comment. They now say what
+          is true: the plan never reads the field, and a request cannot select a
+          relay. They had said the settings were storefront-configured "for now",
+          and that the remote port is leased by the service.
+        - Tests:
+          - `test_fulfillment_convergence.py`: the "code review finding" header and
+            three docstrings.
+          - `test_compute_contract_api.py`.
+          - `test_fulfillment_api.py`: five references to the retired
+            `AnsibleFulfillmentProvider`, now `JobFulfillmentProvider`, and
+            `TestTeardownPreparation`'s "no HTTP path to exercise yet". The teardown
+            endpoint exists.
+          - The API-credit service's `test_migrations.py`: two docstrings written
+            while there were no migrations and no deployment step.
+          - `test_legacy_backfill_teardown.py`: "pre-POOLS" and "new teardown path".
+          - `kit/site/tests/integration/test_ledger.py`: two docstrings.
+          - `test_vm_job_spec_service.py`.
+          - The VM storefront's `test_fulfillment_service.py`. One comment wrongly
+            said nothing reads the identifiers back; restart convergence does, from
+            the delivery row.
+          - `test_capacity_reservation_boundary.py` ("the fix didn't overcorrect").
+          - `test_sqlite_client_escrow_fulfillment_identity.py`. Its docstring no
+            longer claims resumption reads the escrow row; it reads the delivery row.
+      - **Imports.** Every indented import the range added and HEAD still has is now at
+        module level. None hit a circular import: the full suite passes with them
+        moved.
+        - Production code:
+          - `db/database.py`: `FulfillmentBase`, `SiteBase`, and the adjacent
+            `PoolsBase` and `VmBase`. `VmBase` had stayed local under a comment
+            saying the module imports without the optional VM adapter. That was
+            false, since `db.migrations`, which `database.py` imports, already
+            imports `vm_provisioning_adapter.db` at module level. The comment is
+            removed.
+          - `db/migrations.py`: `FulfillmentBase`, `LegacyBackfillValidationError`,
+            the VM legacy-backfill compiler, `SiteBase`, and the adjacent
+            `PoolsBase`.
+          - The API-credit storefront's `credits_service_client.py` (`config`).
+          - The API-credit storefront's `startup.py` (`SiteCapacityAdminClient`). Its
+            test had patched the `market_site_client` module attribute that the local
+            import read at call time. `TESTING.md` forbids patching module-level
+            imports, so `_register_seed_quota` now takes the client's `transport`, and
+            `test_startup_seed_quota.py` passes an `httpx.MockTransport` instead of
+            patching the client class. It still patches `_capacity_authority_site`
+            and the container's signer, as it did before.
+        - Tests:
+          - provisioning service: `conftest.py` (the three metadata bases,
+            `PhysicalSettlementScheduler`, `FulfillmentOrchestrator`,
+            `SqlAlchemyFulfillmentUnitOfWork`), `test_fulfillment_api.py`,
+            `test_compute_contract_api.py`, `test_legacy_backfill_teardown.py`,
+            `test_fulfillment_convergence.py`, `test_vm_host_executor_ref_migration.py`;
+          - `kit/fulfillment`: `test_fulfillment.py`;
+          - `kit/site`: `test_dict_resource_satisfies_claim.py`,
+            `test_resource_satisfies_requirement.py`, `test_settlement_assignment.py`;
+          - `core/storefront`: `test_sqlite_client_escrow_fulfillment_identity.py`;
+          - the VM storefront: `test_vm_job_spec_service.py`,
+            `test_remote_capacity_client.py`, `test_fulfillment_resume_runtime.py`;
+          - the API-credit storefront: `test_keys_lookup.py`,
+            `test_startup_seed_quota.py`;
+          - the API-credit service: `tests/integration/test_migrations.py` (`SiteBase`
+            six times, the migrations module twice). The file moved out of
+            `src/tests/unit/` after the change's range, which is why the range-based
+            search first missed it.
+        - Left as they are: `test_fulfillment_provisioning.py`'s `alkahest_py` probe
+          inside `try`, which is an availability check, and
+          `market_fulfillment/provider.py`'s `TYPE_CHECKING` import, which is
+          module-level.
+      - **Test placement.** `TESTING.md` moves a touched library test that uses a real
+        database from `unit/` to `integration/`. Three moved:
+        - `kit/site/tests/unit/test_settlement_assignment.py` to
+          `kit/site/tests/integration/`;
+        - `core/storefront/tests/unit/test_sqlite_client_escrow_fulfillment_identity.py`
+          to `core/storefront/tests/integration/`;
+        - `kit/fulfillment`'s file-database restart test, out of
+          `tests/unit/test_fulfillment.py` into the new
+          `tests/integration/test_fulfillment_restart.py`, with its own provider fake.
+      - **Seen, not this change's, left alone.**
+        - `kit/site/tests/integration/test_ledger.py`'s "documented pass-1 scope ...
+          before this change" comment, from the multidimensional-capacity change's
+          first pass.
+        - The provisioning service's `pyproject.toml` declares the VM adapter under
+          the optional `adapters` extra. The migration history imports the adapter at
+          module level, so the service cannot start without it.
+        - The `escrows` table's `capacity_reservation_id`, `settlement_resource_id`,
+          and `fulfillment_id` columns are written by no production code. VM keeps
+          the identity on its delivery record (`persist_delivery_fields_with_retry`).
+          Whether to drop the columns is a schema decision, not comment work.
+        - `reviews/03-validation.md`'s coverage table lists `test_credits_payment_deal`
+          as passed. Run 40495699817's log shows all three of its tests skipped
+          (`actions.log`, `e2e-apicredits`: "1 passed, 3 skipped").
+      - **Also fixed.** Two rows of `design.md`'s Section 9 promotion table (around
+        `VmConnectivitySettings` and the sizing precedence) named a file and a model
+        that no longer exist. Each now carries a dated correction for closeout's
+        13.9. The rest of the table is closeout's to re-check.
+        `make check-change` reported two unresolvable citations in this change's
+        `design.md`. One was the full-deal scenario's path written with its middle
+        directories elided. The other was the connectivity-terms change, now archived as
+        `openspec/changes/archive/2026-09-25-add-buyer-vm-connectivity-terms/`. Both
+        now point at real paths.
+      - **Evidence.** `make test` passed. Among its suites:
+        - the provisioning service: unit 658 passed, application integration 527
+          passed;
+        - `kit/site`: 289 passed;
+        - `kit/fulfillment`: 171 passed;
+        - `core/storefront`: 217 passed, 2 skipped;
+        - the VM storefront: unit 1103 passed, 1 skipped; integration 448 passed;
+        - the API-credit storefront: 184 passed.
+
+        These are the counts after the fixes, unchanged by the test moves. The edited
+        source was exercised: each package under test installs editable.
+        `make check-packaging` passed, including the architecture layer, scope,
+        dependency, and kind rules. `make check-change` passed.
+      - **End-to-end.** Validation 03 ran the commit before these edits. Moving imports
+        to module level changes what the provisioning service, its migrate entrypoint,
+        and the API-credit storefront load at start. The next validation's pipeline
+        is therefore the evidence for this section:
+        - `e2e-vm` (`e2e_deal` and the rest of its markers);
+        - `e2e-apicredits` (`e2e_credits_deal`). Its storefront's startup registers
+          the seed quota through the moved import. `e2e_credits_payment_deal` was a
+          blocked skip in run 40495699817, with no payments target configured, so it
+          is not evidence here;
+        - `e2e-bare-metal`, whose stack runs the same provisioning service.
+
+        No `e2e-tests/` marker exercises the comment rewrites.
 
 ## 13. Closeout
 
@@ -1815,6 +2099,9 @@ Per `openspec/README.md#plan-closeout-requirements`.
         and registration written once by executor target.
       - This change's own delta specs (atomic abandonment and release, scheduling,
         fulfillment identity) remain compatible and promote as written.
+        *Amended 2026-10-27 (task 12.4):* they promote as reconciled in 12.4.
+        `credential_generation` is gone, and "Capacity schema separation" replaces
+        "Broad capacity schema cleanup".
 - [ ] 13.10 **Documentation citations.** After promotion, run
       `make check-doc-citations CHANGE=pools-7-storefront-fulfillment-cutover` and resolve every
       match, then `openspec validate pools-7-storefront-fulfillment-cutover --strict`.

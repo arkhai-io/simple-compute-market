@@ -1,13 +1,13 @@
 """compute_capacity_claim_from_order: the resource_type constraint.
 
-Previously untested even before this change -- compute_capacity_claim_from_order
-had no dedicated test file at all. Focused here on the one new behavior:
-every claim this function builds now names resource_type explicitly, so
-an injected exact ClaimMatcher (kit/site's dict_resource_satisfies_claim)
-can reject a resource of the wrong kind rather than silently ranking it.
+Every claim this function builds names resource_type explicitly, so an
+injected exact ClaimMatcher (kit/site's dict_resource_satisfies_claim) can
+reject a resource of the wrong kind rather than silently ranking it.
 """
 
 from __future__ import annotations
+
+from arkhai_vms_listings.resources import ComputeGpuResourceAdapter
 
 from market_storefront.services.vm_job_spec_service import (
     _VM_RESOURCE_TYPE,
@@ -47,8 +47,6 @@ def test_resource_type_constant_matches_the_actual_registered_gpu_resource_type(
     constant must equal what ComputeGpuResourceAdapter actually
     registers, or the claim would reject every real VM resource that
     exists."""
-    from arkhai_vms_listings.resources import ComputeGpuResourceAdapter
-
     assert _VM_RESOURCE_TYPE == ComputeGpuResourceAdapter().resource_type
 
 

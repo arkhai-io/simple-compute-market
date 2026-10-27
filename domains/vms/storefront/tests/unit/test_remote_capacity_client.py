@@ -12,12 +12,14 @@ by that service's own integration tests).
 
 from __future__ import annotations
 
+import functools
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from core_storefront.capacity import CapacityDelta
 from core_storefront.aggregation import fill_first
+from market_site import dict_resource_satisfies_claim
 from market_capacity_publication import (
     CapacityProjection,
     CapacityReconcileContext,
@@ -169,10 +171,6 @@ def test_most_available_placement_gets_the_kit_site_exact_claim_matcher():
     owns the only full claim-parsing and feasibility semantics, so
     composition must inject its exact matcher instead, bound with this
     domain's legacy unit-claim-key vocabulary."""
-    import functools
-
-    from market_site import dict_resource_satisfies_claim
-
     with patch(
         "market_storefront.utils.config.settings",
         _settings(placement="most_available"),

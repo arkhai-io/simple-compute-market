@@ -8,6 +8,7 @@ from typing import Any
 
 from core_storefront.escrow_identity import backfill_escrow_obligation_records
 from market_core import MarketDomainContract
+from market_site_client import SiteCapacityAdminClient, SiteCapacityAdminClientError
 
 from apicredits_storefront.lifecycle_steps import register_api_credit_loops
 from apicredits_storefront.utils import config
@@ -149,16 +150,17 @@ def _capacity_authority_site():
 _QUOTA_POOL_ID = "default"
 
 
-async def _register_seed_quota(*, resource_id: str, total_units: int) -> None:
+async def _register_seed_quota(
+    *, resource_id: str, total_units: int, transport: Any | None = None
+) -> None:
     """Register the demo quota resource in the credits-service ledger.
 
     The ledger is the credits service's; the storefront is a client, so
     registration goes through the typed capacity-administration client
     (``SiteCapacityClient`` only reads/commits, never registers). A
-    re-registration on restart re-asserts the resource.
+    re-registration on restart re-asserts the resource. ``transport`` is the
+    client's HTTP transport, the network's when not given.
     """
-    from market_site_client import SiteCapacityAdminClient, SiteCapacityAdminClientError
-
     import apicredits_storefront.container as container
 
     site = _capacity_authority_site()
@@ -170,7 +172,7 @@ async def _register_seed_quota(*, resource_id: str, total_units: int) -> None:
         signer=signer,
         expected_authorities=site.expected_authorities,
         timeout=30.0,
-        transport=None,
+        transport=transport,
         max_timestamp_skew=300,
     )
     try:
