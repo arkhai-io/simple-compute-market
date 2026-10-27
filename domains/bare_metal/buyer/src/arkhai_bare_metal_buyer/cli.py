@@ -584,9 +584,14 @@ def _seller_principal(deal: Any) -> Any:
     return identities[0] if identities else None
 
 
+# Bare metal's settlement utilities sit under its own command, beside
+# ``request-introduction``, so it registers no root ``settlement`` group: the
+# core application refuses a root command two installed domains register.
+bare_metal_app.add_typer(settlement_app, name="settlement")
+
+
 def register_commands(app: object) -> None:
     """Register the bare-metal group on the core market application."""
 
     add_typer = getattr(app, "add_typer")
     add_typer(bare_metal_app, name="bare-metal")
-    add_typer(settlement_app, name="settlement")

@@ -4065,20 +4065,56 @@ buyer's refusal of a root command two domains register (D14; `buyer-orchestratio
 domains may not register one root command"). Touches `core/buyer` and
 `domains/bare_metal/buyer`.
 
-- [ ] 21.1 `core/buyer/src/core_buyer/cli.py` `build_app`: refuse at startup a root command
+- [x] 21.1 `core/buyer/src/core_buyer/cli.py` `build_app`: refuse at startup a root command
       name two installed domains register, naming the command and both domains, from each
       domain's registered names. Tests in `core/buyer/tests/unit/test_cli.py` (unit): two
       plugins registering `settlement` refuse; distinct names compose (D14).
-- [ ] 21.2 `domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/cli.py` `register_commands`
+      Done: `_register_domain_commands` records the names each domain's registration
+      added and raises `DuplicateRootCommandError` naming the command and both domains;
+      the console script prints it and exits 2. Unit (`make -C core/buyer test`, 148
+      passed): two plugins registering `settlement` refuse, naming both; the console
+      script exits 2 naming the refusal; distinct names compose and each runs its own
+      command.
+- [x] 21.2 `domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/cli.py` `register_commands`
       adds `settlement` to `bare_metal_app` beside `request-introduction`; VM's root
       commands stay. Tests in `domains/bare_metal/buyer/tests/test_buyer_composition.py`
       (unit) (D14).
-- [ ] 21.3 Versions: `arkhai-core-buyer` (the bare-metal buyer's exact pin),
+      Done; `settlement` is added to `bare_metal_app` when the module loads, so the
+      plugin registers one root command, `bare-metal`. Unit: the registration adds only
+      `bare-metal`, `settlement` sits under it, and through the core `build_app`
+      `market bare-metal settlement contact` answers while a root `settlement` is not
+      bare metal's.
+- [x] 21.3 Versions: `arkhai-core-buyer` (the bare-metal buyer's exact pin),
       `arkhai-bare-metal-buyer`; `make lock`.
-- [ ] 21.4 **Verify.** `make test-core`, `make test-bare-metal`, `make test-vms-buyer`; `make
+      `arkhai-core-buyer` is 0.6.0 against `origin/dev`'s 0.5.0, already this change's one
+      bump (Section 9), and the refusal is new behaviour within it, so it and the
+      bare-metal buyer's exact pin stay. `arkhai-bare-metal-buyer` 0.5.1 → 0.6.0: moving
+      its commands is incompatible for a caller of `market settlement`, which its
+      patch bump on this branch does not cover. `make lock` relocked the bare-metal
+      buyer, the bare-metal storefront (its dev group), and `e2e-tests` for the new
+      version; `e2e-tests`' floor on it rises with Section 22's scenario.
+- [x] 21.4 **Verify.** `make test-core`, `make test-bare-metal`, `make test-vms-buyer`; `make
       test`; `make check-packaging`. End-to-end: every VM-lane CLI scenario
       (`e2e_deal_buyer_cli`, `e2e_buy`, `e2e_vm_introduction`) runs with all three buyers
       installed, and Section 22's scenario uses the namespaced commands.
+      Passed with Sections 18 to 22 (18.7's note): core buyer 148, bare-metal buyer 12,
+      and the VM buyer suite within `make test`, the Helm render unrun for want of
+      `helm`; `make check-packaging` passed. End-to-end: unrun here; the scenarios above
+      are confirmed as this section's.
+
+Section 21 notes (handoff):
+
+- The fresh-context check is recorded in Section 20's notes, which it covered with this
+  section. The scenario "Bare metal's settlement commands are namespaced" is shown with
+  the bare-metal plugin alone (`test_buyer_composition.py`) and the core refusal with
+  fake plugins (`test_cli.py`); the VM and bare-metal plugins installed together are
+  first seen by the VM lane's CLI scenarios and Section 22's.
+- **Locks.** The bare-metal storefront's lock, relocked for the buyer's version, also
+  drops dependency markers, as Section 18's locks did; kept as generated. The other
+  locks the environment rewrote while rebuilding, which this change does not touch, are
+  left uncommitted.
+- `core/buyer/tests/unit/test_cli.py` patches the module's `discover_domains` for the
+  console-script test, as the file already did; `main()` takes no injected discovery.
 
 ## 22. Unbacked bare-metal discovery reaches a usable introduction
 

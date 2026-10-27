@@ -64,3 +64,28 @@ than letting the later registration replace or shadow the earlier one.
 - **WHEN** the buyer CLI starts with the VM and bare-metal plugins installed
 - **THEN** it starts, VM's settlement commands are at the root, and bare metal's are
   under `market bare-metal settlement`
+
+## MODIFIED Requirements
+
+### Requirement: Buyer mechanism utilities are namespaced
+
+Raw mechanism-specific setup, inspection, and mutation commands MUST live below a
+`settlement <mechanism>` command group: `market settlement <mechanism>` at the root for a
+domain whose plugin registers its group there, or `market <domain> settlement <mechanism>`
+below the domain's own command, so that no two installed domains register one root
+`settlement` group. Payment approval is an internal accepted-run step, not payer-profile
+administration. Normal `market buy`, `market settle`, resume, and accepted-obligation
+lifecycle commands MUST derive mechanism inputs from the selected option, persistent buyer
+profile, and accepted run and MUST NOT accept chain-, token-, provider-, raw payer-ref-, or
+browser-specific override flags.
+
+#### Scenario: Accepted Alkahest run is resumed
+
+- **WHEN** `market settle --from <run>` resumes Terms containing an Alkahest obligation
+- **THEN** the command derives chain, token, decimals, and escrow identity from accepted state and typed configuration without legacy override flags
+
+#### Scenario: A domain's mechanism utilities sit below its own command
+
+- **WHEN** the bare-metal buyer plugin is installed
+- **THEN** its contact-exchange utilities are `market bare-metal settlement contact`, and it
+  registers no root-level `settlement` group
