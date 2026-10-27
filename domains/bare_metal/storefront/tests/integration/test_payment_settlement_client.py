@@ -5,7 +5,9 @@ SQLite persistence are real; each deal is opened through ``negotiate_new`` with 
 payment selection, exactly as a buyer opens one. Site capacity and provisioning
 are in-memory authorities, and the payments service is the kit's fake injected at
 ``PaymentsClient`` through the settlement composition. Settlement must start
-fulfillment itself once the receipt verifies.
+fulfillment itself once the receipt verifies. The fulfillment status a buyer reads
+is read from the fulfillment service the route calls, since the buyer reads it over
+a signed transport an in-process application cannot serve.
 
 One deal is instead bought by the production buyer's ``market bare-metal buy``,
 against the app served on loopback, through the same fake.
@@ -33,6 +35,7 @@ from source_sites import SourceSite, listing_source_projection, source_projectio
 from storefront_client import StorefrontClient, StorefrontClientError
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
+from arkhai_bare_metal_storefront.fulfillment_service import BareMetalFulfillmentError
 from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
 from arkhai_bare_metal_storefront.server import (
     build_bare_metal_storefront_app,
@@ -351,6 +354,52 @@ async def test_a_refund_before_delivery_blocks_fulfillment(harness):
     assert (await harness.settle()).status == "refunded"
     assert harness.provisioning.begin_calls == []
     assert harness.payments.count("reverse") == 1
+
+
+# A buyer cleaning up reads this answer to tell a purchase with nothing delivered
+# from a host it cannot read; the fulfillment status route carries it as its 409
+# detail, since the route gives no structured reason.
+_UNVERIFIED_WITHOUT_FULFILLMENT = "bare-metal settlement is not authoritatively verified"
+
+
+async def _fulfillment_status(harness):
+    return await harness.runtime.fulfillment_service().status(
+        negotiation_id=harness.negotiation_id, buyer_principal=BUYER.identity,
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_undelivered_deal_reads_as_an_unverified_payment_before_and_after_refund(
+    harness,
+):
+    assert (await harness.settle()).pending
+    refusals = []
+    with pytest.raises(BareMetalFulfillmentError) as pending:
+        await _fulfillment_status(harness)
+    refusals.append(pending.value)
+
+    harness.serve()
+    await harness.refund()
+    with pytest.raises(BareMetalFulfillmentError) as refunded:
+        await _fulfillment_status(harness)
+    refusals.append(refunded.value)
+
+    for refusal in refusals:
+        assert (refusal.status_code, refusal.detail) == (409, _UNVERIFIED_WITHOUT_FULFILLMENT)
+    assert harness.provisioning.begin_calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_delivered_deal_stays_readable_after_its_refund(harness):
+    harness.serve()
+    started = await harness.settle()
+    assert not started.pending
+    await harness.refund()
+
+    status = await _fulfillment_status(harness)
+
+    assert status["fulfillment_id"] == "fulfillment-pay"
+    assert status["settlement_ref"] == harness.data.transaction_id
 
 
 @pytest.mark.asyncio

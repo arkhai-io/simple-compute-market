@@ -24,6 +24,17 @@ from compute_provisioning_ansible import DEFAULT_ANSIBLE_CONFIG
 logger = logging.getLogger(__name__)
 
 
+def refuse_retired_settings() -> None:
+    """Refuse a configuration stating a setting the service no longer reads.
+
+    Runs before any other step, so a stale profile stops the service before it
+    composes anything that would ignore the key. The migration command does not
+    refuse it: migration reads no operational configuration, so a retired key
+    cannot change what it does.
+    """
+    settings.refuse_retired_settings()
+
+
 def apply_ansible_config() -> None:
     """Export ``ANSIBLE_CONFIG`` for every playbook the service runs.
 
@@ -39,13 +50,13 @@ def apply_ansible_config() -> None:
 def initialise_container_resources() -> None:
     """Wire the DI container and verify the DB schema is up to date.
 
-    Migrations are no longer applied in-process here (see ARCHITECTURE.md
-    § Schema Migration Execution) — they must be applied ahead of time via
-    the Helm init container, ``compute-provisioning-migrate``, or ``make migrate``.
-    This step only checks the schema version and fails fast with an
-    actionable message if it's behind, so a missed migration surfaces as an
-    obvious startup error rather than a query hitting a missing column
-    later.
+    Migrations are not applied in-process here (see
+    openspec/specs/deployment-state/spec.md, "Service-owned migration history")
+    — they must be applied ahead of time via the Helm init container,
+    ``compute-provisioning-migrate``, or ``make migrate``. This step only
+    checks the schema version and fails fast with an actionable message if
+    it's behind, so a missed migration surfaces as an obvious startup error
+    rather than a query hitting a missing column later.
     """
     container.identity_context()
     container.init_resources()
@@ -109,8 +120,9 @@ def seed_inventory_if_empty() -> None:
     # are not overwritten on pod restart.  To force a re-seed, use
     # POST /api/v1/hosts/import which always upserts regardless of table state.
     #
-    # Seeding also declares capacity for each seeded host with GPUs that no
-    # capacity declaration names, in the same transaction as the hosts.
+    # Seeding registers hosts and declares no capacity: an entry's GPUs
+    # describe its host, and an entry stating no pool registers its host
+    # unplaced. Capacity is declared through the capacity surface.
     # ------------------------------------------------------------------
     host_service = _container_module.resolved_host_authority
     existing_hosts = host_service.list_hosts(enabled_only=False)
@@ -162,6 +174,17 @@ def import_pool_definitions_if_configured() -> None:
     _definition_importer().import_pool_definitions()
 
 
+def seed_initial_pools_if_fresh() -> None:
+    """Seed a fresh site's pools from ``pool_seed_path``.
+
+    Runs after the pool document import, which a configured document owns, and
+    before the declaration check, which then reads the seeded pools too.
+    Migration creates no pool, so this is how a site with no pool document
+    starts with any.
+    """
+    _definition_importer().seed_initial_pools()
+
+
 def verify_pool_declarations() -> None:
     """Refuse to start while any stored pool lacks valid declarations or a provider handler.
 
@@ -209,6 +232,7 @@ def create_job_queue() -> None:
 
 def startup_steps() -> tuple[ComputeProvisioningStartupStep, ...]:
     return (
+        ComputeProvisioningStartupStep("refuse-retired-settings", refuse_retired_settings),
         ComputeProvisioningStartupStep("apply-ansible-config", apply_ansible_config),
         ComputeProvisioningStartupStep(
             "initialise-container-resources",
@@ -228,6 +252,7 @@ def startup_steps() -> tuple[ComputeProvisioningStartupStep, ...]:
         ComputeProvisioningStartupStep(
             "import-pool-definitions", import_pool_definitions_if_configured
         ),
+        ComputeProvisioningStartupStep("seed-initial-pools", seed_initial_pools_if_fresh),
         ComputeProvisioningStartupStep(
             "verify-pool-declarations", verify_pool_declarations
         ),

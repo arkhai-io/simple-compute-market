@@ -45,13 +45,18 @@ the session, and every turn ends with an outcome matching
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
   to stop and report — a repository guard refusing, `HEAD` moving under you — end
   with `stopped`, `reason` saying why, and `denials` empty.
+- **Git runs in this checkout.** Run Git in the current checkout, never with `-C`:
+  the step already runs in the checkout it reads, and no rule allows `git -C`, since
+  a wildcard after `-C` would also span a push. Run Make here too, never `make -C
+  <a checkout>`: `-C` names only a subdirectory, or the prerequisite's worktree
+  this skill names.
 - **Every reply is a turn.** This step is a discussion: each reply to the owner
   ends its turn with an outcome, the reply in full as its `message` — `question`
   while you wait for the owner's answer or disposition. The orchestrating session
   shows the owner every message and resumes this session with each reply.
-- **The end is an outcome.** When the settled design is recorded (section 6),
-  end with `finished`, `next` naming the design review. A design that cannot
-  proceed without another change ends `blocked`, `blocked_on` the prerequisite's
+- **The end is an outcome.** When the settled design is recorded, committed, and
+  pushed (section 6), end with `finished`, `next` naming the design review. A
+  design that cannot proceed without another change ends `blocked`, `blocked_on` the prerequisite's
   exact change name, at steps 3 and 4 of "When the design needs another change
   first" (section 4); telling the owner there is that outcome's `message`. Under
   orchestration the release of step 5 is proposed to the owner by the
@@ -76,6 +81,11 @@ places that matter, so read all of this first, in full:
   check every factual claim the design makes about the current system.
 - Each change listed in the row's `Depends on`, at least its `proposal.md` and
   `design.md`.
+- Another change's records, where the design rests on them — a dependency's
+  reviews, an earlier change's findings or validation. They are untracked, so they
+  are where that change was worked: `python3 scripts/find_change.py --records
+  <change>` prints where, this checkout's or, from a change's clone, the owner's
+  workspace's, which holds the history of every cleaned-up change.
 
 If a dependency gates `design` and has not reached `archived`, stop and tell
 the owner: designing now risks designing work the
@@ -119,7 +129,12 @@ the problem itself, lead with that — a well-designed solution to a misread
 problem is the costliest outcome.
 
 **Decisions.** List every open decision, numbered, including ones the
-documents treat as settled but the code or a correction reopens. For each:
+documents treat as settled but the code or a correction reopens, as an agenda:
+each decision's number, title, and kind (below), one line each, no positions, in
+the order to settle them. Then present the first decision in full and wait for
+the owner's answer before the next: one decision per message. Every decision
+presented at once invites answers before the owner has read the arguments, and
+an answer to one often reshapes the next. In full, a decision has:
 
 - **Context.** Recap what the design currently says or assumes on this point,
   and the code, guidance, or correction that bears on it, so the owner can
@@ -298,6 +313,11 @@ Only when the owner says the design is settled:
   validation and the change's citations check among the repository's closing
   checks, and report the result. A citation of a file the change itself will
   create is expected; any other is a defect.
+- Commit the recorded design as one commit — the change's documents, the index
+  row, and the ledger lines this step wrote — whose message names the change and
+  says its design is settled, so the design review reads a committed design. Then
+  push it with `make push-branch`, the guarded push of exactly `HEAD`; if it
+  refuses, stop and report its reasons.
 
 Do not write or amend `tasks.md`: planning is a separate phase and starts only
 once the design review's triage records that the change advances.

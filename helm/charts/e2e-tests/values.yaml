@@ -22,6 +22,14 @@ integrationTests:
 createSecret: false
 secretName: arkhai-e2e-credentials
 
+# ---------------------------------------------------------------------------
+# The end-to-end scenarios the e2e-scenarios test pod runs inside the release's
+# namespace, as a pytest marker expression. Empty renders no such pod; a Helm
+# validation sets it to the scenarios it runs.
+# ---------------------------------------------------------------------------
+scenarios:
+  markers: ""
+
 # Public EIP-191 principals used by topology/render checks. The corresponding
 # wallet and identity credentials remain in the referenced Secret.
 seller:

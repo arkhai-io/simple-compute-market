@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 
 [[package]]
@@ -227,7 +227,6 @@ dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
     { name = "arkhai-core" },
     { name = "arkhai-kit-config" },
-    { name = "arkhai-kit-resource-pools" },
     { name = "pydantic" },
 ]
 wheels = [

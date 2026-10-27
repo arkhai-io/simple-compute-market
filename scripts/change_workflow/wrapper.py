@@ -5,16 +5,21 @@ available of the models the step's row names, in order: a model whose harness is
 missing, not signed in, or at its usage limit is passed over, and the line names
 each one passed over and the model that ran; a network error is retried on the
 same model, never passed over. `Wrapper.resume` continues the session of a waiting
-run, named by its line in the log, with the owner's answer, optionally granting a
-rule for that one run; with steps run side by side the last run is not necessarily
-the one that asked, so the run is never inferred.
+run, named by its line in the log, with the owner's answer; with steps run side by
+side the last run is not necessarily the one that asked, so the run is never
+inferred. An implementation run may instead continue a session the caller names,
+one not waiting on the owner, with new instructions. Any run may be granted rules
+for that one run, passed on its command line and recorded as `granted` on its line,
+never added to the step table.
 
 Either way the run's event stream is kept as its transcript, and its outcome is
 appended to the workflow log. A run that crashes, ends without an outcome, or ends
 with one the schema rejects is logged `stopped` by the wrapper itself. A step
 denied a tool ends `stopped` only when it cannot go on without it; one that went
 on is logged with the outcome it ended with, and the orchestrating session reads
-the recorded denials before the change moves on.
+the recorded denials before the change moves on. A run whose session took further
+turns after an outcome is logged with its last, the earlier ones kept beside it as
+`earlier`.
 
 Contract: openspec/specs/change-workflow/spec.md, "Unattended step runs end with a
 structured outcome".
@@ -39,6 +44,7 @@ from change_workflow.harness import (NETWORK_RETRIES, Runner, claude_command, mi
 from change_workflow.log import last_run, log_path, read_log, record_outcome
 from change_workflow.outcome import SCHEMA, load_schema, outcome_problems
 from change_workflow.records import git_head, next_transcript
+from change_workflow.running import recorded_run, runs_directory
 from change_workflow.steps import STEP_TABLE, Model, StepRules, load_steps
 from change_workflow.stream import Stream
 from change_workflow.subagents import subagent_denials
@@ -116,6 +122,29 @@ def run_outcome(status: int, result: dict[str, Any] | None, schema: dict[str, An
     return {"outcome": "stopped", "message": reason, "reason": reason, "denials": denials}
 
 
+# The fields of an outcome a later turn of the same run would otherwise hide.
+_EARLIER_FIELDS = ("outcome", "message", "next", "reason", "awaiting")
+
+
+def earlier_outcomes(results: Sequence[dict[str, Any]], last: dict[str, Any] | None
+                     ) -> list[Entry]:
+    """The outcomes the run's turns ended with before `last`, the result its line is
+    logged from.
+
+    A finished background command, a monitor, or a wake-up the step scheduled can
+    start another turn after the step reported, and that turn's outcome becomes the
+    line's; the report it followed is kept beside it, so it is never lost.
+    """
+    earlier = []
+    for result in results:
+        if result is last:
+            continue
+        outcome = result.get("structured_output")
+        if isinstance(outcome, dict) and isinstance(outcome.get("message"), str):
+            earlier.append({key: outcome[key] for key in _EARLIER_FIELDS if key in outcome})
+    return earlier
+
+
 @dataclass
 class Wrapper:
     """Runs steps of changes under one repository root, through injected seams."""
@@ -131,11 +160,22 @@ class Wrapper:
     # Where Claude Code keeps a session's conversation, read for the turns it gained
     # outside the wrapper and the time of its last turn.
     conversation: Callable[[Path, str], Path] = conversation_file
+    # Where a run in progress is recorded, so no round view moves its checkout.
+    runs: Callable[[Path], Path | None] = runs_directory
 
     def run(self, step: str, change: str, *, arguments: str = "",
-            sections: Sequence[int | str] | None = None, fresh: bool = False) -> Entry:
+            sections: Sequence[int | str] | None = None, fresh: bool = False,
+            granted: Sequence[str] = (), continuing: str | None = None) -> Entry:
         """Run `step`: a fresh session, or, for a step that resumes another's, the
-        latest session of either, unless `fresh`."""
+        latest session of either, unless `fresh`; or, for implementation, the
+        session `continuing` names.
+
+        Continuing an implementation session is the owner's choice of which
+        session's context the work goes to — the next section, or a fix to edits
+        it made — so the session is named, never inferred, and may be any of the
+        change's implementation runs not waiting on the owner. A granted rule
+        applies to this run alone, as it does to a resumed run.
+        """
         steps = load_steps(self.steps_path)
         if step not in steps or step == "review":
             raise StepError(f"{step!r} has no unattended Claude Code run; a review runs "
@@ -147,7 +187,16 @@ class Wrapper:
             raise StepError("only implementation takes sections")
         session = None
         models = rules.models
-        if rules.resume_from and not fresh:
+        extra: Entry = {}
+        if continuing is not None:
+            if step != "implement":
+                raise StepError("only implementation continues a session it names")
+            if fresh:
+                raise StepError("a run continuing a session cannot also start fresh")
+            previous = continued_run(read_log(log), change, continuing)
+            session, models = continuing, _session_models(previous, rules)
+            extra["continues"] = previous["seq"]
+        elif rules.resume_from and not fresh:
             previous = last_run(log, [rules.resume_from, step])
             if previous is not None and not previous.get("session"):
                 raise StepError(f"{change}'s last {previous['step']} run (seq "
@@ -156,9 +205,12 @@ class Wrapper:
             if previous is not None:
                 session = previous["session"]
                 models = _session_models(previous, rules)
-        extra = {"sections": list(sections)} if sections else {}
+        if sections:
+            extra["sections"] = list(sections)
+        if granted:
+            extra["granted"] = list(granted)
         return self._turn(step, rules, change, log, step_prompt(rules, change, arguments),
-                          models, session=session, extra=extra)
+                          models, session=session, granted=granted, extra=extra)
 
     def resume(self, change: str, seq: int, answer: str, granted: Sequence[str] = ()) -> Entry:
         """Resume the step session of the run at `seq` with the owner's answer.
@@ -212,6 +264,15 @@ class Wrapper:
     def _turn(self, step: str, rules: StepRules, change: str, log: Path, prompt: str,
               models: Sequence[Model], *, session: str | None, granted: Sequence[str] = (),
               extra: Entry | None = None) -> Entry:
+        """Run one turn and log it, recorded as in progress in the checkout until its
+        line is written, however it ends."""
+        with recorded_run(self.runs(self.root), step, change, clock=self.clock):
+            return self._logged_turn(step, rules, change, log, prompt, models,
+                                     session=session, granted=granted, extra=extra)
+
+    def _logged_turn(self, step: str, rules: StepRules, change: str, log: Path, prompt: str,
+                     models: Sequence[Model], *, session: str | None,
+                     granted: Sequence[str] = (), extra: Entry | None = None) -> Entry:
         """Run one turn on the first of `models` that is available, and log it.
 
         A model whose harness is missing, not signed in, or at its usage limit
@@ -233,13 +294,15 @@ class Wrapper:
         named = transcript.relative_to(log.parent).as_posix()
         attempts: list[Stream] = []
         with _termination_ends_the_run():
-            outcome, status, failure, model, stream, passed_over = self._attempt_models(
-                rules, prompt, schema, models, session, granted, transcript, progress,
-                attempts,
-            )
+            outcome, status, failure, model, stream, passed_over, logged = (
+                self._attempt_models(rules, prompt, schema, models, session, granted,
+                                     transcript, progress, attempts))
         extra = {**(extra or {}), **model.entry(), "exit_status": status, "transcript": named}
         if passed_over:
             extra["unavailable"] = passed_over
+        # Every attempt's turns: a retried attempt may have reported before it failed.
+        if earlier := earlier_outcomes([r for a in attempts for r in a.results], logged):
+            extra["earlier"] = earlier
         extra.update(self._cost(attempts or [stream], session, before))
         try:
             log = log_path(self.root, change)
@@ -259,13 +322,16 @@ class Wrapper:
                         granted: Sequence[str], transcript: Path, progress: Path,
                         attempts: list[Stream],
                         ) -> tuple[Entry, int | None, BaseException | None, Model, Stream,
-                                   list[Entry]]:
+                                   list[Entry], dict[str, Any] | None]:
         """Run the turn on the first available of `models`: its outcome, exit
-        status, any failure, the model last tried, its stream, and the models
-        passed over. Every attempt's stream is appended to `attempts`."""
+        status, any failure, the model last tried, its stream, the models passed
+        over, and the result the outcome was logged from, when the step gave one.
+        Every attempt's stream is appended to `attempts`."""
         failure: BaseException | None = None
         passed_over: list[Entry] = []
         outcome: Entry = {}
+        # The result the line is logged from, when the step gave one.
+        logged: dict[str, Any] | None = None
         status: int | None = None
         stream = Stream(transcript, progress, self.clock, self.echo)
         model = models[0]
@@ -306,6 +372,9 @@ class Wrapper:
             else:
                 outcome = run_outcome(status, stream.result, schema,
                                       self._denials(stream, session))
+                # A run that exited non-zero is logged from its status, so even its
+                # last turn's outcome is kept as earlier.
+                logged = stream.result if status == 0 else None
                 break
             outcome = {"outcome": "stopped", "message": reason, "reason": reason,
                        "denials": self._denials(stream, session)}
@@ -315,7 +384,7 @@ class Wrapper:
                 f"{entry['model']}: {entry['reason']}" for entry in passed_over)
             outcome = {"outcome": "stopped", "message": reason, "reason": reason,
                        "denials": self._denials(stream, session)}
-        return outcome, status, failure, model, stream, passed_over
+        return outcome, status, failure, model, stream, passed_over, logged
 
     def _denials(self, stream: Stream, session: str | None) -> list[dict[str, Any]]:
         """The run's denials: the parent's own, from its stream, then those its
@@ -341,6 +410,29 @@ class Wrapper:
                              before,
                              read_conversation(self.conversation(self.root, ran))
                              if ran else None)
+
+
+def continued_run(entries: Sequence[Entry], change: str, session: str) -> Entry:
+    """The latest implementation run of `session`, which a run may continue.
+
+    Refused while an implementation run waits on the owner — ended with a question,
+    or stopped with no decision line resolving it. Its answer goes to it through
+    `resume`, which reaches only the step's latest run: a new instruction sent to
+    that session would leave the question unanswered, and one sent to another
+    session would make it no longer the latest, so it could never be resumed.
+    """
+    runs = [e for e in entries if e.get("step") == "implement"]
+    named = [e for e in runs if e.get("session") == session]
+    if not named:
+        raise StepError(f"{change}'s workflow log has no implementation run of session "
+                        f"{session}")
+    latest = runs[-1]
+    resolved = {e.get("resolves") for e in entries if e.get("outcome") == ORCHESTRATOR}
+    if latest.get("outcome") in ("question", "stopped") and latest["seq"] not in resolved:
+        raise StepError(f"implementation's last run (seq {latest['seq']}, session "
+                        f"{latest.get('session')}) ended {latest['outcome']} and waits for "
+                        "the owner's answer; resume it with the answer first")
+    return named[-1]
 
 
 def _session_models(previous: Entry, rules: StepRules) -> tuple[Model, ...]:

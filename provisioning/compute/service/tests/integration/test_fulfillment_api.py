@@ -209,7 +209,12 @@ def _fulfillment_request(**overrides: Any) -> dict:
     return {"kind": "vm.fulfillment.request", "schema_version": 1, "payload": payload}
 
 
-async def _reserved_capacity(pool_id: str, *, claim: dict[str, Any] | None = None) -> str:
+async def _reserved_capacity(
+    pool_id: str,
+    *,
+    claim: dict[str, Any] | None = None,
+    provider_config: dict[str, Any] = _PROVIDER_CONFIG,
+) -> str:
     """Register a pool + VM resource and reserve capacity against it.
 
     The reserve-only half of ``_scheduled_reservation`` below, factored out
@@ -225,7 +230,7 @@ async def _reserved_capacity(pool_id: str, *, claim: dict[str, Any] | None = Non
             label=pool_id,
             provider="vm.ansible",
             policy_tags={"advertisable_modes": ["vm"], "capacity_backing": "backed", "deliverable_modes": ["vm"]},
-            provider_config=_PROVIDER_CONFIG,
+            provider_config=provider_config,
         )
     )
     # The host the declaration is delivered through; every job is submitted
@@ -255,7 +260,10 @@ async def _reserved_capacity(pool_id: str, *, claim: dict[str, Any] | None = Non
 
 
 async def _scheduled_reservation(
-    pool_id: str = "pool-fulfillment-a", *, claim: dict[str, Any] | None = None,
+    pool_id: str = "pool-fulfillment-a",
+    *,
+    claim: dict[str, Any] | None = None,
+    provider_config: dict[str, Any] = _PROVIDER_CONFIG,
 ) -> str:
     """Register a pool + VM resource, reserve capacity, and schedule it.
 
@@ -270,7 +278,9 @@ async def _scheduled_reservation(
     physical_settlement_scheduler = (
         _container_module.resolved_physical_settlement_scheduler
     )
-    capacity_reservation_id = await _reserved_capacity(pool_id, claim=claim)
+    capacity_reservation_id = await _reserved_capacity(
+        pool_id, claim=claim, provider_config=provider_config
+    )
 
     physical_settlement_scheduler.schedule_resource(
         PhysicalSettlementRequest(
@@ -592,6 +602,26 @@ class TestPoolConfigFrozenAtAcceptance:
             unchanged_params = record.prepared_create_operation["payload"]["parameters"]
             assert unchanged_params["playbook_path"] == _PLAYBOOK_PATH
             assert unchanged_params["provider_extra_vars"] == {"region": "eu"}
+
+    async def test_a_pool_stating_no_playbook_freezes_the_services_into_the_job(
+        self, fulfillment: FulfillmentApi
+    ):
+        capacity_reservation_id = await _scheduled_reservation(
+            "pool-fulfillment-service-playbook", provider_config={}
+        )
+
+        await fulfillment.begin(capacity_reservation_id, "vms", _fulfillment_request())
+
+        # The harness configures the service's VM playbook as this path.
+        service_playbook = "/fake/playbook.yml"
+        session_factory = _container_module.resolved_session_factory
+        with session_factory() as db:
+            record = SettlementRepository().get(db, capacity_reservation_id)
+            frozen = record.prepared_create_operation["payload"]["parameters"]
+            job_id = record.provider_metadata["create_job_id"]
+        assert frozen["playbook_path"] == service_playbook
+        job = _container_module.resolved_job_engine.get_job(job_id)
+        assert job.params["playbook_path"] == service_playbook
 
 
 class TestAcknowledgementFailureRecovery:

@@ -211,7 +211,11 @@ def _register_host(body: HostCreate) -> _Call:
 
 
 def _update_host(host_id: str, body: HostUpdate) -> _Call:
-    return _Call("PUT", f"/api/v1/hosts/{host_id}", body, parse=_model(HostResponse))
+    # An update sends exactly the fields its caller set: an explicit
+    # ``pool_id=None`` unplaces the host, so it must reach the service as
+    # ``null``, where the shared serialization drops every null as unset.
+    payload = body.model_dump(mode="json", exclude_unset=True)
+    return _Call("PUT", f"/api/v1/hosts/{host_id}", payload, parse=_model(HostResponse))
 
 
 def _set_host_enabled(host_id: str, enabled: bool) -> _Call:

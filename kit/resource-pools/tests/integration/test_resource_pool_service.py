@@ -644,16 +644,17 @@ pools:
         assert svc.list_pools() == []
 
     def test_validate_accepts_disabled_default_pool(self, svc):
-        """A disabled `default` in an authoritative document is valid —
-        only omitting `default` entirely is rejected
-        (test_missing_default_pool_rejected, below)."""
+        """A disabled `default` in an authoritative document is valid, as
+        a disabled pool of any other name is."""
         response = svc.validate_pools(
             _YAML.replace("enabled: true", "enabled: false", 1)
         )
         assert response.valid is True
         assert response.diff is not None
 
-    def test_missing_default_pool_rejected(self, svc):
+    def test_document_without_default_pool_validates_and_imports(self, svc):
+        """No pool name is required of a document: one that names no
+        `default` validates and imports like any other."""
         no_default_yaml = """
 pools:
   - id: hetzner-eu-central
@@ -667,8 +668,15 @@ pools:
       inventory_group: kvm_hosts_eu
 """
         response = svc.validate_pools(no_default_yaml)
-        assert response.valid is False
-        assert "missing_default_pool" in {p.code for p in response.problems}
+        assert response.valid is True
+        assert response.problems == []
+        assert response.diff is not None
+        assert response.diff.created == ["hetzner-eu-central"]
+        assert svc.list_pools() == []
+
+        diff = svc.import_pools(no_default_yaml)
+        assert diff.created == ["hetzner-eu-central"]
+        assert [pool.id for pool in svc.list_pools()] == ["hetzner-eu-central"]
 
     def test_validate_accumulates_all_detectable_problems(self, svc):
         response = svc.validate_pools("""

@@ -350,7 +350,7 @@ class ListingService:
             updated_at=now_iso,
             listing_resource=listing.listing_resource.model_dump(mode="json"),
             accepted_escrows=listing.accepted_escrows,
-            settlement_options=listing.settlement_options,
+            settlement_options=[option.model_dump(mode="json") for option in listing.settlement_options],
             demands=listing.demands,
             fulfillment_resource=None,
             max_duration_seconds=None,

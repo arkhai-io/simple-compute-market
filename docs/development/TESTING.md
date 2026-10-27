@@ -160,7 +160,9 @@ waiting is a defect in the mock, not something to resume around.
 applies to a service's own background lifecycle loops, where the seam is
 an HTTP control rather than a callback. Each loop should offer a pause,
 and an explicit single-step that works *while* paused, so a scenario
-drives transitions instead of waiting for a timer:
+drives transitions instead of waiting for a timer. The stage discipline
+diagram under [system integration tests](#4-system-integration-tests-end-to-end)
+draws a scenario following this:
 
 | Loop | Pause | Explicit step |
 |---|---|---|
@@ -236,6 +238,15 @@ submit a real job and poll for completion.
 in Kubernetes (`helm/templates/tests/`, per-chart `templates/tests/`
 directories).
 
+A smoke check that writes state belongs in an integration test instead. The
+provisioning smoke checks carry two markers: `provisioning_readonly` for
+reads of health, system status, hosts, and host connectivity, and
+`provisioning_security` for authentication enforcement, which sends an
+unsigned read to a protected route and expects 401 or 403, so it needs no
+administrator credential. The provisioning chart's test hook selects
+`provisioning_readonly or provisioning_security`, and its render test holds
+the hook to that expression.
+
 ### 4. System Integration Tests (End-to-End)
 
 **What they cover:** Cross-service contracts — scenarios that require
@@ -257,23 +268,66 @@ bare-metal lease is released only when authenticated access is revoked and the
 selected-site authority reports teardown. A health check or static Compose
 render is not deal evidence.
 
-The scenarios share `DomainDealState`, exact event ordering, profiled buyer
-configuration, and public client helpers from
-`e2e-tests/tests/e2e/roles/helpers/domain_deal.py` and
-`e2e-tests/tests/e2e/roles/buyer_cli.py`. The helpers keep domain results
-opaque: they do not assume a VM listing, provisioning job, host field, API key,
-Physical Resource, site, or teardown payload. A scenario supplies its codecs
-and domain assertions instead of copying another domain's control flow.
+Three diagrams carry the rest of this section. The first draws the discipline
+every complete-deal scenario follows, whatever its domain. The second applies
+that discipline to the compute family's canonical deal, part by part, as the
+worked example. The third zooms into one of those parts to show the discipline
+inside a single box. Each diagram's source is the `.drawio` file named under it
+in [`diagrams/`](diagrams/); the SVG beside each is its export and also opens
+in draw.io.
 
-The compute family's canonical deal (Alkahest settlement on the dev chain,
-delivery through the provisioning mock profile) takes every stage its domains
-run identically from `e2e-tests/tests/e2e/roles/helpers/compute_deal_stages.py`.
-Those stages are not named `Test*`, so pytest collects them only where a
-domain's scenario module subclasses them, with an empty body, in its run order.
-A shared stage's body is therefore defined once and runs in every compute lane;
-a stage whose body would differ stays each domain's own, inserted between the
-shared ones (VM's listing creation and claim, bare metal's publication, evidence,
-and second-deal stages). What differs reaches a shared stage two ways: fixtures
+#### The discipline every scenario follows
+
+A scenario asserts only on side effects it asked for. While a service's timer
+loops run, an observation races them: a listing reconciled a second later reads
+differently from one reconciled a second earlier, and waiting for the system to
+settle cannot establish ordering even when it passes. So a scenario holds every
+loop it depends on once, at the start, through the pause and step controls
+under ["Pause the loop, then advance it explicitly"](#2-integration-tests), and
+initializes what the deal needs. Then, for each transition, it previews the
+move through the route's evaluate twin or the loop's dry run, advances exactly
+one side effect, and measures that effect against expectations through typed
+clients, with no sleeps: the only wait is on a request the stage made. What a
+stage produced goes into the shared deal state for the stages that depend on
+it, and whatever happened, the fixture's finaliser resumes the loops.
+
+![How an end-to-end scenario holds the loops once, then previews, advances, and measures each transition](diagrams/e2e-stage-discipline.svg)
+
+Source: [`diagrams/e2e-stage-discipline.drawio`](diagrams/e2e-stage-discipline.drawio).
+
+The shared deal state is `DomainDealState`, from
+`e2e-tests/tests/e2e/roles/helpers/domain_deal.py`, which the scenarios share
+with exact event ordering, profiled buyer configuration, and the public client
+helpers in `e2e-tests/tests/e2e/roles/buyer_cli.py`. The helpers keep domain
+results opaque: they do not assume a VM listing, provisioning job, host field,
+API key, Physical Resource, site, or teardown payload. A scenario supplies its
+codecs and domain assertions instead of copying another domain's control flow.
+A stage names each earlier result it depends on with `require_state`, one
+exact producer/consumer field at a time. When an earlier stage or external
+authority is unavailable, the dependent stage names that prerequisite and
+remains blocked; it is never counted as a successful live deal.
+
+#### The canonical compute deal
+
+The compute family's canonical deal settles through Alkahest on the dev chain
+and delivers through the provisioning mock profile. The diagram draws it part
+by part, from holding the loops to resuming them. Each box is one part of the
+deal, its preview, advance, and measurement folded into a sentence or two, and
+the tag at its right is the deal stage the shared state records for it. The
+bare-metal lane runs a second deal on the freed host before its loops resume.
+
+![The canonical compute deal, part by part, from holding the loops to resuming them](diagrams/e2e-compute-deal.svg)
+
+Source: [`diagrams/e2e-compute-deal.drawio`](diagrams/e2e-compute-deal.drawio).
+
+Every stage the compute domains run identically comes from one definition, in
+`e2e-tests/tests/e2e/roles/helpers/compute_deal_stages.py`. Those stages are
+not named `Test*`, so pytest collects them only where a domain's scenario
+module subclasses them, with an empty body, in its run order. A shared stage's
+body is therefore defined once and runs in every compute lane; a stage whose
+body would differ stays each domain's own, inserted between the shared ones
+(VM's listing creation and claim, bare metal's publication, evidence, and
+second-deal stages). What differs reaches a shared stage two ways: fixtures
 every compute conftest provides under one set of names supply who is calling,
 and each domain's `ComputeDealDriver`
 (`e2e-tests/tests/e2e/roles/scenarios/vms/compute_deal_driver.py`,
@@ -287,10 +341,21 @@ checks the stage set from source: each domain subclasses every shared stage once
 in order, with an empty body, and every state field has one producer that runs
 before any stage reads it.
 
-Staged scenarios use `require_state` with one exact producer/consumer field.
-When an earlier stage or external authority is unavailable, the dependent
-stage names that prerequisite and remains blocked; it is never counted as a
-successful live deal.
+#### One part, zoomed in
+
+Settle has the fullest shape of any part, so it is the one drawn open. The
+stage previews twice, through the storefront's evaluate-settle and the
+provisioning service's evaluate-job, advances with one settle call, and
+measures a fulfillment dispatched and held at the mock gate. What it reads
+from and writes to the shared deal state is what ties it to the parts before
+and after: `require_state` on the escrow, listing, negotiation, and armed gate
+on the way in, and the placed host and fulfillment ids on the way out, the
+latter read next by the deliver part. Every other box in the deal diagram
+opens the same way, with its own previews, advance, and measurement.
+
+![One part of the compute deal, settle, zoomed in: its two previews, one advance, and measurement](diagrams/e2e-settle-zoom.svg)
+
+Source: [`diagrams/e2e-settle-zoom.drawio`](diagrams/e2e-settle-zoom.drawio).
 
 The e2e test pod cannot import service internals — it uses typed
 clients, explicit test controllers, and stage/event APIs over HTTP, the
@@ -312,7 +377,22 @@ project of its own:
   discovery, withdrawal, and reinstatement at the registry. Its mock-provisioned
   deal runs the canonical compute deal for one whole host, stage for stage with
   VM's, then a second deal on the freed host whose buyer teardown, sent twice,
-  returns one operation and releases capacity once.
+  returns one operation and releases capacity once. Its separate
+  `e2e_bare_metal_payment_deal` scenario uses a wallet-free profiled buyer for
+  one fixed-term USD/6 purchase, receipt-gated mock access, same-transaction and
+  same-fulfillment re-drive through `settle_agreement`, then seller refund and
+  separate physical teardown with restored whole-host capacity. Unless the
+  refund stage completed the deal's teardown, the module's cleanup finds the
+  purchase in the buyer's run log, refunds it if the log records the payment
+  approved — retrying for a bounded time while the seller has not yet verified
+  it or a service is unavailable — then releases a host it finds after the
+  refund, reporting one it cannot read or tear down; a refund that still fails
+  fails the run with the negotiation and
+  transaction for an operator. Each cleanup step is
+  attempted even after an earlier one fails, and the loops the module paused
+  resume last.
+  Unconfigured payments remain a named blocked prerequisite; no real SSH claim
+  is made.
 - **API-credit lane** (`make -C e2e-tests test-e2e-apicredits`): the credits
   registry, service, storefront, and gated sample app, a compute-schema registry
   of the lane's own that the credits deal's discovery is routed away from, and
@@ -336,6 +416,22 @@ shared `/test/jobs/*` routes. None of them is mounted outside the mock profile.
 before the next, because every stack names its chain container `anvil` and
 publishes fixed host ports. A lane provides its own configuration, so a
 scenario that finds a lane setting missing fails rather than skipping.
+
+Pre-review validation also runs the scenarios the default Helm charts can serve
+(`HELM_SCENARIOS` in `scripts/validate_slice.py`) against a Helm release, in the
+change's own namespace ("Validation namespaces" in
+`docs/development/DEPLOYMENT_AND_CONFIG.md`). They run as a pod inside that
+namespace, the e2e-tests chart's `<release>-e2e-tests-e2e-scenarios` Helm test
+hook, rendered when `scenarios.markers` is set: it runs the change's own
+`e2e-tests` image with the release's `test-config` ConfigMap under the `helm`
+profile, the deal test pod's environment and mounts, and reaches every service by
+its in-cluster name, as a lane's scenarios do on their compose network, so no local
+port is involved. Validation runs it alone (`helm test --filter name=<pod>`) and
+counts it as passed only on the pod's own exit status of 0, since `helm test`
+passes when its filter matches no test. A scenario on that list reads only what the
+`e2e-tests` image copies — `src`, `tests`, `config`, `conftest.py`, and
+`settings.toml` — never a file from the checkout. Every other pipeline scenario is
+reported as not run against Helm.
 
 A mock-provisioned deal proves the services compose into a working deal, not
 that a real resource was delivered. Bare metal's release-qualified deal
@@ -425,7 +521,7 @@ consumer ignores.
 - **Same-package boundary** (producer and consumer share a package):
   `tests/fixtures/<module>.py` within that package, importable as
   `tests.fixtures.<module>` by any test in the package. Example:
-  `domains/vms/storefront/tests/fixtures/publish.py`.
+  `domains/vms/storefront/tests/fixtures/publication_cycle.py`.
 - **Cross-package boundary** (the consumer is a separate, higher-level
   package): `src/<package_name>/fixtures/<module>.py` inside the
   producer's own source package. Because the producer is already
@@ -471,8 +567,8 @@ proving that no execution layer relies on another layer's earlier decision:
 - `kit/fulfillment` scheduler tests withdraw a declaration after reservation;
   orchestration tests withdraw it after provider input is prepared and assert
   no provider dispatch occurs.
-- Provisioning migration tests cover fresh bootstrap, the system-owned default
-  pool, exact derivation from provider/playbook/delegate configuration,
+- Provisioning migration tests cover fresh bootstrap, a `default` pool stored
+  before offering modes (migration creates none), exact derivation from provider/playbook/delegate configuration,
   idempotent rerun, narrowing, INFO evidence, malformed drift, single-proof
   backfill, conflicting proof, unproved active rows, and terminal rows.
 - Advertisement and backing declarations follow the same split.
@@ -673,6 +769,16 @@ payments.serve(build_signed_receipt(signer=IMPOSTOR, mandate=accepted.mandate)) 
 payments.serve(None)                                                              # 202 pending
 ```
 
+A receipt's signed mode is one of those properties. `build_signed_receipt` signs in
+the `livemode` it is given, default `False`, the mode of a test or development
+service. `FakePaymentsClient`'s own `livemode` applies only to the receipts it signs
+on approval; a receipt handed to `serve()` keeps the mode it was signed with. A stage
+configured for one mode is tested with a receipt signed in the other:
+
+```python
+payments.serve(build_signed_receipt(signer=SERVICE, mandate=accepted.mandate, livemode=True))  # refused unless the role sets livemode
+```
+
 A fake may give the surrounding transaction snapshot a placeholder proof,
 because sellers trust only the embedded receipt. A change that makes snapshot
 state authoritative must first add a snapshot vector and fixture.
@@ -746,7 +852,9 @@ passing render is not deployment evidence, just as it is not deal evidence.
   mechanism. `test-render.sh` sets it when the VM storefront environment exists
   (`make init-storefront`). `helm/charts/bare-metal-storefront/tests/test_render.py`
   does the same through `BARE_METAL_STOREFRONT_PYTHON`, which `test-render.sh` sets
-  when `domains/bare_metal/storefront/.venv` exists: bare metal's loader, startup
+  when `domains/bare_metal/storefront/.venv` exists (`make
+  init-bare-metal-storefront`; both targets build the wheelhouse first, and `make
+  init` runs both): bare metal's loader, startup
   refusal, clause compilation, and site binding over the example's rendered
   document, and the refusal over the defaults'. That shows a rendered configuration
   is publishable, not that the storefront starts on it, since the runtime also needs
@@ -826,6 +934,22 @@ and `domains/apicredits/middleware/rust/tests/conformance.rs`.
 ## Private Service Dependencies
 
 This repository is public, and every test target it runs in public CI or a public build MUST pass without credentials for a private repository, image or package. A scenario that needs a private service's internals (its source, images, development-mode auth, operator test funds, or ledger reads) lives in that service's repository, which may depend on SCM's public artifacts. SCM's own e2e may run against a service's public test deployment, readiness-gated: it reports the unmet prerequisite when no target is configured or reachable. Otherwise SCM tests the client side against the service's published contract (schemas and test vectors) and a test double at the client kit's boundary.
+
+The API-credit payment scenario reads its payments policy through
+`e2e-tests/tests/e2e/roles/helpers/payments.py`, which other payment scenarios
+may reuse. A blank PAYMENTS.SERVICE_URL means no payments target is configured,
+and the scenario reports a blocked skip, never an Alkahest fallback: that is
+what the pipeline runs. With SERVICE_URL set, SERVICE_IDENTITY,
+DISPUTE_AUTHORITY, BUYER_ACCOUNT, BUYER_MARKETPLACE_CREDENTIAL and
+SELLER_MARKETPLACE_CREDENTIAL are required, and a missing one fails the
+scenario by name before the target's `/health` is checked (timeout 5 seconds,
+environment proxies disabled); an unready target is again a blocked skip.
+FEE_BPS defaults to 250; LIVEMODE and DEVELOPMENT_AUTH default to false, are
+read as strict booleans, and LIVEMODE is emitted explicitly in buyer TOML.
+DEVELOPMENT_AUTH and API_KEY_ENV are mutually exclusive. The helper serializes
+only the named payments table, not domain configuration or payer selection.
+See [shared payment-scenario configuration](../../e2e-tests/README.md#shared-payment-scenario-configuration)
+for environment and runner setup.
 
 **Current example:** complete deals settled through the Arkhai payments service are qualified by that service's own suite. Here, `kit/arkhai-payments` checks conformance against the service's published vectors, vendored and identified by content hash in `kit/arkhai-payments/schema/SOURCE.md`.
 

@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12, <3.14"
 resolution-markers = [
     "python_full_version >= '3.13' and platform_machine == 'arm64' and sys_platform == 'darwin'",
@@ -814,7 +814,7 @@ requires-dist = [
     { name = "arkhai-core-storefront", specifier = ">=0.16.0" },
     { name = "arkhai-core-storefront-client", specifier = ">=0.27.0" },
     { name = "arkhai-kit-alkahest", specifier = ">=0.10.0" },
-    { name = "arkhai-kit-arkhai-payments", specifier = ">=0.2.0" },
+    { name = "arkhai-kit-arkhai-payments", specifier = ">=0.3.0" },
     { name = "arkhai-kit-capability-admissibility", specifier = ">=0.1.0" },
     { name = "arkhai-kit-capacity-publication", specifier = "==0.11.0" },
     { name = "arkhai-kit-config", specifier = ">=0.4.0" },

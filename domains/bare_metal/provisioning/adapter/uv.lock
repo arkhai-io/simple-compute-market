@@ -129,7 +129,6 @@ dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
     { name = "arkhai-core" },
     { name = "arkhai-kit-config" },
-    { name = "arkhai-kit-resource-pools" },
     { name = "pydantic" },
 ]
 wheels = [

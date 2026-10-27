@@ -279,10 +279,22 @@ def test_unreported_availability_is_not_projected_as_zero():
     assert "available" not in projected
 
 
-def test_a_declaration_with_no_recorded_pool_belongs_to_the_default_pool():
-    (projected,) = _project([_declaration(pool_id=None)])
+def test_a_declaration_with_no_recorded_pool_is_not_projected(caplog):
+    """Not into `default`, nor any other pool: the row is reported and left
+    out, and the declarations around it project as they would without it."""
+    with caplog.at_level("WARNING"):
+        projected = _project(
+            [
+                _declaration(resource_id="vm-slice-1"),
+                _declaration(resource_id="no-pool", pool_id=None),
+                _declaration(resource_id="vm-slice-2"),
+            ]
+        )
 
-    assert projected["pool_id"] == "default"
+    assert projected == _project(
+        [_declaration(resource_id="vm-slice-1"), _declaration(resource_id="vm-slice-2")]
+    )
+    assert "'no-pool' records no pool and is not projected" in caplog.text
 
 
 def test_without_contributed_views_every_attribute_projects_and_no_view_does():

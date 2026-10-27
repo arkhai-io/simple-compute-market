@@ -209,6 +209,7 @@ class PaymentSellerStage:
             self.config.service_identity,
             mandate=data.mandate,
             agreement_json=dict(agreement),
+            livemode=self.config.livemode,
         )
 
     def check_receipt_now(

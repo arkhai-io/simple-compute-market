@@ -69,6 +69,20 @@ def test_a_service_receipt_verifies():
     assert isinstance(outcome, ReceiptVerified)
 
 
+@pytest.mark.parametrize(
+    "configured,signed,verifies",
+    [(True, True, True), (True, False, False), (None, True, False)],
+    ids=["live-accepts-live", "live-refuses-test", "default-refuses-live"],
+)
+def test_a_receipt_verifies_only_in_the_configured_mode(configured, signed, verifies):
+    terms, data = _accepted()
+    fake = FakePaymentsClient()
+    fake.serve(build_signed_receipt(signer=SERVICE, mandate=data.mandate, livemode=signed))
+    stage = _stage(fake) if configured is None else _stage(fake, livemode=configured)
+    outcome = stage.check_receipt_now(terms, data)
+    assert isinstance(outcome, ReceiptVerified if verifies else ReceiptInvalid)
+
+
 def test_impostor_and_wrong_mandate_receipts_are_invalid():
     terms, data = _accepted()
     impostor = FakePaymentsClient()

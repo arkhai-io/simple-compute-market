@@ -15,8 +15,9 @@ ends with the reviewer's session, tagged with its harness, which the next review
 the same kind continues on that harness alone; the reviewer's harness and model, and
 each model passed over; and the commit it reviewed, `HEAD` when its run started. A
 pre-closeout review refuses to start unless the latest validation record names
-`HEAD`, or an ancestor from which `HEAD` changes only changes' records, with the
-result `passed`; the owner may override that. The review's outcome is `finished`,
+`HEAD`, or an ancestor from which `HEAD` changes only changes' records — after an
+earlier pre-closeout review's triage, only paths under `openspec/` and `docs/` —
+with the result `passed`; the owner may override that. The review's outcome is `finished`,
 naming the record this run published, or `stopped` with the runner's reason; an
 earlier record never counts.
 """
@@ -37,7 +38,9 @@ from change_workflow.harness import (NETWORK_RETRIES, CodexRunner, Reached, Runn
                                      resume_command, run_claude, run_codex, unreachable)
 from change_workflow.log import LOG, log_path, record_outcome
 from change_workflow.records import (NUMBERED, TRANSCRIPTS, ChangedSince, changed_since,
-                                     next_number, validation_problem)
+                                     is_documentation, is_record, next_number,
+                                     validation_problem)
+from change_workflow.running import recorded_run, runs_directory
 from change_workflow.steps import HARNESSES, STEP_TABLE, Model, StepRules, load_steps
 from change_workflow.stream import Stream, transcript_denials
 from find_change import ChangeNotFound, change_directory, is_archived
@@ -296,7 +299,12 @@ def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str |
     reviews = directory / "reviews"
     reviewed = head(root)
     if kind == "pre-closeout" and not unvalidated:
-        if problem := validation_problem(reviews, reviewed, root, changed_since):
+        # After an earlier pre-closeout review, as the next-step computation reads
+        # it, closeout is next and its own checks read the documentation again.
+        earlier = any(entry.name.endswith(".triage.md")
+                      for entry in reviews.glob("[0-9]*-pre-closeout*.md"))
+        if problem := validation_problem(reviews, reviewed, root, changed_since,
+                                         exempt=is_documentation if earlier else is_record):
             raise ReviewError(f"a pre-closeout review needs a passing validation of HEAD: "
                               f"{problem}; validate first, or set UNVALIDATED=1 to override")
     steps = load_steps(steps_path)
@@ -430,12 +438,21 @@ def review_outcome(path: Path) -> tuple[Entry, str | None, str | None, Entry]:
 
 def review_and_log(change: str, kind: str, *, root: Path = ROOT, clock: Clock = utc_now,
                    **options: Any) -> Entry:
-    """Run a review and log its outcome.
+    """Run a review and log its outcome, recorded as in progress in the checkout
+    until its line is written, since a round view moving the checkout would change
+    the commit it reads.
 
     It is `finished` only when this run published its own record, named with the
     commit it reviewed; any other end is `stopped` with the runner's reason, so an
     earlier record of the same kind never stands in for this run's.
     """
+    runs = options.pop("runs", runs_directory)
+    with recorded_run(runs(root), "review", change, clock=clock):
+        return _review_and_log(change, kind, root=root, clock=clock, **options)
+
+
+def _review_and_log(change: str, kind: str, *, root: Path, clock: Clock,
+                    **options: Any) -> Entry:
     log = log_path(root, change)
     head = options.get("head", _reviewed_head)
     started = clock()

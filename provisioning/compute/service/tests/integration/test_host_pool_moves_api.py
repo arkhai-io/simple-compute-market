@@ -1,9 +1,10 @@
 """Moving a host between pools, over the real API, through the canonical clients.
 
 A host's pool changes through an update or through an imported inventory, and
-both go through the pool-change hooks the composition contributes. VM's hook
-refuses moving a host to a pool that dials another relay while a VM tunnel is
-bound through the host, because the buyer holds that relay's address and port.
+both go through the pool-change hooks the composition contributes, unplacing a
+host included. VM's hook refuses moving a host to a pool that dials another
+relay, or to no pool, while a VM tunnel is bound through the host, because the
+buyer holds that relay's address and port.
 These tests prove the refusal survives each route as a 409 that leaves the host
 where it was, and that the move goes through once the host is drained.
 
@@ -113,6 +114,46 @@ async def test_an_update_moving_a_tunnelled_host_to_another_relay_is_refused(
 
     with pytest.raises(ComputeProvisioningError) as refused:
         await clients.family.update_host("kvm1", HostUpdate(pool_id=_PLAIN_POOL))
+
+    assert refused.value.status_code == 409
+    assert (await clients.family.get_host("kvm1")).pool_id == _RELAY_POOL
+
+
+async def test_an_inventory_unplacing_a_tunnelled_host_is_refused_whole(client_and_queue):
+    """Unplacing is a move: the host would stop dialling its relay, so the VM
+    hook refuses it, and the import's other entries are not applied either."""
+    clients, _ = client_and_queue
+    await _relay_and_pools(clients)
+    await clients.host_import.import_hosts_from_text(_inventory(_RELAY_POOL))
+    _bind_tunnel()
+
+    # The new host comes first, so it is applied before the refusal and only
+    # the rollback can take it away.
+    with pytest.raises(ComputeProvisioningError) as refused:
+        await clients.host_import.import_hosts_from_text(
+            "[kvm_hosts]\n"
+            "kvm2  ansible_host=10.0.0.2  ansible_user=ubuntu  "
+            "ansible_ssh_private_key_file=/keys/id\n"
+            + _inventory("", address="10.0.0.99").removeprefix("[kvm_hosts]\n")
+        )
+
+    assert refused.value.status_code == 409
+    assert "kvm1:6100" in str(refused.value)
+    host = await clients.family.get_host("kvm1")
+    assert (host.pool_id, host.connection.public["ssh_host"]) == (_RELAY_POOL, "10.0.0.1")
+    with pytest.raises(ComputeProvisioningError) as missing:
+        await clients.family.get_host("kvm2")
+    assert missing.value.status_code == 404
+
+
+async def test_an_update_unplacing_a_tunnelled_host_is_refused(client_and_queue):
+    clients, _ = client_and_queue
+    await _relay_and_pools(clients)
+    await clients.host_import.import_hosts_from_text(_inventory(_RELAY_POOL))
+    _bind_tunnel()
+
+    with pytest.raises(ComputeProvisioningError) as refused:
+        await clients.family.update_host("kvm1", HostUpdate(pool_id=None))
 
     assert refused.value.status_code == 409
     assert (await clients.family.get_host("kvm1")).pool_id == _RELAY_POOL

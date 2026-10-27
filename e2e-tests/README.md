@@ -57,6 +57,32 @@ ACTIVE_PROFILES=staging,staging-secrets
 # loads: config.yml → config-staging.yml → config-staging-secrets.yml
 ```
 
+### Shared payment-scenario configuration
+
+The API-credit payment scenario reads the `PAYMENTS` section (environment
+prefix `ARKHAI_PAYMENTS__`) through `tests/e2e/roles/helpers/payments.py`, which
+other payment scenarios may reuse. SERVICE_URL names the payments target; leave
+it blank and the scenario reports `blocked` and skips. With it set, supply the
+other five: SERVICE_IDENTITY (public Ed25519 receipt signer), DISPUTE_AUTHORITY,
+BUYER_ACCOUNT, BUYER_MARKETPLACE_CREDENTIAL and SELLER_MARKETPLACE_CREDENTIAL;
+a missing one fails the scenario, naming it. Marketplace credentials are
+independent of payment account IDs.
+
+FEE_BPS defaults to 250. LIVEMODE and DEVELOPMENT_AUTH default to false and
+must be `true` or `false`; generated buyer tables explicitly pin the receipt
+mode. Choose either DEVELOPMENT_AUTH=true (literal loopback service URL only) or
+API_KEY_ENV naming the buyer's bearer-key environment variable, never both.
+Forward the named variable into the test runner yourself; host environment
+variables are not inherited by the buyer-machine container.
+
+An unreachable or unready `/health` also reports `blocked` and skips; invalid
+policy fails rather than selecting another settlement mechanism. The shared
+serializer writes only a named payments table — `Settlement.arkhai_payments`,
+or `bare_metal.arkhai_payments`, which it supports for a bare-metal buyer — and
+the scenario supplies domain settings and payer.
+See [Private Service Dependencies](../docs/development/TESTING.md#private-service-dependencies)
+for the public testing boundary.
+
 ### Secret injection (Kubernetes / Vault)
 
 In a Kubernetes environment, mount secrets as a file into `CONFIG_DIRECTORY`:
@@ -169,6 +195,51 @@ ACTIVE_PROFILES=local,e2e-mock uv run pytest -m mock_provisioning_happy -v --tb=
 ```
 
 ---
+
+### Bare-metal payment deal
+
+The bare-metal lane includes marker `e2e_bare_metal_payment_deal`.
+With payments configured, run its three ordered calls against the ready lane:
+
+```sh
+make test-buyer-machine \
+  NETWORK=simple-market-bare-metal_default \
+  BUYER_MODULE=e2e_bare_metal_payment_deal
+```
+
+Supply the shared PAYMENTS settings in the runner's config directory, plus
+SELLER_ACCOUNT, COMPUTE_HOURLY_GROSS=1000000 and DISPUTE_WINDOW=P7D. The seller
+must enable the same payments policy and trust its service identity.
+SELLER_MARKETPLACE_CREDENTIAL must resolve to the lane's pinned seller scheme;
+the purchase buyer is a separate wallet-free Ed25519 profile. An unconfigured
+public CI run reports a named blocked payments prerequisite, not success.
+
+The fixture declares a distinct backed whole host and publishes only a USD
+1.00/hour option for a one-hour term. The installed `market bare-metal buy`
+emits `run_started → agreement_accepted → payment_approved →
+run_ended(status=agreed)`. Delivery reads use that purchase's signer and
+fulfillment transport. Re-drive recovers the original run's retained profile
+and calls the shared `settle_agreement` client, keeping both transaction and
+fulfillment unchanged; there is no bare-metal settle command. Seller refund
+reverses the held once payment, then a separate buyer teardown converges mock
+reclaim and site capacity release. Unless the refund stage completed the deal's
+teardown, the module's cleanup finds the purchase in the buyer's run log; when
+the log records the payment approved, it refunds the payment (a repeat refund
+returns the same result), then reads the purchase's fulfillment and releases a
+host it finds. A host it cannot read or tear down — a delivery that stopped, or
+is still starting, before its fulfillment was recorded, say — is reported as a
+failed step for the provisioning service to recover. A refund the seller
+refuses because it has not yet verified the payment, or because the payments
+service or the storefront is unavailable, is retried for 60 seconds, as is a
+refusal that turns out final; a refund that still fails, retried or not, fails
+the run naming the negotiation and transaction, for an operator to reverse any
+hold that remains and release any host the seller delivers for it afterwards.
+Cleanup then removes its mock rules, drains, and removes its pool override, and
+resumes the loops it paused last. Each step is attempted even after an earlier
+one fails, and the failures are reported together; removing a mock rule that is
+already gone is not a failure.
+This is mock grant/reclaim evidence, not SSH qualification. The canonical
+Alkahest mock-deal scenario remains selected unchanged.
 
 ## CI/CD
 

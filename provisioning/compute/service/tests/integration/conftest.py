@@ -402,9 +402,6 @@ from compute_provisioning.jobs.queue import AsyncJobQueue
 from compute_provisioning.hosts import ConnectionCodecs
 from compute_provisioning.hosts.service import HostAuthority
 from compute_provisioning_ansible import AnsibleJobExecutor, SshConnectionCodec
-from compute_provisioning_service.services.capacity_derivation import (
-    LegacyHostCapacityDerivation,
-)
 from vm_provisioning_adapter.codec import VmAnsibleCodec
 from compute_provisioning.jobs.engine import JobEngine
 from compute_provisioning_ansible import probe_connectivity
@@ -460,7 +457,7 @@ ok: [kvm1] => {
 # ---------------------------------------------------------------------------
 
 
-def _initialize_test_database(engine):
+def _initialize_test_database(engine, *, default_pool: bool = True):
     # resource_pools must exist before VM's ansible_pool_configs FK resolves.
     from market_resource_pools.db import Base as PoolsBase
     PoolsBase.metadata.create_all(bind=engine)
@@ -478,10 +475,11 @@ def _initialize_test_database(engine):
     # scheduling_cursors) ride market_fulfillment's own metadata.
     from market_fulfillment.db import Base as FulfillmentBase
     FulfillmentBase.metadata.create_all(bind=engine)
-    # The host authority requires pool_id to reference an existing pool. The real
-    # migration always seeds "default" before hosts.pool_id can be NOT
-    # NULL (see db/migrations.py); mirror that guarantee here since this
-    # fixture builds schema directly rather than through the migration.
+    # Migration creates no pool. The suite's tests place hosts and declare
+    # capacity in a pool named "default", so the harness stores one, serving
+    # both compute modes, unless a module asks for a site with no pool.
+    if not default_pool:
+        return
     from compute_provisioning_service.db.models import DEFAULT_POOL_ID, ResourcePool
     with Session(engine) as session:
         session.add(ResourcePool(
@@ -544,7 +542,7 @@ def _ansible_executors(runner, settings, bare_metal_runner=None):
     vm = AnsibleJobExecutor(
         runner,
         VmAnsibleCodec(),
-        settings.resolved_playbook_path,
+        settings.resolved_vm_playbook_path,
         timeout_seconds=settings.ansible_timeout_seconds,
         additional_non_retryable_errors=settings.additional_non_retryable_errors,
     )
@@ -620,7 +618,6 @@ async def client_and_queue(
 
     _install_signed_asgi_transport(monkeypatch)
     mock_settings = MagicMock(
-        default_host_id="kvm1",
         default_max_retries=3,
         retry_backoff_initial_seconds=60,
         retry_backoff_multiplier=2.0,
@@ -630,7 +627,7 @@ async def client_and_queue(
         frp_server_addr="",
         frp_domain="",
         frp_dashboard_password="",
-        resolved_playbook_path=Path("/fake/playbook.yml"),
+        resolved_vm_playbook_path=Path("/fake/playbook.yml"),
         resolved_inventory_path=Path("/fake/hosts"),
         # A real Fernet key, not an empty string: the at-rest encryption used
         # by embedded host keys and relay tokens fails closed without one, and
@@ -680,7 +677,6 @@ async def client_and_queue(
     host_authority = HostAuthority(
         session_factory,
         codecs=ConnectionCodecs([SshConnectionCodec(TEST_CONNECTION_KEY)]),
-        capacity_derivation=LegacyHostCapacityDerivation(capacity_ledger_service),
         # The pool-change hooks exactly as the production container merges them,
         # so a move refused there is refused here, by every host route.
         pool_change_hooks=_container_module.Container.host_pool_change_hooks(),
@@ -760,6 +756,7 @@ async def client_and_queue(
     ansible_fulfillment_provider = JobFulfillmentProvider(
         plan=VmFulfillmentPlan(
             reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
+            vm_playbook_path=mock_settings.resolved_vm_playbook_path,
             # Without this a relay-backed pool cannot lease a port, so every
             # relay-backed fulfillment is rejected as invalid provider
             # configuration — which reads as a bad request rather than as a
@@ -793,6 +790,7 @@ async def client_and_queue(
             build_bare_metal_adapter_bundle(
                 fulfillment_provider=JobFulfillmentProvider(
                     plan=BareMetalFulfillmentPlan(
+                        playbook_path=mock_settings.resolved_bare_metal_playbook_path,
                         reclaim_policy=mock_settings.bare_metal_reclaim_policy,
                     ),
                     submission=job_submission,

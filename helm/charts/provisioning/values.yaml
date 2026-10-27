@@ -41,9 +41,10 @@ mockMode: false
 #              declaration it names, and every declared attribute is published
 #              to storefronts.
 #
-# A capacity declaration names its pool, so a pool it names must exist on the
-# first boot: supply `pools` alongside `capacity` when capacity names a pool
-# other than "default". Pools are imported before capacity.
+# A capacity declaration names its pool, so a pool it names must exist when
+# capacity is imported, after pools: one from `pools`, or, on a fresh site with
+# no `pools` document, one from the service's seed (the packaged seed holds
+# `vm-default` and `bare-metal-default`; `configFiles` below replaces it).
 #
 #   pools:
 #     pools:
@@ -64,6 +65,33 @@ definitions:
   relays: {}
   pools: {}
   capacity: {}
+
+# ---------------------------------------------------------------------------
+# Operator files — each entry's content is rendered verbatim into the ConfigMap
+# and mounted read-only at /app/config/<name>. The chart gives a file no meaning:
+# a setting under `config` names it by that path. A name must be one file name;
+# names the chart mounts itself, and `config.yml` or `config-*.yml` (or their
+# `.yaml` forms), which the service would load as profiles around `config`, are
+# refused.
+#
+# For example, a fresh site's starting pools in place of the packaged seed
+# (`pool_seed_path: ""` under `config` starts a fresh site with none):
+#
+#   configFiles:
+#     pool-seed.yaml: |
+#       pools:
+#         - id: gpu-h200
+#           label: H200 nodes
+#           provider: vm.ansible
+#           policy_tags:
+#             deliverable_modes: [vm]
+#             advertisable_modes: [vm]
+#             capacity_backing: backed
+#           provider_config: {}
+#   config:
+#     pool_seed_path: /app/config/pool-seed.yaml
+# ---------------------------------------------------------------------------
+configFiles: {}
 
 # ---------------------------------------------------------------------------
 # Helm smoke-test configuration.
@@ -151,14 +179,14 @@ config:
 
   # Ansible paths — set to the IaC tree location inside the container.
   # Override here for environments that mount the IaC at a different path.
-  playbook_path: "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml"
+  # The schema refuses the retired `playbook_path`, as the service does.
+  vm_playbook_path: "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml"
   bare_metal_playbook_path: "/opt/domains/bare_metal/provisioning/iac/ansible/playbooks/node-access.yaml"
   inventory_path: "/opt/domains/vms/provisioning/iac/ansible/inventory/provisioning-hosts.ini"
   management_vars_path: "/opt/domains/vms/provisioning/iac/ansible/inventory/management-vars.yaml"
 
   # Ansible runtime
   ansible_timeout_seconds: 1800
-  default_host_id: "kvm1"
 
   # Golden image public settings. Credentials belong in the runtime Secret.
   golden_root_ssh_filename: ""

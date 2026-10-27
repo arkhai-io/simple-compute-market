@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12, <3.14"
 
 [[package]]
@@ -161,7 +161,7 @@ dev = [
 requires-dist = [
     { name = "arkhai-core", specifier = ">=0.4.0" },
     { name = "arkhai-kit-alkahest", specifier = ">=0.7.0" },
-    { name = "arkhai-kit-arkhai-payments", specifier = ">=0.2.0" },
+    { name = "arkhai-kit-arkhai-payments", specifier = ">=0.3.0" },
     { name = "arkhai-kit-identity", specifier = "==0.4.0" },
     { name = "arkhai-kit-policy", specifier = ">=0.6.0" },
     { name = "arkhai-kit-settlement-runtime", specifier = ">=0.4.0" },

@@ -30,7 +30,7 @@ _DOCUMENT = textwrap.dedent(
     """
     resources:
       - resource_id: compute-kvm1
-        pool_id: default
+        pool_id: vm-pool
         resource_type: compute.gpu
         host_id: kvm1
         capacity: {gpu_count: 8}
@@ -43,12 +43,18 @@ class _Deployment:
     def __init__(self, tmp_path):
         self.document = tmp_path / "capacity-definitions.yaml"
         engine = create_engine(f"sqlite:///{tmp_path / 'provisioning.db'}")
-        run_migrations(
-            engine,
-            default_playbook_path="/configured/playbook.yaml",
-            default_inventory_group="kvm_hosts",
-        )
+        run_migrations(engine)
         self.session_factory = sessionmaker(bind=engine)
+        # Migration creates no pool; the document's declarations name this one.
+        with self.session_factory() as db, db.begin():
+            db.add(ResourcePool(
+                id="vm-pool", label="VM pool", provider="vm.ansible", enabled=True,
+                policy_tags={
+                    "deliverable_modes": ["vm"],
+                    "advertisable_modes": ["vm"],
+                    "capacity_backing": "backed",
+                },
+            ))
         self.settings = SimpleNamespace(
             resolved_capacity_definitions_path=self.document,
         )
@@ -120,7 +126,7 @@ def test_an_unchanged_document_does_not_revert_api_administration(
     deployment.write_document(_DOCUMENT)
     ledger = deployment.restart(monkeypatch)
     ledger.register_resource(
-        resource_id="compute-kvm1", pool_id="default", resource_type="compute.gpu",
+        resource_id="compute-kvm1", pool_id="vm-pool", resource_type="compute.gpu",
         host_id="kvm1", capacity={"gpu_count": 8},
         attributes={"gpu_model": "H200"}, enabled=False,
     )
@@ -137,7 +143,7 @@ def test_a_declaration_may_name_a_pool_created_before_it(deployment, monkeypatch
             id="gpu-pool", label="GPU pool", provider="ansible", enabled=True,
             policy_tags={"deliverable_modes": ["vm"]},
         ))
-    deployment.write_document(_DOCUMENT.replace("pool_id: default", "pool_id: gpu-pool"))
+    deployment.write_document(_DOCUMENT.replace("pool_id: vm-pool", "pool_id: gpu-pool"))
 
     ledger = deployment.restart(monkeypatch)
 

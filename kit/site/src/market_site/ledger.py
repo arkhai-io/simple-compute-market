@@ -52,7 +52,6 @@ from typing import Any, Mapping, Optional, Protocol, Sequence
 from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
 from market_resource_pools import (
-    DEFAULT_POOL_ID,
     HostRequirement,
     ResourcePool,
     pool_needs_host,
@@ -92,6 +91,20 @@ def _executor_ref_for_resource(resource: CapacityBucket) -> dict[str, Any] | Non
     they cannot drift from each other.
     """
     return {"host_id": resource.host_id} if resource.host_id else None
+
+
+def _log_poolless_declaration(resource: CapacityBucket, effect: str) -> None:
+    """Report a stored declaration that records no pool.
+
+    Every write names a pool, so such a row is malformed. It is read as
+    belonging to no pool, never to one a name or a default would supply: that
+    would admit claims against a pool nobody placed the resource in.
+    """
+    logger.warning(
+        "capacity declaration %r records no pool and is %s",
+        resource.backing_resource_id,
+        effect,
+    )
 
 
 class CapacityConflictError(Exception):
@@ -490,7 +503,12 @@ def dict_resource_satisfies_claim(
     ``("units", "gpu_count")`` in ``container.py``) for the legacy
     non-dimensional claim fallback to agree with admission; the default
     here is the module-wide default, not any particular domain's.
+
+    A row recording no pool matches no claim, since admission admits nothing
+    against it.
     """
+    if not row.get("pool_id"):
+        return False
     if not claim:
         return True
     resource_kind, required_attributes = _split_claim_requirement(
@@ -504,7 +522,7 @@ def dict_resource_satisfies_claim(
     )
     resource = resource_feasibility_view(
         resource_id=str(row.get("resource_id") or ""),
-        pool_id=row.get("pool_id") or row.get("resource_id"),
+        pool_id=row.get("pool_id"),
         resource_kind=row.get("resource_type") or "",
         available=row.get("available") or {},
         attributes=row.get("attributes") or {},
@@ -866,10 +884,9 @@ class CapacityLedgerService:
                     f"host {declaration.host_id!r} already carries resource "
                     f"{holder.backing_resource_id!r}"
                 )
-        if (
-            bucket is not None
-            and (bucket.pool_id or DEFAULT_POOL_ID) != declaration.pool_id
-        ):
+        # A stored row recording no pool belongs to none, so naming any pool
+        # for it is a move.
+        if bucket is not None and bucket.pool_id != declaration.pool_id:
             self._refuse_reassignment_under_obligation(db, bucket, declaration.pool_id)
         is_new = bucket is None
         if bucket is None:
@@ -930,7 +947,7 @@ class CapacityLedgerService:
         rule it would now fail."""
         return CapacityDeclaration.model_construct(
             resource_id=bucket.backing_resource_id,
-            pool_id=bucket.pool_id or DEFAULT_POOL_ID,
+            pool_id=bucket.pool_id,
             resource_type=bucket.resource_type,
             resource_subtype=bucket.resource_subtype,
             host_id=bucket.host_id,
@@ -997,10 +1014,12 @@ class CapacityLedgerService:
         )
         live = debited or assigned
         if live is not None:
+            origin = (
+                f"pool {bucket.pool_id!r}" if bucket.pool_id else "no recorded pool"
+            )
             raise CapacityConflictError(
-                f"resource {bucket.backing_resource_id!r} cannot move from pool "
-                f"{bucket.pool_id or DEFAULT_POOL_ID!r} to {new_pool_id!r} while "
-                f"reservation {live[0]!r} holds it"
+                f"resource {bucket.backing_resource_id!r} cannot move from "
+                f"{origin} to {new_pool_id!r} while reservation {live[0]!r} holds it"
             )
 
     def list_resources(self) -> list[dict[str, Any]]:
@@ -1211,6 +1230,11 @@ class CapacityLedgerService:
             raise CapacityConflictError(
                 f"settlement resource {settlement_resource_id!r} is unavailable"
             )
+        if not destination.pool_id:
+            _log_poolless_declaration(destination, "not assigned for settlement")
+            raise CapacityConflictError(
+                f"settlement resource {settlement_resource_id!r} records no pool"
+            )
         requested_mode = reservation.offering_mode
         if not requested_mode:
             raise CapacityConflictError(
@@ -1219,15 +1243,12 @@ class CapacityLedgerService:
         if not self._pool_declares_mode(db, destination, requested_mode):
             raise UndeclaredOfferingModeError(
                 f"offering mode {requested_mode!r} is not declared by pool "
-                f"{destination.pool_id or DEFAULT_POOL_ID!r}"
+                f"{destination.pool_id!r}"
             )
-        if not destination.host_id and self._pool_needs_host(
-            db, destination.pool_id or DEFAULT_POOL_ID
-        ):
+        if not destination.host_id and self._pool_needs_host(db, destination.pool_id):
             raise CapacityConflictError(
                 f"settlement resource {settlement_resource_id!r} names no host, "
-                f"and pool {destination.pool_id or DEFAULT_POOL_ID!r} delivers "
-                "through one"
+                f"and pool {destination.pool_id!r} delivers through one"
             )
         if (
             self._backing_resource_id(db, reservation.capacity_reservation_id)
@@ -1314,7 +1335,7 @@ class CapacityLedgerService:
         resource = self._bucket_by_backing_resource(db, resource_id)
         if resource is None:
             return None
-        return resource.pool_id or DEFAULT_POOL_ID
+        return resource.pool_id or None
 
     def reservation_payload_in_session(
         self, reservation: CapacityReservation
@@ -1332,7 +1353,8 @@ class CapacityLedgerService:
     def iter_scheduling_candidates_in_session(
         self, db: Session, *, resource_kind: str, exclude_reservation_id: str
     ) -> list[ResourceFeasibilityView]:
-        """Every enabled, ``resource_kind``-matching bucket as a canonical view.
+        """Every enabled, ``resource_kind``-matching bucket recording a pool,
+        as a canonical view.
 
         Session-scoped generalization of ``_find_candidate`` for scheduling:
         ``_find_candidate`` returns the first bucket that satisfies a claim,
@@ -1373,6 +1395,9 @@ class CapacityLedgerService:
         )
         views: list[ResourceFeasibilityView] = []
         for resource in rows:
+            if not resource.pool_id:
+                _log_poolless_declaration(resource, "not a scheduling candidate")
+                continue
             if self._has_physical_host_conflict(
                 db,
                 resource,
@@ -2248,7 +2273,7 @@ class CapacityLedgerService:
         resource: CapacityBucket,
         requested_mode: str,
     ) -> bool:
-        pool = db.get(ResourcePool, resource.pool_id or DEFAULT_POOL_ID)
+        pool = db.get(ResourcePool, resource.pool_id)
         return (
             pool is not None
             and pool.enabled
@@ -2288,6 +2313,10 @@ class CapacityLedgerService:
         pool_mode_decisions: dict[str, bool] = {}
         pool_host_decisions: dict[str, bool] = {}
         for resource in rows:
+            pool_id = resource.pool_id
+            if not pool_id:
+                _log_poolless_declaration(resource, "not admitted against")
+                continue
             attrs = resource.attributes or {}
             if any(
                 not isinstance(attrs.get(key), str) or not attrs[key].strip()
@@ -2304,7 +2333,6 @@ class CapacityLedgerService:
                 required_attributes=required_attributes,
             ):
                 continue
-            pool_id = resource.pool_id or DEFAULT_POOL_ID
             if requested_mode is not None:
                 if pool_id not in pool_mode_decisions:
                     pool_mode_decisions[pool_id] = self._pool_declares_mode(

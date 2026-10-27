@@ -28,20 +28,12 @@ from vm_provisioning_adapter.services.relay_port_allocator import (
     RelayWindowExhaustedError,
 )
 
-_PLAYBOOK_PATH = "/configured/playbook.yaml"
-_INVENTORY_GROUP = "kvm_hosts"
-
-
 @pytest.fixture
 def session_factory(tmp_path):
     engine = create_db_engine(
         f"sqlite:///{tmp_path / 'relay-ports.db'}", is_sqlite=True
     )
-    run_migrations(
-        engine,
-        default_playbook_path=_PLAYBOOK_PATH,
-        default_inventory_group=_INVENTORY_GROUP,
-    )
+    run_migrations(engine)
     try:
         yield sessionmaker(bind=engine)
     finally:

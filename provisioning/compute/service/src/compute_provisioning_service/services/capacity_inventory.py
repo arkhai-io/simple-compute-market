@@ -25,7 +25,7 @@ from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 from compute_provisioning import InventoryPoolContext, InventoryViews
-from market_resource_pools import DEFAULT_POOL_ID, ResourcePool
+from market_resource_pools import ResourcePool
 from market_resource_pools_contracts.hints import (
     PoolDeclarationError,
     resolve_pool_declarations,
@@ -67,17 +67,29 @@ def load_capacity_resource_inventory(
 ) -> list[dict[str, Any]]:
     """Project every capacity declaration, with the views contributed for it.
 
-    One entry per declaration, in declaration order. Nothing is read from host
-    records, and no host identifier or address is added to an entry. Each pool
-    row is read and resolved once, and every declaration of the pool is given
-    that context; a declaration whose pool has no row, or a row whose
-    declarations do not resolve, projects with no views.
+    One entry per declaration that records its pool, in declaration order.
+    Nothing is read from host records, and no host identifier or address is
+    added to an entry. Each pool row is read and resolved once, and every
+    declaration of the pool is given that context; a declaration whose pool
+    has no row, or a row whose declarations do not resolve, projects with no
+    views.
+
+    Every declaration is written naming its pool, so a stored row with none is
+    malformed. It is left out and logged rather than projected into any pool:
+    reading it as one would sell capacity in a pool nobody placed it in.
     """
     with session_factory() as db:
         contexts = {pool.id: pool_context(pool) for pool in db.query(ResourcePool).all()}
-    return [
-        _project_declaration(resource, views, contexts) for resource in capacity_resources
-    ]
+    projected: list[dict[str, Any]] = []
+    for resource in capacity_resources:
+        if not resource.get("pool_id"):
+            logger.warning(
+                "capacity declaration %r records no pool and is not projected",
+                resource.get("resource_id"),
+            )
+            continue
+        projected.append(_project_declaration(resource, views, contexts))
+    return projected
 
 
 def _project_declaration(
@@ -99,9 +111,7 @@ def _project_declaration(
     }
     projected: dict[str, Any] = {
         "resource_id": str(resource["resource_id"]),
-        # A declaration stored before pools were recorded belongs to the
-        # default pool.
-        "pool_id": str(resource.get("pool_id") or DEFAULT_POOL_ID),
+        "pool_id": str(resource["pool_id"]),
         "resource_type": resource.get("resource_type") or "compute.gpu",
         "resource_subtype": resource.get("resource_subtype"),
         "capacity": dict(resource.get("capacity") or {}),

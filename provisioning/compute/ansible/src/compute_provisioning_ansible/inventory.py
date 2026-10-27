@@ -2,15 +2,16 @@
 
 Every host entry in an inventory given to the provisioning service is a host
 to register, under whatever section it is listed: the section names are the
-file's Ansible syntax and mean nothing to the host registry. What a host is
-sold as follows from its Resource Pool, not from its section. Parsing turns
+file's Ansible syntax and mean nothing to the host registry, and a host's pool
+is the one its entry states, never its section. Parsing turns
 each entry into an ``InventoryHost`` with an ``ssh`` connection the host
 authority applies; the authority, not this module, decides what applying means.
 
-The file given to the service lists only hosts to sell. Infrastructure an
-operator manages with Ansible (relay proxies, the provisioning servers
-themselves) belongs in a separate file of the same inventory directory, which
-the service is not given.
+The file given to the service lists only the execution hosts to register;
+registering a host declares none of its capacity. Infrastructure an operator
+manages with Ansible (relay proxies, the provisioning servers themselves)
+belongs in a separate file of the same inventory directory, which the service
+is not given.
 """
 
 from __future__ import annotations
@@ -20,8 +21,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
-from compute_provisioning.hosts.service import InventoryHost
-from market_resource_pools import DEFAULT_POOL_ID
+from compute_provisioning.hosts.service import POOL_UNSTATED, InventoryHost
 
 from .connection import ssh_connection
 
@@ -85,7 +85,9 @@ def _parse_entries(ini_text: str) -> list[dict]:
         ``gpu_model=``                    → ``gpu_model`` (str, default None)
         ``public_host=``                  → ``public_host`` (tenant-facing addr)
         ``ansible_ssh_private_key_file=`` → preserved verbatim
-        ``pool_id=``                      → Resource Pool id (default "default")
+        ``pool_id=<id>``                  → the Resource Pool to place the host in
+        ``pool_id=`` (empty)              → ``None``: unplace the host
+        no ``pool_id``                    → ``POOL_UNSTATED``: the pool is left as it is
         All other variables              → ignored
     """
     results = []
@@ -122,11 +124,11 @@ def _parse_entries(ini_text: str) -> list[dict]:
             )
             continue
 
-        # A malformed gpus= degrades to 0: a wrong capacity hint produces a
-        # wrong listing, which is visible. A malformed ansible_port= instead
-        # skips the entry, because substituting 22 would turn an operator's
-        # typo into a host that cannot be reached at all — a failure that
-        # looks like a network problem rather than a bad inventory line.
+        # A malformed gpus= degrades to 0: it describes the host and sells
+        # nothing, so a wrong value only misreports. A malformed ansible_port=
+        # instead skips the entry, because substituting 22 would turn an
+        # operator's typo into a host that cannot be reached at all — a failure
+        # that looks like a network problem rather than a bad inventory line.
         try:
             gpu_count = int(host_vars.get("gpus", 0))
         except ValueError:
@@ -155,7 +157,14 @@ def _parse_entries(ini_text: str) -> list[dict]:
             "ssh_port": ssh_port,
             "gpu_count": gpu_count,
             "gpu_model": host_vars.get("gpu_model"),
-            "pool_id": host_vars.get("pool_id") or DEFAULT_POOL_ID,
+            # A non-empty pool_id= names a pool, an empty one unplaces the
+            # host, and no pool_id says nothing: an existing host stays where
+            # it is, so an older inventory never unplaces it.
+            "pool_id": (
+                POOL_UNSTATED
+                if "pool_id" not in host_vars
+                else host_vars["pool_id"] or None
+            ),
             "ansible_ssh_private_key_file": host_vars.get(
                 "ansible_ssh_private_key_file", DEFAULT_KEY_PATH
             ),

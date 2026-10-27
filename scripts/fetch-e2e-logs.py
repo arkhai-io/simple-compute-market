@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Wait for a GitHub Actions E2E run, download its logs, and zip the directory.
+"""Wait for a GitHub Actions run, download its logs, and zip the directory.
+
+The run's whole log is downloaded for any workflow. The end-to-end lanes' compose
+logs are artifacts only `e2e.yml` uploads, so they are asked for only of its runs:
+another workflow's run has none, and asking would warn of each as missing.
 
 Without a run ID, the run is the newest one on the current branch whose head commit
 is the commit asked for, local HEAD by default. Matching the commit, not only the
@@ -9,6 +13,9 @@ A just-dispatched run is waited for, with a bound. When the commit already has a
 run — validation repeated on one commit — the earlier run matches before the new
 one is listed, so the caller passes the newest run ID it saw before dispatching
 (`--after-run`) and only later runs are considered; run IDs only increase.
+`--event` narrows the runs considered to those triggered so: a pull request's run
+reports the same head commit while testing a merge of the branch, so a caller
+that dispatched a run asks for `workflow_dispatch`.
 """
 
 from __future__ import annotations
@@ -95,7 +102,12 @@ def _full_commit(revision: str, runner: Runner) -> str:
 
 
 def _matching_run_id(
-    workflow: str, branch: str, commit: str, after_run: int | None, runner: Runner
+    workflow: str,
+    branch: str,
+    commit: str,
+    after_run: int | None,
+    runner: Runner,
+    event: str | None = None,
 ) -> str | None:
     payload = _json_output(
         [
@@ -107,7 +119,7 @@ def _matching_run_id(
             "--limit",
             str(RUN_LIST_LIMIT),
             "--json",
-            "databaseId,headBranch,headSha",
+            "databaseId,headBranch,headSha,event",
         ],
         runner,
     )
@@ -120,6 +132,7 @@ def _matching_run_id(
             isinstance(run, dict)
             and run.get("headBranch") == branch
             and run.get("headSha") == commit
+            and (event is None or run.get("event") == event)
         ):
             run_id = run.get("databaseId")
             if isinstance(run_id, int) or (
@@ -138,12 +151,13 @@ def _run_id_for_commit(
     wait_seconds: float,
     runner: Runner,
     after_run: int | None = None,
+    event: str | None = None,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
 ) -> str:
     deadline = clock() + wait_seconds
     while True:
-        run_id = _matching_run_id(workflow, branch, commit, after_run, runner)
+        run_id = _matching_run_id(workflow, branch, commit, after_run, runner, event)
         if run_id is not None:
             return run_id
         if clock() >= deadline:
@@ -242,6 +256,7 @@ def fetch_logs(
     commit: str | None = None,
     wait_seconds: float = DEFAULT_WAIT_SECONDS,
     after_run: int | None = None,
+    event: str | None = None,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
     runner: Runner = subprocess.run,
@@ -253,6 +268,7 @@ def fetch_logs(
         wait_seconds=wait_seconds,
         runner=runner,
         after_run=after_run,
+        event=event,
         sleep=sleep,
         clock=clock,
     )
@@ -261,31 +277,32 @@ def fetch_logs(
         output_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         raise FetchError(
-            f"could not create E2E log directory {output_dir}: {exc}"
+            f"could not create the log directory {output_dir}: {exc}"
         ) from exc
 
-    print(f"Waiting for E2E workflow run {selected_run} to complete...", flush=True)
+    print(f"Waiting for {workflow} workflow run {selected_run} to complete...", flush=True)
     _run(["gh", "run", "watch", selected_run], runner=runner)
     conclusion = _conclusion(selected_run, runner)
 
     actions_log = _fetch_actions_log(selected_run, output_dir, runner)
+    artifacts = LOG_ARTIFACTS if workflow == DEFAULT_WORKFLOW else ()
     compose_logs = [
         _fetch_compose_log(selected_run, output_dir, artifact, runner)
-        for artifact in LOG_ARTIFACTS
+        for artifact in artifacts
     ]
     if not actions_log and not any(compose_logs):
         raise FetchError(
-            f"no logs could be fetched for E2E workflow run {selected_run}"
+            f"no logs could be fetched for {workflow} workflow run {selected_run}"
         )
 
-    print(f"Fetched E2E run {selected_run} ({conclusion}) logs into {output_dir}.")
+    print(f"Fetched {workflow} run {selected_run} ({conclusion}) logs into {output_dir}.")
     try:
         archive = shutil.make_archive(
             str(output_dir), "zip", root_dir=output_dir.parent, base_dir=output_dir.name
         )
     except OSError as exc:
-        raise FetchError(f"could not create E2E log archive for {output_dir}: {exc}") from exc
-    print(f"Created E2E log archive {archive}.")
+        raise FetchError(f"could not create the log archive for {output_dir}: {exc}") from exc
+    print(f"Created log archive {archive}.")
     return output_dir
 
 
@@ -308,9 +325,17 @@ def main(argv: Sequence[str] | None = None, runner: Runner = subprocess.run) -> 
         type=int,
         help="consider only runs with a higher ID: the newest run before dispatching",
     )
+    parser.add_argument(
+        "--event",
+        help="consider only runs triggered so, such as workflow_dispatch: a pull "
+        "request's run of the same head commit tests a merge, not the commit",
+    )
     args = parser.parse_args(argv)
-    if args.run_id and (args.commit or args.after_run is not None):
-        parser.error("--run-id names the run; it cannot be combined with --commit or --after-run")
+    if args.run_id and (args.commit or args.after_run is not None or args.event):
+        parser.error(
+            "--run-id names the run; it cannot be combined with --commit, --after-run, "
+            "or --event"
+        )
 
     run_id = args.run_id.strip() if args.run_id else None
     try:
@@ -321,6 +346,7 @@ def main(argv: Sequence[str] | None = None, runner: Runner = subprocess.run) -> 
             commit=args.commit.strip() if args.commit else None,
             wait_seconds=args.wait_seconds,
             after_run=args.after_run,
+            event=args.event,
             runner=runner,
         )
     except FetchError as exc:

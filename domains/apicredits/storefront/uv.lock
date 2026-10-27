@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12, <3.14"
 resolution-markers = [
     "platform_machine == 'arm64' and sys_platform == 'darwin'",
@@ -187,6 +187,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "arkhai-apicredits-buyer" },
+    { name = "arkhai-core-buyer" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
 ]
@@ -200,7 +201,7 @@ requires-dist = [
     { name = "arkhai-core-storefront", specifier = ">=0.16.0" },
     { name = "arkhai-core-storefront-client", specifier = ">=0.27.0" },
     { name = "arkhai-kit-alkahest", specifier = ">=0.10.0" },
-    { name = "arkhai-kit-arkhai-payments", specifier = ">=0.2.0" },
+    { name = "arkhai-kit-arkhai-payments", specifier = ">=0.3.0" },
     { name = "arkhai-kit-capacity-publication", specifier = "==0.11.0" },
     { name = "arkhai-kit-config", specifier = ">=0.4.0" },
     { name = "arkhai-kit-identity", specifier = "==0.4.0" },
@@ -222,6 +223,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "arkhai-apicredits-buyer", specifier = ">=0.5.0" },
+    { name = "arkhai-core-buyer", specifier = ">=0.5.0" },
     { name = "pytest", specifier = ">=8.3.4,<9.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.8,<1.0.0" },
 ]

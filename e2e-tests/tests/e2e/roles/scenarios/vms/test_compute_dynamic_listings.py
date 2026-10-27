@@ -176,9 +176,8 @@ class TestComputeDynamicListings:
         require_state(dynamic_state, "storefront_held")
 
         # `reserve` matches CapacityBucket rows, which only a capacity declaration
-        # creates — the host-derived projection is a different store. The
-        # declaration's attributes mirror the listing so a claim built from it
-        # matches by equality.
+        # creates: a host record declares nothing. The declaration's attributes
+        # mirror the listing so a claim built from it matches by equality.
         host = provision_e2e_executor(
             provisioning_client,
             site_capacity_admin_client,

@@ -62,9 +62,12 @@ class AnsiblePoolConfig(BaseModel):
     execution read; a redacted read carries the reference alone. They are
     accepted here rather than fetched so that what a job runs against is
     snapshotted with it, as the playbook path and extra vars already are.
+
+    ``playbook_path`` is absent when the pool leaves the playbook to the
+    service; the fulfillment plan then freezes the service's configured one.
     """
 
-    playbook_path: str = Field(min_length=1)
+    playbook_path: str | None = Field(default=None, min_length=1)
     requirement_delegate: str = "vm_management_v1"
     extra_vars: dict[str, Any] = Field(default_factory=dict)
     default_vm_ram: int | None = Field(default=None, gt=0)

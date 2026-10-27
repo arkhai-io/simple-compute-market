@@ -11,7 +11,7 @@ dependencies = [
     "arkhai-core-storefront>=0.16.0",
     "arkhai-kit-capacity-publication==0.11.0",
     "arkhai-kit-alkahest>=0.10.0",
-    "arkhai-kit-arkhai-payments>=0.2.0",
+    "arkhai-kit-arkhai-payments>=0.3.0",
     "arkhai-kit-config>=0.4.0",
     "arkhai-kit-identity==0.4.0",
     "arkhai-kit-policy>=0.6.0",
@@ -44,10 +44,14 @@ apicredits = "apicredits_storefront.domain_runtime:APICREDITS_STOREFRONT_DOMAIN"
 dev = [
     "pytest>=8.3.4,<9.0.0",
     "pytest-asyncio>=0.23.8,<1.0.0",
-    # The production `market credits negotiate` command, which the negotiation
-    # integration tests drive against the served storefront. Test-only;
-    # production code never imports it.
+    # The production `market credits negotiate` and `market credits buy`
+    # commands, which the negotiation integration tests drive against the
+    # served storefront. Test-only; production code never imports it.
     "arkhai-apicredits-buyer>=0.5.0",
+    # Buyer orchestration and identity types the same tests drive and stand in
+    # for directly: run results and the run log, the publisher-trust refresh,
+    # the resolved buyer identity, and registry authorities. Test-only.
+    "arkhai-core-buyer>=0.5.0",
 ]
 
 [tool.uv]

@@ -29,6 +29,7 @@ from market_core import SettlementStageTable
 
 from market_core.schemas import SettlementOption, SettlementPlan, SettlementSelection
 from market_identity import Identity, Signer, TrustedIdentitySet
+from market_policy.scalar_policies import selected_settlement_artifact
 
 from core_buyer.orchestrator import (
     DEFAULT_HTTP_TIMEOUT,
@@ -160,7 +161,8 @@ def make_publisher_trust_resolver(
             )
         if (
             str(refreshed.get("listing_id")) != listing_id
-            or refreshed.get("publisher_id") != publisher_id
+            # Recovery retains registry subject IDs as text in the run context.
+            or str(refreshed.get("publisher_id")) != str(publisher_id)
             or refreshed.get("storefront_url") != storefront_url
         ):
             raise RuntimeError(
@@ -507,10 +509,29 @@ def _negotiate_matches(
             settlement_selection = None
         advertised_option: SettlementOption | None = None
         if settlement_selection is not None:
-            selected = match.get("_selected_settlement")
-            selected_option = getattr(selected, "option", None)
-            if selected_option is not None:
-                advertised_option = SettlementOption.model_validate(selected_option)
+            # The domain hook returns a selection, not necessarily a cached
+            # SelectedSettlementOption. Resolve its rate and acceptance contract
+            # from the advertised listing for every buyer entry point.
+            selected_option = selected_settlement_artifact(
+                match,
+                {"settlement_selection": settlement_selection.model_dump(mode="json")},
+            )
+            if selected_option is None:
+                # A selection naming nothing the listing advertises has no rate
+                # or acceptance contract to negotiate or revalidate against.
+                attempts.append(
+                    {
+                        "seller_url": seller_url,
+                        "listing_id": listing_id,
+                        "error": "unadvertised_settlement_selection",
+                    }
+                )
+                return NegotiationOutcome(
+                    status="exited",
+                    negotiation_id=None,
+                    reason="unadvertised_settlement_selection",
+                )
+            advertised_option = SettlementOption.model_validate(selected_option)
         if advertised_option is not None and revalidate_settlement is not None:
             try:
                 await revalidate_settlement(match, advertised_option)

@@ -54,6 +54,7 @@ def build_signed_receipt(
     mandate: Mandate | Mapping[str, Any],
     approved_at: int = 1_800_000_000,
     ledger: str = "fixture",
+    livemode: bool = False,
 ) -> SignedReceipt:
     """A receipt for exactly this mandate, as the payments service would sign it."""
 
@@ -70,6 +71,7 @@ def build_signed_receipt(
             "parts": receipt_parts(parsed),
             "approvedAt": approved_at,
             "issuer": signer.identity.model_dump(mode="json"),
+            "livemode": livemode,
         },
     )
 

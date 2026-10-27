@@ -30,7 +30,7 @@ from typing import Any, Sequence
 from change_workflow.common import KINDS, ORCHESTRATOR, STEPS, Clock, Entry, StepError, utc_now
 from change_workflow.outcome import outcome_problems
 from change_workflow.records import next_number
-from find_change import ChangeNotFound, change_directory
+from find_change import ChangeNotFound, change_directory, find_records
 
 LOG = "workflow.jsonl"
 
@@ -44,6 +44,21 @@ def log_path(root: Path, change: str) -> Path:
         return change_directory(root, change) / "reviews" / LOG
     except ChangeNotFound as exc:
         raise StepError(str(exc)) from exc
+
+
+def history_log_path(root: Path, change: str) -> Path:
+    """The log a report of the change's history reads: wherever its records are.
+
+    A cleaned-up change's records are in its archive directory, in this checkout or,
+    from another change's clone, in the owner's workspace; the workspace may also
+    hold the change's active directory from a branch, without them, which
+    `log_path` would prefer. Only reports read through this; a step's own lines are
+    written where `log_path` says, in the checkout working the change.
+    """
+    try:
+        return find_records(root, change) / LOG
+    except ChangeNotFound:
+        return log_path(root, change)
 
 
 def _parse(path: Path, text: str) -> list[Entry]:
@@ -165,11 +180,22 @@ def note_round(path: Path, sections: Any, by: str, after: int | None = None,
                                else after, **({"commit": commit} if commit else {})}, clock)
 
 
+def redesigned_after_return(entries: Sequence[Entry]) -> bool:
+    """Whether the latest design run finished after the latest confirmed return to
+    design: when the owner may waive another design review for what it settled."""
+    returns = [entry["seq"] for entry in entries if entry.get("outcome") == ORCHESTRATOR
+               and entry.get("by") == "owner" and entry.get("next") == "design"
+               and entry.get("resolves") is not None]
+    designs = [entry for entry in entries if entry.get("step") == "design"]
+    return bool(returns and designs and designs[-1].get("outcome") == "finished"
+                and designs[-1]["seq"] > returns[-1])
+
+
 def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHESTRATOR,
                       resolves: int | None = None, reads: int | None = None,
                       next_step: str | None = None, kind: str | None = None,
                       branch: str | None = None, change: str | None = None,
-                      clock: Clock = utc_now) -> Entry:
+                      status: str | None = None, clock: Clock = utc_now) -> Entry:
     """Record a decision: the orchestrating session's own routing or recovery, or
     the owner's, relayed by it.
 
@@ -187,12 +213,17 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
     computation names until that step has run. A directed review takes its
     `kind`, without which the computation could not name one; a directed step
     of any other kind is a confirmed return, so it resolves the returned run,
-    which would otherwise wait ahead of the directive. A repeat review the owner
+    which would otherwise wait ahead of the directive, and only the owner gives
+    it: the spec reserves confirming a return to them. A repeat review the owner
     asks for outside a triage names no run, since no run waits on it; nor does the
     owner's direction to archive cleanup, by which they waive the validation the
     computation would name first. Only the owner gives it; archive cleanup's own
     entry checks still hold, and its validation check asks the owner and records
-    the waiver in the ledger.
+    the waiver in the ledger. Nor does the owner's waiver of another design review
+    for a decision made after a return, directing planning: it is accepted only
+    while the change's `status` is `in design` and its latest design run finished
+    after the confirmed return, so it cannot stand in for a confirmed return of
+    its own.
     `branch` and `change` record the owner's word that `change` is worked on
     `branch` though the branch is not its own, which each step's branch check
     accepts in place of asking (`branch_decisions`); only the owner gives it.
@@ -209,7 +240,8 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
         if by != "owner":
             raise StepError("a branch decision is the owner's")
         line.update(branch=branch, change=change)
-    runs = {entry["seq"]: entry for entry in read_log(path) if entry.get("step") in STEPS}
+    entries = read_log(path)
+    runs = {entry["seq"]: entry for entry in entries if entry.get("step") in STEPS}
     if resolves is not None:
         if resolves not in runs:
             raise StepError(f"no run has seq {resolves!r} in the workflow log; a decision "
@@ -232,9 +264,18 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
             if by != "owner":
                 raise StepError("a decision directing archive cleanup past its validation "
                                 "is the owner's waiver")
+        elif next_step == "plan" and resolves is None:
+            if by != "owner" or status != "in design" or not redesigned_after_return(entries):
+                raise StepError("a decision directing plan names the run it resolves, as a "
+                                "confirmed return does, unless it is the owner's waiver of "
+                                "another design review: the change in design, its latest "
+                                "design run finished after the confirmed return")
         elif next_step != "review" and resolves is None:
             raise StepError(f"a decision directing {next_step} is a confirmed return and "
                             "names the run it resolves")
+        if next_step != "review" and by != "owner":
+            raise StepError(f"a decision directing {next_step} confirms a return, which is "
+                            "the owner's")
         line["next"] = next_step
     if kind is not None:
         if next_step != "review":

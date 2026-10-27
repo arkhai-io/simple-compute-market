@@ -60,7 +60,6 @@ from vm_provisioning_adapter.services.relay_execution import (
 )
 
 _PLAYBOOK_PATH = "/configured/playbook.yaml"
-_INVENTORY_GROUP = "kvm_hosts"
 # A development-only Fernet key. Generated for this fixture, never used on any
 # network, and safe to read here precisely because it protects nothing.
 _KEY = Fernet.generate_key().decode()
@@ -73,11 +72,7 @@ def session_factory():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    run_migrations(
-        engine,
-        default_playbook_path=_PLAYBOOK_PATH,
-        default_inventory_group=_INVENTORY_GROUP,
-    )
+    run_migrations(engine)
     return sessionmaker(bind=engine)
 
 

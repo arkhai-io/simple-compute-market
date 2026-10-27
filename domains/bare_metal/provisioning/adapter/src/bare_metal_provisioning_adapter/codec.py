@@ -3,7 +3,8 @@
 ``BareMetalAnsibleCodec`` is the bare-metal domain's contribution to the compute
 family's Ansible executor. A grant installs the buyer's key for a tenant account
 on the whole host the lease sells; a reclaim removes access by the configured
-reclaim policy. Each job stores a ``BareMetalJobParams``.
+reclaim policy. Each job stores a ``BareMetalJobParams``, which names the access
+playbook frozen when the job was prepared, or none, leaving the executor's.
 
 A grant's result is the compute family's ``CreateJobResult``: the delivery
 evidence (the host and port the buyer connects to, the tenant account, and when
@@ -18,6 +19,7 @@ key that was installed.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, Literal
 
 from arkhai_bare_metal import (
@@ -89,6 +91,10 @@ class BareMetalJobParams(BaseModel):
     ssh_public_key: str | None = None
     # Set on a reclaim only; a grant has nothing to reclaim.
     reclaim_policy: str | None = None
+    # The access playbook, frozen when the job is prepared so a later
+    # configuration change never rewrites an accepted operation. A job stored
+    # without one runs the executor's configured playbook.
+    playbook_path: str | None = None
 
 
 #: The grant fact's fields kept as operator detail: what the role did, on which
@@ -140,7 +146,11 @@ class BareMetalAnsibleCodec:
                 f"bare-metal job parameters name action {params.action!r}, "
                 f"but the job runs {run.action!r}"
             )
-        return AnsibleJobPlan(variables=self.variables(params), limit=run.host.host_id)
+        return AnsibleJobPlan(
+            variables=self.variables(params),
+            limit=run.host.host_id,
+            playbook_path=Path(params.playbook_path) if params.playbook_path else None,
+        )
 
     def interpret(
         self, run: JobRun, host: InventoryTarget, output: AnsibleResult

@@ -257,6 +257,10 @@ class FakeSite:
                     "resources": [
                         {
                             "resource_id": rid,
+                            # Every declaration names its pool, and a row with
+                            # none matches no claim; this fake places each
+                            # resource in a pool of its own, as its matcher does.
+                            "pool_id": rid,
                             "resource_type": "compute.gpu",
                             "unit": "count",
                             "value": row["total_units"],

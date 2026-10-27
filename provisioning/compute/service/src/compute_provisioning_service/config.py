@@ -64,6 +64,16 @@ def _load_bootstrap(environ: Mapping[str, str]) -> DynaconfBootstrapResult:
     )
 
 
+# Each setting the service no longer reads, with the setting that replaced it.
+# A retired key is refused rather than ignored: a profile still stating the old
+# VM playbook name would otherwise run the default playbook without a word.
+RETIRED_SETTINGS: Mapping[str, str] = {"playbook_path": "vm_playbook_path"}
+
+
+class RetiredSettingsError(RuntimeError):
+    """The configuration states a setting the service no longer reads."""
+
+
 _bootstrap = _load_bootstrap(os.environ)
 _CONFIG_DIR = _bootstrap.config_directory
 _active_profiles = list(_bootstrap.active_profiles)
@@ -93,9 +103,24 @@ class Settings:
     def is_sqlite(self) -> bool:
         return str(self._source.database_url).startswith("sqlite")
 
+    def stated_retired_settings(self) -> tuple[str, ...]:
+        """Every retired setting any configuration layer states."""
+        return tuple(name for name in RETIRED_SETTINGS if self._source.exists(name))
+
+    def refuse_retired_settings(self) -> None:
+        """Raise naming each stated retired setting and its replacement."""
+        stated = self.stated_retired_settings()
+        if stated:
+            raise RetiredSettingsError(
+                "the provisioning configuration states retired settings: "
+                + "; ".join(
+                    f"{name} (state {RETIRED_SETTINGS[name]} instead)" for name in stated
+                )
+            )
+
     @property
-    def resolved_playbook_path(self) -> Path:
-        return Path(str(self._source.playbook_path)).resolve()
+    def resolved_vm_playbook_path(self) -> Path:
+        return Path(str(self._source.vm_playbook_path)).resolve()
 
     @property
     def resolved_bare_metal_playbook_path(self) -> Path:
@@ -109,6 +134,20 @@ class Settings:
     def resolved_pool_definitions_path(self) -> Path | None:
         raw = str(getattr(self._source, "pool_definitions_path", "") or "").strip()
         return Path(raw).resolve() if raw else None
+
+    @property
+    def resolved_pool_seed_path(self) -> Path | None:
+        """The fresh-site pool seed document, or ``None`` when seeding is off.
+
+        A relative path resolves against the directory of ``settings.toml``,
+        where the packaged seed document lives, so the default names it in an
+        installed wheel whatever the working directory.
+        """
+        raw = str(getattr(self._source, "pool_seed_path", "") or "").strip()
+        if not raw:
+            return None
+        path = Path(raw)
+        return (path if path.is_absolute() else _SRC_DIR / path).resolve()
 
     @property
     def resolved_capacity_definitions_path(self) -> Path | None:

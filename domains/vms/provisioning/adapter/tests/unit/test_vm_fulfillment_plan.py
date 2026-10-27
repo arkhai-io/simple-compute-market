@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -21,6 +22,7 @@ from vm_provisioning_adapter.guest_names import (
     fulfillment_guest_name,
     guest_login,
 )
+from vm_provisioning_adapter.runtime import VmProvisioningRuntime
 from vm_provisioning_adapter.services.vm_fulfillment_plan import VmFulfillmentPlan
 
 
@@ -78,9 +80,14 @@ class _Allocator:
         return self._lease
 
 
-def _plan(allocator=None) -> VmFulfillmentPlan:
+SERVICE_PLAYBOOK = "/opt/service/vm-operations.yaml"
+
+
+def _plan(allocator=None, *, vm_playbook_path=SERVICE_PLAYBOOK) -> VmFulfillmentPlan:
     return VmFulfillmentPlan(
-        reserved_var_keys=VmAnsibleCodec().reserved_var_keys, port_allocator=allocator
+        reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
+        vm_playbook_path=vm_playbook_path,
+        port_allocator=allocator,
     )
 
 
@@ -123,11 +130,70 @@ class TestCreate:
         assert prepared.parameters["escrow_uid"] == "alloc-1"
         json.dumps(prepared.parameters)  # stored as the job's parameters
 
-    def test_another_offering_mode_and_a_missing_playbook_are_refused(self):
+    def test_another_offering_mode_and_a_blank_playbook_are_refused(self):
         with pytest.raises(ProviderConfigInvalidError, match="offering mode"):
             _create(_plan(), resource=_resource(offering_mode="bare_metal"))
         with pytest.raises(ProviderConfigInvalidError, match="pool configuration"):
-            _create(_plan(), pool_config={"extra_vars": {}})
+            _create(_plan(), pool_config=_pool_config(playbook_path=""))
+
+
+class TestPlaybookFrozenAtPreparation:
+    """A job runs the pool's playbook when the pool states one, and otherwise the
+    service's as configured when the job is prepared."""
+
+    @pytest.mark.parametrize("prepare", [_create, _teardown], ids=["create", "teardown"])
+    def test_a_pool_stating_no_playbook_freezes_the_services(self, prepare):
+        prepared = prepare(_plan(), pool_config=_pool_config(playbook_path=None))
+
+        assert prepared.parameters["playbook_path"] == SERVICE_PLAYBOOK
+
+    @pytest.mark.parametrize("prepare", [_create, _teardown], ids=["create", "teardown"])
+    def test_a_pools_own_playbook_wins_over_the_services(self, prepare):
+        prepared = prepare(_plan(), pool_config=_pool_config())
+
+        assert prepared.parameters["playbook_path"] == "playbooks/vm-operations.yaml"
+
+    def test_each_job_takes_the_playbook_configured_when_it_is_prepared(self):
+        """The path is written into the job's stored parameters, which the VM
+        codec runs in preference to the executor's playbook; so a job prepared
+        after the service is reconfigured takes the new path, and one prepared
+        before keeps the old."""
+        pool = _pool_config(playbook_path=None)
+        created = _create(_plan(), pool_config=pool)
+
+        reconfigured = _plan(vm_playbook_path="/opt/service/vm-operations-v2.yaml")
+        teardown = _teardown(reconfigured, pool_config=pool)
+
+        assert created.parameters["playbook_path"] == SERVICE_PLAYBOOK
+        assert teardown.parameters["playbook_path"] == "/opt/service/vm-operations-v2.yaml"
+
+    def test_the_runtime_gives_its_plan_the_services_configured_playbook(self):
+        runtime = VmProvisioningRuntime(
+            config=SimpleNamespace(resolved_vm_playbook_path=Path("/opt/service/vm.yaml")),
+            session_factory=None,
+            job_queue_provider=lambda: None,
+            ansible_service=None,
+            codec=VmAnsibleCodec(),
+            host_authority=None,
+            pool_config_handler=None,
+            job_engine=None,
+            job_submission=None,
+            vm_operations_service=None,
+            host_operations_service=None,
+            relay_port_allocator=None,
+            relay_service=None,
+        )
+
+        prepared = _create(
+            runtime.fulfillment_plan(), pool_config=_pool_config(playbook_path=None)
+        )
+
+        assert prepared.parameters["playbook_path"] == "/opt/service/vm.yaml"
+
+    @pytest.mark.parametrize("prepare", [_create, _teardown], ids=["create", "teardown"])
+    def test_no_playbook_from_the_pool_or_the_service_is_refused(self, prepare):
+        with pytest.raises(ProviderConfigInvalidError, match="vm_playbook_path"):
+            prepare(_plan(vm_playbook_path=None), pool_config=_pool_config(playbook_path=None))
 
 
 class TestSizingPrecedence:

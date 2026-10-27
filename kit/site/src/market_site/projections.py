@@ -5,10 +5,30 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import logging
 import threading
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Callable, Iterable, Mapping
+
+logger = logging.getLogger(__name__)
+
+
+def _recorded_pool_id(resource: Mapping[str, Any]) -> str | None:
+    """The pool a resource's declaration records, or ``None``, logged.
+
+    Every declaration is written naming its pool, so a row with none is
+    malformed. It is projected into no pool, neither a default nor one named
+    for the resource, since a storefront would publish it as sellable there.
+    """
+    pool_id = resource.get("pool_id")
+    if pool_id:
+        return str(pool_id)
+    logger.warning(
+        "capacity declaration %r records no pool and is not projected",
+        resource.get("resource_id"),
+    )
+    return None
 
 
 def _canonical(value: Any) -> Any:
@@ -102,7 +122,9 @@ def resource_pool_projection(
     pools: dict[str, list[dict[str, Any]]] = {}
     for raw in resources:
         resource = dict(raw)
-        pool_id = str(resource.get("pool_id") or resource["resource_id"])
+        pool_id = _recorded_pool_id(resource)
+        if pool_id is None:
+            continue
         attrs = dict(resource.get("attributes") or {})
         projected = {
             "physical_resource_id": str(resource["resource_id"]),
@@ -151,8 +173,11 @@ def capacity_bucket_projection(resources: Iterable[Mapping[str, Any]]) -> list[d
     for resource in resources:
         if not resource.get("enabled", True):
             continue
+        pool_id = _recorded_pool_id(resource)
+        if pool_id is None:
+            continue
         criteria = {
-            "pool_id": str(resource.get("pool_id") or resource["resource_id"]),
+            "pool_id": pool_id,
             "resource_type": resource.get("resource_type"),
             "resource_subtype": resource.get("resource_subtype"),
             "available": dict(resource.get("available") or {}),

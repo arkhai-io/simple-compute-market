@@ -6,16 +6,19 @@ the job's ``executor_target`` and the KVM host its ``host_id``. A teardown
 removes that guest from that host, as the fulfillment recorded them.
 
 What is VM's here: sizing from the reservation's committed dimensions through
-the pool's requirement delegate, the pool's playbook and extra variables, and
-the relay. A pool that references a relay leases the VM's remote port on it
-when a create is accepted; the lease is the record of where the port is bound,
-so a teardown takes the relay from the lease, not from the pool, which may have
-been rebound since.
+the pool's requirement delegate, the playbook and the pool's extra variables,
+and the relay. The playbook is the pool's when it states one and otherwise the
+service's configured VM playbook, written into the job when it is prepared so a
+later configuration change never rewrites an accepted operation. A pool that
+references a relay leases the VM's remote port on it when a create is accepted;
+the lease is the record of where the port is bound, so a teardown takes the
+relay from the lease, not from the pool, which may have been rebound since.
 """
 
 from __future__ import annotations
 
 import dataclasses
+import os
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -52,8 +55,14 @@ class VmFulfillmentPlan:
         self,
         *,
         reserved_var_keys: Callable[[VmJobParams], frozenset[str]],
+        vm_playbook_path: str | os.PathLike[str] | None,
         port_allocator: Any | None = None,
     ) -> None:
+        # Required, though it may be None, so no composition can forget the
+        # service's playbook; with none, a pool stating no playbook is refused.
+        self._vm_playbook_path = (
+            None if vm_playbook_path is None else os.fspath(vm_playbook_path)
+        )
         # The variable names a job sets itself (the VM codec's answer), so a
         # pool's extra variables that would replace one are refused when the
         # fulfillment is prepared, before anything is written.
@@ -167,6 +176,16 @@ class VmFulfillmentPlan:
                 f"invalid Ansible pool configuration: {exc}"
             ) from exc
 
+    def _playbook_path(self, config: AnsiblePoolConfig) -> str:
+        """The playbook a job prepared now runs: the pool's, else the service's."""
+        playbook_path = config.playbook_path or self._vm_playbook_path
+        if not playbook_path:
+            raise ProviderConfigInvalidError(
+                "the pool states no playbook_path and the service configures no "
+                "vm_playbook_path"
+            )
+        return playbook_path
+
     @staticmethod
     def _host_id(resource: SettlementResource) -> str:
         value = resource.host_id
@@ -266,7 +285,7 @@ class VmFulfillmentPlan:
             relay_id=config.relay_id if uses_relay else None,
             vm_remote_port=remote_port,
             escrow_uid=capacity_reservation_id,
-            playbook_path=config.playbook_path,
+            playbook_path=self._playbook_path(config),
         )
         self._validate_extra_vars(params, config.extra_vars)
         return _prepared(dataclasses.replace(params, provider_extra_vars=config.extra_vars))
@@ -284,7 +303,8 @@ class VmFulfillmentPlan:
         """The job removing the guest the create recorded, from its host.
 
         Reads nothing from the create's parameters: the target is the
-        fulfillment's, the playbook the pool's, and the relay the lease's.
+        fulfillment's, the playbook the pool's or else the service's as
+        configured now, and the relay the lease's.
         """
         del create_parameters
         config = self._pool_config(pool_config)
@@ -294,7 +314,7 @@ class VmFulfillmentPlan:
             offering_mode=resource.offering_mode,
             vm_target=executor_target,
             escrow_uid=capacity_reservation_id,
-            playbook_path=config.playbook_path,
+            playbook_path=self._playbook_path(config),
             relay_id=self._leased_relay_id(capacity_reservation_id),
         )
         self._validate_extra_vars(params, config.extra_vars)

@@ -30,7 +30,7 @@ from typing import Any, Sequence
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from change_workflow.common import ORCHESTRATOR, ROOT, STEPS, StepError  # noqa: E402
-from change_workflow.log import log_path, read_log  # noqa: E402
+from change_workflow.log import history_log_path, read_log  # noqa: E402
 
 BEFORE_ROUNDS = "design and planning"
 CLOSEOUT = "closeout"
@@ -163,7 +163,7 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
     parser.add_argument("change")
     args = parser.parse_args(argv)
     try:
-        log = read_log(log_path(root, args.change))
+        log = read_log(history_log_path(root, args.change))
     except StepError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1

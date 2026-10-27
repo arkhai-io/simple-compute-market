@@ -489,11 +489,15 @@ Within a service, controllers stay thin: HTTP routing, request/response schemas,
 
 A capability that serves HTTP routes is split into five pieces. The package that owns the capability owns the wire models, the route contract, and the route service:
 
-1. **Wire models**: the request and response schemas.
+1. **Typed client**: a method for every route, sync and async where both are offered, built on the route contract. It may live beside the capability or in a thin client package of its own that depends only on the models and the contract, so a caller does not install the capability's service code to call it.
 2. **Route contract**: each route's method, path, signed operation name, the resource a request binds, and the caller roles it admits. Request authentication and the typed client both bind requests from it, so the two cannot disagree.
-3. **Typed client**: a method for every route, sync and async where both are offered, built on the route contract. It may live beside the capability or in a thin client package of its own that depends only on the models and the contract, so a caller does not install the capability's service code to call it.
-4. **Route service**: a framework-free class over the capability's collaborators that validates and performs each route and shapes its response. It reports a refusal as an error carrying a status code and detail, and it imports no web framework.
-5. **HTTP binding**: the thin controller that maps each route to its route service, turns the route-service error into a response, and sits behind the process's authentication. It belongs to whatever composes the process: a storefront for storefront capabilities, the provisioning service for the compute family kit's routes, and a domain package for the routes that domain contributes.
+3. **Wire models**: the request and response schemas, with the validation that refuses a malformed request before dispatch.
+4. **HTTP binding**: the thin controller that maps each route to its route service, turns the route-service error into a response, and sits behind the process's authentication. It belongs to whatever composes the process: a storefront for storefront capabilities, the provisioning service for the compute family kit's routes, and a domain package for the routes that domain contributes.
+5. **Route service**: a framework-free class over the capability's collaborators that validates and performs each route and shapes its response. It reports a refusal as an error carrying a status code and detail, and it imports no web framework.
+
+The diagram below follows one request through the five pieces, each filled by the package that owns it. The route contract and the wire models stand between the caller and the serving process because the typed client on one side and the binding and route service on the other are built from them, so a client and the service it calls cannot disagree about a route. Solid arrows follow one request; a dashed arrow points from a piece to the contract piece it is built from. The diagram's source is [`diagrams/route-contract-pattern.drawio`](diagrams/route-contract-pattern.drawio); the SVG beside it is the export and also opens in draw.io.
+
+![The five pieces of a capability's HTTP surface and the package that owns each](diagrams/route-contract-pattern.svg)
 
 A request is checked in the order of what it takes to judge it. What the request establishes by itself is validated by its wire models, in the contracts package, so a typed caller and the server refuse it before dispatch or database work, as HTTP 422. Checks that need the composed service — registered providers, provider-owned configuration — or stored state — immutable fields — belong to the route service and refuse through its own error. A comparison of stored and proposed state is one pure function shared by every write path that needs it, individual and document alike, rather than repeated per adapter. The order is a default, not a ranking of messages: a path is not reordered, nor a lookup added, only to report a different error first. The resource-pool capability is the worked instance; see its [administrative reconciliation](../../openspec/specs/resource-pool-management/architecture.md#administrative-reconciliation).
 
@@ -509,7 +513,7 @@ A domain that contributes routes to a service it does not compose declares their
 | Marketplace principal normalization, proof dispatch, and canonical envelopes | Identity kit | Scheme-neutral foundation capability; roles inject signers and authorities own subject/role bindings |
 | Listing, negotiation, deal, and seller policy state | Storefront | Market-facing state, not physical inventory |
 | Capacity admission and reservation | Site authority | Serialization point for competing reservations |
-| Sellable capacity: each Physical Resource's declared shape, quantity, pool, and match attributes | Site authority | Declared by registration, a capacity-definitions document, or derivation from legacy host inventory; host records are connection identity only |
+| Sellable capacity: each Physical Resource's declared shape, quantity, pool, and match attributes | Site authority | Declared only by registration, a capacity-definitions document, or capacity import; no host write declares capacity, and host records are connection identity only |
 | VM listing shapes a storefront publishes | Storefront, within what the site declares | A storefront pool override, else the pool's `listing_shapes` hint, else the VM domain's default generator; constraints a stated shape carries, merged with the storefront's configured `[admissibility.defaults.vm]`, decide which shapes it would sell, and a site's constraints are advisory input to that policy; feasibility is judged against the site's declarations, and admission remains the site's |
 | A bare-metal listing's shape | Site authority, through the Physical Resource's declaration | Derived from the declared capacity and attributes; the storefront chooses nothing |
 | Resource-pool metadata and provider configuration | Resource-pool service | Provisioning routing metadata; the provider is fixed at creation, and disabled pools remain resolvable |
@@ -635,10 +639,22 @@ A pool's provider, like its backing, is fixed at creation: every administration
 path, API and definition document alike, refuses to change it, because existing
 members and records were resolved through it. Inventory reaches another provider
 through a second pool and explicit member reassignment, under the site's and
-the host authority's own move guards. A fresh site with a mounted pool document
-creates `default` from that document with its declared provider, before any
-host is admitted. VM and bare metal register as `vm.ansible` and
-`bare_metal.ansible`.
+the host authority's own move guards. VM and bare metal register as `vm.ansible`
+and `bare_metal.ansible`. No pool is special and none is created implicitly:
+migration creates no pool, and a fresh site, storing no pool and configuring no
+pool document, is seeded at startup from a pool document packaged with the
+provisioning service, which declares `vm-default` and `bare-metal-default`. An
+operator replaces the seed or disables it; a site that already holds pools is
+never seeded. See the
+[resource-pool management architecture](../../openspec/specs/resource-pool-management/architecture.md#administrative-reconciliation).
+
+No host write places a host in a pool or declares its capacity, whatever its entry
+point. A host names its pool, or is unplaced; a host's pool is placement intent,
+read by the pool-change hooks and host reads, and nothing that admits, schedules,
+dispatches, or sells reads it. A host sells only through capacity an operator has
+explicitly declared, and a declaration names its own pool. So a host an
+administrator lists or registers is never sold before they decide how to sell it,
+and every entry point that writes a host has the same effect.
 
 A pool also declares which offering modes its listings may advertise and whether
 it is capacity-backed. Advertisement is separate from delivery so a seller with no
@@ -729,7 +745,7 @@ variables, and the bare-metal listing. The VM listing model still accepts a
 serves a slice is provisioning's, and a VM storefront database written before
 that boundary keeps `vm_host` only in its frozen inventory tables. The address the provisioner connects to is the host's
 `ssh_host`. `physical_host_id` is a different concept and keeps its own name: the
-stable identity of a physical machine across hosts. A host belongs to exactly one
+stable identity of a physical machine across hosts. A host belongs to at most one
 Resource Pool, so one machine offered both as VM slices and as a whole host is
 registered as two hosts, and `physical_host_id` is what lets cross-mode accounting
 see one machine.

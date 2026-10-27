@@ -259,6 +259,7 @@ Capacity projection events MUST remain anonymous and versioned, while deal-scope
 - Storefront-to-site HTTP contract: `kit/site-client/tests/unit/test_client.py`, `kit/site-client/tests/unit/test_opacity.py`.
 - “Do not close on ignorance” reconciliation: `domains/vms/storefront/tests/unit/test_cli_publish_helpers.py`.
 - Shared feasibility predicate: `kit/site/tests/unit/test_resource_satisfies_requirement.py`.
+- A stored declaration with no pool excluded from admission, both projections, scheduling, settlement assignment, and pool moves, logged, and still listed for its operator: `kit/site/tests/integration/test_ledger.py`; from projection and the injected exact matcher: `kit/site/tests/unit/test_projections.py` and `kit/site/tests/unit/test_dict_resource_satisfies_claim.py`; from the provisioning resource-pool projection: `provisioning/compute/service/tests/unit/services/test_capacity_inventory.py`.
 - Session-scoped settlement assignment, locked reservation reads, and in-session backing-resource lookup: `kit/site/tests/unit/test_settlement_assignment.py`.
 - Reservation supersede (`resize_reservation`) and unconditional settlement-abandonment hook invocation across TTL lapse, release, and resize: `kit/site/tests/integration/test_ledger.py`.
 - One release-handle name: the ledger payload and model in `kit/site/tests/integration/test_ledger.py`; the published and updatable VM lease handle in `provisioning/compute/service/tests/integration/test_leases_api.py`, the published bare-metal lease handle in `provisioning/compute/service/tests/integration/test_bare_metal_leases_api.py`, and the lease models in `provisioning/compute/service/tests/unit/test_lease_models.py`; the upgrade, including the mirror-only backfill and the refusal on disagreement, in `provisioning/compute/service/tests/integration/test_reservation_release_mirror_migration.py`; and the deployed VM release path through teardown in `e2e-tests/tests/e2e/roles/scenarios/vms/test_full_deal.py`.
@@ -457,7 +458,7 @@ pool MUST be rejected at request validation rather than recorded against a defau
 because registration replaces the whole declaration and a silently defaulted pool is
 a reassignment nobody requested. A declaration naming a pool the site does not have
 MUST be refused, whether it arrives as a registration or a document entry. A stored
-declaration with no recorded pool is read as belonging to the default pool.
+declaration with no recorded pool MUST NOT be read as belonging to any pool.
 
 #### Scenario: Shape authority is not admission authority
 
@@ -494,6 +495,11 @@ declaration with no recorded pool is read as belonging to the default pool.
 - **WHEN** a capacity declaration carries only some dimensions
 - **THEN** the authority accepts it and treats the omitted dimensions as undeclared
   rather than rejecting the declaration or substituting a value from another record
+
+#### Scenario: A stored declaration has no pool
+
+- **WHEN** a stored declaration carries no pool identifier
+- **THEN** it is not projected, admitted against, or moved as a member of any pool, including one named `default`
 
 ### Requirement: Projected inventory is internally consistent
 

@@ -31,11 +31,7 @@ def _current_engine():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    run_migrations(
-        engine,
-        default_playbook_path="/configured/playbook.yaml",
-        default_inventory_group="legacy_hosts",
-    )
+    run_migrations(engine)
     return engine
 
 
@@ -196,11 +192,7 @@ class TestDropReservationReleaseMirror:
         _insert(engine, "r1", "fulfillment-1")
         _forget_migration(engine)
 
-        run_migrations(
-            engine,
-            default_playbook_path="/configured/playbook.yaml",
-            default_inventory_group="legacy_hosts",
-        )
+        run_migrations(engine)
 
         assert _RETIRED not in _columns(engine)
         assert _handles(engine) == {"r1": "fulfillment-1"}
@@ -212,11 +204,7 @@ class TestDropReservationReleaseMirror:
         engine = _current_engine()
         _add_retired_column(engine)
 
-        run_migrations(
-            engine,
-            default_playbook_path="/configured/playbook.yaml",
-            default_inventory_group="legacy_hosts",
-        )
+        run_migrations(engine)
 
         assert _RETIRED in _columns(engine)
         with Session(engine) as session:

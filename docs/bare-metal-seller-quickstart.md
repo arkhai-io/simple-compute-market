@@ -51,23 +51,18 @@ Create an operator-owned inventory file outside the repository:
 host-ca-h200-01 ansible_host=10.0.0.25 public_host=203.0.113.25 ansible_user=ubuntu pool_id=whole-host-california
 ```
 
-The provisioning service registers every host entry in this file; the section
-name is yours to choose and means nothing to it. List only hosts to sell.
+The provisioning service registers every host entry in this file as a host; the
+section name is yours to choose and means nothing to it. List only execution
+hosts. A host's `pool_id` places it in that pool, which must exist; an empty
+`pool_id=` unplaces it, and a host with none is registered unplaced. Registering
+a host declares none of its capacity: a machine is sold only once you register it
+as a Physical Resource, as "Start and inspect" below describes.
 
 Create a Resource Pool document outside the repository. The pool id must match
 the inventory host's `pool_id`; executor connectivity remains service-owned:
 
 ```yaml
 pools:
-  - id: default
-    label: Inert default
-    provider: bare_metal.ansible
-    enabled: true
-    policy_tags:
-      deliverable_modes: []
-      advertisable_modes: []
-      capacity_backing: backed
-    provider_config: {}
   - id: whole-host-california
     label: Whole Host California
     provider: bare_metal.ansible
@@ -80,9 +75,15 @@ pools:
     provider_config: {}
 ```
 
-The document is authoritative, and the service refuses one that does not name
-the `default` pool. Declaring it with no deliverable or advertisable mode keeps
-it inert: nothing is delivered from it or listed from it.
+The document is authoritative: pools it stops naming are disabled. It need not
+name any particular pool, `default` included. A mounted pool document also
+replaces the provisioning service's seed. Without one, a fresh site storing no
+pool is seeded at startup with `vm-default` and `bare-metal-default`, which sell
+nothing until capacity is declared into them; set `pool_seed_path` to another
+pool document to seed different pools while administering them through the API,
+or to an empty value to start with none. Under Helm, supply that document through
+the provisioning chart's `configFiles` and name its path,
+`/app/config/<name>`, in `config.pool_seed_path`.
 
 Every pool must declare `advertisable_modes` — the offering modes its listings
 may name — and `capacity_backing`. A `backed` pool may advertise only modes it
@@ -92,7 +93,9 @@ an entry omits either declaration; nothing is defaulted.
 The bare-metal provider rejects pool-local playbook paths, inventory groups,
 credentials, and executor targets. The service-owned
 `bare_metal_playbook_path`, the selected Physical Resource, and the registered
-host record it names determine execution.
+host record it names determine execution. The playbook is fixed into each grant
+and reclaim when it is prepared, so changing the setting affects only jobs
+prepared afterwards.
 
 The mounted inventory seeds the host registry when the provisioning service
 starts with no hosts registered; it is not read at execution. A host added to it
