@@ -390,7 +390,7 @@ add-inference-domain-contract ────┴──► compose-inference-domain-
 ```
 
 The family kit precedes the stack, and it is not this campaign's: Goal 4's
-[`compose-api-family-kit`](compose-api-family-kit/) refactors API credits onto
+[`compose-api-family-kit`](archive/2026-10-26-compose-api-family-kit/) refactors API credits onto
 an `api` family vocabulary and kit, standing on `dev` alone, with its digests
 pinned byte-for-byte. Inference then composes that kit, contributing only its
 listing schema, its publication guard, its materialization, its service root,

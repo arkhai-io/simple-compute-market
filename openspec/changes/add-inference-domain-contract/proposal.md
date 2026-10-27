@@ -203,7 +203,7 @@ them.
   `listing_resource`, `offering_mode`, `listing_cardinality_mode` — was settled
   by [`settle-listing-vocabulary`](../archive/2026-09-15-settle-listing-vocabulary/),
   archived 2026-09-15, so nothing here waits on a rename.
-- [`compose-api-family-kit`](../compose-api-family-kit/),
+- [`compose-api-family-kit`](../archive/2026-10-26-compose-api-family-kit/),
   [`compose-inference-domain-stack`](../compose-inference-domain-stack/),
   [`meter-inference-usage`](../meter-inference-usage/),
   [`package-inference-seller`](../package-inference-seller/), and
