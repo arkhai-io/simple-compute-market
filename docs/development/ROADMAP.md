@@ -191,7 +191,7 @@ library, its service root the family's authority, its buyer plugin the buying
 libraries, and third-party applications the family's bearer gate; API credits
 keeps its listing schema, kind bindings, and bundle values, with its wire,
 digests, schema, configuration, and service identity held to recorded
-baselines. A second API-selling domain composes the same kit. The kit's
+baselines. A second API-selling domain would compose the same kit. The kit's
 composability is scoped to prepaid bearer access, and its selling and buying
 libraries still depend on the core storefront and the buyer role under owned
 exception rows.

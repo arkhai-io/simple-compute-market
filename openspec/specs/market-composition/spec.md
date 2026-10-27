@@ -1177,9 +1177,9 @@ the field's absence MUST leave a response valid for a storefront that reports no
 API credits, and every API-selling domain that follows it, MUST form the `api`
 family, with one vocabulary package under `domains/api` and one family kit of
 distributions beneath it, placed under the family directory the scope rule
-names. Neither domain MUST define the purchase shape, issuance digests, key
-authority, issuance composition, buyer flows, mechanism stages, or bearer gate
-of its own, and neither MUST obtain them by importing the other. A third
+names. A domain of the family MUST NOT define the purchase shape, issuance
+digests, key authority, issuance composition, buyer flows, mechanism stages, or
+bearer gate of its own, nor obtain them by importing another. Another
 domain selling prepaid bearer access MUST be able to compose the kit by
 supplying contributions alone, without the kit learning its listing schema or
 branching on its identity; access sold without a prepaid balance — by

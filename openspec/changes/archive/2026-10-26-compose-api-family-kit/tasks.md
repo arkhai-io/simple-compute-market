@@ -1565,7 +1565,8 @@ change to implementation.
       passing-validation rule. Local validation passed at `f1246298d`, the
       code this closeout carries. Owner of the remedy: a maintainer with push
       access, who runs the API-credit lane before the change merges into the
-      main repository.
+      main repository; the run is tracked in the Goal 4 unowned work of
+      `openspec/changes/README.md`, where it is recorded once it passes.
 - [x] 11.9 **Promotion.** Write the permanent documents the record below
       names: `docs/development/ARCHITECTURE.md` "Family kits" (the `api` family,
       its eleven distributions and the rule each exists for, the
@@ -1580,6 +1581,12 @@ change to implementation.
       record below completed; `RELEASING.md`'s table already listed the gate in
       the middleware's place. Review 08 F1's citation, F2's two scenarios, F4's
       requirement, F6's limitation, and F9's migration-chain limit are in.
+      Two requirements were written by hand, because their promotion rows
+      pointed at specs no delta covered: `storefront-publication`'s
+      "Reconciliation reads every listing once" and `market-composition`'s
+      "System status carries the storefront's own principal", both section 6
+      decisions. Closeout review 10 checked both against the code, and the
+      owner ratified them as reviewed.
 - [x] 11.10 **Documentation citations.** `make check-doc-citations
       CHANGE=compose-api-family-kit` resolves every path after promotion; then
       `openspec validate compose-api-family-kit --strict`. Before the archive
@@ -1594,7 +1601,8 @@ change to implementation.
       nineteen added requirements (seventeen creating `api-family`, one each in
       `api-credits` and `market-composition`) with nothing modified or removed;
       the new specification's purpose was written in place of the archive's
-      placeholder. The index row and the roadmap's Goal 4 row link the archive.
+      placeholder. With 11.9's two hand-written requirements, twenty-one
+      requirements entered `openspec/specs/`. The index row and the roadmap's Goal 4 row link the archive.
 
 ## Design promotion record
 
@@ -1615,7 +1623,7 @@ change to implementation.
 | D7 — an opening is one transaction through the runtime's `open_negotiation` hook; VM and bare metal commit separately, an unowned limitation | `openspec/specs/api-family/spec.md` (An opening is recorded in one transaction); `openspec/specs/market-composition/architecture.md#the-negotiation-runtimes-opening-unit-of-work`; `openspec/changes/README.md` (Goal 4 unowned work); `docs/development/ROADMAP.md` (Goal 4 gap row) |
 | D7 — refusal messages through the bundle's `refusal_noun`; one per-credit amount rate per option or escrow; publication guards wherever a listing publishes; mechanism loops and startup steps as registrations | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md#negotiation-publication-and-lifecycle` |
 | Core listing pages are ordered by `(created_at, listing_id)` with a keyset cursor | `openspec/specs/storefront-publication/spec.md` (Reconciliation reads every listing once) |
-| System status carries the storefront's own principal; the API-credits baselines were re-recorded once for this additive field | `openspec/specs/market-composition/spec.md` (System status carries the storefront's own principal); `openspec/specs/api-credits/spec.md` (baselines) |
+| System status carries the storefront's own principal; the API-credits baselines were re-recorded once for this additive field | `openspec/specs/market-composition/spec.md` (System status carries the storefront's own principal); the re-record is history, kept in section 6's notes |
 | D7, D12 — pricing, the negotiation guards, and the seed code are the family's; API credits keeps its `[seed]` values | `openspec/specs/api-credits/architecture.md#authority-boundaries` |
 | D7 — core's per-negotiation artifacts gain a `listing` slot | `openspec/specs/market-composition/architecture.md#frozen-storefront-registry-and-executable-ownership` |
 | A delivery's public record is safe and final | `openspec/specs/api-family/spec.md` (A delivery's public record is safe and final) |

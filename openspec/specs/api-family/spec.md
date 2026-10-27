@@ -20,9 +20,10 @@ issuance label type with its label-parameterized operations — MUST live once,
 in the family vocabulary package under `domains/api`, and every domain selling
 prepaid bearer access MUST bind it rather than define or copy its own. The vocabulary MUST
 depend only on foundation kits, never on core, a domain, a role, or a
-family-kit distribution, and MUST NOT name a sibling domain's label value. No
-distribution under `domains/api` MUST import an API-selling domain or a role
-executable.
+family-kit distribution, and MUST NOT name a sibling domain's label value. Every
+distribution under `domains/api` MUST import no API-selling domain and no
+role; the edges still tracked as exceptions are listed under
+[Current limits](architecture.md#current-limits).
 
 #### Scenario: Two kind literals bind the purchase shape
 

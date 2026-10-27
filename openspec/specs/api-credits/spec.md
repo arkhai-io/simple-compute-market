@@ -278,7 +278,7 @@ the gate library instead.
 
 #### Scenario: A baseline is diffed
 
-- **WHEN** a slice lands and the recorded baselines — route surface and OpenAPI
+- **WHEN** the service or storefront changes and the recorded baselines — route surface and OpenAPI
   document, authentication roles and operation names, refusal status codes and
   error bodies, environment variables and settings keys, schema and migration
   history, version response — are diffed against the service and storefront
