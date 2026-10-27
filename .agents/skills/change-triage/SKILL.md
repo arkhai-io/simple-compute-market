@@ -110,7 +110,9 @@ the session, and every turn ends with an outcome matching
   and the owner directs the correction.
 - **A return commits its partial work; a stop does not.** When an accepted fix
   shows the plan or the design wrong, as `change-implement`'s step 4 finds it,
-  record why in the notes of the section it concerns, commit what the triage has —
+  record why in the notes of the section it concerns, write `## Next` in each
+  review's triage file as `Returned to design` or `Returned to planning`, then why
+  (step 4), commit what the triage has —
   the fixes so far and the tracked edits its dispositions made, the ledger
   included — as one work-in-progress commit
   naming the change and why it returns, checking no task for it, push it with
@@ -336,14 +338,17 @@ record and the owner's notes included — in this form:
 
 ## Next
 
-<Advance | Another round> — <the owner's words, and any condition>
+<Advance | Another round | Returned to <design | planning>> — <the owner's words, and any condition>
 ```
 
 `## Next` is the triage's last edit, written once step 6 is answered and the
-accepted fixes are committed (step 5): `scripts/change_next_step.py` routes the
-change on its first words alone, one of two fixed tokens, `Advance` or `Another
-round`, and reads a review's triage file without `## Next` as a triage still in
-progress, so the change does not move on while its fixes are uncommitted. When two
+accepted fixes are committed (step 5) — or, on a return, before its
+work-in-progress commit, with no step 6: `scripts/change_next_step.py` routes the
+change on its first words alone, one of three fixed tokens — `Advance`, `Another
+round`, or, for a triage that returns the change to an earlier phase, `Returned`
+(`Returned to design` or `Returned to planning`, then why) — and reads a review's
+triage file without `## Next` as a triage still in progress, so the change does
+not move on while its fixes are uncommitted. When two
 reviews are triaged together, write the same `## Next` in each review's triage
 file. Only a review's triage file has `## Next`. The triage file of a validation
 record, of the owner's notes, or of the orchestrating session's observations ends
@@ -458,7 +463,14 @@ review, archive cleanup, after a validation of `HEAD` when a path outside
 `openspec/` and `docs/` changed since the commit it reviewed. `Another round` leads
 to the review of the same kind again, after the fix commit's validation for an
 implementation or pre-closeout review — for a pre-closeout one, only when the fix
-changed a path outside `openspec/` and `docs/`.
+changed a path outside `openspec/` and `docs/`. `Returned` waits for the owner to
+confirm the return; once they do, the returned review no longer governs, and what
+the design or plan makes of it is a round of its own, read, validated, and
+reviewed afresh, even where it reworks a section the returned round implemented —
+after a pre-closeout triage, a validation of `HEAD` and a new pre-closeout review
+when the plan adds nothing to implement. A return the owner declines leaves the
+owner to decide what the triage records, and an archived change has no earlier
+phase to return to.
 
 When the triage of a phase-closing review records `Advance`, set the change's
 `Status` in `openspec/changes/README.md`, and rewrite the row's `Notes` in the same

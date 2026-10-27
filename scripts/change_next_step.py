@@ -32,7 +32,8 @@ log, and whether a round view is open, and prints one JSON object:
 
 The rules follow each step's skill: its entry check, and the handoff that names
 what comes after it. A review's triage file records under `## Next` whether the
-change advances or another review round runs, and the change advances on that
+change advances, another review round runs, or the triage returned the change to
+an earlier phase, and the change advances on that
 token and the conditions each phase sets — a passing validation of the round's
 fix commit, of `HEAD` before closeout, and of a closeout correction that changed
 more than documentation — without the owner.
@@ -62,6 +63,7 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
@@ -101,8 +103,8 @@ _PHASE_STEPS = {"design": ("design", "review", "triage"), "planning": ("plan",),
                 "implementation": ("implement", "validate", "review", "triage"),
                 "closeout": ("closeout", "review", "triage", "validate", "archive-cleanup")}
 # What a review's triage file records next, read from its `## Next` token.
-ADVANCE, ANOTHER_ROUND, IN_PROGRESS, OWNER = ("advance", "another round", "in progress",
-                                              "owner")
+ADVANCE, ANOTHER_ROUND, RETURNED, IN_PROGRESS, OWNER = (
+    "advance", "another round", "returned", "in progress", "owner")
 
 
 def _section_text(text: str, heading: str) -> str | None:
@@ -115,6 +117,12 @@ def _section_text(text: str, heading: str) -> str | None:
     rest = text[match.end():]
     end = re.search(r"^## ", rest, re.M)
     return (match.group(1) or "") + "\n" + (rest[:end.start()] if end else rest)
+
+
+def _seconds(at: str) -> int:
+    """A log line's `at`, UTC to the second, as seconds since the epoch."""
+    return int(datetime.strptime(at, "%Y-%m-%dT%H:%M:%SZ").replace(
+        tzinfo=timezone.utc).timestamp())
 
 
 Result = dict[str, Any]
@@ -139,12 +147,14 @@ class Record:
     def next_token(self) -> str | None:
         """What a review's triage recorded next; None while it is untriaged.
 
-        Triage writes `## Next` last, its first words `Advance` or `Another round`,
+        Triage writes `## Next` last, its first words `Advance`, `Another round`,
+        or, for a triage that returns the change to an earlier phase, `Returned`,
         and the change is routed on that token alone: `ADVANCE`, `ANOTHER_ROUND`,
-        `OWNER` for any other first words, and `IN_PROGRESS` for a triage file
-        without the section, a triage not yet finished. A file from before `## Next`
-        ends with `## Gate`; one beginning "Passed" reads as `ADVANCE`, so nothing
-        already passed reopens, and any other goes to the owner.
+        `RETURNED`, `OWNER` for any other first words, and `IN_PROGRESS` for a
+        triage file without the section, a triage not yet finished. A file from
+        before `## Next` ends with `## Gate`; one beginning "Passed" reads as
+        `ADVANCE`, so nothing already passed reopens, and any other goes to the
+        owner.
         """
         if not self.triaged:
             return None
@@ -152,7 +162,8 @@ class Record:
         if (following := _section_text(text, "Next")) is not None:
             words = following.strip().lower()
             return (ADVANCE if words.startswith("advance")
-                    else ANOTHER_ROUND if words.startswith("another round") else OWNER)
+                    else ANOTHER_ROUND if words.startswith("another round")
+                    else RETURNED if words.startswith("returned") else OWNER)
         if (gate := _section_text(text, "Gate")) is not None:
             return ADVANCE if gate.strip().lower().startswith("passed") else OWNER
         return IN_PROGRESS
@@ -651,6 +662,9 @@ class Computation:
         review = reviews[-1]
         if waiting := self.not_advancing(review):
             return waiting
+        if review.next_token() == RETURNED:
+            return {"step": "design", "reason": f"{review.triage.name} returned the change "
+                                                "to design"}
         if review.next_token() == ANOTHER_ROUND:
             return {"step": "review", "kind": "design",
                     "reason": f"{review.triage.name} records another round"}
@@ -679,6 +693,13 @@ class Computation:
             # missing a heading would have whole sections repeated or skipped.
             return self.unclassified("the task list is malformed: " + "; ".join(problems))
         current = rounds[-1] if rounds else None
+        if current and self.set_aside(current):
+            # Read before the round's sections: the amended plan may have renumbered
+            # or dropped them. The next round's own validation covers the
+            # work-in-progress commit the return left, so none is asked for before it.
+            if all(s.complete for s in work):
+                return self._pre_closeout()
+            return self.next_round(work)
         round_sections = ([str(s) for session in current["sections"] for s in session]
                           if current else [])
         by_id = {s.id: s for s in state.sections}
@@ -875,15 +896,17 @@ class Computation:
         if untriaged := self.untriaged(kinds=("pre-closeout",)):
             return {"step": "triage", "reason": f"{untriaged} has no triage"}
         reviews = [r for r in self.state.records if r.review_kind == "pre-closeout"]
-        if not reviews:
+        review = governing(reviews) if reviews else None
+        if review is not None and (waiting := self.not_advancing(review)):
+            return waiting
+        # A review whose triage returned the change describes work the return
+        # replaced, so the work implemented since is reviewed afresh.
+        if review is None or review.next_token() == RETURNED:
             if waiting := self.validated("a pre-closeout review needs a passing validation "
                                          "of HEAD"):
                 return waiting
             return {"step": "review", "kind": "pre-closeout",
                     "reason": "every section before closeout is checked and validated"}
-        review = governing(reviews)
-        if waiting := self.not_advancing(review):
-            return waiting
         # From here closeout is next, and its own checks read the documentation, so
         # a triage's commit of documents alone needs no validation.
         if review.next_token() == ANOTHER_ROUND:
@@ -910,6 +933,10 @@ class Computation:
         review = governing(reviews)
         if waiting := self.not_advancing(review):
             return waiting
+        if review.next_token() == RETURNED:
+            return _owner(f"{review.triage.name} records a return, and an archived change "
+                          "has no earlier phase to return to: the owner directs its "
+                          "correction")
         if review.next_token() == ANOTHER_ROUND:
             return {"step": "review", "kind": "closeout",
                     "reason": f"{review.triage.name} records another round"}
@@ -1026,18 +1053,60 @@ class Computation:
                      and entry["seq"] > design["seq"]), None)
 
     def not_advancing(self, review: Record) -> Result | None:
-        """The step while `review`'s triage records neither token: the triage, while
-        it has no `## Next`, or the owner, for a legacy gate not passed or a
-        `## Next` without a token."""
+        """The step while `review`'s triage records no token the phase can route on:
+        the triage, while it has no `## Next`; the owner, for a legacy gate not
+        passed, a `## Next` without a token, or a return the owner has not
+        confirmed."""
         token = review.next_token()
         if token == IN_PROGRESS:
             return {"step": "triage", "reason": f"{review.triage.name} has no `## Next`: its "
                                                 "triage is in progress"}
         if token == OWNER:
-            return _owner(f"{review.triage.name} records neither Advance nor Another round "
-                          "under `## Next`, or a gate it did not pass: the owner decides "
-                          "what follows")
+            return _owner(f"{review.triage.name} records neither Advance, Another round, nor "
+                          "Returned under `## Next`, or a gate it did not pass: the owner "
+                          "decides what follows")
+        if token == RETURNED and not self.return_confirmed(review):
+            return _owner(f"{review.triage.name} records a return the owner has not "
+                          "confirmed: resume its triage if it stopped before proposing the "
+                          "return, or decide what the triage records")
         return None
+
+    def return_confirmed(self, review: Record) -> bool:
+        """Whether the owner confirmed the return `review`'s triage records: a
+        decision resolving a returned triage run and directing design or planning,
+        recorded once that triage wrote its `## Next`.
+
+        Triage writes `## Next` as its last edit and is never rewritten after it,
+        so the file's time is when the return was proposed, and a decision from
+        before it confirmed some earlier return. A triage run's log line does not
+        name the review it triaged, so the file's time is what ties the two. Until
+        the owner decides, the returned run waits in `pending`, ahead of the
+        phase's routing; a decision resolving it without directing design or
+        planning declines the return, and the triage's `Returned` no longer says
+        what follows."""
+        log = self.state.log
+        returned = {e["seq"] for e in log
+                    if e.get("step") == "triage" and e.get("outcome") == "returned"}
+        proposed = review.triage.stat().st_mtime_ns // 1_000_000_000
+        return any(e.get("outcome") == ORCHESTRATOR and e.get("resolves") in returned
+                   and e.get("next") in ("design", "plan")
+                   and isinstance(e.get("at"), str) and _seconds(e["at"]) >= proposed
+                   for e in log)
+
+    def set_aside(self, current: dict[str, Any]) -> bool:
+        """Whether a confirmed return set the current round aside: the review that
+        governs it — its implementation review, or the pre-closeout review after
+        it — records `Returned`, and the owner confirmed it.
+
+        What the design or plan made of the return is a round of its own, read,
+        validated, and reviewed afresh, even where it reworks one of this round's
+        sections, so this round's records no longer decide anything."""
+        reviews = [r for r in self.state.records if r.number > current.get("after", 0)
+                   and r.review_kind in ("implementation", "pre-closeout")]
+        if not reviews:
+            return False
+        review = governing(reviews)
+        return review.next_token() == RETURNED and self.return_confirmed(review)
 
     def validated(self, why: str, exempt: Callable[[str], bool] = is_record) -> Result | None:
         """None when the latest validation passed for `HEAD`, or for an ancestor it

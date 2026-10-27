@@ -1693,3 +1693,48 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
       those nine requirements, each present once, and "Evidence". Archived as
       `openspec/changes/archive/2026-10-26-parallel-change-workflows/`, `reviews/`
       with it; the index row links it. `make check-change`: passed.
+
+Closeout triage 157 corrections, on the owner's direction (the closeout review's
+two findings):
+
+- 157 F1, a code correction: a triage that returns the change records `Returned
+  to design` or `Returned to planning` under `## Next`, and once the owner confirms
+  the return its review no longer governs (`design.md`, "Known gaps").
+  `scripts/change_next_step.py` gains the `RETURNED` token, `return_confirmed`
+  (a decision resolving a returned triage run and directing design or planning,
+  recorded after the review's triage file was last written), and `set_aside`,
+  which `_implementation` reads before anything else about the current round, so
+  the amended plan's next round runs as a round of its own, or the pre-closeout
+  review when every section is checked; `_pre_closeout` goes to a validation of
+  `HEAD` and a new pre-closeout review; an unconfirmed or declined return, and any
+  at closeout, names the owner. The triage skill writes the token on a return,
+  and the plan and orchestrate skills name it; the spec's requirement and three
+  scenarios, the companion architecture, and `docs/agents/change-workflow.md`
+  describe it, and the limit is removed.
+  Evidence: `scripts/tests/test_change_next_step.py`, unit level (`TESTING.md`),
+  178 passed, seven new: a round's confirmed return to the amended plan's next
+  round; a rework of the round's own section as a new round; a plan that drops
+  the round's section; a confirmation from before a return not confirming it; an
+  unconfirmed and a declined return; a pre-closeout return to validation then
+  review; a closeout return to the owner. `make test-release-tooling` 1578 passed;
+  `make test` passed; `make check-packaging`, `make check-comment-hygiene`, and
+  `make check-change CHANGE=parallel-change-workflows` passed. Two fresh-context
+  compliance checks of the diff against 860ce6db7: fixed — a rework of the
+  returned round's own section, which under the old round reached the next round
+  unread and unreviewed; a confirmation matched to the latest returned run rather
+  than to the review; a plan that renumbered the round's sections reaching
+  `unclassified` before the set-aside; two-token wording left in the module
+  docstring and the orchestrate, plan, and triage skills; the pre-closeout and
+  declined routes missing from the spec; one more history phrase of F2's kind
+  ("It no longer commits a step's leftover work"). Declined — a triage that
+  crashes after writing `Returned` and before logging its outcome: its stopped run
+  is resumed and then ends `returned`, and the owner's message says so. Raised and
+  left to the owner, since it predates this correction: with a round line in the
+  log, a pre-closeout `Another round` over documents alone reaches `_round`'s
+  validation of the round's fixes before `_pre_closeout`'s documentation
+  exemption, so it asks for a validation the exemption would waive.
+- 157 F2, documentation: the architecture's "Pushing is guarded, never repaired"
+  states the present reason a step commits its own work without the former
+  rule, "The change's namespace" gives fixed per-change tags their present
+  reasons only, and "The orchestrator relays and routes" says the session commits
+  no step's leftover work, without "no longer".

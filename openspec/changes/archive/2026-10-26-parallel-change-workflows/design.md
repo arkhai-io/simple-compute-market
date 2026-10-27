@@ -1142,14 +1142,34 @@ pre-closeout review.
 
 ## Known gaps
 
-Found during implementation (8B.9's handoff), raised by no review, and decided by
-none; the first two describe the system and are recorded in the companion
+Found during implementation (8B.9's handoff); the first was decided at closeout
+(157 F1), and the second describes the system and is recorded in the companion
 architecture's "Current limits":
 
-- A triage that returns the change to an earlier phase writes no `## Next`, since
-  neither `Advance` nor `Another round` fits, so its file reads as a triage in
-  progress, and once the change is back in design or planning the computation may
-  name that triage again. D20 does not say what `## Next` records on a return.
+- A triage that returns the change to an earlier phase wrote no `## Next`, since
+  neither `Advance` nor `Another round` fit, so its file read as a triage in
+  progress, and once the change was back in implementation the computation named
+  that triage again and never reached the amended plan's sections. **Decided in
+  closeout triage 157 (F1): a third token, `Returned`.** The returning triage
+  writes `## Next` as `Returned to design` or `Returned to planning`, then why;
+  once the owner confirms the return — a decision resolving a returned triage run
+  and directing design or planning, recorded after the review's triage file was
+  last written, since a triage run's log line names no review — the review no
+  longer governs, and the round it governed is set aside: what the design or plan
+  makes of the return is the plan's next round, read, validated, and reviewed as
+  its own even where it reworks one of the set-aside round's sections, with no
+  validation of the work-in-progress commit before it; after a pre-closeout
+  triage whose plan adds nothing, a validation of `HEAD` and a new pre-closeout
+  review. An unconfirmed return waits on the owner as before; a declined one, and
+  any `Returned` at closeout, names the owner. The
+  owner chose a code correction over stating the exception in the spec, so that
+  the spec's "route on that token alone" holds without qualification, and the
+  token over routing from the log alone, so that a returned triage's file says it
+  ended. Having every step's handoff name its next step, which `Returned to
+  <phase>` is an instance of, is deferred to a change of its own after this one
+  merges. Promoted to `spec.md#requirement-the-next-step-is-computed-from-the-files`
+  (its "A triage returns the change" scenario), `arch#the-owner-is-interrupted-only-for-judgement`
+  with the limit removed from `arch#current-limits`, `docs/agents/change-workflow.md`, and the triage skill.
 - The merge check (D20.3) runs in whichever checkout computes, before the clone
   lookup, so an unrelated merge in progress in the owner's workspace makes the
   workspace's computation name the owner rather than the change's clone.

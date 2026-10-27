@@ -84,7 +84,8 @@ happened elsewhere. Read the change's row in `openspec/changes/README.md` — st
 `reviews/`. Then confirm:
 
 - The change's status is `ready for planning` or `in planning`, or the owner has
-  confirmed implementation's return of the change to planning, or the change is
+  confirmed an implementation session's or a triage's return of the change to
+  planning, or the change is
   `in design` with the orchestrating session's record of the owner's waiver below;
   in the last two cases set it to `in planning`.
 - The latest design review's triage file has a `## Next` beginning `Advance` — a

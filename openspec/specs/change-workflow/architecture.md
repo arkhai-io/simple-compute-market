@@ -247,7 +247,17 @@ attention is elsewhere; a routing question at each review would be the same
 interruption under another name. A
 review's triage records, under `## Next`, whether the change advances or another
 round runs, its first word a fixed token the computation reads alone, since routing
-on free text is a model's reading again. A triage with nothing to dispose of advances
+on free text is a model's reading again. A triage that returns the change to design
+or planning records `Returned`, so its file says the triage ended rather than
+reading as one still running; once the owner confirms the return, that review no
+longer governs, and what the return leads to is a round of its own, read,
+validated, and reviewed afresh — even a rework of the returned round's own
+sections, which under the returned round would reach the next round unread and
+unreviewed. A declined return is the owner's to settle, since the triage it ended
+no longer says what follows. A triage run's log line does not name the review it
+triaged, so a confirmation counts for a review only when it was recorded after that
+review's triage file was last written, which a triage file, never rewritten after
+`## Next`, makes the time of the return. A triage with nothing to dispose of advances
 without the owner. An implementation or pre-closeout round advances only on a
 `passed` validation of its final commit, and after a closeout review a correction
 outside `openspec/` and `docs/` is validated before archive cleanup, so a code
@@ -280,9 +290,9 @@ in the owner's workspace, the clone's step table would not see them until `dev` 
 merged in. It commits nothing while a step runs and never writes the change's
 feature work of its own accord. Nothing restricts its commits mechanically: it runs
 on the owner's interactive permissions, and "when the owner instructs" is not a rule
-a table can hold. It no longer commits a step's leftover work: each step commits
-its own ("Pushing is guarded, never repaired"), so tracked work left after a step
-ended is that step's defect, brought to the owner.
+a table can hold. It commits no step's leftover work: each step commits its own
+("Pushing is guarded, never repaired"), so tracked work left after a step ended is
+that step's defect, brought to the owner.
 
 A merge of `dev` is made between steps, never while a round view is open, nor
 between a round's sections being committed and that round's triage, so it never
@@ -419,8 +429,7 @@ release. A namespace alone does not isolate images: every image the chart deploy
 is pulled `IfNotPresent` from the one Docker daemon the development cluster reads,
 so the part builds every image under a tag fixed per change, the bare tag with
 `-<change>` appended, and deploys those tags. A tag per change, never per commit:
-commit-suffixed tags caused repeated image-not-found failures deploying Helm, a
-rebuilt image under a fixed tag rolls out by restarting pods, and two changes never
+a rebuilt image under a fixed tag rolls out by restarting pods, and two changes never
 write one tag, so no build lock is needed. A namespace per validated commit was
 rejected because they accumulate; one per change is bounded by the active changes.
 
@@ -557,11 +566,9 @@ forced. Each refused state means something unexpected happened; an agent repairi
 it would hide that. Never forcing also keeps valid the fast-forward-only pulls
 between a change's clone and the owner's workspace.
 
-The steps were once denied their own commits and pushes by inheritance rather than
-by a decided reason: the owner read and committed design-phase work, and only
-validation pushed, since only the pipeline needed a pushed branch. With the owner
-away and steps running in clones, work left uncommitted in a checkout is stranded,
-and a dirty checkout blocks every later step's guarded push. So a step commits its
+Work left uncommitted in a checkout is stranded when no session follows to commit
+it, as when the owner is away and steps run in clones, and a dirty checkout blocks
+every later step's guarded push. So a step commits its
 own work, and partial work only on a return: a run that returns the change records
 why, commits what it has as work in progress, and pushes it, since no session is
 left to finish it. A stopped run leaves its work uncommitted, since a stop is
@@ -740,9 +747,6 @@ rows are recent history and may be pruned at any time.
 - Two releases at once may exhaust the node's memory: the capacity preflight is an
   estimate, and stays inactive on a cluster with no metrics source, which has no
   recorded figure.
-- A triage that returns the change to an earlier phase writes no `## Next`, so its
-  file reads as a triage in progress, and once the change is back in design or
-  planning the computation may name that triage again.
 - The computation's check for a merge in progress runs in whichever checkout
   computes, so an unrelated merge in progress in the owner's workspace makes the
   workspace's computation name the owner rather than the change's clone.

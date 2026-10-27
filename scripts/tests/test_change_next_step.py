@@ -442,6 +442,138 @@ def test_a_legacy_passed_gate_reads_as_advance(tmp_path: Path) -> None:
     assert _next(root)["step"] == "plan"
 
 
+# `Returned`: a triage that returns the change; once the owner confirms it, its
+# review no longer governs.
+
+RETURN = {"outcome": "returned", "message": "The fix needs a section the plan lacks.",
+          "return_to": "planning", "evidence": "section 2's notes"}
+
+
+def _returned_round(root: Path) -> dict:
+    """A round whose triage returned the change to planning; the returned run."""
+    _log(root, "plan", PLAN)
+    _round(root, [[2]])
+    _check(root, TASKS.replace("- [ ] 2.1", "- [x] 2.1"))
+    _record(root, "01-validation.md", text=_validation("e" * 40), triage="Evidence.")
+    _triaged(root, "02-implementation.md", "Returned to planning — the plan changes.",
+             reviewed="e" * 40)
+    return _log(root, "triage", RETURN)
+
+
+def test_a_confirmed_return_from_a_round_goes_to_the_amended_plans_next_round(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    run = _returned_round(root)
+    _decide(root, "return to planning confirmed", by="owner", resolves=run["seq"],
+            next_step="plan")
+    directed = _next(root)
+    _log(root, "plan", {**PLAN, "rounds": [[[3]]]})
+
+    result = _next(root)
+
+    assert directed["step"] == "plan"
+    # The work-in-progress commit is validated with the next round, not before it.
+    assert (result["step"], result["sections"]) == ("round", [[3]])
+
+
+def test_a_return_that_reworks_the_rounds_own_section_is_a_round_of_its_own(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    run = _returned_round(root)
+    _decide(root, "return to planning confirmed", by="owner", resolves=run["seq"],
+            next_step="plan")
+    _log(root, "plan", PLAN)
+    _check(root, TASKS.replace("- [ ] 2.1 Open.", "- [x] 2.1 Open.\n- [ ] 2.2 Rework."))
+
+    planned = _next(root)
+    _round(root, [[2]])
+    implementing = _next(root)
+
+    # Read, validated, and reviewed as a round, never under the returned one.
+    assert (planned["step"], planned["sections"]) == ("round", [[2]])
+    assert (implementing["step"], implementing["sections"]) == ("implement", [2])
+
+
+def test_a_return_whose_plan_drops_the_rounds_section_goes_to_the_next_round(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    run = _returned_round(root)
+    _decide(root, "return to planning confirmed", by="owner", resolves=run["seq"],
+            next_step="plan")
+    _log(root, "plan", {**PLAN, "rounds": [[[3]]]})
+    _check(root, TASKS.replace("## 2. Second\n\n- [ ] 2.1 Open.\n\n", ""))
+
+    result = _next(root)
+
+    assert (result["step"], result["sections"]) == ("round", [[3]])
+
+
+def test_a_confirmation_from_before_a_return_does_not_confirm_it(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    earlier = _log(root, "triage", RETURN)
+    _decide(root, "an earlier return to planning confirmed", by="owner",
+            resolves=earlier["seq"], next_step="plan")
+    _log(root, "plan", PLAN)
+    _round(root, [[2]])
+    _check(root, TASKS.replace("- [ ] 2.1", "- [x] 2.1"))
+    _record(root, "01-validation.md", text=_validation("e" * 40), triage="Evidence.")
+    # Returned in a session that logged no run, after the earlier confirmation.
+    _triaged(root, "02-implementation.md", "Returned to planning", reviewed="e" * 40)
+    later = (_reviews(root) / "02-implementation.triage.md").stat().st_mtime + 60
+    os.utime(_reviews(root) / "02-implementation.triage.md", (later, later))
+
+    result = _next(root)
+
+    assert result["step"] == "owner" and "not confirmed" in result["reason"]
+
+
+def test_a_return_waits_for_the_owner_and_a_declined_one_stays_theirs(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    run = _returned_round(root)
+
+    unconfirmed = _next(root)
+    _decide(root, "return declined", by="owner", resolves=run["seq"])
+    declined = _next(root)
+
+    assert (unconfirmed["step"], unconfirmed["return_to"]) == ("owner", "planning")
+    assert declined["step"] == "owner" and "not confirmed" in declined["reason"]
+
+
+def test_a_confirmed_return_from_pre_closeout_reviews_the_work_again(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation", tasks=ALL_WORK_DONE)
+    _triaged(root, "03-pre-closeout.md", "Returned to planning — a section is missing.",
+             reviewed="e" * 40)
+    run = _log(root, "triage", RETURN)
+    _decide(root, "return to planning confirmed", by="owner", resolves=run["seq"],
+            next_step="plan")
+    _log(root, "plan", FINISHED)
+
+    unvalidated = _next(root)
+    _record(root, "04-validation.md", text=_validation(HEAD))
+    validated = _next(root)
+
+    assert unvalidated["step"] == "validate"
+    assert (validated["step"], validated["kind"]) == ("review", "pre-closeout")
+
+
+def test_a_closeout_triage_that_returns_goes_to_the_owner(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in closeout", archived=True)
+    _triaged(root, "05-closeout.md", "Returned to planning", reviewed="e" * 40)
+    run = _log(root, "triage", RETURN)
+    _decide(root, "return to planning confirmed", by="owner", resolves=run["seq"],
+            next_step="plan")
+    # Planning refuses an archived change.
+    _log(root, "plan", {"outcome": "stopped", "message": "Archived.",
+                        "reason": "the change is archived", "denials": []})
+    _decide(root, "planning's refusal read", resolves=run["seq"] + 2)
+
+    result = _next(root)
+
+    assert result["step"] == "owner" and "archived change" in result["reason"]
+
+
 # An implementation round advances on a passing validation of its fix commit.
 
 PLAN = {"outcome": "finished", "message": "Planned.", "next": "implementation",

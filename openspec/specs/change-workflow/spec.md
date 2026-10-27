@@ -884,10 +884,15 @@ cannot classify the change's state, the orchestrating session MUST determine wha
 happened and either resolve it, when it concerns only routing or recovery, or bring
 it to the owner, when it would decide a finding, settle a design question, or
 change a status; and MUST record what it decided in the workflow log. A review's triage
-MUST record, in its triage file's `## Next`, whether the change advances or another
-review round runs, beginning with the token `Advance` or `Another round`; the
-computation MUST route on that token alone, and MUST treat a triage file without it
-as a triage in progress. An implementation or pre-closeout round MUST advance only
+MUST record, in its triage file's `## Next`, whether the change advances, another
+review round runs, or the triage returns the change to an earlier phase, beginning
+with the token `Advance`, `Another round`, or `Returned`; the computation MUST route
+on that token alone, and MUST treat a triage file without it as a triage in
+progress. Once the owner confirms a return, the returned review MUST NOT govern
+what follows, so the work the return leads to is implemented, validated, and
+reviewed afresh, as a round of its own even where it reworks a section the
+returned round implemented; a return the owner declined, or one recorded at
+closeout, MUST be brought to the owner. An implementation or pre-closeout round MUST advance only
 on a `passed` validation naming its final commit, or a commit from which its final
 commit differs only in changes' records — or, after a pre-closeout review, only in
 paths under `openspec/` and `docs/`; an `inconclusive` validation MUST be brought to
@@ -917,6 +922,26 @@ the owner.
 - **WHEN** a review's triage file exists without a `## Next` section
 - **THEN** the computation names the triage, or the run waiting in it, and no
   review
+
+#### Scenario: A triage returns the change
+
+- **WHEN** an implementation round's triage recorded `Returned to planning` under
+  `## Next`, the owner confirmed the return, and the amended plan finished
+- **THEN** the computation names the amended plan's next round, not that triage,
+  and the round's own validation covers the work-in-progress commit the return left
+
+#### Scenario: A pre-closeout triage returns the change
+
+- **WHEN** a pre-closeout review's triage recorded `Returned to planning`, the
+  owner confirmed the return, and the amended plan added nothing to implement
+- **THEN** the computation names a validation of `HEAD`, and then a new
+  pre-closeout review
+
+#### Scenario: The owner declines a return
+
+- **WHEN** a triage recorded `Returned` and the owner's decision resolved its run
+  without directing design or planning
+- **THEN** the computation names the owner, who decides what the triage records
 
 #### Scenario: A triage file predates `## Next`
 

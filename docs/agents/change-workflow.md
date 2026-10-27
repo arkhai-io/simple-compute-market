@@ -78,7 +78,10 @@ implementation, its review beside validation of the same commit, and one triage 
 both; a pre-closeout review and its triage; closeout; the closeout review and its
 triage; archive cleanup. A review is not a gate: its triage records under `## Next`
 whether the change advances (`Advance`) or another review round runs (`Another
-round`), asking the owner which once every finding is disposed and before any fix.
+round`), asking the owner which once every finding is disposed and before any fix;
+a triage that returns the change to design or planning records `Returned`, and
+once the owner confirms the return, what it leads to is implemented and reviewed
+afresh.
 
 A step that finds the change in the wrong state refuses and says why. Design and
 implementation take only an active change. Closeout archives the change as its last

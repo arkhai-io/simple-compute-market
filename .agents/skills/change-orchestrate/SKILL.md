@@ -192,8 +192,9 @@ owner's reply back as written. A line carrying `earlier` is a run whose session
 took more turns after reporting — a wake-up, a background command finishing — and
 is logged from its last: show each earlier message too, before the last, since the
 report is often the earlier one. Design and triage stay conversations with the
-owner. A triage records in its file's `## Next` whether the change advances or
-another review round runs, and the computation routes on that; there is no gate
+owner. A triage records in its file's `## Next` whether the change advances,
+another review round runs, or the triage returned the change to an earlier phase,
+and the computation routes on that; there is no gate
 to bring to the owner, and a triage with nothing to dispose of advances without
 them.
 
