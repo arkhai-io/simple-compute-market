@@ -389,6 +389,13 @@ Touches `scripts/change_next_step.py`, `scripts/change_workflow/graph.py`,
       `test_round_view.py`, and `test_run_change_step.py`; `make test`; `make
       check-change CHANGE=workflow-steps-name-next-step`. End-to-end: none, and none
       is owed.
+- [ ] 6.7 The round's join read from `graph.ROUND_JOIN`: the records its members
+      supply decide what the join still waits for and which member's step the
+      computation names, the clone's and the repeat pass's reading rules kept; unit,
+      in `test_change_next_step.py`, a table whose join lacks a member no longer
+      waits for that member's record (52 F1: the table declared the join while
+      `in_round` read it from record kinds of its own, so a changed join redrew the
+      diagram and left routing as it was).
 
 ## 7. `convert`: a change's records converted when it takes the new code
 
