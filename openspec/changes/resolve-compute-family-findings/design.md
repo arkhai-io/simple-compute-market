@@ -93,13 +93,27 @@ cases; `kit/site`'s middleware does the same for three of them. The answer becom
 
 Overlap is decidable because a route contract's pattern is restricted (35 F7): literal
 path segments, `[^/]+` named captures, and finite alternations of literal segments, as
-`identity/rotations/(?P<trust_role>admin|seller)` is. Building a contract from its
-declaration refuses any other pattern. `ProvisioningRouteTable` compares contracts of
-different contributions segment by segment when it is composed, and refuses two whose
-method and segments can match one request, before the service accepts traffic; within one
-contribution the first matching contract still decides, in the order its owner gave. Every
-route pattern in the tree already fits the grammar. A future route needing a tail capture
-extends the grammar and its comparison together. `kit/site`'s middleware resolves first-match
+`identity/rotations/(?P<trust_role>admin|seller)` is, optionally ending in `/?`, an
+optional trailing slash (55 F1). Building a contract from its declaration refuses any other
+pattern. `ProvisioningRouteTable` compares contracts of different contributions segment by
+segment when it is composed, a pattern ending in `/?` compared as both its forms, and
+refuses two whose method and segments can match one request, before the service accepts
+traffic; within one contribution the first matching contract still decides, in the order
+its owner gave. The family's `jobs/?` and `hosts/?`, VM's `vms/?` and `relays/?`, and the
+resource-pools contribution's `pools/?` use the slash, and the clients send the slashed
+form, so no served path or signed operation changes. Every route pattern in the tree fits
+the grammar once VM's two relay declarations drop a terminal `$`, which full matching
+makes redundant. A unit test of the provisioning composition root builds the complete
+table, the family's routes and every contribution the service ships (VM, bare metal,
+resource pools, Ansible host import, capacity definitions), under the grammar and the
+overlap check.
+
+The grammar is written here only while it stays this small (55 F1). A route needing more
+— a tail capture, a typed segment — does not extend it: the contracts adopt an
+established path-template grammar and its matcher, imported rather than written here, and
+the overlap comparison is rebuilt on it. Rejected: migrating the optional slashes to one
+literal form, which would answer 404 to unslashed requests that authenticate today and
+touch three owners' declarations for no gain in the comparison. `kit/site`'s middleware resolves first-match
 over the one ordered table it is given, which the API-credits service extends with its own
 routes, so it has no ambiguous case; whether it gains contributions is
 `site-route-contracts`' question. Rejected: detecting ambiguity per request and answering it

@@ -46,11 +46,13 @@ field when its route's body resource cannot be bound. Such an answer is unsigned
 contract supplies the operation and resource a response proof binds.
 
 A route contract's path pattern MUST consist of literal segments, single-segment named
-captures (`[^/]+`), and finite alternations of literal segments, and building a contract
-from a declaration MUST refuse any other pattern. Composing the route table MUST compare
-the contracts of different contributions segment by segment and MUST refuse, before the
-service accepts traffic, two whose method and segments can match one request. Within one
-contribution, the first matching contract MUST decide, in the order its owner gave.
+captures (`[^/]+`), and finite alternations of literal segments, optionally ending in an
+optional trailing slash (`/?`), and building a contract from a declaration MUST refuse any
+other pattern. Composing the route table MUST compare the contracts of different
+contributions segment by segment, a pattern ending in an optional slash as both its forms,
+and MUST refuse, before the service accepts traffic, two whose method and segments can
+match one request. Within one contribution, the first matching contract MUST decide, in
+the order its owner gave.
 
 #### Scenario: An unknown path is requested
 
@@ -76,8 +78,16 @@ contribution, the first matching contract MUST decide, in the order its owner ga
 #### Scenario: A contract's pattern is outside the grammar
 
 - **WHEN** a contribution declares a route whose pattern uses a construct other than a
-  literal segment, a single-segment capture, or a literal alternation
+  literal segment, a single-segment capture, a literal alternation, or a terminal optional
+  slash
 - **THEN** building its contract is refused, naming the route
+
+#### Scenario: The service's own route table composes
+
+- **WHEN** the provisioning composition root assembles the family's routes and every
+  contribution the service ships
+- **THEN** every contract is built under the grammar and composition succeeds
+- **AND** a path with or without a route's optional trailing slash resolves to that route
 
 #### Scenario: One contribution orders overlapping routes
 

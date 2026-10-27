@@ -21,9 +21,10 @@ An introduction whose contact payloads have been deleted MUST NOT be delivered: 
 introduction start that finds the payloads already deleted MUST NOT deliver, and an
 operator's re-delivery request for such an introduction MUST be refused without
 contacting any sink. Re-delivery reads the durable reveal rather than reconstructing
-one, so once the payloads are gone there is nothing it may send. A first reveal that
-persisted before the deletion committed preceded it, and its delivery belongs to it
-even if the deletion commits before that delivery is dispatched.
+one, so once the payloads are gone there is nothing it may send. A start that completed
+the reveal from payloads it read before the deletion committed preceded the deletion, and
+the one dispatch it claims belongs to it even if the deletion commits before that dispatch
+is scheduled.
 
 #### Scenario: The reveal request is retried
 
@@ -63,9 +64,10 @@ even if the deletion commits before that delivery is dispatched.
 
 #### Scenario: Deletion commits while the first reveal is completing
 
-- **WHEN** a first reveal has persisted the introduction and a deletion of its payloads
-  commits before the reveal's delivery is dispatched
-- **THEN** the seller receives that one delivery
+- **WHEN** a start has read the introduction's payloads and completed its reveal, and a
+  deletion of the payloads commits before that start dispatches the seller's delivery
+- **THEN** that start claims and dispatches the one delivery from the payloads it holds,
+  best-effort like every dispatch
 - **AND** no later start or re-delivery delivers again
 
 #### Scenario: Operator re-delivers a deleted introduction

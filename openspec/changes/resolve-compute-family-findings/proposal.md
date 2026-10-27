@@ -28,7 +28,8 @@ Route answers and typed surfaces:
 - A request matching no route contract is answered unsigned by what failed to match:
   404 for an unknown path, 405 with `Allow` for a known path under another method, 400
   for a route whose body resource cannot be bound. Route-contract patterns are
-  restricted to literal segments, single-segment captures, and literal alternations, so
+  restricted to literal segments, single-segment captures, literal alternations, and an
+  optional trailing slash, a hand-written grammar kept only while it stays that small, so
   the provisioning service refuses overlap between contributions when its table is
   composed; `kit/site` keeps ordered first-match. Both the provisioning service's
   middleware and `kit/site`'s answer by what failed, and the family client and the site
@@ -184,7 +185,8 @@ Each is a minor bump of its package under the repository's pre-1.0 versioning po
 - Unmatched-route answers, the route-pattern grammar and overlap refusal, and the
   clients' report of an unauthenticated answer →
   `openspec/specs/physical-provisioning/spec.md`, `openspec/specs/site-capacity/spec.md`;
-  why an unroutable request is unsigned, and why the pattern grammar is restricted →
+  why an unroutable request is unsigned, why the pattern grammar is restricted, and that a
+  route needing more adopts an established path-template grammar rather than extending it →
   `openspec/specs/physical-provisioning/architecture.md`, "Canonical requests, durable
   replay, and signed responses" (D3).
 - The lifecycle event provisioning sends; the schedule response's identities; contract
