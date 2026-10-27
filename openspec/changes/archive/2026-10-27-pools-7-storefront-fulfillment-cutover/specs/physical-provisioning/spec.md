@@ -107,9 +107,11 @@ own provider submission, retry, provider-status convergence, output
 persistence, settlement-result delivery, teardown, and final physical-resource
 reclamation. Progress MUST NOT depend on storefront polling.
 
-Pending and in-progress work MUST be recovered periodically with a
-multi-replica-safe claim/lease mechanism. Database locks MUST be released
-before external provider calls.
+Pending and in-progress work MUST be recovered periodically through durable
+claims that stay safe under concurrent claim attempts; on the service's SQLite
+database the single writer serializes those attempts, which is not a
+distributed multi-replica protocol. Database locks MUST be released before
+external provider calls.
 
 #### Scenario: Process restarts after acceptance
 - **WHEN** the provisioning process restarts with a pending or in-progress
