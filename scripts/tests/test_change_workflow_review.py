@@ -9,8 +9,8 @@ from typing import Sequence
 import pytest
 
 from change_workflow.log import log_path, read_log
-from change_workflow.review import (ReviewError, claim_record, review_and_log, review_models,
-                                    run_review)
+from change_workflow.review import (ReviewError, claim_record, prior_session, review_and_log,
+                                    review_models, run_review)
 from change_workflow.running import live_runs
 from change_workflow.steps import Model, load_steps
 from change_workflow_fixtures import (CHANGE, HEAD, RECORDS, VALIDATED, FakeClaude,
@@ -292,6 +292,21 @@ def test_a_review_of_another_kind_does_not_continue(tmp_path: Path) -> None:
                runner=writing(review_text("implementation"), calls=calls), head=lambda _: HEAD)
 
     assert "resume" not in calls[0]
+
+
+def test_a_closeout_review_does_not_continue_a_pre_closeout_reviewer(tmp_path: Path) -> None:
+    reviews = tmp_path / "reviews"
+    reviews.mkdir()
+    (reviews / "28-pre-closeout.md").write_text(
+        review_text("pre-closeout") + "\n<!-- reviewer-session: codex:pre -->\n", "utf-8")
+
+    assert prior_session(reviews, "closeout") is None
+
+    (reviews / "35-closeout.md").write_text(
+        review_text("closeout") + "\n<!-- reviewer-session: codex:close -->\n", "utf-8")
+
+    assert prior_session(reviews, "closeout") == ("codex", "close", "35-closeout")
+    assert prior_session(reviews, "pre-closeout") == ("codex", "pre", "28-pre-closeout")
 
 
 def test_an_external_review_is_never_continued(tmp_path: Path) -> None:

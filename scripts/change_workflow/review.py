@@ -37,7 +37,7 @@ from change_workflow.harness import (NETWORK_RETRIES, CodexRunner, Reached, Runn
                                      claude_command, codex_command, missing_program,
                                      resume_command, run_claude, run_codex, unreachable)
 from change_workflow.log import LOG, log_path, record_outcome
-from change_workflow.records import (NUMBERED, TRANSCRIPTS, ChangedSince, changed_since,
+from change_workflow.records import (TRANSCRIPTS, ChangedSince, changed_since,
                                      is_documentation, is_record, next_number,
                                      validation_problem)
 from change_workflow.running import recorded_run, runs_directory
@@ -187,10 +187,13 @@ def prior_session(reviews: Path, kind: str) -> tuple[str, str, str] | None:
     review of `kind`.
 
     Records are ordered by number, not by name: `101-` sorts before `94-` as text.
+    The kind is matched whole, since one kind may end another's name: a glob for
+    `*-closeout.md` also takes `NN-pre-closeout.md`.
     """
+    record_of_kind = re.compile(rf"^(\d+)-{re.escape(kind)}\.md$")
     records = sorted((int(match.group(1)), entry) for entry in
-                     (reviews.glob(f"[0-9]*-{kind}.md") if reviews.is_dir() else [])
-                     if (match := NUMBERED.match(entry.name)))
+                     (reviews.iterdir() if reviews.is_dir() else [])
+                     if (match := record_of_kind.match(entry.name)))
     for _, record in reversed(records):
         # The last marker is the record's own; an earlier one may be quoted.
         if sessions := _SESSION_MARKER.findall(record.read_text("utf-8")):
