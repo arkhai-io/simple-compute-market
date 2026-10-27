@@ -197,6 +197,8 @@ reservation states were never shipped and do not require compatibility handling.
   `FulfillmentProvider`/`ProviderRegistry` gain a production caller;
   `pools-2`'s and `pools-3`'s deferred durability/wiring items get
   resolved against a real call shape.
+- `vm-storefront-fulfillment`: the storefront's fulfillment request
+  carries no `connectivity` field, which provisioning refuses.
 
 ## Dependencies and Related Changes
 

@@ -2157,8 +2157,10 @@ Per `openspec/README.md#plan-closeout-requirements`.
 - [ ] 13.3 **Documentation compliance.** Re-check this change's accepted decisions
       against `openspec/README.md`'s placement rules, and the permanent documents
       against the code they describe. It carries delta specs for
-      `physical-provisioning` and `site-capacity`; confirm durable conceptual rationale
-      sits in the companion `architecture.md` rather than only in `design.md`.
+      `physical-provisioning`, `site-capacity`, and `vm-storefront-fulfillment` (the
+      last added by the fix for review 17 F1, named here per review 28 F1); confirm
+      durable conceptual rationale sits in the companion `architecture.md` rather than
+      only in `design.md`.
 - [ ] 13.4 **Narrative compression.** Compress completed-task notes to final behavior,
       material validation evidence, unresolved or deferred work, and
       permanent-documentation destinations, moving durable rationale into `design.md`
@@ -2187,8 +2189,9 @@ Per `openspec/README.md#plan-closeout-requirements`.
       design-promotion record, mapping every accepted decision to its exact permanent
       heading, and verify no production source references
       `openspec/changes/pools-7-storefront-fulfillment-cutover`. A `spec.md` the deltas cover
-      (`physical-provisioning`, `site-capacity`) is written by the archive in 13.11, not
-      by hand; the record names it all the same.
+      (`physical-provisioning`, `site-capacity`, `vm-storefront-fulfillment`) is written
+      by the archive in 13.11, not by hand; the record names it all the same, and 13.11
+      checks the merged text of each.
       *Superseded decisions (2026-10-05, `bare-metal-mock-provisioned-deal` 5B.8):*
       - Do not promote the following as current behaviour; record each as superseded by
         that change instead:
