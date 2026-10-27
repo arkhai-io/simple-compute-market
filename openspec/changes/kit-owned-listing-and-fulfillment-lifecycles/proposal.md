@@ -142,3 +142,7 @@ None.
 - Coordinates with `add-api-credits-hosted-settlement` (the issuance evidence an
   envelope would wrap) and `add-alkahest-attestation-reference-query` (reconciling a
   parked submission).
+- `resolve-compute-family-findings` (its design's decision D8, 2026-10-27) makes a ready
+  step that defers for a pending delivery a non-failure in `kit/settlement-runtime`,
+  rechecked on the next servicing cycle without lengthening the error backoff. The
+  proposed start path's "pending" answer inherits that cadence.

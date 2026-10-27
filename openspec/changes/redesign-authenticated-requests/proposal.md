@@ -36,6 +36,54 @@ authorities' stores. Built on the present design, it would add a third body-reta
 store with the same two problems. It is blocked on this change so the two are not
 designed in the wrong order.
 
+*Expanded 2026-10-27, by `resolve-compute-family-findings`' design (its decision D3), to
+the shared `kit/identity` request contract, and renamed from
+`redesign-authenticated-replay-state` to match.* The direction is independently operated
+sites and storefronts, and one storefront serving several sites, and the version 2
+request envelope does not carry what that needs:
+
+- **It binds no audience.** `RequestEnvelope` (`kit/identity/src/market_identity/models.py`)
+  signs role, principal, method, operation, resource, request identity, timestamp, and
+  body hash, and nothing naming the authority the request is addressed to. Replay is
+  reserved per authority. Once one storefront principal is trusted by several sites, a
+  request it signed for site A verifies at site B, whose store has never seen it, and
+  for an operation whose resource is not site-specific — a reservation against a pool
+  both sites name, a projection read — the replay acts. That makes audience binding a
+  replay question as much as an envelope one.
+- **A request does not state its operation.** The signature binds the operation, but the
+  request does not name it, so an authority that cannot route a request cannot sign its
+  answer (`resolve-compute-family-findings` keeps those answers unsigned, by status), and
+  cannot tell a caller whose route table differs from its own that it signed operation X
+  where this service binds Y; it answers 403. A stated operation lets an authority sign
+  "operation not served" over the caller's own claim, report version skew as skew, give
+  a newer storefront evidence to degrade against an older site, and match and authorize
+  on the operation rather than on how a proxy spelled the path. It also lets every replay
+  row record its operation, which today's rows cannot.
+
+Before 1.0 the envelope may change incompatibly (`docs/development/RELEASING.md`,
+"Versioning policy"): a version 3 protocol identifier is defined beside version 2, and
+the release that introduces it may stop accepting version 2.
+
+`service-identity-signing` was found delivered by `add-nonchain-marketplace-identities`
+and later changes, its requirements already in the permanent specifications. What its
+tasks left undone moves here:
+
+- the API-credits service's shared-secret fallback (`storefront_admin_key`,
+  `AdminKeyAuthMiddleware`) and the `X-Admin-Key` the Python credits client still sends,
+  removed only after `sign-multi-language-credits-middleware` signs the TypeScript and
+  Rust middlewares, whose interim position relies on the fallback;
+- the API-credits service's trusted principals, read from the environment with no
+  durable rotation;
+- one site-registry interface returning `(site_id, url, principal)`, where principals
+  come through `ServicePeerTrust` and URLs straight from configuration;
+- provisioning-side explicit principal retirement and disablement, which
+  `physical-provisioning` requires and the service lacks, and an operator route to the
+  storefront's existing disablement;
+- the VM storefront's callback middleware's unsigned authentication refusals, contrary
+  to `marketplace-identity`;
+- a runtime protocol-capability check, and exact `arkhai-kit-identity` pins in
+  `kit/site` and `kit/arkhai-payments`.
+
 ## What changes
 
 This change is in design. Its direction, to be settled by the decisions in
@@ -56,6 +104,10 @@ This change is in design. Its direction, to be settled by the decisions in
 - **The requirement is restated.** `marketplace-identity`'s "an exact reuse MUST
   resolve to the recorded operation outcome" is revised to say how each kind of route
   resolves one, and for how long.
+- **A version 3 request envelope** states its operation and binds its audience, and
+  every authority's middleware and typed client moves to it; an authority signs its
+  answer to a request it cannot route, over the operation the request states.
+- **What `service-identity-signing` left undone**, listed under Why.
 
 ## Design questions this owes
 
@@ -67,9 +119,14 @@ becomes of `retain-authenticated-request-outcomes`.
 
 ## What this change does not cover
 
-- The request and response signature protocol, principal binding, and skew
-  enforcement on first use, all of which conform and are unchanged.
+- Skew enforcement on first use, which conforms and is unchanged.
 - The introduction record's retention, which `contact-payload-retention` owns.
+- A signed answer to a route that raises after authentication, which
+  `unbacked-bare-metal-listings` owns.
+
+If design finds that bounded replay state and the version 3 envelope can land
+separately, it may split them again; what argues for one change is that both rewrite
+every authority's middleware.
 
 ## Permanent documentation impact
 
@@ -88,3 +145,6 @@ becomes of `retain-authenticated-request-outcomes`.
 - Where the shared replay store lives in the package layers →
   `docs/development/ARCHITECTURE.md`
 - Any operator-configurable horizon → `docs/development/DEPLOYMENT_AND_CONFIG.md`
+- The version 3 envelope, its audience binding, and signed answers to unroutable
+  requests → `openspec/specs/marketplace-identity/spec.md` and `architecture.md`;
+  `docs/development/ARCHITECTURE.md`, "Authenticated service boundaries"
