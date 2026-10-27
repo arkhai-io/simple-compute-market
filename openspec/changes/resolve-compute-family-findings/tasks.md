@@ -321,7 +321,34 @@ Shared with the branch:
 The e2e harness keeps its own client until section 21. The paths and signed
 operations do not change, so it keeps working.
 
-- [ ] 3.1 VM's `routes.py` replaces its hand-written test entries with
+**Stopped before implementation, for the owner (D2's rule).** Section 3's
+rename of `arkhai_bare_metal.provisioning_client` removes the export
+`BARE_METAL_PROVISIONING_ROUTES`, and a file this plan does not name imports
+it: `e2e-tests/src/e2e_harness/provisioning_test_client.py` (lines 42 and
+74–76) builds its signing table from it, so `make test`'s e2e unit suite and
+every lane would fail at import. The harness module itself is not the
+branch's: the branch at `c6e2108` changes nothing under
+`e2e-tests/src/e2e_harness/`. But the harness then needs a newer
+`arkhai-bare-metal` (the rename takes `0.12.0` → `0.13.0`) and, to build
+the mount, `MockRouteMount` from contracts `0.10.0`, and both floors sit in
+`e2e-tests/pyproject.toml`, which the branch edits:
+- the branch raises lines 12–13 (contracts `>=0.10.0`, client `>=0.8.0`);
+  raising line 12 alone overlaps that hunk, so it merges cleanly only if this
+  section raises both lines to the branch's exact values;
+- the branch replaces lines 43–44 (the bare-metal buyer and core buyer
+  floors); line 42, `arkhai-bare-metal>=0.11.0`, is adjacent with no
+  unchanged line between, so raising it is a hunk touching the branch's.
+
+Nothing of section 3 was written when this was found.
+
+**The owner's decision (B).** Section 3 also edits the e2e harness to build
+bare metal's mount from `arkhai_bare_metal.provisioning_routes`' values, and
+raises `e2e-tests/pyproject.toml`'s lines 12–13 to the branch's exact values
+and line 42 to the renamed `arkhai-bare-metal`. The line-42 hunk touches the
+branch's, accepting a one-line conflict when the branch merges, resolved by
+keeping both sides' lines.
+
+- [x] 3.1 VM's `routes.py` replaces its hand-written test entries with
   `MockRouteMount("/test", "provisioning_test").route_declarations()`. VM's test
   controller answers with the family's models. VM's own mock-rule models in
   `models/system_model.py` are removed (D14).
@@ -330,7 +357,23 @@ operations do not change, so it keeps working.
   - every mounted route resolves to exactly one contract;
   - every contract resolves to a mounted route;
   - VM's paths and operations are unchanged.
-- [ ] 3.2 Rename bare metal's `provisioning_client.py` to `provisioning_routes.py`
+
+  The mount is `vm_provisioning_operator.VM_MOCK_ROUTE_MOUNT`, spliced into
+  `VM_PROVISIONING_ROUTES` where the hand-written entries were; VM's test
+  controller takes its router prefix from it, reads `MockRuleCreate`, and
+  answers `MockJobEvaluation`. Of `system_model.py`, `EvaluateJobResponse` is
+  removed; `EvaluateJobRequest` stays, since an evaluated job's fields are VM's
+  job parameters, not the family's. Unit: the binding tests run unchanged
+  over the app with the mock profile active (the service `Makefile` sets
+  `ACTIVE_PROFILES=mock`), so every mounted mock route resolves to one
+  contract and every contract to a mounted route; new in
+  `test_route_table_composition.py`,
+  `test_each_domain_contributes_its_mock_routes_from_the_family_template`
+  (both adapters' mock contributions equal their mounts' declarations in
+  method, path, operation, roles, and bound resource) and
+  `test_vm_mock_routes_are_served_at_their_signed_paths_and_operations` (the
+  literal paths and operations VM's callers sign). Pass.
+- [x] 3.2 Rename bare metal's `provisioning_client.py` to `provisioning_routes.py`
   and reduce it to bare metal's two mount values. The bare-metal adapter builds
   the mount from them and contributes its declarations (D14).
   Verify:
@@ -338,7 +381,30 @@ operations do not change, so it keeps working.
     compute dependency.
   - The adapter's route contracts equal the mount's declarations, which 3.1's
     binding tests check.
-- [ ] 3.3 The service integration harness calls the family client for rules and
+
+  The values are `BARE_METAL_MOCK_ROUTE_PREFIX` and
+  `BARE_METAL_MOCK_OPERATION_PREFIX`, exported from `arkhai_bare_metal` in
+  place of `BARE_METAL_PROVISIONING_ROUTES`. The adapter's
+  `controllers/test_controller.py` builds `BARE_METAL_MOCK_ROUTE_MOUNT` from
+  them, takes its router prefix from it, and `routers.bare_metal_route_contracts`
+  returns its declarations; the controller reads `MockRuleCreate` and answers
+  `MockJobEvaluation` in place of `BareMetalMockRuleRequest` and
+  `BareMetalEvaluateJobResponse` (its evaluate request stays bare metal's).
+  `domains/bare_metal/tests/test_provisioning_client.py` became
+  `test_provisioning_routes.py`, asserting the two values. `make
+  check-packaging`, which runs `make check-architecture`, passes with
+  `arkhai-bare-metal` declaring no compute dependency.
+
+  Outside the plan's files, by the owner's decision B above:
+  `e2e-tests/src/e2e_harness/provisioning_test_client.py` builds bare metal's
+  part of its signing table from a `MockRouteMount` of those values, and
+  `e2e-tests/pyproject.toml` raises the contracts and client floors to the
+  branch's exact values (`0.10.0`, `0.8.0`) and `arkhai-bare-metal` to
+  `>=0.13.0` (the accepted one-line conflict). `make -C e2e-tests test
+  PYTEST_ARGS="--collect-only -q …"` over the VM and bare-metal scenario
+  directories collects 178 tests, so every scenario module, the harness
+  included, imports; the e2e unit suite does not import the harness.
+- [x] 3.3 The service integration harness calls the family client for rules and
   job evaluation. In `conftest.py`, `AsyncProvisioningTestClient`'s rule and
   evaluate-job methods go through `MockRuleClient` with each domain's mount. The
   shared `/test/jobs/*` drain and wait stay where they are (D14; TESTING.md's
@@ -363,14 +429,81 @@ operations do not change, so it keeps working.
   - `provisioning/compute/service/tests/unit/test_provisioning_client_contract.py`
     adds the `MockRuleClient`/`SyncMockRuleClient` pair to its sync/async
     parity guardrail (TESTING.md, "Sync/async client parity").
-- [ ] 3.4 Bump `arkhai-bare-metal` by a minor version, since the module is
+
+  Done. `AsyncProvisioningTestClient` builds a family client signed as the
+  administrator and two `MockRuleClient`s, `vm_rules` with
+  `VM_MOCK_ROUTE_MOUNT` and `bare_metal_rules` with a mount built from
+  `arkhai_bare_metal`'s two values (the service's `dev` floor on
+  `arkhai-bare-metal` rises to `>=0.13.0`, the branch's value); its rule and
+  evaluate methods keep their names and return the family's models, and only
+  the `/test/jobs/*` reads stay its own requests. A refused rule call now
+  raises the family's `ComputeProvisioningError`. Both adapters read
+  `MockRuleCreate`, and `MockRuleRouteService.add` takes only that model.
+  Application integration, through the family client against the in-process
+  app:
+  - `test_test_controller.py` `TestMockRuleCrud`, whose fixture runs VM's
+    executor on the runner VM's rule routes reach: VM rules added and listed
+    (compared with the models), deleted (an existing rule's answer compared
+    with the model, a missing rule's `deleted` read), and an unknown resume
+    answers 404. New `test_a_vm_rule_holds_a_vm_job_until_resumed`: a gated
+    rule installed through VM's mount holds a VM create job, is listed with
+    one waiting job, and resuming it through the mount releases the job, which
+    succeeds.
+  - `test_bare_metal_mock_profile.py`: bare metal's add, list, evaluate,
+    resume, and unknown resume, answers typed. New
+    `test_a_rule_installed_through_vms_mount_is_not_bare_metals`: a catch-all
+    rule installed through VM's mount is listed by VM's routes alone, absent
+    from bare metal's runner, and bare metal's dry run meets no rule. With the
+    existing assertion that a bare-metal rule leaves VM's list empty, rules
+    installed through one mount are in that domain's rule set only. That a
+    VM rule never meets a bare-metal *job* follows from each adapter's mock
+    owning its own rule set; this harness runs bare metal's jobs on a runner
+    separate from the one VM's routes reach, so it does not exercise that at
+    the job level.
+  - `TestBareMetalTestRouteCoverage`: every bare-metal mock route; added,
+    evaluated, resumed, and deleted compared with the models, the listing
+    read as `(rule_id, waiting)`.
+  - `test_system_api.py` `TestEvaluateJob`: VM's dry run, its answer parsed
+    into `MockJobEvaluation`; new `test_the_answer_states_every_field`
+    checks that the route states all five fields rather than leaving the
+    model's defaults to fill three, replacing the test that checked a dict's
+    keys. The class's imports are not touched, being the branch's lines.
+
+  `test_lease_release_api.py` needed no edit, as planned. The parity
+  guardrail includes the mock-rule pair. Service: unit 661 passed, application
+  integration 538 passed.
+- [x] 3.4 Bump `arkhai-bare-metal` by a minor version, since the module is
   renamed. Bump the VM and bare-metal adapters and the VM operator client.
   Raise the service's `dev` floor on the client to section 2's bump. Run
   `make lock`.
 
   Amended in section 2: both adapters took their bump there (VM `0.14.0`,
   bare metal `0.10.0`), so this task does not bump them again.
-- [ ] 3.5 **Verification checkpoint.**
+
+  `arkhai-bare-metal` `0.12.0` → `0.13.0`; VM operator client `0.9.1` →
+  `0.10.0`, its contracts floor raised to `0.10.0`. Floors raised where the
+  consumer needs this section's change, each to the branch's exact value
+  where the branch raises the same line, so those hunks are identical:
+  - the VM adapter: `arkhai-compute-provisioning>=0.20.0` (the branch's line)
+    and the operator client `>=0.10.0` (not the branch's, one unchanged line
+    from it);
+  - the bare-metal adapter: `arkhai-bare-metal>=0.13.0` and
+    `arkhai-compute-provisioning>=0.20.0` (both the branch's lines and
+    values);
+  - the service: its `adapters` extra (`>=0.14.0`, `>=0.10.0`) and its `dev`
+    floors on both adapters, `arkhai-bare-metal` (`>=0.13.0`), and the client
+    (`>=0.8.0`), all the branch's values. The service's `dev` floor on the
+    operator client stays `>=0.9.0` although the conftest imports
+    `VM_MOCK_ROUTE_MOUNT`, new in `0.10.0`: the line is adjacent to a
+    branch-edited one, and the VM adapter floor beside it already requires
+    `>=0.10.0`, so no resolvable environment lacks it. Section 21, which
+    edits these callers again after the merge, can raise it then.
+
+  An adapter now passes a `MockRuleCreate` to `MockRuleRouteService.add`,
+  which only the family kit `0.20.0` takes, hence the family-kit floors. No
+  service bump: its runtime code is unchanged. `make lock` updated every lock
+  resolving the bumped packages.
+- [x] 3.5 **Verification checkpoint.**
   - Unit: 3.1 and 3.2.
   - Application integration: 3.3.
   - Run `make test` in `domains/vms/provisioning/client`,
@@ -387,6 +520,30 @@ operations do not change, so it keeps working.
 
   Passing lanes are the evidence that the wire did not change. No scenario is
   owed.
+
+  `make test`: `domains/vms/provisioning/adapter` 37 passed,
+  `domains/bare_metal` 133, `domains/bare_metal/provisioning/adapter` 46,
+  `provisioning/compute/service` 661 unit and 538 application integration,
+  `provisioning/compute` 237; `domains/vms/provisioning/client` has no tests
+  or `Makefile`, so its declarations are tested through the service's binding
+  and composition suites. The full `make test` passes; `make
+  check-packaging` passes; `make check-change` passes but for the closeout
+  citation section 1 notes. The end-to-end statement is amended in one
+  respect: the bare-metal lane's passing scenarios will also be the evidence
+  that the harness's bare-metal table, now built from bare metal's mount
+  (3.2), signs as the service authenticates. Validation has not run them yet.
+
+  Handoff: the fresh-context check found that the first VM-rule isolation
+  test proved less than claimed (the service harness runs no executor on the
+  runner VM's routes reach), that parsing into `MockJobEvaluation` cannot
+  catch omitted fields, and that the conftest took bare metal's mount from the
+  adapter's controller rather than from bare metal's values; each was
+  corrected as recorded above. It also noted a pre-existing mid-file import
+  in the service conftest (`compute_provisioning_service.main`, after the test
+  client class), which this section did not add and left. The merge of `unbacked-bare-metal-listings` will conflict on
+  `e2e-tests/pyproject.toml`'s `arkhai-bare-metal` line, by the owner's
+  decision B; keep `>=0.13.0` and the branch's two buyer lines below it.
+  Every other floor this section raised equals the branch's line exactly.
 
 ## 4. An operator-named VM guest satisfies provisioning's naming rules
 

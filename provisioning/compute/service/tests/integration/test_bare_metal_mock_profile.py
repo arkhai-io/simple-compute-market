@@ -22,12 +22,14 @@ from bare_metal_provisioning_adapter.services.mock_output import bare_metal_mock
 from compute_provisioning_service import container as _container_module
 from compute_provisioning_ansible import MockAnsibleRunner
 from compute_provisioning.jobs.queue import AsyncJobQueue
+from compute_provisioning_client import ComputeProvisioningError
 from compute_provisioning_contracts import (
     ACCESS_DELIVERY_KIND,
     CREATE_JOB_RESULT_KIND,
     AccessDelivery,
     CreateJobResult,
     LeaseTermination,
+    MockJobEvaluation,
 )
 
 from .bare_metal_deal import (
@@ -39,7 +41,6 @@ from .bare_metal_deal import (
     create_job_id,
     schedule,
 )
-from .conftest import AsyncProvisioningTestClientError
 
 
 @pytest.fixture
@@ -85,9 +86,9 @@ async def test_a_held_grant_runs_through_the_bare_metal_mock(
     preview = await test_client.evaluate_bare_metal_job(
         HOST_ID, action=NODE_GRANT_ACCESS_ACTION
     )
-    assert preview["host_exists"] is True
-    assert preview["rule_matched"] == "grant-gate"
-    assert preview["would_pause"] is True
+    assert preview == MockJobEvaluation(
+        params_valid=True, host_exists=True, rule_matched="grant-gate", would_pause=True
+    )
 
     dispatched, first_dispatch = _record_dispatches(job_queue)
     await begin(clients, capacity_reservation_id, "escrow-bm-mock")
@@ -100,9 +101,8 @@ async def test_a_held_grant_runs_through_the_bare_metal_mock(
     )
 
     rules = await test_client.list_bare_metal_mock_rules()
-    assert rules[0]["rule_id"] == "grant-gate"
-    assert rules[0]["paused"] is True
-    assert rules[0]["waiting"] == 1
+    assert (rules[0].rule_id, rules[0].paused, rules[0].waiting) == ("grant-gate", True, 1)
+    # A bare-metal rule is installed through bare metal's mount alone.
     assert await test_client.list_mock_rules() == []
     job = _container_module.resolved_job_engine.get_job(grant_job_id)
     assert job.status not in {"succeeded", "failed"}
@@ -117,7 +117,7 @@ async def test_a_held_grant_runs_through_the_bare_metal_mock(
     (endpoint,) = created.evidence.endpoints
     assert (endpoint.protocol, endpoint.host, endpoint.port) == ("ssh", SSH_HOST, 2201)
     assert endpoint.user
-    assert (await test_client.list_bare_metal_mock_rules())[0]["waiting"] == 0
+    assert (await test_client.list_bare_metal_mock_rules())[0].waiting == 0
 
 
 
@@ -151,7 +151,7 @@ async def test_cancelling_a_held_grant_ends_its_execution_without_a_resume(
     )
     await asyncio.wait_for(job_queue.wait_until_idle(), timeout=5.0)
     rules = await test_client.list_bare_metal_mock_rules()
-    assert (rules[0]["paused"], rules[0]["waiting"]) == (True, 0)
+    assert (rules[0].paused, rules[0].waiting) == (True, 0)
     # The run ended as a failed playbook after the cancellation was committed;
     # that late outcome does not replace it.
     job = _container_module.resolved_job_engine.get_job(grant_job_id)
@@ -173,8 +173,23 @@ async def test_a_bare_metal_rule_can_fail_a_grant(test_client, client_and_queue)
     assert "host unreachable" in finished["error"]
 
 
+async def test_a_rule_installed_through_vms_mount_is_not_bare_metals(
+    test_client, bare_metal_runner, client_and_queue
+) -> None:
+    """A catch-all rule installed through VM's mount is in VM's rules alone:
+    bare metal's routes neither list it nor evaluate a job against it."""
+    await test_client.add_mock_rule(rule_id="vm-catch-all", match={}, fail_with="VM rule met")
+
+    preview = await test_client.evaluate_bare_metal_job(HOST_ID, action=NODE_GRANT_ACCESS_ACTION)
+
+    assert preview.rule_matched is None
+    assert await test_client.list_bare_metal_mock_rules() == []
+    assert bare_metal_runner.list_rules() == []
+    assert [rule.rule_id for rule in await test_client.list_mock_rules()] == ["vm-catch-all"]
+
+
 async def test_bare_metal_rule_routes_refuse_an_unknown_resume(test_client) -> None:
-    with pytest.raises(AsyncProvisioningTestClientError) as refused:
+    with pytest.raises(ComputeProvisioningError) as refused:
         await test_client.resume_bare_metal_rule("missing")
     assert refused.value.status_code == 404
 

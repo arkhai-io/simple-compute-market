@@ -39,8 +39,12 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 import httpx
-from arkhai_bare_metal import BARE_METAL_PROVISIONING_ROUTES
+from arkhai_bare_metal import (
+    BARE_METAL_MOCK_OPERATION_PREFIX,
+    BARE_METAL_MOCK_ROUTE_PREFIX,
+)
 from compute_provisioning_contracts import (
+    MockRouteMount,
     assemble_provisioning_route_table,
     canonical_provisioning_request_body,
     resolve_provisioning_route_contract,
@@ -71,8 +75,13 @@ log = logging.getLogger(__name__)
 
 # The routes the provisioning service authenticates under the mock profile:
 # the family kit's and each composed domain's, including their test routes.
+# Bare metal mounts only the family's mock routes, so its declarations are its
+# mount's.
 _ROUTE_TABLE = assemble_provisioning_route_table(
-    VM_PROVISIONING_ROUTES, BARE_METAL_PROVISIONING_ROUTES
+    VM_PROVISIONING_ROUTES,
+    MockRouteMount(
+        BARE_METAL_MOCK_ROUTE_PREFIX, BARE_METAL_MOCK_OPERATION_PREFIX
+    ).route_declarations(),
 )
 
 

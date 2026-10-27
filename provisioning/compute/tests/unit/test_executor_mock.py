@@ -188,11 +188,11 @@ def test_route_service_drives_its_own_rule_set() -> None:
     assert routes.delete("r") == MockRuleDeleted(rule_id="r", deleted=False)
 
 
-def test_route_service_reads_a_rule_given_as_a_mapping() -> None:
+def test_route_service_assigns_a_rule_id_and_hides_the_output() -> None:
     rules = MockRuleSet()
     routes = MockRuleRouteService(lambda: rules)
 
-    added = routes.add({"match": {"action": "grant"}, "result_stdout": "out"})
+    added = routes.add(MockRuleCreate(match={"action": "grant"}, result_stdout="out"))
 
     assert isinstance(added, MockRuleAdded) and added.rule_id
     [listed] = routes.list()

@@ -234,8 +234,7 @@ class MockRuleRouteService:
             )
         return rule_set
 
-    def add(self, body: MockRuleCreate | Mapping[str, Any]) -> MockRuleAdded:
-        request = MockRuleCreate.model_validate(body)
+    def add(self, request: MockRuleCreate) -> MockRuleAdded:
         rule = self._rule_set().add(
             MockRule(
                 rule_id=request.rule_id,

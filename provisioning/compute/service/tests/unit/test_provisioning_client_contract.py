@@ -2,10 +2,11 @@
 
 The compute provisioning client distribution is the family's authoritative
 inter-service client, and VM and the Ansible implementation extend it over its
-transport. None keeps contract-validation machinery of its own, so the service
-suite owns the guardrail that each async and sync pair exposes the same public
-operations with the same signatures. Behaviour through the real
-routes is the integration suite's.
+transport, as the family's mock-rule client does for each domain's mount. None
+keeps contract-validation machinery of its own, so the service suite owns the
+guardrail that each async and sync pair exposes the same public operations
+with the same signatures. Behaviour through the real routes is the
+integration suite's.
 """
 
 from __future__ import annotations
@@ -14,7 +15,12 @@ import inspect
 import time
 
 import pytest
-from compute_provisioning_client import ComputeProvisioningClient, SyncComputeProvisioningClient
+from compute_provisioning_client import (
+    ComputeProvisioningClient,
+    MockRuleClient,
+    SyncComputeProvisioningClient,
+    SyncMockRuleClient,
+)
 from compute_provisioning_ansible.host_import import (
     AnsibleHostImportClient,
     SyncAnsibleHostImportClient,
@@ -35,10 +41,11 @@ def _public_methods(cls: type) -> dict[str, inspect.Signature]:
     ("async_client", "sync_client"),
     [
         (ComputeProvisioningClient, SyncComputeProvisioningClient),
+        (MockRuleClient, SyncMockRuleClient),
         (VmOperatorClient, SyncVmOperatorClient),
         (AnsibleHostImportClient, SyncAnsibleHostImportClient),
     ],
-    ids=["family", "vm", "ansible-host-import"],
+    ids=["family", "mock-rules", "vm", "ansible-host-import"],
 )
 def test_async_and_sync_clients_have_matching_public_operations_and_signatures(
     async_client, sync_client

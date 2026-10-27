@@ -1,13 +1,14 @@
 [project]
 name = "arkhai-vms-provisioning-operator-client"
-version = "0.9.1"
+version = "0.10.0"
 license = "MIT"
 description = "VM's provisioning route declarations, wire models, and typed client."
 requires-python = ">=3.12"
 dependencies = [
-    # The family's wire contract, for the job responses VM's operations return.
-    # The transport is the family client, which a caller supplies.
-    "arkhai-compute-provisioning-contracts>=0.9.0",
+    # The family's wire contract, for the job responses VM's operations return
+    # and the mock-route template VM mounts. The transport is the family
+    # client, which a caller supplies.
+    "arkhai-compute-provisioning-contracts>=0.10.0",
     "pydantic>=2.7",
 ]
 

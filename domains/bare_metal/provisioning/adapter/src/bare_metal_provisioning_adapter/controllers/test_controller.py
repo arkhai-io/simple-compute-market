@@ -16,14 +16,21 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from arkhai_bare_metal import BARE_METAL_ACCESS_ACTIONS
+from arkhai_bare_metal import (
+    BARE_METAL_ACCESS_ACTIONS,
+    BARE_METAL_MOCK_OPERATION_PREFIX,
+    BARE_METAL_MOCK_ROUTE_PREFIX,
+)
 from compute_provisioning.route_errors import ProvisioningRouteError
 from compute_provisioning.jobs.executor_mock import (
     MockRuleRouteService,
     MockRuleSet,
 )
 from compute_provisioning_contracts import (
+    MockJobEvaluation,
+    MockRouteMount,
     MockRuleAdded,
+    MockRuleCreate,
     MockRuleDeleted,
     MockRuleResumed,
     MockRuleView,
@@ -31,28 +38,20 @@ from compute_provisioning_contracts import (
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-
-class BareMetalMockRuleRequest(BaseModel):
-    rule_id: str = ""
-    match: dict[str, Any] = Field(default_factory=dict)
-    pause_before_result: bool = False
-    result_stdout: str | None = None
-    fail_with: str | None = None
+#: Where bare metal mounts the family's mock routes; their signed contracts are
+#: this mount's declarations.
+BARE_METAL_MOCK_ROUTE_MOUNT = MockRouteMount(
+    BARE_METAL_MOCK_ROUTE_PREFIX, BARE_METAL_MOCK_OPERATION_PREFIX
+)
 
 
 class BareMetalEvaluateJobRequest(BaseModel):
+    """A bare-metal job, as its stored parameters name it, to dry-run."""
+
     host: str = Field(min_length=1)
     action: str = Field(min_length=1)
     physical_host_id: str | None = None
     escrow_uid: str | None = None
-
-
-class BareMetalEvaluateJobResponse(BaseModel):
-    params_valid: bool
-    host_exists: bool
-    rule_matched: str | None = None
-    would_pause: bool = False
-    errors: list[str] = Field(default_factory=list)
 
 
 def _routed(call):
@@ -73,7 +72,7 @@ def make_mock_router(
     mock profile; ``host_authority`` resolves the host registry a dry run
     checks the host against. Both are read per request.
     """
-    router = APIRouter(prefix="/test/bare-metal", tags=["test", "bare-metal"])
+    router = APIRouter(prefix=BARE_METAL_MOCK_ROUTE_MOUNT.prefix, tags=["test", "bare-metal"])
 
     def mock_rules() -> MockRuleSet | None:
         mock = mock_executor()
@@ -90,8 +89,8 @@ def make_mock_router(
     rule_routes = MockRuleRouteService(mock_rules)
 
     @router.post("/mock-rules", summary="Add a bare-metal mock rule")
-    def add_mock_rule(body: BareMetalMockRuleRequest) -> MockRuleAdded:
-        return _routed(lambda: rule_routes.add(body.model_dump()))
+    def add_mock_rule(body: MockRuleCreate) -> MockRuleAdded:
+        return _routed(lambda: rule_routes.add(body))
 
     @router.get("/mock-rules", summary="List bare-metal mock rules")
     def list_mock_rules() -> list[MockRuleView]:
@@ -109,10 +108,9 @@ def make_mock_router(
 
     @router.post(
         "/evaluate-job",
-        response_model=BareMetalEvaluateJobResponse,
         summary="Dry-run: would this bare-metal job run, and which rule would it meet?",
     )
-    def evaluate_job(body: BareMetalEvaluateJobRequest) -> BareMetalEvaluateJobResponse:
+    def evaluate_job(body: BareMetalEvaluateJobRequest) -> MockJobEvaluation:
         rules = _routed(rule_set)
         hosts = host_authority()
         if hosts is None:
@@ -130,6 +128,6 @@ def make_mock_router(
                 f"action must be one of {', '.join(BARE_METAL_ACCESS_ACTIONS)}"
             )
             report["params_valid"] = False
-        return BareMetalEvaluateJobResponse(**report)
+        return MockJobEvaluation(**report)
 
     return router

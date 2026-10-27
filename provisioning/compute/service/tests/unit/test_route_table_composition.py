@@ -13,7 +13,7 @@ import re
 
 import pytest
 from bare_metal_provisioning_adapter.routers import bare_metal_route_contracts
-from compute_provisioning_contracts import PROVISIONING_ROUTE_CONTRACTS
+from compute_provisioning_contracts import PROVISIONING_ROUTE_CONTRACTS, MockRouteMount
 from vm_provisioning_adapter.routers import vm_route_contracts
 
 from compute_provisioning_service.route_table import (
@@ -40,6 +40,40 @@ def test_every_assembled_route_resolves_to_itself(contract) -> None:
 
     assert resolved is contract
     assert resource == contract.match(contract.method, path, body)
+
+
+def _signed(declarations) -> list[tuple]:
+    return [
+        (d["method"], d["path"], d["operation"], tuple(d["roles"]), d.get("path_resource"))
+        for d in declarations
+    ]
+
+
+def test_each_domain_contributes_its_mock_routes_from_the_family_template() -> None:
+    vm_mount = MockRouteMount("/test", "provisioning_test")
+    bare_metal_mount = MockRouteMount("/test/bare-metal", "provisioning_test_bare_metal")
+    vm_mock = [d for d in vm_route_contracts() if d["path"].startswith("/test/")]
+
+    assert _signed(vm_mock) == _signed(vm_mount.route_declarations())
+    assert _signed(bare_metal_route_contracts()) == _signed(
+        bare_metal_mount.route_declarations()
+    )
+
+
+def test_vm_mock_routes_are_served_at_their_signed_paths_and_operations() -> None:
+    vm_mock = {
+        (d["method"], d["path"], d["operation"])
+        for d in vm_route_contracts()
+        if d["path"].startswith("/test/")
+    }
+
+    assert vm_mock == {
+        ("POST", "/test/mock-rules", "provisioning_test_rule_add"),
+        ("GET", "/test/mock-rules", "provisioning_test_rules_list"),
+        ("DELETE", "/test/mock-rules/(?P<rule_id>[^/]+)", "provisioning_test_rule_delete"),
+        ("POST", "/test/mock-rules/(?P<rule_id>[^/]+)/resume", "provisioning_test_rule_resume"),
+        ("POST", "/test/evaluate-job", "provisioning_test_job_evaluate"),
+    }
 
 
 def test_every_contributed_route_admits_admin() -> None:
