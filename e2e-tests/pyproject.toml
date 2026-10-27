@@ -40,7 +40,9 @@ dependencies = [
 	"arkhai-vms-storefront>=0.16.0",
     "arkhai-vms-provisioning-operator-client>=0.9.0",
     "arkhai-bare-metal>=0.11.0",
-    "arkhai-bare-metal-buyer>=0.5.0",
+    # Its settlement commands under `market bare-metal`, which the bare-metal
+    # introduction scenarios run.
+    "arkhai-bare-metal-buyer>=0.6.0",
     # The buyer's `market` CLI, run as a subprocess by the buyer-machine
     # e2e (tests/e2e/roles/buyer_cli.py). Installed so the binary is on
     # PATH inside arkhai:e2e-tests when the suite runs in-network.
@@ -105,6 +107,7 @@ markers = [
     "e2e_bare_metal_mock_deal: Bare-metal lane — the canonical compute deal on a mock-profile site, stage for stage with VM's typed-client deal, then a second deal on the freed machine",
     "e2e_vm_introduction: VM lane — backed and unbacked VM listings found by one rate-bounded query; an unbacked listing's introduction negotiated and revealed through the `market` CLI, delivered to the buyer's sink and mailed to the seller through Mailpit",
     "e2e_bare_metal_introduction: Bare-metal lane — an introduction offered by pool override, revealed with its retention disclosed, then deleted by an operator and by the held, stepped retention sweep",
+    "e2e_bare_metal_unbacked_introduction: Bare-metal lane — backed and unbacked whole machines found by one rate-bounded `market bare-metal list`, the unbacked one by the backing filter alone; its introduction revealed through the `market bare-metal` CLI, delivered to the buyer's sink and mailed to the seller through Mailpit, with no fulfillment",
     "e2e_alkahest_escrow_codecs: Real Alkahest escrow codec create/read scenario",
     "e2e_alkahest_trusted_oracle: An ERC-20 escrow released by the trusted-oracle arbiter and collected, against the dev chain",
     "e2e_non_erc20_settlement: Full settlement path for scalar non-ERC20 Alkahest escrow variants",

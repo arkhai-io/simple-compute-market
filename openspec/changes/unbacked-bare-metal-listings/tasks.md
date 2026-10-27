@@ -4125,18 +4125,56 @@ scenario moved onto them, and the bare-metal lane's mail sink (D14, D15, D12;
 the bare-metal lane's compose overlay, and the bare-metal storefront's development
 configuration.
 
-- [ ] 22.1 `e2e-tests/tests/e2e/roles/helpers/introduction_stages.py` (new): the stages VM's
+- [x] 22.1 `e2e-tests/tests/e2e/roles/helpers/introduction_stages.py` (new): the stages VM's
       introduction scenario runs, as non-`Test*` stage classes over a driver protocol each
       domain supplies for supply seeding and its CLI verbs, as `compute_deal_stages.py`
       does; `scenarios/vms/test_vm_introduction.py` moves onto them with a VM driver. A
       source check beside `tests/unit/test_compute_deal_stages.py` holds both domains to the
       shared stages (D14).
-- [ ] 22.2 The lane's mail sink: a `mailpit` service in `compose.bare-metal-local.yml`, so the
+      Done. Four shared stages (disclosure; supply and rate-bounded discovery and the
+      introduction-only option; the CLI reveal and the buyer's sink; the seller's mail)
+      over `IntroductionDriver` and `IntroductionState`, reached through the fixtures
+      `introduction_driver` and `introduction_state` each domain's module provides. Each
+      domain's driver is its own module (`scenarios/vms/introduction_driver.py`,
+      `scenarios/bare_metal/introduction_driver.py`), as the compute deal drivers are.
+      VM's scenario keeps its stages and assertions, now the shared bodies; its driver
+      reports no rateless listing of its own, the shared check that every listing a
+      rate bound returns publishes a rate covering the lane's default listing. The source
+      check, `tests/unit/test_introduction_stages.py`, reuses
+      `test_compute_deal_stages.py`'s readers: the shared stages are not collected where
+      defined, each domain subclasses each once in order with an empty body, each
+      domain's state is the shared state or extends it, and every stage uses only its
+      state's fields.
+      **Correction after the section's fresh-context check:** the drivers wrote the
+      listings into the state themselves, so the source check could not see who
+      produced them. A driver's `seed_supply` now returns a `SeededSupply` the stage
+      records, the state gains `rateless_listings`, and bare metal needs no state
+      subclass. The source readers the two checks share moved into
+      `tests/unit/stage_sources.py`, with `test_compute_deal_stages.py` rewritten onto
+      them, unchanged in what it checks; the introduction check now reads the handoffs
+      test by test: every field used is declared, produced before it is required or
+      read, and written by one test. No consumed-after-produced check: VM's scenario
+      records the negotiation ID that only bare metal's own stage reads.
+      **Corrections from the re-check:** with no state subclass left, the check holds
+      every test to the shared state's fields, so "each domain's state is the shared
+      state or extends it" above no longer holds: a domain's own handoff now needs a
+      shared field. "VM's scenario keeps its assertions" is nearly so: its
+      introduction-only check is now an exact one-option list where it compared sets,
+      and the buyer's contact is the shared `buyer@introduction-e2e.invalid`.
+- [x] 22.2 The lane's mail sink: a `mailpit` service in `compose.bare-metal-local.yml`, so the
       existing `MAILPIT.API_URL` setting applies; `domains/bare_metal/storefront/storefront.dev.toml`
       configures `[Delivery]` with a `seller-mail` SMTP sink to it, as VM's
       `storefront.bob.toml` does; `e2e-tests/tests/unit/test_domain_stack_configuration.py`
       asserts both (D14).
-- [ ] 22.3 `scenarios/bare_metal/test_bare_metal_unbacked_introduction.py` (new), marker
+      Done; the storefront also waits for Mailpit to be healthy, and the sink mails the
+      seller contact the storefront reveals for its one site. The stack test parses the
+      overlay, the storefront's TOML, and the lane's settings, and holds the mail
+      recipient to both the configured contact and the lane's `seller_contact_email`.
+      **Correction:** the overlay's new service broke the compose render test
+      `scripts/tests/test_bare_metal_compose.py`, which asserts the development stack's
+      exact service set; it now expects `mailpit` there and the storefront waiting on
+      it. That test skips where Docker Compose is absent.
+- [x] 22.3 `scenarios/bare_metal/test_bare_metal_unbacked_introduction.py` (new), marker
       `e2e_bare_metal_unbacked_introduction`, holding the storefront's loops through
       Section 13's module hold, with a bare-metal driver: a backed pool with a host-bearing
       declaration and a rate, an unbacked pool (no deliverable mode, advertising
@@ -4149,12 +4187,96 @@ configuration.
       exactly `contact-exchange.v1`; the reveal through `market bare-metal settlement contact
       introduce`, the buyer's file sink receiving the seller's contact and the seller's mail
       reaching the sink; the fulfillment status route answering 404 (D14, D12).
-- [ ] 22.4 `e2e-tests/pyproject.toml` registers the marker; `e2e-tests/Makefile`'s
+      Done, as the shared stages with bare metal's own between them: after supply, a
+      `capacity_backing=unbacked` query returning the unbacked listing and neither backed
+      one, and the unbacked listing stating no delivery term while the backed one states
+      them all; after the mail, the fulfillment status route answering 404 naming that
+      the deal has no fulfillment. The three machines are each in a pool of their own
+      (backed and rated, unbacked and rated, backed and rateless), all through the
+      site's operator and capacity clients; the unbacked pool names
+      `bare_metal.ansible` with no provider configuration and its machine names no host.
+      Discovery is the production `market bare-metal list --resource`, and every
+      bare-metal verb is given the buyer's TOML, which carries its `[bare_metal]` section
+      and `[Delivery]`.
+      **Beyond the files the plan names, found by the section's fresh-context check:**
+      the bare-metal buyer's `request-introduction` had never run against a storefront,
+      and failed three ways the scenario would meet. It passed the seller no advertised
+      option to hold the accept reply's plan to, so the core negotiation client refused
+      every acceptance ("buyer acceptance state omitted the advertised settlement
+      semantics"); it recorded the publisher and seller principals as a bare list,
+      which the core run-log loader refuses, so `settlement contact introduce` could not
+      reload the run; and it decoded none of the provision terms the storefront echoes,
+      so the run-log write failed on a dict. All three are fixed in
+      `domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/cli.py`, as VM's
+      `request-introduction` already does them. Application integration through the
+      production commands (`test_http_introductions.py`,
+      `test_the_buyer_commands_reach_an_introduction_over_their_own_run_log`):
+      `market bare-metal request-introduction` then `market bare-metal settlement contact
+      introduce`, through the core `build_app`, against the served storefront, over a
+      real run log, the registry doubled at the buyer's client and the profile identity
+      resolved to the test buyer; the reveal returns the seller's contact. It failed on
+      the first defect before the fix, on the third with only the first two fixed, and,
+      with the second alone reverted, on the run-log loader's "malformed
+      publisher_principals". The option the doubled registry serves is the storefront's
+      stored one, so that the buyer's hold survives a real registry's round trip is the
+      scenario's to show; the test's buyer configures no delivery sink. The storefront's
+      dev group now declares `arkhai-core-buyer` and the buyer at `>=0.6.0`, whose
+      commands the test runs (`make lock` for the storefront).
+- [x] 22.4 `e2e-tests/pyproject.toml` registers the marker; `e2e-tests/Makefile`'s
       `E2E_BARE_METAL_MODULE` includes it (D14).
-- [ ] 22.5 Version: `arkhai-e2e-tests`; `make lock`.
+      Done.
+- [x] 22.5 Version: `arkhai-e2e-tests`; `make lock`.
+      `arkhai-e2e-tests` is 0.3.0 against `origin/dev`'s 0.2.1, already this change's one
+      bump, so it stays; its floor on `arkhai-bare-metal-buyer` rises to 0.6.0, whose
+      `market bare-metal settlement` the scenario runs. `make lock` relocked `e2e-tests`,
+      with the buyer's 0.6.0 from Section 21.
 - [ ] 22.6 **Verify.** `make test-e2e-unit`; `make -C e2e-tests test-e2e-bare-metal` and
       `test-e2e-vm` (system); `make test`; `make check-packaging`. End-to-end:
       `e2e_bare_metal_unbacked_introduction` and `e2e_vm_introduction`.
+      **Left unchecked:** the two system lanes did not run here, since this session may
+      not run Docker, and they are this section's evidence; the
+      pipeline the round view starts runs them. Passed: e2e-tests unit 122, the release
+      tooling suite with the corrected compose render test, and the bare-metal
+      storefront's run of the production buyer commands (22.3's correction), within
+      `make test`, the Helm render unrun for want of `helm`; `make check-packaging` and
+      `make check-change` passed.
+
+Section 22 notes (handoff):
+
+- **The scenario has not run.** Its first pipeline run is the first time the bare-metal
+  lane's Mailpit, the storefront's `seller-mail` sink, the three-pool supply and the
+  namespaced buyer commands meet; the fresh-context check traced the CLI arguments,
+  JSON keys, fixtures and declarations against the code and found the three buyer
+  defects 22.3's correction fixed, and nothing else.
+- **Left for the owner: the bare-metal `buy` command has the same three defects** as
+  `request-introduction` had: no advertised option passed to the negotiation, the
+  publisher principals recorded as a bare list, and no provision-terms decoder. No
+  scenario or test here runs it, so it is unchanged; it is the Arkhai-payments
+  purchase, outside this change.
+- `storefront.dev.toml`'s seller-mail sink names the development overlay's `mailpit`,
+  which the base bare-metal stack (`compose.bare-metal.yml` alone) does not run. The
+  sink's delivery is never fatal to a reveal, so that stack still reveals; its seller
+  mail goes undelivered.
+- **Declined from the fresh-context check:** taking the scenario's delivery terms from
+  `arkhai_bare_metal`'s `BARE_METAL_LISTING_DELIVERY_TERMS`; a system test stating
+  the wire contract independently catches a term the domain's own constant drops.
+- The proxy reported connections refused to `registry.example` on each bare-metal
+  storefront run that failed (it reports only then); the suites passed otherwise, and
+  no test this change added names that host.
+- **Re-check of the section's fixes**, which found no lane defect. Taken up: the shared
+  stages' docstring said a domain's state may subclass the shared one, which the check
+  forbids; the introduction check now uses the shared readers' stage resolution rather
+  than repeating it; the storefront's dev dependencies; and the note corrections in
+  22.1 and 22.3. **Declined:** replacing the new storefront test's identity patches
+  with a real buyer profile, since a profile is the buyer's secret store and the
+  patches replace only which signer the commands resolve, while the registry double
+  sits at the buyer's own client of that boundary; a buyer-package unit test of the
+  run-log shape, since the storefront test reaches the real loader and was shown to
+  fail on it; and dropping the scenario's fulfillment-404 and delivery-term stages,
+  which 22.3 prescribes, though the storefront's own suite proves both in-process.
+- **Also adjacent and left:** the bare-metal buyer's `_seller_principal` reads a
+  `seller_principals` the core `DealContext` does not carry, so a delivered
+  introduction names no counterparty to the buyer's sinks.
 
 ## 23. Closeout
 

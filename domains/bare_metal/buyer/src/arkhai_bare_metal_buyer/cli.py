@@ -509,10 +509,7 @@ def request_introduction(
         seller_url=listing.storefront_url,
         storefront_url=listing.storefront_url,
         publisher_id=str(listing.publisher_id),
-        publisher_principals=[
-            item.model_dump(mode="json")
-            for item in listing.publisher_principals.identities
-        ],
+        publisher_principals=publisher_principals.model_dump(mode="json"),
         source_registry_url=buyer_config.registry_url,
         source_registry_authority=buyer_config.registry_authority,
     )
@@ -531,7 +528,11 @@ def request_introduction(
                 "access_method": "none",
             },
         ),
+        decode_provision_terms=BareMetalProvisionTerms.model_validate,
         settlement_selection=selection,
+        # The seller's accept reply is checked against the option the listing
+        # advertised; without it the buyer has nothing to hold the plan to.
+        policy_params={"_selected_settlement_option": selected.model_dump(mode="json")},
         max_rounds=buyer_config.default_max_rounds,
     )
     if outcome.status != "agreed" or outcome.negotiation_id is None:
@@ -547,10 +548,7 @@ def request_introduction(
         negotiation_id=outcome.negotiation_id,
         agreement_ref=outcome.negotiation_id,
         obligation_ref=obligation_ref,
-        seller_principals=[
-            item.model_dump(mode="json")
-            for item in listing.publisher_principals.identities
-        ],
+        seller_principals=publisher_principals.model_dump(mode="json"),
         storefront_url=listing.storefront_url,
         accepted_plan=outcome.settlement_plan.model_dump(mode="json"),
     )
