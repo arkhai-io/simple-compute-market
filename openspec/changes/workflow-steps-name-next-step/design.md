@@ -81,7 +81,7 @@ A guard is of one of two kinds (21 F1):
   guard that remedies it. An entry guard unmet on a step's exit names the owner.
 
 The table states today's routing, which round 1 reproduces exactly (13 F1); the
-triages' kinds and the entry guards are round 2's:
+triages' kinds, the entry guards, and the temporary `convert` node are round 2's:
 
 | Node | Exits a step names | Join | Guards on the exits, and their remedy |
 |---|---|---|---|
@@ -100,6 +100,7 @@ triages' kinds and the entry guards are round 2's:
 | `triage` `closeout` | `archive-cleanup`; `review` `closeout` | — | `archive-cleanup`: when a path outside `openspec/` and `docs/` changed since the first closeout review, `HEAD` validated (`validate`; failed or inconclusive: owner) |
 | `archive-cleanup` | `done` | — | — |
 | `done` | none: the change is done, and no step runs | — | — |
+| `convert`, while older records remain (D7) | the node the change stands at, which the owner confirms | — | the guards of that exit, as for a step's |
 
 The entry guards:
 
@@ -110,15 +111,20 @@ The entry guards:
 | `review` `closeout`, `triage` `closeout`, `archive-cleanup` | the change is archived | no |
 | `triage` of each kind | a review of its kind awaits triage | no |
 | `done` | reached only by archive cleanup's exit | no: never directed |
+| `validate` | it carries a target that is a node of the table, whose unwaivable entry guards are met | no |
+| `convert` | the change's records are not yet converted | no |
 
 Closeout has no archive guard, since it is the step that archives.
 
 The computation names `validate` always with a `target` (D4): in a round's join,
-the round's triage; as a guard's remedy, the exit it clears. Validation names that
-target as its exit, and the computation checks the target's guards again, so a
-passed validation clears the guard and a failed or inconclusive one names the owner
-(21 F2). Under orchestration validation takes the target from the computation's
-result; an interactive `make validate` reads it by running the computation. A
+the round's triage; as a guard's remedy, the exit it clears; after the owner's
+direction to validation, the target the direction names (D5). Validation's entry
+guard holds every entry to that rule, a direction's included (30 F2). Validation
+names that target as its exit, and the computation checks the target's guards
+again, so a passed validation clears the guard and a failed or inconclusive one
+names the owner (21 F2). Under orchestration validation takes the target from the
+computation's result; an interactive `make validate` reads it by running the
+computation. A
 triage's join is read from the files as today's; a step that waits on the
 owner — a question, a stop, a proposed return — holds its node until answered or
 resolved, as now. `done` is the terminal node: archive cleanup names it, and the
@@ -151,7 +157,11 @@ kind of review it triages (`{"step": "triage", "kind": "pre-closeout"}`), and
 review or a triage without its kind, or with an empty or unknown one, is no node,
 and is refused wherever a target is written (21 F3). A return names its
 target as a step (`{"step": "plan"}`, `{"step": "design"}`), not as a phase.
-`{"step": "done"}` is the terminal node archive cleanup names.
+`{"step": "done"}` is the terminal node archive cleanup names. A direction to
+validation nests the target the validation is for,
+`{"step": "validate", "target": {"step": "closeout"}}`, and is refused without one
+by validation's entry guard (D1, 30 F2); the computation's own result names
+validation the same way.
 `{"step": "round"}` is the plan's next round, so a triage never copies the plan's
 mapping; `{"step": "implement", "sections": […]}` names sections out of the plan's
 order, and becomes, through the computation, a `round` result for those sections,
@@ -178,8 +188,9 @@ names its triage, of its kind; validation names the target the computation gave 
 (D1); archive cleanup names `done`. A triage's outcome also names the
 records it triaged, in `triaged`, which the wrapper requires on a triage run. The
 computation routes on the governing review's latest triage outcome — the latest
-triage line whose `triaged` names it. A triage file with no finished or returned
-triage line naming its review is a triage in progress. A return is confirmed by the
+triage line whose `triaged` names it, or the conversion line that names it (D7). A
+triage file with no finished or returned triage or conversion line naming its
+review is a triage in progress. A return is confirmed by the
 owner's decision that resolves its run, so neither `governing()` nor
 `return_confirmed()` reads a file's time; the file-time rules and the `## Gate`
 reading are deleted, since a change's records are converted before the new
@@ -269,6 +280,11 @@ as the pre-closeout review's validation check, or the computation it asks — ac
 the direction in the log as that override; the step sets its own status as it
 starts, accepting the change in that state because the log holds the owner's
 direction.
+A direction to validation names the target it is for, so the owner can have a
+validation before a step a direction would otherwise reach unchecked: a passed
+validation leads to the target, its entry guards checked, and a failed or
+inconclusive one names the owner. No exit guard of an earlier edge applies, since
+the owner directed it (30 F2).
 The waiver of another design review and the waiver of archive cleanup's validation
 are plain directions, whose `reason` says what they skip; archive cleanup, finding
 the direction in the log, still writes the waiver's ledger line. Every decision
@@ -321,7 +337,8 @@ Rejected:
 
 A decision line's `next` is the D2 object, with `kind` folded into it; `resolves`
 and `reads` are unchanged. The CLI keeps its flags — `--next`, `--kind`, and
-`--sections` — and builds the object. `note_orchestrator` checks three things in
+`--sections` — and builds the object; a direction to validation adds `--target`,
+the step it is for, which `--kind` and `--sections` then qualify (30 F2). `note_orchestrator` checks three things in
 place of its special cases: a `next` is the owner's, its target is a node of the
 table, and its target's unwaivable entry guards are met. A direction checks no exit
 guard and overrides a waivable entry guard (D5), so a decision line names none.
@@ -340,34 +357,63 @@ wrapper appending older lines after the conversion. So each change's records are
 converted at the one point that is safe for it, when its branch first carries the
 new code, and that point is not this change's to choose (21 F4).
 
+Every line the new tooling appends to a workflow log — the wrapper's, `record`'s,
+and the decision writer's — carries the log's format marker, `"format": 2`. The
+computation detects a change not yet converted by the marker's absence: a log with
+a line that lacks it, or numbered records under `reviews/` and no log. It names the
+owner with the conversion command for it, rather than routing on either. The rule
+needs no knowledge of an older line's shapes, so it catches an older `returned`
+outcome, which carries no `next`, a change worked interactively whose records have
+no log at all, and a line an older wrapper appends after the conversion. It reads
+no triage file's first words, so a new triage awaiting its outcome is not taken for
+an older one (13 F2), and a new change has a log from its first recorded run, the
+design's (D11), before its first review is published (30 F1).
+
 A committed command, `python3 scripts/run_change_step.py convert <change>`,
 converts one change's records in the checkout that holds them, its clone or the
-workspace. The computation detects a log not yet converted by its lines' shapes —
-an outcome or decision line whose `next` is a string, or a decision line with a
-`kind` field — and names the owner with the command for it, rather than routing on
-it. Detection reads the log only, never a triage file's first words, so a new
-triage awaiting its outcome is not taken for an older one. The command converts:
+workspace, in two parts:
 
-- each triaged review whose triage file carries a `## Next` token or a `## Gate`
-  and that no triage outcome names: a triage line is appended naming it in
-  `triaged`, with the target the token leads to in its phase today — `Advance` and a
-  `## Gate` beginning `Passed` the phase's advancing exit, `Another round` the
-  review of the same kind, and `Returned` a `returned` outcome naming the step its
-  confirmation directs, which the owner's existing confirmation resolves by seq;
-- the log's older field shapes, in place: a decision line's string `next` and
-  `kind` become the D2 object, a `returned` outcome's `return_to` gains its target,
-  and an outcome's prose `next`, which nothing routes on, moves into its `message`.
+- The log's lines, in place, each keeping its seq, so every `resolves` and `reads`
+  still names its run: a decision line's string `next` and `kind` become the D2
+  object, a `returned` outcome's `return_to` gains its target, an outcome's prose
+  `next`, which nothing routes on, moves into its `message`, and each line gains
+  the format marker.
+- One line appended, `step` `convert`, stating where the change stands: `triaged`
+  names every review with a triage file, so none reads as a triage in progress, and
+  `next` names the node the change stands at, which the owner confirms. The command
+  proposes it from the latest triage file's token as that token leads in its phase
+  today — `Advance` and a `## Gate` beginning `Passed` the phase's advancing exit,
+  `Another round` the review of the same kind, `Returned` the step a recorded
+  confirmation directed — and takes the owner's `--next` in its place. A return not
+  yet confirmed is converted as a `returned` line naming its target, which the
+  owner's confirmation then resolves by that line's own seq.
 
-Round 2 runs the command on this change, and the detection catches the converting
-run's own last line, which the wrapper that started it appends in the older shape.
-A change that takes the new code with a triage in progress finishes that triage on
-the code it started with, then converts. Cleaned-up changes are history and are left
-as they are. With no older reading, `## Next` is free prose, and a triage file whose
-outcome is not yet recorded is a triage in progress whatever its first words.
+```json
+{"seq": 38, "step": "convert", "outcome": "finished", "format": 2,
+ "triaged": ["13-design", "21-design", "30-design"],
+ "next": {"step": "review", "kind": "design"},
+ "message": "converted; 30-design's triage chose another round"}
+```
 
-The command and the detection are temporary: a change opened at this change's
-closeout removes both once no change not yet cleaned up holds a log in an older
-shape. The computation's routing keeps no older reading meanwhile.
+The history is not rebuilt as triage lines, one per older triage: an older triage
+line names no review, so every older triage would gain an appended line, placed
+after the runs its exit already led to, and the computation would name those runs
+again (30 F1). The one conversion line comes last, and states the present.
+
+`convert` is a node of the table while the command exists (D1): its exit is
+checked as a step's is, against the node the owner confirmed, and its entry guard
+refuses a change already converted. Round 2 runs the command on this change, and
+the marker catches the converting run's own last line, which the wrapper that
+started it appends unmarked. A change that takes the new code with a triage in
+progress finishes that triage on the code it started with, then converts.
+Cleaned-up changes are history and are left as they are. With no older reading,
+`## Next` is free prose, and a triage file whose outcome is not yet recorded is a
+triage in progress whatever its first words.
+
+The command, its node, and the detection are temporary: a change opened at this
+change's closeout removes them once every change not yet cleaned up is converted.
+The marker stays, as the log's format for any later change to it. The computation's
+routing keeps no older reading meanwhile.
 
 Rejected:
 
@@ -384,6 +430,15 @@ Rejected:
   new format, and a change the task misses would be read as the new format (21 F4).
 - *Cutting over when no other change is in flight*: a pause across every active
   change, with nothing to detect one missed.
+- *Detection by an older line's shapes* — a string `next`, a decision line's
+  `kind` (D7 as settled by 21 F4): misses an older `returned` outcome, which has no
+  `next`, and a change with records and no log (30 F1).
+- *Each older triage converted in place, its run matched to its review by file
+  time* (review 30 F1's suggestion): keeps the history line by line in the new
+  vocabulary, but a triage with no logged run, any interactive one, has no position
+  in the log at which its exit would not repeat a run that followed it.
+- *Appended triage lines, with only the confirmation's link mended*: leaves the
+  detection's gaps and the appended exits that repeat the runs after them.
 
 ### D8 — Recovery
 
@@ -400,7 +455,8 @@ Rejected:
   progress: the computation names it, and no step after it, with a `disagreement`
   naming the missing outcome and the `record` command. A plan's outcome is what
   carries its exit and its `rounds`, which no status can supply (21 F5).
-- A log in an older shape names the owner with the `convert` command (D7).
+- A change not yet converted — a log line without the format marker, or records
+  with no log — names the owner with the `convert` command (D7).
 - A status edited by hand: the files hold state and prevail on it; an exit or
   direction that contradicts the status is reported as a `disagreement`, as now.
 - A named target whose guard changed is routed on the current state (D4); one its
@@ -458,10 +514,11 @@ Two rounds:
 - **Round 2**, two sessions: first the new records and routing on them — the
   schema's object `next` and `triaged`, the wrapper's requirement, `record`, the
   decision lines' object `next` and owner-only directions, the triage's `kind`, the
-  entry guards and the writer's refusals on them, validation's carried target, the
-  terminal `done`, the result's `target` and the undeclared-exit rule, routing on
-  outcomes, and the `triaged` rule, the file-time rules and the older readings
-  deleted, with the `convert` command and the detection of older log shapes (D7),
+  entry guards and the writer's refusals on them, validation's carried target and
+  a direction's nested one, the terminal `done`, the result's `target` and the
+  undeclared-exit rule, routing on outcomes, and the `triaged` rule, the file-time
+  rules and the older readings deleted, with the log's format marker, the
+  `convert` command and node, and the detection of a change not yet converted (D7),
   run on this change's records, since the computation it lands reads only the new
   format; then every skill's handoff and interactive ending, triage's prose
   `## Next`, the entry checks asking the computation and the pre-closeout review's
@@ -486,9 +543,11 @@ within round 2.
   time the workflow rewrites a record. A change whose branch takes the new code
   stops at the owner until its records are converted, which the owner does by one
   command when the computation names it.
-- Detection reads the log's shapes: a change with older triage files and no log
-  line at all is not detected, and its triage reads as in progress until converted.
-- The command and the detection outlive this change until every change not yet
+- The conversion line's exit is the owner's confirmation of where the change
+  stands, not a reconstruction: a wrong one routes the change wrongly, which the
+  owner corrects by a direction. The older history keeps its own lines, readable
+  as they were written.
+- The command, its node, and the detection outlive this change until every change not yet
   cleaned up has taken the new code; their removal is a later change's.
 - A direction may name a node that makes no sense from where the change stands;
   only its unwaivable entry guards and the owner hold it.

@@ -53,10 +53,15 @@ step rather than inferring one.
   of any step closed before it records leaves that step in progress, for the owner
   to resume or record by hand.
 - A change's records are converted to the new format when its branch first carries
-  the new code, by a committed `convert` command; the computation reads only the
-  new format, detects a log in an older shape, and names the owner with the command
-  for it. A later change removes the command and the detection once no change not
-  yet cleaned up holds an older log.
+  the new code, by a committed `convert` command, which rewrites the log's lines in
+  place and appends one line stating where the change stands, as the owner confirms
+  it. Every new log line carries a format marker; the computation reads only the
+  new format, detects a change not yet converted by a line without the marker, or
+  by records with no log, and names the owner with the command for it. A later
+  change removes the command and the detection once every change not yet cleaned up
+  is converted.
+- A direction to validation names the target the validation is for, and
+  validation's entry guard refuses one without it.
 
 ## Capabilities
 
@@ -124,14 +129,17 @@ None.
   and the log the transitions chosen on it (D3): `architecture.md`.
 - An unmet guard names its remedy; an undeclared exit names the owner (D4):
   `spec.md`.
-- The owner's directions to any node, checking no guard (D5): `spec.md`, and the
-  orchestrate skill.
+- The owner's directions to any node, past its exit guards and within its entry
+  guards: an unwaivable one refuses the direction, a waivable one takes it as its
+  override; a direction to validation names the target it is for (D5): `spec.md`,
+  and the orchestrate skill.
 - Interactive runs record their outcome through `record` (D11): `spec.md`,
   `architecture.md` ("Steps run headless and resume with the owner's answers"), and
   `docs/agents/change-workflow.md`.
-- The computation reads only the format in which outcomes name their exits, and
-  brings a log in an older shape to the owner with the conversion command (D7):
-  `spec.md`, until the later change that removes them.
+- The computation reads only the format in which outcomes name their exits, marked
+  on every log line, and brings a change not yet converted to the owner with the
+  conversion command (D7): `spec.md`, the command until the later change that
+  removes it, the marker for good.
 - Entry guards on nodes, unwaivable or waivable, and exit guards on edges (D1, D5):
   `spec.md`, and the distinction's rationale in `architecture.md`.
 - Returning an archived change to an earlier phase is not supported (D5):

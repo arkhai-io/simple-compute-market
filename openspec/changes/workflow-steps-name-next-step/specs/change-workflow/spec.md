@@ -15,7 +15,9 @@ while unmet, and a waivable one MUST take the owner's direction as its override.
 The change's archive MUST be an unwaivable entry guard of the closeout review, its
 triage, and archive cleanup, and its absence one of design, planning, and
 implementation. A triage node's entry guard MUST be that a review of its kind
-awaits triage. Archive cleanup's exit MUST be the terminal node `done`, which has no
+awaits triage. Validation's entry guard MUST be unwaivable: that it carries a
+target, a node of the table whose unwaivable entry guards are met. Archive
+cleanup's exit MUST be the terminal node `done`, which has no
 exits and no step, and which no direction reaches. A change to the table MUST be
 made as an OpenSpec change.
 The table MUST be renderable as a diagram, and the diagram the `change-workflow`
@@ -109,6 +111,10 @@ guard is not met MUST be refused, naming the guard: an archived change MUST NOT 
 directed to design, planning, or implementation, nor a change not archived to the
 closeout review, its triage, or archive cleanup. A waivable entry guard, and the
 directed step's own entry check for it, MUST accept the direction as its override.
+A direction to validation MUST name, nested in its target, the target the
+validation is for, and MUST be refused without one by validation's entry guard; a
+directed validation that passed MUST lead to its target, whose entry guards are
+checked, and one that failed or was inconclusive MUST be brought to the owner.
 
 #### Scenario: The owner directs past a guard
 
@@ -148,6 +154,18 @@ directed step's own entry check for it, MUST accept the direction as its overrid
   pre-closeout review
 - **THEN** the computation names the pre-closeout review, and the review starts,
   taking the direction as its override of the validation check
+
+#### Scenario: The owner directs a validation before closeout
+
+- **WHEN** the owner directs `{"step": "validate", "target": {"step": "closeout"}}`,
+  and the validation passes, naming closeout as its exit
+- **THEN** the computation names validation with closeout as its target, and then
+  closeout; had the validation failed, it would name the owner
+
+#### Scenario: A validation is directed without a target
+
+- **WHEN** a direction to `{"step": "validate"}` naming no target is attempted
+- **THEN** the log's writer refuses it, naming validation's entry guard
 
 #### Scenario: A triage is directed with nothing to triage
 
@@ -414,18 +432,23 @@ outcome names, and on the owner's latest direction until a later run of its targ
 is logged, and MUST NOT infer an exit from the phase. A review's triage MUST name its
 exit in its outcome, and MUST keep the target and the owner's words under its triage
 file's `## Next` as prose, which nothing routes on; a review whose triage file exists
-while no finished or returned triage outcome names it MUST be treated as a triage in
-progress. An exit its node does not declare, a validation's exit other than the
+while no finished or returned triage outcome, and no conversion line, names it MUST
+be treated as a triage in progress. An exit its node does not declare, a validation's exit other than the
 target it was given, and an exit whose target's entry guard is not met MUST be
 brought to the owner. When a guard on a declared exit is not met, the computation
 MUST name the step that satisfies it, carrying the exit as its target, and MUST
 bring a guard no step can satisfy to the owner, naming the target and what is
 missing. The computation MUST name validation with a target always — the round's
-triage in a round's join — and MUST check the target's guards again on the
-validation's exit. A workflow log holding a line in an older shape — an outcome or
-decision line whose `next` is a string, or a decision line with a `kind` field — MUST
-be brought to the owner with the command that converts the change's records, and
-MUST NOT be read as the new format. Once the owner confirms
+triage in a round's join, the target an owner's direction named after one — and
+MUST check the target's guards again on the validation's exit. Every line the
+workflow tooling appends to a workflow log MUST carry the log's format marker. A
+change whose log holds a line without the marker, or which has numbered review
+records and no log, MUST be brought to the owner with the command that converts the
+change's records, and its log MUST NOT be read as the new format. The conversion
+MUST rewrite the log's lines in place, each keeping its seq, so every decision still
+names the run it named; and MUST append one conversion line naming, as `triaged`,
+every review with a triage file, and, as its exit, the node the change stands at,
+which the owner confirms. Once the owner confirms
 a return, the returned review MUST NOT govern what follows, so the work the return
 leads to is implemented, validated, and reviewed afresh, as a round of its own even
 where it reworks a section the returned round implemented; a return the owner
@@ -515,15 +538,58 @@ routes on a triage file's `## Next`.
 - **WHEN** a review's triage file ends with a `## Gate` beginning `Passed`, and no
   triage outcome names the review
 - **THEN** the computation names the triage as in progress, since it reads no
-  `## Gate`; a change's records are converted when it takes the new code, so that an
-  outcome names each such review
+  `## Gate`; a change's records are converted when it takes the new code, so that
+  its conversion line names each such review
 
 #### Scenario: A log not yet converted
 
-- **WHEN** a change's workflow log holds a decision line whose `next` is the string
-  `review` beside a `kind` field
+- **WHEN** a change's workflow log holds a decision line, without the format marker,
+  whose `next` is the string `review` beside a `kind` field
 - **THEN** the computation names the owner with the command that converts the
   change's records, and routes on none of its lines
+
+#### Scenario: An older return awaits confirmation
+
+- **WHEN** a change's workflow log ends with a triage's `returned` outcome that
+  carries `return_to` and no `next`, without the format marker
+- **THEN** the computation names the owner with the conversion command, not the
+  waiting return
+
+#### Scenario: A change has records and no log
+
+- **WHEN** a change worked in interactive sessions has `reviews/03-design.md` and
+  its triage file, and no workflow log
+- **THEN** the computation names the owner with the conversion command, and names
+  no triage in progress
+
+#### Scenario: A change is converted
+
+- **WHEN** a change's log holds older lines, the last triage file of review 21
+  records `Another round`, and the owner confirms the review the conversion proposes
+- **THEN** each older line is rewritten in place with its seq and marked, one
+  conversion line is appended naming every triaged review and
+  `{"step": "review", "kind": "design"}`, and the computation names that review
+
+#### Scenario: A pending return is converted, then confirmed
+
+- **WHEN** a change's last triage proposed a return to planning that the owner has not
+  confirmed, and the change is converted
+- **THEN** the conversion line is a `returned` outcome naming `{"step": "plan"}`,
+  the computation names the owner for it, and the owner's confirmation resolves the
+  conversion line's seq
+
+#### Scenario: A confirmed return is converted
+
+- **WHEN** the owner's decision at seq 51 resolved the returned triage run at seq 50,
+  directing design, and design has not run when the change is converted
+- **THEN** seq 50 and 51 keep their seqs, the decision still resolves seq 50, and
+  the conversion line names `{"step": "design"}`
+
+#### Scenario: An older wrapper appends after the conversion
+
+- **WHEN** a converted log gains a line without the format marker, as the converting
+  run's own outcome appended by the wrapper that started it
+- **THEN** the computation names the owner with the conversion command again
 
 #### Scenario: A validation before closeout passes
 
