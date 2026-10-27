@@ -90,6 +90,64 @@ def test_every_node_has_an_exit_but_the_one_that_finishes_the_change() -> None:
     assert NODES[graph.DONE].runs is None
 
 
+def _entry(node: Node) -> list[str]:
+    return [guard.condition for guard in NODES[node].entry]
+
+
+def test_the_entry_guards_are_the_tables() -> None:
+    # The archive both ways: no entry returns an archived change to an earlier
+    # phase, and none takes a change not archived past it.
+    for node in (DESIGN, graph.PLAN, graph.ROUND):
+        assert _entry(node) == ["the change is not archived"]
+    for node in (graph.CLOSEOUT_REVIEW, ARCHIVE_CLEANUP):
+        assert _entry(node) == ["the change is archived"]
+    assert _entry(CLOSEOUT_TRIAGE) == ["the change is archived",
+                                       "a review of its kind awaits triage"]
+    for node in (graph.DESIGN_TRIAGE, graph.IMPLEMENTATION_TRIAGE, graph.PRE_CLOSEOUT_TRIAGE):
+        assert _entry(node) == ["a review of its kind awaits triage"]
+    # Closeout is the step that archives.
+    assert _entry(graph.CLOSEOUT) == []
+    assert _entry(graph.VALIDATE) == ["it carries a target that is a node"]
+    assert _entry(graph.DONE) == ["reached only by archive cleanup's exit"]
+    (validated,) = NODES[graph.PRE_CLOSEOUT_REVIEW].entry
+    assert validated.waivable and validated.check is None
+    assert not any(guard.waivable for d in TABLE for guard in d.entry
+                   if d.node != graph.PRE_CLOSEOUT_REVIEW)
+
+
+ACTIVE = graph.Standing(archived=False, awaiting=frozenset({"design"}))
+ARCHIVED = graph.Standing(archived=True, awaiting=frozenset())
+
+
+@pytest.mark.parametrize("target,standing,refused", [
+    ({"step": "design"}, ACTIVE, None),
+    ({"step": "design"}, ARCHIVED, "design's entry guard (the change is not archived)"),
+    ({"step": "archive-cleanup"}, ACTIVE, "archive-cleanup's entry guard (the change is "
+                                          "archived) is not met: the change is not archived"),
+    ({"step": "triage", "kind": "design"}, ACTIVE, None),
+    ({"step": "triage", "kind": "implementation"}, ACTIVE,
+     "no implementation review awaits triage"),
+    ({"step": "validate", "target": {"step": "archive-cleanup"}}, ACTIVE,
+     "archive-cleanup's entry guard"),
+    ({"step": "review", "kind": "pre-closeout"}, ACTIVE, None),
+    ({"step": "done"}, ARCHIVED, "reached only by archive cleanup's exit"),
+], ids=str)
+def test_a_direction_is_refused_by_an_unwaivable_entry_guard_of_a_node_it_names(
+        target: dict, standing: graph.Standing, refused: str | None) -> None:
+    found = graph.entry_refusal(target, standing, directed=True)
+
+    assert found is None if refused is None else refused in (found or "")
+
+
+def test_a_steps_exit_is_checked_against_its_targets_entry_guards_alone() -> None:
+    # Archive cleanup's exit enters done; a validation's own exit is checked on its
+    # target, not the target it nests, since that review may not be published yet.
+    assert graph.entry_refusal({"step": "done"}, ARCHIVED, directed=False) is None
+    assert graph.entry_refusal({"step": "validate", "target": {"step": "triage",
+                                                               "kind": "implementation"}},
+                               ACTIVE, directed=False) is None
+
+
 def test_a_target_names_its_node() -> None:
     assert graph.node_of({"step": "triage", "kind": "pre-closeout"}) == graph.PRE_CLOSEOUT_TRIAGE
     assert graph.node_of({"step": "implement", "sections": [[5]]}) == graph.ROUND
@@ -140,7 +198,13 @@ def test_the_diagram_draws_every_node_exit_join_and_guard() -> None:
     edges = [line.strip() for line in rendering.splitlines() if "-->" in line]
     joins = {exit_.join for _, exit_ in EXITS if exit_.join}
 
-    assert all(f'    {_node_id(node)}["{node.label}"]' in rendering for node in NODES)
+    boxes = {line.split("[", 1)[0].strip(): line for line in rendering.splitlines()
+             if line.endswith('"]')}
+    for node, declaration in NODES.items():
+        box = boxes[_node_id(node)]
+        assert box.startswith(f'    {_node_id(node)}["{node.label}')
+        assert all(f"<br/>entry: {guard.condition}" + (" (waivable)" if guard.waivable else "")
+                   in box for guard in declaration.entry)
     assert rendering.count('{{"join"}}') == len(joins)
     assert len(edges) == len(EXITS) + len(joins)
     for source, exit_ in EXITS:
@@ -159,6 +223,7 @@ def test_the_diagram_draws_every_node_exit_join_and_guard() -> None:
 
 def test_the_diagrams_ids_are_distinct_and_its_labels_need_no_escaping() -> None:
     labels = [node.label for node in NODES] + [
+        guard.condition for declaration in TABLE for guard in declaration.entry] + [
         text for _, exit_ in EXITS
         for text in [exit_.when or "", *(guard.condition for guard in exit_.guards),
                      *(guard.otherwise or "" for guard in exit_.guards)]]

@@ -19,7 +19,6 @@ import sys
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
-from check_change_index import index_rows
 from change_workflow.common import KINDS, ORCHESTRATOR, ROOT, StepError
 from change_workflow.harness import UNATTENDED_RUN
 from change_workflow.log import (branch_decisions, history_log_path, last_entries, log_path,
@@ -174,8 +173,16 @@ def _parser() -> argparse.ArgumentParser:
     decision.add_argument("--reads", type=int, default=None,
                           help="the seq of the run whose denials the decision has read")
     decision.add_argument("--next", dest="next_step", default=None,
-                          help="the step the decision directs next")
-    decision.add_argument("--kind", default=None, help="the review kind when --next is review")
+                          help="the owner's direction: the step the change goes to next")
+    decision.add_argument("--kind", default=None,
+                          help="the kind of review --next is, or triages; with --target, "
+                               "the target's")
+    decision.add_argument("--sections", default=None,
+                          help="with --next implement, the sections it implements out of "
+                               "the plan's order, as `note round` takes them; with "
+                               "--target, the target's")
+    decision.add_argument("--target", default=None,
+                          help="with --next validate, the step the validation is for")
     decision.add_argument("--branch", default=None,
                           help="with --change, the owner's word that the change is worked on "
                                "this branch")
@@ -251,14 +258,14 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
             line = note_orchestrator(path, args.decision, args.reason, by=args.by,
                                      resolves=args.resolves, reads=args.reads,
                                      next_step=args.next_step, kind=args.kind,
+                                     sections=(parse_sections(args.sections)
+                                               if args.sections is not None else None),
+                                     target=args.target,
                                      branch=args.branch,
                                      # A branch decision is about the change whose
                                      # log holds it, which is where steps look.
                                      change=args.decided_change
-                                     or (args.change if args.branch else None),
-                                     status=next((row.status for row in
-                                                  index_rows(wrapper.root)
-                                                  if row.name == args.change), None))
+                                     or (args.change if args.branch else None))
             print(json.dumps(line, ensure_ascii=False))
     except StepError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

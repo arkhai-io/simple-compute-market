@@ -28,6 +28,11 @@ triage the kind of review it triages, `sections` for an implementation out of th
 plan's order, and for a validation the `target` it is for (`node_of`). Its label,
 `review:pre-closeout`, is drawn in diagrams and documents and never parsed.
 
+A node may also have entry guards: conditions on entering it at all, by a step's
+exit or by the owner's direction, which checks no exit guard. An unwaivable one
+refuses every entry while it is not met (`entry_refusal`); a waivable one takes the
+owner's direction as its override.
+
 `make change-graph` prints the table as a Mermaid diagram (`mermaid`), the diagram
 the change-workflow architecture shows. A durable change to the workflow is a
 change to this table, made as an OpenSpec change. See
@@ -133,15 +138,46 @@ class Exit:
 
 
 @dataclass(frozen=True)
+class Standing:
+    """What the entry guards read of the change: whether it is archived, and the
+    kinds of review awaiting triage."""
+
+    archived: bool
+    awaiting: frozenset[str]
+
+
+# Why an entry guard is not met for an entry to `target`, the entry a direction
+# when `directed`; None when it is met.
+EntryCheck = Callable[[Standing, Mapping[str, Any], bool], "str | None"]
+
+
+@dataclass(frozen=True)
+class EntryGuard:
+    """A condition on entering a node, by a step's exit or the owner's direction,
+    without which its step cannot, or should not, carry out its work.
+
+    An unwaivable guard refuses every entry while it is not met. A waivable one
+    takes the owner's direction as its override, and on a step's exit is met first
+    by the exit guard that remedies it, so nothing here checks it: the step's own
+    entry check reads it (`check` None).
+    """
+
+    condition: str
+    waivable: bool = False
+    check: EntryCheck | None = None
+
+
+@dataclass(frozen=True)
 class Declaration:
     """A node of the table: its exits, the phases the change is in while its step
-    runs, and the step a run of it is logged as, None for a step the log does not
-    record."""
+    runs, the step a run of it is logged as, None for a step the log does not
+    record, and its entry guards."""
 
     node: Node
     exits: tuple[Exit, ...]
     phases: tuple[str, ...]
     runs: str | None
+    entry: tuple[EntryGuard, ...] = ()
 
 
 DESIGN = Node("design")
@@ -245,6 +281,48 @@ CORRECTION_VALIDATED = Guard("a path outside openspec/ and docs/ changed since t
                              "closeout review: HEAD validated", VALIDATE, VALIDATION_FAILED,
                              _correction_validated)
 
+# The entry guards. The archive is the boundary no entry crosses: an archived change
+# is not returned to an earlier phase, since its deltas are merged into the
+# specifications, and a change not archived is not taken past it, since the closeout
+# review reads the archive and archive cleanup would mark `archived` a change whose
+# deltas were never merged.
+
+def _archived(standing: Standing, _: Mapping[str, Any], __: bool) -> str | None:
+    return None if standing.archived else "the change is not archived"
+
+
+def _not_archived(standing: Standing, _: Mapping[str, Any], __: bool) -> str | None:
+    return "the change is archived" if standing.archived else None
+
+
+def _awaits_triage(standing: Standing, target: Mapping[str, Any], _: bool) -> str | None:
+    kind = target["kind"]
+    return None if kind in standing.awaiting else f"no {kind} review awaits triage"
+
+
+def _carries_target(_: Standing, target: Mapping[str, Any], __: bool) -> str | None:
+    try:
+        node_of(target)
+    except TargetError as exc:
+        return str(exc)
+    return None
+
+
+def _never_directed(_: Standing, __: Mapping[str, Any], directed: bool) -> str | None:
+    return "the change is done only once archive cleanup has run" if directed else None
+
+
+NOT_ARCHIVED = EntryGuard("the change is not archived", check=_not_archived)
+ARCHIVED = EntryGuard("the change is archived", check=_archived)
+AWAITS_TRIAGE = EntryGuard("a review of its kind awaits triage", check=_awaits_triage)
+CARRIES_TARGET = EntryGuard("it carries a target that is a node", check=_carries_target)
+NEVER_DIRECTED = EntryGuard("reached only by archive cleanup's exit", check=_never_directed)
+# The review checks it itself as it starts (`change_workflow.review`), taking the
+# owner's direction to it, or `--unvalidated`, as the override.
+REVIEW_VALIDATED = EntryGuard("the latest validation passed for HEAD, or for an ancestor it "
+                              "differs from only in records, or after a pre-closeout triage "
+                              "only in openspec/ and docs/", waivable=True)
+
 ROUND_JOIN = Join((("the round's sections checked", ROUND),
                    ("the owner's reading", ROUND_VIEW),
                    ("its validation", VALIDATE),
@@ -252,24 +330,25 @@ ROUND_JOIN = Join((("the round's sections checked", ROUND),
 TO_ROUND_TRIAGE = Exit(IMPLEMENTATION_TRIAGE, join=ROUND_JOIN)
 
 
-def _declare(node: Node, phases: tuple[str, ...], *exits: Exit,
-             runs: str | None = None) -> Declaration:
-    return Declaration(node, exits, phases, runs or node.step)
+def _declare(node: Node, phases: tuple[str, ...], *exits: Exit, runs: str | None = None,
+             entry: tuple[EntryGuard, ...] = ()) -> Declaration:
+    return Declaration(node, exits, phases, runs or node.step, entry)
 
 
 _STEPS = (
-    _declare(DESIGN, ("design",), Exit(DESIGN_REVIEW)),
+    _declare(DESIGN, ("design",), Exit(DESIGN_REVIEW), entry=(NOT_ARCHIVED,)),
     _declare(DESIGN_REVIEW, ("design",), Exit(DESIGN_TRIAGE)),
     _declare(DESIGN_TRIAGE, ("design",),
              Exit(PLAN, (PLANNING_RELEASED,), ADVANCE),
              Exit(DESIGN_REVIEW, when=ANOTHER_ROUND),
-             Exit(DESIGN, (RETURN_CONFIRMED,), RETURN)),
+             Exit(DESIGN, (RETURN_CONFIRMED,), RETURN), entry=(AWAITS_TRIAGE,)),
     _declare(PLAN, ("planning",),
              Exit(ROUND, (IMPLEMENTATION_RELEASED,)),
-             Exit(PRE_CLOSEOUT_REVIEW, (HEAD_VALIDATED,), "nothing to implement")),
+             Exit(PRE_CLOSEOUT_REVIEW, (HEAD_VALIDATED,), "nothing to implement"),
+             entry=(NOT_ARCHIVED,)),
     _declare(ROUND, ("implementation",),
              Exit(IMPLEMENTATION_TRIAGE, (BOOTSTRAPPED,), join=ROUND_JOIN),
-             runs="implement"),
+             runs="implement", entry=(NOT_ARCHIVED,)),
     _declare(IMPLEMENTATION_REVIEW, ("implementation",), TO_ROUND_TRIAGE),
     _declare(IMPLEMENTATION_TRIAGE, ("implementation",),
              Exit(ROUND, (ROUND_FIX_VALIDATED,), ADVANCE),
@@ -278,25 +357,28 @@ _STEPS = (
              Exit(IMPLEMENTATION_REVIEW, (REPEAT_FIX_READ, REPEAT_FIX_VALIDATED),
                   ANOTHER_ROUND),
              Exit(PLAN, (RETURN_CONFIRMED,), RETURN),
-             Exit(DESIGN, (RETURN_CONFIRMED,), RETURN)),
-    _declare(PRE_CLOSEOUT_REVIEW, ("implementation",), Exit(PRE_CLOSEOUT_TRIAGE)),
+             Exit(DESIGN, (RETURN_CONFIRMED,), RETURN), entry=(AWAITS_TRIAGE,)),
+    _declare(PRE_CLOSEOUT_REVIEW, ("implementation",), Exit(PRE_CLOSEOUT_TRIAGE),
+             entry=(REVIEW_VALIDATED,)),
     _declare(PRE_CLOSEOUT_TRIAGE, ("implementation",),
              Exit(CLOSEOUT, (CLOSEOUT_RELEASED, CLOSEOUT_VALIDATED), ADVANCE),
              Exit(PRE_CLOSEOUT_REVIEW, (DOCUMENTED_FIX_VALIDATED,), ANOTHER_ROUND),
              Exit(PLAN, (RETURN_CONFIRMED,), RETURN),
-             Exit(DESIGN, (RETURN_CONFIRMED,), RETURN)),
+             Exit(DESIGN, (RETURN_CONFIRMED,), RETURN), entry=(AWAITS_TRIAGE,)),
+    # Closeout has no archive guard: it is the step that archives.
     _declare(CLOSEOUT, ("closeout",), Exit(CLOSEOUT_REVIEW)),
-    _declare(CLOSEOUT_REVIEW, ("closeout",), Exit(CLOSEOUT_TRIAGE)),
+    _declare(CLOSEOUT_REVIEW, ("closeout",), Exit(CLOSEOUT_TRIAGE), entry=(ARCHIVED,)),
     # An archived change has no earlier phase, so a closeout triage has no return.
     _declare(CLOSEOUT_TRIAGE, ("closeout",),
              Exit(ARCHIVE_CLEANUP, (CORRECTION_VALIDATED,), ADVANCE),
-             Exit(CLOSEOUT_REVIEW, when=ANOTHER_ROUND)),
-    _declare(ARCHIVE_CLEANUP, ("closeout",), Exit(DONE)),
-    Declaration(DONE, (), ("closeout",), None),
+             Exit(CLOSEOUT_REVIEW, when=ANOTHER_ROUND), entry=(ARCHIVED, AWAITS_TRIAGE)),
+    _declare(ARCHIVE_CLEANUP, ("closeout",), Exit(DONE), entry=(ARCHIVED,)),
+    Declaration(DONE, (), ("closeout",), None, (NEVER_DIRECTED,)),
 )
 
 
-def _remedying(remedy: Node, phases: tuple[str, ...], runs: str | None) -> Declaration:
+def _remedying(remedy: Node, phases: tuple[str, ...], runs: str | None,
+               entry: tuple[EntryGuard, ...] = ()) -> Declaration:
     """A node whose step is a join's member or a guard's remedy. Its exits are each
     join it supplies, and each exit whose guard it remedies, with that exit's guards,
     which are checked again once it has run: the computation names the exit's target
@@ -308,12 +390,15 @@ def _remedying(remedy: Node, phases: tuple[str, ...], runs: str | None) -> Decla
                 found.setdefault((exit_.target, None), Exit(exit_.target, join=exit_.join))
             elif any(guard.remedy == remedy for guard in exit_.guards):
                 found.setdefault((exit_.target, exit_.when), exit_)
-    return Declaration(remedy, tuple(found.values()), phases, runs)
+    return Declaration(remedy, tuple(found.values()), phases, runs, entry)
 
 
 TABLE: tuple[Declaration, ...] = _STEPS + (
     _remedying(ROUND_VIEW, ("implementation",), None),
-    _remedying(VALIDATE, ("implementation", "closeout"), VALIDATE.step),
+    # A validation names the target it is for, whose own entry guards are checked
+    # on the validation's exit: a round's validation starts before the review its
+    # target triages is published.
+    _remedying(VALIDATE, ("implementation", "closeout"), VALIDATE.step, (CARRIES_TARGET,)),
 )
 NODES: dict[Node, Declaration] = {declaration.node: declaration for declaration in TABLE}
 # The steps whose nodes are told apart by the kind of review they are or triage.
@@ -382,6 +467,36 @@ def node_of(target: Any) -> Node:
     return Node(step)
 
 
+def entry_refusal(target: Mapping[str, Any], standing: Standing, *,
+                  directed: bool) -> str | None:
+    """Why an entry to `target` — the owner's direction when `directed`, else a
+    step's exit — is refused: the first unwaivable entry guard not met of a node it
+    names, the target and, for a validation, the target nested in it. None when
+    every one is met.
+
+    A waivable guard refuses nothing here: a direction is its override, and on a
+    step's exit the exit guard that remedies it is met first. A validation is
+    checked for its nested target only when directed: the computation names a
+    validation before the review its target triages may be published, and checks
+    the target's guards on the validation's exit.
+    """
+    try:
+        node = node_of(target)
+    except TargetError:
+        # A validation without a target that is a node is refused by its own entry
+        # guard, which says so; any other target that names no node is no entry.
+        if not (isinstance(target, Mapping) and target.get("step") == VALIDATE.step):
+            raise
+        node = VALIDATE
+    for guard in NODES[node].entry:
+        if not guard.waivable and guard.check and (why := guard.check(standing, target,
+                                                                      directed)):
+            return f"{node.label}'s entry guard ({guard.condition}) is not met: {why}"
+    if node == VALIDATE and directed:
+        return entry_refusal(target["target"], standing, directed=directed)
+    return None
+
+
 def exits(source: Node, *, target: Node | None = None, when: str | None = None) -> list[Exit]:
     """The exits of `source` to `target`, or taken on `when`, in the table's order."""
     return [exit_ for exit_ in NODES[source].exits
@@ -419,13 +534,20 @@ def _guard(guard: Guard) -> str:
     return f"{guard.condition} ⇒ {_remedy(guard.remedy)}{otherwise}{held}"
 
 
+def _box(declaration: Declaration) -> str:
+    guards = "".join(f"<br/>entry: {guard.condition}" + (" (waivable)" if guard.waivable else "")
+                     for guard in declaration.entry)
+    return f'    {_id(declaration.node)}["{declaration.node.label}{guards}"]'
+
+
 def mermaid(table: Sequence[Declaration] = TABLE) -> str:
-    """The table as a Mermaid flowchart: a box for each node, an edge for each exit
-    labelled with what it is taken on and each guard with its remedy, and a hexagon
-    for each join, which the exits waiting on it enter, labelled with the record
-    their node supplies. The same table always renders the same text."""
+    """The table as a Mermaid flowchart: a box for each node with its entry guards,
+    an edge for each exit labelled with what it is taken on and each guard with its
+    remedy, and a hexagon for each join, which the exits waiting on it enter,
+    labelled with the record their node supplies. The same table always renders the
+    same text."""
     lines = ["flowchart TD"]
-    lines += [f'    {_id(d.node)}["{d.node.label}"]' for d in table]
+    lines += [_box(d) for d in table]
     joins = {exit_.join: exit_.target for d in table for exit_ in d.exits if exit_.join}
     lines += [f'    join_{_id(target)}{{{{"join"}}}}' for target in joins.values()]
     for declaration in table:

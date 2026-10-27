@@ -8,7 +8,7 @@ from typing import Sequence
 
 import pytest
 
-from change_workflow.log import log_path, read_log
+from change_workflow.log import log_path, note_orchestrator, read_log
 from change_workflow.review import (ReviewError, claim_record, prior_session, review_and_log,
                                     review_models, run_review)
 from change_workflow.running import live_runs
@@ -419,6 +419,35 @@ def test_the_owner_may_run_a_pre_closeout_review_unvalidated(tmp_path: Path) -> 
                       head=lambda _: HEAD, runner=writing(review_text("pre-closeout")))
 
     assert path.name == "01-pre-closeout.md"
+
+
+def test_the_owners_direction_overrides_a_failed_validation_until_the_review_runs(
+        tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    (reviews_of(root) / "03-validation.md").write_text(validation_text(HEAD, "failed"), "utf-8")
+    log = reviews_of(root) / "workflow.jsonl"
+    note_orchestrator(log, "review over the failure", "the failure is the pipeline's",
+                      by="owner", next_step="review", kind="pre-closeout")
+
+    line = review_and_log(CHANGE, "pre-closeout", root=root, clock=clock, head=lambda _: HEAD,
+                          runner=writing(review_text("pre-closeout")))
+
+    assert (line["outcome"], line["record"]) == ("finished", "04-pre-closeout.md")
+    # Used by the review it directed: the next one is held to the validation again.
+    with pytest.raises(ReviewError, match="result is failed"):
+        run_review(CHANGE, "pre-closeout", root=root, head=lambda _: HEAD,
+                   runner=writing(review_text("pre-closeout")))
+
+
+def test_a_direction_to_another_node_overrides_nothing(tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    (reviews_of(root) / "03-validation.md").write_text(validation_text(HEAD, "failed"), "utf-8")
+    note_orchestrator(reviews_of(root) / "workflow.jsonl", "closeout", "r", by="owner",
+                      next_step="closeout")
+
+    with pytest.raises(ReviewError, match="result is failed"):
+        run_review(CHANGE, "pre-closeout", root=root, head=lambda _: HEAD,
+                   runner=writing(review_text("pre-closeout")))
 
 
 def test_an_implementation_review_never_waits_for_validation(tmp_path: Path) -> None:

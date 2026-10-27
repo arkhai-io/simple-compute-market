@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 import change_clone as clones
+from change_workflow.common import StepError
 from change_workflow.log import (append_entry, log_path, note_orchestrator, note_round,
                                  record_outcome)
 from find_change import change_directory
@@ -579,12 +580,11 @@ def test_a_closeout_triage_that_returns_goes_to_the_owner(tmp_path: Path) -> Non
     root = _repository(tmp_path, "in closeout", archived=True)
     _triaged(root, "05-closeout.md", "Returned to planning", reviewed="e" * 40)
     run = _log(root, "triage", RETURN)
-    _decide(root, "return to planning confirmed", by="owner", resolves=run["seq"],
-            next_step="plan")
-    # Planning refuses an archived change.
-    _log(root, "plan", {"outcome": "stopped", "message": "Archived.",
-                        "reason": "the change is archived", "denials": []})
-    _decide(root, "planning's refusal read", resolves=run["seq"] + 2)
+    # No direction crosses the archive: planning's entry guard refuses it.
+    with pytest.raises(StepError, match="the change is archived"):
+        _decide(root, "return to planning confirmed", by="owner", resolves=run["seq"],
+                next_step="plan")
+    _decide(root, "return declined", by="owner", resolves=run["seq"])
 
     result = _next(root)
 
@@ -2111,8 +2111,7 @@ def test_the_owners_waiver_after_a_return_names_planning(tmp_path: Path) -> None
     _log(root, "design", FINISHED)
     before = _next(root)
 
-    waiver = _decide(root, "waive another design review", by="owner", next_step="plan",
-                     status="in design")
+    waiver = _decide(root, "waive another design review", by="owner", next_step="plan")
 
     assert (before["step"], before["kind"]) == ("review", "design")
     assert _next(root)["step"] == "plan"
@@ -2121,7 +2120,7 @@ def test_the_owners_waiver_after_a_return_names_planning(tmp_path: Path) -> None
                                   **HERE)
     computation.run()
     assert computation._design("in design")["step"] == "plan"
-    assert waiver["next"] == "plan" and "resolves" not in waiver
+    assert waiver["next"] == {"step": "plan"} and "resolves" not in waiver
 
 
 @pytest.mark.parametrize("outcome,expected", [
@@ -2137,8 +2136,7 @@ def test_planning_that_ran_on_the_waiver_is_not_run_again(tmp_path: Path, outcom
     _decide(root, "return to design confirmed", by="owner", resolves=returned["seq"],
             next_step="design")
     _log(root, "design", FINISHED)
-    _decide(root, "waive another design review", by="owner", next_step="plan",
-            status="in design")
+    _decide(root, "waive another design review", by="owner", next_step="plan")
     planned = _log(root, "plan", outcome)
 
     result = _next(root)

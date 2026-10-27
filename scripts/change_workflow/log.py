@@ -7,13 +7,12 @@ run's session and commit: the wrapper's for an unattended run, and
 `note_round` and `note_orchestrator` append the
 orchestrating session's own lines: a `round` line recording the implementation
 round the owner agreed, and an `orchestrator` line recording a decision — the
-orchestrating session's own routing or recovery, or the owner's, such as a
-confirmed return or a repeat review — naming the run whose denials it reads, the
-run it resolves, and the step it directs next, so the next-step computation
-routes on it. Reading and resolving are distinct because a run can be denied a
-call and still end with a question or a proposed return: its denials are read
-first, and its outcome is answered or decided after. This module is the log's only
-writer.
+orchestrating session's own routing or recovery, or the owner's — naming the run
+whose denials it reads, the run it resolves, and, for the owner's alone, the node
+it directs the change to next, so the next-step computation routes on it. Reading
+and resolving are distinct because a run can be denied a call and still end with a
+question or a proposed return: its denials are read first, and its outcome is
+answered or decided after. This module is the log's only writer.
 
 The log holds only what the change's files cannot: session ids, the owner's round
 agreements, and the last outcome. Where the log and the files disagree, the files
@@ -36,10 +35,11 @@ from pathlib import Path
 from typing import IO, Any, Sequence
 
 from change_workflow.common import KINDS, ORCHESTRATOR, STEPS, Clock, Entry, StepError, utc_now
-from change_workflow.graph import section_ids
+from change_workflow.graph import (NODES, Standing, TargetError, entry_refusal, node_of,
+                                   section_ids)
 from change_workflow.outcome import outcome_problems
-from change_workflow.records import next_number, triage_outcome_problems
-from find_change import ChangeNotFound, change_directory, find_records
+from change_workflow.records import NUMBERED, next_number, triage_outcome_problems
+from find_change import ARCHIVE, ChangeNotFound, change_directory, find_records
 
 LOG = "workflow.jsonl"
 FORMAT = 2
@@ -248,18 +248,73 @@ def redesigned_after_return(entries: Sequence[Entry]) -> bool:
     """Whether the latest design run finished after the latest confirmed return to
     design: when the owner may waive another design review for what it settled."""
     returns = [entry["seq"] for entry in entries if entry.get("outcome") == ORCHESTRATOR
-               and entry.get("by") == "owner" and entry.get("next") == "design"
+               and entry.get("by") == "owner" and directed_step(entry) == "design"
                and entry.get("resolves") is not None]
     designs = [entry for entry in entries if entry.get("step") == "design"]
     return bool(returns and designs and designs[-1].get("outcome") == "finished"
                 and designs[-1]["seq"] > returns[-1])
 
 
+def standing(path: Path, entries: Sequence[Entry] | None = None) -> Standing:
+    """What the entry guards read of the change whose log is at `path`: whether its
+    directory is under the archive, and the kinds of review awaiting triage.
+
+    A review — a numbered record of a review kind, `-external` included — awaits
+    triage until a triage's finished or returned outcome, or a conversion line,
+    names it in `triaged`; a review whose triage file exists and whose outcome is
+    not yet recorded is a triage in progress, and still awaits it.
+    """
+    directory = path.parent.parent
+    entries = read_log(path) if entries is None else entries
+    triaged = {name for entry in entries
+               if (entry.get("step") == "triage"
+                   and entry.get("outcome") in ("finished", "returned"))
+               or entry.get("step") == "convert"
+               for name in entry.get("triaged") or () if isinstance(name, str)}
+    awaiting = set()
+    for record in (path.parent.iterdir() if path.parent.is_dir() else ()):
+        stem = record.name.removesuffix(".md")
+        if not record.name.endswith(".md") or not NUMBERED.match(stem) or stem in triaged:
+            continue
+        kind = stem.split("-", 1)[1].removesuffix("-external")
+        if kind in KINDS:
+            awaiting.add(kind)
+    return Standing(archived=directory.parent.as_posix().endswith(ARCHIVE.as_posix()),
+                    awaiting=frozenset(awaiting))
+
+
+def directed_step(entry: Entry) -> str | None:
+    """The step a decision line directs: its target's, or, on a line the log's
+    format has not marked, the step it names as a string."""
+    target = entry.get("next")
+    if isinstance(target, dict):
+        return target.get("step")
+    return target if isinstance(target, str) else None
+
+
+def direction(next_step: str, kind: str | None = None,
+              sections: list[list[int | str]] | None = None,
+              target: str | None = None) -> Entry:
+    """The target a direction names, built from the command line's flags: `--next`,
+    qualified by `--kind` and `--sections`, or, for a validation, `--target`, which
+    they qualify instead."""
+    qualified: Entry = {"step": target if target is not None else next_step}
+    if kind is not None:
+        qualified["kind"] = kind
+    if sections is not None:
+        qualified["sections"] = sections
+    if target is None:
+        return qualified
+    return {"step": next_step, "target": qualified}
+
+
 def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHESTRATOR,
                       resolves: int | None = None, reads: int | None = None,
                       next_step: str | None = None, kind: str | None = None,
+                      sections: list[list[int | str]] | None = None,
+                      target: str | None = None,
                       branch: str | None = None, change: str | None = None,
-                      status: str | None = None, clock: Clock = utc_now) -> Entry:
+                      clock: Clock = utc_now) -> Entry:
     """Record a decision: the orchestrating session's own routing or recovery, or
     the owner's, relayed by it.
 
@@ -272,22 +327,20 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
     outcome waiting. A stopped run is read the same way: a reading that also
     resolved it would make `resume` refuse the one-run grant that recovers it,
     so a stop is resolved only when it is not recovered.
-    `next_step` names the step the decision directs — the step a confirmed
-    return goes to, the review the owner asked for again — which the next-step
-    computation names until that step has run. A directed review takes its
-    `kind`, without which the computation could not name one; a directed step
-    of any other kind is a confirmed return, so it resolves the returned run,
-    which would otherwise wait ahead of the directive, and only the owner gives
-    it: the spec reserves confirming a return to them. A repeat review the owner
-    asks for outside a triage names no run, since no run waits on it; nor does the
-    owner's direction to archive cleanup, by which they waive the validation the
-    computation would name first. Only the owner gives it; archive cleanup's own
-    entry checks still hold, and its validation check asks the owner and records
-    the waiver in the ledger. Nor does the owner's waiver of another design review
-    for a decision made after a return, directing planning: it is accepted only
-    while the change's `status` is `in design` and its latest design run finished
-    after the confirmed return, so it cannot stand in for a confirmed return of
-    its own.
+
+    `next_step`, qualified by `kind` and `sections`, or for a validation by
+    `target`, the step it is for, which they then qualify (`direction`), is the
+    owner's direction, recorded as the line's `next`: a target naming the node of
+    the workflow graph the change goes to next, which the next-step computation
+    names until a run of it is logged — a confirmed return, which resolves the
+    returned run, a repeat review, a waiver of a step's check, any intervention.
+    Only the owner
+    directs: the orchestrating session neither directs a step of its own accord
+    nor records a step's exit for it. A direction checks none of the exit guards a
+    step's exit is held to, since the owner made it deliberately, and its `reason`
+    says what it skips; it is refused, naming the guard, while an unwaivable entry
+    guard of a node it names is not met — its target, and the target nested in a
+    direction to validation — since the step could not carry out its work.
     `branch` and `change` record the owner's word that `change` is worked on
     `branch` though the branch is not its own, which each step's branch check
     accepts in place of asking (`branch_decisions`); only the owner gives it.
@@ -319,35 +372,53 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
             raise StepError(f"the run at seq {reads} recorded no denial; a decision reads "
                             "a run's denials")
         line["reads"] = reads
+    if next_step is None and (kind, sections, target) != (None, None, None):
+        raise StepError("a kind, sections, or target qualify the step a decision directs")
     if next_step is not None:
-        if next_step not in STEPS:
-            raise StepError(f"unknown step {next_step!r}; expected one of {', '.join(STEPS)}")
-        if next_step == "review" and kind is None:
-            raise StepError("a decision directing a review names its kind")
-        if next_step == "archive-cleanup" and resolves is None:
-            if by != "owner":
-                raise StepError("a decision directing archive cleanup past its validation "
-                                "is the owner's waiver")
-        elif next_step == "plan" and resolves is None:
-            if by != "owner" or status != "in design" or not redesigned_after_return(entries):
-                raise StepError("a decision directing plan names the run it resolves, as a "
-                                "confirmed return does, unless it is the owner's waiver of "
-                                "another design review: the change in design, its latest "
-                                "design run finished after the confirmed return")
-        elif next_step != "review" and resolves is None:
-            raise StepError(f"a decision directing {next_step} is a confirmed return and "
-                            "names the run it resolves")
-        if next_step != "review" and by != "owner":
-            raise StepError(f"a decision directing {next_step} confirms a return, which is "
-                            "the owner's")
-        line["next"] = next_step
-    if kind is not None:
-        if next_step != "review":
-            raise StepError("a kind goes with next = review")
-        if kind not in KINDS:
-            raise StepError(f"unknown review kind {kind!r}; expected one of {', '.join(KINDS)}")
-        line["kind"] = kind
+        if by != "owner":
+            raise StepError("a decision directing a step is the owner's; the orchestrating "
+                            "session directs none")
+        directed = direction(next_step, kind, sections, target)
+        try:
+            refusal = entry_refusal(directed, standing(path, entries), directed=True)
+        except TargetError as exc:
+            raise StepError(f"the direction names no node: {exc}") from exc
+        if refusal:
+            raise StepError(f"the direction is refused: {refusal}")
+        line["next"] = directed
     return append_entry(path, line, clock)
+
+
+def unused_direction(entries: Sequence[Entry]) -> Entry | None:
+    """The owner's latest direction, while no run of the node it directs is logged
+    after it; None once one is, or when the owner has directed nothing.
+
+    A run of a review is of the kind directed; a run of a triage names a review of
+    the kind directed among the records it triaged.
+    """
+    direction_ = next((entry for entry in reversed(entries)
+                       if entry.get("outcome") == ORCHESTRATOR and entry.get("by") == "owner"
+                       and isinstance(entry.get("next"), dict)), None)
+    if direction_ is None:
+        return None
+    try:
+        node = node_of(direction_["next"])
+    except TargetError:
+        return None
+    runs = NODES[node].runs
+
+    def ran(entry: Entry) -> bool:
+        if entry.get("step") != runs:
+            return False
+        if node.step == "review":
+            return entry.get("kind") == node.kind
+        if node.step == "triage":
+            return any(isinstance(name, str) and name.split("-", 1)[-1].removesuffix(
+                "-external") == node.kind for name in entry.get("triaged") or ())
+        return True
+
+    return None if any(entry["seq"] > direction_["seq"] and ran(entry)
+                       for entry in entries) else direction_
 
 
 def branch_decisions(entries: Sequence[Entry], branch: str,

@@ -151,22 +151,22 @@ The workflow's graph, as `make change-graph` draws it from the table in
 
 ```mermaid
 flowchart TD
-    design["design"]
+    design["design<br/>entry: the change is not archived"]
     review_design["review:design"]
-    triage_design["triage:design"]
-    plan["plan"]
-    round["round"]
+    triage_design["triage:design<br/>entry: a review of its kind awaits triage"]
+    plan["plan<br/>entry: the change is not archived"]
+    round["round<br/>entry: the change is not archived"]
     review_implementation["review:implementation"]
-    triage_implementation["triage:implementation"]
-    review_pre_closeout["review:pre-closeout"]
-    triage_pre_closeout["triage:pre-closeout"]
+    triage_implementation["triage:implementation<br/>entry: a review of its kind awaits triage"]
+    review_pre_closeout["review:pre-closeout<br/>entry: the latest validation passed for HEAD, or for an ancestor it differs from only in records, or after a pre-closeout triage only in openspec/ and docs/ (waivable)"]
+    triage_pre_closeout["triage:pre-closeout<br/>entry: a review of its kind awaits triage"]
     closeout["closeout"]
-    review_closeout["review:closeout"]
-    triage_closeout["triage:closeout"]
-    archive_cleanup["archive-cleanup"]
-    done["done"]
+    review_closeout["review:closeout<br/>entry: the change is archived"]
+    triage_closeout["triage:closeout<br/>entry: the change is archived<br/>entry: a review of its kind awaits triage"]
+    archive_cleanup["archive-cleanup<br/>entry: the change is archived"]
+    done["done<br/>entry: reached only by archive cleanup's exit"]
     round_view["round-view"]
-    validate["validate"]
+    validate["validate<br/>entry: it carries a target that is a node"]
     join_triage_implementation{{"join"}}
     design --> review_design
     review_design --> triage_design

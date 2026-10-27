@@ -86,8 +86,8 @@ from change_workflow.graph import (ARCHIVE_CLEANUP, CLOSEOUT,  # noqa: E402
                                    PLAN, PRE_CLOSEOUT_REVIEW, PRE_CLOSEOUT_TRIAGE, ROUND,
                                    ROUND_VIEW, VALIDATE, Node)
 from change_workflow.graph import owner as _owner  # noqa: E402
-from change_workflow.log import (branch_decisions, log_path, read_log,  # noqa: E402
-                                 redesigned_after_return)
+from change_workflow.log import (branch_decisions, directed_step, log_path,  # noqa: E402
+                                 read_log, redesigned_after_return)
 from change_workflow.records import (ChangedSince, changed_since,  # noqa: E402
                                      is_documentation, is_record, latest_validation,
                                      validation_problem, validation_result)
@@ -1048,11 +1048,13 @@ class Computation:
         """
         log = self.state.log
         decision = next((e for e in reversed(log)
-                         if e.get("outcome") == ORCHESTRATOR and e.get("next")
-                         and (e["next"] == "review" or e.get("by") == "owner")), None)
+                         if e.get("outcome") == ORCHESTRATOR and directed_step(e)
+                         and (directed_step(e) == "review" or e.get("by") == "owner")), None)
         if decision is None:
             return None
-        step, kind = decision["next"], decision.get("kind")
+        step = directed_step(decision)
+        kind = (decision["next"].get("kind") if isinstance(decision["next"], dict)
+                else decision.get("kind"))
         if any(e["seq"] > decision["seq"] and e.get("step") == step
                and (step != "review" or kind is None or e.get("kind") == kind)
                for e in log):
@@ -1072,7 +1074,7 @@ class Computation:
             return None
         return next((entry for entry in reversed(log)
                      if entry.get("outcome") == ORCHESTRATOR and entry.get("by") == "owner"
-                     and entry.get("next") == "plan" and entry.get("resolves") is None
+                     and directed_step(entry) == "plan" and entry.get("resolves") is None
                      and entry["seq"] > design["seq"]), None)
 
     def not_advancing(self, review: Record, triage: Node) -> Result | None:
@@ -1111,7 +1113,7 @@ class Computation:
         proposed = review.triage.stat().st_mtime_ns // 1_000_000_000
         return any(e.get("outcome") == ORCHESTRATOR and e.get("by") == "owner"
                    and e.get("resolves") in returned
-                   and e.get("next") in ("design", "plan")
+                   and directed_step(e) in ("design", "plan")
                    and isinstance(e.get("at"), str) and _seconds(e["at"]) >= proposed
                    for e in log)
 

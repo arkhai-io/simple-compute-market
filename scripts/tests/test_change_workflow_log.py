@@ -15,7 +15,7 @@ from change_workflow.cli import main
 from change_workflow.common import StepError
 from change_workflow.log import (LogError, append_entry, branch_decisions, last_entries,
                                  note_orchestrator, note_round, read_log, record_interactive,
-                                 record_outcome)
+                                 record_outcome, unused_direction)
 from change_workflow_fixtures import CHANGE, COMMIT, DENIALS, VALID, clock, log_file
 
 
@@ -170,30 +170,168 @@ def test_a_decision_names_who_decided_the_run_it_resolves_and_the_next_step(
     assert line == {"seq": 2, "at": "2026-10-21T09:15:40Z", "format": 2,
                     "step": "orchestrator", "outcome": "orchestrator", "by": "owner",
                     "decision": "return to design confirmed", "reason": "the owner's word",
-                    "resolves": 1, "next": "design"}
-    assert (review["next"], review["kind"]) == ("review", "pre-closeout")
+                    "resolves": 1, "next": {"step": "design"}}
+    # The repeat review names no run, since no run waits on it.
+    assert review["next"] == {"step": "review", "kind": "pre-closeout"}
+    assert "resolves" not in review and "kind" not in review
     assert note_orchestrator(log, "d", "r")["by"] == "orchestrator"
 
 
-def test_the_owner_may_direct_archive_cleanup_past_its_validation(tmp_path: Path) -> None:
+# The owner's directions: any node, checked only against the unwaivable entry
+# guards of the nodes they name.
+
+def _archived_log(tmp_path: Path) -> Path:
+    directory = tmp_path / "openspec/changes/archive" / f"2026-10-21-{CHANGE}"
+    directory.mkdir(parents=True)
+    return directory / "reviews" / "workflow.jsonl"
+
+
+def _review(log: Path, name: str, triaged: bool = False) -> None:
+    log.parent.mkdir(parents=True, exist_ok=True)
+    (log.parent / name).with_suffix(".md").write_text("A review.\n", "utf-8")
+    if triaged:
+        (log.parent / name).with_suffix(".triage.md").write_text("Its triage.\n", "utf-8")
+        record_outcome(log, "triage", {"outcome": "finished", "message": "Advance.",
+                                       "next": {"step": "plan"}, "triaged": [name]},
+                       session="s", commit=COMMIT)
+
+
+@pytest.mark.parametrize("fields,target", [
+    ({"next_step": "archive-cleanup"}, {"step": "archive-cleanup"}),
+    ({"next_step": "review", "kind": "closeout"}, {"step": "review", "kind": "closeout"}),
+    ({"next_step": "triage", "kind": "closeout"}, {"step": "triage", "kind": "closeout"}),
+    ({"next_step": "closeout"}, {"step": "closeout"}),
+    ({"next_step": "validate", "target": "archive-cleanup"},
+     {"step": "validate", "target": {"step": "archive-cleanup"}}),
+])
+def test_the_owner_directs_an_archived_change_past_the_archive(
+        tmp_path: Path, fields: dict, target: dict) -> None:
+    log = _archived_log(tmp_path)
+    _review(log, "05-closeout")
+
+    # Archive cleanup's validation is waived by a plain direction, its reason
+    # saying what it skips.
+    line = note_orchestrator(log, "waive archive cleanup's validation", "the paths judged",
+                             by="owner", **fields)
+
+    assert line["next"] == target and "resolves" not in line
+
+
+@pytest.mark.parametrize("fields,guard", [
+    ({"next_step": "design"}, "design's entry guard (the change is not archived)"),
+    ({"next_step": "plan"}, "plan's entry guard (the change is not archived)"),
+    ({"next_step": "implement", "sections": [[5]]},
+     "round's entry guard (the change is not archived)"),
+    ({"next_step": "validate", "target": "design"},
+     "design's entry guard (the change is not archived)"),
+])
+def test_an_archived_change_is_not_directed_to_an_earlier_phase(
+        tmp_path: Path, fields: dict, guard: str) -> None:
+    log = _archived_log(tmp_path)
+
+    with pytest.raises(StepError, match="refused") as refused:
+        note_orchestrator(log, "back to design", "r", by="owner", **fields)
+
+    assert guard in str(refused.value) and "the change is archived" in str(refused.value)
+    assert not log.exists()
+
+
+def test_done_is_never_directed(tmp_path: Path) -> None:
+    log = _archived_log(tmp_path)
+
+    with pytest.raises(StepError, match="reached only by archive cleanup's exit"):
+        note_orchestrator(log, "done", "r", by="owner", next_step="done")
+
+
+@pytest.mark.parametrize("fields,label", [
+    ({"next_step": "archive-cleanup"}, "archive-cleanup"),
+    ({"next_step": "review", "kind": "closeout"}, "review:closeout"),
+    ({"next_step": "triage", "kind": "closeout"}, "triage:closeout"),
+    # A directed validation that could never reach its target runs no validation.
+    ({"next_step": "validate", "target": "archive-cleanup"}, "archive-cleanup"),
+])
+def test_a_change_not_archived_is_not_directed_past_the_archive(
+        tmp_path: Path, fields: dict, label: str) -> None:
     log = log_file(tmp_path)
 
-    waiver = note_orchestrator(log, "waive archive cleanup's validation", "the paths judged",
-                               by="owner", next_step="archive-cleanup")
+    with pytest.raises(StepError) as refused:
+        note_orchestrator(log, "d", "r", by="owner", **fields)
 
-    assert waiver["next"] == "archive-cleanup" and "resolves" not in waiver
-    with pytest.raises(StepError, match="is the owner's waiver"):
-        note_orchestrator(log, "d", "r", next_step="archive-cleanup")
+    assert (f"{label}'s entry guard (the change is archived) is not met: the change is not "
+            "archived") in str(refused.value)
+    assert not log.exists()
 
 
-@pytest.mark.parametrize("next_step", ["design", "plan"])
-def test_only_the_owner_confirms_a_return(tmp_path: Path, next_step: str) -> None:
+def test_a_directed_validation_names_its_target(tmp_path: Path) -> None:
+    log = log_file(tmp_path)
+
+    line = note_orchestrator(log, "validate before closeout", "r", by="owner",
+                             next_step="validate", target="closeout")
+    round_ = note_orchestrator(log, "validate the fix", "r", by="owner", next_step="validate",
+                               target="implement", sections=[[5], [6]])
+
+    assert line["next"] == {"step": "validate", "target": {"step": "closeout"}}
+    assert round_["next"] == {"step": "validate",
+                              "target": {"step": "implement", "sections": [[5], [6]]}}
+    # Refused by validation's entry guard, which the refusal names.
+    with pytest.raises(StepError) as refused:
+        note_orchestrator(log, "d", "r", by="owner", next_step="validate")
+    assert ("validate's entry guard (it carries a target that is a node) is not met: a "
+            "validation names the target it is for") in str(refused.value)
+
+
+def test_a_triage_is_directed_only_while_a_review_of_its_kind_awaits_it(
+        tmp_path: Path) -> None:
+    log = log_file(tmp_path)
+    _review(log, "13-design", triaged=True)
+
+    with pytest.raises(StepError, match="no design review awaits triage"):
+        note_orchestrator(log, "triage again", "r", by="owner", next_step="triage",
+                          kind="design")
+    # A review awaits its triage until a triage's outcome names it, its triage file
+    # written or not, an external review among them.
+    _review(log, "21-design-external")
+    line = note_orchestrator(log, "triage it", "r", by="owner", next_step="triage",
+                             kind="design")
+
+    assert line["next"] == {"step": "triage", "kind": "design"}
+
+
+def test_a_direction_checks_no_exit_guard(tmp_path: Path) -> None:
+    # The pre-closeout review's validation is waivable, and closeout's is an exit
+    # guard: neither refuses the owner's direction.
+    log = log_file(tmp_path)
+
+    for fields in ({"next_step": "review", "kind": "pre-closeout"}, {"next_step": "closeout"}):
+        assert note_orchestrator(log, "d", "r", by="owner", **fields)["next"]
+
+
+@pytest.mark.parametrize("fields,target", [
+    ({"next_step": "design"}, {"step": "design"}),
+    ({"next_step": "plan"}, {"step": "plan"}),
+    ({"next_step": "round"}, {"step": "round"}),
+    ({"next_step": "implement", "sections": [[5]]}, {"step": "implement", "sections": [[5]]}),
+])
+def test_a_change_not_archived_is_directed_to_an_earlier_phase(
+        tmp_path: Path, fields: dict, target: dict) -> None:
+    log = log_file(tmp_path)
+
+    assert note_orchestrator(log, "d", "r", by="owner", **fields)["next"] == target
+
+
+@pytest.mark.parametrize("fields", [
+    {"next_step": "review", "kind": "pre-closeout"},
+    {"next_step": "design"},
+    {"next_step": "plan"},
+])
+def test_only_the_owner_directs_a_step(tmp_path: Path, fields: dict) -> None:
     log = log_file(tmp_path)
     run = record_outcome(log, "triage", VALID["returned"], session="s", commit=COMMIT)
 
-    with pytest.raises(StepError, match="which is the owner's"):
-        note_orchestrator(log, "return confirmed", "r", resolves=run["seq"],
-                          next_step=next_step)
+    # A return confirmed by anyone but the owner, or a review the orchestrating
+    # session asks for of its own accord.
+    with pytest.raises(StepError, match="is the owner's; the orchestrating session directs"):
+        note_orchestrator(log, "directed", "r", resolves=run["seq"], **fields)
 
     assert len(read_log(log)) == 1
 
@@ -201,11 +339,14 @@ def test_only_the_owner_confirms_a_return(tmp_path: Path, next_step: str) -> Non
 @pytest.mark.parametrize("fields,problem", [
     ({"resolves": 9}, "no run has seq 9"),
     ({"reads": 9}, "no run has seq 9"),
-    ({"next_step": "deploy"}, "unknown step 'deploy'"),
-    ({"kind": "design"}, "a kind goes with next = review"),
-    ({"next_step": "review", "kind": "triage"}, "unknown review kind 'triage'"),
-    ({"next_step": "review"}, "a decision directing a review names its kind"),
-    ({"next_step": "design"}, "directing design is a confirmed return and names the run"),
+    ({"by": "owner", "next_step": "deploy"}, "'deploy' is no node"),
+    ({"kind": "design"}, "qualify the step a decision directs"),
+    ({"by": "owner", "next_step": "review", "kind": "triage"}, "review:triage is no node"),
+    # A directed review, or a directed triage, names its kind.
+    ({"by": "owner", "next_step": "review"}, "a review is a node only with the kind"),
+    ({"by": "owner", "next_step": "triage"}, "a triage is a node only with the kind"),
+    ({"by": "owner", "next_step": "plan", "kind": "design"},
+     "only a review or a triage names a kind"),
     ({"by": ""}, "names who decided"),
 ])
 def test_a_decision_naming_what_the_log_lacks_is_refused(tmp_path: Path, fields: dict,
@@ -415,76 +556,60 @@ def test_a_round_recorded_after_the_fact_is_given_its_last_record_before_it(
         note_round(log, [[1]], "owner", after=-1)
 
 
-# The owner's waiver of another design review after a return.
+# The owner's waiver of another design review is a plain direction to planning.
 
-def _returned_and_redesigned(log: Path, *, design: dict | None = None) -> None:
-    run = record_outcome(log, "plan", VALID["returned"], session="s", commit=COMMIT)
-    note_orchestrator(log, "return to design confirmed", "the owner's word", by="owner",
-                      resolves=run["seq"], next_step="design", clock=clock)
-    record_outcome(log, "design", design or VALID["finished"], session="s", commit=COMMIT)
-
-
-def test_the_owner_may_waive_another_design_review_after_a_return(tmp_path: Path) -> None:
+def test_the_owner_waives_another_design_review_by_a_direction(tmp_path: Path) -> None:
     log = log_file(tmp_path)
-    _returned_and_redesigned(log)
 
     waiver = note_orchestrator(log, "waive another design review", "the decision is small",
-                               by="owner", next_step="plan", status="in design")
+                               by="owner", next_step="plan")
 
-    assert waiver["next"] == "plan" and "resolves" not in waiver
+    assert waiver["next"] == {"step": "plan"} and "resolves" not in waiver
 
 
-@pytest.mark.parametrize("case", ["by the orchestrator", "not in design", "no return",
-                                  "design not finished", "design before the return",
-                                  "return not the owner's"])
-def test_a_waiver_is_refused_unless_it_follows_a_finished_redesign(tmp_path: Path,
-                                                                   case: str) -> None:
+def test_the_owners_latest_direction_is_unused_until_its_node_runs(tmp_path: Path) -> None:
     log = log_file(tmp_path)
-    by, status = "owner", "in design"
-    if case == "by the orchestrator":
-        _returned_and_redesigned(log)
-        by = "orchestrator"
-    elif case == "not in design":
-        _returned_and_redesigned(log)
-        status = "in planning"
-    elif case == "no return":
-        record_outcome(log, "design", VALID["finished"], session="s", commit=COMMIT)
-    elif case == "design not finished":
-        _returned_and_redesigned(log, design=VALID["question"])
-    elif case == "return not the owner's":
-        run = record_outcome(log, "plan", VALID["returned"], session="s", commit=COMMIT)
-        # Appended past the writer, which refuses this line, to stand for a log holding one.
-        append_entry(log, {"step": "orchestrator", "outcome": "orchestrator",
-                           "by": "orchestrator", "decision": "return to design confirmed",
-                           "reason": "r", "resolves": run["seq"], "next": "design"})
-        record_outcome(log, "design", VALID["finished"], session="s", commit=COMMIT)
-    else:
-        record_outcome(log, "design", VALID["finished"], session="s", commit=COMMIT)
-        run = record_outcome(log, "plan", VALID["returned"], session="s", commit=COMMIT)
-        note_orchestrator(log, "return to design confirmed", "r", by="owner",
-                          resolves=run["seq"], next_step="design", clock=clock)
-    count = len(read_log(log))
+    note_orchestrator(log, "review again", "r", by="owner", next_step="review",
+                      kind="pre-closeout")
+    directed = read_log(log)[-1]
+    record_outcome(log, "review", VALID["finished"], session="s", commit=COMMIT,
+                   extra={"kind": "implementation"})
 
-    with pytest.raises(StepError, match="directing plan names the run it resolves"):
-        note_orchestrator(log, "waive", "r", by=by, next_step="plan", status=status)
-    assert len(read_log(log)) == count
+    assert unused_direction(read_log(log)) == directed
+    record_outcome(log, "review", VALID["finished"], session="s", commit=COMMIT,
+                   extra={"kind": "pre-closeout"})
+    assert unused_direction(read_log(log)) is None
 
 
-def test_the_command_line_reads_the_changes_status_for_a_waiver(
-        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_a_direction_to_a_triage_is_used_by_a_triage_of_its_kind(tmp_path: Path) -> None:
     log = log_file(tmp_path)
-    _returned_and_redesigned(log)
-    note = ["note", CHANGE, "orchestrator", "--decision", "waive another design review",
-            "--reason", "the decision is small", "--by", "owner", "--next", "plan"]
-    (tmp_path / "openspec/changes/README.md").write_text(
-        "| Change | Status | Depends on | Notes | Acceptance boundary |\n|---|---|---|---|---|\n"
-        f"| [`{CHANGE}`]({CHANGE}/) | in planning | — | x | x |\n", "utf-8")
+    _review(log, "13-design")
+    _review(log, "14-implementation", triaged=False)
+    (log.parent / "14-implementation.triage.md").write_text("Its triage.\n", "utf-8")
+    note_orchestrator(log, "triage it", "r", by="owner", next_step="triage", kind="design")
+    directed = read_log(log)[-1]
+    record_outcome(log, "triage", {"outcome": "finished", "message": "Round.",
+                                   "next": {"step": "round"}, "triaged": ["14-implementation"]},
+                   session="s", commit=COMMIT)
 
-    assert main(note, root=tmp_path) == 1
-    assert "directing plan" in capsys.readouterr().err
+    assert unused_direction(read_log(log)) == directed
+    (log.parent / "13-design.triage.md").write_text("Its triage.\n", "utf-8")
+    record_outcome(log, "triage", {"outcome": "finished", "message": "Plan.",
+                                   "next": {"step": "plan"}, "triaged": ["13-design"]},
+                   session="s", commit=COMMIT)
+    assert unused_direction(read_log(log)) is None
 
-    (tmp_path / "openspec/changes/README.md").write_text(
-        (tmp_path / "openspec/changes/README.md").read_text("utf-8").replace(
-            "in planning", "in design"), "utf-8")
-    assert main(note, root=tmp_path) == 0
-    assert read_log(log)[-1]["next"] == "plan"
+
+def test_a_direction_to_any_other_step_is_used_by_its_run(tmp_path: Path) -> None:
+    log = log_file(tmp_path)
+    note_orchestrator(log, "plan", "r", by="owner", next_step="plan")
+    directed = read_log(log)[-1]
+    record_outcome(log, "design", VALID["finished"], session="s", commit=COMMIT)
+
+    assert unused_direction(read_log(log)) == directed
+    record_outcome(log, "plan", VALID["question"], session="s", commit=COMMIT)
+    # A run of it, however it ended.
+    assert unused_direction(read_log(log)) is None
+    # Only the owner's latest direction counts.
+    note_orchestrator(log, "closeout", "r", by="owner", next_step="closeout")
+    assert unused_direction(read_log(log))["next"] == {"step": "closeout"}

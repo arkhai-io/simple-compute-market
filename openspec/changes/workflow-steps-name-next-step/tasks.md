@@ -403,13 +403,26 @@ guards, D5, D6; requirement "The owner directs a change's next step", and
 `scripts/change_workflow/graph.py`, `log.py`, `cli.py`, `review.py`, and
 `scripts/tests/`.
 
-- [ ] 5.1 `graph.py`: each node's entry guards, unwaivable or waivable, as D1's
+- [x] 5.1 `graph.py`: each node's entry guards, unwaivable or waivable, as D1's
       entry-guard table gives them — the archive's absence for design, planning, and
       implementation; the archive for the closeout review, its triage, and archive
       cleanup; a review of its kind awaiting triage for each triage node;
       validation carrying a target that is a node; `done` never directed; and the
       pre-closeout review's validation, waivable. The drawing is redrawn.
-- [ ] 5.2 `log.py`, `note_orchestrator` (D6): `next` is the target object; every line
+      `Declaration.entry`, a tuple of `EntryGuard(condition, waivable, check)`; a
+      check reads `Standing(archived, awaiting)` — the kinds of review awaiting
+      triage — the target, and whether the entry is a direction. `entry_refusal(
+      target, standing, directed=)` names the first unwaivable guard not met, of the
+      target and, for a directed validation only, its nested target: on a step's
+      exit the nested target is checked on the validation's own exit (D1). The
+      waivable guard has no check here: the review checks it as it starts (5.4).
+      A validation whose target names no node is refused by validation's own
+      guard, which the refusal names; any other target naming no node raises
+      `TargetError`.
+      Each box of the drawing lists its entry guards (`entry: …`, `(waivable)`);
+      the block was written by hand from `mermaid()`'s algorithm and `drift`
+      confirms it.
+- [x] 5.2 `log.py`, `note_orchestrator` (D6): `next` is the target object; every line
       carrying `next` is `by: owner`; its target is a node of the table; and the
       log's writer refuses it, naming the guard, while an unwaivable entry guard of
       any node it names is not met — the target, and the target nested in a
@@ -417,14 +430,34 @@ guards, D5, D6; requirement "The owner directs a change's next step", and
       cases for review, plan, archive cleanup, and confirmed returns, and
       `redesigned_after_return`'s gate, are removed: a waiver is a plain direction
       whose `reason` says what it skips. `resolves` and `reads` are unchanged.
-- [ ] 5.3 `cli.py`: `note orchestrator` keeps `--next`, `--kind`, and `--sections`,
+      `note_orchestrator` keeps `next_step` and `kind` and gains `sections` and
+      `target`, building the object with `direction()`; its `status` parameter is
+      gone. `standing(path)` reads the archive from the change directory's place
+      and the awaiting reviews from `reviews/` and the log: a numbered record of a
+      review kind, `-external` included, that no finished or returned triage line,
+      and no conversion line, names in `triaged`. `unused_direction(entries)` is
+      the owner's latest direction while no run of its node follows it (a review
+      of its kind; a triage naming a review of its kind). `redesigned_after_return`
+      stays, the computation's reading until section 6, and reads a decision's
+      step through `directed_step`, which takes the object or an unmarked line's
+      string. The computation's three readers of a decision's `next` (`directed`,
+      `waived_design_review`, `return_confirmed`) read it the same way, so today's
+      routing holds on directions written as objects.
+- [x] 5.3 `cli.py`: `note orchestrator` keeps `--next`, `--kind`, and `--sections`,
       and gains `--target` for a direction to validation, which `--kind` and
       `--sections` then qualify (D6); it builds the object.
-- [ ] 5.4 `review.py`: the pre-closeout review's validation check accepts the
+      Correction to the plan: `note orchestrator` had no `--sections`; it gains
+      both, `--sections` in `note round`'s form. The writer builds the object from
+      the flags, so a caller of `note_orchestrator` passes the same names. The
+      index lookup for the waiver's status is gone.
+- [x] 5.4 `review.py`: the pre-closeout review's validation check accepts the
       owner's direction to that review, logged and not yet used, as its override, as
       `--unvalidated` is (D5, scenario "The owner directs a pre-closeout review over
       a failed validation").
-- [ ] 5.5 Verification, unit, with real archive directories in a temporary
+      `run_review` reads `unused_direction` from the change's log; a direction to a
+      review of the kind it runs sets the override. Its refusal names both
+      overrides.
+- [x] 5.5 Verification, unit, with real archive directories in a temporary
       directory: in `test_change_workflow_log.py` and `test_run_change_step.py`, the
       spec's "A directed review names no kind", "A directed triage names no kind",
       "The orchestrating session directs a step", "A return confirmed by anyone but
@@ -436,6 +469,56 @@ guards, D5, D6; requirement "The owner directs a change's next step", and
       failed validation starting on the direction; the graph tests with the redrawn
       diagram; `make test`; `make check-change CHANGE=workflow-steps-name-next-step`.
       End-to-end: none, and none is owed.
+      Unit. `test_change_workflow_log.py`, calling `note_orchestrator` on logs in
+      real active and archive directories in a temporary directory: each named
+      scenario, a validation without its target refused naming validation's guard,
+      `done` never directed, the archive both ways for design, planning, the round
+      and an implementation, the closeout review, its triage, and archive cleanup,
+      and for a validation nesting one, a triage directed once an external review
+      awaits it, the owner's directions past the pre-closeout review's validation
+      and closeout's, the waiver as a plain direction, and `unused_direction` for a
+      review, a triage (used only by a triage naming a review of its kind), and any
+      other step (used by its run however it ended).
+      `test_run_change_step.py`, through `main`: the flags building each object,
+      and a validation without its target refused naming the guard.
+      `test_change_workflow_review.py`, with a fake reviewer: a pre-closeout review
+      over a failed validation starts on the owner's direction, through
+      `review_and_log`; the next one, through `run_review`, is held to the
+      validation again; and a direction to another node overrides nothing. The
+      graph tests: the entry
+      guards as D1 tabulates them, `entry_refusal` for a direction and for a step's
+      exit, and the boxes drawn with their guards. `test_change_next_step.py`
+      changed in three places — two waiver calls lose `status=`, one asserts the
+      object, and the closeout triage's return to planning is now refused by the
+      writer, the owner declining it instead; its routing assertions are
+      otherwise as they were, and section 6 rewrites it. Workflow suites
+      (`-k "change or run_change_step or check_tasks or round_view"`): 1028
+      passed. `make test`: passed (`scripts/tests`: 1722), before the
+      fresh-context check's fixes, which touched `graph.py`'s `entry_refusal`,
+      the review's refusal message, and tests, all under `scripts/`, rerun above.
+      `make check-packaging`: passed. `make check-change`: every check passes but
+      the documentation citations, which report `scripts/change_workflow/convert.py`,
+      section 7's file. End-to-end: none, confirmed; no `Owed by validation:` line.
+
+Handoff from section 5: until section 9 rewrites `change-orchestrate`, the
+orchestrating session's own repeat-review decision (`--by orchestrator --next
+review`) is refused by the writer, as D5 intends; the owner's word is recorded `--by
+owner`. The computation still accepts an unmarked decision's string `next` through
+`directed_step`, the older reading section 6 deletes with the detection. A
+direction's nested target is checked by the writer; section 6 checks a validation's
+exit against the target it carries with `entry_refusal(..., directed=False)`, and a
+step's exit with the same call. `standing(path)` is what section 6 builds its
+`Standing` from. Left open for section 6, which routes on directions: a direction
+to `round-view` is never used up by `unused_direction`, since no run of it is
+logged (the round view's own state says when the owner read); a triage run that
+ends without `triaged` — a question or a stop — does not use up a direction to a
+triage, since nothing records which kind it ran for, while the computation's
+`directed()` counts any triage run; and `standing()` reads an unconverted log's
+triages as naming nothing, so every review awaits triage there — the detection
+should hold routing before any direction is checked on such a log, and section 7's
+`convert` checks its direction against the converted lines. Section 9's
+`change-orchestrate` rewrite also drops its account of the design-review waiver's
+old gate (the change `in design`, a finished redesign).
 
 ## 6. Routing on outcomes and directions
 

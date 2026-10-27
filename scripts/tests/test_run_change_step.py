@@ -135,6 +135,35 @@ def test_a_record_without_head_is_refused(tmp_path: Path,
     assert not log.exists()
 
 
+@pytest.mark.parametrize("flags,target", [
+    (["--next", "validate", "--target", "implement", "--sections", "5;6"],
+     {"step": "validate", "target": {"step": "implement", "sections": [[5], [6]]}}),
+    (["--next", "validate", "--target", "review", "--kind", "implementation"],
+     {"step": "validate", "target": {"step": "review", "kind": "implementation"}}),
+    (["--next", "implement", "--sections", "5"], {"step": "implement", "sections": [[5]]}),
+])
+def test_the_command_line_builds_the_owners_direction(tmp_path: Path, flags: list[str],
+                                                       target: dict) -> None:
+    log = log_file(tmp_path)
+
+    assert main(["note", CHANGE, "orchestrator", "--decision", "d", "--reason", "r",
+                 "--by", "owner", *flags], root=tmp_path) == 0
+
+    assert read_log(log)[-1]["next"] == target
+
+
+def test_the_command_line_refuses_a_direction_naming_no_node(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    log = log_file(tmp_path)
+
+    assert main(["note", CHANGE, "orchestrator", "--decision", "d", "--reason", "r",
+                 "--by", "owner", "--next", "validate"], root=tmp_path) == 1
+
+    assert ("validate's entry guard (it carries a target that is a node) is not met"
+            in capsys.readouterr().err)
+    assert not log.exists()
+
+
 def test_sections_parse_by_session(tmp_path: Path) -> None:
     assert parse_sections("1,2; 3 ;5B") == [[1, 2], [3], ["5B"]]
 
@@ -148,7 +177,7 @@ def test_the_command_line_notes_a_round_and_prints_the_log(
     assert main(["note", CHANGE, "round", "--sections", "1;2,3", "--after", "4"],
                 root=tmp_path) == 0
     assert main(["note", CHANGE, "orchestrator", "--decision", "d", "--reason", "r",
-                 "--by", "owner", "--next", "review", "--kind", "closeout"],
+                 "--by", "owner", "--next", "review", "--kind", "pre-closeout"],
                 root=tmp_path) == 0
     assert main(["note", CHANGE, "orchestrator", "--decision", "gap", "--reason", "r",
                  "--reads", "1"], root=tmp_path) == 0
@@ -161,8 +190,8 @@ def test_the_command_line_notes_a_round_and_prints_the_log(
     assert (entries[0]["sections"], entries[0]["after"]) == ([[1], [2, 3]], 4)
     # A round recorded after the fact started at a commit that is no longer HEAD.
     assert "commit" not in entries[0]
-    assert (entries[1]["by"], entries[1]["next"], entries[1]["kind"]) == (
-        "owner", "review", "closeout")
+    assert (entries[1]["by"], entries[1]["next"]) == (
+        "owner", {"step": "review", "kind": "pre-closeout"})
     assert entries[2]["reads"] == 1
     assert [entry["seq"] for entry in printed] == [4]
 

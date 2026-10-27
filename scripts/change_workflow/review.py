@@ -17,7 +17,9 @@ each model passed over; and the commit it reviewed, `HEAD` when its run started.
 pre-closeout review refuses to start unless the latest validation record names
 `HEAD`, or an ancestor from which `HEAD` changes only changes' records — after an
 earlier pre-closeout review's triage, only paths under `openspec/` and `docs/` —
-with the result `passed`; the owner may override that. The review's outcome is `finished`,
+with the result `passed`; the owner overrides that by `--unvalidated`, or by their
+direction to the review in the workflow log, until a review of that kind has run on
+it. The review's outcome is `finished`,
 naming the record this run published and, as its exit, the triage of its kind, or
 `stopped` with the runner's reason; an earlier record never counts.
 """
@@ -36,7 +38,7 @@ from change_workflow.cost import review_cost
 from change_workflow.harness import (NETWORK_RETRIES, CodexRunner, Reached, Runner,
                                      claude_command, codex_command, missing_program,
                                      resume_command, run_claude, run_codex, unreachable)
-from change_workflow.log import LOG, log_path, record_outcome
+from change_workflow.log import LOG, log_path, read_log, record_outcome, unused_direction
 from change_workflow.records import (TRANSCRIPTS, ChangedSince, changed_since,
                                      is_documentation, is_record, next_number,
                                      validation_problem)
@@ -301,6 +303,12 @@ def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str |
                           "change, so finish closeout, which archives it, first")
     reviews = directory / "reviews"
     reviewed = head(root)
+    # The owner's direction to this review, not yet used by a run of it, overrides
+    # the validation check as `--unvalidated` does: the check is the review's
+    # waivable entry guard.
+    directed = unused_direction(read_log(reviews / LOG))
+    if directed is not None and directed["next"] == {"step": "review", "kind": kind}:
+        unvalidated = True
     if kind == "pre-closeout" and not unvalidated:
         # After an earlier pre-closeout review, as the next-step computation reads
         # it, closeout is next and its own checks read the documentation again.
@@ -309,7 +317,8 @@ def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str |
         if problem := validation_problem(reviews, reviewed, root, changed_since,
                                          exempt=is_documentation if earlier else is_record):
             raise ReviewError(f"a pre-closeout review needs a passing validation of HEAD: "
-                              f"{problem}; validate first, or set UNVALIDATED=1 to override")
+                              f"{problem}; validate first, or override it: UNVALIDATED=1, or "
+                              "the owner's direction to this review in the workflow log")
     steps = load_steps(steps_path)
     if "review" not in steps:
         raise ReviewError(f"{steps_path} has no review row naming the review's models")
