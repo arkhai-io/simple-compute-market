@@ -52,7 +52,7 @@ def test_bare_metal_compose_merges_bindings_and_preserves_mount_paths(
         "bare-metal-registry", "bare-metal-redis", "bare-metal-provisioning",
         "bare-metal-storefront", "bare-metal-buyer",
     }
-    assert set(services) == expected | ({"anvil"} if development else set())
+    assert set(services) == expected | ({"anvil", "mailpit"} if development else set())
     provisioning = services["bare-metal-provisioning"]
     # The run's provisioning mode selects the site's profile, with or without
     # the development overlay.
@@ -91,6 +91,8 @@ def test_bare_metal_compose_merges_bindings_and_preserves_mount_paths(
     )
     if development:
         assert storefront["depends_on"]["anvil"]["condition"] == "service_healthy"
+        # The mail sink the development storefront.toml's seller delivery names.
+        assert storefront["depends_on"]["mailpit"]["condition"] == "service_healthy"
         # The address book the development storefront.toml names.
         assert mounts["/app/alkahest_anvil_addresses.json"] == str(
             REPO_ROOT / "kit/alkahest/src/market_alkahest/data/alkahest_anvil_addresses.json"

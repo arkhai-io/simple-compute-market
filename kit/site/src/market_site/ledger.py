@@ -1609,12 +1609,12 @@ class CapacityLedgerService:
         held/leased reservation, or if the new shape has no eligible
         candidate.
 
-        No caller uses this method yet. When one is added: resize before
+        No production code calls this method. A caller must resize before
         ``schedule_resource()`` runs for the affected reservation, not
         after. VM fulfillment-request shape derivation
-        (``AnsibleFulfillmentProvider.prepare_create``) trusts the
-        reservation's committed ``dimensions`` as authoritative precisely
-        because nothing currently changes them once a hold exists
+        (``VmFulfillmentPlan.prepare_create``) trusts the reservation's
+        committed ``dimensions`` as authoritative precisely because nothing
+        changes them once a hold exists
         (``compute_capacity_claim_from_order`` computes the claim from the
         terminal, post-negotiation order at acceptance time, so the initial
         reservation and any later shape-derivation always agree by
@@ -2399,13 +2399,10 @@ class CapacityLedgerService:
         ``escrow_uid`` are absent) finds the most recently created held
         reservation currently debited against the named resource's bucket —
         "which reservation currently holds this physical resource" rather
-        than "the reservation with this ID". No current caller reaches this
-        branch: it exists for a future caller that has a resource identity
-        but not a reservation identity (e.g. admin/recovery tooling, or a
-        not-yet-built direct-resource-reservation path). Ordinary
-        reservations, pool-scoped or resource-pinned, always carry their
-        own ``capacity_reservation_id`` by commit time and use that branch
-        instead.
+        than "the reservation with this ID". No production caller reaches
+        this branch: ordinary reservations, pool-scoped or resource-pinned,
+        always carry their own ``capacity_reservation_id`` by commit time
+        and use that branch instead.
         """
         if capacity_reservation_id:
             return db.get(CapacityReservation, capacity_reservation_id)

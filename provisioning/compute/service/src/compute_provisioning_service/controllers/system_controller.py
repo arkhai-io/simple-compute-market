@@ -10,7 +10,9 @@ other route is under ``/api/v1/system``:
 - ``POST /system/check-leases``: one lease lifecycle cycle, run whether or not
   the watchdog's timer is paused.
 - ``POST /system/fulfillment-convergence/{run-cycle,advance-cycle,pause,resume}``
-  and ``POST /system/lease-watchdog/{pause,resume}``: the workers' controls.
+  and ``POST /system/lease-watchdog/{pause,resume}``: the workers' controls. A
+  pause or resume answers the worker's pause state: whether its timer is held,
+  and whether it is at its gate with no timer cycle running.
 
 Health and status answer 503 with their body when degraded. A worker control
 answers 503 while its worker is not composed, and 409 when the request
@@ -28,6 +30,7 @@ from compute_provisioning_contracts import (
     HealthResponse,
     SystemStatusResponse,
     VersionResponse,
+    WorkerPauseResponse,
 )
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
@@ -145,39 +148,57 @@ def make_system_routers(
             )
         return await watchdog.advance_cycle()
 
+    # The pause and resume routes are async so they run on the event loop's
+    # thread: a worker's resume event is an ``asyncio.Event``, which is not
+    # thread-safe, and its gate count is read here while the loop updates it.
+    def pause_state(worker: Any) -> WorkerPauseResponse:
+        return WorkerPauseResponse(paused=worker.is_paused, at_gate=worker.is_at_gate)
+
     @system_router.post(
         "/fulfillment-convergence/pause",
+        response_model=WorkerPauseResponse,
         summary="Pause timer-driven fulfillment convergence cycles (admin)",
     )
-    def pause_fulfillment_convergence() -> dict:
-        """Hold the timer; explicit cycles still run."""
-        require(convergence_watchdog, "fulfillment convergence").pause()
-        return {"paused": True}
+    async def pause_fulfillment_convergence() -> WorkerPauseResponse:
+        """Hold the timer; explicit cycles still run. ``at_gate`` is false while
+        a timer cycle begun before the pause is still running; pausing again
+        reads it afresh."""
+        watchdog = require(convergence_watchdog, "fulfillment convergence")
+        watchdog.pause()
+        return pause_state(watchdog)
 
     @system_router.post(
         "/fulfillment-convergence/resume",
+        response_model=WorkerPauseResponse,
         summary="Resume timer-driven fulfillment convergence cycles (admin)",
     )
-    def resume_fulfillment_convergence() -> dict:
-        require(convergence_watchdog, "fulfillment convergence").resume()
-        return {"paused": False}
+    async def resume_fulfillment_convergence() -> WorkerPauseResponse:
+        watchdog = require(convergence_watchdog, "fulfillment convergence")
+        watchdog.resume()
+        return pause_state(watchdog)
 
     @system_router.post(
         "/lease-watchdog/pause",
+        response_model=WorkerPauseResponse,
         summary="Pause timer-driven lease watchdog cycles (admin)",
     )
-    def pause_lease_watchdog() -> dict:
-        """Hold the timer at its gate; ``check-leases`` still runs a cycle."""
-        require(lease_lifecycle, "the lease lifecycle").pause()
-        return {"paused": True}
+    async def pause_lease_watchdog() -> WorkerPauseResponse:
+        """Hold the timer at its gate; ``check-leases`` still runs a cycle.
+        ``at_gate`` is false while a timer cycle begun before the pause is still
+        running; pausing again reads it afresh."""
+        lifecycle = require(lease_lifecycle, "the lease lifecycle")
+        lifecycle.pause()
+        return pause_state(lifecycle)
 
     @system_router.post(
         "/lease-watchdog/resume",
+        response_model=WorkerPauseResponse,
         summary="Resume timer-driven lease watchdog cycles (admin)",
     )
-    def resume_lease_watchdog() -> dict:
-        require(lease_lifecycle, "the lease lifecycle").resume()
-        return {"paused": False}
+    async def resume_lease_watchdog() -> WorkerPauseResponse:
+        lifecycle = require(lease_lifecycle, "the lease lifecycle")
+        lifecycle.resume()
+        return pause_state(lifecycle)
 
     return health_router, system_router
 

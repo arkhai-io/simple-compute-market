@@ -59,7 +59,7 @@ kind: Pod
 metadata:
   name: {{ include "storefront.fullname" . }}-smoke-test
   labels:
-    {{- include "storefront.labels" . | nindent 4 }}
+    {{- include "storefront.testLabels" . | nindent 4 }}
   annotations:
     "helm.sh/hook": test
     "helm.sh/hook-delete-policy": before-hook-creation

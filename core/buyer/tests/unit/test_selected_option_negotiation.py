@@ -96,7 +96,6 @@ def _hook(selection: SettlementSelection, revalidated: list[SettlementOption]):
         encode_escrow_proposal=lambda proposal: proposal,
         decode_provision_terms=lambda value: value,
         decode_escrow_proposal=lambda value: value,
-        decode_escrow_terms=lambda value: value,
         max_negotiation_rounds=3,
         derive_prices=lambda _match: (300, 300),
         chain=None,

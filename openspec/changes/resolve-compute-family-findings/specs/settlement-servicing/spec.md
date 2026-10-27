@@ -1,18 +1,64 @@
+## MODIFIED Requirements
+
+### Requirement: A fulfillment attempt may be deferred to its domain's convergence
+
+A fulfillment attempt MUST report one of three outcomes: fulfilled, failed, or deferred.
+Deferred means work remains that the domain's own convergence will finish: the workload
+exists, but a step after it did not complete. A deferred outcome MUST be persisted through
+the domain, so the domain can leave its deal open; no fulfillment MAY be bound for it, and
+servicing MUST NOT be woken for it. A deferred outcome is distinct from a ready step
+awaiting delivery, whose fulfillment has not started and which servicing rechecks every
+cycle.
+
+#### Scenario: A domain defers a fulfillment
+
+- **WHEN** a domain's fulfillment reports deferred
+- **THEN** the outcome is persisted, no fulfillment reference is bound to the obligation,
+  and servicing is not woken
+
 ## ADDED Requirements
 
-### Requirement: A ready step whose delivery is pending is rechecked every cycle
+### Requirement: A ready step awaiting delivery is rechecked every cycle
 
-A servicing worker's ready step that finds its domain's delivery still pending, and defers
-the obligation for it, MUST NOT count that deferral as a failed attempt: the obligation
-MUST be due again on the worker's next servicing cycle, and the error backoff MUST NOT
-lengthen. A failed ready step keeps the error backoff.
+A servicing worker's ready step that finds its domain's delivery not yet active, and
+leaves the obligation awaiting delivery, MUST NOT count that as a failed attempt: the
+obligation MUST be due again on the worker's next servicing cycle, and the error backoff
+MUST NOT lengthen. A failed ready step keeps the error backoff.
+
+The settlement operation journal MUST record the wait: a ready step leaves its obligation
+awaiting delivery through the runtime's operation for it, which in one write releases the
+fulfillment lease, returns the attempt its reservation counted, marks the operation
+awaiting delivery while it stays pending, and makes it due at once. The worker MUST read
+the operation after the ready step returns and MUST NOT apply the error backoff to an
+operation awaiting delivery; an operation still pending and not awaiting delivery keeps
+the error backoff. A release that does not know the mark MUST still find the operation
+pending and due.
 
 #### Scenario: Delivery takes several cycles
 
-- **WHEN** a ready step defers an obligation because its delivery is not yet active, on
-  several consecutive cycles
-- **THEN** each deferral leaves the obligation due on the next cycle, and its attempts are
-  not counted toward the backoff
+- **WHEN** a ready step leaves an obligation awaiting delivery because its delivery is not
+  yet active, on several consecutive cycles
+- **THEN** each time the obligation is due on the next cycle, and its attempts are not
+  counted toward the backoff
+
+#### Scenario: The process stops just after the mark is written
+
+- **WHEN** a ready step's awaiting-delivery mark is written and the process stops before
+  the worker schedules anything
+- **THEN** the restarted worker finds the obligation due, its lease free, and the
+  attempt not counted
+
+#### Scenario: A ready step returns without starting or awaiting delivery
+
+- **WHEN** a ready step returns, has not marked its obligation awaiting delivery, and has
+  bound no fulfillment
+- **THEN** the obligation takes the error backoff
+
+#### Scenario: A release without the mark services the obligation
+
+- **WHEN** a release that predates the awaiting-delivery mark runs against a journal
+  holding an operation awaiting delivery
+- **THEN** it finds the operation pending and due, and retries it on the error backoff
 
 #### Scenario: A ready step fails
 

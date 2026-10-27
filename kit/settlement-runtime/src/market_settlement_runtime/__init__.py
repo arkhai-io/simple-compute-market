@@ -28,6 +28,7 @@ from .configuration import (
     PreflightCallback,
     PublicationInputValidator,
     ReadinessBlocker,
+    ReadinessBlockerKind,
     RegisteredSettlementClauseField,
     SettlementClauseField,
     SettlementClauseProjector,
@@ -84,6 +85,7 @@ from .ports import (
 from .publication import (
     SettlementPublicationClause,
     compile_settlement_publication_clause,
+    parse_settlement_publication_clause,
 )
 from .runtime import (
     FULFILLMENT_REFERENCE_KEY,
@@ -157,6 +159,7 @@ __all__ = [
     "PublicationInputValidator",
     "PreparedSettlement",
     "ReadinessBlocker",
+    "ReadinessBlockerKind",
     "RegisteredSettlementClauseField",
     "SettlementConfig",
     "QueryValueType",
@@ -190,6 +193,7 @@ __all__ = [
     "settlement_migrations",
     "settlement_operation_ref",
     "compile_settlement_publication_clause",
+    "parse_settlement_publication_clause",
     "decimal_rate_to_base_units",
     "compile_settlement_clause",
     "select_settlement_candidates",

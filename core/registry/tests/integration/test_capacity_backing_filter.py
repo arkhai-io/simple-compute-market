@@ -14,8 +14,10 @@ from registry_client import ListingRequest
 pytestmark = pytest.mark.asyncio
 
 
-def _listing(listing_id: str, backing: str | None) -> ListingRequest:
-    resource = {"gpu_model": "H200", "region": "us-west", "offering_mode": "vm"}
+def _listing(
+    listing_id: str, backing: str | None, *, offering_mode: str = "vm"
+) -> ListingRequest:
+    resource = {"gpu_model": "H200", "region": "us-west", "offering_mode": offering_mode}
     if backing is not None:
         resource["capacity_backing"] = backing
     return ListingRequest(
@@ -46,6 +48,23 @@ async def test_backed_and_unbacked_listings_share_one_catalogue(registry_client)
     assert await _ids(registry_client, capacity_backing="backed") == {"backed-1"}
     assert await _ids(registry_client, capacity_backing="unbacked") == {"unbacked-1"}
     assert {"backed-1", "unbacked-1", "predates-1"} <= await _ids(registry_client)
+
+
+async def test_a_bare_metal_listing_is_found_by_its_own_backing_alone(registry_client):
+    """Spec scenario "A bare-metal listing is published": backed or unbacked,
+    each bare-metal listing answers only the exact filter for its backing."""
+    await registry_client.publish_listing(
+        _listing("bm-backed", "backed", offering_mode="bare_metal")
+    )
+    await registry_client.publish_listing(
+        _listing("bm-unbacked", "unbacked", offering_mode="bare_metal")
+    )
+
+    backed = await _ids(registry_client, capacity_backing="backed")
+    unbacked = await _ids(registry_client, capacity_backing="unbacked")
+
+    assert "bm-backed" in backed and "bm-backed" not in unbacked
+    assert "bm-unbacked" in unbacked and "bm-unbacked" not in backed
 
 
 async def test_the_published_value_round_trips(registry_client):

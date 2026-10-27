@@ -14,10 +14,10 @@ named:
   exactly one service peer.
 
 Terms that a pool's override or hint may supply instead of the storefront's
-defaults -- its settlement clauses among them -- are not checked here: a pool
-that resolves none is held and reported by publication. See the requirement
-"A storefront that cannot publish refuses to start" in
-openspec/specs/storefront-publication/spec.md.
+defaults -- its settlement clauses among them -- are not checked here:
+publication refuses, closing any open listing, a candidate whose pool resolves
+no settlement clause. See the requirement "A storefront that cannot publish
+refuses to start" in openspec/specs/storefront-publication/spec.md.
 """
 
 from __future__ import annotations

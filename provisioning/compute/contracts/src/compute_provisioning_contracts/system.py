@@ -80,6 +80,19 @@ class VersionResponse(BaseModel):
     )
 
 
+class WorkerPauseResponse(BaseModel):
+    """A timer-driven worker's pause state, as its pause and resume routes answer.
+
+    ``paused`` is whether the timer is held. ``at_gate`` is whether the worker
+    is held at its gate with no timer cycle running, so none can run until it
+    is resumed: a cycle that began before the pause finishes first, and a
+    caller that needs the worker held repeats the pause until this is true.
+    """
+
+    paused: bool
+    at_gate: bool
+
+
 __all__ = [
     "ExecutionStatus",
     "ExecutorStatus",
@@ -87,4 +100,5 @@ __all__ = [
     "SystemStatusComponent",
     "SystemStatusResponse",
     "VersionResponse",
+    "WorkerPauseResponse",
 ]

@@ -225,7 +225,7 @@ expect_present "$TWO_REGISTRIES_RENDERED" 'name: +'"$RELEASE"'-registries-regist
 expect_present "$TWO_REGISTRIES_RENDERED" 'name: +'"$RELEASE"'-registries-api-credits-registry' "dual render creates an independent API-credits Service"
 
 expect_present "$PAYMENTS_DEPLOYMENT" 'name: +\"?payments-bob-marketplace-identity\"?' "wallet-free signer comes from a Secret reference"
-expect_absent "$PAYMENTS_DEPLOYMENT" 'wait-for-rpc|CHAIN_ID|RPC_URL' "wallet-free storefront pod omits chain readiness"
+expect_absent "$PAYMENTS_DEPLOYMENT" 'CHAIN_ID|RPC_URL' "wallet-free storefront pod omits chain configuration"
 expect_absent "$PAYMENTS_DEPLOYMENT" 'STOREFRONT_SETTLEMENT__HOSTED|HOSTED_SETTLEMENT' "wallet-free storefront pod emits no legacy settlement environment"
 expect_absent "$PAYMENTS_REGISTRY" 'CHAIN_ID|RPC_URL' "wallet-free registry pod omits chain configuration"
 expect_present "$PAYMENTS_REGISTRY" 'name: +REGISTRY_AUTHORITY_SCHEME' "wallet-free registry renders its public signer scheme"
@@ -248,7 +248,6 @@ expect_present "$PAYMENTS_RENDERED" 'image: +[^[:space:]]+@sha256:44444444444444
 expect_absent "$PAYMENTS_RENDERED" 'kind: +Secret|sshPrivateKey|golden_root_ssh_password|relay_token' "wallet-free chart renders only pre-existing Secret references"
 
 expect_absent "$OVERLAP_PROVISIONING_CONFIGMAP" '^[[:space:]]+principals:' "overlap profile keeps provisioning bootstrap identities singular"
-expect_present "$EVM_DEPLOYMENT" 'wait-for-rpc' "EVM profile retains chain readiness"
 expect_present "$EVM_DEPLOYMENT" 'name: +\"?evm-bob-marketplace-identity\"?' "EVM marketplace signer is Secret-referenced"
 expect_present "$EVM_DEPLOYMENT" 'secretName: +\"?evm-bob-runtime\"?' "EVM wallet overlay is Secret-referenced"
 expect_absent "$EVM_RENDERED" 'private_key|privateKey|request_credential|sshPrivateKey|golden_root_ssh_password|relay_token' "EVM manifests reference secrets without embedding keys"

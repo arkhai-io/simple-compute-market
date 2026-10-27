@@ -69,8 +69,8 @@ def test_preflight_checks_configured_environment_name_without_exposing_secret(
     readiness = asyncio.run(arkhai_payments_preflight(config, {}, "seller"))
 
     assert not readiness.ready
-    assert [blocker.code for blocker in readiness.blockers] == [
-        "arkhai_payments.credential_missing"
+    assert [(blocker.code, blocker.kind) for blocker in readiness.blockers] == [
+        ("arkhai_payments.credential_missing", "configuration")
     ]
     assert "secret" not in repr(readiness).lower()
 
@@ -226,8 +226,8 @@ def test_attach_agreement_is_a_buyer_setting(monkeypatch: pytest.MonkeyPatch) ->
     config = _config(attach_agreement=True)
 
     seller = asyncio.run(arkhai_payments_preflight(config, {}, "seller"))
-    assert [blocker.code for blocker in seller.blockers] == [
-        "arkhai_payments.attach_agreement_buyer_only"
+    assert [(blocker.code, blocker.kind) for blocker in seller.blockers] == [
+        ("arkhai_payments.attach_agreement_buyer_only", "configuration")
     ]
     buyer = asyncio.run(arkhai_payments_preflight(config, {}, "buyer"))
     assert buyer.ready

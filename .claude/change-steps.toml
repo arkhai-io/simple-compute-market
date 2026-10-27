@@ -74,7 +74,8 @@ models = [
   { harness = "claude", model = "claude-opus-5-5", effort = "high" },
 ]
 allow = ["Bash(make check-doc-citations*)", "Bash(make check-comment-hygiene)",
-         "Bash(make check-tasks*)", "Bash(make check-architecture)"]
+         "Bash(make check-tasks*)", "Bash(make check-architecture)",
+         "Bash(make check-agent-skills)"]
 deny = ["Edit"]
 
 [steps.design]

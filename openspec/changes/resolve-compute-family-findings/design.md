@@ -62,10 +62,16 @@ keeping `kit/site`'s surface as a round of this change.
 
 ### D2. Sequencing against `unbacked-bare-metal-listings`
 
-That change's branch holds substantial unmerged work in files this change edits. Every
-decision that shares a file with it is implemented in the second round, after it lands;
-the first round shares none. The wait is partial, so it is recorded in the index's
-`Notes`, not `Depends on`. Planning reads the branch so the plan cites what is already
+That change's branch holds substantial unmerged work in files this change edits. A
+decision is implemented in the first round only where its overlap with that branch is a
+package's version line, a lock file, or a hunk that touches none of the branch's hunks;
+every other decision waits for the second round, after the branch lands (35 F3). Version
+lines are nearly unavoidable, since each incompatible change bumps its package and the
+branch bumps most of the same packages; the branch's `RELEASING.md` resolves them, a
+change bumping a package at most once against its target branch. Planning derives the
+partition from the branch's diff against its merge base, not from this list, and names
+each file a first-round section shares with the branch and why it merges mechanically.
+The wait is partial, so it is recorded in the index's `Notes`, not `Depends on`. Planning reads the branch so the plan cites what is already
 written there; in particular it types the worker pause and resume routes
 (`WorkerPauseResponse`), wraps both middlewares' dispatch for a signed 500, and rewrites
 `kit/alkahest/settlement_config.py`'s readiness blockers.
@@ -83,7 +89,36 @@ cases; `kit/site`'s middleware does the same for three of them. The answer becom
 | The path matches no contract | 404 |
 | The path matches a contract under another method | 405 with `Allow` naming the contracts' methods |
 | The route matches but its body resource is absent or not a string | 400 naming the field |
-| Two contracts claim the method and path | Unreachable: composing the route table refuses overlapping patterns |
+| Two contracts claim the method and path | Unreachable in the provisioning service: composing its route table refuses overlap between contributions |
+
+Overlap is decidable because a route contract's pattern is restricted (35 F7): literal
+path segments, `[^/]+` named captures, and finite alternations of literal segments, as
+`identity/rotations/(?P<trust_role>admin|seller)` is, optionally ending in `/?`, an
+optional trailing slash (55 F1). Building a contract from its declaration refuses any other
+pattern. `ProvisioningRouteTable` compares contracts of different contributions segment by
+segment when it is composed, a pattern ending in `/?` compared as both its forms, and
+refuses two whose method and segments can match one request, before the service accepts
+traffic; within one contribution the first matching contract still decides, in the order
+its owner gave. The family's `jobs/?` and `hosts/?`, VM's `vms/?` and `relays/?`, and the
+resource-pools contribution's `pools/?` use the slash, and the clients send the slashed
+form, so no served path or signed operation changes. Every route pattern in the tree fits
+the grammar once VM's two relay declarations drop a terminal `$`, which full matching
+makes redundant. A unit test of the provisioning composition root builds the complete
+table, the family's routes and every contribution the service ships (VM, bare metal,
+resource pools, Ansible host import, capacity definitions), under the grammar and the
+overlap check.
+
+The grammar is written here only while it stays this small (55 F1). A route needing more
+— a tail capture, a typed segment — does not extend it: the contracts adopt an
+established path-template grammar and its matcher, imported rather than written here, and
+the overlap comparison is rebuilt on it. Rejected: migrating the optional slashes to one
+literal form, which would answer 404 to unslashed requests that authenticate today and
+touch three owners' declarations for no gain in the comparison. `kit/site`'s middleware resolves first-match
+over the one ordered table it is given, which the API-credits service extends with its own
+routes, so it has no ambiguous case; whether it gains contributions is
+`site-route-contracts`' question. Rejected: detecting ambiguity per request and answering it
+as an unsigned 500 (a mis-composed service starts and fails on exactly the overlapping
+requests).
 
 Route resolution in both contracts packages reports which case failed through a typed
 error rather than a bare `ValueError`. The answers stay unsigned. A response proof binds
@@ -92,9 +127,11 @@ the method, operation, resource, request identity, status, and body
 resource; the server knows no operation for the first two cases and no resource for the
 third, and a request's headers carry a signature over its operation, not the operation.
 The family client (`compute_provisioning_client/base.py`) and `kit/site-client` report a
-refusal of an answer that carried no response authentication as such, naming its status,
-following the wording `name-unverifiable-responses` gives storefront clients; they report
-a malformed or wrong signature as they do today.
+refusal of an answer that carried no response authentication as such (35 F11): the report
+names the status and that the answer was unauthenticated, and contains no part of the
+response body, no header value, and no credential. It is the rule
+`name-unverifiable-responses` states for storefront clients, stated here for these two.
+They report a malformed or wrong signature as they do today.
 
 The family client resolves its own table before sending, so it meets these answers only
 when its table and the service's differ; the e2e harness's hand-built clients and an
@@ -127,7 +164,15 @@ Removed: the four routes, their request models, `notify_usage_started` and
 operation map and the OpenAPI callback set, their tests, and the e2e stage that tests
 `usage-started` itself. Kept: the failure policy, its unit and pull-path tests, and
 `capacity-released`. `compute-provisioning-contract`'s "Deal-scoped lifecycle events"
-describes the `capacity_released` event provisioning sends. `docs/configuration.md`
+describes what provisioning sends and what crosses the wire (35 F4): the `LifecycleEvent`
+model is the provisioner's internal record and is never sent; the provisioner calls the
+storefront's capacity-released callback, a `service`-role signed request carrying the
+reservation ID, the site ID, and the release time when known, under a request identity
+derived from the release's stable event identity, and retries it from its durable outbox
+until acknowledged. The requirement states the sender's obligation and names the callback
+as its target; the route itself is the storefront's. The callback stays under an
+administrator path, which the argument below applies to as well; moving it is a known
+limit left to `replace-polling-with-authenticated-push`. `docs/configuration.md`
 describes the failure policy as the pull path's.
 
 Push delivery (`replace-polling-with-authenticated-push`) would not reuse these: it
@@ -146,7 +191,8 @@ are never assigned, yet held-state sums, the lease transitions, the terminal set
 lease-state projection, VM's interrupt and release code, and API credits all decide about
 them. Both members go, with every reader, the lease contract's
 `LeaseState.PROVISIONING_FAILED`, and the mapping entries. `site-capacity` states the
-remaining states.
+remaining states. Removing a lease state changes the compute provisioning contract, so it
+is part of that contract's major 3 (D13).
 
 The column is a plain string, so no schema change is needed, but a stored row in either
 state would change behaviour silently: a `provisioning` row would stop counting as held,
@@ -214,7 +260,10 @@ Three parts.
 1. **Reporting.** Bare metal composes an `on_event` for its servicing worker, writing the
    `claims` stage events VM's composition writes (`settlement_composition.py`). The kit's
    worker logs every scheduled retry at warning, naming the obligation, operation, and
-   error, so a failing step is recorded with or without a callback.
+   error, so a failing step is recorded with or without a callback. The API-credit
+   storefront composes the same worker with no callback, so it composes one too:
+   `settlement-servicing`'s "Every failing servicing step is reported" requires a callback
+   of each storefront that composes the worker.
 2. **Deferred delivery.** Bare metal's ready hook defers while the lease is not yet
    active (`alkahest_lifecycle.py`); each deferral counts as an attempt, so the next try
    follows the error backoff, 30 s doubling to 30 minutes, and evidence publication, and
@@ -222,10 +271,35 @@ Three parts.
    production nothing wakes it: the only wake is in the administrator's settle wait.
    `kit/settlement-runtime` therefore treats a deferral as not a failure: it does not
    count as an attempt, and a deferred obligation is rechecked on the next servicing
-   cycle. Only bare metal defers today. The administrator wait keeps its wake, which a
+   cycle. Only bare metal defers today.
+
+   The operation journal records the wait (24 F4). A ready hook whose delivery is not yet
+   active calls `SettlementRuntime.defer_fulfillment`, which in one journal write releases
+   the fulfillment lease, returns the attempt `reserve_fulfillment` counted, marks the
+   operation *awaiting delivery*, and makes it due at once. After the hook returns without
+   a fulfillment reference, the worker reads the operation, as its scheduling already
+   does: an operation awaiting delivery keeps its due time and takes no backoff; any other
+   operation still pending takes the error backoff as today, and a hook that raises
+   stays on the error path.
+
+   The mark is a flag on the operation, `awaiting_delivery`, added to
+   `settlement_operations` by the runtime's own migrations, and the operation's state
+   stays `pending` (35 F5). The worker's due query, `schedule_settlement_retry`, and
+   `wake_settlement_obligation` all select `pending` operations, so they are unchanged,
+   and only `defer_fulfillment`'s write and the worker's post-hook read learn the flag;
+   any later write that leases the operation clears it. A release that predates the flag
+   ignores it and reads an ordinary pending operation, due now with its attempt returned,
+   and backs it off as today: rollback degrades to today's cadence and never strands an
+   obligation. Rejected: a new state value, which an older release's due query would
+   never select again, so every deal awaiting delivery would stall after a rollback. The hook's signature is unchanged, and `service_obligation`
+   behaves as a sweep does. Rejected: a typed outcome returned by the hook, which is a
+   second signal that must agree with the lease it released and still needs a journal
+   write to return the attempt. The administrator wait keeps its wake, which a
    scenario holding the loops needs, so `storefront-publication`'s scenario is unchanged.
    This is distinct from `settlement-servicing`'s deferred fulfillment *outcome*, which a
-   domain's own convergence finishes. `kit-owned-listing-and-fulfillment-lifecycles`,
+   domain's own convergence finishes and for which servicing is not woken; the journal
+   mark has its own name so the capability uses one word per concept, and the
+   deferred-outcome requirement says which of the two wakes servicing. `kit-owned-listing-and-fulfillment-lifecycles`,
    whose proposed start path has a domain answer "pending", inherits the cadence.
 3. **The settle wait.** `SettlementAdminRouteService.wait` treats a failure of its status
    read as a non-terminal poll, keeps polling until its deadline, and returns the last
@@ -241,17 +315,44 @@ with this change depending on it (that change is undesigned and behind
 `IntroductionRouteService.start` judges a first reveal by whether a record existed before
 the call, and delivers to the seller's sinks only then. A first call that persisted the
 record and then failed completion answers 503 before delivering; a retry finds the record,
-completes, and skips delivery, so the seller is never told. The introduction store gains
-a seller-delivery marker, set after dispatch, and the seller's side is told exactly once,
-on whichever start completes the reveal. Operator re-delivery is unaffected.
+completes, and skips delivery, so the seller is never told.
 
-Completing an interrupted reveal stays the buyer's retry. Completion is local, idempotent
-bookkeeping, and the durable reveal record is what matters to either party; finishing it
-without the buyer would hand the seller the buyer's contact while the buyer saw a 503.
-The 503's detail says a retry completes the reveal, and the limit is documented.
+The introduction store gains a seller-delivery claim (24 F1). Once completion succeeds,
+the start claims it with a conditional write that succeeds for exactly one caller, and
+only the start that wins schedules the seller's delivery; any other start, concurrent or
+later, skips it. Each introduction therefore has at most one seller-side dispatch, made by
+the start that completes the reveal. The claim records that dispatch was scheduled, not
+that a sink received anything: a dispatch lost to process exit, or failed at every sink,
+is recovered by the operator's re-delivery, as a failed send is today, consistent with
+delivery being best-effort beside the durable reveal. A claim write that fails after
+completion succeeded answers 503, and the buyer's next start claims it. The claim also
+closes the race in which two concurrent first starts both find no record and both deliver.
 
-Rejected: a sweep that completes and delivers without the buyer; handing completion to
-`kit-owned-listing-and-fulfillment-lifecycles`.
+The claim is a row in its own table, keyed by the introduction's obligation reference, and
+taking it is an insert that succeeds for one caller (35 F6). It is not a column on
+`contact_introductions`, whose `contact_introductions_redaction_only` trigger refuses every
+update but the one-way payload redaction; that trigger is how a revealed row is kept from
+being rewritten or un-redacted, and the claim leaves it untouched. No deployment holds an
+introduction revealed before the claim exists, so the migration creates the table empty.
+
+Seller-side delivery is never a counterparty's lever: a buyer repeating starts, by mistake
+or deliberately, cannot make the seller's sinks send again. Re-delivery stays the seller
+operator's explicit action, and the buyer's own copy is sent by the buyer's own process.
+
+Completing an interrupted reveal stays the buyer's, by a new start (24 F2). Completion is
+local, idempotent bookkeeping, and the durable reveal record is what matters to either
+party; finishing it without the buyer would hand the seller the buyer's contact while the
+buyer saw a 503. A new start carries a fresh request identity, as the buyer client gives
+every start, and reaches completion. An exact replay of the failed request answers its
+recorded 503 and completes nothing, as every route answers an exact replay; resuming
+completion on a replay would break that rule for a case a new start already handles. The
+503's detail says to start the introduction again, and the limit is documented.
+
+Rejected: delivering on every start that completes the reveal, which hands the buyer a
+way to make the seller's sinks send again; a durable delivery outbox with sink-level
+idempotency, which would make best-effort delivery guaranteed at the cost of a servicing
+loop and an idempotency duty on every sink; a sweep that completes and delivers without
+the buyer; handing completion to `kit-owned-listing-and-fulfillment-lifecycles`.
 
 ### D10. A seller's wallet address and key name one account
 
@@ -305,9 +406,14 @@ chain_id = 31337
 
 The map is Alkahest-owned and per chain, so `[Chains]` holds only chain resources, as
 `settlement-configuration` requires. Readiness refuses a map key naming no configured
-chain. Every reader, storefronts and buyers, resolves a chain's book through one
-`kit/alkahest` operation, which answers nothing for a chain using built-in addresses, so
-no caller reads the map. `kit/config`'s `ChainSettings` loses the field. Both old keys are
+chain. A chain's book is resolved through one `kit/alkahest` operation, which answers
+nothing for a chain using built-in addresses, so no caller reads the map. Only composition
+roots, the storefronts and buyer CLIs, call it (35 F9): they pass the resolved
+chain-to-book mapping as data to the negotiation, policy, and codec packages, which keep
+their current `chain_config_paths` parameters and gain no `kit/alkahest` call.
+`arkhai-kit-policy`, `arkhai-vms-negotiation`, and `arkhai-kit-storefront` reach
+`kit/alkahest` through scope exceptions `move-escrow-into-alkahest` owns, and no new
+dependency of that shape is added while they stand. `kit/config`'s `ChainSettings` loses the field. Both old keys are
 refused with a diagnostic naming the map, and the migration tool moves either into it: a
 per-chain key to its chain, and the section key to the one configured chain, or to the
 chains whose per-chain keys name the same book; where it cannot tell which chains it
@@ -332,22 +438,82 @@ retrying, now logged (D8).
 Begin requires a nested `bare_metal_publication` repeating the terms' host and physical
 machine, which `site-capacity`'s "Cross-mode physical accounting" forbids a declaration's
 publication settings to repeat; a conforming declaration fails begin. Begin compares the
-scheduled resource's top-level `physical_host_id` and a `host_id` the schedule response
-now carries, from the declaration. The e2e driver stops declaring the nested copies.
+scheduled resource's `physical_host_id`, read from its top-level attributes, and a
+`host_id` the schedule response now carries, from the declaration. The e2e driver stops
+declaring the nested copies.
 
-### D14. Mock-rule routes are typed
+The response's `host_id` is optional, absent when the declaration names no host (35 F8).
+`SettlementResource.host_id` and the stored assignment's host are optional, and the
+scheduler places a hostless declaration, and returns a hostless assignment unchanged, in a
+pool whose provider needs no host; a required field would fail the response's validation
+on exactly those resources, an idempotent repeat of an older assignment included. Bare-metal
+begin refuses an absent or different `host_id`, or a different `physical_host_id`, as a
+conflict with its terms.
 
-Response models for the shared rule route service sit in `compute_provisioning_contracts`,
-since the mechanism is the family's. Each domain's client package (`vm_provisioning_operator`,
-`arkhai_bare_metal.provisioning_client`) gains an extension client over any transport's
-`authenticated_request`, after `kit/pool-overrides`. The e2e harness and the service's
-integration conftest call them.
+The response is a versioned contract, so it is versioned rather than changed in place
+(24 F3). The compute provisioning contract becomes major 3, carrying the schedule
+response's `host_id` and D5's removed lease state, and every party accepts only
+major 3, as major 2 replaced major 1. A major-2 schedule response names no host, which
+bare-metal begin would otherwise refuse as a conflict with its terms rather than by
+version; versioning makes a mismatched pair a refusal that names the cause. The provisioning service, the storefronts, and the
+family and domain clients of a deployment upgrade together, and roll back together; a
+mismatched pair refuses each request, naming the supported major, as "Explicit contract
+incompatibility" requires, rather than failing begin on a missing field. Rejected: a minor
+2.1 with a new minor-version check where bare metal needs it, which allows a mixed rollout
+of the schedule response but adds a check the contract has no machinery for and leaves
+D5's enum removal unversioned.
+
+### D14. The mock mechanism's routes are the family's, typed and mounted by each domain
+
+The rule routes and the evaluate-job route are the compute family's mock mechanism, which
+each adapter binds under its own `/test` prefix, so the family owns their pieces of the
+route-contract pattern (`ARCHITECTURE.md`, "Route contracts and their HTTP binding") and a
+domain supplies only where it mounts them (35 F1):
+
+- **Route contract:** `compute_provisioning_contracts` gains `MockRouteMount`, a frozen
+  value of a `prefix` and an `operation_prefix` whose `route_declarations()` yields the
+  five declarations (rule add, rules list, rule delete, rule resume, job evaluate) under
+  that prefix and those operation names. VM mounts `("/test", "provisioning_test")` and
+  bare metal `("/test/bare-metal", "provisioning_test_bare_metal")`, which reproduce
+  today's paths and signed operation names exactly, so the wire is unchanged.
+- **Wire models:** the rule route service's response models sit in
+  `compute_provisioning_contracts`.
+- **Route service:** `MockRuleRouteService`, unchanged in the family kit.
+- **Typed client:** `compute_provisioning_client` gains `MockRuleClient` and
+  `SyncMockRuleClient`, constructed over the family client's transport with a
+  `MockRouteMount`; each method signs from the mount's declarations and returns the
+  family's models.
+- **HTTP binding:** each domain's adapter, as today, contributing its mount's
+  declarations to the provisioning service's table.
+
+VM's `routes.py` replaces its hand-written test entries with its mount's declarations.
+`arkhai_bare_metal.provisioning_client`, which holds bare metal's hand-written copy of the
+contract and is no client, is reduced to bare metal's two mount values and renamed
+`provisioning_routes`, so `arkhai-bare-metal` gains no compute dependency; the bare-metal
+adapter and callers construct the mount from those values. The e2e harness and the
+service's integration conftest call the family client. A third compute domain mounts the
+mechanism by stating two values.
+
+Rejected: an extension client in each domain's client package, which would write the same
+client once per domain and place bare metal's in its vocabulary library; one family client
+fed each domain's hand-written declarations, which needs the declarations restructured to
+name each operation and still a prefix to build concrete paths from patterns, at which point
+the declarations are redundant.
 
 ### D15. Worker controls are typed
 
 `check-leases`, `run-cycle`, `advance-cycle`, and identity rotation return models in
 `compute_provisioning_contracts/system.py`, beside `WorkerPauseResponse` from
 `unbacked-bare-metal-listings`' branch. The e2e helpers read their attributes.
+
+D14's and D15's ownership is normative (24 F5, 35 F1): `physical-provisioning`'s
+"Compute-owned caller contract" names the mock-rule and worker-control response models
+among those the contracts distribution owns, the mock mechanism's route-contract template
+among its route contracts, and the mock-rule client among the family client's operations,
+a domain contributing only its mount; `market-composition`'s mock-executor requirement
+says the rule route service answers with those models and each adapter mounts it through
+the family's template. Their fields stay in code, held by
+the contract tests, and their failures are answered as every provisioning route's are.
 
 ### D16. VM binds pool overrides at `POOL_OVERRIDES_PATH`
 
@@ -415,14 +581,34 @@ per-release list of incompatible changes is kept.
 
 Two rounds, each reviewed before the next, then closeout.
 
-- **Round 1**, sharing no file with `unbacked-bare-metal-listings`' branch, in two
-  sessions:
-  - provisioning and the compute family: D6, D13, D14, D17, D20, D21;
-  - storefronts and kits: D4 (all but its e2e stage), D7, D9, D16, D18, D22.
+- **Round 1**, overlapping `unbacked-bare-metal-listings`' branch only as D2 allows, in
+  two sessions:
+  - provisioning and the compute family: D6, D14 (all but its e2e callers), D17, D20, D21;
+  - storefronts and kits: D4 with its e2e stage, D7, D9, D16, D18.
 - **Round 2**, after `unbacked-bare-metal-listings` lands, in two sessions:
-  - D3, D5, D8, D12, D15, D19, and D4's e2e stage;
+  - D3, D5, D8, D12, D13, D15, D19, D22, and D14's e2e callers;
   - D10 and D11.
 - **Closeout**: promotion, the roadmap, the index, archive.
+
+D13 and D5 together make the compute provisioning contract major 3, so both are in round
+2 (35 F2): `dev` never holds a major-3 contract that must not be released, and no release
+can carry half of it. Bare-metal begin's fix waits for the branch; the pipeline does not
+meet the defect meanwhile, since its driver still declares the nested copy begin reads.
+D22 waits because its template and settings edits sit beside the branch's own, and D14's
+e2e callers because the branch rewrites the files they are in (35 F3). Planning confirms
+the rest of the partition against the branch's diff, as D2 says.
+
+Planning's derivation, from the branch's diff against its merge base `968a4a9`, placed
+D4's e2e stage in round 1, beside the routes it tests. The stage is
+`test_03_usage_started_keeps_oversized_listings_closed` in
+`e2e-tests/tests/e2e/roles/scenarios/vms/test_compute_dynamic_listings.py`. It calls
+`notify_usage_started`, which D4 removes. Removing the stage means removing that method,
+the `usage_started` field and the requirement on it in `test_04`, and the docstring's step
+naming it. None of those hunks touches the branch's: the branch edits the module's imports,
+`pytestmark`, the head of `DynamicListingState`, and `test_00`/`test_00a`. Leaving the stage
+for round 2 would leave round 1's pipeline calling a client method that round 1 removed.
+D14's first round changes no path or signed operation, so the e2e harness's hand-built
+mock-rule client keeps working until its callers move in round 2.
 
 ## Edits to other changes
 

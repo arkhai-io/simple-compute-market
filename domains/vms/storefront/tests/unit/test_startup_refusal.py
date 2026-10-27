@@ -119,6 +119,27 @@ def test_the_removed_provisioning_trust_set_is_refused() -> None:
     assert publication_startup_problems(source) == []
 
 
+@pytest.mark.parametrize(
+    ("stated", "key"),
+    [
+        ("fail_on_unreachable", "fail_on_unreachable"),
+        ("FAIL_ON_UNREACHABLE", "fail_on_unreachable"),
+        ("preflight_timeout", "preflight_timeout"),
+        ("Preflight_Timeout", "preflight_timeout"),
+    ],
+)
+def test_the_removed_provisioning_preflight_settings_are_refused(stated, key) -> None:
+    """The storefront starts without waiting for its provisioning service, so a
+    stated wait setting is refused by its key, in any spelling, rather than
+    silently ignored."""
+    source = _source(provisioning={stated: 30})
+    assert retired_setting_problems(source) == [
+        f"provisioning.{key} was removed: the storefront starts without waiting for "
+        "its provisioning service; a site it cannot reach is reported in system "
+        "status, and each call to it is retried"
+    ]
+
+
 def test_no_enabled_settlement_mechanism_is_refused() -> None:
     for settlement in (
         {"schema_version": 1, "priority": []},

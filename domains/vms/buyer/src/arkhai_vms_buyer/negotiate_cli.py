@@ -228,7 +228,6 @@ def register(app: typer.Typer) -> None:
                 accepted_escrow_proposal=resume_point.accepted_escrow_proposal,
                 settlement_plan=resume_point.settlement_plan,
                 settlement_selection=resume_point.settlement_selection,
-                accepted_escrow_terms=resume_point.accepted_escrow_terms,
             )
 
         settlement_policy = None
@@ -431,6 +430,14 @@ def register(app: typer.Typer) -> None:
             source_registry_authority = resume_point.source_registry_authority
         if not publisher_id or not source_registry_url or not source_registry_authority:
             raise typer.BadParameter("listing publisher provenance is incomplete")
+        # What the selected entry records about the listing, such as the release
+        # conditions it advertised; a resumed run carries its first run's record.
+        if selected_stage is not None and listing_dict is not None:
+            listing_record = selected_stage.listing_record(listing_dict)
+        elif resume_state is not None:
+            listing_record = resume_point.listing_record
+        else:
+            listing_record = None
         run_log = RunLog.start(
             command="market negotiate",
             profile_id=identity.profile_id,
@@ -448,6 +455,7 @@ def register(app: typer.Typer) -> None:
             max_rounds=max_rounds,
             duration_seconds=duration_seconds,
             resumed_from=from_run,
+            listing_record=listing_record,
             **(
                 settlement_policy.public_run_metadata()
                 if settlement_policy is not None
@@ -596,11 +604,7 @@ def register(app: typer.Typer) -> None:
             **accepted_settlement,
             agreement_bytes=outcome.agreement_bytes,
             settlement_data=outcome.settlement_data,
-            accepted_escrow_terms=(
-                [term.model_dump() for term in outcome.accepted_escrow_terms]
-                if outcome.accepted_escrow_terms is not None
-                else None
-            ),
+            listing_record=listing_record,
             accepted_provision_terms=(
                 outcome.accepted_provision_terms.model_dump()
                 if outcome.accepted_provision_terms is not None

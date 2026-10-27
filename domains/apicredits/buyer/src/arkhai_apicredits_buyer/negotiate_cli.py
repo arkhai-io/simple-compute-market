@@ -231,7 +231,6 @@ def register(credits_app: typer.Typer) -> None:
                 accepted_escrow_proposal=resume_point.accepted_escrow_proposal,
                 settlement_selection=resume_point.settlement_selection,
                 settlement_plan=resume_point.settlement_plan,
-                accepted_escrow_terms=resume_point.accepted_escrow_terms,
             )
             if resume_point.settlement_selection is None:
                 raise typer.BadParameter("run has no recorded settlement selection")
@@ -423,6 +422,14 @@ def register(credits_app: typer.Typer) -> None:
             "source_registry_url": source_registry_url,
             "source_registry_authority": source_registry_authority,
         }
+        # What the selected entry records about the listing, such as the release
+        # conditions it advertised; a resumed run carries its first run's record.
+        if selected_stage is not None and listing_dict is not None:
+            listing_record = selected_stage.listing_record(listing_dict)
+        elif resume_state is not None:
+            listing_record = resume_point.listing_record
+        else:
+            listing_record = None
         run_log = RunLog.start(
             profile_id=identity.profile_id,
             principal=identity.principal,
@@ -445,6 +452,7 @@ def register(credits_app: typer.Typer) -> None:
             token_decimals=token_decimals,
             resumed_from=from_run,
             chain_name=(picked_entry.get("chain_name") if picked_entry else None),
+            listing_record=listing_record,
         )
         resolve_seller_principals = make_publisher_trust_resolver(
             config=BuyConfig.from_resolved_identity(
@@ -584,11 +592,7 @@ def register(credits_app: typer.Typer) -> None:
                 if outcome.accepted_escrow_proposal is not None
                 else None
             ),
-            accepted_escrow_terms=(
-                [term.model_dump() for term in outcome.accepted_escrow_terms]
-                if outcome.accepted_escrow_terms is not None
-                else None
-            ),
+            listing_record=listing_record,
             accepted_provision_terms=(
                 outcome.accepted_provision_terms.model_dump()
                 if outcome.accepted_provision_terms is not None

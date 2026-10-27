@@ -27,6 +27,13 @@ def test_publication_source_collects_core_hooks() -> None:
         {"id": "candidate-1"},
         {"resource_id": "candidate-1"},
     ) == {"id": "candidate-1"}
+    # A source composed without a close hook closes nothing.
+    assert (
+        source.close_candidate_listing(
+            "db.sqlite", "http://seller", {"id": "candidate-1"}, "no_settlement_option"
+        )
+        is None
+    )
 
 
 def test_publication_source_can_price_from_offer_payload() -> None:

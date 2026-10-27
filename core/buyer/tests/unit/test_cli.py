@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 
 from types import SimpleNamespace
+import pytest
 import typer
 from typer.testing import CliRunner
 
 import core_buyer.cli as cli_mod
-from core_buyer.cli import build_app
+from core_buyer.cli import DuplicateRootCommandError, build_app
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from core_buyer.registry_config import RegistryAuthority
 from market_core import (
@@ -302,11 +303,15 @@ def _vm_like_plugin() -> MarketDomainContract:
         def buy(max_price: float = typer.Option(..., "--max-price")) -> None:
             typer.echo(f"plugin buy at {max_price}")
 
+    return _plugin("vms.compute", register)
+
+
+def _plugin(identity: str, register) -> MarketDomainContract:
     def normalize(value):
         return value
 
     return MarketDomainContract(
-        identity=DomainIdentity("vms.compute"),
+        identity=DomainIdentity(identity),
         contract_version=MARKET_DOMAIN_CONTRACT_VERSION,
         codecs=ImmutableCodecCapability(
             normalize_listing=normalize,
@@ -359,3 +364,122 @@ def test_version_reports_core_and_plugins():
     assert result.exit_code == 0
     assert "arkhai-core-buyer" in result.output
     assert "vms.compute" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Two plugins: a root command belongs to one domain
+# ---------------------------------------------------------------------------
+
+
+def _root_group_plugin(identity: str, name: str) -> MarketDomainContract:
+    def register(app: typer.Typer) -> None:
+        group = typer.Typer()
+
+        @group.command("introduce")
+        def introduce() -> None:
+            typer.echo(f"{identity} introduce")
+
+        app.add_typer(group, name=name)
+
+    return _plugin(identity, register)
+
+
+def test_two_plugins_registering_one_root_command_refuse_to_start():
+    with pytest.raises(DuplicateRootCommandError) as refused:
+        build_app(
+            domains=[
+                _root_group_plugin("vms.compute", "settlement"),
+                _root_group_plugin("bare_metal.v1", "settlement"),
+            ]
+        )
+
+    message = str(refused.value)
+    assert "'settlement'" in message
+    assert "'vms.compute'" in message and "'bare_metal.v1'" in message
+
+
+def _nameless_group_plugin(identity: str, name: str) -> MarketDomainContract:
+    """A domain whose ``name`` command sits in a group added without a name,
+    nested in another, which Typer merges into the root under ``name``."""
+
+    def register(app: typer.Typer) -> None:
+        inner = typer.Typer()
+
+        @inner.command(name)
+        def command() -> None:
+            typer.echo(f"{identity} {name}")
+
+        outer = typer.Typer()
+        outer.add_typer(inner)
+        app.add_typer(outer)
+
+    return _plugin(identity, register)
+
+
+def _root_command_plugin(identity: str, name: str) -> MarketDomainContract:
+    def register(app: typer.Typer) -> None:
+        @app.command(name)
+        def command() -> None:
+            typer.echo(f"{identity} {name}")
+
+    return _plugin(identity, register)
+
+
+@pytest.mark.parametrize(
+    "later",
+    [_nameless_group_plugin, _root_command_plugin],
+    ids=["nameless-group", "command"],
+)
+def test_a_root_command_registered_any_way_is_refused_a_second_time(later):
+    with pytest.raises(DuplicateRootCommandError) as refused:
+        build_app(
+            domains=[
+                _root_group_plugin("vms.compute", "settlement"),
+                later("bare_metal.v1", "settlement"),
+            ]
+        )
+
+    assert "both register the root command 'settlement'" in str(refused.value)
+
+
+def test_a_nameless_groups_commands_compose_beside_other_domains():
+    app = build_app(
+        domains=[
+            _root_group_plugin("vms.compute", "settlement"),
+            _nameless_group_plugin("bare_metal.v1", "bare-metal"),
+        ]
+    )
+
+    merged = runner.invoke(app, ["bare-metal"])
+    assert merged.exit_code == 0 and "bare_metal.v1 bare-metal" in merged.output
+
+
+def test_the_console_script_names_the_refusal_and_exits(monkeypatch, capsys):
+    monkeypatch.setattr(
+        cli_mod,
+        "discover_domains",
+        lambda: [
+            _root_group_plugin("vms.compute", "settlement"),
+            _root_group_plugin("bare_metal.v1", "settlement"),
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exited:
+        cli_mod.main()
+
+    assert exited.value.code == 2
+    assert "both register the root command 'settlement'" in capsys.readouterr().err
+
+
+def test_plugins_with_distinct_root_commands_compose():
+    app = build_app(
+        domains=[
+            _root_group_plugin("vms.compute", "settlement"),
+            _root_group_plugin("bare_metal.v1", "bare-metal"),
+        ]
+    )
+
+    vm = runner.invoke(app, ["settlement", "introduce"])
+    bare_metal = runner.invoke(app, ["bare-metal", "introduce"])
+    assert vm.exit_code == 0 and "vms.compute introduce" in vm.output
+    assert bare_metal.exit_code == 0 and "bare_metal.v1 introduce" in bare_metal.output

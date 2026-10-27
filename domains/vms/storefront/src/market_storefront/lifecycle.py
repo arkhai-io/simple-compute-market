@@ -37,6 +37,7 @@ from market_capacity_publication import (
     CapacityConfigurationError,
     SiteEventCycle,
 )
+from market_alkahest import ALKAHEST_CHAIN_PROBE_LOOP
 from market_storefront_kit import (
     LoopSnapshot,
     LoopStep,
@@ -64,6 +65,8 @@ CAPACITY_EVENTS_POLLER = "capacity_events_poller"
 SITE_PROJECTION_POLLER = "site_projection_poller"
 PUBLICATION = "publication"
 INTRODUCTION_RETENTION = "introduction_retention"
+#: The Alkahest kit names its own loop, so every storefront registers it alike.
+ALKAHEST_CHAIN_PROBE = ALKAHEST_CHAIN_PROBE_LOOP
 
 
 def capacity_site_loop_name(site: str) -> str:

@@ -92,8 +92,6 @@ discovery_timeout = 5.0
 [credits]
 service_url = "http://credits-service:8082"
 admin_key = "test-api-key"
-preflight_timeout = 60
-fail_on_unreachable = true
 
 [capacity]
 poll_interval = 1

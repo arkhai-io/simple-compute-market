@@ -14,22 +14,23 @@ listing sells, so every domain that composes Alkahest derives it here:
 - ``oracle_gated``: the trusted-oracle arbiter, releasing when the first
   configured third-party oracle arbitrates in the seller's favour;
 - ``interruptible``: the ERC-20 splitter, whose oracle (the first configured
-  interruptible oracle, else the seller wallet) declares the refund split if
-  the deal is interrupted.
+  interruptible oracle) declares the refund split if the deal is interrupted.
 
 A domain delivers only some of these models; an interruptible deal, for
 instance, presumes a listing that can be preempted. Each domain's Alkahest
-seller entry therefore declares the models it delivers, and its composition
-refuses a configured model outside them with
-:func:`require_deliverable_release_model`.
+seller entry therefore declares the models it delivers, and a composition passes
+them to the Alkahest preflight as ``deliverable_release_models``, which reports a
+model outside them as a configuration blocker: an undeliverable model costs the
+seller Alkahest, never the storefront. :func:`escrow_release_conditions`, which
+every domain's publication calls, derives conditions only while Alkahest is ready.
 """
 
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 
-from market_settlement_runtime import SettlementPublicationClause
+from market_settlement_runtime import MechanismReadiness
 
 from .alkahest import (
     get_erc20_splitter,
@@ -38,63 +39,14 @@ from .alkahest import (
 )
 from .settlement_config import (
     ALKAHEST_MECHANISM_ID,
-    AlkahestPublicationInput,
+    INTERRUPTIBLE_RELEASE,
+    ORACLE_GATED_RELEASE,
+    RECIPIENT_RELEASE,
+    RELEASE_MODELS,
     AlkahestSettlementConfig,
+    ReleaseModelError,
+    configured_release_model,
 )
-
-RECIPIENT_RELEASE = "recipient"
-ORACLE_GATED_RELEASE = "oracle_gated"
-INTERRUPTIBLE_RELEASE = "interruptible"
-RELEASE_MODELS: frozenset[str] = frozenset(
-    {RECIPIENT_RELEASE, ORACLE_GATED_RELEASE, INTERRUPTIBLE_RELEASE}
-)
-
-
-class ReleaseModelError(ValueError):
-    """The configured release model is contradictory or cannot be delivered."""
-
-
-def configured_release_model(config: AlkahestSettlementConfig | None) -> str:
-    """The release model ``config`` selects; no section selects ``recipient``.
-
-    Raises ``ReleaseModelError`` when the section selects both the oracle-gated
-    and the interruptible model, since an escrow has one arbiter.
-    """
-    if config is None:
-        return RECIPIENT_RELEASE
-    if config.oracle_gated and config.interruptible:
-        raise ReleaseModelError(
-            "Settlement.alkahest oracle and interruptible policies are mutually "
-            "exclusive"
-        )
-    if config.oracle_gated:
-        return ORACLE_GATED_RELEASE
-    if config.interruptible:
-        return INTERRUPTIBLE_RELEASE
-    return RECIPIENT_RELEASE
-
-
-def require_deliverable_release_model(
-    config: AlkahestSettlementConfig | None,
-    deliverable: Collection[str],
-) -> str:
-    """Return the configured release model, refusing one the domain cannot deliver.
-
-    ``deliverable`` is the set a domain's Alkahest seller entry declares. The
-    refusal names the configured model, so a storefront that composes this
-    check at startup reports which setting it cannot honour.
-    """
-    unknown = set(deliverable) - RELEASE_MODELS
-    if unknown:
-        raise ValueError(f"unknown Alkahest release models {sorted(unknown)}")
-    model = configured_release_model(config)
-    if model not in deliverable:
-        raise ReleaseModelError(
-            f"Settlement.alkahest configures the {model!r} release model, which "
-            "this storefront's domain cannot deliver (it delivers "
-            f"{', '.join(repr(name) for name in sorted(deliverable)) or 'none'})"
-        )
-    return model
 
 
 def _first(addresses: tuple[str, ...]) -> str:
@@ -123,10 +75,14 @@ def release_conditions(
     address book (the SDK's own addresses are used where it names none).
     ``wallet_address`` is the seller wallet the escrow pays.
 
-    Raises ``ValueError`` for a chain ``chains`` does not configure, an
-    oracle-gated model with no trusted oracle or whose oracle is the seller
-    wallet (the party collecting cannot also decide collection), and
-    ``ReleaseModelError`` for a contradictory model.
+    Raises ``ValueError`` for a chain ``chains`` does not configure, and for an
+    oracle-gated or interruptible model with no oracle of its own or whose
+    oracle is the seller wallet: the party collecting cannot also decide
+    collection, so no condition stands in for a missing oracle. Raises
+    ``ReleaseModelError`` for a contradictory model, which startup refuses.
+    Alkahest readiness reports each oracle case as a blocker, so a caller that
+    derives only for a ready mechanism, as :func:`escrow_release_conditions`
+    does, never meets them.
     """
     names = sorted(set(chain_names))
     if not names:
@@ -141,18 +97,24 @@ def release_conditions(
         oracle = _first(config.trusted_oracle_addresses) if config else ""
         if not oracle:
             raise ValueError("Settlement.alkahest.oracle_gated requires a trusted oracle")
+        arbiter_for = get_trusted_oracle_arbiter
+    elif model == INTERRUPTIBLE_RELEASE:
+        oracle = _first(config.interruptible_oracle_addresses) if config else ""
+        if not oracle:
+            raise ValueError(
+                "Settlement.alkahest.interruptible requires an interruptible oracle"
+            )
+        arbiter_for = get_erc20_splitter
+    else:
+        oracle = ""
+        arbiter_for = get_recipient_arbiter
+    if oracle:
         if oracle.lower() == wallet:
             raise ValueError(
-                "Settlement.alkahest trusted oracle equals the storefront wallet"
+                "Settlement.alkahest release oracle equals the storefront wallet"
             )
-        arbiter_for = get_trusted_oracle_arbiter
-        demand_data = {"oracle": oracle.lower(), "data": "0x"}
-    elif model == INTERRUPTIBLE_RELEASE:
-        oracle = (_first(config.interruptible_oracle_addresses) if config else "") or wallet
-        arbiter_for = get_erc20_splitter
-        demand_data = {"oracle": oracle.lower(), "data": "0x"}
+        demand_data: dict[str, str] = {"oracle": oracle.lower(), "data": "0x"}
     else:
-        arbiter_for = get_recipient_arbiter
         demand_data = {"recipient": wallet}
 
     return [
@@ -167,26 +129,32 @@ def release_conditions(
     ]
 
 
-def publication_release_conditions(
+def escrow_release_conditions(
     config: AlkahestSettlementConfig | None,
-    clauses: Iterable[SettlementPublicationClause],
+    accepted_escrows: Iterable[Mapping[str, Any]],
     *,
+    readiness: Iterable[MechanismReadiness],
     chains: Mapping[str, Any],
     wallet_address: str,
 ) -> list[dict[str, Any]]:
-    """The release conditions for every chain the Alkahest clauses publish on.
+    """The release conditions a listing publishing ``accepted_escrows`` advertises.
 
-    Clauses of other mechanisms advertise no release condition and are
-    skipped; a listing publishing no Alkahest clause advertises none.
+    ``accepted_escrows`` are every Alkahest escrow the listing publishes, in the
+    publication form whose ``chain_name`` names its chain, whatever produced
+    them. ``readiness`` is the readiness they were published under: while
+    Alkahest is not ready nothing publishes an Alkahest escrow, so nothing is
+    advertised either. Otherwise each chain the escrows name gets one condition
+    from :func:`release_conditions`, which refuses a chain ``chains`` does not
+    configure, since nothing could settle an escrow on it.
     """
-    chain_names = {
-        AlkahestPublicationInput.model_validate(clause.mechanism_input).chain
-        for clause in clauses
-        if clause.mechanism == ALKAHEST_MECHANISM_ID
-    }
+    if not any(
+        status.mechanism == ALKAHEST_MECHANISM_ID and status.ready
+        for status in readiness
+    ):
+        return []
     return release_conditions(
         config,
-        chain_names=chain_names,
+        chain_names={str(escrow["chain_name"]) for escrow in accepted_escrows},
         chains=chains,
         wallet_address=wallet_address,
     )
@@ -199,7 +167,6 @@ __all__ = [
     "RELEASE_MODELS",
     "ReleaseModelError",
     "configured_release_model",
-    "publication_release_conditions",
+    "escrow_release_conditions",
     "release_conditions",
-    "require_deliverable_release_model",
 ]

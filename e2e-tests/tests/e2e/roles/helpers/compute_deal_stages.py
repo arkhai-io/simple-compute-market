@@ -37,7 +37,8 @@ from typing import Any, Optional, Protocol
 
 from tests.e2e.roles.helpers.compute_deal import (
     advance_fulfillment_to,
-    pause_storefront,
+    assert_lease_watchdog_held,
+    assert_storefront_loops_held,
     wait_for_stage_event,
 )
 from tests.e2e.roles.helpers.domain_deal import DomainDealState, require_state
@@ -97,6 +98,35 @@ BUYER_MAX_PRICE = 12 * 10**18
 E2E_LEASE_EXPIRY_BACKDATE = timedelta(minutes=1)
 
 
+def alkahest_opening(listing: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+    """A listing's one Alkahest option, and the escrow an opening for it names.
+
+    The escrow is the contract the option's accepted escrow is on, its literal
+    fields, and the release condition the listing advertises on that chain, as
+    a buyer deriving its proposal from the option names them: a storefront
+    refuses an escrow naming no contract, and its shape guard one selecting no
+    advertised condition.
+    """
+    (option,) = [
+        dict(entry)
+        for entry in listing.settlement_options
+        if dict(entry)["mechanism"] == "alkahest.v1"
+    ]
+    escrow = option["params"]["accepted_escrow"]
+    chain = escrow["chain_name"]
+    condition = next(
+        dict(demand)
+        for demand in listing.demands
+        if dict(demand).get("chain_name") in (None, chain)
+    )
+    return option, {
+        "chain_name": chain,
+        "escrow_address": escrow["escrow_address"],
+        "literal_fields": dict(escrow.get("literal_fields") or {}),
+        "demand": condition,
+    }
+
+
 def _expired_lease_end() -> str:
     """A lease end the watchdog reads as expired but still inside its grace."""
     return (
@@ -129,7 +159,7 @@ class ComputeDealState(DomainDealState):
     # Phase 0 — readiness. Each check gates the stages that depend on it.
     #: The storefront's timer loops are held, so every later effect is one a
     #: stage asked for. Required before the first write.
-    _lifecycle_paused: bool = False
+    _lifecycle_held: bool = False
     _storefront_healthy: bool = False
     _registry_reachable: bool = False
     _provisioning_healthy: bool = False
@@ -280,25 +310,26 @@ class ComputeDealDriver(Protocol):
 # Phase 0 — readiness
 # ===========================================================================
 
-class Stage00_LifecyclePause:
-    def test_00_pauses_the_storefront_loops(
+class Stage00_LifecycleHeld:
+    def test_00_the_storefront_loops_are_held(
         self, storefront_admin_client, deal_state: ComputeDealState
     ):
-        """Hold the storefront's timer loops idle for the rest of this scenario.
+        """The storefront's timer loops are held for this scenario.
 
-        A named stage rather than a fixture because every later assertion depends
-        on it: with the loops running, a listing status read after a reserve races
-        the capacity poller's next cycle, and a defect that reorders two writes
-        shows up as an intermittent failure instead of a reproducible one.
+        The module holds them through its lane's storefront hold fixture; this
+        stage asserts the hold, through system status, because every later
+        assertion depends on it: with the loops running, a listing status read
+        after a reserve races the capacity poller's next cycle, and a defect that
+        reorders two writes shows up as an intermittent failure instead of a
+        reproducible one.
 
-        Trading is unaffected — this pauses the loops, not the storefront's
-        willingness to negotiate — so the deal stages below still work. Loops are
-        held, not stopped: nothing is torn down and no cycle is cut in half. Work
-        a loop would have done is requested explicitly from here on, through
+        Trading is unaffected — the hold stops the loops, not the storefront's
+        willingness to negotiate — so the deal stages below still work. Work a
+        loop would have done is requested explicitly, through
         `advance_storefront`.
         """
-        pause_storefront(storefront_admin_client)
-        deal_state._lifecycle_paused = True
+        assert_storefront_loops_held(storefront_admin_client)
+        deal_state._lifecycle_held = True
 
 
 class Stage00a_StorefrontHealth:
@@ -527,7 +558,7 @@ class Stage00f1_ExecutorHostRegistry:
         """
         require_state(
             deal_state,
-            "_lifecycle_paused",
+            "_lifecycle_held",
             "_storefront_healthy",
             "_provisioning_mock_mode",
             "_contract_pins_agree",
@@ -652,8 +683,8 @@ class Stage04a_PrimaryRegistryPublish:
 
 class Stage05a_EvaluateNegotiate:
     def test_05a_evaluate_negotiate_would_not_exit(
-        self, storefront_admin_client, buyer_principal, deal_driver: ComputeDealDriver,
-        deal_state: ComputeDealState,
+        self, storefront_admin_client, registry_client, buyer_principal,
+        deal_driver: ComputeDealDriver, deal_state: ComputeDealState,
     ):
         """POST /api/v1/admin/listings/{id}/evaluate-negotiate → would_negotiate=True (dry-run).
 
@@ -666,11 +697,13 @@ class Stage05a_EvaluateNegotiate:
             "_negotiation_strategy_viable",
         )
 
+        _option, escrow = alkahest_opening(
+            registry_client.get_listing(deal_state.seller_listing_id)
+        )
         result = storefront_admin_client.evaluate_negotiate(
             deal_state.seller_listing_id,
             proposal={
-                "chain_name": "anvil",
-                "escrow_address": "0x" + "0" * 40,
+                **escrow,
                 "fields": {
                     # Decimal-digit string: the request body is
                     # canonicalized for signing, and a base-unit
@@ -735,14 +768,11 @@ class Stage05b_NegotiationStartsAndVisible:
         deal_state._escrow_expiration_unix = int(time.time()) + ESCROW_TTL_SECONDS
 
         # The listing's one Alkahest option, which the domain's opening names
-        # where its storefront needs the selection stated explicitly.
-        (alkahest_option,) = [
-            dict(option)
-            for option in registry_client.get_listing(
-                deal_state.seller_listing_id
-            ).settlement_options
-            if dict(option)["mechanism"] == "alkahest.v1"
-        ]
+        # where its storefront needs the selection stated explicitly, and the
+        # escrow every opening names.
+        alkahest_option, escrow = alkahest_opening(
+            registry_client.get_listing(deal_state.seller_listing_id)
+        )
 
         resp = storefront_client.negotiate_new(
             listing_id=deal_state.seller_listing_id,
@@ -754,6 +784,10 @@ class Stage05b_NegotiationStartsAndVisible:
             # supplied later.
             provision_terms=deal_driver.provision_terms(),
             token=DEAL_TOKEN["contract_address"],
+            chain_name=escrow["chain_name"],
+            escrow_address=escrow["escrow_address"],
+            literal_fields=escrow["literal_fields"],
+            demands=[escrow["demand"]],
             settlement_selection=deal_driver.opening_selection(
                 alkahest_option, deal_state._escrow_expiration_unix
             ),
@@ -918,28 +952,25 @@ class Stage07_OnChainEscrowAndProvGate:
 
 class Stage07b_VerifyEscrow:
     def test_07b_storefront_verifies_on_chain_escrow(
-        self, storefront_admin_client, seller_wallet, deal_state: ComputeDealState
+        self, storefront_admin_client, deal_state: ComputeDealState
     ):
         """POST /api/v1/admin/settle/{uid}/verify → valid=True (dry-run).
 
-        Exercises getRecordFromChain in isolation: reads the escrow from chain
-        and confirms token, amount, and seller recipient match. No DB writes.
+        Reads the escrow from chain and confirms it is the obligation the
+        accepted negotiation's committed settlement plan names, exactly as
+        settle verifies it. No DB writes.
         """
-        require_state(deal_state, "real_escrow_uid", "seller_listing_id", "agreed_amount",
-                      "_alkahest_configured")
+        require_state(deal_state, "real_escrow_uid", "negotiation_id", "_alkahest_configured")
 
         result = storefront_admin_client.verify_settle(
             deal_state.real_escrow_uid,
-            seller_wallet=seller_wallet,
-            agreed_price=deal_state.agreed_amount,
-            agreed_duration_seconds=DURATION_HOURS * 3600,
-            listing_id=deal_state.seller_listing_id,
+            negotiation_id=deal_state.negotiation_id,
         )
         assert result.get("valid") is True, (
             f"Storefront could not verify on-chain escrow {deal_state.real_escrow_uid}.\n"
             f"reason={result.get('reason')!r}\n"
-            "Check that the token address, amount, arbiter, and seller wallet "
-            "all match what was set at escrow creation time."
+            "Check that the escrow funds the obligation the accepted settlement "
+            "plan names: its token, amount, arbiter, demand, and expiry."
         )
         log.info("[07b] Storefront verified escrow %s: valid=True", deal_state.real_escrow_uid)
 
@@ -1096,7 +1127,7 @@ class Stage09a_ProvisioningCompletes:
         race -- the timer could have claimed this row while the job above
         was still gated -- the same race 11b's advances avoid.
         The advance releases the watchdog's own claims first; the timer is
-        paused for the module by ``convergence_advanced_explicitly``.
+        held for the module by ``fulfillment_convergence_held``.
         """
         require_state(deal_state, "fulfillment_id")
 
@@ -1234,8 +1265,9 @@ class Stage10a_LeaseExpirySetup:
     ):
         """Expire the deal's lease and hold provider teardown at its gate.
 
-        The watchdog is paused first so the expiry sits unobserved until 10b runs
-        one cycle: that keeps the trigger and the reaction as separate, asserted
+        The module holds the lease watchdog (``lease_watchdog_held``), which
+        this stage reads back, so the expiry sits unobserved until 10b runs one
+        cycle: that keeps the trigger and the reaction as separate, asserted
         steps rather than one race.
 
         Release reaches the storefront through the capacity-released callback,
@@ -1247,15 +1279,15 @@ class Stage10a_LeaseExpirySetup:
         require_state(deal_state, "lease_id", "real_escrow_uid",
                       "reserved_resource_id", "deal_lease",
                       "_provisioning_storefront_ok")
-        assert provisioning_client.pause_lease_watchdog().get("paused") is True
+        assert_lease_watchdog_held(provisioning_client)
         deal_driver.arm_teardown_gate()
         # Expire the lease rather than interrupting the deal. Expiry is what ends
         # a lease in production; interruption is an operator escape hatch for a
         # deal sold as interruptible, and driving the main teardown path with the
         # escape hatch would leave the ordinary path uncovered.
         #
-        # The watchdog is paused above, so nothing acts on the expiry until 10b
-        # runs one cycle deliberately.
+        # The watchdog is held for the module, so nothing acts on the expiry
+        # until 10b runs one cycle deliberately.
         lease = deal_state.deal_lease.backdate(_expired_lease_end())
         assert lease.get("id") == deal_state.lease_id, (
             f"back-dated the wrong reservation: {lease}"
@@ -1315,6 +1347,8 @@ class Stage11b_TeardownCompletion:
     ):
         require_state(deal_state, "teardown_fulfillment_id", "lease_id",
                       "reserved_resource_id")
+        # The release below is this stage's own lease cycle, not the timer's.
+        assert_lease_watchdog_held(provisioning_client)
         sync_stage, sync_event = deal_state.deal_lease.released_stage_event
         existing = storefront_admin_client.get_events(limit=500, stage=sync_stage)
         since_id = max((ev.id for ev in existing.events), default=0)
@@ -1362,4 +1396,3 @@ class Stage11b_TeardownCompletion:
         # `admin_release_reservations` is fleet-wide and would clear other
         # scenarios' holds.
         deal_driver.release_reserved(reserved_again)
-        provisioning_client.resume_lease_watchdog()

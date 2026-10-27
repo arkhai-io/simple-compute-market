@@ -33,6 +33,7 @@ An architecture companion does not replace a normative requirement. When explana
 | Site capacity | [Spec](site-capacity/spec.md) | [Architecture](site-capacity/architecture.md) |
 | Storefront publication | [Spec](storefront-publication/spec.md) | [Architecture](storefront-publication/architecture.md) |
 | Testing and compatibility | [Spec](test-compatibility/spec.md) | [Architecture](test-compatibility/architecture.md) |
+| VM storefront fulfillment | [Spec](vm-storefront-fulfillment/spec.md) | [Architecture](vm-storefront-fulfillment/architecture.md) |
 
 
 ## Settlement documentation ownership

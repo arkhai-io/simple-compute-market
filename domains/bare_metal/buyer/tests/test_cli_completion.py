@@ -1,8 +1,9 @@
 """Both bare-metal negotiating commands complete an agreed negotiation.
 
-The bare-metal buyer gives the negotiation client no provision-terms decoder, so
-the accepted terms always arrive as a plain dictionary; each command's
-``run_ended`` event must carry them as they arrived. The commands take no
+A negotiation outcome carries the accepted terms decoded, or as the plain
+dictionary the seller echoed when the client was given no decoder; each
+command's ``run_ended`` event must carry them as they arrived, and these tests
+give the dictionary. The commands take no
 injected collaborators, so the ones around the completion path are replaced at
 the command's module, as the composition tests do; the run log is real, under a
 temporary state directory.
@@ -119,7 +120,7 @@ def _compose(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, option: Settlement
     monkeypatch.setattr(cli, "registry_client", registry)
     monkeypatch.setattr(cli, "negotiate_with_seller", lambda **_kwargs: outcome)
     monkeypatch.setattr(cli, "BUYER_STAGES", {_PAYMENT.mechanism: stage})
-    monkeypatch.setattr(cli, "PaymentApproval", lambda *_args: object())
+    monkeypatch.setattr(cli, "payment_approval", lambda _config: object())
     monkeypatch.setattr(cli, "BareMetalSettlementTransport", lambda **_kwargs: object())
 
 

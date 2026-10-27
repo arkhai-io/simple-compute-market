@@ -188,15 +188,25 @@ def _parse_cli_clause(source: str) -> dict[str, Any]:
     }
 
 
-def compile_settlement_publication_clause(
+def parse_settlement_publication_clause(
     value: str | Mapping[str, Any] | SettlementPublicationClause,
     *,
     registry: SettlementConfigurationRegistry,
-    config: SettlementConfig,
     role: SettlementRole,
 ) -> SettlementPublicationClause:
-    """Compile one CLI or structured clause and validate its mechanism input."""
+    """Read one CLI or structured clause completely, apart from configuration.
 
+    Every check compilation makes that does not read the storefront's settlement
+    configuration: the clause's syntax and fields, a mechanism installed for
+    ``role``, named canonically, and its mechanism input as the mechanism's own
+    publication-input model parses it. A malformed clause therefore fails here
+    whether or not its mechanism is enabled, so a caller can tell a clause its
+    configuration rules out from one that cannot be read at all. The mechanism
+    input is returned as stated; compilation validates it against the
+    mechanism's configured section.
+
+    Raises ``SettlementConfigurationError`` for a clause that cannot be read.
+    """
     if isinstance(value, str):
         raw = _parse_cli_clause(value)
         mechanism_fields = raw.pop("_mechanism_fields")
@@ -205,7 +215,15 @@ def compile_settlement_publication_clause(
         mechanism_fields = dict(raw.get("mechanism_input") or {})
     elif isinstance(value, Mapping):
         raw = dict(value)
-        mechanism_fields = dict(raw.get("mechanism_input") or {})
+        # Absent means no input, as the clause model's default does; a stated
+        # value must be a mapping, so a stated null, list, number, or text is
+        # malformed rather than read as no input.
+        stated_input = raw.get("mechanism_input", {})
+        if not isinstance(stated_input, Mapping):
+            raise SettlementConfigurationError(
+                "invalid settlement publication clause: mechanism_input must be a mapping"
+            )
+        mechanism_fields = dict(stated_input)
     else:
         raise SettlementConfigurationError(
             "settlement publication clause must be DSL text or a structured mapping"
@@ -229,11 +247,6 @@ def compile_settlement_publication_clause(
         raise SettlementConfigurationError("settlement publication requires mechanism")
     mechanism = registry.canonical_mechanism_id(requested_mechanism, role=role)
     registration = registry.registration(mechanism)
-    section = config.mechanisms.get(registration.config_key)
-    if section is None or getattr(section, "enabled", False) is not True:
-        raise SettlementConfigurationError(
-            f"settlement mechanism {mechanism!r} is disabled for publication"
-        )
 
     if isinstance(value, str):
         prefix = f"{registration.config_key}."
@@ -252,8 +265,44 @@ def compile_settlement_publication_clause(
     raw["mechanism_input"] = mechanism_fields
     try:
         clause = SettlementPublicationClause.model_validate(raw)
+    except (ValueError, TypeError) as exc:
+        raise SettlementConfigurationError(
+            f"invalid settlement publication clause: {exc}"
+        ) from exc
+    try:
+        registration.publication_input_model.model_validate(clause.mechanism_input)
+    except (ValueError, TypeError):
+        # Named as the configured validation names it, without echoing a value.
+        raise SettlementConfigurationError(
+            f"invalid publication input for {mechanism!r}"
+        ) from None
+    return clause
+
+
+def compile_settlement_publication_clause(
+    value: str | Mapping[str, Any] | SettlementPublicationClause,
+    *,
+    registry: SettlementConfigurationRegistry,
+    config: SettlementConfig,
+    role: SettlementRole,
+) -> SettlementPublicationClause:
+    """Compile one CLI or structured clause and validate its mechanism input.
+
+    The clause is read whole first (``parse_settlement_publication_clause``),
+    then refused when its mechanism is not enabled, then its mechanism input is
+    validated against the mechanism's configured section.
+    """
+
+    clause = parse_settlement_publication_clause(value, registry=registry, role=role)
+    registration = registry.registration(clause.mechanism)
+    section = config.mechanisms.get(registration.config_key)
+    if section is None or getattr(section, "enabled", False) is not True:
+        raise SettlementConfigurationError(
+            f"settlement mechanism {clause.mechanism!r} is disabled for publication"
+        )
+    try:
         validated_input = registry.validate_publication_input(
-            mechanism,
+            clause.mechanism,
             clause.mechanism_input,
             config,
             role=role,
@@ -273,4 +322,5 @@ __all__ = [
     "SettlementPublicationClause",
     "compile_settlement_publication_clause",
     "decimal_rate_to_base_units",
+    "parse_settlement_publication_clause",
 ]

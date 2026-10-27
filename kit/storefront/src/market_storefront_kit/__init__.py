@@ -3,6 +3,7 @@
 from .alkahest_clients import (
     AlkahestChain,
     AlkahestClientPolicy,
+    alkahest_client_constructor,
     build_alkahest_clients,
 )
 from .composition import (
@@ -34,6 +35,10 @@ from .deal_control_routes import (
     NegotiationControlRouteService,
     StageEventRouteService,
     opening_proposal,
+)
+from .introduction_routes import (
+    refuse_introduction_fulfillment,
+    refuse_introduction_settle,
 )
 from .lifecycle_routes import LifecycleRouteError, StorefrontLifecycleRouteService
 from .trading_pause import TradingPause, TradingPauseRouteService
@@ -76,11 +81,14 @@ __all__ = [
     "StorefrontServiceHooks",
     "TradingPause",
     "TradingPauseRouteService",
+    "alkahest_client_constructor",
     "build_alkahest_clients",
     "build_composed_storefront_app",
     "build_storefront_lifespan",
     "get_storefront_container",
     "parse_timestamp",
+    "refuse_introduction_fulfillment",
+    "refuse_introduction_settle",
     "run_negotiation_watchdog",
     "stale_negotiations",
     "sweep_stale_negotiations",

@@ -35,23 +35,20 @@ def extract_compute_from_order(order: dict[str, Any]) -> dict[str, Any]:
     return listing_resource
 
 
-_NO_SELECTION = object()
-
-
 def extract_initial_price_from_order(
     order: Listing | dict[str, Any],
     *,
     default_min_price: Any = None,
-    selected_option: Any = _NO_SELECTION,
+    selected_option: Any,
 ) -> int | Fraction:
     """The seller's initial negotiation floor for a VM listing, per hour.
 
     ``selected_option`` is the accepted escrow or settlement option the buyer's
-    proposal selects, or None when it selects none the listing offers. The seller
-    negotiates from that option's advertised rate, in its own asset's base units,
-    so a hosted selection on a listing that also offers Alkahest is never priced
-    against the Alkahest rate. Without a selection to read, as before a buyer has
-    proposed, the listing's first accepted escrow stands in.
+    proposal selects. The seller negotiates from that option's advertised rate,
+    in its own asset's base units, so a hosted selection on a listing that also
+    offers Alkahest is never priced against the Alkahest rate, and no other
+    entry of the listing ever stands in for it. A proposal selecting nothing is
+    priced from no rate and no floor, so None refuses.
 
     When the option advertises no rate the listing is a hidden reserve and the
     floor is the storefront's configured ``default_min_price``, in base units per
@@ -67,11 +64,12 @@ def extract_initial_price_from_order(
     if isinstance(order, dict):
         order = Listing.model_validate(order)
 
-    if selected_option is _NO_SELECTION:
-        selected_option = order.accepted_escrows[0] if order.accepted_escrows else None
-    advertised = (
-        primary_rate_value(selected_option) if selected_option is not None else None
-    )
+    if selected_option is None:
+        raise ValueError(
+            f"Listing {order.listing_id}: the buyer's proposal selects no "
+            "settlement option the listing offers, so nothing prices it."
+        )
+    advertised = primary_rate_value(selected_option)
     if advertised is not None:
         return advertised
 

@@ -574,7 +574,7 @@ def done(root: Path, *, runs: Runs = runs_in_progress) -> Closed:
     elif _ancestor(root, current, view.head) and _ancestor(root, view.base, current):
         # At the base, or reset to one of the round's commits: nothing of the
         # owner's is committed.
-        _git(root, "reset", "--quiet", "--mixed", view.head)
+        _reset_index(root, view.head)
     else:
         way_back = (f"Nothing was reset; to return, `git reset --mixed {view.head}`, then "
                     "run `make round-done` again")
@@ -589,10 +589,22 @@ def done(root: Path, *, runs: Runs = runs_in_progress) -> Closed:
         commits = _git(root, "rev-list", "--reverse", f"{view.base}..{current}").split()
         carried = _carry(root, view, commits)
         last = next((c.replacement for c in reversed(carried) if c.replacement), view.head)
-        _git(root, "reset", "--quiet", "--mixed", last)
+        _reset_index(root, last)
     _git_path(root, STATE).unlink()
     returned_to, stayed = _return(root, view)
     return Closed(view, carried, returned_to, stayed)
+
+
+def _reset_index(root: Path, commit: str) -> None:
+    """Move the branch to `commit`, its index rebuilt from `commit`'s tree.
+
+    An intent-to-add entry for an empty file records the empty blob, the same
+    object the round's commit records, so a reset alone leaves it and its flag
+    in place and the unchanged file reads as an edit. Rebuilding the index from
+    the tree clears every such entry; the files stay.
+    """
+    _git(root, "reset", "--quiet", "--mixed", commit)
+    _git(root, "read-tree", commit)
 
 
 def _return(root: Path, view: View) -> tuple[str | None, str | None]:

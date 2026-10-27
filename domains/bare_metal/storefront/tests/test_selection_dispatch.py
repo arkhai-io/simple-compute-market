@@ -30,8 +30,6 @@ from market_core.schemas import RateValue, SettlementOption, derive_settlement_o
 from arkhai_bare_metal_storefront.settlement_stages import (
     PaymentStage,
     SellerStage,
-    verify_contact,
-    revalidate_contact,
 )
 from market_identity import Eip191Signer
 from market_settlement_runtime import (
@@ -116,7 +114,11 @@ def _intro_stages():
     return SettlementStageTable(
         {
             INTRO_MECHANISM: SellerStage(
-                _intro_registration, verify_contact, revalidate_contact, False
+                _intro_registration,
+                None,
+                None,
+                False,
+                completes_outside_settlement=True,
             )
         }
     )
@@ -335,7 +337,11 @@ def _payment_stages():
     return SettlementStageTable(
         {
             PAYMENT_MECHANISM: PaymentStage(
-                _intro_registration, verify_contact, revalidate_contact, True
+                _intro_registration,
+                None,
+                None,
+                True,
+                completes_outside_settlement=False,
             )
         }
     )

@@ -21,6 +21,7 @@ def _vm_callbacks() -> VmPublicationSourceCallbacks:
         listing_resource=lambda candidate: {"resource_id": candidate["resource_id"]},
         record_published=lambda *_args: None,
         reopen_existing=lambda *_args: None,
+        close_candidate_listing=lambda *_args: None,
     )
 
 
@@ -37,6 +38,7 @@ def test_build_vm_publication_source_kwargs_maps_callbacks() -> None:
     assert kwargs["listing_resource"]({"resource_id": "vm-1"}) == {
         "resource_id": "vm-1",
     }
+    assert kwargs["close_candidate_listing"] is callbacks.close_candidate_listing
 
 
 

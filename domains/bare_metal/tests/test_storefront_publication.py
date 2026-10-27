@@ -18,6 +18,7 @@ from arkhai_bare_metal import (
     UNCHANGED,
     WITHDRAWN,
     BareMetalResourceProjection,
+    BareMetalViewProblems,
     TrustedBareMetalProjection,
     TrustedBareMetalResource,
     bare_metal_source_identity,
@@ -53,6 +54,7 @@ def _resource(
     capacity=None,
     attributes=None,
     capabilities=None,
+    backing=BACKED,
 ):
     return TrustedBareMetalResource(
         pool_id=pool_id,
@@ -60,6 +62,7 @@ def _resource(
         view=BareMetalResourceProjection.model_validate(
             build_bare_metal_publication_view(
                 resource_id,
+                backing=backing,
                 pool_id=pool_id,
                 host_id=f"machine-{resource_id}",
                 physical_host_id=f"physical-{resource_id}",
@@ -129,16 +132,90 @@ def test_each_resource_falls_into_exactly_one_class():
 
 
 def test_availability_bounds_only_backed_supply():
+    """An unbacked view states no availability, and its resource is a candidate
+    without one."""
     classification = classify_bare_metal_resources(
-        _generation(_resource("leased", available=False)),
+        _generation(_resource("unbacked", backing=UNBACKED)),
         pool_backings={"pool-1": UNBACKED},
         pool_admission={"pool-1": POOL_ADMITTED},
         pool_regions=_regions("pool-1"),
     )
 
-    assert _classes(classification) == {"leased": CANDIDATE}
+    assert _classes(classification) == {"unbacked": CANDIDATE}
     (candidate,) = classification.candidates
     assert candidate["listing_resource"]["capacity_backing"] == "unbacked"
+
+
+def test_an_unbacked_candidate_carries_no_host_fields():
+    """The declaration names a host, which an unbacked view and its candidate
+    never carry: nothing delivers a machine behind it."""
+    classification = classify_bare_metal_resources(
+        _generation(_resource("unbacked", backing=UNBACKED)),
+        pool_backings={"pool-1": UNBACKED},
+        pool_admission={"pool-1": POOL_ADMITTED},
+        pool_regions=_regions("pool-1"),
+    )
+
+    (candidate,) = classification.candidates
+    assert "host_id" not in candidate and "physical_host_id" not in candidate
+    published = candidate["listing_resource"]
+    for term in ("host_id", "physical_host_id", "access_methods", "available"):
+        assert term not in published
+
+
+@pytest.mark.parametrize(
+    ("admission", "enabled", "expected"),
+    [
+        pytest.param(POOL_ADMITTED, True, HELD, id="admitted"),
+        pytest.param(POOL_HELD, True, HELD, id="pool-held"),
+        pytest.param(POOL_ADMITTED, False, WITHDRAWN, id="declaration-disabled"),
+        pytest.param(POOL_NOT_ADMITTED, True, WITHDRAWN, id="pool-not-admitted"),
+    ],
+)
+def test_a_resource_the_site_built_no_view_for_is_held_unless_withdrawn(
+    admission, enabled, expected
+):
+    """A declaration the site cannot build a view from is unreadable, so its
+    resource is held; a disabled declaration or a pool that no longer admits
+    bare metal is still a withdrawal."""
+    generation = TrustedBareMetalProjection(
+        site_id="site-a",
+        revision=4,
+        digest="generation-4",
+        view_problems=[
+            BareMetalViewProblems(
+                pool_id="pool-1",
+                physical_resource_id="r1",
+                enabled=enabled,
+                problems=("access_methods: required",),
+            )
+        ],
+    )
+
+    classification = classify_bare_metal_resources(
+        generation,
+        pool_backings=_BACKED,
+        pool_admission={"pool-1": admission},
+        pool_regions=_regions("pool-1"),
+    )
+
+    (item,) = classification.resources
+    assert (item.physical_resource_id, item.classification) == ("r1", expected)
+    assert item.view_unbuildable is True
+    assert item.problems == ("access_methods: required",)
+    assert classification.candidates == ()
+
+
+def test_a_disabled_unbacked_declaration_is_withdrawn():
+    classification = classify_bare_metal_resources(
+        _generation(_resource("unbacked", backing=UNBACKED, enabled=False)),
+        pool_backings={"pool-1": UNBACKED},
+        pool_admission={"pool-1": POOL_ADMITTED},
+        pool_regions=_regions("pool-1"),
+    )
+
+    assert _classes(classification) == {"unbacked": WITHDRAWN}
+    assert classification.candidates == ()
 
 
 def test_a_held_pool_holds_even_a_disabled_or_busy_resource():

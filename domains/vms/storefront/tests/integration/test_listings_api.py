@@ -22,7 +22,11 @@ import httpx
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
+from market_alkahest.alkahest import get_recipient_arbiter
+from market_alkahest.dev_chain import anvil_address_book_path
+from market_config.config_loader import ChainConfig
 from market_identity import Ed25519Signer, TrustedIdentitySet
+from market_settlement_runtime import MechanismReadiness
 from storefront_client.client import StorefrontClient, StorefrontClientError
 
 import market_storefront.container as _container
@@ -35,11 +39,14 @@ from market_storefront.middleware import admin_identity as _admin_identity
 from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
 import market_storefront.negotiation_runtime as _negotiation_runtime
 from market_storefront.publication_binding import prepare_vm_listing_binding
+from market_storefront.services.listing_service import ListingService
+from market_storefront.utils import config as storefront_config
 from market_storefront.utils.config import BASE_URL_OVERRIDE
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests.publication_app import recorded_registries
 from tests.fake_site import FakeProjectionSite, loaded_site_projection_state
 from tests.listing_service_fixtures import vm_listing_collaborators
+from tests._settings_overrides import settings_overrides
 
 _VM_PROVISION_TERMS = {
     "kind": "compute.v1",
@@ -581,7 +588,7 @@ class TestEvaluateNegotiate:
                 "neg-eval-1",
                 proposal={
                     "chain_name": "anvil",
-                    "escrow_address": "0x" + "0" * 40,
+                    "escrow_address": "0x" + "11" * 20,
                     "fields": {"amount": 5000, "token": "0x" + "a" * 40},
                     "expiration_unix": 2000000000,
                 },
@@ -602,7 +609,7 @@ class TestEvaluateNegotiate:
                 "neg-eval-2",
                 proposal={
                     "chain_name": "anvil",
-                    "escrow_address": "0x" + "0" * 40,
+                    "escrow_address": "0x" + "11" * 20,
                     "fields": {"amount": 5000, "token": "0x" + "a" * 40},
                     "expiration_unix": 2000000000,
                 },
@@ -660,7 +667,7 @@ class TestEvaluateNegotiate:
             "ghost-listing",
             proposal={
                 "chain_name": "anvil",
-                "escrow_address": "0x" + "0" * 40,
+                "escrow_address": "0x" + "11" * 20,
                 "fields": {"amount": 1000, "token": "0x" + "a" * 40},
                 "expiration_unix": 2000000000,
             },
@@ -682,7 +689,7 @@ class TestEvaluateNegotiate:
                 "neg-eval-no-thread",
                 proposal={
                     "chain_name": "anvil",
-                    "escrow_address": "0x" + "0" * 40,
+                    "escrow_address": "0x" + "11" * 20,
                     "fields": {"amount": 5000, "token": "0x" + "a" * 40},
                     "expiration_unix": 2000000000,
                 },
@@ -702,7 +709,7 @@ class TestEvaluateNegotiate:
             json={
                 "proposal": {
                     "chain_name": "anvil",
-                    "escrow_address": "0x" + "0" * 40,
+                    "escrow_address": "0x" + "11" * 20,
                     "fields": {
                         "amount": 1000,
                         "token": "0x" + "a" * 40,
@@ -782,13 +789,44 @@ async def _declared_pool_projections(
 
 @pytest_asyncio.fixture
 async def seller_auth_full_client(db):
-    """Listing lifecycle app with a real signer-aware ListingService."""
-    from market_storefront.services.listing_service import ListingService
+    """Listing lifecycle app with a real signer-aware ListingService, whose
+    composition publishes the supplied escrows and reports no readiness."""
+    async for client in _full_client(db, readiness=()):
+        yield client
 
+
+@pytest_asyncio.fixture
+async def seller_auth_alkahest_ready_client(db):
+    """The same app with Alkahest ready on the anvil chain, so a create derives
+    the release conditions its published escrows advertise."""
+    chains = {
+        "anvil": ChainConfig(
+            name="anvil",
+            rpc_url="http://anvil.test",
+            chain_id=31337,
+            alkahest_address_config_path=str(anvil_address_book_path()),
+        )
+    }
+    ready = MechanismReadiness(
+        mechanism="alkahest.v1", configured=True, enabled=True, ready=True
+    )
+    with patch.dict(storefront_config.CHAINS, chains, clear=True), settings_overrides(
+        **{"wallet.address": _SELLER_WALLET}
+    ):
+        async for client in _full_client(db, readiness=(ready,)):
+            yield client
+
+
+#: The seller wallet the ready fixture configures, which a derived recipient
+#: condition pays. A deterministic development value, never used on any network.
+_SELLER_WALLET = "0x" + "33" * 20
+
+
+async def _full_client(db, *, readiness):
     class _AcceptedEscrowComposition:
         async def publication_artifacts(self, resources, *, clauses=None):
             assert clauses is None
-            return list(resources["accepted_escrows"]), [], ()
+            return list(resources["accepted_escrows"]), [], readiness
 
     collaborators = vm_listing_collaborators(
         db.domain_registry,
@@ -1015,3 +1053,61 @@ class TestCreateListing:
         assert hasattr(result, "listing_id") or (
             isinstance(result, dict) and "listing_id" in result
         ), f"Unexpected response shape: {result}"
+
+
+class TestCreateListingReleaseConditions:
+    """A listing advertises only the release conditions the storefront's own
+    Alkahest configuration derives, whether its escrows were supplied or
+    compiled from clauses."""
+
+    async def test_supplied_escrows_advertise_the_derived_condition(
+        self, seller_auth_alkahest_ready_client
+    ):
+        c, db = seller_auth_alkahest_ready_client
+        result = await c.create_listing(
+            listing_resource=_OFFER,
+            capacity_source=_CAPACITY_SOURCE,
+            accepted_escrows=_ACCEPTED_ESCROWS,
+            paused=True,
+        )
+
+        listing = await db.load_listing(listing_id=result.listing_id)
+        (condition,) = listing["demands"]
+        assert condition["chain_name"] == "anvil"
+        assert condition["arbiter"].lower() == get_recipient_arbiter(
+            "anvil", config_path=str(anvil_address_book_path())
+        ).lower()
+        assert condition["demand_data"]["recipient"].lower() == _SELLER_WALLET
+
+    async def test_unready_alkahest_advertises_no_condition(
+        self, seller_auth_full_client
+    ):
+        c, db = seller_auth_full_client
+        result = await c.create_listing(
+            listing_resource=_OFFER,
+            capacity_source=_CAPACITY_SOURCE,
+            accepted_escrows=_ACCEPTED_ESCROWS,
+            paused=True,
+        )
+
+        listing = await db.load_listing(listing_id=result.listing_id)
+        assert not listing["demands"]
+
+    async def test_a_create_supplying_demands_is_refused(
+        self, seller_auth_alkahest_ready_client
+    ):
+        c, _ = seller_auth_alkahest_ready_client
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await c.create_listing(
+                listing_resource=_OFFER,
+                capacity_source=_CAPACITY_SOURCE,
+                accepted_escrows=_ACCEPTED_ESCROWS,
+                demands=[{
+                    "chain_name": "anvil",
+                    "arbiter": "0x" + "55" * 20,
+                    "demand_data": {"recipient": "0x" + "44" * 20},
+                }],
+                paused=True,
+            )
+        assert exc_info.value.status_code == 400
+        assert "demands are derived" in str(exc_info.value)

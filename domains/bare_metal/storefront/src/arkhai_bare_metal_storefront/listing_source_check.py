@@ -108,13 +108,17 @@ def build_listing_source_check(
             "resource_pools": list(view.value),
         }
         try:
-            generation = trusted_bare_metal_projection(site_id=site_id, projection=response)
+            # Read as publication reads it: the pools first, since each view's
+            # delivery terms answer to its pool's backing.
+            reading = read_site_pools(response["resource_pools"])
+            generation = trusted_bare_metal_projection(
+                site_id=site_id, projection=response, backings=reading.backings
+            )
         except ValueError as exc:
             return ListingSourceVerdict(
                 "unverifiable",
                 f"site {site_id!r} serves a generation bare metal refuses: {exc}",
             )
-        reading = read_site_pools(response["resource_pools"])
         # A listing's backing is fixed for the life of its binding, so a pool
         # that now declares another backing is a declared mismatch, decided
         # before anything else is compared.

@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import uuid
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 from market_core import SettlementStageTable
 from market_core.schemas import (
-    Agreement, SettlementOption, SettlementSelection, derive_settlement_option_id,
+    Agreement,
+    SettlementObligation,
+    SettlementOption,
+    SettlementPlan,
+    SettlementSelection,
+    derive_settlement_option_id,
 )
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from registry_client import FilterSpecResponse
@@ -22,7 +28,11 @@ from core_buyer import (
     run_buy,
 )
 from core_buyer.negotiation_client import NegotiationOutcome
-from core_buyer.orchestration import make_publisher_trust_resolver, make_settle_hook
+from core_buyer.orchestration import (
+    make_escrow_settle_hook,
+    make_publisher_trust_resolver,
+    make_settle_hook,
+)
 
 
 def _trusted(*signers: Ed25519Signer) -> TrustedIdentitySet:
@@ -238,6 +248,117 @@ def _agreement(mechanism: str) -> Agreement:
         ),
         asset="usd",
     )
+
+
+def _escrow_settle_hook(*, build, check, create):
+    return make_escrow_settle_hook(
+        config=_config(),
+        unit_count=1.0,
+        duration_seconds=3600,
+        build_escrow_terms=build,
+        check_escrows_fund_plan=check,
+        create_escrow=create,
+        settlement_recipient=lambda _proposal: "0x" + "44" * 20,
+        build_settlement_payload=lambda negotiation_id, _proposal: {
+            "negotiation_id": negotiation_id
+        },
+        confirm_settlement=None,
+        settlement_submit_max_attempts=1,
+        settlement_submit_retryable=lambda _exc: False,
+        settlement_poll_interval=0,
+        settlement_total_timeout=0,
+        sleep=lambda _seconds: None,
+    )
+
+
+_SELLER_PLAN = SettlementPlan(
+    obligations=[
+        SettlementObligation(
+            payer="buyer", claimant="seller", amount=10, asset="0x" + "33" * 20,
+            expiration_unix=2_000_000_000, mechanism="example.escrow.v1", params={},
+        )
+    ]
+)
+
+
+def _escrow_negotiation(plan: SettlementPlan | None) -> NegotiationResult:
+    return NegotiationResult(
+        match={"seller": "http://seller", "listing_id": "L1"},
+        outcome=NegotiationOutcome(
+            status="agreed", negotiation_id="N1", agreed_amount=10,
+            accepted_escrow_proposal={"opaque": "accepted"},
+            settlement_plan=plan,
+        ),
+    )
+
+
+class _DerivedTerms(SimpleNamespace):
+    """An opaque term payload, as a domain's derivation returns one."""
+
+    def model_dump(self) -> dict:
+        return dict(vars(self))
+
+
+def test_the_escrow_helper_funds_only_what_it_derives() -> None:
+    """The derivation is checked against the seller's plan, then funded."""
+    derived = [_DerivedTerms(maker="buyer", term="derived")]
+    checked: list = []
+    funded: list = []
+
+    def create(terms):
+        funded.append(terms)
+        raise RuntimeError("stop before submission")
+
+    hook = _escrow_settle_hook(
+        build=lambda *_args: derived,
+        check=lambda terms, plan: checked.append((terms, plan)),
+        create=create,
+    )
+
+    result = hook(_escrow_negotiation(_SELLER_PLAN), lambda *_args: None)
+
+    assert checked == [(derived, _SELLER_PLAN)]
+    assert funded == [derived]
+    assert result.reason.startswith("escrow_create_failed")
+
+
+def test_the_escrow_helper_funds_nothing_the_sellers_plan_does_not_commit_to() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def mismatch(_terms, _plan):
+        raise ValueError("escrow 0 obligation field 'demand' differs")
+
+    hook = _escrow_settle_hook(
+        build=lambda *_args: [SimpleNamespace(maker="buyer")],
+        check=mismatch,
+        create=lambda _terms: pytest.fail("an escrow was funded against the seller's plan"),
+    )
+
+    result = hook(
+        _escrow_negotiation(_SELLER_PLAN), lambda name, body: events.append((name, body))
+    )
+
+    assert result.status == "exited"
+    assert result.reason.startswith("seller_plan_mismatch")
+    assert "demand" in result.reason
+    assert events[-1][0] == "escrow_create_failed"
+
+
+def test_the_escrow_helper_funds_nothing_when_the_seller_sends_no_plan() -> None:
+    """A seller accepts an escrow only with its plan; without one the check that
+    catches buyer and seller deriving different escrows cannot run."""
+    events: list[tuple[str, dict]] = []
+    hook = _escrow_settle_hook(
+        build=lambda *_args: pytest.fail("derived without a plan to hold it to"),
+        check=lambda *_args: pytest.fail("checked against no plan"),
+        create=lambda _terms: pytest.fail("an escrow was funded without the seller's plan"),
+    )
+
+    result = hook(_escrow_negotiation(None), lambda name, body: events.append((name, body)))
+
+    assert result.status == "exited"
+    assert result.reason.startswith("seller_plan_missing")
+    assert events[-1][0] == "escrow_create_failed"
 
 
 def test_missing_accepted_entry_fails_before_domain_effects() -> None:

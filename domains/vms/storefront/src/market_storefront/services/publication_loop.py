@@ -24,6 +24,7 @@ from typing import Any, TypeVar
 
 from core_storefront.publication_runner import (
     REOPEN_UNCHANGED,
+    NoSettlementOption,
     PublicationPayload,
 )
 from arkhai_vms_listings.listing_comparison import (
@@ -39,6 +40,7 @@ from arkhai_vms_listings.reconciler import (
     available_compute_slices,
     open_listing_resource_keys,
     ReconciliationScope,
+    site_derivation_entries,
     stale_open_listing_ids,
 )
 from market_capability_admissibility import Declaration
@@ -47,6 +49,8 @@ from market_capacity_publication import (
     PublicationCycleDriver,
     PublicationCycleReport,
     ReconciliationPlan,
+    RefusedCandidates,
+    SiteDerivationLog,
     SiteProjectionState,
     converge_registries,
 )
@@ -56,6 +60,7 @@ import market_storefront.container as container
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.lifecycle import enter_stage
 from market_storefront.models.listing_models import VmCreateListingRequest
+from market_storefront.publication_binding import vm_candidate_derivation_key
 from market_storefront.publication_wiring import (
     VmPublicationSourceCallbacks,
     build_vm_storefront_publication_selection,
@@ -76,14 +81,13 @@ from market_storefront.services.listing_source_check import (
 from market_storefront.services.publication_terms import (
     compile_publication_clauses,
     compose_clause_rates,
-    demands_for_publication_clauses,
+    enabled_publication_clauses,
     listing_resource_for_candidate,
     normalize_max_duration_seconds,
     pool_hint_resolution_settings,
 )
 from market_storefront.utils.config import (
     BASE_URL_OVERRIDE,
-    get_evm_wallet_address,
     settings,
     settlement_publication_defaults,
     storefront_domain_registry,
@@ -128,6 +132,17 @@ def _source_of(candidate: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _derivation_source(candidate: Mapping[str, Any]) -> dict[str, Any]:
+    """Where a candidate's site derivation entry is recorded: its site, pool,
+    Physical Resource where it has one, and shape, at the entry's top level."""
+    return {
+        "site_id": candidate.get("site_id"),
+        "pool_id": candidate.get("pool_id"),
+        "physical_resource_id": candidate.get("resource_id"),
+        "shape_digest": candidate.get("shape_digest"),
+    }
+
+
 def _terms_of(record: Mapping[str, Any]) -> dict[str, Any]:
     return {name: record.get(name) for name in TERM_LISTING_FIELDS}
 
@@ -144,16 +159,19 @@ class VmPublicationCycle:
         site_projections: SiteProjectionState,
         registry: Any,
         storefront_url: str,
-        wallet_address: str,
         dry_run: bool,
         admissibility_default: Declaration | None,
         shape_feasible: ShapeFeasibility | None = None,
         enter_stage: Callable[[str], None] | None = None,
+        derivation: SiteDerivationLog | None = None,
     ) -> None:
         """``enter_stage`` names each stage the cycle reaches -- ``compose``,
         ``run``, ``converge`` -- so a failure is recorded in the stage it
-        happened in; the loop controller's, when a cycle runs under it."""
+        happened in; the loop controller's, when a cycle runs under it.
+        ``derivation`` receives each configured site's holds and reports once
+        the cycle has derived them."""
         self._db = sqlite_client
+        self._derivation = derivation
         self._enter_stage = enter_stage or (lambda _stage: None)
         self._admissibility_default = admissibility_default
         self._shape_feasible = shape_feasible or vm_shape_feasibility()
@@ -162,9 +180,16 @@ class VmPublicationCycle:
         self._site_projections = site_projections
         self._registry = registry
         self._storefront_url = storefront_url
-        self._wallet_address = wallet_address
         self.report = PublicationCycleReport(dry_run=dry_run)
         self._driver = PublicationCycleDriver()
+        self._refusals = RefusedCandidates(
+            self.report,
+            call=self._await,
+            listings=sqlite_client,
+            derivation_key=vm_candidate_derivation_key,
+            derivation_source=_derivation_source,
+            reconciliation_close=self._reconciliation_close,
+        )
         self._projection: Mapping[str, list[dict[str, Any]]] = {}
         self._buckets: Mapping[str, list[dict[str, Any]]] | None = None
         self._availability: Mapping[tuple[str, str], int] | None = None
@@ -207,6 +232,7 @@ class VmPublicationCycle:
                 listing_resource=listing_resource_for_candidate,
                 record_published=self._record_published,
                 reopen_existing=self._reopen_existing,
+                close_candidate_listing=self._refusals.close_candidate_listing,
             ),
         )
         sources = selection.build_sources()
@@ -220,6 +246,12 @@ class VmPublicationCycle:
             close_stale=self._availability is not None,
             skip_open=False,
         )
+        if self._derivation is not None:
+            self._derivation.record(
+                self._registry.resolve_mode("vm").contribution_id,
+                self.report,
+                self._sites,
+            )
         self._enter_stage("converge")
         await self._converge_registries()
         return self._report()
@@ -242,8 +274,6 @@ class VmPublicationCycle:
 
     def _available_candidates(self, db_path: str) -> list[dict[str, Any]]:
         holds: set[tuple[str, str, str]] = set()
-        # A preview derives exactly as the cycle would and publishes no
-        # derivation report, so status keeps describing the last cycle that ran.
         reports: dict[str, dict[str, Any]] = {}
         candidates = available_compute_slices(
             db_path,
@@ -256,27 +286,23 @@ class VmPublicationCycle:
             holds=holds,
             shape_feasible=self._shape_feasible,
             configured_sites=self._sites,
-            record_reports=not self.dry_run,
             reports=reports,
         )
-        for kind, site_id, source_id in sorted(holds):
+        for kind, site_id, _source_id in sorted(holds):
             if kind == "site":
                 # Unknown, not empty: nothing of this site's is closed or refreshed.
                 self.report.record("hold", site_id=site_id, reason="site_projection_unknown")
-            else:
-                self.report.record("hold", site_id=site_id, **{f"{kind}_id": source_id})
-        # Every VM listing publishes a region, which only its pool states. A
-        # pool stating none publishes and refreshes nothing; its candidates
-        # still count as present, so source reconciliation does not close the
-        # listings it already published. The hold is reported from the
-        # derivation's own report rather than from the candidates, because a
-        # pool with no available slice yields no candidate and is held all
-        # the same.
-        for site_id in sorted(self._projection):
-            for pool_id in reports.get(site_id, {}).get("regionless_pools", ()):
-                self.report.record(
-                    "hold", site_id=site_id, pool_id=pool_id, reason="pool_region_missing"
-                )
+        # Every pool or member hold has its reason in the site's report, which
+        # is recorded whole: what a cycle holds, and what it reports holding
+        # nothing. Every VM listing publishes a region, which only its pool
+        # states. A pool stating none publishes and refreshes nothing; its
+        # candidates still count as present, so source reconciliation does not
+        # close the listings it already published. Its hold comes from the
+        # report rather than from the candidates, because a pool with no
+        # available slice yields no candidate and is held all the same.
+        for site_id in sorted(reports):
+            for action, entry in site_derivation_entries(reports[site_id]):
+                self.report.record(action, site_id=site_id, **entry)
         return [candidate for candidate in candidates if candidate.get("region") is not None]
 
     def _close_stale(self, db_path: str, _base_url: str) -> list[str]:
@@ -289,7 +315,6 @@ class VmPublicationCycle:
             scope=ReconciliationScope.SOURCE,
             shape_feasible=self._shape_feasible,
             admissibility_default=self._admissibility_default,
-            record_reports=not self.dry_run,
         )
         for listing_id in stale:
             self.report.record("close", listing_id=listing_id, reason="source_gone")
@@ -321,20 +346,33 @@ class VmPublicationCycle:
         source: Any,
         candidate: dict[str, Any],
         listing_resource: dict[str, Any],
-    ) -> PublicationPayload | str:
+    ) -> PublicationPayload | NoSettlementOption | str:
+        """The candidate's payload, or its refusal recorded under its site.
+
+        A candidate with no settlement option is refused where configuration
+        rules out every mechanism it could publish, and held while any of them
+        is unknown; the runner then closes or keeps its open listing. A
+        mechanism whose clauses were dropped because the storefront does not
+        enable it counts among those ruled out only where the candidate's
+        backing would let it publish them.
+        """
         try:
-            request, rate_structure = self._create_request(
+            request, rate_structure, ruled_out = self._create_request(
                 source, candidate, listing_resource
             )
-            derived = replace(
-                self._await(self._listings.derive_listing(request)),
-                rate_structure=rate_structure,
-            )
+            try:
+                derived = replace(
+                    self._await(self._listings.derive_listing(request)),
+                    rate_structure=rate_structure,
+                )
+            except NoSettlementOption as exc:
+                if not ruled_out:
+                    raise
+                raise NoSettlementOption(
+                    str(exc), mechanisms=(*exc.mechanisms, *ruled_out), unknown=exc.unknown
+                ) from exc
         except Exception as exc:
-            self.report.record(
-                "refuse", source=_source_of(candidate), reason=str(exc)
-            )
-            return str(exc)
+            return self._refusals.refuse(candidate, exc)
         self._derived[id(listing_resource)] = derived
         listing = derived.listing.model_dump(mode="json")
         return PublicationPayload(
@@ -350,12 +388,16 @@ class VmPublicationCycle:
         source: Any,
         candidate: dict[str, Any],
         listing_resource: dict[str, Any],
-    ) -> tuple[VmCreateListingRequest, dict[str, Any] | None]:
-        """The create request a candidate derives, and its rate structure.
+    ) -> tuple[VmCreateListingRequest, dict[str, Any] | None, tuple[str, ...]]:
+        """The create request a candidate derives, its rate structure, and the
+        mechanisms its configuration rules out.
 
         Clause rates are composed before compilation completes the request, so a
         shape-priced listing whose rates cannot price its shape is refused here,
-        through the same path as any other underivable candidate.
+        through the same path as any other underivable candidate. A clause
+        naming a mechanism the storefront does not enable is dropped, and its
+        mechanism is ruled out only if the candidate's backing admits it: one
+        the candidate could never publish is not classified at all.
         """
         pricing = source.pricing_resource(candidate, listing_resource)
         raw_clauses = pricing.get("settlements")
@@ -365,9 +407,26 @@ class VmPublicationCycle:
                 for clause in settlement_publication_defaults()
             ]
         if not isinstance(raw_clauses, list) or not raw_clauses:
-            raise ValueError(
+            # Nothing in configuration names a mechanism for this listing.
+            raise NoSettlementOption(
                 "no settlement clauses: set the pool's `settlements` pricing hint "
                 "or configure [pricing].settlements"
+            )
+        raw_clauses, disabled = enabled_publication_clauses(raw_clauses)
+        ruled_out = (
+            self._listings.admissible_mechanisms(
+                disabled, backing=capacity_backing(candidate.get("capacity_backing"))
+            )
+            if disabled
+            else ()
+        )
+        if not raw_clauses:
+            # Each disabled mechanism the candidate could publish is ruled out
+            # by configuration, so none is unknown and its open listing closes.
+            raise NoSettlementOption(
+                "every settlement clause names a mechanism the storefront does not "
+                f"enable: {', '.join(disabled)}",
+                mechanisms=ruled_out,
             )
         composed = compose_clause_rates(
             compile_publication_clauses(raw_clauses),
@@ -384,14 +443,11 @@ class VmPublicationCycle:
                 "listing_shape": candidate["listing_shape"],
             },
             settlements=list(clauses),
-            demands=demands_for_publication_clauses(
-                clauses, wallet_address=self._wallet_address
-            ),
             max_duration_seconds=normalize_max_duration_seconds(
                 pricing.get("max_duration_seconds")
             ),
         )
-        return request, composed.rate_structure
+        return request, composed.rate_structure, ruled_out
 
     def _publish_listing(
         self,
@@ -483,12 +539,23 @@ class VmPublicationCycle:
                 list(comparison.differing_fields),
                 "closing it" if is_open else "not reopening it",
             )
-            self.report.record(
-                "close" if is_open else "refuse",
-                listing_id=listing_id,
-                reason=comparison.outcome,
-                fields=list(comparison.differing_fields),
-            )
+            if is_open:
+                self.report.record(
+                    "close",
+                    listing_id=listing_id,
+                    reason=comparison.outcome,
+                    fields=list(comparison.differing_fields),
+                )
+            else:
+                # A refusal, like every one a cycle makes, names its site and
+                # pool, so it reaches the site's derivation.
+                self.report.record(
+                    "refuse",
+                    **_derivation_source(candidate),
+                    listing_id=listing_id,
+                    reason=comparison.outcome,
+                    fields=list(comparison.differing_fields),
+                )
             if is_open and not self.dry_run:
                 await self._reconciliation_close([listing_id])
             return {"status": REOPEN_UNCHANGED}
@@ -551,10 +618,10 @@ async def run_publication_cycle_once(
         site_projections=site_projections or container.site_projections(),
         registry=storefront_domain_registry(),
         storefront_url=BASE_URL_OVERRIDE,
-        wallet_address=get_evm_wallet_address() or "",
         dry_run=dry_run,
         admissibility_default=container.resolved_admissibility_default,
         enter_stage=enter_stage,
+        derivation=container.resolved_site_derivation_log,
     )
     return await cycle.run()
 

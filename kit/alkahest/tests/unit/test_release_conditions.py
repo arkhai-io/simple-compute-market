@@ -18,11 +18,10 @@ from market_alkahest import (
     AlkahestSettlementConfig,
     ReleaseModelError,
     configured_release_model,
-    publication_release_conditions,
+    escrow_release_conditions,
     release_conditions,
-    require_deliverable_release_model,
 )
-from market_settlement_runtime import SettlementPublicationClause
+from market_settlement_runtime import MechanismReadiness, ReadinessBlocker
 
 WALLET = "0x" + "AB" * 20
 ORACLE = "0x" + "CD" * 20
@@ -104,11 +103,17 @@ def test_the_interruptible_model_names_its_configured_refund_authority(chains):
     ]
 
 
-def test_the_interruptible_model_falls_back_to_the_seller_wallet(chains):
-    (condition,) = _conditions(_config(interruptible=True), chains, ["anvil"])
+def test_an_interruptible_model_without_its_oracle_is_refused(chains):
+    """No condition stands in for a missing oracle, the seller wallet least of all."""
+    with pytest.raises(ValueError, match="requires an interruptible oracle"):
+        _conditions(_config(interruptible=True), chains, ["anvil"])
 
-    assert condition["arbiter"] == ARBITERS["anvil"]["erc20_splitter"].lower()
-    assert condition["demand_data"] == {"oracle": WALLET.lower(), "data": "0x"}
+
+def test_the_seller_wallet_cannot_be_its_own_interruptible_oracle(chains):
+    config = _config(interruptible=True, interruptible_oracle_addresses=[WALLET])
+
+    with pytest.raises(ValueError, match="equals the storefront wallet"):
+        _conditions(config, chains, ["anvil"])
 
 
 def test_conditions_are_one_per_chain_in_chain_order(chains):
@@ -148,8 +153,6 @@ def test_oracle_gated_and_interruptible_are_mutually_exclusive(chains):
         configured_release_model(config)
     with pytest.raises(ReleaseModelError, match="mutually exclusive"):
         _conditions(config, chains, ["anvil"])
-    with pytest.raises(ReleaseModelError, match="mutually exclusive"):
-        require_deliverable_release_model(config, {RECIPIENT_RELEASE})
 
 
 @pytest.mark.parametrize(
@@ -164,59 +167,91 @@ def test_each_section_selects_one_model(policy, model):
     assert configured_release_model(_config(**policy)) == model
 
 
-def test_a_model_the_domain_declares_is_returned():
-    config = _config(oracle_gated=True, trusted_oracle_addresses=[ORACLE])
-
-    assert (
-        require_deliverable_release_model(
-            config, {RECIPIENT_RELEASE, ORACLE_GATED_RELEASE}
-        )
-        == ORACLE_GATED_RELEASE
-    )
-    assert require_deliverable_release_model(None, {RECIPIENT_RELEASE}) == RECIPIENT_RELEASE
+def _escrow(chain_name: str) -> dict:
+    """An Alkahest escrow in the publication form, on ``chain_name``."""
+    return {
+        "chain_name": chain_name,
+        "escrow_address": "0x" + "22" * 20,
+        "literal_fields": {"token": "0x" + "11" * 20},
+    }
 
 
-def test_a_model_the_domain_does_not_declare_is_refused_by_name():
-    with pytest.raises(ReleaseModelError, match="'interruptible' release model"):
-        require_deliverable_release_model(
-            _config(interruptible=True), {RECIPIENT_RELEASE, ORACLE_GATED_RELEASE}
-        )
+def test_published_escrows_derive_a_condition_for_each_chain_they_name(chains):
+    escrows = [_escrow("base_sepolia"), _escrow("anvil"), _escrow("anvil")]
 
-
-def test_a_declaration_naming_an_unknown_model_is_refused():
-    with pytest.raises(ValueError, match="unknown Alkahest release models"):
-        require_deliverable_release_model(None, {RECIPIENT_RELEASE, "escrowless"})
-
-
-def _clause(mechanism: str, **mechanism_input) -> SettlementPublicationClause:
-    return SettlementPublicationClause(
-        mechanism=mechanism,
-        asset="0x" + "11" * 20,
-        rate="1",
-        per="hour",
-        mechanism_input=mechanism_input,
-    )
-
-
-def test_publication_derives_a_condition_for_each_alkahest_clause_chain(chains):
-    clauses = [
-        _clause("alkahest.v1", chain="base_sepolia", escrow_kind="erc20_escrow_obligation_default"),
-        _clause("alkahest.v1", chain="anvil", escrow_kind="erc20_escrow_obligation_default"),
-        _clause("alkahest.v1", chain="anvil", escrow_kind="erc20_escrow_obligation_default"),
-        _clause("arkhai.payments.v1", payee_account="seller"),
-    ]
-
-    conditions = publication_release_conditions(
-        None, clauses, chains=chains, wallet_address=WALLET
+    conditions = escrow_release_conditions(
+        None, escrows, readiness=_ready(), chains=chains, wallet_address=WALLET
     )
 
     assert conditions == _conditions(None, chains)
 
 
-def test_publication_without_an_alkahest_clause_advertises_no_condition():
-    clauses = [_clause("arkhai.payments.v1", payee_account="seller")]
+def test_a_listing_publishing_no_escrow_advertises_no_condition():
+    assert (
+        escrow_release_conditions(
+            None, [], readiness=_ready(), chains={}, wallet_address=WALLET
+        )
+        == []
+    )
+
+
+def test_a_published_escrow_on_an_unconfigured_chain_is_refused(chains):
+    """Nothing could settle it, so no condition is derived for it."""
+    with pytest.raises(ValueError, match="unknown chain 'ethereum_sepolia'"):
+        escrow_release_conditions(
+            None,
+            [_escrow("anvil"), _escrow("ethereum_sepolia")],
+            readiness=_ready(),
+            chains=chains,
+            wallet_address=WALLET,
+        )
+
+
+@pytest.mark.parametrize(
+    "readiness",
+    [
+        (),
+        (
+            MechanismReadiness(
+                mechanism="alkahest.v1",
+                configured=True,
+                enabled=True,
+                ready=False,
+                blockers=(
+                    ReadinessBlocker(
+                        code="alkahest.oracle_policy_invalid",
+                        message="oracle-gated settlement requires a trusted oracle address",
+                        kind="configuration",
+                    ),
+                ),
+            ),
+        ),
+    ],
+    ids=["no-alkahest-readiness", "alkahest-unready"],
+)
+def test_no_condition_is_advertised_while_alkahest_is_unready(chains, readiness):
+    """An unready mechanism publishes no escrow, so nothing is advertised.
+
+    The section here would refuse derivation outright, and the second escrow's
+    chain is not configured; readiness keeps either refusal from being reached.
+    """
+    escrows = [_escrow("anvil"), _escrow("ethereum_sepolia")]
 
     assert (
-        publication_release_conditions(None, clauses, chains={}, wallet_address=WALLET)
+        escrow_release_conditions(
+            _config(oracle_gated=True),
+            escrows,
+            readiness=readiness,
+            chains=chains,
+            wallet_address=WALLET,
+        )
         == []
+    )
+
+
+def _ready() -> tuple[MechanismReadiness, ...]:
+    return (
+        MechanismReadiness(
+            mechanism="alkahest.v1", configured=True, enabled=True, ready=True
+        ),
     )

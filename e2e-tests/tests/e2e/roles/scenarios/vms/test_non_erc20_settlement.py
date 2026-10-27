@@ -25,8 +25,8 @@ from market_alkahest.alkahest import (
 from e2e_harness.settings import settings
 from tests.e2e.roles.helpers.compute_deal import (
     advance_storefront,
+    assert_storefront_loops_held,
     delete_mock_rules_if_present,
-    pause_storefront,
     wait_for_stage_event,
 )
 from tests.e2e.roles.helpers.escrow import ensure_ws_rpc_url
@@ -45,12 +45,17 @@ from tests.e2e.roles.scenarios.vms.host_registry import (
 log = logging.getLogger(__name__)
 
 pytestmark = [
+    # Listed first, so the holds are taken before, and released after, every
+    # other fixture of the module; the lane's cleanup follows them, so it runs
+    # while the holds stand.
+    # The module steps the storefront's loops and fulfillment convergence (a
+    # timer cycle could claim a row mid-provider-call, and the module's own
+    # explicit cycle would then reach nothing) itself.
+    pytest.mark.usefixtures(
+        "storefront_loops_held", "fulfillment_convergence_held",
+        "ensure_storefront_resumed", "reap_buyer_settle_subprocess", "release_reserved_resources",
+    ),
     pytest.mark.e2e_non_erc20_settlement,
-    # This module advances fulfillment convergence itself, so the
-    # 30s timer is stopped for its duration -- otherwise a timer
-    # cycle can claim a row mid-provider-call and the module's own
-    # explicit cycle reaches nothing.
-    pytest.mark.usefixtures("convergence_advanced_explicitly"),
 ]
 
 _CHAIN_NAME = "anvil"
@@ -312,8 +317,9 @@ def test_scalar_non_erc20_settlement_reaches_ready(
 ):
     """Native-token and ERC1155 escrows settle through provisioning."""
     # The listing below is created explicitly; a running publication loop
-    # could bind the same slice first and the create would be refused.
-    pause_storefront(storefront_admin_client)
+    # could bind the same slice first and the create would be refused, so the
+    # module holds the loops.
+    assert_storefront_loops_held(storefront_admin_client)
     _assert_services_ready(storefront_admin_client, provisioning_client)
 
     # Each case sells its own resource, declared at the site: the listing's
@@ -334,7 +340,6 @@ def test_scalar_non_erc20_settlement_reaches_ready(
         listing_resource=_offer(case),
         capacity_source=capacity_source_for(_offer(case)),
         accepted_escrows=_accepted_escrows(case),
-        demands=_recipient_demands(seller_wallet),
         max_duration_seconds=_DURATION_SECONDS,
         paused=True,
     )

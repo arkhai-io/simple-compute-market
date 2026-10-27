@@ -98,8 +98,8 @@ moves nothing here, and validation runs beside it.
   that commit; if `HEAD` moves while you work, stop: the evidence no longer belongs
   to one commit.
 - **Instructions.** If the invocation says `HELM_ALL_SCENARIOS=1`, the Helm part
-  runs every pipeline scenario rather than only those the default charts serve, to
-  find which the charts serve now (step 3).
+  runs every pipeline scenario and the served list together, to find which the
+  charts serve now (step 3).
 - **Owed CI evidence.** Evidence only a push produces — a CI workflow's run, which a
   change branch's push does not trigger — is owed by validation rather than gating a
   task. Read the change's `tasks.md`, as the clean worktree holds it at `HEAD`, and

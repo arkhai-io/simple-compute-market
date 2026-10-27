@@ -223,7 +223,6 @@ def _run_resume_from(
                     accepted_escrow_proposal=resume_point.accepted_escrow_proposal,
                     settlement_selection=resume_point.settlement_selection,
                     settlement_plan=resume_point.settlement_plan,
-                    accepted_escrow_terms=resume_point.accepted_escrow_terms,
                 ),
                 resolve_seller_principals=resolve_seller_principals,
             )
@@ -258,11 +257,7 @@ def _run_resume_from(
             if outcome.agreement is not None else None,
             agreement_bytes=outcome.agreement_bytes,
             settlement_data=outcome.settlement_data,
-            accepted_escrow_terms=[
-                term.model_dump() for term in outcome.accepted_escrow_terms
-            ]
-            if outcome.accepted_escrow_terms is not None
-            else None,
+            listing_record=resume_point.listing_record,
             accepted_provision_terms=outcome.accepted_provision_terms.model_dump()
             if outcome.accepted_provision_terms is not None
             else None,

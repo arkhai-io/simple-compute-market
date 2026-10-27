@@ -28,10 +28,33 @@ class _Recording:
         self.calls.append((args, kwargs))
         return RESPONSE
 
+    def list_listings(self, **kwargs):
+        self.calls.append((("list_listings",), kwargs))
+        return {"listings": []}
+
 
 class _AsyncRecording(_Recording):
     async def authenticated_request(self, *args, **kwargs):
         return super().authenticated_request(*args, **kwargs)
+
+    async def list_listings(self, **kwargs):
+        return super().list_listings(**kwargs)
+
+
+async def test_both_clients_list_through_the_public_listing_route():
+    sync_transport, async_transport = _Recording(), _AsyncRecording()
+
+    sync_page = SyncApiCreditListingClient(sync_transport, seller=SELLER).list_listings(
+        status="open", limit=10
+    )
+    async_page = await ApiCreditListingClient(async_transport, seller=SELLER).list_listings(
+        status="open", limit=10
+    )
+
+    assert sync_page == async_page == {"listings": []}
+    assert sync_transport.calls == async_transport.calls == [
+        (("list_listings",), {"status": "open", "limit": 10, "offset": 0})
+    ]
 
 
 def _public_methods(cls) -> dict[str, inspect.Signature]:

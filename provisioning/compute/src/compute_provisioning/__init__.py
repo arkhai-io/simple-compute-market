@@ -23,8 +23,10 @@ from .definition_documents import DefinitionDocumentContribution
 from .events import IdempotentLifecycleEventSink, LifecycleEventSink
 from .release_effects import ReleaseEffect, ReleaseEffects, reservation_is_released
 from .inventory_views import (
+    InventoryPoolContext,
     InventoryViewProjection,
     InventoryViews,
+    ResourceViews,
     compose_inventory_views,
 )
 from .app import (
@@ -57,8 +59,10 @@ __all__ = [
     "ReleaseEffect",
     "ReleaseEffects",
     "reservation_is_released",
+    "InventoryPoolContext",
     "InventoryViewProjection",
     "InventoryViews",
+    "ResourceViews",
     "JobExecutor",
     "JobExecutorResolver",
     "JobFailure",

@@ -289,9 +289,33 @@ def _migrate_fulfillment_context_names_no_guest(conn: sqlite3.Connection) -> Non
     which the provisioning service rewrites the same way, so a replay of a
     rewritten request still matches.
 
-    Every escrow is rewritten, in every state. Contexts of another kind or
-    version, values that are not JSON, and requests naming no guest are left as
-    they are, so a rerun changes nothing.
+    Every escrow is rewritten, in every state. Contexts of another kind, values
+    that are not JSON, and requests naming no guest are left as they are, so a
+    rerun changes nothing.
+    """
+    _remove_fulfillment_request_fields(conn, frozenset({"vm_target"}))
+
+
+def _migrate_fulfillment_context_carries_no_connectivity(conn: sqlite3.Connection) -> None:
+    """Remove ``connectivity`` from every escrow's stored fulfillment request.
+
+    Provisioning refuses a VM request that carries ``connectivity``: the relay
+    a host dials is the one its pool references, and the buyer's address and
+    port come back in the fulfillment result. An escrow's context keeps a copy
+    of the request the storefront sent, which may hold a relay dashboard
+    credential nothing reads; it is rewritten as the provisioning service
+    rewrites its own copy, so no stored request still carries the field.
+    """
+    _remove_fulfillment_request_fields(conn, frozenset({"connectivity"}))
+
+
+def _remove_fulfillment_request_fields(
+    conn: sqlite3.Connection, fields: frozenset[str]
+) -> None:
+    """Drop ``fields`` from every escrow's stored fulfillment request payload.
+
+    Contexts of another kind, values that are not JSON, and requests carrying
+    none of ``fields`` are left as they are, so a rerun changes nothing.
     """
     if not _table_exists(conn, "escrows") or not _column_exists(
         conn, "escrows", "fulfillment_context"
@@ -312,8 +336,8 @@ def _migrate_fulfillment_context_names_no_guest(conn: sqlite3.Connection) -> Non
             continue
         payload = context.get("payload")
         request = payload.get("fulfillment_request") if isinstance(payload, dict) else None
-        fields = request.get("payload") if isinstance(request, dict) else None
-        if not isinstance(fields, dict) or "vm_target" not in fields:
+        stored = request.get("payload") if isinstance(request, dict) else None
+        if not isinstance(stored, dict) or fields.isdisjoint(stored):
             continue
         rewritten = {
             **context,
@@ -322,7 +346,7 @@ def _migrate_fulfillment_context_names_no_guest(conn: sqlite3.Connection) -> Non
                 "fulfillment_request": {
                     **request,
                     "payload": {
-                        key: value for key, value in fields.items() if key != "vm_target"
+                        key: value for key, value in stored.items() if key not in fields
                     },
                 },
             },
@@ -351,4 +375,8 @@ VM_MIGRATIONS: tuple[Migration, ...] = (
         _migrate_fulfillment_context_names_no_guest,
     ),
     Migration("20261001_011_vm_settlement_records", add_vm_settlement_records),
+    Migration(
+        "20261027_001_fulfillment_context_carries_no_connectivity",
+        _migrate_fulfillment_context_carries_no_connectivity,
+    ),
 )

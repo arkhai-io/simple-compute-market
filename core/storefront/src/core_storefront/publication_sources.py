@@ -31,3 +31,9 @@ class PublicationSource:
     ] = field(
         default=lambda candidate, _offer: candidate,
     )
+    #: Closes the open listing bound under a candidate's identity, if one is,
+    #: for the reason given: ``(db_path, base_url, candidate, reason)``. A
+    #: source whose listings nothing closes this way closes nothing.
+    close_candidate_listing: Callable[[str, str, dict[str, Any], str], None] = field(
+        default=lambda _db_path, _base_url, _candidate, _reason: None,
+    )

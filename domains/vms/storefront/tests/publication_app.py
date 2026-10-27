@@ -29,6 +29,7 @@ import httpx
 from core_storefront import multi_registry_client
 from fastapi import FastAPI
 from market_config.config_loader import ChainConfig
+from market_capacity_publication import SiteDerivationLog
 from market_capacity_publication.capacity_remote import reset_site_event_cursors
 from market_site_client.fixtures.resource_pools import (
     build_projected_resource,
@@ -41,7 +42,12 @@ from market_core.schemas import RateValue, derive_settlement_option_id
 from core_storefront.service_peers import ServicePeerTrust
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_policy.identity import Identity as PolicyIdentity
-from market_settlement_runtime import SettlementRuntime, SettlementSQLiteRepository
+from market_settlement_runtime import (
+    MechanismReadiness,
+    ReadinessBlocker,
+    SettlementRuntime,
+    SettlementSQLiteRepository,
+)
 from storefront_client.client import StorefrontClient
 
 from market_alkahest.dev_chain import anvil_address_book_path
@@ -103,6 +109,8 @@ _PUBLISHERS = TrustedIdentitySet(identities=(TEST_MARKETPLACE_SIGNER.identity,))
 #: The storefront's configured seller wallet; a development value, never used
 #: on a public network.
 SELLER_WALLET = "0x" + "33" * 20
+#: The token and escrow contract the harness's Alkahest options name;
+#: development values, never used on a public network.
 _TOKEN = "0x" + "22" * 20
 _ESCROW_ADDRESS = "0x" + "11" * 20
 
@@ -193,6 +201,14 @@ class SettlementCompositionDouble:
     declares it.
     """
 
+    #: A blocker Alkahest readiness reports, or ``None`` for a ready Alkahest.
+    #: While one is set, publication suppresses Alkahest's clauses as the real
+    #: composition does: no accepted escrow, no option, and Alkahest unready.
+    alkahest_blocker: ReadinessBlocker | None = None
+    #: Several blockers Alkahest readiness reports together, as
+    #: ``alkahest_blocker`` reports one.
+    alkahest_blockers: tuple[ReadinessBlocker, ...] = ()
+
     def __init__(self, mechanism_fulfillment: Mapping[str, bool]) -> None:
         self.configuration_registry = build_storefront_settlement_registry()
         self.settlement_config = self.configuration_registry.resolve(
@@ -247,8 +263,38 @@ class SettlementCompositionDouble:
             dispatch[mechanism_id] = build
         return dispatch
 
+    async def readiness(self):
+        """Each mechanism's readiness, evaluated by the real registry.
+
+        Alkahest's preflight reads the chain probe the container holds, as the
+        real composition hands it, and the harness's seller wallet and chains.
+        """
+        resources = {
+            "wallet": {"address": SELLER_WALLET},
+            "chains": dict(storefront_config.CHAINS),
+            "default_chain": "anvil",
+        }
+        if container.resolved_alkahest_chain_probe is not None:
+            resources["chain_probe"] = container.resolved_alkahest_chain_probe
+        return await self.configuration_registry.ordered_readiness(
+            self.settlement_config, role="seller", resources=resources
+        )
+
     async def publication_artifacts(self, resources, clauses=None):
         options = await self._registry_options(resources, clauses)
+        blockers = self.alkahest_blockers or (
+            (self.alkahest_blocker,) if self.alkahest_blocker is not None else ()
+        )
+        if blockers:
+            return [], options, (
+                MechanismReadiness(
+                    mechanism="alkahest.v1",
+                    configured=True,
+                    enabled=True,
+                    ready=False,
+                    blockers=blockers,
+                ),
+            )
         accepted = [
             {
                 "chain_name": str(clause.mechanism_input["chain"]),
@@ -274,10 +320,32 @@ class SettlementCompositionDouble:
                 **{**body, "rates": [RateValue.model_validate(rate) for rate in body["rates"]]}
             )
             options.append({"option_id": option_id, **body})
-        return accepted, options, ()
+        # Release conditions are derived only under a ready Alkahest, so the
+        # double reports Alkahest ready wherever it builds Alkahest options, as
+        # the real composition's readiness does.
+        readiness = (
+            (
+                MechanismReadiness(
+                    mechanism="alkahest.v1", configured=True, enabled=True, ready=True
+                ),
+            )
+            if accepted
+            else ()
+        )
+        return accepted, options, readiness
 
 
 REGISTRY_URLS = ("http://registry-a.test", "http://registry-b.test")
+
+
+def _refuse_registry_probe(request: httpx.Request) -> httpx.Response:
+    raise httpx.ConnectError("connection refused", request=request)
+
+
+#: System status's registry health probes, refused as by registries that are
+#: down: ``RecordingRegistries`` stands in for publication's registry client and
+#: serves no health route, so no probe leaves the process.
+REFUSED_REGISTRY_PROBES = httpx.MockTransport(_refuse_registry_probe)
 
 
 class RecordingRegistries:
@@ -613,6 +681,7 @@ async def publication_app(
                 "resolved_listing_service",
                 "resolved_capacity_runtime",
                 "resolved_site_projections",
+                "resolved_site_derivation_log",
                 "resolved_domain_registry",
                 "resolved_marketplace_signer",
                 "resolved_system_service",
@@ -626,12 +695,14 @@ async def publication_app(
         container.resolved_listing_service = listings
         container.resolved_capacity_runtime = capacity
         container.resolved_site_projections = site_projections
+        container.resolved_site_derivation_log = SiteDerivationLog()
         container.resolved_domain_registry = registry
         container.resolved_marketplace_signer = TEST_MARKETPLACE_SIGNER
         container.resolved_system_service = SystemService(
             sqlite_client=db,
             marketplace_signer=TEST_MARKETPLACE_SIGNER,
             site_projections=site_projections,
+            registry_probe_transport=REFUSED_REGISTRY_PROBES,
         )
         container.resolved_admissibility_default = (
             parse_configured_admissibility_default()

@@ -2,8 +2,9 @@
 #
 # The seller side of the token-gated-API market: a registry/indexer instance
 # speaking the api_credits schema, the credits service (keys / prepaid credits /
-# quota ledger), the credits storefront (self-seeds one quota-backed listing on
-# startup), and a sample gated app behind the Python token-gating middleware.
+# quota ledger), the credits storefront (self-seeds one quota-backed listing
+# once its dependencies answer), and a sample gated app behind the Python
+# token-gating middleware.
 # The buyer drives it with `market credits buy` through the root overlay's
 # one-shot buyer service. Mutable XDG profile/run state and the strict
 # provider-secret mount are separate from this seller-only domain stack.
@@ -138,8 +139,9 @@ services:
       start_period: 10s
 
   # 4. Credits storefront — quota-backed listings + issuance-backed
-  # settlement. Self-seeds one listing on startup (storefront.credits.toml
-  # [seed] block) pointing at the sample app.
+  # settlement. Self-seeds one listing (storefront.credits.toml [seed] block)
+  # pointing at the sample app, from its listing-seed loop once the credits
+  # service and the chain answer.
   credits-storefront:
     image: arkhai:apicredits-storefront
     platform: linux/amd64

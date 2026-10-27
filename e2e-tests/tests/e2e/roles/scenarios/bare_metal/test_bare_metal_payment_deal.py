@@ -2,6 +2,11 @@
 
 The profiled Ed25519 buyer has no wallet. Financial reversal and physical
 release are separate operations; mock access is never evidence of real SSH.
+
+The storefront's loops, fulfillment convergence, and the lease watchdog are held
+for the whole module, so publication, delivery, and release are each the step a
+stage or the supply fixture asks for, and the purchase's cleanup runs before the
+holds are released.
 """
 
 from __future__ import annotations
@@ -41,7 +46,6 @@ from tests.e2e.roles.helpers.compute_deal import (
     advance_fulfillment_to,
     advance_storefront,
     dry_run_storefront,
-    pause_storefront,
     wait_for_stage_event,
 )
 from tests.e2e.roles.helpers.domain_deal import (
@@ -68,7 +72,14 @@ from tests.e2e.roles.scenarios.bare_metal.compute_deal_driver import (
 )
 from tests.e2e.roles.scenarios.bare_metal.conftest import lane_setting
 
-pytestmark = pytest.mark.e2e_bare_metal_payment_deal
+pytestmark = [
+    # Listed first, so the holds are taken before, and released after, every
+    # other fixture of the module.
+    pytest.mark.usefixtures(
+        "storefront_loops_held", "fulfillment_convergence_held", "lease_watchdog_held"
+    ),
+    pytest.mark.e2e_bare_metal_payment_deal,
+]
 
 
 def _pins(role: str) -> TrustedIdentitySet:
@@ -206,9 +217,6 @@ def payment_supply(
     )
     overrides = SyncPoolOverrideClient(storefront_admin_client)
     try:
-        pause_storefront(storefront_admin_client)
-        assert provisioning_client.pause_fulfillment_convergence().get("paused") is True
-        assert provisioning_client.pause_lease_watchdog().get("paused") is True
         driver.seed_supply()
         overrides.put_pool_override({
             "site_id": driver.site_id, "pool_id": driver.pool_id,
@@ -264,8 +272,6 @@ def payment_supply(
             ),
             retryable=refund_may_clear,
         )
-        # Resuming held loops runs last and always, so a failing step above it
-        # cannot leave them stopped for the lane's next module.
         run_cleanup(
             [
                 *compensation.steps(settled=payment_deal_state.teardown is not None),
@@ -279,13 +285,6 @@ def payment_supply(
                 ("remove the pool override", lambda: overrides.delete_pool_override(
                     driver.site_id, driver.pool_id, "bare_metal",
                 )),
-            ],
-            always=[
-                ("resume the lease watchdog", provisioning_client.resume_lease_watchdog),
-                ("resume fulfillment convergence",
-                 provisioning_client.resume_fulfillment_convergence),
-                ("resume the storefront's loops",
-                 storefront_admin_client.admin_resume_lifecycle_loops),
             ],
         )
 
