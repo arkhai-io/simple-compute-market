@@ -39,13 +39,17 @@ step rather than inferring one.
   exit whose guard is not met names the guard's remedy — a validation of `HEAD` —
   and keeps the exit as its target; a guard no step can satisfy, or an exit the node
   does not declare, names the owner.
-- The owner redirects one change by a decision naming any node as its target, the
-  target's entry guards still holding; the waivers of a design review and of archive
-  cleanup's validation become such directions, naming the guard they skip. Every
-  direction is the owner's.
+- The owner redirects one change by a decision naming any node as its target, and no
+  guard is checked against it; the waivers of a design review and of archive
+  cleanup's validation become such directions, whose reason says what they skip.
+  Every direction is the owner's.
 - An interactive run records its own outcome with `run_change_step.py record`,
-  which reads the session's id from `CLAUDE_CODE_SESSION_ID`.
-- Records written before this change are read as they were.
+  which reads the session's id from `CLAUDE_CODE_SESSION_ID`; an interactive session
+  of any step closed before it records leaves that step in progress, for the owner
+  to resume or record by hand.
+- The records of every change not yet cleaned up are converted to the new format
+  as a task of this change, so no older record remains; the computation reads only
+  the new format, and no migration command is committed.
 
 ## Capabilities
 
@@ -77,6 +81,7 @@ None.
 - `scripts/change_next_step.py` and its tests; the outcome, log, wrapper, review,
   and command-line modules under `scripts/change_workflow/` and their tests;
   `.agents/change-outcome.schema.json`; a `make change-graph` target.
+- The records and workflow logs of every change not yet cleaned up, converted once.
 - Every leaf skill's handoff and a new interactive ending under `.agents/skills/`,
   the plan, closeout, and archive cleanup entry checks, and the orchestrate skill.
 - `.claude/change-steps.toml`: every step may run `printenv
@@ -110,11 +115,13 @@ None.
   and the log the transitions chosen on it (D3): `architecture.md`.
 - An unmet guard names its remedy; an undeclared exit names the owner (D4):
   `spec.md`.
-- The owner's directions to any node, with `waives` (D5): `spec.md`, and the
+- The owner's directions to any node, checking no guard (D5): `spec.md`, and the
   orchestrate skill.
 - Interactive runs record their outcome through `record` (D11): `spec.md`,
   `architecture.md` ("Steps run headless and resume with the owner's answers"), and
   `docs/agents/change-workflow.md`.
-- The legacy reading of older records (D7): `spec.md`.
+- The computation reads only the format in which outcomes name their exits (D7):
+  `spec.md`. The conversion of older records is this change's task, not permanent
+  knowledge.
 - Returning an archived change to an earlier phase is not supported (D5):
   `architecture.md`, "Current limits".

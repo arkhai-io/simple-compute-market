@@ -5,8 +5,10 @@
 The workflow's steps and the transitions between them MUST be declared as one table
 in code, which the next-step computation interprets: each node a step, qualified by
 its review kind where it has one; the exits it may take; the records a join waits
-for; and the guards on each edge, each naming the step that satisfies it, or the
-owner where no step can. A change to the table MUST be made as an OpenSpec change.
+for; and the guards on each exit, each naming the step that satisfies it, or the
+owner where no step can. Guards MUST apply to the exits steps take, and MUST NOT be
+checked against the owner's directions. A change to the table MUST be made as an
+OpenSpec change.
 The table MUST be renderable as a diagram, and the diagram the `change-workflow`
 architecture shows MUST be checked against that rendering.
 
@@ -49,11 +51,18 @@ allow it to print the session's id.
 
 #### Scenario: An interactive session ends without recording
 
-- **WHEN** the owner closes an interactive triage session before it recorded its
-  outcome
-- **THEN** the computation names the triage as in progress, its reason saying that
-  an interactive session may have ended without recording, to be resumed or
-  recorded by hand
+- **WHEN** the owner closes an interactive session of any step before it recorded its
+  outcome, and the last exit or direction names that step
+- **THEN** the computation names the step as in progress, its reason saying that if
+  no session of it is open, an interactive session ended without recording, to be
+  resumed or recorded by hand
+
+#### Scenario: An interactive plan sets its status and records nothing
+
+- **WHEN** an interactive planning session wrote the task list and set the status
+  `ready for implementation`, and was closed before it recorded its outcome
+- **THEN** the computation's result carries a `disagreement` naming the missing plan
+  outcome and the record command
 
 #### Scenario: The harness exports no session id
 
@@ -69,14 +78,19 @@ allow it to print the session's id.
 ### Requirement: The owner directs a change's next step
 
 The owner MAY direct a change to any node of the workflow graph, by a decision in the
-workflow log naming its target as an outcome names an exit, with a reason, and, where
-it skips a guard, the guard it waives; the decision MAY resolve the run waiting on
-it. Only the owner MAY direct a step: the orchestrating session MUST NOT direct one
-of its own accord, nor record a step's exit on its behalf. The computation MUST name
-the directed step until a later run of it is logged, subject to that step's entry
-guards and entry check, and the step sets its own status as it starts. A direction
-of an archived change to design, planning, or implementation MUST be refused, naming
-the archive.
+workflow log naming its target as an outcome names an exit, with a reason, which
+says what any skipped check was; the decision MAY resolve the run waiting on it.
+Only the owner MAY direct a step: the orchestrating session MUST NOT direct one of
+its own accord, nor record a step's exit on its behalf. The computation MUST name
+the directed step until a later run of it is logged, checking no guard, and the
+step sets its own status as it starts. A direction of an archived change to design,
+planning, or implementation MUST be refused, naming the archive.
+
+#### Scenario: The owner directs past a guard
+
+- **WHEN** the latest validation of `HEAD` failed, and the owner directs the change
+  to closeout
+- **THEN** the computation names closeout, not the owner or a validation
 
 #### Scenario: Closeout finds a design defect before the archive
 
@@ -89,9 +103,9 @@ the archive.
 #### Scenario: The owner waives archive cleanup's validation by a direction
 
 - **WHEN** the computation names a validation before archive cleanup, and the owner
-  directs archive cleanup waiving that guard
-- **THEN** the computation names archive cleanup, and archive cleanup records the
-  waiver in the intervention ledger
+  directs archive cleanup, the reason saying the validation is waived
+- **THEN** the computation names archive cleanup, and archive cleanup, finding the
+  direction in the log, records the waiver in the intervention ledger
 
 #### Scenario: An archived change is directed to design
 
@@ -213,8 +227,11 @@ blocked on a prerequisite; or stopped, with its reason and any tools it was deni
 An exit or a return MUST be named as a target: an object naming a node of the
 workflow graph by its step, with its review kind for a review, and the sections for
 an implementation out of the plan's order. A triage's finished or returned outcome
-MUST name the review records it triaged, and the wrapper MUST NOT record a triage's
-outcome without them as anything but stopped. The wrapper
+MUST name the review records it triaged, as a non-empty list of distinct record
+names in the form `NN-<kind>`, each a numbered record in the change's `reviews/`
+with its triage file beside it, at least one of them a review; the wrapper MUST NOT
+record a triage's outcome that names none, or breaks that rule, as anything but
+stopped, naming the reference, and the record command MUST refuse it. The wrapper
 MUST append each outcome, with the run's session and commit, to the change's
 workflow log, and MUST record a stopped outcome itself for a run that ends without
 one. A run whose session took further turns after an outcome — a background
@@ -268,8 +285,26 @@ step MUST name its target as an outcome names an exit, and MUST be the owner's.
 
 #### Scenario: A triage outcome names no records
 
-- **WHEN** an unattended triage ends finished without naming the records it triaged
+- **WHEN** an unattended triage ends finished without naming the records it triaged,
+  or naming an empty list
 - **THEN** the wrapper records the run as stopped, naming the missing field
+
+#### Scenario: A triage outcome names an unknown record
+
+- **WHEN** an unattended triage of review 13 ends finished with
+  `"triaged": ["31-design"]`, and the change has no record 31
+- **THEN** the wrapper records the run as stopped, naming `31-design`
+
+#### Scenario: A triage outcome names no review
+
+- **WHEN** a triage outcome's `triaged` names only `12-validation`
+- **THEN** it is refused, since it names no review, and the review it triaged stays
+  in progress
+
+#### Scenario: A triage outcome names a record twice
+
+- **WHEN** a triage outcome's `triaged` is `["13-design", "13-design"]`
+- **THEN** it is refused, naming the duplicate
 
 #### Scenario: The owner confirms a return
 
@@ -338,11 +373,8 @@ declined, or one recorded at closeout, MUST be brought to the owner. An
 implementation or pre-closeout round MUST advance only on a `passed` validation
 naming its final commit, or a commit from which its final commit differs only in
 changes' records — or, after a pre-closeout review, only in paths under `openspec/`
-and `docs/`; an `inconclusive` validation MUST be brought to the owner. A review that
-no triage outcome names MUST be routed by its triage file as written before triage
-outcomes named their exits: a `## Next` beginning `Advance`, `Another round`, or
-`Returned`, or a `## Gate` beginning `Passed`, read as the target it leads to in its
-phase.
+and `docs/`; an `inconclusive` validation MUST be brought to the owner. Nothing
+routes on a triage file's `## Next`.
 
 #### Scenario: Reviews await triage
 
@@ -411,18 +443,20 @@ phase.
   a triage's proposed return and directing planning, is attempted
 - **THEN** the log's writer refuses it, and the return still waits for the owner
 
-#### Scenario: A triage file predates triage outcomes
+#### Scenario: A new triage file awaits its outcome
 
-- **WHEN** a review's triage file records `## Next` beginning `Advance`, and no
-  triage outcome names the review
-- **THEN** the computation reads it as the target `Advance` leads to in its phase
+- **WHEN** a review's triage file has `## Next` written as prose beginning with
+  "Advance to planning", and no triage outcome names the review
+- **THEN** the computation names the triage as in progress, and does not read the
+  prose
 
 #### Scenario: A triage file predates `## Next`
 
 - **WHEN** a review's triage file ends with a `## Gate` beginning `Passed`, and no
   triage outcome names the review
-- **THEN** the computation reads it as `Advance`; any other legacy gate is brought
-  to the owner
+- **THEN** the computation names the triage as in progress, since it reads no
+  `## Gate`; the records of every change were converted so that an outcome names
+  each such review
 
 #### Scenario: A closeout correction awaits validation
 
