@@ -8,17 +8,19 @@ description: Advance one OpenSpec change through its leaf skills from one sessio
 Carry only the change you were given between its steps. The leaf skills do the
 work in their own sessions; the owner decides every finding and design question,
 and the change advances without the owner wherever the next-step computation names
-a step. Never open this change's pull request or start another change, and never
-commit while a step is running. When a step closes and leaves work uncommitted
-that its own skill does not commit — the design's documents, a triage's accepted
-fixes, the owner's round notes — commit it as its own commit on the checked-out
-branch and push, so a closed step's work never sits uncommitted in the checkout;
-a skill or permission-table edit is committed on the owner's word, as its own
-commit. Leaf steps commit what their own skills authorize. Design runs on the
-checked-out branch; on the owner's word, create this change's branch from it once
-the design review's triage advances the change and before planning starts, and
-record that through `note`. This session uses the owner's interactive
-permissions; the step table limits unattended runs only.
+a step. Never start another change, never open this change's pull request before
+`done`, and never commit while a step is running. Each leaf step that writes tracked work commits and
+pushes it itself, and one that returns the change commits its partial work first;
+a stopped run's work waits uncommitted for its resume, unless the owner has you
+commit it to a separate work-in-progress branch — needed before a fresh rerun,
+whose entry check wants a clean worktree. Tracked work a finished step
+leaves uncommitted is a defect of that step: bring it to the owner as one, and
+commit it only on their word. You also maintain the workflow the change runs on:
+you create the change's clone and branch, and commit workflow maintenance, what the
+owner instructs, and merges of `dev` on their word ("Maintain the workflow",
+below); never write the change's feature work of your own accord. This session
+uses the owner's interactive permissions; the step table limits unattended runs
+only.
 
 You relay and route; you do not judge. Read only what routing and recovery need:
 the computation and the inputs it names — the index row, the triage files'
@@ -38,11 +40,23 @@ python3 scripts/change_next_step.py <change>
 python3 scripts/run_change_step.py log <change> --last 10
 ```
 
+The owner starts you in their workspace, and you run these there first. A change
+worked in its own clone, `<workspace>.changes/<change>/`, is computed there: the
+workspace's computation names it (`in-clone`, with its directory), and from then
+on you run the computation, the log, and every command this skill names for the
+change in the clone — `python3 <clone>/scripts/change_next_step.py <change>`,
+`python3 <clone>/scripts/run_change_step.py …`, `make -C <clone> …` — since the
+change's records, log, transcripts, and step sessions are the clone's. Only
+`make change-clone` and the round view run in the workspace. A change worked in
+the workspace itself, with no clone, is computed and run there throughout.
+
 Act on that result. Recompute after each completed turn, decision, or owner
 takeover, rereading the log as needed. Keep no routing state in memory alone.
 Leave the detailed loading of code, specifications, and reviews to each leaf.
-If a round view is open, handle that reading first: the branch points at its base
-until it closes. Start no leaf step while it is open.
+For a change worked in the workspace, a round view open there points the branch
+its steps run on at the round's base until it closes: handle that reading first,
+and start no leaf step while it is open. For a change in its own clone, a view in
+the workspace holds triage alone, and the computation says when it does.
 
 Files prevail over a disagreeing log: say what disagreed and record why you
 followed the files. If the computation errors or answers `unclassified`, inspect
@@ -65,21 +79,70 @@ python3 scripts/run_change_step.py note <change> orchestrator --by owner --branc
 `python3 scripts/run_change_step.py log <change> --branch <branch>` lists such
 lines; a step checks for one rather than stopping to ask.
 
+## Where the change is worked
+
+The computation names where the change is worked before any step:
+
+- **`clone`** — the change's branch is checked out neither in the workspace nor in
+  a clone of its own, or its clone was left unfinished. Run, in the workspace,
+  `make change-clone` with the result's `arguments` (`CHANGE=<change>
+  BRANCH=<branch> FROM=<ref>`, or the change alone to finish a clone), with any
+  `BRANCH` or `FROM` the owner names instead — a change whose branch starts from
+  another change's branch rather than `dev`. It clones
+  the workspace, checks out the branch — creating it from `FROM` when it does not
+  exist — and starts the clone's bootstrap, `make init`, in the background. It
+  refuses, deleting nothing, a directory that is not a clone of the workspace, has
+  another branch checked out, or has uncommitted changes: bring its message to the
+  owner. Recompute.
+- **`in-clone`** — compute in the clone it names, as above.
+- **`wait`** — the clone's bootstrap is still running, and the step it holds
+  (`waits`) needs the environments: implementation, validation, and every later
+  step. Design and planning go on meanwhile. Tell the owner which step waits and
+  the bootstrap's log; start nothing it holds, and recompute once the log shows the
+  bootstrap ended, or when the owner asks.
+- **`owner`, `environmental`** — the bootstrap failed, almost always for a reason
+  in the environment. Show the reason and its `log`. It is never retried by
+  itself: on the owner's word, rerun `make change-clone CHANGE=<change>` in the
+  workspace, which restarts it.
+- **`owner`, `routes`** — the change's records are already in the workspace's
+  `reviews/` though its branch is checked out nowhere, so a clone would start
+  without them. Relay both routes as the reason gives them: check out its branch
+  in the workspace and go on there without a clone, or move it into a clone by
+  hand, as `docs/agents/change-workflow.md` describes. Both are the owner's to
+  carry out; recompute once they say it is done.
+- **`owner`, naming the workspace** — you were started in a clone of another
+  change: tell the owner to start you in their workspace.
+
 ## Run the computed step
 
 For `design`, `plan`, `implement`, `triage`, `validate`, `closeout`, or
-`archive-cleanup`, run `make <step> CHANGE=<change> UNATTENDED=1`. Pass computed
-implementation `sections` as `SECTIONS=<comma-separated-ids>`; each session
-implements its sections in order, committing each separately. For `review`, run
-`make review CHANGE=<change> KIND=<computed-kind>`: the review runs on its row's
-models, Codex first and Claude when Codex is unavailable. Never set
-`REVIEW_MODEL` or `REVIEW_EFFORT`: they are the owner's choice for a review run by
-hand, outside the row's policy. For
+`archive-cleanup`, run `make -C <clone> <step> CHANGE=<change> UNATTENDED=1`, or
+`make <step> CHANGE=<change> UNATTENDED=1` for a change worked in the workspace.
+Pass computed implementation `sections` as `SECTIONS=<comma-separated-ids>`; each
+session implements its sections in order, committing and pushing each separately.
+Rules the owner grants for a fresh run go on its target as
+`ALLOW='<rule>;<rule>'`, each rule as the owner granted it; the run's log line
+records them as `granted`, and the step's next run is held to its table again.
+Always start a fresh run through its target, never the script directly: the target
+checks the change, refuses while a round view is open, and passes `SECTIONS`,
+`FRESH`, `SESSION_ID`, and `HELM_ALL_SCENARIOS` on.
+Each implementation run starts a fresh session unless the owner directs the work to
+an earlier implementation session: the next section to a session they judge small
+enough, or a fix to the session that made the edits. Then pass that run's `session`
+from its log line as `SESSION_ID=<id>` beside `SECTIONS` or `ARGUMENTS`; the wrapper
+continues it on its model and refuses one waiting on the owner, which is resumed
+with the answer instead. Never continue a session on your own judgement.
+For `review`, run `make review CHANGE=<change> KIND=<computed-kind>`, in the clone
+likewise: the review runs on its row's models, Codex first and Claude when Codex is
+unavailable. Never set `REVIEW_MODEL` or `REVIEW_EFFORT`: they are the owner's
+choice for a review run by hand, outside the row's policy. For
 `validate-and-review`, start validation with `UNATTENDED=1` and the review with its
-computed `KIND` side by side. Wait for both outcomes before triage and keep their
-waiting runs distinct. Never advance with a process still running or bypass a
-guard that refuses. A failed review has no published result; an earlier record
-does not count.
+computed `KIND` side by side. When a validation, a review, or both carry `reading`,
+the owner reads the round in the workspace while they run ("Carry an
+implementation round"). Wait for both outcomes before triage and keep their
+waiting runs distinct. Never advance with a
+process still running or bypass a guard that refuses. A failed review has no
+published result; an earlier record does not count.
 
 For `round`, record the planned round the computation names, as it names it,
 just before starting its first session — copying the list is routing, not a
@@ -95,10 +158,11 @@ round. Recompute, and run its sessions.
 Before any long-running unattended turn — validation, implementation, a review,
 closeout, or a discussion resumed to apply fixes or run checks — tell the owner
 what is running and give `make change-watch CHANGE=<change>` to follow it in
-another terminal. When the owner asks for status, read the step's current progress
-file under `reviews/transcripts/` — one line per tool call, its time and what it
-touched, not the transcript, which you read only through the denials report; the
-harness's task panel does not show wrapper runs.
+another terminal, run in the clone for a change worked there. When the owner asks
+for status, read the step's current progress file under `reviews/transcripts/` —
+one line per tool call, its time and what it touched, not the transcript, which you
+read only through the denials report; the harness's task panel does not show
+wrapper runs.
 Send a push notification through the harness's available notification facility on
 a `question`, `stopped`, or a long step finishing. If none is available, tell the
 owner delivery is unavailable and show the message here; never claim a push was
@@ -116,7 +180,7 @@ Planning resumes the design session through the wrapper. Offer a fresh planning
 session (`make plan CHANGE=<change> UNATTENDED=1 FRESH=1`) only when the owner
 asks for one; you judge no session's size. Closeout and archive cleanup are
 delegated like other steps, with their questions relayed; archive cleanup drafts
-the merge message and pull request for the owner to publish. Recompute after every
+the merge message and pull request, which you publish at `done`. Recompute after every
 outcome; its free-text `next` is not a routing command.
 
 ## Relay each discussion turn
@@ -124,13 +188,19 @@ outcome; its free-text `next` is not a routing command.
 Read every outcome to know what to do next, and show each message to the owner as
 written, its options, evidence, and recommendation intact. Do not summarize it,
 add a position of your own, or answer a leaf's question for the owner; send the
-owner's reply back as written. Design and triage stay conversations with the
-owner. A triage records in its file's `## Next` whether the change advances or
-another review round runs, and the computation routes on that; there is no gate
+owner's reply back as written. A line carrying `earlier` is a run whose session
+took more turns after reporting — a wake-up, a background command finishing — and
+is logged from its last: show each earlier message too, before the last, since the
+report is often the earlier one. Design and triage stay conversations with the
+owner. A triage records in its file's `## Next` whether the change advances,
+another review round runs, or the triage returned the change to an earlier phase,
+and the computation routes on that; there is no gate
 to bring to the owner, and a triage with nothing to dispose of advances without
 them.
 
-For `owner`, inspect the reason and any named `seq`. Read that run's outcome,
+An `owner` result carrying `merging` is a merge in progress in the checkout; it
+concludes as "Maintain the workflow" says, and nothing else runs until it has.
+For any other `owner`, inspect the reason and any named `seq`. Read that run's outcome,
 including `message` and `awaiting`; read its denials first, as below. Put a
 `question` to the owner and wait. Resume the same session with the reply:
 
@@ -149,6 +219,27 @@ the owner; leave the status unchanged until confirmation. Record confirmation wi
 Recompute; the directed leaf sets its phase's status. A declined return also needs
 an explicit owner disposition. A repeat review the owner asks for outside a triage
 records `--next review --kind <kind>` with no `resolves`: no run waits on it.
+
+After a confirmed return to design, once the design step has finished, the
+computation names a design review of what it settled. The owner may waive that
+review. Only on the owner's word, record it as their decision directing planning,
+naming no run:
+
+```text
+python3 scripts/run_change_step.py note <change> orchestrator --by owner --next plan --decision "waives another design review" --reason <the owner's reason>
+```
+
+The log accepts it only while the change is `in design` and its latest design run
+finished after the confirmed return. Append the waiver's line to the change's
+`interventions.jsonl` — the clone's, for a change worked there — uncommitted, for
+planning to commit with its plan:
+`{"review": "plan", "finding": "<the decision the design step settled>",
+"section": null, "lens": "readiness", "basis": "judgement", "severity": null,
+"agent_position": "the next-step computation named another design review",
+"owner_disposition": "<the owner's waiver and reason>", "summary": "<one line>"}`.
+Recompute: the computation names planning, and planning's entry check accepts the
+waiver.
+
 When the computation names validation, or the owner, before archive cleanup —
 `HEAD` changes a path outside `openspec/` and `docs/` since the closeout review —
 the owner may waive that validation, judging the paths its reason names. Only on
@@ -165,10 +256,31 @@ word remove it from this change's row, keep `in design`, run
 `make check-change-index`, record the decision, and recompute. An absent
 prerequisite or another external blocker goes to the owner.
 
-Between turns the owner can take over with `claude --resume <session-id>`; never
-resume concurrently. On handback reread the files and log and recompute rather
-than presuming the direct conversation's result. For `done`, report the archived
-change and stop; the owner creates its pull request.
+Between turns the owner can take over a step's session, from the checkout it ran
+in, since a session is keyed by its checkout's path: `cd <clone> && claude
+--resume <session-id>` for a change in its clone, `claude --resume <session-id>`
+in the workspace otherwise. Never resume concurrently. On handback reread the
+files and log and recompute rather than presuming the direct conversation's
+result. For `done`, open the change's pull request, report the archived change,
+and stop; the owner reviews and merges it. For a change worked in its clone, archive cleanup has copied its
+history into the workspace, where sessions working other changes find it
+(`python3 scripts/find_change.py --records <change>`), but its own log line is
+written after that copy: at `done`, before reporting, run `make -C <clone>
+change-history CHANGE=<change>`, so the workspace holds archive cleanup's outcome
+too, and relay what it reports. Lines and records written in the clone later
+reach the workspace with the next such copy, or when the owner removes the clone
+after the merge with `make change-clone-remove CHANGE=<change>`, which copies them
+first. Removing a clone is
+the owner's alone: never run it.
+
+Open the pull request from the drafts archive cleanup wrote to the archived
+change's `reviews/pull-request.md`: from the change's branch into `dev`, titled
+with the merge commit message's subject, its body the pull request description.
+When a pull request from the branch already exists, open no second one; give its
+link. When the drafts say the branch carries another change that is not archived,
+the pull request would merge that change too: ask the owner before opening it.
+In the report, give the pull request's link and then the merge commit message, in
+a fenced block, for the owner to paste into the squash merge.
 
 ## Read every denial before advancing
 
@@ -187,14 +299,26 @@ Read or Grep for a shell read — is not a workaround; read it as the gap it is.
 denied chain retried as separate allowed commands alone does not establish a
 workaround. One denied call is not a denied tool.
 
-Classify by the harness's `reason`: `mode` means a missing allow rule, a gap; a
-denial with no `reason` met a deny rule and is forbidden, since the harness
-reports a reason only for a decision of the permission mode. Take any other
-value to the owner. Never grant a deny-rule
+Classify by the harness's `reason`:
+
+- `mode`: no allow rule matched the call, a gap.
+- `rule`: a deny rule refused it, forbidden.
+- `subcommandResults`: the harness split a shell command into its parts and
+  refused one, without saying whether a deny rule or a missing allow rule did.
+  Match each part against the step's deny rules and `common`'s in
+  `.claude/change-steps.toml`: a part one matches makes the call forbidden — name
+  the rule; otherwise it is a gap, naming the part no allow rule matches.
+- No `reason`, from a record written before reasons were carried: match the call
+  against the deny rules the same way; matched, it is forbidden.
+
+Take any other value, or a call you cannot place this way, to the owner. Never grant a deny-rule
 denial: an allow cannot override it. For a gap propose the narrowest matching
-rule, distinguishing a one-run `--allow` on a stopped run's resume from a routine
-tracked edit in `.claude/change-steps.toml` for the owner to commit. Never widen
-permissions silently. An unnecessary call may need no rule; explain why.
+rule, distinguishing a grant for one run — `--allow <rule>` on a stopped run's
+resume, or `ALLOW='<rule>;<rule>'` on a fresh run's target — from a tracked edit
+of the step table, which you make and commit on the owner's word ("Maintain the
+workflow"). Either way a stop met inside a round's window is recovered, since a
+grant commits nothing. Never widen permissions silently. An unnecessary call may
+need no rule; explain why.
 
 Record the reading through `note orchestrator --by orchestrator --reads <seq>`:
 the decision begins `gap:`, `forbidden:`, or `workaround:` and names the call,
@@ -205,9 +329,10 @@ A reading resolves nothing. A question is still answered; a return is still
 decided. The owner chooses recovery of a stop: resume its waiting `seq` with the
 answer and any narrowly granted `--allow <rule>`, only after the owner grants it.
 Do not resolve it first: the wrapper refuses a resolved run. The resumed run
-supersedes the stop. If the stop is not recovered (rerun fresh, fix first, or
-abandon), record a separate decision with `--resolves <stopped-seq>` and its
-reason. Leave other waiting runs untouched and recompute.
+supersedes the stop. If the stop is not recovered by its resume (rerun fresh, with
+any grant in `ALLOW`, fix first, or abandon), record a separate decision with
+`--resolves <stopped-seq>` and its reason. Leave other waiting runs untouched and
+recompute.
 
 ## Carry an implementation round
 
@@ -231,25 +356,121 @@ sessions without another question about them. A round noted as it starts records
 No step may edit `.claude/`, so a task the plan gives you — an edit of the step
 table or the project's Claude Code settings — is yours: before starting the
 session whose sections hold it, show the owner the edit, and on their word make
-it, uncommitted, for that session to commit with its section.
+it, uncommitted, in the checkout that session runs in, for it to commit with its
+section.
 
-For `round-view`, run `make round-view CHANGE=<change>` in this session: it
-pushes and dispatches the pipeline, then shows the committed round as uncommitted
-changes in the owner's checkout. Wait for the owner's reading and notes. Save
-the notes verbatim as the next `reviews/NN-implementation-owner.md`, choosing a
+**A change in its own clone.** Once a round's sections are committed, the
+computation names its validation and its implementation review, and while the
+owner has not answered on the round the result carries `reading` and the
+`workspace`: the owner reads the round there while both run in the clone. Start
+validation and the review in the clone first, so nothing in the workspace holds
+them up; then open the view in the workspace: `make round-view CHANGE=<change>`.
+It fetches the change's branch from the clone, checks it out, and shows the round
+as uncommitted changes over its base; it refuses a dirty workspace, a run in
+progress there, or another change's open view, naming each, and a refusal goes to
+the owner while validation and the review go on. Tell the owner the round is open
+for reading. When the computation names `round-view` with the `workspace` —
+validation and the review are in and the owner has not yet read — open the view
+the same way, and wait.
+
+Wait for the owner's answer: notes, or that there are none. Save it as the
+round's owner record in the clone (below), then run `make round-done` in the
+workspace. It carries any commit the owner made during the view onto the round's
+head, printing each beside its replacement, and returns the workspace to where it
+was; it refuses, moving nothing, a commit that lacks some of the round's changes
+to a file, a merge, or a branch moved off the round's base, naming the file or
+commit and the way back. Relay its output as written, and leave every refusal and
+any edit it reports to the owner. Triage pulls the owner's commits into the clone.
+While the view is open, `make round-view CHANGE=<change>` again moves it to the
+branch's new head over the same base, for an owner following triage's fixes. The
+computation names triage once the owner record, the review, and the validation all
+exist and the view is closed; while the view is open where triage would be named,
+it names the owner, to save the answer and close the view.
+
+**A change worked in the workspace.** Its view resets the branch its own steps run
+on, so the reading comes first: for `round-view`, run `make round-view
+CHANGE=<change>` in this session, which shows the committed round as uncommitted
+changes in the checkout. Wait for the owner's reading and notes, save them, and
+run `make round-done`. Recompute only after the view closes; the computation then
+names validation and the implementation review, side by side.
+
+Save the owner's answer verbatim as the next `reviews/NN-implementation-owner.md`
+in the change's directory — the clone's, for a change worked there — choosing a
 number after all numbered records and transcripts and using exclusive creation.
 Never overwrite a record. If there are no findings, save the owner's actual reply
 so the reading is recorded. On restart with a view open, recover its round head
 from Git's view state and finish that reading; preserve notes already saved.
+Never discard or commit the owner's edits to force a clean checkout.
 
-Once the owner finishes, run `make round-done`. Preserve any edits it reports;
-never discard or commit them to force a clean checkout. Recompute only after the
-view closes. Validation adopts the view's pipeline through its baseline. Start
-validation and the implementation review side by side when computed; their
-records and the owner's notes go to a fresh triage session together. Triage
-commits accepted fixes and records `## Next`; the computation then names
-validation of the fix commit, and the next round, the pre-closeout review, or
-another review round as the triage recorded.
+The records and the owner's notes go to a fresh triage session together. Triage
+commits accepted fixes, pushes them, and records `## Next`; the computation then
+names validation of the fix commit, and the next round, the pre-closeout review,
+or another review round as the triage recorded.
+
+**A repeat pass.** When a triage records another round over a fix it committed,
+the owner reads the fix as they read the round: the computation's `round-view`,
+or its validation or review carrying `reading`, then names `base`, the commit the
+earlier pass's review read. Open the view with `make round-view CHANGE=<change>
+BASE=<base>`, in the workspace or in place as above, and save the owner's answer
+as a new owner record; the first pass's record answers only for the first pass.
+
+## Maintain the workflow
+
+Besides advancing the change, you maintain the workflow it runs on. On the owner's
+explicit word, edit and commit changes to the workflow itself — skills, the step
+table — and anything else the owner instructs, in the change's clone, on its
+branch, so its next step runs on them and they land with the change: `git -C
+<clone> add` and `git -C <clone> commit`, then `make -C <clone> push-branch`, the
+guarded push. For a change worked in the workspace, make the edit the owner asks
+for and leave committing it to them. Commit only between steps, never while a step
+runs in the clone: validation fails when `HEAD` moves under it, and a review
+describes the commit it started on. Between a round's sections being committed and
+that round's triage, a commit also moves the `HEAD` the round's validation and
+review describe, so a permission a run needs then is granted for that one run,
+fresh or resumed, and the table edit committed once the round is triaged, unless
+the owner says otherwise. Commit on a clean worktree only, since the guarded push
+refuses any other: while the waiver's ledger line waits for planning, the commit
+waits too. Never write the change's feature work of your own accord; never read a
+finding's code to decide what to change.
+
+Merging `dev`, or another branch whose workflow tooling the change's later rounds
+need, into the change's branch is workflow maintenance too, done only on the
+owner's word: `git -C <clone> pull --no-rebase origin dev`, or `workspace
+<branch>` for another branch, then `make -C <clone> push-branch`. Make it only
+between the change's steps, never while its round view is open, and never between
+a round's sections being committed and that round's triage, so the merge never
+moves the commit a round's validation and review describe or falls inside a
+round's diff: asked for inside that window, it waits until the round is triaged,
+and you say so.
+
+A merge that stops at conflicts stays in progress — never abort it — and while it
+does, the computation names the owner, `merging`, before anything else. Resolve
+the conflicts in the workflow's own files yourself: the rows of
+`openspec/changes/README.md`, each change's row as its own branch has it; change
+documents under `openspec/changes/`, this change's or another's; the step table;
+and skills. Any other conflict — code above all: a script, a package, a test, a
+Makefile — goes to the owner as it stands: the files, and what each side did to
+them (`git -C <clone> log --merge --oneline -- <file>`), with no resolution of your
+own. When every conflict is resolved — yours, and the owner's rulings carried out
+as they gave them — conclude the merge with `git -C <clone> commit --no-edit`,
+which keeps Git's merge message and opens no editor, and push it. When the owner leaves a code conflict to implementation,
+resolve the workflow's files first, `git -C <clone> add` them, and record the
+owner's decision naming the code files left,
+
+```text
+python3 <clone>/scripts/run_change_step.py note <change> orchestrator --by owner --decision "an implementation run resolves the merge conflicts in <files>" --reason <the owner's words>
+```
+
+then run `make -C <clone> implement CHANGE=<change> UNATTENDED=1 ARGUMENTS='resolve
+the merge conflicts in <files>'`, with no sections. It resolves them, runs the
+suites of the sections owning them, concludes the merge, and pushes. While the
+merge is in progress the computation names no waiting run, so a question or stop
+from that run is resumed by the `seq` on the line its target printed when it
+ended — the one run you started — after `python3 <clone>/scripts/run_change_step.py
+log <change> --last 3` confirms it is still the latest. Recompute once the merge is
+concluded and pushed. Its `implement` line makes the computation report a
+`disagreement` while the change is in design or planning: the files decide, as
+always, and you record that the run was the merge's.
 
 ## Record decisions through the wrapper
 
@@ -261,11 +482,13 @@ python3 scripts/run_change_step.py note <change> orchestrator --by <owner-or-orc
 
 Add `--reads <seq>` for the run whose denials were read, `--resolves <seq>` only
 for the run settled, and `--next <step>` for a direction, with `--kind <kind>`
-for review. A confirmed return resolves its run; a repeat review names no run.
+for review. A confirmed return resolves its run; a repeat review, and the owner's
+waiver of a design review or of archive cleanup's validation, name no run.
 Record every routing or recovery decision, the owner's included, with its reason.
 Never append log lines by hand or clear one run with a decision about another.
 Leaf skills record `## Next`, design decisions, and the intervention ledger: relay
 the owner's answer to the waiting leaf rather than substituting your own record.
+The ledger line of the owner's waiver of a design review is the one you write.
 
 ## Report what only you see
 
@@ -273,8 +496,8 @@ Misbehaviour of the workflow's own tooling that shows across steps — an answer
 delivered to the wrong session, a denial missing from a line, a table rule several
 steps trip, a computation result that contradicts the files — is yours to report,
 since no step sees it. Write it as the change's next numbered record,
-`reviews/NN-orchestrator.md`, numbered after every record and transcript with an
-exclusive create, opening "Observations of the orchestrating session", each
-observation with the log lines or files that show it. The next triage reads it as
-it reads the owner's notes. It is never commentary on a step's finding or a design
-question.
+`reviews/NN-orchestrator.md`, in the clone for a change worked there, numbered
+after every record and transcript with an exclusive create, opening "Observations
+of the orchestrating session", each observation with the log lines or files that
+show it. The next triage reads it as it reads the owner's notes. It is never
+commentary on a step's finding or a design question.

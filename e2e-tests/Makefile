@@ -42,12 +42,16 @@ reinit: init-venv
 IMAGE_NAME ?= arkhai
 IMAGE_TAG  ?= e2e-tests
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
+# Appended to the image's tag; the root Makefile's IMAGE_SUFFIX. A suffixed build
+# is tagged per change alone: a commit tag would keep one image per validated commit.
+# The targets that run the image use the bare tag, as the pipeline lanes do.
+IMAGE_SUFFIX ?=
 
 build: build-images
 
 build-images: reinit
-	cd .. && docker build -t $(IMAGE_NAME):$(IMAGE_TAG) -f e2e-tests/Dockerfile .
-	docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_NAME):$(IMAGE_TAG)-$(GIT_SUFFIX)
+	cd .. && docker build -t $(IMAGE_NAME):$(IMAGE_TAG)$(IMAGE_SUFFIX) -f e2e-tests/Dockerfile .
+	$(if $(IMAGE_SUFFIX),,docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_NAME):$(IMAGE_TAG)-$(GIT_SUFFIX))
 
 test:
 	ACTIVE_PROFILES=$(ACTIVE_PROFILES) \

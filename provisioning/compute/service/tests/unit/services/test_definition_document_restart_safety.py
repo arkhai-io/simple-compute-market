@@ -34,8 +34,6 @@ from vm_provisioning_adapter.db import Relay
 from vm_provisioning_adapter.runtime import VmProvisioningRuntime
 from vm_provisioning_adapter.services.relay_service import RelayService
 
-_PLAYBOOK_PATH = "/configured/playbook.yaml"
-_INVENTORY_GROUP = "kvm_hosts"
 # Development-only Fernet key, generated per run and never used on a network.
 _KEY = Fernet.generate_key().decode()
 
@@ -65,11 +63,7 @@ class _Deployment:
         self.db_path = tmp_path / "provisioning.db"
         self.document = tmp_path / "relays.yaml"
         self.engine = create_engine(f"sqlite:///{self.db_path}")
-        run_migrations(
-            self.engine,
-            default_playbook_path=_PLAYBOOK_PATH,
-            default_inventory_group=_INVENTORY_GROUP,
-        )
+        run_migrations(self.engine)
         self.session_factory = sessionmaker(bind=self.engine)
         self.settings = SimpleNamespace(
             ssh_decryption_key=_KEY,

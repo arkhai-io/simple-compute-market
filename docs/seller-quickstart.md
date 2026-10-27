@@ -198,17 +198,34 @@ VM pools declare provider `vm.ansible`. Provisioning migrations canonicalize
 stored `ansible` routing names while preserving pool configuration and existing
 fulfillment state. Use `vm.ansible` in mounted pool documents and operator
 requests before starting the upgraded service; the old name is not a runtime
-alias. A fresh site with a mounted pool document creates its default from that
-document before importing host inventory. Without a document, migration supplies
-the configured VM default.
+alias.
+
+A fresh site starts with pools from the provisioning service's seed: with no
+pool document mounted and no pool stored, startup creates `vm-default`
+(`vm.ansible`) and `bare-metal-default` (`bare_metal.ansible`), each backed and
+delivering and advertising its own mode. They sell nothing until you declare
+capacity into them. A VM pool, seeded or your own, may omit `playbook_path`:
+its jobs then run the service's `vm_playbook_path`, fixed into each job when it
+is prepared. A mounted pool document replaces the seed, and creates its own
+pools before host inventory is imported; no pool name, `default` included, is
+required. To start a fresh site with other pools while keeping pools
+administrable through the API, point `pool_seed_path` at your own pool
+document: under compose, mount the file into `seller-provisioning` and set
+`PROVISIONING_POOL_SEED_PATH` to its path in an override file; under Helm, put
+the document in the provisioning chart's `configFiles` (for example as
+`pool-seed.yaml`) and set `config.pool_seed_path` to
+`/app/config/pool-seed.yaml`. An empty `pool_seed_path` starts a fresh site with
+no pool. The seed is applied once, to a site storing no pool; a site that
+already holds pools is never seeded.
 
 A site sells what its capacity declarations say. A declaration names its Resource
 Pool, a `capacity` map of the dimensions it sells (`gpu_count`, `vcpu_count`,
 `ram_gb`, …), the categorical `attributes` claims match (`gpu_model`, `region`),
 and, when it is delivered through a host, that host's `host_id`. A host that no
-declaration names is not published.
+declaration names is not published, whatever pool it is placed in: registering
+or importing a host declares none of its capacity.
 
-There are three ways to declare, and they describe the same declaration:
+There are two ways to declare, and they describe the same declaration:
 
 - `PUT /api/v1/capacity/resources/{resource_id}` for one declaration.
 - A capacity-definitions document, submitted with
@@ -219,23 +236,21 @@ There are three ways to declare, and they describe the same declaration:
   ```yaml
   resources:
     - resource_id: compute-kvm1
-      pool_id: default
+      pool_id: vm-default
       resource_type: compute.gpu
       host_id: kvm1
       capacity: {gpu_count: 8, vcpu_count: 192, ram_gb: 2048}
       attributes: {gpu_model: H200, region: "California, US"}
   ```
 
-- Host inventory, once: see step 3 of "Live KVM provisioning".
-
 Every entry replaces the whole declaration it names, so restate everything you
 want to keep. Declarations a document does not name are left as they are. Every
 declared attribute is published to storefronts. `DEPLOYMENT_AND_CONFIG.md`'s
 "Capacity definitions" describes the document's rules in full.
 
-A declaration wins over any GPU count recorded on its host. That can be
-surprising: once a declaration names a host, editing the host's inventory no
-longer changes what is sold. Change the declaration instead.
+A host's GPU count and model are descriptive and never change what is sold:
+editing a host's inventory line leaves its declaration as it is. Change the
+declaration instead.
 
 ## 4. Bring it up
 
@@ -316,7 +331,7 @@ touching libvirt. To create real VMs:
    chmod 600 ./keys/id_ed25519
    ```
 
-3. List the hosts you sell:
+3. List the execution hosts the service registers:
 
    ```bash
    cd domains/vms/provisioning/iac/ansible/inventory
@@ -324,9 +339,11 @@ touching libvirt. To create real VMs:
    # edit provisioning-hosts.ini with your real KVM host(s)
    ```
 
-   The provisioning service registers every host entry in this file into its
-   authoritative Host and Resource Pool tables, whatever section it is listed
-   under. List only hosts to sell: relay proxies and other infrastructure you
+   The provisioning service registers every host entry in this file as a host,
+   whatever section it is listed under. A host line's `pool_id=<id>` places the
+   host in that pool, which must exist; an empty `pool_id=` unplaces it; a line
+   with no `pool_id` leaves a new host unplaced and an existing host's pool as it
+   is. List only execution hosts: relay proxies and other infrastructure you
    manage with the IaC playbooks go in `hosts` in the same directory
    (`cp hosts.example hosts`), which the service is never given. Storefront listings reference trusted projected
    `pool_id`/`resource_id`; they do not carry a `host_id`. Each host line's
@@ -350,17 +367,15 @@ touching libvirt. To create real VMs:
    again (`POST /api/v1/hosts/import`) or register the host (`POST
    /api/v1/hosts`). A host that is only in the file is refused at dispatch.
 
-   An inventory line's `gpus=` and `gpu_model=` declare capacity **once**: when
-   the inventory is applied, a host with GPUs that no capacity declaration names
-   gets one (`resource_id` and `host_id` both the host's name, `capacity`
-   `{gpu_count: <gpus>}`, `gpu_model` as an attribute, in the host's pool).
-   After that, later values on the line are still stored on the host but no
-   longer affect capacity; change the declaration instead. Hosts added through
-   `POST /api/v1/hosts` never derive one. These inventory values are slated for
-   removal once every deployment declares capacity directly. Upgrading derives
-   declarations the same way for hosts that already exist. Rolling back past the
-   upgrade is a code rollback: the derived declarations remain, and stay
-   reservable.
+   An inventory line's `gpus=` and `gpu_model=` are stored on the host and
+   declare nothing: neither applying the inventory nor `POST /api/v1/hosts`
+   creates a capacity declaration. Declare each host's capacity yourself, as
+   "Declaring capacity" describes, naming the host's `host_id`. A host that
+   existed when its site upgraded to declared capacity received a declaration
+   derived from its GPUs then (`resource_id` and `host_id` both the host's name,
+   `capacity` `{gpu_count: <gpus>}`, `gpu_model` as an attribute, in the host's
+   pool); that declaration is an ordinary one, and stays reservable if the code
+   is rolled back.
    The provisioning image bakes the inventory in at build time — rebuild
    after edits:
 

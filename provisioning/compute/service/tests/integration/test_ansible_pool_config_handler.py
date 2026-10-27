@@ -126,6 +126,53 @@ class TestValidateVmSizeDefaults:
 
 
 # ---------------------------------------------------------------------------
+# playbook_path -- optional; the service's playbook runs when a pool states none
+# ---------------------------------------------------------------------------
+
+class TestOptionalPlaybook:
+    @pytest.mark.parametrize("config", [{}, {"playbook_path": None}])
+    def test_a_pool_stating_no_playbook_is_stored_and_read_as_none(
+        self, handler, session_factory, config,
+    ):
+        with session_factory() as db:
+            handler.replace_config(db, "pool-a", config)
+            db.commit()
+
+        with session_factory() as db:
+            read_back = handler.read_config(db, "pool-a")
+        assert "playbook_path" in read_back
+        assert read_back["playbook_path"] is None
+
+    def test_a_stated_playbook_is_kept(self, handler, session_factory):
+        with session_factory() as db:
+            handler.replace_config(db, "pool-a", _BASE_CONFIG)
+            db.commit()
+
+        with session_factory() as db:
+            read_back = handler.read_config(db, "pool-a")
+        assert read_back["playbook_path"] == _BASE_CONFIG["playbook_path"]
+
+    @pytest.mark.parametrize("bad_value", ["", "   ", 7, ["vm.yaml"]])
+    def test_a_stated_playbook_naming_nothing_is_refused(self, handler, bad_value):
+        normalized, problems = handler.validate_config_problems(
+            {"playbook_path": bad_value}
+        )
+        assert normalized is None
+        assert any(
+            p.path == "playbook_path" and p.code == "invalid_type" for p in problems
+        )
+
+    def test_the_inventory_group_is_not_a_pool_setting(self, handler):
+        normalized, problems = handler.validate_config_problems(
+            {"inventory_group": "kvm_hosts"}
+        )
+        assert normalized is None
+        assert any(
+            p.path == "inventory_group" and p.code == "unknown_field" for p in problems
+        )
+
+
+# ---------------------------------------------------------------------------
 # read_config / replace_config -- persistence round-trip
 # ---------------------------------------------------------------------------
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from compute_provisioning.hosts.service import POOL_UNSTATED
 from compute_provisioning_ansible import DEFAULT_KEY_PATH, parse_inventory_ini
 
 _INI = """
@@ -39,7 +40,24 @@ def test_every_host_entry_becomes_a_host_whatever_its_section() -> None:
     assert kvm1.connection.public["public_host"] == "203.0.113.1"
     assert kvm1.connection.public["key_path"] == DEFAULT_KEY_PATH
     assert hosts["kvm2"].connection.public["key_path"] == "/keys/kvm2"
-    assert hosts["bm1"].pool_id == "default"
+
+
+def test_a_pool_is_named_cleared_or_left_unstated() -> None:
+    """A non-empty ``pool_id=`` names a pool, an empty one unplaces the host,
+    and no ``pool_id`` at all leaves its pool unstated, never a default."""
+    hosts = {
+        host.host_id: host
+        for host in parse_inventory_ini(
+            "[hosts]\n"
+            "placed ansible_host=10.0.0.1 ansible_user=root pool_id=gpu\n"
+            "cleared ansible_host=10.0.0.2 ansible_user=root pool_id=\n"
+            "unstated ansible_host=10.0.0.3 ansible_user=root\n"
+        )
+    }
+
+    assert hosts["placed"].pool_id == "gpu"
+    assert hosts["cleared"].pool_id is None
+    assert hosts["unstated"].pool_id is POOL_UNSTATED
 
 
 def test_variables_and_children_sections_list_no_hosts() -> None:

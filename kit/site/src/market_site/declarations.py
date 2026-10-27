@@ -1,9 +1,8 @@
 """A capacity declaration: the one definition of its fields and their rules.
 
 Every place that builds, stores, compares, or accepts a declaration — the
-ledger, a capacity-definitions document, the registration request, the
-derivation of declarations from legacy host capacity — uses this model, so a
-field is added, renamed, or constrained here and nowhere else.
+ledger, a capacity-definitions document, the registration request — uses this
+model, so a field is added, renamed, or constrained here and nowhere else.
 """
 
 from __future__ import annotations

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -28,6 +29,7 @@ from market_fulfillment import (
 )
 
 from bare_metal_provisioning_adapter.codec import BareMetalJobParams
+from bare_metal_provisioning_adapter.runtime import build_bare_metal_runtime
 from bare_metal_provisioning_adapter.services.bare_metal_fulfillment_plan import (
     BareMetalFulfillmentPlan,
 )
@@ -66,6 +68,13 @@ def _request(*, host_id: str = HOST.host_id, **overrides) -> VersionedEnvelope:
     return VersionedEnvelope(kind="bare_metal.v2", schema_version=1, payload=payload)
 
 
+SERVICE_PLAYBOOK = "/opt/service/node-access.yaml"
+
+
+def _plan(*, playbook_path=SERVICE_PLAYBOOK, **options) -> BareMetalFulfillmentPlan:
+    return BareMetalFulfillmentPlan(playbook_path=playbook_path, **options)
+
+
 def _grant(plan: BareMetalFulfillmentPlan, **request):
     return plan.prepare_create(
         capacity_reservation_id="reservation-1",
@@ -76,8 +85,19 @@ def _grant(plan: BareMetalFulfillmentPlan, **request):
     )
 
 
+def _reclaim(plan: BareMetalFulfillmentPlan, grant_parameters):
+    return plan.prepare_teardown(
+        capacity_reservation_id="reservation-1",
+        resource=_resource(),
+        host_id=HOST.host_id,
+        executor_target=HOST.host_id,
+        create_parameters=grant_parameters,
+        pool_config={},
+    )
+
+
 def test_a_grant_is_prepared_for_the_selected_whole_host() -> None:
-    prepared = _grant(BareMetalFulfillmentPlan())
+    prepared = _grant(_plan())
 
     assert (prepared.offering_mode, prepared.action) == (
         BARE_METAL_OFFERING_MODE,
@@ -101,11 +121,11 @@ def test_a_grant_is_prepared_for_the_selected_whole_host() -> None:
 )
 def test_a_buyer_payload_cannot_replace_the_selected_machine(request_fields, message) -> None:
     with pytest.raises(ProviderConfigInvalidError, match=message):
-        _grant(BareMetalFulfillmentPlan(), **request_fields)
+        _grant(_plan(), **request_fields)
 
 
 def test_pool_configuration_and_another_offering_mode_are_refused() -> None:
-    plan = BareMetalFulfillmentPlan()
+    plan = _plan()
 
     with pytest.raises(ProviderConfigInvalidError, match="pool-local configuration"):
         plan.prepare_create(
@@ -121,7 +141,7 @@ def test_pool_configuration_and_another_offering_mode_are_refused() -> None:
 
 
 def test_the_reclaim_undoes_exactly_what_the_grant_ran() -> None:
-    plan = BareMetalFulfillmentPlan(reclaim_policy="lock_user")
+    plan = _plan(reclaim_policy="lock_user")
     grant = _grant(plan)
 
     reclaim = plan.prepare_teardown(
@@ -154,7 +174,7 @@ def test_the_reclaim_undoes_exactly_what_the_grant_ran() -> None:
 def test_a_reclaim_is_refused_when_the_grant_does_not_match(
     create_parameters, resource, message
 ) -> None:
-    plan = BareMetalFulfillmentPlan()
+    plan = _plan()
     grant = _grant(plan)
 
     with pytest.raises(ProviderConfigInvalidError, match=message):
@@ -170,7 +190,59 @@ def test_a_reclaim_is_refused_when_the_grant_does_not_match(
 
 def test_a_reclaim_policy_the_role_does_not_implement_is_refused_at_composition() -> None:
     with pytest.raises(ValueError, match="bare_metal_reclaim_policy"):
-        BareMetalFulfillmentPlan(reclaim_policy="format_disk")
+        _plan(reclaim_policy="format_disk")
+
+
+def test_a_grant_and_its_reclaim_carry_the_configured_playbook() -> None:
+    plan = _plan()
+    grant = _grant(plan)
+
+    reclaim = _reclaim(plan, grant.parameters)
+
+    assert grant.parameters["playbook_path"] == SERVICE_PLAYBOOK
+    assert reclaim.parameters["playbook_path"] == SERVICE_PLAYBOOK
+
+
+def test_a_reclaim_takes_the_playbook_configured_when_it_is_prepared() -> None:
+    """A reclaim prepared after the service is reconfigured carries the new
+    playbook, whatever its grant's parameters carry."""
+    grant = _grant(_plan())
+
+    reclaim = _reclaim(_plan(playbook_path="/opt/service/node-access-v2.yaml"), grant.parameters)
+
+    assert reclaim.parameters["playbook_path"] == "/opt/service/node-access-v2.yaml"
+
+
+def test_a_reclaim_of_a_grant_stored_without_a_playbook_gains_the_configured_one() -> None:
+    grant = dict(_grant(_plan()).parameters)
+    del grant["playbook_path"]
+
+    reclaim = _reclaim(_plan(), grant)
+
+    assert reclaim.parameters["playbook_path"] == SERVICE_PLAYBOOK
+
+
+def test_the_runtime_gives_its_plan_the_services_configured_playbook(monkeypatch) -> None:
+    # The mock profile, so the runtime composes no real Ansible runner.
+    monkeypatch.setenv("ACTIVE_PROFILES", "mock")
+    runtime = build_bare_metal_runtime(
+        job_engine=None,
+        job_submission=None,
+        config=SimpleNamespace(
+            resolved_bare_metal_playbook_path=Path("/opt/service/node-access.yaml"),
+            bare_metal_reclaim_policy=None,
+        ),
+    )
+
+    operation = runtime.fulfillment_provider.prepare_create(
+        capacity_reservation_id="reservation-1",
+        request=_request(),
+        resource=_resource(),
+        pool_config={},
+    )
+
+    parameters = operation.model_dump(mode="json")["payload"]["parameters"]
+    assert parameters["playbook_path"] == "/opt/service/node-access.yaml"
 
 
 class _MockJobs:
@@ -202,7 +274,7 @@ async def test_a_mock_grant_is_delivered_and_reclaimed_through_the_family_provid
     composed as the provisioning service composes them."""
     jobs = _MockJobs()
     provider = JobFulfillmentProvider(
-        plan=BareMetalFulfillmentPlan(),
+        plan=_plan(),
         submission=JobSubmissionService(
             engine=jobs,
             hosts=SimpleNamespace(get_host=lambda host_id: SimpleNamespace(enabled=True)),

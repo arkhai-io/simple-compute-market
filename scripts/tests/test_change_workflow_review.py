@@ -11,6 +11,7 @@ import pytest
 from change_workflow.log import log_path, read_log
 from change_workflow.review import (ReviewError, claim_record, review_and_log, review_models,
                                     run_review)
+from change_workflow.running import live_runs
 from change_workflow.steps import Model, load_steps
 from change_workflow_fixtures import (CHANGE, HEAD, RECORDS, VALIDATED, FakeClaude,
                                       claude_review, clock, codex_missing, codex_saying,
@@ -365,6 +366,37 @@ def test_a_ledger_commit_after_validation_admits_a_pre_closeout_review(tmp_path:
     assert path.name == "04-pre-closeout.md"
 
 
+DOCUMENTS = ["openspec/changes/README.md", f"{RECORDS}/specs/x/spec.md"]
+
+
+def test_a_document_commit_after_a_pre_closeout_triage_admits_the_next_review(
+        tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    (reviews_of(root) / "03-validation.md").write_text(validation_text(VALIDATED, "passed"),
+                                                       "utf-8")
+    (reviews_of(root) / "04-pre-closeout.md").write_text("x", "utf-8")
+    (reviews_of(root) / "04-pre-closeout.triage.md").write_text("## Next\n\nAnother round\n",
+                                                               "utf-8")
+
+    path = run_review(CHANGE, "pre-closeout", root=root, head=lambda _: HEAD,
+                      changed_since=lambda *_: DOCUMENTS,
+                      runner=writing(review_text("pre-closeout")))
+
+    assert path.name == "05-pre-closeout.md"
+
+
+def test_a_document_commit_before_any_pre_closeout_review_needs_validating(
+        tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    (reviews_of(root) / "03-validation.md").write_text(validation_text(VALIDATED, "passed"),
+                                                       "utf-8")
+
+    with pytest.raises(ReviewError, match="specs/x/spec.md"):
+        run_review(CHANGE, "pre-closeout", root=root, head=lambda _: HEAD,
+                   changed_since=lambda *_: DOCUMENTS,
+                   runner=writing(review_text("pre-closeout")))
+
+
 def test_the_owner_may_run_a_pre_closeout_review_unvalidated(tmp_path: Path) -> None:
     root = repository(tmp_path)
 
@@ -677,3 +709,27 @@ def test_a_reviewer_that_cannot_start_is_logged_stopped_with_head(tmp_path: Path
 
     assert (line["outcome"], line["commit"]) == ("stopped", HEAD)
     assert line["reason"] == "the review did not finish: PermissionError: codex"
+
+
+def test_a_review_is_recorded_in_progress_while_it_runs_and_forgotten_after(
+        tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    runs = tmp_path / "git" / "change-runs"
+    seen: list[list] = []
+    review = writing(review_text(), session="codex-1")
+
+    def watched(command: Sequence[str], log: Path) -> int:
+        seen.append(live_runs(runs))
+        return review(command, log)
+
+    def head(_: Path) -> str:
+        seen.append(live_runs(runs))
+        return HEAD
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock, runner=watched, head=head,
+                          runs=lambda _: runs)
+
+    assert line["outcome"] == "finished" and len(seen) >= 2
+    assert all([(run.step, run.change) for run in live] == [("review", CHANGE)]
+               for live in seen)
+    assert list(runs.iterdir()) == []

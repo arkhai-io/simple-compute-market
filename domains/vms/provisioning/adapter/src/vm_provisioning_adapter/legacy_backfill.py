@@ -76,7 +76,11 @@ def prepare_historical_vm_teardown(
     this path.
     """
     metadata = settlement_result.provider_metadata
-    plan = VmFulfillmentPlan(reserved_var_keys=VmAnsibleCodec().reserved_var_keys)
+    # A historical pool always states its playbook (the compiler refuses one
+    # that does not), so no service playbook is consulted here.
+    plan = VmFulfillmentPlan(
+        reserved_var_keys=VmAnsibleCodec().reserved_var_keys, vm_playbook_path=None
+    )
     prepared = plan.prepare_teardown(
         capacity_reservation_id=settlement_result.capacity_reservation_id,
         resource=settlement_result.resource,

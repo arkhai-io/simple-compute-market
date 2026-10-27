@@ -91,11 +91,7 @@ def test_running_it_again_changes_nothing() -> None:
 def test_a_fresh_database_ends_with_only_the_envelope_columns() -> None:
     engine = _engine()
 
-    run_migrations(
-        engine,
-        default_playbook_path="/configured/playbook.yaml",
-        default_inventory_group="kvm_hosts",
-    )
+    run_migrations(engine)
 
     columns = _columns(engine)
     assert {"connection_kind", "connection_public", "connection_protected"} <= columns

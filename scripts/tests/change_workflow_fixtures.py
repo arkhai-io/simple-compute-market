@@ -111,7 +111,8 @@ def make_wrapper(tmp_path: Path, claude: FakeClaude) -> Wrapper:
     (tmp_path / "openspec/changes" / CHANGE).mkdir(parents=True, exist_ok=True)
     return Wrapper(root=tmp_path, runner=claude, head=lambda _: COMMIT, clock=clock,
                    echo=None,
-                   conversation=lambda _, session: conversations(tmp_path) / f"{session}.jsonl")
+                   conversation=lambda _, session: conversations(tmp_path) / f"{session}.jsonl",
+                   runs=lambda _: None)
 
 
 def option(command: list[str], flag: str) -> str:

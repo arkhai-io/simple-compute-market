@@ -15,7 +15,13 @@ from market_resource_pools.db import (
     ResourcePool,
 )
 
-from market_site.db import HELD_RESERVATION_STATES, Base, CapacityReservation
+from market_site import CapacityDeclaration
+from market_site.db import (
+    HELD_RESERVATION_STATES,
+    Base,
+    CapacityBucket,
+    CapacityReservation,
+)
 from market_site.ledger import (
     ALLOCATION_MODE_EXCLUSIVE,
     ALLOCATION_MODE_SHAREABLE,
@@ -24,6 +30,7 @@ from market_site.ledger import (
     UndeclaredOfferingModeError,
     UnknownPoolError,
 )
+from market_site.projections import SiteProjectionService
 
 
 def _make_ledger(**kwargs) -> CapacityLedgerService:
@@ -1383,8 +1390,6 @@ def test_attribute_view_prefers_real_pool_id_over_attributes_json():
     """A row stored before registration refused declaration fields as
     attributes may carry both; the column must win. Registration can no
     longer write such a row, so the test stores it directly."""
-    from market_site.db import CapacityBucket
-
     ledger = _make_ledger()
     _declare_pool(ledger, "pool-a", "vm")
     ledger.register_resource(resource_id="r1", total_units=4, pool_id="pool-a")
@@ -1397,19 +1402,114 @@ def test_attribute_view_prefers_real_pool_id_over_attributes_json():
     assert ledger.probe(claim={"offering_mode": "vm", **{"pool_id": "pool-stale-json-value", "gpu_count": 1}}) is None
 
 
-def test_attribute_view_falls_back_to_resource_id_when_pool_id_unset():
-    """A legacy row stored with no pool: a claim addressing the resource by
-    its own id as a pool still matches. Registration can no longer write such
-    a row, so the test stores it directly."""
-    from market_site.db import CapacityBucket
+def _strip_stored_pool(ledger: CapacityLedgerService, resource_id: str) -> None:
+    """Store a row with no pool, as no write can: every declaration names one."""
+    with ledger._session_factory() as db:
+        row = db.query(CapacityBucket).filter_by(backing_resource_id=resource_id).one()
+        row.pool_id = None
+        db.commit()
 
+
+def test_a_row_with_no_stored_pool_is_not_admitted_against(caplog):
+    """Neither as `default` nor as a pool named for the resource: a claim
+    finds nothing, and the row is reported."""
     ledger = _make_ledger()
     ledger.register_resource(resource_id="r1", total_units=4, pool_id="default")
+    _strip_stored_pool(ledger, "r1")
+
+    with caplog.at_level("WARNING", logger="market_site.ledger"):
+        assert ledger.probe(claim={"offering_mode": "vm", "gpu_count": 1}) is None
+        assert ledger.probe(
+            claim={"offering_mode": "vm", "pool_id": "default", "gpu_count": 1}
+        ) is None
+        assert ledger.probe(
+            claim={"offering_mode": "vm", "pool_id": "r1", "gpu_count": 1}
+        ) is None
+        assert ledger.reserve(
+            claim={"offering_mode": "vm", "gpu_count": 1}, deal_ref={}
+        ) is None
+    # Every claim, pinned or not, is refused by the missing pool itself.
+    assert caplog.text.count("'r1' records no pool and is not admitted against") == 4
     with ledger._session_factory() as db:
-        db.query(CapacityBucket).filter_by(backing_resource_id="r1").one().pool_id = None
-        db.commit()
-    match = ledger.probe(claim={"offering_mode": "vm", **{"pool_id": "r1", "gpu_count": 1}})
-    assert match is not None
+        assert db.query(CapacityReservation).count() == 0
+
+
+def test_a_row_with_no_stored_pool_is_in_no_pool_for_reconciliation_and_reservations():
+    """Re-declaring the row in `default` is a change, not a restatement, and a
+    reservation backed by it resolves to no pool."""
+    ledger = _make_ledger()
+    ledger.register_resource(resource_id="r1", total_units=4, pool_id="default")
+    reserved = ledger.reserve(claim={"offering_mode": "vm", "gpu_count": 1}, deal_ref={})
+    assert reserved is not None
+    declaration = CapacityDeclaration(
+        resource_id="r1",
+        pool_id="default",
+        resource_type="compute.gpu",
+        capacity={"gpu_count": 4},
+    )
+    with ledger._session_factory() as db:
+        assert ledger.declaration_change_in_session(db, declaration) == "unchanged"
+    _strip_stored_pool(ledger, "r1")
+
+    with ledger._session_factory() as db:
+        assert ledger.declaration_change_in_session(db, declaration) == "updated"
+        assert ledger.backing_pool_id_in_session(
+            db, reserved["capacity_reservation_id"]
+        ) is None
+
+
+def test_a_row_with_no_stored_pool_is_in_neither_projection(caplog):
+    ledger = _make_ledger()
+    _declare_pool(ledger, "pool-a", "vm")
+    ledger.register_resource(resource_id="r1", total_units=4, pool_id="default")
+    ledger.register_resource(resource_id="r2", total_units=4, pool_id="pool-a")
+    _strip_stored_pool(ledger, "r1")
+    projections = SiteProjectionService(ledger)
+
+    with caplog.at_level("WARNING", logger="market_site.projections"):
+        _, pools = projections.resource_pools()
+        _, buckets = projections.capacity_buckets()
+
+    assert [row["pool_id"] for row in pools] == ["pool-a"]
+    assert [
+        resource["physical_resource_id"] for resource in pools[0]["resources"]
+    ] == ["r2"]
+    assert [row["pool_id"] for row in buckets] == ["pool-a"]
+    assert "'r1' records no pool and is not projected" in caplog.text
+    # The administrative listing still shows the row, so it can be found and
+    # declared again, and reports it in no pool.
+    (stored,) = [row for row in ledger.list_resources() if row["resource_id"] == "r1"]
+    assert stored["pool_id"] is None
+
+
+def test_a_row_with_no_stored_pool_is_neither_scheduled_nor_assigned(caplog):
+    ledger = _make_ledger()
+    ledger.register_resource(resource_id="r1", total_units=4, pool_id="default")
+    ledger.register_resource(resource_id="r2", total_units=4, pool_id="default")
+    reserved = ledger.reserve(claim={"offering_mode": "vm", "gpu_count": 1}, deal_ref={})
+    assert reserved is not None
+    reservation_id = reserved["capacity_reservation_id"]
+    held = ledger.get_reservation_backing_resource_id(reservation_id)
+    other = "r2" if held == "r1" else "r1"
+    _strip_stored_pool(ledger, other)
+
+    with caplog.at_level("WARNING", logger="market_site.ledger"):
+        with ledger._session_factory() as db:
+            candidates = ledger.iter_scheduling_candidates_in_session(
+                db,
+                resource_kind="compute.gpu",
+                exclude_reservation_id=reservation_id,
+            )
+        assert [view.resource_id for view in candidates] == [held]
+        with pytest.raises(CapacityConflictError, match="records no pool"):
+            ledger.assign_settlement_resource(
+                capacity_reservation_id=reservation_id,
+                settlement_resource_id=other,
+            )
+    assert f"{other!r} records no pool and is not a scheduling candidate" in caplog.text
+    assert f"{other!r} records no pool and is not assigned for settlement" in caplog.text
+    assert ledger.get_reservation_backing_resource_id(reservation_id) == held
+    assert ledger.get_reservation(reservation_id)["settlement_resource_id"] is None
 
 
 # ----------------------------------------------------------------------
@@ -1797,19 +1897,23 @@ def test_restating_the_same_pool_is_not_a_move():
     assert updated["capacity"] == {"gpu_count": 6}
 
 
-def test_a_legacy_row_with_no_stored_pool_is_in_the_default_pool():
-    from market_site.db import CapacityBucket
-
+def test_naming_any_pool_for_a_row_with_no_stored_pool_is_a_move():
+    """A row recording no pool is in none, `default` included, so declaring it
+    into `default` is a move, refused while a reservation holds it."""
     ledger = _make_ledger()
     ledger.register_resource(resource_id="r1", pool_id="default", total_units=4)
-    with ledger._session_factory() as db:
-        db.query(CapacityBucket).filter_by(backing_resource_id="r1").one().pool_id = None
-        db.commit()
-    ledger.reserve(claim={"offering_mode": "vm", "gpu_count": 1}, deal_ref={})
+    reserved = ledger.reserve(claim={"offering_mode": "vm", "gpu_count": 1}, deal_ref={})
+    assert reserved is not None
+    _strip_stored_pool(ledger, "r1")
 
-    # Naming the default pool explicitly restates where the row already was.
-    restated = ledger.register_resource(resource_id="r1", pool_id="default", total_units=4)
-    assert restated["pool_id"] == "default"
+    with pytest.raises(CapacityConflictError, match="from no recorded pool to 'default'"):
+        ledger.register_resource(resource_id="r1", pool_id="default", total_units=4)
+    (stored,) = ledger.list_resources()
+    assert stored["pool_id"] is None
+
+    ledger.release(capacity_reservation_id=reserved["capacity_reservation_id"])
+    declared = ledger.register_resource(resource_id="r1", pool_id="default", total_units=4)
+    assert declared["pool_id"] == "default"
 
 
 # ----------------------------------------------------------------------

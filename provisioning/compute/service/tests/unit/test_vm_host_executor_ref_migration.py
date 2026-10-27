@@ -22,10 +22,6 @@ from compute_provisioning_service.db.migrations import (
     _migrate_capacity_reservations_vm_host_to_executor_ref,
 )
 
-_PLAYBOOK_PATH = "/configured/playbook.yaml"
-_INVENTORY_GROUP = "legacy_hosts"
-
-
 def _sqlite_memory_engine():
     return create_engine(
         "sqlite:///:memory:",
@@ -39,11 +35,7 @@ def _bootstrap_engine_with_legacy_vm_host_column():
     back via raw SQL and populated -- simulating an already-deployed
     database from before this migration existed."""
     engine = _sqlite_memory_engine()
-    run_migrations(
-        engine,
-        default_playbook_path=_PLAYBOOK_PATH,
-        default_inventory_group=_INVENTORY_GROUP,
-    )
+    run_migrations(engine)
     with engine.begin() as connection:
         connection.execute(text(
             "ALTER TABLE capacity_reservations ADD COLUMN vm_host VARCHAR"
@@ -151,11 +143,7 @@ class TestVmHostBackfill:
         """A database created fresh from the current ORM model never had
         vm_host at all -- the migration must not error."""
         engine = _sqlite_memory_engine()
-        run_migrations(
-            engine,
-            default_playbook_path=_PLAYBOOK_PATH,
-            default_inventory_group=_INVENTORY_GROUP,
-        )
+        run_migrations(engine)
         # No exception, and it's already covered by run_migrations's own
         # invocation of this migration during bootstrap above -- calling
         # it again here proves the explicit no-op path too.
@@ -178,11 +166,7 @@ class TestPublicRunMigrationsEntrypointAppliesTheBackfill:
         # added back -- the actual schema shape such a database would
         # have had.
         engine = _sqlite_memory_engine()
-        run_migrations(
-            engine,
-            default_playbook_path=_PLAYBOOK_PATH,
-            default_inventory_group=_INVENTORY_GROUP,
-        )
+        run_migrations(engine)
         with engine.begin() as connection:
             connection.execute(text(
                 "DELETE FROM schema_migrations "
@@ -198,11 +182,7 @@ class TestPublicRunMigrationsEntrypointAppliesTheBackfill:
             ))
 
         # The public entrypoint, not the private migration function.
-        run_migrations(
-            engine,
-            default_playbook_path=_PLAYBOOK_PATH,
-            default_inventory_group=_INVENTORY_GROUP,
-        )
+        run_migrations(engine)
 
         row = _row(engine, "r-public")
         assert "vm_host" not in row

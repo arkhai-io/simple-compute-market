@@ -65,7 +65,7 @@ Each service MUST own its database and migration history; cross-service identifi
 - **THEN** correlation identifiers cross the API while provisioning retains ownership of its allocation records
 
 ### Requirement: Service-owned migration history
-Each stateful service MUST run and record its own ordered migration chain against its owned database; a deployed provisioning service MUST apply pending migrations before application startup and MUST reject schema drift from its normal startup path instead of applying migrations in-process.
+Each stateful service MUST run and record its own ordered migration chain against its owned database; a deployed provisioning service MUST apply pending migrations before application startup and MUST reject schema drift from its normal startup path instead of applying migrations in-process. The provisioning migration entrypoint MUST receive only its database and MUST NOT read operational configuration; configuration-driven seeding belongs to runtime initialization.
 
 #### Scenario: Database initialization is repeated
 - **WHEN** a service initializes a database whose migrations are already applied
@@ -82,6 +82,10 @@ Each stateful service MUST run and record its own ordered migration chain agains
 #### Scenario: A service has no separate deployment step for migrations
 - **WHEN** a stateful service has no Kubernetes init container or standalone migration CLI to apply migrations ahead of the application process (for example, the API-credit service, which has no Helm chart)
 - **THEN** it MAY apply its own ordered migration chain in-process at application startup, before serving requests, rather than rejecting drift from its normal startup path — this is a valid instantiation of service-owned migration history for a service without the provisioning service's deployment topology, not an exception to it
+
+#### Scenario: Provisioning migration runs under different configuration
+- **WHEN** the provisioning migration runs against the same database under two configurations that differ in playbooks, host defaults, or pool and seed documents
+- **THEN** both runs produce the same schema and the same rows
 
 ### Requirement: Shared Dynaconf bootstrap preserves consumer policy
 
@@ -933,10 +937,23 @@ remains available to an operator.
 - **THEN** its pod environment carries only the configuration directory and the signing
   credential, and every other value is in a mounted configuration file
 
+### Requirement: The provisioning chart mounts operator files it gives no meaning
+The provisioning chart MUST render each entry of `configFiles` verbatim into its ConfigMap and mount it read-only in the application container at `/app/config/<name>`, beside the rendered profile. The chart MUST NOT derive a setting from an operator file: a setting under `config` names it by that path. The values schema MUST refuse a name that is not a single file name, a name the chart mounts itself, and `config.yml` or `config-*.yml` and their `.yaml` forms, which the service would load as configuration profiles. A file's content and name MUST reach the container exactly as given.
+
+#### Scenario: An operator supplies a fresh site's seed
+- **WHEN** a release sets `configFiles` with a `pool-seed.yaml` entry and `config.pool_seed_path` to `/app/config/pool-seed.yaml`
+- **THEN** the file renders and mounts at that path, and the rendered profile carries the setting as stated
+
+#### Scenario: An operator file takes a reserved name
+- **WHEN** a release names an operator file `pool-definitions.yaml`, `config.yml`, `config-production.yml`, `..`, or a path rather than a file name
+- **THEN** rendering fails naming the refused name
+
 ## Evidence
 
 - Configurable registry endpoints and independently composed role stacks: core buyer registry configuration plus domain Compose and Helm manifests.
 - Service-owned persistence, provisioning migration init, and schema-drift rejection: registry Alembic tests, `provisioning/compute/service/tests/integration/test_database.py`, and `helm/charts/provisioning/templates/deployment.yaml`.
+- The provisioning migration reading no operational configuration, the same database migrated under two configurations to equal schema and rows: `provisioning/compute/service/tests/integration/test_migration_reads_no_configuration.py`; job-envelope host evidence: `provisioning/compute/service/tests/integration/test_job_envelope_migration.py`.
+- The provisioning chart's `configFiles` rendered, mounted, and named in the profile, exact content and names, and refused names: `helm/charts/provisioning/tests/test_render.py`.
 - Wheel-directory dependency resolution without parent-path UV sources: package `pyproject.toml` files and package Makefiles using `--find-links`.
 - Package architecture in the packaging check: `make check-architecture`, `scripts/check_architecture_*.py`, and `scripts/tests/test_check_architecture.py`.
 - Derived internal-package refresh for environments, images, and locks: `scripts/uv_project.py`, `scripts/tests/test_uv_project.py`, every `reinit` target, and every Dockerfile that copies `.dist`.

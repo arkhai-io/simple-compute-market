@@ -1,0 +1,78 @@
+{{- if .Values.scenarios.markers }}
+{{/*
+Helm test pod: the end-to-end scenarios scenarios.markers selects (a pytest
+marker expression), run inside the release's namespace, where they reach every
+service by its in-cluster name through the shared test-config's "helm" profile,
+so no local port is involved. A Helm validation selects its scenarios here and
+runs this pod alone (`helm test --filter name=<this pod>`).
+
+Its configuration, credentials, and volumes are the deal test's
+(e2e-deal-test.yaml), which a render test holds equal. Rendered only when
+scenarios.markers is set.
+*/}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "e2e-tests.fullname" . }}-e2e-scenarios
+  labels:
+    {{- include "e2e-tests.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  restartPolicy: Never
+  containers:
+    - name: e2e-scenarios
+      image: {{ include "e2e-tests.image" . }}
+      imagePullPolicy: {{ .Values.integrationTests.pullPolicy }}
+      command:
+        - .venv/bin/pytest
+        - -m
+        - {{ .Values.scenarios.markers | quote }}
+        - -v
+        - --tb=short
+      env:
+        - name: ACTIVE_PROFILES
+          value: "helm,e2e-secret"
+        - name: CONFIG_DIRECTORY
+          value: /app/config
+        - name: XDG_DATA_HOME
+          value: /var/lib/arkhai-buyer
+        - name: XDG_STATE_HOME
+          value: /var/lib/arkhai-buyer-state
+      volumeMounts:
+        - name: test-config
+          mountPath: /app/config/config-helm.yml
+          subPath: config-helm.yml
+          readOnly: true
+        - name: e2e-secret
+          mountPath: /app/config/config-e2e-secret.yml
+          subPath: config-e2e-secret.yml
+          readOnly: true
+        - name: buyer-profile-store
+          mountPath: {{ required "buyer profile-store mountPath is required" .Values.buyer.profileStore.mountPath | quote }}
+        - name: buyer-run-state
+          mountPath: /var/lib/arkhai-buyer-state
+        - name: buyer-credential
+          mountPath: {{ required "buyer credential mountPath is required" .Values.buyer.credentialSecret.mountPath | quote }}
+          subPath: credential
+          readOnly: true
+  volumes:
+    - name: test-config
+      configMap:
+        name: {{ .Release.Name }}-test-config
+    - name: e2e-secret
+      secret:
+        secretName: {{ include "e2e-tests.secretName" . }}
+    - name: buyer-profile-store
+      persistentVolumeClaim:
+        claimName: {{ required "buyer profile-store existingClaim is required" .Values.buyer.profileStore.existingClaim | quote }}
+    - name: buyer-run-state
+      emptyDir: {}
+    - name: buyer-credential
+      secret:
+        secretName: {{ required "buyer credential Secret name is required" .Values.buyer.credentialSecret.name | quote }}
+        items:
+          - key: {{ required "buyer credential Secret key is required" .Values.buyer.credentialSecret.key | quote }}
+            path: credential
+{{- end }}

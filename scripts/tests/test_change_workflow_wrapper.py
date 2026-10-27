@@ -4,6 +4,7 @@ answer: the wrapper's command and the outcome it logs."""
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from pathlib import Path
 
@@ -12,6 +13,7 @@ import pytest
 from change_workflow.common import StepError
 from change_workflow.log import log_path, note_orchestrator, read_log, record_outcome
 from change_workflow.outcome import harness_schema, load_schema, outcome_problems
+from change_workflow.running import Run, live_runs, recorded_run, runs_directory
 from change_workflow.steps import Model, load_steps
 from change_workflow.wrapper import Wrapper
 from change_workflow_fixtures import (CHANGE, COMMIT, LIMIT, NETWORK, OPUS, SESSION, VALID,
@@ -96,6 +98,37 @@ def test_a_malformed_outcome_is_logged_stopped(tmp_path: Path) -> None:
     assert line["reason"] == ("the run's outcome does not conform to the schema: "
                               "outcome has no next")
     assert line["message"] == "Done.\n\n" + line["reason"]
+
+
+def test_a_turn_after_the_report_keeps_the_report_as_earlier(tmp_path: Path) -> None:
+    # A wake-up the step scheduled fires after it reported, and its turn ends the run.
+    report = {"outcome": "finished", "message": "The section is committed; make test passed.",
+              "next": "The next section."}
+    woke = {"outcome": "finished", "message": "Nothing left to wait for.",
+            "next": "The next section."}
+    claude = FakeClaude((event_lines(report) + event_lines(woke), 0))
+
+    line = make_wrapper(tmp_path, claude).run("implement", CHANGE)
+
+    assert (line["outcome"], line["message"]) == ("finished", "Nothing left to wait for.")
+    assert line["earlier"] == [report]
+    assert read_log(log_path(tmp_path, CHANGE)) == [line]
+
+
+def test_a_run_of_one_turn_has_no_earlier(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines(VALID["finished"]), 0))
+
+    assert "earlier" not in make_wrapper(tmp_path, claude).run("implement", CHANGE)
+
+
+def test_a_run_that_crashes_after_reporting_keeps_the_report(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines(VALID["finished"]) + event_lines(result=False), 137))
+
+    line = make_wrapper(tmp_path, claude).run("implement", CHANGE)
+
+    assert line["outcome"] == "stopped"
+    assert line["earlier"] == [{key: VALID["finished"][key] for key in ("outcome", "message",
+                                                                         "next")}]
 
 
 def test_a_stop_without_denials_is_logged_as_the_step_gave_it(tmp_path: Path) -> None:
@@ -193,6 +226,23 @@ def test_a_question_is_answered_by_resuming_its_session_with_a_granted_rule(
     assert "granted" not in rerun
 
 
+def test_a_fresh_run_granted_rules_holds_them_for_that_run_alone(tmp_path: Path) -> None:
+    # The owner grants two rules before the step's next run has started.
+    granted = ["Bash(gh run download *)", "Bash(make check-packaging)"]
+    claude = FakeClaude((event_lines(VALID["finished"], session="v-1"), 0),
+                        (event_lines(VALID["finished"], session="v-2"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+
+    line = wrapper.run("validate", CHANGE, granted=granted)
+    rerun = wrapper.run("validate", CHANGE)
+
+    table = list(load_steps()["validate"].allow)
+    assert option_rules(claude.commands[0], "--allowedTools") == [*table, *granted]
+    assert line["granted"] == granted
+    assert option_rules(claude.commands[1], "--allowedTools") == table
+    assert "granted" not in rerun
+
+
 def test_a_resumed_implementation_keeps_its_sections(tmp_path: Path) -> None:
     claude = FakeClaude((event_lines(VALID["question"]), 0), (event_lines(VALID["finished"]), 0))
     wrapper = make_wrapper(tmp_path, claude)
@@ -202,6 +252,72 @@ def test_a_resumed_implementation_keeps_its_sections(tmp_path: Path) -> None:
 
     assert line["sections"] == [2]
     assert "granted" not in line
+
+
+def test_implementation_continues_a_finished_session_it_names(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines(VALID["finished"], session="i-1"), 0),
+                        (event_lines(VALID["finished"], session="i-2"), 0),
+                        (event_lines(VALID["finished"], session="i-1"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    first = wrapper.run("implement", CHANGE, arguments="section 8A", sections=["8A"])
+    wrapper.run("implement", CHANGE, arguments="section 8B", sections=["8B"])
+
+    # The later session is not the one continued: the session is named, not inferred.
+    line = wrapper.run("implement", CHANGE, arguments="section 8C", sections=["8C"],
+                       continuing="i-1")
+
+    command = claude.commands[2]
+    assert command[2] == f"/change-implement {CHANGE} section 8C"
+    assert option(command, "--resume") == "i-1"
+    assert (option(command, "--model"), option(command, "--effort")) == (
+        first["model"], first["effort"])
+    assert (line["session"], line["continues"], line["sections"]) == ("i-1", first["seq"],
+                                                                      ["8C"])
+
+
+@pytest.mark.parametrize("continuing", ["i-1", "i-2"])
+def test_no_session_is_continued_while_an_implementation_run_waits(
+        tmp_path: Path, continuing: str) -> None:
+    # Continuing another session would leave the question unresumable, since a
+    # resume reaches only implementation's latest run.
+    claude = FakeClaude((event_lines(VALID["finished"], session="i-2"), 0),
+                        (event_lines(VALID["question"], session="i-1"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    wrapper.run("implement", CHANGE)
+    asked = wrapper.run("implement", CHANGE)
+
+    with pytest.raises(StepError, match=f"seq {asked['seq']}.*resume it with the answer"):
+        wrapper.run("implement", CHANGE, continuing=continuing)
+    assert len(claude.commands) == 2
+
+
+def test_a_stop_a_decision_resolved_does_not_hold_a_session_back(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines(VALID["stopped"], session="i-1"), 0),
+                        (event_lines(VALID["finished"], session="i-1"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    stopped = wrapper.run("implement", CHANGE)
+    note_orchestrator(log_path(tmp_path, CHANGE), "left for a fix later", "owner's word",
+                      resolves=stopped["seq"])
+
+    line = wrapper.run("implement", CHANGE, arguments="fix the parser", continuing="i-1")
+
+    assert (line["session"], line["continues"]) == ("i-1", stopped["seq"])
+
+
+@pytest.mark.parametrize("step,session,fresh,match", [
+    ("implement", "nobody", False, "no implementation run of session nobody"),
+    ("validate", "i-1", False, "only implementation continues"),
+    ("implement", "i-1", True, "cannot also start fresh"),
+])
+def test_continuing_is_refused_for_a_session_it_cannot_continue(
+        tmp_path: Path, step: str, session: str, fresh: bool, match: str) -> None:
+    claude = FakeClaude((event_lines(VALID["finished"], session="i-1"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    wrapper.run("implement", CHANGE)
+
+    with pytest.raises(StepError, match=match):
+        wrapper.run(step, CHANGE, continuing=session, fresh=fresh)
+    assert len(claude.commands) == 1
 
 
 def test_a_resume_names_the_waiting_run_not_the_last(tmp_path: Path) -> None:
@@ -535,3 +651,70 @@ def test_a_run_that_went_on_past_a_denial_is_logged_as_it_ended_with_the_denial(
 
     assert (line["outcome"], line["message"], line["denials"]) == (
         kind, VALID[kind]["message"], recorded)
+
+
+# A run in progress is recorded in its checkout, so a round view never moves it.
+
+def test_a_run_is_recorded_while_it_runs_and_forgotten_once_its_line_is_written(
+        tmp_path: Path) -> None:
+    runs = tmp_path / "git" / "change-runs"
+    seen: list[list[Run]] = []
+
+    class Watching(FakeClaude):
+        def __call__(self, command, cwd, feed) -> int:
+            seen.append(live_runs(runs))
+            return super().__call__(command, cwd, feed)
+
+    wrapper = make_wrapper(tmp_path, Watching((event_lines(VALID["finished"]), 0)))
+    wrapper.runs = lambda _: runs
+    # The log reads the clock last, for the time on the line it then writes.
+    at_clock: list[list[Run]] = []
+    wrapper.clock = lambda: (at_clock.append(live_runs(runs)), clock())[1]
+
+    wrapper.run("implement", CHANGE)
+
+    (recorded,) = seen[0]
+    assert (recorded.pid, recorded.step, recorded.change, recorded.started) == (
+        os.getpid(), "implement", CHANGE, "2026-10-21T09:15:40Z")
+    assert at_clock[-1] == seen[0]
+    assert len(read_log(log_path(tmp_path, CHANGE))) == 1
+    assert list(runs.iterdir()) == []
+
+
+def test_an_interrupted_run_forgets_its_record_after_its_line(tmp_path: Path) -> None:
+    runs = tmp_path / "git" / "change-runs"
+
+    def interrupted(command, cwd, feed) -> int:
+        assert live_runs(runs)
+        raise KeyboardInterrupt
+
+    wrapper = make_wrapper(tmp_path, FakeClaude())
+    wrapper.runner = interrupted
+    wrapper.runs = lambda _: runs
+    at_clock: list[list[Run]] = []
+    wrapper.clock = lambda: (at_clock.append(live_runs(runs)), clock())[1]
+
+    with pytest.raises(KeyboardInterrupt):
+        wrapper.run("validate", CHANGE)
+
+    assert read_log(log_path(tmp_path, CHANGE))[-1]["outcome"] == "stopped"
+    assert len(at_clock[-1]) == 1
+    assert list(runs.iterdir()) == []
+
+
+def test_a_record_whose_process_is_gone_counts_as_no_run(tmp_path: Path) -> None:
+    runs = tmp_path / "change-runs"
+    with recorded_run(runs, "triage", CHANGE, clock=clock, pid=4242):
+        (live,) = live_runs(runs, alive=lambda pid: pid == 4242)
+        assert live.describe() == (
+            f"triage of {CHANGE} (process 4242, started 2026-10-21T09:15:40Z)")
+        assert live_runs(runs, alive=lambda pid: False) == []
+    assert live_runs(runs, alive=lambda pid: True) == []
+
+
+def test_a_checkout_without_git_has_no_runs_directory(tmp_path: Path) -> None:
+    # The pytest temporary directory is not inside a Git checkout.
+    assert runs_directory(tmp_path) is None
+    with recorded_run(None, "design", CHANGE):
+        assert live_runs(None) == []
+    assert list(tmp_path.iterdir()) == []

@@ -2,7 +2,18 @@
 
 CHART_DIR    := .
 RELEASE      := arkhai-node-operator
+# Every target that takes NAMESPACE= also takes CHANGE=, which derives the
+# change's validation namespace (../scripts/change_namespace.py). Release names do
+# not change with the namespace, so the in-cluster Service names the values
+# files state resolve in every one.
+ifneq ($(CHANGE),)
+ifeq ($(origin NAMESPACE),command line)
+$(error give CHANGE= or NAMESPACE=, not both)
+endif
+NAMESPACE    := $(or $(shell python3 ../scripts/change_namespace.py $(CHANGE)),$(error CHANGE=$(CHANGE) names no validation namespace))
+else
 NAMESPACE    := default
+endif
 VALUES       := values.yaml
 LOCAL_VALUES := local-values.yaml
 # Secrets the release's workloads read with the default values, which the chart
@@ -26,7 +37,8 @@ TEST_VOLUMES := arkhai-buyer-profiles
 TEST_VOLUME_SIZE := 100Mi
 
 .PHONY: init template deploy deploy-local undeploy check-local-secrets test test-render \
-	topology-up topology-down topology-check topology-secrets
+	topology-up topology-down topology-check topology-secrets forward unforward resume \
+	teardown
 
 ## Update Helm dependencies declared in Chart.yaml
 init:
@@ -83,6 +95,29 @@ deploy-local:
 ## release is installed.
 undeploy:
 	helm uninstall $(RELEASE) --namespace $(NAMESPACE) --wait --ignore-not-found
+
+## Delete a change's validation namespace, with every release, volume, and Secret
+## in it, and remove each image the change's validation built under its tags
+## (../scripts/change_namespace.py --images); archive cleanup runs it once the
+## change has landed. It takes CHANGE=<change> only, so it never deletes
+## `default`, and deletes only in HELM_CONTEXT, the context validation deploys to,
+## whatever context is current. Succeeds when the namespace or an image is already
+## gone, and fails when any image could not be removed, after trying the rest.
+HELM_CONTEXT ?= docker-desktop
+teardown:
+ifeq ($(CHANGE),)
+	$(error teardown needs CHANGE=<change>: it deletes that change's validation namespace, never $(NAMESPACE))
+endif
+	kubectl delete namespace $(NAMESPACE) --context $(HELM_CONTEXT) --ignore-not-found --wait
+	@status=0; \
+	for image in $$(python3 ../scripts/change_namespace.py $(CHANGE) --images); do \
+		if docker image inspect "$$image" >/dev/null 2>&1; then \
+			docker image rm "$$image" || status=1; \
+		else \
+			echo "$$image is not here"; \
+		fi; \
+	done; \
+	exit $$status
 
 ## Fail, naming each one, unless every out-of-band Secret in LOCAL_SECRETS and
 ## every PersistentVolumeClaim in LOCAL_VOLUMES (none unless given) exists.
@@ -199,7 +234,8 @@ topology-up:
 ## Create, or replace the contents of, every out-of-band Secret the topology
 ## reads -- $(LOCAL_SECRETS), $(TOPOLOGY_SECRETS), and $(TEST_SECRETS) -- from
 ## the development values above, and the buyer-profile volume the deal test
-## mounts ($(TEST_VOLUMES), created if absent), idempotently
+## mounts ($(TEST_VOLUMES), created if absent), idempotently, in $(NAMESPACE),
+## which it creates if absent (CHANGE=<change> for a change's validation namespace)
 ## (scripts/topology-secrets.sh says what each holds). Needs cast (Foundry) and
 ## kubectl. Development only, never for a public network.
 topology-secrets:
@@ -287,29 +323,60 @@ endif
 # PID file used by forward/unforward targets
 FORWARD_PID_FILE := .port-forward.pids
 
-## Forward all service ports to localhost in the background.
-## PIDs are written to $(FORWARD_PID_FILE) so unforward can clean them up.
+## Forward the release's service ports in $(NAMESPACE) (CHANGE=<change> for a
+## change's validation namespace) to localhost in the background, for running
+## e2e targets by hand. PIDs are written to $(FORWARD_PID_FILE) so unforward can
+## clean them up. The ports are the same for every namespace, so one namespace is
+## forwarded at a time: a port another checkout already forwards fails to bind,
+## and forward names it and stops (scripts/port-forward.sh).
 ## Access services at:
 ##   Anvil RPC          http://localhost:8545
 ##   Registry           http://localhost:8080
 ##   Seller Storefront  http://localhost:8001
 ##   Provisioning       http://localhost:8081
 forward: unforward
-	@echo "Starting port-forwards..."
-	@kubectl port-forward --namespace $(NAMESPACE) \
-		svc/$(RELEASE)-dev-env 8545:8545 > /dev/null 2>&1 & echo $$! >> $(FORWARD_PID_FILE)
-	@kubectl port-forward --namespace $(NAMESPACE) \
-		svc/$(RELEASE)-registry 8080:8080 > /dev/null 2>&1 & echo $$! >> $(FORWARD_PID_FILE)
-	@kubectl port-forward --namespace $(NAMESPACE) \
-		svc/$(RELEASE)-storefront-bob 8001:8001 > /dev/null 2>&1 & echo $$! >> $(FORWARD_PID_FILE)
-	@kubectl port-forward --namespace $(NAMESPACE) \
-		svc/$(RELEASE)-provisioning 8081:8081 > /dev/null 2>&1 & echo $$! >> $(FORWARD_PID_FILE)
+	@echo "Starting port-forwards from namespace $(NAMESPACE)..."
+	@NAMESPACE="$(NAMESPACE)" PID_FILE="$(FORWARD_PID_FILE)" bash ./scripts/port-forward.sh start \
+		$(RELEASE)-dev-env:8545 $(RELEASE)-registry:8080 \
+		$(RELEASE)-storefront-bob:8001 $(RELEASE)-provisioning:8081
 	@echo "  anvil    → http://localhost:8545"
 	@echo "  registry → http://localhost:8080"
 	@echo "  sell     → http://localhost:8001"
 	@echo "  prov     → http://localhost:8081"
 	@echo "Run 'make unforward' to stop."
 
-## Kill all port-forwards started by 'make forward'
+## Stop the port-forwards 'make forward' started, waiting for them to exit.
 unforward:
-	@test -f $(FORWARD_PID_FILE) && cat $(FORWARD_PID_FILE) | xargs kill 2>/dev/null; rm -f $(FORWARD_PID_FILE); true
+	@PID_FILE="$(FORWARD_PID_FILE)" bash ./scripts/port-forward.sh stop
+
+## Scale every release's Deployments and StatefulSets in $(NAMESPACE) back to the
+## replica counts its installed manifest states (CHANGE=<change> for a change's
+## validation namespace, which validation leaves scaled to zero), or only those
+## of the releases RESUME_RELEASES names. The counts come from `helm get
+## manifest`, so nothing is rendered from the checkout and no release changes.
+RESUME_RELEASES ?=
+resume:
+	@set -e; \
+	releases="$(or $(RESUME_RELEASES),$$(helm list --namespace $(NAMESPACE) --short))"; \
+	workloads=""; \
+	for release in $$releases; do \
+		manifest="$$(helm get manifest "$$release" --namespace $(NAMESPACE))"; \
+		workloads="$$workloads $$(printf '%s\n' "$$manifest" | awk '$(RESUME_REPLICAS)')"; \
+	done; \
+	if [ -z "$$(echo $$workloads)" ]; then \
+		echo "ERROR: no release in namespace $(NAMESPACE) states Deployment or StatefulSet replicas" >&2; exit 1; \
+	fi; \
+	for workload in $$workloads; do \
+		kubectl scale --namespace $(NAMESPACE) "$${workload%=*}" --replicas="$${workload##*=}"; \
+	done
+
+# Each Deployment's and StatefulSet's `kind/name=replicas` in a rendered manifest,
+# which Helm writes with top-level keys at column 0 and their fields indented two.
+RESUME_REPLICAS := \
+	function emit() { if (kind != "" && name != "" && replicas != "") print tolower(kind) "/" name "=" replicas } \
+	/^---/ { emit(); kind = ""; name = ""; replicas = ""; section = "" } \
+	/^kind: (Deployment|StatefulSet)$$/ { kind = $$2 } \
+	/^[a-z]/ { section = $$1 } \
+	section == "metadata:" && /^  name: / && name == "" { name = $$2; gsub(/"/, "", name) } \
+	section == "spec:" && /^  replicas: / { replicas = $$2 } \
+	END { emit() }

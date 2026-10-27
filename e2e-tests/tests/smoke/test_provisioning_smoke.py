@@ -1,21 +1,21 @@
 """Smoke tests for the deployed provisioning service.
 
 The provisioning service gates every non-health route on a single
-marketplace signature and asserted role, verified per caller.
-Read-only checks are selected by the Helm smoke hook; write-path checks
-are kept under a separate marker because they mutate provisioning
-state.
+marketplace signature and asserted role, verified per caller. Every check
+here is stateless and writes nothing: the Helm smoke hook runs the read-only
+checks and the authentication check, and a service's write paths are its
+integration suite's to prove.
 """
 
 from __future__ import annotations
 
 import logging
 
+import httpx
 import pytest
 
 from market_identity import Identity, TrustedIdentitySet, create_signer
-from compute_provisioning_client import ComputeProvisioningError, SyncComputeProvisioningClient
-from compute_provisioning_contracts import ConnectionSubmission, HostCreate, HostUpdate
+from compute_provisioning_client import SyncComputeProvisioningClient
 
 log = logging.getLogger(__name__)
 
@@ -107,70 +107,17 @@ class TestProvisioningSmoke:
         assert isinstance(data.reachable, bool), f"Missing reachable field: {data}"
         log.info("Connectivity for %s: reachable=%s", first, data.reachable)
 
-    @pytest.mark.provisioning_write
-    def test_host_crud_round_trip(
-        self, provisioning_settings: dict, seller_settings: dict
-    ):
-        """Register -> GET -> disable -> re-enable -> cleanup a transient test host."""
-        test_host = HostCreate(
-            host_id="smoke-test-host",
-            connection=ConnectionSubmission(
-                kind="ssh",
-                public={"ssh_host": "192.0.2.1", "ssh_user": "ubuntu", "key_path": "/home/appuser/.ssh/id_ed25519"},
-            ),
-            gpu_count=0,
-            enabled=True,
-        )
+    @pytest.mark.provisioning_security
+    def test_an_unsigned_read_is_refused(self, provisioning_settings: dict):
+        """An unsigned read of a protected route is refused.
 
-        with _client(provisioning_settings, seller_settings) as client:
-            try:
-                reg = client.register_host(test_host)
-            except ComputeProvisioningError as exc:
-                if exc.status_code != 409:
-                    raise
-                log.info("smoke-test-host already exists - updating instead of inserting")
-                reg = client.update_host(
-                    "smoke-test-host", HostUpdate(connection=test_host.connection),
-                )
-                client.enable_host("smoke-test-host")
-
-            assert reg.host_id == "smoke-test-host"
-            assert "secrets" not in reg.connection.model_dump(), "secrets must never be returned"
-
-            got = client.get_host("smoke-test-host")
-            assert got.connection.public["ssh_host"] == "192.0.2.1"
-
-            disabled = client.disable_host("smoke-test-host")
-            assert disabled.enabled is False
-
-            names = [h.host_id for h in client.list_hosts().hosts]
-            assert "smoke-test-host" not in names
-
-            enabled = client.enable_host("smoke-test-host")
-            assert enabled.enabled is True
-
-            client.disable_host("smoke-test-host")
-
-        log.info("Host CRUD round-trip passed")
-
-    @pytest.mark.provisioning_write
-    def test_auth_enforcement_when_enabled(
-        self, provisioning_settings: dict, seller_settings: dict
-    ):
-        """An unsigned POST to a protected route is refused.
-
+        A read, so the check changes nothing even where enforcement is broken.
         The canonical client cannot express this case — it requires a signer at
         construction — so the request goes out raw. That is the point of the
         check: enforcement must not depend on the caller being well-behaved.
         """
-        import httpx
-
         base = str(provisioning_settings["api_url"]).rstrip("/")
-        resp = httpx.post(
-            f"{base}/api/v1/hosts/kvm1/vms",
-            json={"vm_target": "smoke-test-vm"},
-            timeout=15.0,
-        )
+        resp = httpx.get(f"{base}/api/v1/hosts/", timeout=15.0)
         assert resp.status_code in (401, 403), (
             f"Unsigned request to a protected provisioning route returned "
             f"{resp.status_code}; expected a refusal. Body: {resp.text[:200]}"

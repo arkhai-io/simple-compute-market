@@ -13,7 +13,8 @@
 # placeholder the bare-metal Compose lane mounts.
 #
 # Inputs:
-#   NAMESPACE                          the namespace both releases run in
+#   NAMESPACE                          the namespace both releases run in, created
+#                                      when absent
 #   DEV_MNEMONIC                       the mnemonic the keys are derived from
 #   DEV_ACCOUNT_PROVISIONING           release 1's provisioning signer (0)
 #   DEV_ACCOUNT_BUYER                  the e2e-tests chart's buyer (1)
@@ -87,6 +88,12 @@ credential() {
     apply "$1" "credential=$work/$1"
     echo "  $1: Anvil account $2 ($(address "$2"))"
 }
+
+# A change's validation namespace exists only once something creates it, and
+# every Secret below is created in it.
+if ! kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then
+    kubectl create namespace "$NAMESPACE"
+fi
 
 echo "Development Secrets in namespace $NAMESPACE (never for a public network):"
 

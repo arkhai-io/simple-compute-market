@@ -31,7 +31,6 @@ from vm_provisioning_adapter.db import AnsiblePoolConfig, Relay, RelayPortLease
 
 
 _PLAYBOOK_PATH = "/configured/playbook.yaml"
-_INVENTORY_GROUP = "kvm_hosts"
 
 
 def _engine():
@@ -40,11 +39,7 @@ def _engine():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    run_migrations(
-        engine,
-        default_playbook_path=_PLAYBOOK_PATH,
-        default_inventory_group=_INVENTORY_GROUP,
-    )
+    run_migrations(engine)
     return engine
 
 
@@ -64,7 +59,6 @@ def _pool_config(pool_id: str, **overrides) -> AnsiblePoolConfig:
     fields = {
         "pool_id": pool_id,
         "playbook_path": _PLAYBOOK_PATH,
-        "inventory_group": _INVENTORY_GROUP,
         "extra_vars": {},
     }
     fields.update(overrides)
@@ -249,19 +243,15 @@ class TestMigrations:
         with engine.begin() as connection:
             connection.execute(text(
                 "INSERT INTO ansible_pool_configs "
-                "(pool_id, playbook_path, requirement_delegate, inventory_group, extra_vars) "
-                "VALUES ('legacy', :p, 'vm_management_v1', :g, '{}')"
-            ), {"p": _PLAYBOOK_PATH, "g": _INVENTORY_GROUP})
+                "(pool_id, playbook_path, requirement_delegate, extra_vars) "
+                "VALUES ('legacy', :p, 'vm_management_v1', '{}')"
+            ), {"p": _PLAYBOOK_PATH})
         with Session(engine) as session:
             assert session.get(AnsiblePoolConfig, "legacy").relay_id is None
 
     def test_running_migrations_twice_is_idempotent(self):
         engine = _engine()
-        run_migrations(
-            engine,
-            default_playbook_path=_PLAYBOOK_PATH,
-            default_inventory_group=_INVENTORY_GROUP,
-        )
+        run_migrations(engine)
         with Session(engine) as session:
             session.add(_lease("10.0.0.9:7000", 6100))
             session.commit()

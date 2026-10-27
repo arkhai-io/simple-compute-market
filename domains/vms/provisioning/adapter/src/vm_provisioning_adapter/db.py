@@ -93,11 +93,12 @@ class AnsiblePoolConfig(Base):
     __tablename__ = "ansible_pool_configs"
 
     pool_id = Column(String, ForeignKey(ResourcePool.__table__.c.id), primary_key=True)
-    playbook_path = Column(String, nullable=False)
+    # Nullable: a pool that states no playbook runs the service's configured
+    # VM playbook, frozen into each job when the job is prepared.
+    playbook_path = Column(String, nullable=True)
     requirement_delegate = Column(
         String, nullable=False, default="vm_management_v1", server_default="vm_management_v1"
     )
-    inventory_group = Column(String, nullable=False)
     extra_vars = Column(JSON, nullable=False, default=dict)
     # Fulfillment-time fallback shape, read only by VM's fulfillment plan's
     # three-tier precedence (derived > requirements > pool default) when

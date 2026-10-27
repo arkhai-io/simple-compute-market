@@ -41,9 +41,6 @@ from vm_provisioning_adapter.runtime import (
     HOST_REQUIREMENT as VM_HOST_REQUIREMENT,
     build_vm_runtime,
 )
-from compute_provisioning_service.services.capacity_derivation import (
-    LegacyHostCapacityDerivation,
-)
 
 from compute_provisioning_service.config import settings
 from compute_provisioning_service.db.database import create_db_engine, create_session_factory
@@ -164,7 +161,7 @@ def _merge_host_requirements(*requirements: Mapping[str, bool]) -> Mapping[str, 
     return MappingProxyType(merged)
 
 
-def _make_host_authority(session_factory, cfg, capacity_derivation, pool_change_hooks):
+def _make_host_authority(session_factory, cfg, pool_change_hooks):
     """The one host authority: every connection kind's codec and every hook.
 
     The ``ssh`` codec is the Ansible implementation's, protecting a submitted
@@ -175,7 +172,6 @@ def _make_host_authority(session_factory, cfg, capacity_derivation, pool_change_
     return HostAuthority(
         session_factory,
         codecs=ConnectionCodecs([SshConnectionCodec(cfg.ssh_decryption_key)]),
-        capacity_derivation=capacity_derivation,
         pool_change_hooks=tuple(pool_change_hooks),
     )
 
@@ -342,14 +338,6 @@ class Container(containers.DeclarativeContainer):
         release_effect=release_effects,
     )
 
-    # Declared ahead of vm_runtime: host inventory derives capacity
-    # declarations from INI hosts through this port, inside its own upsert
-    # transaction.
-    capacity_derivation = providers.Singleton(
-        LegacyHostCapacityDerivation,
-        ledger=capacity_ledger_service,
-    )
-
     # Filled and frozen by adapter composition; the job engine resolves each
     # job's executor through it.
     job_executor_table = providers.Singleton(JobExecutorTable)
@@ -360,7 +348,6 @@ class Container(containers.DeclarativeContainer):
         _make_host_authority,
         session_factory=session_factory,
         cfg=config,
-        capacity_derivation=capacity_derivation,
         pool_change_hooks=host_pool_change_hooks,
     )
 

@@ -214,6 +214,24 @@ async def test_a_job_whose_host_is_not_registered_fails_before_any_executor_runs
 
 
 @pytest.mark.asyncio
+async def test_a_job_naming_no_host_fails_before_any_executor_runs() -> None:
+    executor = _Executor()
+    engine, factory = _engine(executor)
+    job = await _submit(engine, _Queue())
+    # A stored job can name no host: nothing in it identified a physical one.
+    with factory() as db, db.begin():
+        db.get(JobRecord, job.job_id).host_id = None
+
+    await engine.process_job(job.job_id)
+
+    assert executor.runs == 0
+    status = engine.get_job(job.job_id)
+    assert status.status == "failed"
+    assert "job names no host" in status.error
+    assert "None" not in status.error
+
+
+@pytest.mark.asyncio
 async def test_submissions_are_deduplicated_by_operation_and_by_contract() -> None:
     engine, _ = _engine(_Executor())
     queue = _Queue()

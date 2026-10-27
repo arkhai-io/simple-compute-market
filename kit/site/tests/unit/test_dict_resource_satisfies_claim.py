@@ -119,6 +119,15 @@ def test_no_claim_matches_everything():
     assert dict_resource_satisfies_claim(_row(), {}) is True
 
 
+@pytest.mark.parametrize(
+    "claim", [None, {}, {"pool_id": "default"}, {"pool_id": "r1"}, {"units": 1}]
+)
+def test_a_row_recording_no_pool_matches_no_claim(claim):
+    """Admission admits nothing against such a row, so ranking must not
+    read it as `default`, or as a pool named for the resource."""
+    assert dict_resource_satisfies_claim(_row(pool_id=None), claim) is False
+
+
 def test_unit_claim_keys_must_match_the_backing_ledger_service_configuration():
     """VM's CapacityLedgerService is composed with
     unit_claim_keys=("units", "gpu_count") in container.py -- the

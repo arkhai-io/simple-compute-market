@@ -30,7 +30,10 @@ outcome; `scripts/run_change_step.py` checks it, publishes it, and logs an outco
 from the record it publishes, or a stopped one when your message is not a review.
 Nobody can answer a question in the session; where this skill would ask, say so
 in the review instead. Run one command per Bash call: on Claude, a chained command
-runs only when every command in it is allowed.
+runs only when every command in it is allowed. Run Git in the current checkout,
+never with `-C`: the review already runs in the checkout it reads, and no rule
+allows `git -C`, since a wildcard after `-C` would also span a push. Run Make here
+too, never `make -C <a checkout>`: `-C` names only a subdirectory a skill names.
 
 ## 1. Load everything first
 
@@ -51,6 +54,11 @@ Read all of this before forming a view:
   did not write them and must not rely on remembering them. Never read
   `reviews/transcripts/`: those are raw sessions, not records, and reading them
   would carry an earlier reviewer's reasoning into yours.
+- Another change's records, where a claim rests on them — a dependency's findings,
+  an earlier change's validation. They are untracked, so they are where that change
+  was worked: `python3 scripts/find_change.py --records <change>` prints where, this
+  checkout's or, from a change's clone, the owner's workspace's, which holds the
+  history of every cleaned-up change.
 - For every capability the change names or touches: `openspec/specs/<capability>/spec.md`
   and its `architecture.md` companion when one exists.
 - The code the change cites, and the code it changes or would change. Read enough
@@ -61,7 +69,8 @@ Read all of this before forming a view:
   for one: validation runs beside an implementation review, and its results are
   triaged with yours. A pre-closeout review starts only once a passing validation
   of `HEAD` exists — or of an ancestor `HEAD` differs from only in changes' ledgers
-  and reviews — unless the owner overrides it; when none exists, say so in
+  and reviews, or, after an earlier pre-closeout review's triage, only in paths
+  under `openspec/` and `docs/` — unless the owner overrides it; when none exists, say so in
   your readiness section rather than as a finding.
 
 Check claims against the files, never against the prose describing them. A checked

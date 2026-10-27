@@ -34,7 +34,7 @@ from market_resource_pools_contracts import (
     PoolValidateResponse,
     PoolValidationProblem,
 )
-from .db import DEFAULT_POOL_ID, ResourcePool
+from .db import ResourcePool
 
 
 class PoolNotFoundError(Exception):
@@ -412,7 +412,6 @@ class ResourcePoolService:
 
         definitions: list[PoolDefinition] = []
         seen: set[str] = set()
-        declared_ids: set[str] = set()
         for index, entry in enumerate(entries):
             base = f"pools[{index}]"
             if not isinstance(entry, dict):
@@ -448,7 +447,6 @@ class ResourcePoolService:
                 entry_valid = False
                 pool_id = None
             else:
-                declared_ids.add(pool_id)
                 if pool_id in seen:
                     problems.append(
                         PoolValidationProblem(
@@ -613,14 +611,6 @@ class ResourcePoolService:
                     )
                 )
 
-        if DEFAULT_POOL_ID not in declared_ids:
-            problems.append(
-                PoolValidationProblem(
-                    path="pools",
-                    code="missing_default_pool",
-                    message=f"authoritative pool definitions must include '{DEFAULT_POOL_ID}'",
-                )
-            )
         return DocumentValidationResult(tuple(definitions), tuple(problems))
 
     @staticmethod

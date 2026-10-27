@@ -54,9 +54,10 @@ class Stream:
     wake the session for another turn, so the last result is the run's end but
     its `permission_denials` are only its own turn's; the denials are gathered
     from every result, keyed by the call, and each takes the reason the harness
-    gave in its `permission_denied` event. The harness emits that event only for a
-    decision of the permission mode, `mode` for a call no allow rule matched; a
-    call that met a deny rule has none, so its denial carries no reason.
+    gave in its `permission_denied` event: `mode` for a call no allow rule
+    matched, `rule` for one a deny rule refused, and `subcommandResults` for a
+    shell command the harness refused by one of its parts. A denial with no such
+    event carries no reason.
     """
 
     def __init__(self, transcript: Path, progress: Path, clock: Clock = utc_now,

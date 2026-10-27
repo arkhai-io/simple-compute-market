@@ -97,10 +97,11 @@ def _transcript_denials(transcript: Path, meta: dict[str, Any]) -> list[dict[str
             denial: dict[str, Any] = {"tool_name": call["tool_name"] if call else "?",
                                       "tool_use_id": key,
                                       "tool_input": call["tool_input"] if call else {}}
-            # The harness names a reason only for a decision of the permission
-            # mode; a call that met a deny rule carries none, as on the parent's.
-            if decision.get("reasonType") == "mode":
-                denial["reason"] = "mode"
+            # The harness's reason, as on the parent's denials: `mode` for a call
+            # no allow rule matched, `rule` for one a deny rule refused, and
+            # `subcommandResults` for a shell command refused by one of its parts.
+            if isinstance(decision.get("reasonType"), str):
+                denial["reason"] = decision["reasonType"]
             denial["subagent"] = subagent
             denials.append(denial)
     return denials

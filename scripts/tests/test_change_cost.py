@@ -134,3 +134,15 @@ def test_the_command_prints_the_report_and_refuses_an_unknown_change(
     assert capsys.readouterr().out.startswith("By step:\n")
     assert cost.main(["missing"], root=tmp_path) == 1
     assert "ERROR" in capsys.readouterr().err
+
+
+def test_a_cleaned_up_change_is_reported_from_its_archived_records(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    archived = tmp_path / "openspec/changes/archive" / f"2026-10-24-{CHANGE}"
+    (archived / "reviews").mkdir(parents=True)
+    _run(archived / "reviews/workflow.jsonl", "design", 6.0)
+    # The workspace's branch carries the change's active directory, without records.
+    (tmp_path / "openspec/changes" / CHANGE).mkdir()
+
+    assert cost.main([CHANGE], root=tmp_path) == 0
+    assert "all runs                           runs 1 " in capsys.readouterr().out

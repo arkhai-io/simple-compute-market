@@ -29,6 +29,7 @@ from compute_provisioning_client import (
     SyncComputeProvisioningClient,
 )
 from compute_provisioning_contracts import (
+    HostUpdate,
     resolve_provisioning_route,
 )
 
@@ -490,3 +491,44 @@ async def test_the_client_signs_a_route_its_caller_names() -> None:
             )
 
     assert signed == [("admin", "/api/v1/example/leases/lease-1")]
+
+
+@pytest.mark.parametrize("variant", ("async", "sync"))
+@pytest.mark.parametrize(
+    ("update", "body"),
+    (
+        (HostUpdate(pool_id=None), {"pool_id": None}),
+        (HostUpdate(pool_id="gpu"), {"pool_id": "gpu"}),
+        (HostUpdate(enabled=False), {"enabled": False}),
+        (HostUpdate(), {}),
+    ),
+)
+@pytest.mark.asyncio
+async def test_a_host_update_sends_exactly_the_fields_its_caller_set(variant, update, body):
+    """An explicit ``pool_id=None`` unplaces a host, so it is sent as ``null``;
+    an omitted pool is not sent at all, so the host keeps its pool."""
+    sent: list = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.content))
+        return httpx.Response(500)
+
+    caller = Ed25519Signer(b"\x61" * 32)
+    client_type = (
+        ComputeProvisioningClient if variant == "async" else SyncComputeProvisioningClient
+    )
+    client = client_type(
+        "http://provisioner",
+        signer=caller,
+        caller_role="admin",
+        expected_authorities=TrustedIdentitySet(identities=(caller.identity,)),
+        transport=httpx.MockTransport(handler),
+    )
+    # The fake authority answers unsigned, so the call fails after sending.
+    with pytest.raises(ComputeProvisioningAuthenticationError):
+        result = client.update_host("kvm1", update)
+        if variant == "async":
+            await result
+    await _close(client)
+
+    assert sent == [body]

@@ -12,6 +12,8 @@ Each module holds one concern, on the standard library alone:
 - `harness` — the Claude Code and Codex commands, and how each harness says it
   cannot serve a model;
 - `cost` — what each run cost;
+- `running` — the record of each run in progress in a checkout, which a round view
+  reads before it moves the checkout;
 - `wrapper` — running a step unattended, and resuming a waiting run;
 - `review` — a review run read-only and published as a numbered record;
 - `watch` — following the steps as they run, and a run's denials report;
