@@ -149,7 +149,7 @@ Shared with the branch:
 - **The client's `client.py`** is not touched. The branch rewrites it, so the
   new client lives in a module of its own.
 
-- [ ] 2.1 Add `MockRouteMount`, a frozen value of `prefix` and
+- [x] 2.1 Add `MockRouteMount`, a frozen value of `prefix` and
   `operation_prefix`. Its `route_declarations()` yields the five declarations:
   rule add, rules list, rule delete, rule resume, and job evaluate. Add the
   rule route service's response models beside it (D14).
@@ -161,11 +161,54 @@ Shared with the branch:
     today's `arkhai_bare_metal/provisioning_client.py` entries.
 
   Equal declarations mean the wire does not change.
-- [ ] 2.2 `MockRuleRouteService` answers with the contracts' models (D14; delta
+
+  Done in `compute_provisioning_contracts/mock_rules.py`. Beside the five
+  declarations the mount gives `operation(action)`, `declaration(action)`, and
+  the paths a client sends (`rules_path`, `rule_path`, `rule_resume_path`,
+  `evaluate_path`), so the client builds no path of its own. It refuses a
+  prefix that is not literal path segments, since the prefix enters the
+  patterns unescaped. The models: `MockRuleCreate` (the rule request, which
+  the client sends and section 3's adapters will read), `MockRuleAdded`,
+  `MockRuleView`, `MockRuleDeleted`, `MockRuleResumed`, and `MockJobEvaluation`
+  (the dry run's report, identical in both adapters today). The evaluate
+  request stays each domain's: its fields are the domain's job parameters.
+  Unit (`test_mock_rules.py`, contracts): each mount's declarations equal the
+  hand-written entries copied from VM's and bare metal's route modules as they
+  stand; both mounts compose into one table; every path the mount builds
+  resolves to its route and resource; non-literal prefixes are refused; the
+  models validate hand-written examples of the shapes the routes answer.
+  Passes. That `MockJobEvaluation` matches both adapters' evaluate responses
+  field for field was read, not tested: no route answers with it until
+  section 3, whose application integration checks it.
+- [x] 2.2 `MockRuleRouteService` answers with the contracts' models (D14; delta
   `market-composition`, "Compute mock executors share one compute-family
   mechanism"). Unit (`provisioning/compute/tests/unit`, the executor-mock
   suites): every route-service answer validates as its model.
-- [ ] 2.3 Add `MockRuleClient` and `SyncMockRuleClient`. Each is constructed over
+
+  `add` takes a `MockRuleCreate` or a mapping, so the adapters, which still
+  pass `body.model_dump()` until section 3, keep working. Unit
+  (`test_executor_mock.py`): add, list, delete, and resume each return their
+  model, compared by equality with the expected model, and a rule given as a
+  mapping is read; passes.
+
+  Plan correction: the plan left the adapters' controllers to section 3, but
+  their rule routes declared `-> dict` and `-> list[dict]`, which FastAPI takes
+  as the response model and refuses a returned model with
+  (`ResponseValidationError`): the service's integration suite failed 10 tests
+  on the first full run. The rule routes of both adapters'
+  `controllers/test_controller.py` therefore declare the family's models in
+  this section (`MockRuleAdded`, `list[MockRuleView]`, `MockRuleDeleted`,
+  `MockRuleResumed`), and both adapters raise their floor on the contracts to
+  `0.10.0` and take their one bump of the change here: the VM adapter `0.13.1`
+  → `0.14.0`, the bare-metal adapter `0.9.2` → `0.10.0`. Neither raises its
+  floor on `arkhai-compute-provisioning`, on the reasoning, not tested, that a
+  model annotation also validates the dicts an older route service returns.
+  The branch also bumps both adapters' version lines, an overlap D2 admits (a
+  version line); the contracts floor lines are not the branch's (section 3's
+  shared-file notes). The request models, the evaluate route, and VM's
+  `system_model.py` stay for section 3, whose tasks are amended to take the
+  rest; sections 3.4 and 4.3 bump neither adapter again.
+- [x] 2.3 Add `MockRuleClient` and `SyncMockRuleClient`. Each is constructed over
   the family client's authenticated transport with a `MockRouteMount`. Each
   method signs from the mount's declarations and returns the family's models
   (D14).
@@ -174,11 +217,29 @@ Shared with the branch:
   - Answers parse into the models.
   - The sync and async clients have the same public methods and signatures
     (TESTING.md, "Sync/async client parity").
-- [ ] 2.4 Bump `arkhai-compute-provisioning-contracts`,
+
+  Done in `compute_provisioning_client/mock_rules.py`, in its own module so the
+  branch's rewrite of `client.py` does not meet it. `evaluate_job` takes the
+  job as a mapping, since its fields are the mounting domain's. Unit
+  (`test_mock_rules.py`, client): the real async and sync family clients send
+  through an `httpx.MockTransport` that resolves each request against a table
+  assembled from the mount's declarations and verifies its signature over that
+  route's operation and resource, for the VM and bare-metal mounts; the
+  recorded method, path, operation, and resource match each call, and every
+  answer parses into its model. The parity test compares the two classes'
+  public methods and signatures. Passes. TESTING.md puts the parity guardrail
+  in the owning service's unit suite, so section 3 adds the pair to
+  `test_provisioning_client_contract.py` (amended into 3.3).
+- [x] 2.4 Bump `arkhai-compute-provisioning-contracts`,
   `arkhai-compute-provisioning-client`, and `arkhai-compute-provisioning` by a
   minor version each, since the route service's answers change type. Run
   `make lock`.
-- [ ] 2.5 **Verification checkpoint.**
+
+  Contracts `0.9.1` → `0.10.0`; client `0.7.0` → `0.8.0`; family kit `0.19.1`
+  → `0.20.0`. The client's and the family kit's floors on the contracts rise to
+  `0.10.0`, since both import the new models. `make lock` updated every lock
+  that resolves them.
+- [x] 2.5 **Verification checkpoint.**
   - Unit: 2.1–2.3.
   - Run `make test` in `provisioning/compute/contracts`,
     `provisioning/compute/client`, and `provisioning/compute`.
@@ -187,6 +248,23 @@ Shared with the branch:
   Application integration is section 3's, where the template is mounted.
 
   End-to-end: none, since nothing mounts the template yet. No scenario is owed.
+
+  `make test`: contracts 71 passed, client 63 passed, family kit 237 passed
+  (unit and library integration); with the controllers typed (2.2's
+  correction), `provisioning/compute/service` 536 passed (unit and application
+  integration, its rule routes answering through both adapters), the VM
+  adapter 37 and the bare-metal adapter 46. The full `make test` passes. `make
+  check-packaging` passes. `make check-change` passes but for the closeout
+  citation section 1 notes. The end-to-end statement stands: the routes'
+  paths, operations, and answer shapes are unchanged and nothing mounts the
+  template yet.
+
+  Handoff: FastAPI takes a route's return annotation as its response model,
+  so changing what a route service returns means changing its bindings'
+  annotations in the same commit. The fresh-context check found comments
+  describing the mount as already in use, a test docstring narrating history,
+  and evidence wording that outran the tests; all were corrected, and the
+  work this section leaves to section 3 is amended into 3.3 and 3.4.
 
 ## 3. Each compute domain mounts the family's mock mechanism
 
@@ -273,10 +351,25 @@ operations do not change, so it keeps working.
     through the family client under both mounts. Each answer is the family's
     typed model.
   - A VM rule matches only VM jobs.
+
+  Amended in section 2, which typed the adapters' rule-route answers and
+  left this work here:
+  - Both adapters' rule-add routes read the family's `MockRuleCreate` in
+    place of their own request models (VM's `MockRuleRequest`, bare metal's
+    `BareMetalMockRuleRequest`), and both evaluate routes answer the family's
+    `MockJobEvaluation`. `MockRuleRouteService.add` then takes only a
+    `MockRuleCreate`: its mapping form exists only for the adapters' current
+    request models.
+  - `provisioning/compute/service/tests/unit/test_provisioning_client_contract.py`
+    adds the `MockRuleClient`/`SyncMockRuleClient` pair to its sync/async
+    parity guardrail (TESTING.md, "Sync/async client parity").
 - [ ] 3.4 Bump `arkhai-bare-metal` by a minor version, since the module is
   renamed. Bump the VM and bare-metal adapters and the VM operator client.
   Raise the service's `dev` floor on the client to section 2's bump. Run
   `make lock`.
+
+  Amended in section 2: both adapters took their bump there (VM `0.14.0`,
+  bare metal `0.10.0`), so this task does not bump them again.
 - [ ] 3.5 **Verification checkpoint.**
   - Unit: 3.1 and 3.2.
   - Application integration: 3.3.

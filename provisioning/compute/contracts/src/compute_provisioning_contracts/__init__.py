@@ -1,10 +1,10 @@
 """The compute provisioning family's wire contract.
 
-Versioned contract models, the host, job, and system models, and the route
-contracts the provisioning service authenticates and every typed client signs
-from. A thin distribution: it carries no service code, so the family kit, the
-service, its adapters, and its clients all depend on it without depending on
-each other.
+Versioned contract models, the host, job, system, and mock-rule models, and the
+route contracts the provisioning service authenticates and every typed client
+signs from, the mock mechanism's as a template each compute domain mounts. A
+thin distribution: it carries no service code, so the family kit, the service,
+its adapters, and its clients all depend on it without depending on each other.
 """
 
 from .contracts import (
@@ -56,6 +56,15 @@ from .jobs import (
     JobLogsResponse,
     JobStatusResponse,
     JobSubmitResponse,
+)
+from .mock_rules import (
+    MockJobEvaluation,
+    MockRouteMount,
+    MockRuleAdded,
+    MockRuleCreate,
+    MockRuleDeleted,
+    MockRuleResumed,
+    MockRuleView,
 )
 from .system import (
     ExecutionStatus,
@@ -129,6 +138,13 @@ __all__ = [
     "JobLogsResponse",
     "JobStatusResponse",
     "JobSubmitResponse",
+    "MockJobEvaluation",
+    "MockRouteMount",
+    "MockRuleAdded",
+    "MockRuleCreate",
+    "MockRuleDeleted",
+    "MockRuleResumed",
+    "MockRuleView",
     "ExecutionStatus",
     "ExecutorStatus",
     "HealthResponse",

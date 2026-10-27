@@ -54,6 +54,12 @@ from compute_provisioning.jobs.executor_mock import (
     MockRuleSet,
 )
 from compute_provisioning_ansible import MockAnsibleRunner
+from compute_provisioning_contracts import (
+    MockRuleAdded,
+    MockRuleDeleted,
+    MockRuleResumed,
+    MockRuleView,
+)
 from vm_provisioning_adapter.controllers.route_binding import routed
 from vm_provisioning_adapter.models.jobs_model import VmJobParams
 from vm_provisioning_adapter.models.system_model import EvaluateJobRequest, EvaluateJobResponse  # server-only test controller models
@@ -97,7 +103,7 @@ def make_mock_router(
     rule_routes = MockRuleRouteService(vm_mock_rules)
 
     @router.post("/mock-rules", summary="Add a mock rule")
-    def add_mock_rule(body: MockRuleRequest) -> dict:
+    def add_mock_rule(body: MockRuleRequest) -> MockRuleAdded:
         """Add a when→then mock rule for VM jobs.
 
         Rules are evaluated in insertion order.  The first rule whose ``match``
@@ -106,17 +112,17 @@ def make_mock_router(
         return routed(lambda: rule_routes.add(body.model_dump()))
 
     @router.get("/mock-rules", summary="List active mock rules")
-    def list_mock_rules() -> list[dict]:
+    def list_mock_rules() -> list[MockRuleView]:
         """Return the current set of VM mock rules in evaluation order."""
         return routed(rule_routes.list)
 
     @router.delete("/mock-rules/{rule_id}", summary="Remove a mock rule")
-    def delete_mock_rule(rule_id: str) -> dict:
+    def delete_mock_rule(rule_id: str) -> MockRuleDeleted:
         """Remove a rule by ID.  No-op if the rule does not exist."""
         return routed(lambda: rule_routes.delete(rule_id))
 
     @router.post("/mock-rules/{rule_id}/resume", summary="Release a paused job gate")
-    def resume_mock_rule(rule_id: str) -> dict:
+    def resume_mock_rule(rule_id: str) -> MockRuleResumed:
         """Release the gate of a rule with ``pause_before_result=true``.
 
         The job held by this rule's gate proceeds to its result or failure

@@ -22,6 +22,12 @@ from compute_provisioning.jobs.executor_mock import (
     MockRuleRouteService,
     MockRuleSet,
 )
+from compute_provisioning_contracts import (
+    MockRuleAdded,
+    MockRuleDeleted,
+    MockRuleResumed,
+    MockRuleView,
+)
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -84,21 +90,21 @@ def make_mock_router(
     rule_routes = MockRuleRouteService(mock_rules)
 
     @router.post("/mock-rules", summary="Add a bare-metal mock rule")
-    def add_mock_rule(body: BareMetalMockRuleRequest) -> dict:
+    def add_mock_rule(body: BareMetalMockRuleRequest) -> MockRuleAdded:
         return _routed(lambda: rule_routes.add(body.model_dump()))
 
     @router.get("/mock-rules", summary="List bare-metal mock rules")
-    def list_mock_rules() -> list[dict]:
+    def list_mock_rules() -> list[MockRuleView]:
         return _routed(rule_routes.list)
 
     @router.delete("/mock-rules/{rule_id}", summary="Remove a bare-metal mock rule")
-    def delete_mock_rule(rule_id: str) -> dict:
+    def delete_mock_rule(rule_id: str) -> MockRuleDeleted:
         return _routed(lambda: rule_routes.delete(rule_id))
 
     @router.post(
         "/mock-rules/{rule_id}/resume", summary="Release a held bare-metal job"
     )
-    def resume_mock_rule(rule_id: str) -> dict:
+    def resume_mock_rule(rule_id: str) -> MockRuleResumed:
         return _routed(lambda: rule_routes.resume(rule_id))
 
     @router.post(

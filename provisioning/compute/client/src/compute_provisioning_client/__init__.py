@@ -12,6 +12,7 @@ from .errors import (
     ComputeProvisioningJobError,
     ComputeProvisioningTimeoutError,
 )
+from .mock_rules import MockRuleClient, SyncMockRuleClient
 
 __all__ = [
     "AuthorityTrust",
@@ -21,5 +22,7 @@ __all__ = [
     "ComputeProvisioningError",
     "ComputeProvisioningJobError",
     "ComputeProvisioningTimeoutError",
+    "MockRuleClient",
     "SyncComputeProvisioningClient",
+    "SyncMockRuleClient",
 ]
