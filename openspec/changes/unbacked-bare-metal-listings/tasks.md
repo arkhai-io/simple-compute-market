@@ -4240,6 +4240,18 @@ configuration.
       storefront's run of the production buyer commands (22.3's correction), within
       `make test`, the Helm render unrun for want of `helm`; `make check-packaging` and
       `make check-change` passed.
+- [ ] 22.7 `domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/cli.py` `buy_bare_metal`:
+      fix the three defects 22.3's correction fixed in `request_introduction`, which
+      `buy` shares. It passes the listing's advertised settlement option, so the seller
+      can accept; it records the publisher principals in the shape the run-log loader
+      reads, so a later `market bare-metal` command can reload the run; and it decodes
+      the provision terms the seller echoes. Added on the owner's word after round 3's
+      implementation, ahead of triage. Tests: a bare-metal storefront test running
+      `buy` over a real run log, beside 22.3's run of the production commands, failing
+      on each defect with its fix reverted. Version: `arkhai-bare-metal-buyer` only if
+      this branch has not already bumped it past `dev` (it has, to 0.6.0, in 21.3);
+      `make lock` if a pin moves. **Verify.** `make test-bare-metal`; `make test`;
+      `make check-packaging`.
 
 Section 22 notes (handoff):
 
