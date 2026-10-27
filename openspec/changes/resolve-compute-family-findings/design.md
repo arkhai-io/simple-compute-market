@@ -260,7 +260,10 @@ Three parts.
 1. **Reporting.** Bare metal composes an `on_event` for its servicing worker, writing the
    `claims` stage events VM's composition writes (`settlement_composition.py`). The kit's
    worker logs every scheduled retry at warning, naming the obligation, operation, and
-   error, so a failing step is recorded with or without a callback.
+   error, so a failing step is recorded with or without a callback. The API-credit
+   storefront composes the same worker with no callback, so it composes one too:
+   `settlement-servicing`'s "Every failing servicing step is reported" requires a callback
+   of each storefront that composes the worker.
 2. **Deferred delivery.** Bare metal's ready hook defers while the lease is not yet
    active (`alkahest_lifecycle.py`); each deferral counts as an attempt, so the next try
    follows the error backoff, 30 s doubling to 30 minutes, and evidence publication, and
@@ -581,9 +584,9 @@ Two rounds, each reviewed before the next, then closeout.
 - **Round 1**, overlapping `unbacked-bare-metal-listings`' branch only as D2 allows, in
   two sessions:
   - provisioning and the compute family: D6, D14 (all but its e2e callers), D17, D20, D21;
-  - storefronts and kits: D4 (all but its e2e stage), D7, D9, D16, D18.
+  - storefronts and kits: D4 with its e2e stage, D7, D9, D16, D18.
 - **Round 2**, after `unbacked-bare-metal-listings` lands, in two sessions:
-  - D3, D5, D8, D12, D13, D15, D19, D22, D4's e2e stage, and D14's e2e callers;
+  - D3, D5, D8, D12, D13, D15, D19, D22, and D14's e2e callers;
   - D10 and D11.
 - **Closeout**: promotion, the roadmap, the index, archive.
 
@@ -594,6 +597,18 @@ meet the defect meanwhile, since its driver still declares the nested copy begin
 D22 waits because its template and settings edits sit beside the branch's own, and D14's
 e2e callers because the branch rewrites the files they are in (35 F3). Planning confirms
 the rest of the partition against the branch's diff, as D2 says.
+
+Planning's derivation, from the branch's diff against its merge base `968a4a9`, placed
+D4's e2e stage in round 1, beside the routes it tests. The stage is
+`test_03_usage_started_keeps_oversized_listings_closed` in
+`e2e-tests/tests/e2e/roles/scenarios/vms/test_compute_dynamic_listings.py`. It calls
+`notify_usage_started`, which D4 removes. Removing the stage means removing that method,
+the `usage_started` field and the requirement on it in `test_04`, and the docstring's step
+naming it. None of those hunks touches the branch's: the branch edits the module's imports,
+`pytestmark`, the head of `DynamicListingState`, and `test_00`/`test_00a`. Leaving the stage
+for round 2 would leave round 1's pipeline calling a client method that round 1 removed.
+D14's first round changes no path or signed operation, so the e2e harness's hand-built
+mock-rule client keeps working until its callers move in round 2.
 
 ## Edits to other changes
 
