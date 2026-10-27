@@ -5,7 +5,7 @@ hand-constructs a `SettlementRecord` row directly (`_create_active_fulfillment`
 and its siblings in `test_ledger_lease_lifecycle.py`/`test_compute_contract_api.py`),
 which is the right choice for tests whose subject is teardown submission or
 polling -- but none of them prove the actual legacy backfill migration
-(`_apply_legacy_vm_lease_backfill`) produces a row the new teardown path can
+(`_apply_legacy_vm_lease_backfill`) produces a row the teardown path can
 consume. This file runs the real migration entrypoint against a real
 connection, then drives its output through `begin_fulfillment_teardown`,
 simulated convergence (`FulfillmentConvergenceWatchdog` has its own test
@@ -14,6 +14,10 @@ proving a pre-cutover VM lease reaches `released` with capacity returned.
 """
 
 from __future__ import annotations
+
+import asyncio
+from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
@@ -93,8 +97,6 @@ def _bootstrap_engine():
 
 
 def _settings(**overrides):
-    from unittest.mock import MagicMock
-
     s = MagicMock()
     s.lease_watchdog_grace_period_seconds = 300
     s.storefront_url = "http://storefront:8001"
@@ -110,7 +112,7 @@ async def _successful_notification(_reservation):
 def test_pre_cutover_vm_lease_backfills_and_tears_down_to_release():
     engine = _bootstrap_engine()
 
-    # Representative pre-POOLS data: a VM lease still active (not yet
+    # Representative legacy data: a VM lease still active (not yet
     # released) when the cutover migration ran, exactly the common case a
     # migration must carry forward correctly, not an already-failed edge
     # case that happens to skip the "initiate teardown" step.
@@ -192,15 +194,11 @@ def test_pre_cutover_vm_lease_backfills_and_tears_down_to_release():
     # Give the reservation a lease_end_utc in the past so the watchdog
     # picks it up -- the migration itself does not carry lease timing
     # (that's site-ledger data, not fulfillment-aggregate data).
-    from datetime import datetime, timedelta, timezone
-
     with engine.begin() as connection:
         connection.execute(text(
             "UPDATE capacity_reservations SET lease_end_utc = :end WHERE "
             "capacity_reservation_id = 'reservation-legacy-1'"
         ), {"end": (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()})
-
-    import asyncio
 
     async def _drive():
         first = await lease_lifecycle.force_check_leases()

@@ -1,13 +1,15 @@
 """Escrow persistence: capacity_reservation_id/settlement_resource_id/fulfillment_id.
 
-These three columns were added to the shared ``escrows`` table so a caller
-can resume checking a VM fulfillment's durable progress by escrow after a
-storefront restart, without redispatching. Distinct from the pre-existing
+These three columns on the shared ``escrows`` table record an escrow's
+durable physical-fulfillment identity. They are distinct from the
 ``fulfillment_uid`` column (the on-chain settlement-claim identity) --
 covers that both may be set independently on the same row.
 """
 
 from __future__ import annotations
+
+import sqlite3
+from datetime import datetime
 
 import pytest
 
@@ -20,9 +22,6 @@ def client(tmp_path):
 
 
 async def _seed_escrow(client: SQLiteClient, escrow_uid: str) -> None:
-    import sqlite3
-    from datetime import datetime
-
     conn = sqlite3.connect(client.db_path)
     try:
         now = datetime.now().isoformat()

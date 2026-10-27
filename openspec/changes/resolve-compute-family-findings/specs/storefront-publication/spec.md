@@ -16,8 +16,9 @@ answer such a read with an unhandled error.
 ### Requirement: Bare-metal begin reads the scheduled resource's own identity
 
 Bare-metal fulfillment MUST begin only when the scheduled resource's host and physical
-machine, as the schedule response names them, equal the accepted terms'. It MUST NOT
-require the declaration's publication settings to repeat them.
+machine, as the schedule response names them, equal the accepted terms'. A schedule
+response that names no host conflicts with the terms. It MUST NOT require the
+declaration's publication settings to repeat them.
 
 #### Scenario: A declaration names its machine once
 
@@ -28,4 +29,9 @@ require the declaration's publication settings to repeat them.
 #### Scenario: The scheduled resource is another machine
 
 - **WHEN** the schedule response names a physical machine other than the accepted terms'
+- **THEN** fulfillment does not begin, and the deal reports the conflict
+
+#### Scenario: The scheduled resource names no host
+
+- **WHEN** the schedule response for a bare-metal deal names no host
 - **THEN** fulfillment does not begin, and the deal reports the conflict

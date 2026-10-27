@@ -76,7 +76,7 @@ Restart recovery MUST use the same aggregate capacity and fulfillment clients as
 
 ### Requirement: The storefront does not select buyer access infrastructure
 
-The VM storefront MUST NOT supply relay configuration with a fulfillment request. It MUST NOT hold a relay address, a relay credential, or a relay's port allocation window in its settings, and it MUST NOT populate them into the request's connectivity metadata.
+The VM storefront MUST NOT supply relay configuration with a fulfillment request. It MUST NOT hold a relay address, a relay credential, or a relay's port allocation window in its settings, and the request it sends MUST carry no `connectivity` field, which provisioning refuses.
 
 Which relay serves a host is a durable property of the deployment that owns the host, recorded against the relay that the host's pool references. A storefront naming a relay per request would make a fleet-wide fact depend on a caller's configuration, and would allow two requests against one host to disagree about how that host is reached.
 

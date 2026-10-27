@@ -132,9 +132,11 @@ reservation keeps its capacity effect and reads in a state the lifecycle defines
 The site kit's authentication middleware MUST answer a request that resolves to no route
 contract, without signing it, with 404 when no contract names its path, 405 naming the
 allowed methods when a contract names its path under another method, and 400 naming the
-field when its route's body resource cannot be bound. Composing the contracts MUST refuse
-two that claim one method and path. The site client MUST report an answer carrying no
-response authentication as unauthenticated, with its status, and never its body.
+field when its route's body resource cannot be bound. The middleware MUST resolve a request
+against the one ordered table it is given, the first matching contract deciding, so no
+request is claimed by two contracts. The site client MUST report an answer carrying no
+response authentication as unauthenticated, with its status, and the report MUST contain
+no part of the response body, no header value, and no credential.
 
 #### Scenario: A known path is requested with another method
 

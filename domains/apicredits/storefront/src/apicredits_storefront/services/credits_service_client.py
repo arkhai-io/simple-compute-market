@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from arkhai_apicredits.settlement import CreditsServiceClient
 
+from apicredits_storefront.utils import config
+
 _client: CreditsServiceClient | None = None
 
 
@@ -22,8 +24,6 @@ def get_credits_service_client() -> CreditsServiceClient:
     """
     global _client
     if _client is None:
-        from apicredits_storefront.utils import config
-
         authorities = config.credits_expected_authorities()
         _client = CreditsServiceClient(
             config.credits_service_url(),

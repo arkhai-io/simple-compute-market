@@ -275,9 +275,9 @@ async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch
 
 @pytest.mark.asyncio
 async def test_terminate_vm_lease_asks_only_the_reservations_site():
-    """No early-termination business flow calls this yet; this confirms the
-    plumbing: the request reaches the reservation's recorded site and no other,
-    with the reason passed through, and the site's lease view comes back."""
+    """The early-termination plumbing: the request reaches the reservation's
+    recorded site and no other, with the reason passed through, and the site's
+    lease view comes back."""
     calls: list[tuple[str, str, Any]] = []
 
     class Site:
@@ -317,8 +317,8 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
     unmodified credential-storage code, with the fulfillment client mocked at
     the network boundary but capacity reservation going through a real
     FakeSite ledger. Confirms end to end -- real stored rows, not code
-    inspection -- that credentials produced by the new fulfillment path
-    reach the storefront's existing credential store correctly."""
+    inspection -- that credentials the fulfillment result carries reach the
+    storefront's credential store."""
 
     lifecycle = await make_vm_lifecycle_fixture(
         Path(client.db_path),
@@ -428,10 +428,10 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
     assert roles["tenant"]["password"] == "tenant-pw"
     assert roles["tenant"]["key_type"] == "generated"
 
-    # The escrow row carries the durable fulfillment identity by the time
-    # this call returns. This proves the identifiers round-trip correctly;
-    # it does not by itself prove restart *resumption* -- nothing yet reads
-    # these values back to resume an in-progress fulfillment after a crash.
+    # The delivery row carries the durable fulfillment identity by the time
+    # this call returns, which is what restart convergence reads back to
+    # resume an in-progress fulfillment. This proves the identifiers
+    # round-trip; resumption itself is test_fulfillment_resume_runtime.py's.
     escrow = await client.load_vm_delivery(negotiation_id="neg-e2e-1")
     assert escrow["fulfillment_id"] == "fulfillment-e2e-1"
     assert escrow["settlement_resource_id"] == "host-1"

@@ -10,7 +10,9 @@ framework-free test route service. A mock executor MUST be assembled from shared
 execution mechanics and the adapter's contributed default output; no adapter's mock MAY
 derive from another adapter's. The mechanism MUST NOT be presented as a foundation kit,
 and a non-compute domain's executor mock MUST NOT be added to it. Each adapter MUST
-mount its rule routes under its own prefix; job draining and waiting MUST stay shared.
+mount its rule and evaluate-job routes under its own prefix, contributing their route
+contracts from the family's template instantiated with its mount; job draining and
+waiting MUST stay shared.
 The test route service MUST answer with response models the compute family's contracts
 distribution owns, so every adapter's rule routes answer the same typed shapes.
 

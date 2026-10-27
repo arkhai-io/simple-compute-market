@@ -358,11 +358,11 @@ class FulfillmentConvergenceWatchdog:
         """Claim one bounded batch in its own short write transaction.
 
         A lock-contention error here means another worker's outcome
-        application is mid-transaction (holding the write reservation
-        _with_owned_record now acquires up front) -- expected, occasional
-        contention under the fix that closed the stale-outcome race, not a
-        cycle-aborting failure. Treated the same as "no eligible rows this
-        attempt": the next cycle tries again.
+        application is mid-transaction, holding the write reservation
+        _with_owned_record acquires before its ownership check. That is
+        expected, occasional contention, not a cycle-aborting failure.
+        Treated the same as "no eligible rows this attempt": the next cycle
+        tries again.
         """
         with self._session_factory() as db:
             try:
@@ -615,12 +615,11 @@ class FulfillmentConvergenceWatchdog:
         and checking ownership, not after: a plain SELECT does not open a
         SQLite-level transaction on its own (pysqlite only begins one before
         a DML statement), so checking ownership first and writing later
-        left a real, empirically-confirmed gap -- a worker whose lease had
-        already been reclaimed by another worker could still commit its
-        stale outcome on top of the new owner's claim, silently clearing it.
-        Reserving the write lock first closes that gap: once reserved, no
-        other worker's claim_pending() can commit a reclaim until this
-        transaction resolves, so the ownership check and the writes that
+        would let a worker whose lease another worker had already reclaimed
+        commit its stale outcome on top of the new owner's claim, silently
+        clearing it. Reserving the write lock first prevents that: once
+        reserved, no other worker's claim_pending() can commit a reclaim until
+        this transaction resolves, so the ownership check and the writes that
         follow it observe a consistent view.
         """
         with self._session_factory() as db:
