@@ -1900,8 +1900,8 @@ Per `openspec/README.md#plan-closeout-requirements`.
         "Broad capacity schema cleanup".
       **Done (2026-10-27).** The permanent documents 12.1–12.3 named were written
       then. Closeout edited `docs/development/ARCHITECTURE.md`'s "Fulfillment status
-      and results" (13.3). `openspec/specs/README.md` needs nothing: every capability
-      the change touches is already indexed. `design.md`'s "Closeout design-promotion
+      and results" (13.3). `openspec/specs/README.md` lacked a row for
+      `vm-storefront-fulfillment`; the closeout triage added it (35 F1). `design.md`'s "Closeout design-promotion
       record" maps every accepted decision to a heading that resolves, and records the
       three superseded decisions above as superseded by `bare-metal-mock-provisioned-deal`,
       with the current requirements that replace them. No file outside
