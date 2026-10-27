@@ -167,9 +167,11 @@ async def test_evaluate_refuses_a_listing_no_authority_stands_behind_and_writes_
     tmp_path,
 ) -> None:
     """An unbacked listing is one no fulfillment can start for, so the preview
-    answers that settlement would submit nothing, naming why, reserving nothing
-    and writing nothing; the backed listing beside it still previews its
-    reservation. The loops are held, so no cycle writes during the preview."""
+    answers that settlement would submit nothing, naming why, where it would
+    otherwise preview a reservation naming no host; the backed listing beside it
+    still previews its reservation. A preview reserves and writes nothing for
+    either backing, so the last assertions hold the route to that rather than
+    showing the refusal. The loops are held, so no cycle writes during it."""
     runtime, _negotiation_id, capacity = await _runtime(tmp_path)
     runtime = replace(runtime, loop_controller_factory=held_loop_controller)
     await runtime.db.upsert_bare_metal_listing(

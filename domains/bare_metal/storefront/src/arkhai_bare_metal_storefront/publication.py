@@ -386,7 +386,9 @@ class BareMetalPublicationCycle:
             )
         for unbuildable in generation.view_problems:
             # The site built no view for this resource, so it yields no
-            # listing and an open one is held; the reasons are its
+            # listing; an open one is held, as an unreadable declaration is,
+            # and closes only as a withdrawn source: its declaration disabled,
+            # or its pool no longer admitting bare metal. The reasons are its
             # declaration's, named for the seller.
             self.report.record(
                 "report",

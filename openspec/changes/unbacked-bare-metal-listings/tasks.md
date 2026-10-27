@@ -3426,6 +3426,9 @@ bare-metal storefronts.
       the cycle's unused `publication_clauses` parameter are gone. A candidate refused
       while building its payload is no longer warned of every cycle: the site
       derivation logs it when it appears.
+      **Correction:** there is no `_close_candidate_listing`; the close hook is the kit's
+      `RefusedCandidates.close_candidate_listing`, which both storefronts build (18.3's
+      note).
 - [x] 18.3 VM `services/listing_service.py` (`_admissible_settlement_terms`,
       `derive_listing`) keeps the readiness `publication_artifacts` returns and raises the
       typed refusal; `services/publication_loop.py` `_create_request`'s no-clause case is the
@@ -3456,13 +3459,23 @@ bare-metal storefronts.
       entry at the top level under its site and pool (VM's also name the shape digest),
       so every refusal now reaches the site's `refusals` in both storefronts (Section
       17's handoff item).
+      **Corrections:** the kit function is `parse_settlement_publication_clause`, not
+      `publication_clause_mechanism`, and `compile_settlement_publication_clause` now
+      reads every clause through it, so for every consumer, API credits included, a
+      stated `mechanism_input` that is not a mapping is refused rather than read as no
+      input, and a malformed clause fails as malformed before its mechanism's
+      enablement is judged. The empty-result refusal `reconcile_settlement_options` keeps
+      is in `listing_service.py` after `publication_artifacts`; it gained its unit test
+      in this section's later work (`tests/unit/test_settlement_reconciliation.py`).
+      The storefront's own configured clauses are no longer strict about enablement:
+      see 18.5's later note.
 - [x] 18.4 Both storefronts' adapters (`arkhai_bare_metal/storefront_adapter.py`,
       `arkhai_vms/storefront_adapter.py`) pass the hook into the source (D7).
       Done: the hook is a required adapter argument in both; VM's
       `VmPublicationSourceCallbacks` carries it. Unit: `domains/bare_metal/tests/
       test_storefront_adapter.py`, `domains/vms/domain/tests/test_storefront_adapter.py`,
       VM `tests/unit/test_publication_wiring.py`.
-- [ ] 18.5 Tests: bare metal `tests/test_publication_cycle.py` (library) and VM
+- [x] 18.5 Tests: bare metal `tests/test_publication_cycle.py` (library) and VM
       `tests/integration/test_publication_loop.py` (application integration, through
       `StorefrontClient`): an open listing whose only mechanism is configured away closes as
       `no_settlement_option` and reopens under its identity when it builds again; one whose
@@ -3510,6 +3523,27 @@ bare-metal storefronts.
         candidate whose override names only Alkahest.
       - VM unit (`tests/unit/test_unbacked_settlement_options.py`): the refusal's
         mechanisms and unknown set for each blocker mix and backing.
+      **Completed, with corrections, after Section 19's code.** The three bare-metal
+      cases on unbacked candidates are 19.6's carried cycle tests, which pass. The
+      VM count above predates the final file: it now runs 65, the disabled-mechanism
+      test parametrized below. A disabled mechanism closes in VM as in bare metal only
+      since a fix to VM's configured defaults in this section's closing round:
+      `settlement_publication_defaults` (`utils/config.py`) had compiled each
+      `[pricing].settlements` clause against its section, so one naming a disabled
+      mechanism refused the whole cycle and left every listing open; it now reads such
+      a clause in full without compiling it, publication drops it, and the listing it
+      alone priced closes (design decision 7's Section 18 paragraph). Application
+      integration (VM, `test_a_listing_whose_mechanism_is_disabled_closes_and_reopens
+      [configured]`), the clause as the storefront's own configuration; unit
+      (`tests/unit/test_config_loader.py`): such a clause is returned for publication
+      to drop, and one that cannot be read is still refused. **Fidelity, unchanged:**
+      bare metal's configured-away, unprobed-hold, both-kinds, and
+      unreached-beside-ruled-out cases are cycle orchestration, not integration; its
+      application-integration evidence through `StorefrontClient` is the no-clause close
+      and reopen (`test_http_system.py`) and, from Section 20, an unbacked listing
+      published by the app's own cycle (`test_http_introductions.py`). VM's refusal
+      entries name the pool and shape digest, its source; no VM test names a resource
+      because a VM candidate's source is its pool's shape, not a Physical Resource.
 - [x] 18.6 Versions: `arkhai-core-storefront`, `arkhai-bare-metal`, `arkhai-vms`, both
       storefronts; `make lock`.
       `arkhai-vms` 0.6.1 → 0.7.0 (its adapter takes a new required argument; no earlier
@@ -3523,7 +3557,7 @@ bare-metal storefronts.
       changed 14 locks: the `arkhai-vms` version and those floors in seven, and
       dependency markers alone in seven more and alongside the changes in two; kept as
       generated, by the owner's decision.
-- [ ] 18.7 **Verify.** `make test-core`; `make test-vms-domain`, `make test-storefront`,
+- [x] 18.7 **Verify.** `make test-core`; `make test-vms-domain`, `make test-storefront`,
       `make test-bare-metal`; `make test`; `make check-packaging`. End-to-end:
       `e2e_compute_dynamic_listings` and `e2e_bare_metal_publication`; no scenario closes a
       listing for configuration, and integration is the evidence.
@@ -3541,6 +3575,17 @@ bare-metal storefronts.
       handoff below, and the section's fresh-context check is outstanding. End-to-end: unrun here;
       `e2e_compute_dynamic_listings` and `e2e_bare_metal_publication` run the changed
       cycles once deployed, and no scenario closes a listing for configuration.
+      **Qualified on the tree committed with Sections 18 to 22**, with the checks of all
+      five run together: `make test` passed every suite up to the Helm render, among them
+      core buyer 148, core storefront 223 (2 skipped), capacity publication 124,
+      settlement runtime 141, kit storefront 131, VM storefront unit 1132 (1 skipped) and
+      integration 477, bare-metal domain 183, storefront 497, buyer 12, adapter 51,
+      API-credit storefront 239, e2e-tests unit 122, release tooling 1081 (11 skipped).
+      The Helm render (`make test-deployment-packaging`) did not run: this environment
+      has no `helm`. `make check-packaging` and `make check-change` passed. The VM
+      integration test once seen reporting `timeout` passed in all four full VM runs of
+      this session. End-to-end: unrun here (this session may not run Docker); the
+      scenarios named above are the evidence once the pipeline runs.
 
 Section 18 notes (handoff):
 
@@ -3567,6 +3612,8 @@ Section 18 notes (handoff):
   or an override is dropped and, alone, closes its listing; one stated in the
   storefront's own `[pricing].settlements` is its configuration contradicting itself,
   which `settlement_publication_defaults` refuses for the whole cycle, as before.
+  **Superseded in the section's closing round** (18.5's later note): such a clause is
+  dropped and its mechanism ruled out, so the listing closes in VM as in bare metal.
 - **First fresh-context check (eight findings), all taken up:** the permanent "A
   storefront that cannot publish refuses to start" said a pool resolving no clause is
   held, so the `storefront-publication` delta now modifies it; the stale permanent
@@ -3588,6 +3635,21 @@ Section 18 notes (handoff):
   filter left in each domain is one line over `MechanismReadiness.unknown`); API
   credits' own `_unknown`, outside this section; `replaced_setting`, the VM tests'
   existing seam.
+- **Correction to the second check's declined item:** the close hooks are shared after
+  all. Both storefronts build the kit's `RefusedCandidates`, and each supplies only how
+  its domain derives the key and closes through its own reconciliation.
+- **Third fresh-context check (closing round, over 3bfa948).** Taken up: VM's configured
+  clause naming a disabled mechanism closes rather than failing the cycle (18.5's later
+  note); `RefusedCandidates.refuse` reports a failed open-listing lookup instead of
+  raising into the runner, which does not guard its payload builder, so one database
+  error had ended the whole cycle (kit unit
+  `test_an_open_listing_lookup_that_fails_is_reported_and_the_cycle_goes_on`); the
+  empty-result refusal of `reconcile_settlement_options` gained a unit test; the task
+  notes' wrong names and counts corrected (18.2, 18.3, 18.5); a test docstring citing
+  the wrong scenario; development-value comments on the `.invalid` contacts the section's
+  tests added; the section's implementation decisions recorded in design decision 7, and
+  their promotion added to 23.9. Declined: rewriting the VM tests' settings patching,
+  the existing seam, as before.
 - **Locks.** The pinned uv rewrites dependency markers in projects this section did not
   touch, unlike Section 14's `make lock`; the cause was not found. The 14 locks are kept
   as generated, by the owner's decision, and `make check-packaging` passes over them.
@@ -3674,6 +3736,11 @@ terms only when backed"; the removed "An unbacked pool yields no bare-metal list
         **Defect fixed here:** the settlement preview answered `would_submit: true`, with
         no host, for an unbacked listing; it now asks the binding's delegate first and
         answers `would_submit: false` naming the refusal.
+      **Correction:** a bargaining round against an unbacked listing publication
+      produced is refused before the admission check, as naming no accepted escrow
+      contract (`negotiation_runtime.py`), since publication gives an unbacked listing no
+      Alkahest option; the admission refusal is what a listing seeded with an escrow
+      meets (19.6). Either way `persist_artifacts` is never reached.
 - [x] 19.5 Recheck: `arkhai_bare_metal/inventory_guard.py` is unchanged; tests confirm an
       unbacked listing is refused only by its declaration (shape, region, Physical
       Resource, or its resource now in another pool, as `declared_mismatch`), and a site
@@ -3762,12 +3829,50 @@ terms only when backed"; the removed "An unbacked pool yields no bare-metal list
         (`core/registry/tests/integration/test_capacity_backing_filter.py`): a backed and
         an unbacked bare-metal listing each found by the exact filter for its backing
         alone.
-- [ ] 19.7 Versions: `arkhai-bare-metal`, `arkhai-bare-metal-storefront`; `make lock`.
+      **Corrections from the section's fresh-context check, with the tests that now back
+      each claim:**
+      - "The site reporting the machine free or taken" was not so: the fixtures carried
+        availability only on the view, which an unbacked view drops, so both cases were
+        one projection. The fixtures' taken case (`source_sites.py`,
+        `test_publication_cycle.py`'s `member`) now also reports none of the declared
+        capacity available in the site's ledger, the one place a site reports an
+        unbacked machine taken, so the HTTP negotiation cases and the cycle's "never
+        judged against availability" test (which now also asserts nothing is sent to a
+        registry) differ from the free ones. The inventory guard's duplicate case is
+        gone: the trusted carrier it reads holds no ledger counts.
+      - The preview's "reserving nothing and writing nothing" holds for either backing,
+        so it shows the route's discipline, not the refusal; `would_submit: false` and
+        its reason are the evidence. The HTTP acceptance test's reservation assertion is
+        removed for the same reason.
+      - "A declaration names a host" in the unbacked fixtures: the host is the view
+        builder's argument, which the delegate drops; the site-side test
+        (`provisioning/adapter/tests/test_inventory_views.py`) is where a declaration
+        naming a host builds a host-less view.
+      - "The publication loop runs it": the test runs the cycle the loop's timer runs.
+      - The declared-mismatch HTTP cases name only the reason code, so which mismatch
+        refused is the inventory guard's unit tests' to show.
+      - **Added:** an unbacked "held generation is refused" opening, retryable
+        (`test_http_negotiation.py`, its view naming a host); the opt-in at the site for
+        an unbacked pool as for a backed one, spec "A resource in an unbacked pool does
+        not opt in" (adapter unit, `test_inventory_views.py`); the carrier refusing a
+        resource both viewed and reported unbuildable (`tests/test_publication.py`),
+        since classification would place it twice; and, from Section 20, an unbacked
+        listing published by the app's own cycle, accepted, and revealed through the
+        typed clients (`test_http_introductions.py`).
+- [x] 19.7 Versions: `arkhai-bare-metal`, `arkhai-bare-metal-storefront`; `make lock`.
       Left unchecked. This section changes no version and no lock, though
       `arkhai-bare-metal` gains the public `BareMetalViewProblems`. Whether the packages'
       current versions meet `docs/development/RELEASING.md`'s rule against the target
       branch is unverifiable here: the comparison was out of this section's scope.
-- [ ] 19.8 **Verify.** `make test-bare-metal`; `make test-core` if the registry test
+      **Checked in the section's closing round against `origin/dev`:** `arkhai-bare-metal`
+      is 0.12.0 there and 0.13.0 here, one minor bump (Section 15), which covers the new
+      public `BareMetalViewProblems`; `arkhai-bare-metal-storefront` is 0.17.0 there and
+      0.22.0 here, a minor bump over the target branch that earlier sections reached
+      through several unreleased bumps, which Section 11 already read as this change's one
+      bump. Nothing is owed here and no lock changes. The repeated unreleased bumps are
+      for the owner to judge at closeout; RELEASING.md says a second bump of an
+      unreleased version changes nothing a release sees.
+- [x] 19.8 **Verify.** `make test-bare-metal`; `make test-core` if the registry test
       changes; `make test`; `make check-packaging`. End-to-end:
       `e2e_bare_metal_unbacked_introduction` (Section 22), and `e2e_bare_metal_publication`
       for backed supply unchanged.
@@ -3780,6 +3885,10 @@ terms only when backed"; the removed "An unbacked pool yields no bare-metal list
       not acceptance. This item and 19.7 remain unchecked.
       End-to-end: unrun here; `e2e_bare_metal_publication` exercises backed supply, and
       `e2e_bare_metal_unbacked_introduction` arrives with Section 22.
+      **Qualified with Sections 18 to 22** (18.7's note): `make test-bare-metal` and the
+      registry suites passed within `make test`, the Helm render unrun for want of
+      `helm`; `make check-packaging` and `make check-change` passed. End-to-end: unrun
+      here; `e2e_bare_metal_publication` and `e2e_bare_metal_unbacked_introduction`.
 
 Section 19 notes (handoff):
 
@@ -3798,6 +3907,28 @@ Section 19 notes (handoff):
   given `uv --directory`, which resolves a relative `--find-links` against the caller's
   directory; and a storefront environment needs `make reinit` after `make dist`, since a
   rebuilt wheel keeps its version.
+- **Fresh-context check of Section 19, and a re-check of the closing round over both
+  sections.** The first check's findings are taken up as 19.6's and 19.4's corrections
+  and the fixes they name; besides those, the stale comments (`publication.py`'s
+  unbuildable-resource comment, `storefront_publication.py`'s class docstring), the
+  guard's view-less branch recorded in design decision 8 and the delta's recheck
+  requirement (the storefront's record of the refusal names the site's problem; the
+  buyer gets the reason code), and an import-order nit. The re-check confirmed the
+  three main fixes fail when reverted, and its wording findings are taken up: the
+  delta and decision 8 no longer say the refusal names the problem to the buyer, the
+  decision's "the inventory guard is unchanged" no longer contradicts its own branch,
+  a test named for a reservation check it no longer makes is renamed, a test docstring
+  pairing a scenario with the wrong requirement corrected, the lookup-failure hold
+  recorded in decision 7, Section 18's superseded "configured clauses stay strict" note
+  marked, and the carrier's twice-unbuildable case tested. **Declined:** a kit helper
+  for "a mechanism whose section is absent or disabled", now written in VM's
+  configuration defaults, VM's publication terms, and the settlement runtime's
+  compilation; one line each, and the VM pair reads the section from different
+  sources (the settings snapshot it is given, and the live settings). The VM
+  reconciliation test's patch of `publish_order_to_registry`, the existing test's seam
+  in that file, since production injects no registry publisher there. The
+  declared-mismatch HTTP cases' exhaustive parametrization at integration level, kept
+  as the cases the spec names.
 
 ## 20. A deal settled by introduction has no settlement or fulfillment, in both domains
 
@@ -4077,6 +4208,16 @@ change to implementation.
         architecture.md`'s derivation passage ("each cycle replaces it": a cycle that
         derives no site leaves its last derivation, and a site held whole keeps its
         pools' entries).
+      - Section 18's implementation decisions (design decision 7's Section 18
+        paragraph): `docs/development/ARCHITECTURE.md` "Capacity publication and
+        multi-domain storefront composition" — the kit's refused-candidate recording
+        and close hook, which every storefront driving its cycle through the kit
+        shares; `docs/development/DEPLOYMENT_AND_CONFIG.md` "Storefront listing shapes
+        and pool overrides" — the derivation reason codes `settlement_mechanism_unknown`
+        and `payload_unbuildable`, and that a clause naming a disabled mechanism is
+        dropped wherever it is stated, closing a listing it alone priced; the
+        `settlement-configuration` companion — a clause read apart from configuration
+        before its mechanism's enablement is judged.
       - The `spec.md` files of the ten capabilities the deltas cover are written by the
         archive (23.11) and named in the record. `openspec/specs/README.md` gains nothing:
         no new capability or companion.

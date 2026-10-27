@@ -1,7 +1,8 @@
 """Pure bare-metal publication decisions over one site's accepted generation.
 
-Every Physical Resource carrying a bare-metal view falls into exactly one
-class, and a storefront builds its reconciliation from those disjoint classes:
+Every Physical Resource carrying a bare-metal view, or reported with the
+problems that kept the site from building one, falls into exactly one class,
+and a storefront builds its reconciliation from those disjoint classes:
 
 - **candidate** — its pool admits bare metal, its declaration is enabled, and,
   where its pool's backing says availability bounds it, its view says the

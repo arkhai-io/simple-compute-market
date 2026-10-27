@@ -593,6 +593,30 @@ def test_an_unknown_mechanism_holds_only_an_open_listing(listings, action):
     assert (recorded, reason) == (action, SETTLEMENT_MECHANISM_UNKNOWN)
 
 
+class _UnreadableListings(_Listings):
+    async def load_listing_binding_by_derivation(self, *, derivation_key):
+        raise RuntimeError("database is locked")
+
+
+def test_an_open_listing_lookup_that_fails_is_reported_and_the_cycle_goes_on():
+    """An unknown mechanism closes nothing whatever the lookup finds, so a
+    failed lookup is reported beside a hold rather than raised into the
+    runner, which would end the whole cycle."""
+    report = PublicationCycleReport()
+    refusals, closed = _refusals(report, _UnreadableListings())
+    refusal = NoSettlementOption(
+        "unreached", mechanisms=("alkahest.v1",), unknown=("alkahest.v1",)
+    )
+
+    assert refusals.refuse(_CANDIDATE, refusal) is refusal
+
+    assert [(item["action"], item["reason"]) for item in report.actions] == [
+        ("fail", "open listing lookup failed: database is locked"),
+        ("hold", SETTLEMENT_MECHANISM_UNKNOWN),
+    ]
+    assert closed == []
+
+
 def test_the_close_hook_closes_the_open_listing_through_reconciliation():
     report = PublicationCycleReport()
     refusals, closed = _refusals(report, _OPEN)

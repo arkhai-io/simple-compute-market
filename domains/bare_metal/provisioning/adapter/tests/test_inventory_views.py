@@ -104,11 +104,15 @@ def test_a_declaration_with_no_positive_dimension_has_nothing_to_sell():
     assert _view(declaration)["available"] is False
 
 
-def test_a_publication_that_is_not_enabled_projects_no_view_and_no_problem():
+@pytest.mark.parametrize("backing", [BACKED, UNBACKED], ids=["backed", "unbacked"])
+def test_a_publication_that_is_not_enabled_projects_no_view_and_no_problem(backing):
+    """Spec scenario "A resource in an unbacked pool does not opt in", and its
+    backed counterpart: the opt-in is the resource's own whatever its pool's
+    backing, so the storefront derives no listing from it."""
     declaration = _declaration()
     declaration["attributes"][BARE_METAL_PUBLICATION_ATTR]["enabled"] = False
 
-    assert _built(declaration) == ResourceViews()
+    assert _built(declaration, backing) == ResourceViews()
 
 
 @pytest.mark.parametrize("host_id", [None, "bm-host-1"])

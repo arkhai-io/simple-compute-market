@@ -315,6 +315,30 @@ payload failures keep their behaviour: reported, with the listing left as it is,
 defect never delists anything. API credits does not publish through the runner; what an
 unready Alkahest does to an open API-credit listing is recorded in decision 19.
 
+Settled in implementation (Section 18):
+
+- **One recording and close for both storefronts.** `kit/capacity-publication`'s
+  `RefusedCandidates` records every payload refusal under its site
+  (`record_payload_refusal`) and is each storefront's close hook, closing the open listing
+  bound under the candidate's derivation key through the storefront's own reconciliation;
+  each domain supplies only its derivation key and source and its reconciliation close.
+  Its reason codes beside `no_settlement_option` are `settlement_mechanism_unknown`, a
+  hold where the candidate's listing is open and a refusal otherwise -- a hold, beside
+  the failure, when the open-listing lookup itself fails, since an unknown mechanism
+  leaves any listing as it is and the runner does not guard its payload builder -- and
+  `payload_unbuildable`, any other payload failure, its text as the entry's error.
+  `MechanismReadiness.unknown` in `kit/settlement-runtime` is the one definition of an
+  unknown mechanism.
+- **A disabled mechanism's clause is dropped wherever it is stated.** A clause is read in
+  full apart from configuration (`parse_settlement_publication_clause`), so a malformed
+  clause stays a payload failure that leaves its listing as it is, and a stated
+  `mechanism_input` that is not a mapping is malformed rather than read as no input. A
+  readable clause naming a mechanism whose section is absent or disabled is dropped, and
+  rules that mechanism out, whether it comes from a pool's hint, an override, or the
+  storefront's own `[pricing].settlements`: in both domains a listing it alone priced
+  closes, where VM had refused its own configured clause for the whole cycle and left
+  every listing open.
+
 Rejected: closing whenever any mechanism is ruled out by configuration, which let an
 unrelated, unusable mechanism decide whether an outage delists supply; classifying every
 configured mechanism, which let an outage on a mechanism the candidate could never use
@@ -337,7 +361,16 @@ now in a pool other than its bound one. The recheck finds the resource by its bo
 and Physical Resource, so a resource moved to another pool answers that the resource is no
 longer projected under its pool, a declared mismatch. A site whose projection the
 storefront does not hold, or holds unconfirmed, refuses openings as retryable for either
-backing. The inventory guard is unchanged.
+backing. The inventory guard's rules are unchanged but for the branch below.
+
+Settled in implementation (Section 19): the guard gains one branch, for decision 4's
+held resource. A resource the site projects, enabled in a pool admitting bare metal, with
+the problems that kept it from building a bare-metal view is refused as a declared
+mismatch, the storefront's own record of the refusal naming the site's problem: the
+declaration no longer yields the listing it published, and an opening against it is not
+retryable, while publication holds the listing so that a declaration fault never delists
+it. A disabled one, or one whose pool no longer admits bare metal, is a withdrawn source,
+as any such resource is.
 
 #### 9. A deal settled by introduction has no settlement or fulfillment, in both domains
 

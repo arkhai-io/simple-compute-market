@@ -187,11 +187,27 @@ class RefusedCandidates:
         unknown = isinstance(refusal, NoSettlementOption) and not (
             refusal.ruled_out_by_configuration
         )
+        listing_open = False
+        if unknown:
+            try:
+                listing_open = self._open_listing_id(candidate) is not None
+            except Exception as exc:
+                # The runner does not guard its payload builder, so a lookup
+                # that raises here would end the whole cycle. An unknown
+                # mechanism leaves any open listing as it is whatever the
+                # lookup would have found, so the refusal is recorded as the
+                # hold it would be for an open listing, beside the failure.
+                self._report.record(
+                    "fail",
+                    source=dict(self._derivation_source(candidate)),
+                    reason=f"open listing lookup failed: {exc}",
+                )
+                listing_open = True
         record_payload_refusal(
             self._report,
             self._derivation_source(candidate),
             refusal,
-            listing_open=unknown and self._open_listing_id(candidate) is not None,
+            listing_open=listing_open,
         )
         return refusal if isinstance(refusal, NoSettlementOption) else str(refusal)
 

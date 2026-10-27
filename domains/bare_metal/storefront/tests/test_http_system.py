@@ -803,8 +803,9 @@ async def test_a_listing_whose_pool_resolves_no_clause_closes_and_reopens_with_o
     """A storefront restarted with no clause configured refuses the candidate,
     records the refusal under its site, and closes its open listing as
     `no_settlement_option`; restarted with the clause again, the same listing
-    reopens. Spec "A compute candidate with no settlement option yields no
-    listing", "An open listing loses its last option to configuration"."""
+    reopens. Spec "A storefront that cannot publish refuses to start", scenario
+    "A pool resolves no settlement clause", and the close and reopen "A compute
+    candidate with no settlement option yields no listing" requires."""
     sites = {"site-a": Site(pool("pool-1", member("r1", "pool-1")))}
     runtime = _derivation_runtime(tmp_path, monkeypatch, sites)
 

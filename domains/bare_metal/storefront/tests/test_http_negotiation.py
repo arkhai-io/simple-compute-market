@@ -12,7 +12,6 @@ from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
 from arkhai_bare_metal_storefront.settlement_composition import (
     BareMetalStorefrontSettlementComposition,
 )
-from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
 from arkhai_bare_metal_storefront.server import (
     build_bare_metal_storefront_app,
     build_bare_metal_storefront_registry,
@@ -21,6 +20,7 @@ from arkhai_bare_metal_storefront.settlement import (
     BareMetalSettlementPlanError,
     build_bare_metal_settlement_plan,
 )
+from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
 import httpx
 import pytest
 from fastapi.testclient import TestClient
@@ -1284,6 +1284,15 @@ def _unbacked_source(**changes) -> SourceSite:
     return SourceSite(listing_source_projection(backing=UNBACKED, **changes))
 
 
+def _unbacked_view_naming_a_host() -> dict:
+    """The seeded unbacked listing's projection with its view naming a host, a
+    delivery term its pool's backing forbids, so bare metal refuses it whole."""
+    projection = copy.deepcopy(listing_source_projection(backing=UNBACKED))
+    resource = projection["resource_pools"][0]["resources"][0]
+    resource["publication_views"]["bare_metal.v2"]["host_id"] = "machine-1"
+    return projection
+
+
 async def _insert_unbacked_listing(
     runtime: BareMetalStorefrontRuntime,
     *,
@@ -1445,22 +1454,22 @@ async def _select_contact(site: SourceSite, tmp_path):
 
 
 @pytest.mark.parametrize("available", [True, False], ids=["free", "reported-taken"])
-async def test_an_unbacked_listing_is_accepted_by_introduction_reserving_nothing(
+async def test_an_unbacked_listing_is_accepted_by_introduction_free_or_taken(
     tmp_path, available
 ) -> None:
-    """Spec scenarios "An unbacked bare-metal listing is accepted" and "An
-    unbacked listing's resource reads as unavailable": the recheck matches the
-    held declaration with no availability read and no site call, and nothing
-    is reserved."""
+    """Spec scenario "An unbacked listing's resource reads as unavailable", and
+    the acceptance of "An unbacked bare-metal listing is accepted": with the
+    site's ledger reporting the machine free or taken, the recheck matches the
+    held declaration with no site call and the introduction is accepted. Its
+    reveal is the introduction routes' tests' case."""
     site = _unbacked_source(available=available)
 
-    outcome, threads, opening_calls, runtime = await _select_contact(site, tmp_path)
+    outcome, threads, opening_calls, _ = await _select_contact(site, tmp_path)
 
     assert isinstance(outcome, dict), outcome
     assert outcome["action"] == "accept"
     assert threads == 1
     assert opening_calls == 0
-    assert runtime.capacity_client.reservation_sites == {}
 
 
 @pytest.mark.parametrize(
@@ -1482,6 +1491,10 @@ async def test_an_unbacked_listing_is_accepted_by_introduction_reserving_nothing
             SourceSite(error=ConnectionError("site unreachable")), 503,
             "listing_source_unverifiable", id="site not held",
         ),
+        pytest.param(
+            SourceSite(_unbacked_view_naming_a_host()), 503,
+            "listing_source_unverifiable", id="generation refused",
+        ),
     ],
 )
 async def test_an_unbacked_listing_is_refused_only_by_its_declaration(
@@ -1489,7 +1502,9 @@ async def test_an_unbacked_listing_is_refused_only_by_its_declaration(
 ) -> None:
     """Spec scenario "An unbacked listing's resource moves to another pool",
     and the declared-match and retryable refusals an unbacked listing shares
-    with a backed one."""
+    with a backed one, "The held generation is refused" among them. The
+    refusal names its reason code only, so which declared mismatch refused an
+    opening is the inventory guard's unit tests' to show."""
     outcome, threads, opening_calls, _ = await _select_contact(site, tmp_path)
 
     assert isinstance(outcome, StorefrontClientError), outcome

@@ -171,7 +171,11 @@ class TrustedBareMetalProjection(BaseModel):
     def _validate_generation(self) -> "TrustedBareMetalProjection":
         if not self.site_id.strip():
             raise ValueError("site_id must be non-empty")
-        resource_ids = [item.physical_resource_id for item in self.resources]
+        # A resource is either viewed or reported unbuildable, never both, and
+        # never twice: classification places each in exactly one class.
+        resource_ids = [item.physical_resource_id for item in self.resources] + [
+            item.physical_resource_id for item in self.view_problems
+        ]
         if len(resource_ids) != len(set(resource_ids)):
             raise ValueError("physical_resource_id must be unique within a site")
         return self

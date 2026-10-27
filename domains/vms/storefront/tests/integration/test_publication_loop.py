@@ -11,6 +11,9 @@ storefront's own persistence.
 The VM composition fulfils both of its mechanisms through capacity, so an unbacked
 listing has no option it may publish under it. Tests of unbacked supply declare
 ``alkahest.v1`` as not fulfilled through capacity, which is what lets them publish.
+
+Every seller contact here is an address on the reserved ``.invalid`` domain, a
+development value that must never be used on a public network.
 """
 
 from __future__ import annotations
@@ -1488,19 +1491,26 @@ async def test_a_listing_whose_only_mechanism_is_configured_away_closes_and_reop
 _ALKAHEST_DISABLED = {"schema_version": 1, "priority": [], "alkahest": {"enabled": False}}
 
 
-async def test_a_listing_whose_mechanism_is_disabled_closes_and_reopens(capacity_world):
+@pytest.mark.parametrize("clause_source", ["pool-hint", "configured"])
+async def test_a_listing_whose_mechanism_is_disabled_closes_and_reopens(
+    capacity_world, clause_source
+):
     """A disabled section is the storefront's configuration ruling its
-    mechanism out, so a listing whose only clause, its pool's own pricing hint,
-    names it closes as `no_settlement_option`, as bare metal's does, and reopens
-    under its identity once the section is enabled again. The storefront's
-    configured clauses state none: a configured clause naming a disabled
-    mechanism is its own configuration contradicting itself, which every cycle
-    refuses whole."""
-    hinted = {"gpu": {"H100": {"settlements": [settlement_clause()]}}}
-    capacity_world.pools.append(
-        pool("pool-a", backing="backed", gpu_count=1, pricing=hinted)
-    )
-    with replaced_setting("pricing.settlements", []):
+    mechanism out, so a listing whose only clause names it closes as
+    `no_settlement_option`, as bare metal's does, and reopens under its
+    identity once the section is enabled again: whether the clause is its
+    pool's own pricing hint or the storefront's configured
+    `[pricing].settlements`."""
+    if clause_source == "pool-hint":
+        hinted = {"gpu": {"H100": {"settlements": [settlement_clause()]}}}
+        capacity_world.pools.append(
+            pool("pool-a", backing="backed", gpu_count=1, pricing=hinted)
+        )
+        configured = []
+    else:
+        capacity_world.pools.append(pool("pool-a", backing="backed", gpu_count=1))
+        configured = [settlement_clause()]
+    with replaced_setting("pricing.settlements", configured):
         await _cycle(capacity_world)
         (listing_id,) = await _listings(capacity_world)
         with replaced_setting("settlement", _ALKAHEST_DISABLED):

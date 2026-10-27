@@ -99,12 +99,18 @@ def member(
     The declaration is a whole machine: one unit holding the default hardware,
     with the GPU model as a declared attribute. The site's view repeats the
     capacity and folds enablement into ``available``, as the provisioning
-    service builds it for a pool of ``backing``.
+    service builds it for a pool of ``backing``. ``available=False`` also
+    reports none of the declared capacity available in the site's ledger,
+    where a machine taken shows whatever its backing: an unbacked view carries
+    no availability of its own. ``host_id`` and ``physical_host_id`` are what
+    the view builder is given; the backing's delegate decides whether the view
+    carries them.
     """
     declared = dict(DEFAULT_CAPACITY if capacity is None else capacity)
     return build_projected_resource(
         resource_id,
         capacity=declared,
+        available=None if available else {dimension: 0 for dimension in declared},
         attributes={"gpu_model": DEFAULT_GPU_MODEL} if attributes is None else attributes,
         enabled=enabled,
         publication_views={
@@ -423,8 +429,8 @@ def unbacked_pool(*members: dict[str, Any], pool_id: str = "pool-u", **declarati
 
 
 def unbacked_member(resource_id: str, pool_id: str = "pool-u", **changes: Any):
-    """A member of an unbacked pool whose declaration names a host, as the site
-    projects it: its view carries no delivery term."""
+    """A member of an unbacked pool, its view built as if from a declaration
+    naming a host, as the site projects it: the view carries no delivery term."""
     return member(resource_id, pool_id, backing=UNBACKED, **changes)
 
 
@@ -461,9 +467,10 @@ async def test_an_unbacked_pool_publishes_an_unbacked_listing_with_no_delivery_t
 
 
 async def test_an_unbacked_listing_is_never_judged_against_availability(db):
-    """Spec scenario "An unbacked resource's capacity is consumed": a site
-    ledger reporting the machine taken builds no availability into an unbacked
-    view, so the listing stays open."""
+    """Spec scenario "An unbacked resource's capacity is consumed": the site's
+    ledger reports none of the machine's capacity available, and an unbacked
+    view carries no availability, so the listing stays open, neither closed
+    nor refreshed."""
     site = Site(unbacked_pool(unbacked_member("r1")))
     storefront = Storefront(db, {"site-a": site})
     await storefront.run()
@@ -474,6 +481,7 @@ async def test_an_unbacked_listing_is_never_judged_against_availability(db):
 
     assert storefront.listing("site-a", "pool-u", "r1") == (listing_id, "open", None)
     assert closes(report) == {}
+    assert storefront.registries.operations() == []
 
 
 @pytest.mark.parametrize(
@@ -483,7 +491,7 @@ async def test_an_unbacked_listing_is_never_judged_against_availability(db):
 )
 async def test_a_withdrawn_unbacked_pools_listing_closes_on_the_next_cycle(db, withdrawn):
     """Source reconciliation is the only reconciliation an unbacked listing gets,
-    and the publication loop runs it without an operator."""
+    and the publication cycle, the one the loop's timer runs, closes it."""
     site = Site(unbacked_pool(unbacked_member("r1")))
     storefront = Storefront(db, {"site-a": site})
     await storefront.run()
@@ -1956,7 +1964,8 @@ async def test_a_preview_reports_the_close_and_applies_none(db, tmp_path, monkey
 
 
 #: Contact exchange configured only for another origin, so a candidate from
-#: ``site-a`` builds no contact option.
+#: ``site-a`` builds no contact option. The address is on the reserved
+#: ``.invalid`` domain, a development value never for a public network.
 CONTACT_ELSEWHERE = {
     "enabled": True,
     "origins": {"site-b": {"contact_payload": {"email": "sales@seller.invalid"}}},
