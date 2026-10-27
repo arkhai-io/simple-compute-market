@@ -2,8 +2,9 @@
 
 `session.json` is the shared behavioral contract for the API-credits
 gating middleware. All three implementations reproduce this recorded
-session exactly: Python (`../python`, the reference, which also gates
-the e2e sample service), TypeScript (`../typescript`), and Rust
+session exactly: Python (the api family's gate, `domains/api/gate`, the
+reference, which also gates the e2e sample service), TypeScript
+(`../typescript`), and Rust
 (`../rust`). Keeping the trace in data (not in each language's test
 code) is what makes "identical behavior across three languages" a
 checkable claim rather than a hope.
@@ -24,8 +25,14 @@ checks:
   credit problem).
 - `verify_calls` / `consume_calls` — how many calls to the tokens
   service this single step triggered. These pin the two stateful
-  behaviors: a repeated key skips `verify` (the short-TTL cache), and a
-  key already known-exhausted denies with **zero** consume calls.
+  behaviors: a repeat of a verified secret skips `verify` (the short-TTL
+  cache), while another secret under the same key id is verified and, if
+  refused, leaves the cached one in place; and a key already
+  known-exhausted denies with **zero** consume calls.
+- `verified_secrets` — the exact secrets, in order, the step sent to
+  `verify`. A harness records the `secret` of every verify request body
+  and compares, so a gate that verifies a different secret than the one
+  presented — the cached one, say — fails the step.
 
 ## The scripted service
 
@@ -40,19 +47,20 @@ synchronous consume and the call trace is deterministic.
 ## Implementing a harness
 
 1. Stand up a mock credits service that records `verify`/`consume` calls
-   per key and replays the scripted responses, and drive the **real**
+   per key and the secret each verify sends, and replays the scripted
+   responses, and drive the **real**
    HTTP client against it (not a stub) so request shape and response
    parsing are validated too. The three reference harnesses do this with
    `httpx.MockTransport` (Python) and a real in-process HTTP server
    (`node:http` in TypeScript, `axum` in Rust).
 2. Build the gate from `config`.
-3. For each step: snapshot the call counters, call the gate with the
-   step's `Authorization`, then assert the decision and the per-step
-   call deltas.
+3. For each step: snapshot the call counters and recorded secrets, call
+   the gate with the step's `Authorization`, then assert the decision, the
+   per-step call deltas, and the secrets the step verified.
 
 The reference harnesses (identical structure in each language):
 
-- Python — `python/tests/conformance_runner.py`
+- Python — `domains/api/gate/tests/conformance_runner.py`
 - TypeScript — `typescript/test/conformanceRunner.ts`
 - Rust — `rust/tests/conformance.rs` (+ `rust/tests/common/mod.rs`)
 
@@ -69,7 +77,7 @@ against a signed marketplace identity v2 envelope and signs every
 response, including refusals. It accepts signed requests **or** the legacy
 `X-Admin-Key` shared secret, never both, chosen by its own configuration.
 
-- **Python** signs (`apicredits_middleware.signing`), gated behind the
+- **Python** signs (`arkhai_api_gate.signing`), gated behind the
   `signed` extra. It works against either service configuration.
 - **TypeScript** and **Rust** send the shared secret only. They work
   against a service that has not enabled signed authentication, and are

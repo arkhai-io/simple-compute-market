@@ -14,19 +14,17 @@ from market_arkhai_payments import (
 )
 from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt
 from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
+from arkhai_api_selling.issuance import SettlementRefusal, accepted_agreement, settlement_evidence
 from market_identity import Ed25519Signer
 
-from apicredits_storefront import settlement_stages
+from apicredits_storefront.container import SELLING_CONTRIBUTIONS
 from apicredits_storefront.domain_runtime import get_market_domain_contract
-from apicredits_storefront.services.payment_settlement_service import (
-    ApiCreditPaymentSettlementService,
-)
-from apicredits_storefront.settlement_composition import SELLER_STAGES
+from apicredits_storefront.container import SELLER_STAGES
 from apicredits_storefront.settlement_models import ApiCreditsSettleRequest
-from apicredits_storefront.settlement_stages import SettlementRefusal
-from apicredits_storefront.utils.sqlite_client import SQLiteClient
+from apicredits_storefront.container import storefront_sqlite_client
 from arkhai_apicredits.negotiation.terms import make_api_credits_provision_terms
-from arkhai_apicredits.settlement.credits_client import CreditIssuanceResult
+from arkhai_api.issuance import issuance_result_model
+from arkhai_apicredits.label import API_CREDITS_LABEL
 from tests.listing_bindings import upsert_bound_listing
 
 BUYER = Ed25519Signer(bytes.fromhex("11" * 32))
@@ -35,6 +33,7 @@ SERVICE = Ed25519Signer(bytes.fromhex("55" * 32))
 PAYER = "11111111-1111-4111-8111-111111111111"
 PAYEE = "22222222-2222-4222-8222-222222222222"
 DISPUTE = "33333333-3333-4333-8333-333333333333"
+IssuanceResult = issuance_result_model(API_CREDITS_LABEL)
 
 
 class IssuanceBoundary:
@@ -42,13 +41,13 @@ class IssuanceBoundary:
         self.grants = {}
         self.lose_ack = True
 
-    async def submit_credit_issuance(self, request):
+    async def submit_issuance(self, request):
         already_issued = request.fulfillment_id in self.grants
         self.grants.setdefault(request.fulfillment_id, request)
         if self.lose_ack:
             self.lose_ack = False
             raise TimeoutError("lost acknowledgement after grant commit")
-        return CreditIssuanceResult(
+        return IssuanceResult(
             fulfillment_id=request.fulfillment_id, grant_id=request.fulfillment_id,
             negotiation_id=request.negotiation_id, owner=request.owner,
             service=request.service, resource_id=request.resource_id, quantity=request.quantity,
@@ -60,7 +59,7 @@ class IssuanceBoundary:
 
 @pytest.fixture
 async def payment_context(tmp_path):
-    db = SQLiteClient(str(tmp_path / "storefront.db"))
+    db = storefront_sqlite_client(str(tmp_path / "storefront.db"))
     payments = FakePaymentsClient()
     kit_stage = servicing_stage(
         ArkhaiPaymentsConfig(
@@ -72,10 +71,8 @@ async def payment_context(tmp_path):
     )
     issuance = IssuanceBoundary()
     composition = SimpleNamespace(
-        domain=get_market_domain_contract(), credits_client=issuance, arkhai_payments_stage=kit_stage,
-    )
-    composition.payment_service = lambda store: ApiCreditPaymentSettlementService(
-        db=store, composition=composition, stage=kit_stage, mechanism=ARKHAI_PAYMENTS_MECHANISM,
+        domain=get_market_domain_contract(), credits_client=issuance, servicing={ARKHAI_PAYMENTS_MECHANISM: kit_stage},
+        contributions=SELLING_CONTRIBUTIONS,
     )
     stage = SELLER_STAGES[ARKHAI_PAYMENTS_MECHANISM]
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -138,7 +135,7 @@ async def test_lost_ack_recovery_revalidates_stored_receipt_without_rechecking(p
     reads = payments.count("get_transaction")
 
     payments.unavailable = True
-    context["db"] = SQLiteClient(context["db"].db_path)
+    context["db"] = storefront_sqlite_client(context["db"].db_path)
     ready = await stage.status(**context)
 
     assert ready.payload["status"] == "ready"
@@ -194,11 +191,12 @@ async def test_refund_status_moves_only_through_ordered_transitions(payment_cont
 async def test_recovery_refuses_a_stored_receipt_with_invalid_signature(payment_context):
     stage, context, payments, issuance = payment_context
     db = context["db"]
-    agreement, raw = settlement_stages.accepted_agreement(context["thread"])
+    agreement, raw = accepted_agreement(context["thread"])
     receipt = payments.receipt.model_dump(mode="json", by_alias=True, exclude_none=True)
     receipt["receipt"]["ledger"] = "tampered"
     data = context["thread"]["settlement_data"]
-    evidence = settlement_stages.settlement_evidence(
+    evidence = settlement_evidence(
+        SELLING_CONTRIBUTIONS,
         agreement, raw, reference=data["transaction_id"], status="verified",
         source={**data, "receipt": receipt},
         order=await db.load_listing(listing_id=agreement.listing_id),

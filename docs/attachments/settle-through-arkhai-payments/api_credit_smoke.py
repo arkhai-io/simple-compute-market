@@ -17,7 +17,7 @@ from apicredits_storefront.services.payment_settlement_service import (
 from apicredits_storefront.settlement_composition import (
     build_storefront_settlement_registry,
 )
-from apicredits_storefront.utils.sqlite_client import SQLiteClient
+from apicredits_storefront.container import storefront_sqlite_client
 from market_arkhai_payments import (
     ARKHAI_PAYMENTS_MECHANISM,
     PaymentApproval,
@@ -38,7 +38,8 @@ from smoke_common import (
 )
 
 from arkhai_apicredits.listings.models import coerce_resource_dict
-from arkhai_apicredits.settlement.credits_client import CreditsServiceClient
+from arkhai_api_client import AuthorityClient
+from arkhai_apicredits.label import API_CREDITS_LABEL
 from arkhai_apicredits.settlement.fulfillment import fulfill_api_credits_obligation
 from arkhai_apicredits.settlement.payments import validate_payment_publication_clause
 
@@ -91,12 +92,13 @@ async def main(directory, phase, authority):
     settings = config()
     response = httpx.get("http://127.0.0.1:3181/health", trust_env=False)
     response.raise_for_status()
-    db = SQLiteClient(str(Path(directory) / "storefront.db"))
+    db = storefront_sqlite_client(str(Path(directory) / "storefront.db"))
     identifier = "api-smoke-" + Path(directory).name
 
-    credits_client = CreditsServiceClient(
+    credits_client = AuthorityClient(
         "http://127.0.0.1:3181",
         Path(authority, "admin-key").read_text(),
+        label=API_CREDITS_LABEL,
         transport=httpx.AsyncHTTPTransport(),
     )
 

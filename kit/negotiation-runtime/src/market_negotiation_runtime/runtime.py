@@ -129,6 +129,21 @@ class OpeningRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class OpeningWrite:
+    """Everything an opening writes before the seller's decision is recorded.
+
+    ``thread`` and ``message`` are the keyword arguments of the repository's
+    ``create_negotiation_thread`` and ``save_negotiation_message``; ``opening``
+    is what the domain's own persistence reads. A domain that supplies an
+    ``open_negotiation`` hook commits all three together or not at all.
+    """
+
+    thread: Mapping[str, Any]
+    message: Mapping[str, Any]
+    opening: OpeningRecord
+
+
+@dataclass(frozen=True, slots=True)
 class Acceptance:
     """Complete immutable input to domain-owned artifact construction."""
 
@@ -249,6 +264,9 @@ ProposalFromAmountHook = Callable[
 AgreementHook = Callable[[Any, Mapping[str, Any], NegotiationTerms], AgreementTerms]
 BuildArtifactsHook = Callable[[Acceptance, bool], Mapping[str, Any]]
 PersistOpeningHook = Callable[[Any, OpeningRecord], Awaitable[None]]
+#: ``(repository, write)``: records the thread, its opening message, and the domain's
+#: opening state in one transaction, in place of the separate writes.
+OpenNegotiationHook = Callable[[Any, OpeningWrite], Awaitable[None]]
 PlaceHoldHook = Callable[[Any, Acceptance], Awaitable[None]]
 PersistArtifactsHook = Callable[[Any, Acceptance, Mapping[str, Any]], Awaitable[None]]
 DecisionWireHook = Callable[[NegotiationDecision], Mapping[str, Any]]
@@ -280,6 +298,9 @@ class NegotiationDomainHooks:
     storefront_is_paused: Callable[[], bool]
     stage_event: StageEventHook
     persist_opening: PersistOpeningHook | None = None
+    # When set, the runtime makes none of the opening writes itself, and
+    # ``persist_opening`` is the hook's to call or fold in.
+    open_negotiation: OpenNegotiationHook | None = None
     place_hold: PlaceHoldHook | None = None
     persist_artifacts: PersistArtifactsHook | None = None
     # Checks the listing against the declaration it was published from before
@@ -353,26 +374,25 @@ class NegotiationRuntime:
         buyer = acceptance.buyer_principal
         seller = acceptance.seller_principal
 
-        await repository.create_negotiation_thread(
-            negotiation_id=negotiation_id,
-            our_listing_id=listing_id,
-            their_listing_id="",
-            our_agent_id=seller_agent_url,
-            their_agent_id=buyer_agent_url,
-            buyer_principal=buyer,
-            seller_principal=seller,
-            owner_id=seller_agent_url,
-            our_initial_price=int(evaluation.our_amount),
-            our_strategy=evaluation.strategy_label,
-            requested_duration_seconds=decoded_terms.requested_duration_seconds,
-            requested_start_utc=decoded_terms.requested_start_utc,
-            buyer_escrow_proposal=acceptance.pinned_proposal,
-            provision_terms=(
+        thread = {
+            "negotiation_id": negotiation_id,
+            "our_listing_id": listing_id,
+            "their_listing_id": "",
+            "our_agent_id": seller_agent_url,
+            "their_agent_id": buyer_agent_url,
+            "buyer_principal": buyer,
+            "seller_principal": seller,
+            "owner_id": seller_agent_url,
+            "our_initial_price": int(evaluation.our_amount),
+            "our_strategy": evaluation.strategy_label,
+            "requested_duration_seconds": decoded_terms.requested_duration_seconds,
+            "requested_start_utc": decoded_terms.requested_start_utc,
+            "buyer_escrow_proposal": acceptance.pinned_proposal,
+            "provision_terms": (
                 dict(decoded_terms.wire) if decoded_terms.wire is not None else None
             ),
-        )
-        await self._append_message(
-            repository,
+        }
+        message = self._message(
             negotiation_id=negotiation_id,
             sender_principal=buyer,
             sender_role="buyer",
@@ -394,8 +414,15 @@ class NegotiationRuntime:
             evaluation=evaluation,
             binding=acceptance.binding,
         )
-        if hooks.persist_opening is not None:
-            await hooks.persist_opening(repository, opening)
+        if hooks.open_negotiation is not None:
+            await hooks.open_negotiation(
+                repository, OpeningWrite(thread=thread, message=message, opening=opening)
+            )
+        else:
+            await repository.create_negotiation_thread(**thread)
+            await repository.save_negotiation_message(**message)
+            if hooks.persist_opening is not None:
+                await hooks.persist_opening(repository, opening)
         terminal_state = await self._record_seller_decision(
             repository=repository,
             negotiation_id=negotiation_id,
@@ -1113,9 +1140,8 @@ class NegotiationRuntime:
         if hooks.persist_artifacts is not None:
             await hooks.persist_artifacts(repository, acceptance, artifacts)
 
-    async def _append_message(
+    def _message(
         self,
-        repository: Any,
         *,
         negotiation_id: str,
         sender_principal: Identity,
@@ -1125,19 +1151,23 @@ class NegotiationRuntime:
         proposed_amount: int | None,
         action_taken: str,
         message_type: str,
-    ) -> int:
-        return await repository.save_negotiation_message(
-            negotiation_id=negotiation_id,
-            round=None,
-            sender_principal=sender_principal,
-            sender_role=sender_role,
-            our_price=our_amount,
-            their_price=their_amount,
-            proposed_price=proposed_amount,
-            action_taken=action_taken,
-            message_type=message_type,
-            timestamp=self._now().isoformat(),
-        )
+    ) -> dict[str, Any]:
+        """The repository's ``save_negotiation_message`` arguments for one message."""
+        return {
+            "negotiation_id": negotiation_id,
+            "round": None,
+            "sender_principal": sender_principal,
+            "sender_role": sender_role,
+            "our_price": our_amount,
+            "their_price": their_amount,
+            "proposed_price": proposed_amount,
+            "action_taken": action_taken,
+            "message_type": message_type,
+            "timestamp": self._now().isoformat(),
+        }
+
+    async def _append_message(self, repository: Any, **message: Any) -> int:
+        return await repository.save_negotiation_message(**self._message(**message))
 
     async def _record_seller_decision(
         self,

@@ -10,6 +10,7 @@ on:
       - 'domains/apicredits/**'
       - 'domains/bare_metal/**'
       - 'domains/compute/**'
+      - 'domains/api/**'
       - 'provisioning/compute/**'
       - '.github/workflows/publish-pypi.yml'
   workflow_dispatch:
@@ -103,6 +104,17 @@ jobs:
             kit-resource-pools-client: ['kit/resource-pools-client/**', '.github/workflows/publish-pypi.yml']
             kit-storefront: ['kit/storefront/**', '.github/workflows/publish-pypi.yml']
             compute: ['domains/compute/**', '.github/workflows/publish-pypi.yml']
+            api: ['domains/api/pyproject.toml', 'domains/api/src/**', 'domains/api/tests/**', '.github/workflows/publish-pypi.yml']
+            api-contracts: ['domains/api/contracts/**', '.github/workflows/publish-pypi.yml']
+            api-client: ['domains/api/client/**', '.github/workflows/publish-pypi.yml']
+            api-authority: ['domains/api/authority/**', '.github/workflows/publish-pypi.yml']
+            api-selling: ['domains/api/selling/**', '.github/workflows/publish-pypi.yml']
+            api-selling-alkahest: ['domains/api/selling-alkahest/**', '.github/workflows/publish-pypi.yml']
+            api-selling-arkhai-payments: ['domains/api/selling-arkhai-payments/**', '.github/workflows/publish-pypi.yml']
+            api-buying: ['domains/api/buying/**', '.github/workflows/publish-pypi.yml']
+            api-buying-alkahest: ['domains/api/buying-alkahest/**', '.github/workflows/publish-pypi.yml']
+            api-buying-arkhai-payments: ['domains/api/buying-arkhai-payments/**', '.github/workflows/publish-pypi.yml']
+            api-gate: ['domains/api/gate/**', '.github/workflows/publish-pypi.yml']
             bare-metal: ['domains/bare_metal/pyproject.toml', 'domains/bare_metal/src/**', 'domains/bare_metal/tests/**', '.github/workflows/publish-pypi.yml']
             bare-metal-storefront: ['domains/bare_metal/storefront/**', '.github/workflows/publish-pypi.yml']
             bare-metal-buyer: ['domains/bare_metal/buyer/**', '.github/workflows/publish-pypi.yml']
@@ -122,7 +134,6 @@ jobs:
             vms-storefront: ['domains/vms/storefront/**', '.github/workflows/publish-pypi.yml']
             apicredits-domain: ['domains/apicredits/pyproject.toml', 'domains/apicredits/src/**', 'domains/apicredits/tests/**', '.github/workflows/publish-pypi.yml']
             apicredits-buyer: ['domains/apicredits/buyer/**', '.github/workflows/publish-pypi.yml']
-            apicredits-middleware: ['domains/apicredits/middleware/python/**', '.github/workflows/publish-pypi.yml']
             apicredits-storefront: ['domains/apicredits/storefront/**', '.github/workflows/publish-pypi.yml']
             apicredits-service: ['domains/apicredits/service/**', '.github/workflows/publish-pypi.yml']
       - name: Build publish matrix
@@ -165,6 +176,17 @@ jobs:
             {"key": "kit-resource-pools-client", "path": "kit/resource-pools-client",     "dist": "arkhai-kit-resource-pools-client"},
             {"key": "kit-storefront",         "path": "kit/storefront",                   "dist": "arkhai-kit-storefront"},
             {"key": "compute",                "path": "domains/compute",                  "dist": "arkhai-compute"},
+            {"key": "api",                    "path": "domains/api",                      "dist": "arkhai-api"},
+            {"key": "api-contracts",          "path": "domains/api/contracts",            "dist": "arkhai-api-contracts"},
+            {"key": "api-client",             "path": "domains/api/client",               "dist": "arkhai-api-client"},
+            {"key": "api-authority",          "path": "domains/api/authority",            "dist": "arkhai-api-authority"},
+            {"key": "api-selling",            "path": "domains/api/selling",              "dist": "arkhai-api-selling"},
+            {"key": "api-selling-alkahest",   "path": "domains/api/selling-alkahest",     "dist": "arkhai-api-selling-alkahest"},
+            {"key": "api-selling-arkhai-payments", "path": "domains/api/selling-arkhai-payments", "dist": "arkhai-api-selling-arkhai-payments"},
+            {"key": "api-buying",             "path": "domains/api/buying",               "dist": "arkhai-api-buying"},
+            {"key": "api-buying-alkahest",    "path": "domains/api/buying-alkahest",      "dist": "arkhai-api-buying-alkahest"},
+            {"key": "api-buying-arkhai-payments", "path": "domains/api/buying-arkhai-payments", "dist": "arkhai-api-buying-arkhai-payments"},
+            {"key": "api-gate",               "path": "domains/api/gate",                 "dist": "arkhai-api-gate"},
             {"key": "bare-metal",            "path": "domains/bare_metal",              "dist": "arkhai-bare-metal"},
             {"key": "bare-metal-storefront", "path": "domains/bare_metal/storefront",   "dist": "arkhai-bare-metal-storefront"},
             {"key": "bare-metal-buyer",      "path": "domains/bare_metal/buyer",        "dist": "arkhai-bare-metal-buyer"},
@@ -184,7 +206,6 @@ jobs:
             {"key": "vms-storefront",         "path": "domains/vms/storefront",           "dist": "arkhai-vms-storefront", "wheel_only": true},
             {"key": "apicredits-domain",       "path": "domains/apicredits",               "dist": "arkhai-apicredits-domain"},
             {"key": "apicredits-buyer",        "path": "domains/apicredits/buyer",          "dist": "arkhai-apicredits-buyer", "wheel_only": true},
-            {"key": "apicredits-middleware",   "path": "domains/apicredits/middleware/python", "dist": "arkhai-apicredits-middleware"},
             {"key": "apicredits-storefront",   "path": "domains/apicredits/storefront",     "dist": "arkhai-apicredits-storefront"},
             {"key": "apicredits-service",      "path": "domains/apicredits/service",        "dist": "arkhai-apicredits-service"}
           ]

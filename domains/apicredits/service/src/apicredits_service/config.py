@@ -29,7 +29,11 @@ import tomllib
 from pathlib import Path
 from typing import List
 
+from arkhai_api.labels import IssuanceLabel
+from arkhai_api_authority import AuthorityConfig, CapacityProfile
 from dynaconf import Dynaconf
+from market_resource_pools import DEFAULT_POOL_ID
+from market_resource_pools_contracts import BACKED
 
 _SRC_DIR = Path(__file__).parent
 _CONFIG_DIR = Path(os.environ.get("CONFIG_DIRECTORY", str(_SRC_DIR / "config")))
@@ -126,3 +130,26 @@ class Settings:
 
 
 settings = Settings(_dynaconf)
+
+
+# The API-credits deployment of the family authority: its label, the one
+# capacity profile its pool and reservations carry, and its key namespace.
+ISSUANCE_LABEL = IssuanceLabel("api-credits", "api-credit-fulfillment.v1")
+
+CAPACITY_PROFILE = CapacityProfile(
+    offering_mode="api_credits",
+    pool_provider="api_credits",
+    pool_id=DEFAULT_POOL_ID,
+    pool_label="Default Pool",
+    deliverable_modes=frozenset({"api_credits"}),
+    advertisable_modes=frozenset({"api_credits"}),
+    backing=BACKED,
+)
+
+authority_config = AuthorityConfig(
+    label=ISSUANCE_LABEL,
+    profile=CAPACITY_PROFILE,
+    database_url=str(settings.database_url),
+    distribution="arkhai-apicredits-service",
+    key_prefix="ak",
+)

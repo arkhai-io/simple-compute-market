@@ -8,10 +8,6 @@ from typer.testing import CliRunner
 
 import apicredits_storefront.container as container
 from apicredits_storefront import cli, server
-from apicredits_storefront.controllers.listings_controller import (
-    ListingsController,
-    PublishFromQuotaRequest,
-)
 
 
 class _ListingService:
@@ -23,19 +19,19 @@ class _ListingService:
         return {"status": "created", "listing_id": "L-1"}
 
 
-async def test_the_publish_route_passes_the_submitted_settlement_clauses():
+async def test_the_publish_route_passes_the_submitted_settlement_clauses(monkeypatch):
     service = _ListingService()
-    controller = ListingsController.__new__(ListingsController)
-    controller._listing_svc = service
+    monkeypatch.setattr(container, "resolved_listing_service", service)
     clauses = [{"mechanism": "arkhai.payments.v1", "asset": "usd"}]
 
-    await controller.publish_from_quota(
-        PublishFromQuotaRequest(
+    await container.LISTING_ROUTES.publish_from_quota(
+        container.PublishFromQuotaRequest(
             resource_id="svc-quota", service_name="Acme", settlement_clauses=clauses
         )
     )
 
     assert service.calls[0]["settlement_clauses"] == clauses
+    assert service.calls[0]["service_name"] == "Acme"
 
 
 def test_the_publish_command_uses_the_storefronts_composed_listing_service(monkeypatch):

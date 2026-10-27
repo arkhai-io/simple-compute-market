@@ -141,7 +141,8 @@ def test_payment_deal_issues_credits_after_a_verified_receipt(
     payment_deal_state.complete(
         DealStage.SETTLEMENT, settlement_id=str(lifecycle[3]["transaction_id"])
     )
-    credentials = buy.wait_for_event("credentials_delivered", timeout=10.0)["credentials"]
+    buy.wait_for_event("credentials_delivered", timeout=10.0)
+    credentials = payment_buyer_cli.credentials("credits", buy.run_id)
     with httpx.Client(timeout=15) as client:
         consumed = client.get(
             f"{credentials['base_url'].rstrip('/')}/api/forecast",
@@ -172,7 +173,7 @@ def test_settlement_re_driven_from_the_run_log_is_idempotent(
         timeout=90.0,
     )
     assert_market_run_succeeded(again, command="market credits settle --from <run>")
-    delivered = again.wait_for_event("credentials_delivered", timeout=10.0)["credentials"]
+    delivered = again.wait_for_event("credentials_delivered", timeout=10.0)
     assert delivered["key_id"] == payment_deal_state.delivery["key_id"]
 
 

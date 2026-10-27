@@ -55,7 +55,7 @@ project:
 - `credits-service`: the seller-operated key, credit, quota, and
   fulfillment service used by the storefront and gateway.
 - `vllm-gateway`: an OpenAI-compatible reverse proxy protected by
-  `arkhai-apicredits-middleware`.
+  `arkhai-api-gate`.
 - `vllm`: the upstream model server.
 - `buyer`: an optional tool container for validating the purchase and
   API-call path from the buyer role.
@@ -195,6 +195,11 @@ vllm-gateway:
     APICREDITS_MIDDLEWARE_PURCHASE_REGISTRY_URL: http://api-credits-registry:8080
 ```
 
+The gateway reads these with
+`GateConfig.from_env("APICREDITS_MIDDLEWARE_", authority_label="credits-service")`:
+the gate names no prefix of its own, so the gateway passes the one its
+environment uses.
+
 For a GPU host, replace the `vllm` service with the CUDA image and an
 NVIDIA device reservation:
 
@@ -252,14 +257,15 @@ alkahest_address_config_path = "/config/alkahest_anvil_addresses.json"
 urls = ["http://api-credits-registry:8080"]
 ```
 
-Run the purchase from a buyer environment:
+Run the purchase from a buyer environment. The buyer settles on the
+configured `[chains.<name>]` entry the listing accepts and signs with the
+`[wallet]` key above; neither is passed on the command line:
 
 ```bash
 market credits buy \
   --quantity 3 \
   --new-key \
-  --service-name vllm-chat \
-  --chain anvil \
+  --resource 'service_name="vllm-chat"' \
   --max-matches 5 \
   --max-rounds 10 \
   --poll-interval 1.0 \
@@ -268,10 +274,16 @@ market credits buy \
   --yes
 ```
 
+The successful settlement output shows the issued bearer secret once and
+keeps it in the buyer's private credential store; the run log records only
+the key ID and the store's reference. Read it again by run ID:
 
+```bash
+market credits credentials show --from <run-id> --json
+```
 
-The successful settlement output includes the issued bearer secret. Use
-it from the buyer environment when calling the gated vLLM endpoint:
+Use the secret from the buyer environment when calling the gated vLLM
+endpoint:
 
 ```bash
 curl -s http://vllm-gateway:8080/v1/chat/completions \

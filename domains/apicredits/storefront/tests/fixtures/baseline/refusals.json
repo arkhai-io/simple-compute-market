@@ -1,0 +1,45 @@
+{
+  "changed_reuse": {
+    "body": {
+      "detail": "Request ID was reused with changed signed content"
+    },
+    "status": 409
+  },
+  "exact_retry": {
+    "body": {
+      "message": "Storefront paused. New negotiations will receive 503.",
+      "paused": true
+    },
+    "status": 200
+  },
+  "invalid_signature": {
+    "body": {
+      "detail": "Invalid marketplace signature"
+    },
+    "status": 403
+  },
+  "role_not_authorized": {
+    "body": {
+      "detail": "Marketplace authentication role, principal, or route does not match"
+    },
+    "status": 403
+  },
+  "unauthenticated": {
+    "body": {
+      "detail": "Missing X-Market-Signature-Version header"
+    },
+    "status": 401
+  },
+  "unknown_lifecycle_loop": {
+    "body": {
+      "detail": "no lifecycle loop 'no-such-loop'"
+    },
+    "status": 404
+  },
+  "untrusted_principal": {
+    "body": {
+      "detail": "Marketplace principal is not active for this subject"
+    },
+    "status": 403
+  }
+}

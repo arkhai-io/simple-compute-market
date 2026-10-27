@@ -1157,6 +1157,51 @@ MUST remain distinguishable from a running loop whose last cycle failed.
 - **THEN** the recorded outcome names the failing stage and the exception's type, and not its
   message
 
+### Requirement: System status carries the storefront's own principal
+
+The core storefront's status model (`HealthResponse`) MUST carry an optional `principal`,
+the storefront's own marketplace principal, so a domain's system status reports it in the
+shared shape and the canonical storefront client reads it as a typed field. A storefront
+that reports its principal MUST report it on system status and not on its liveness probe;
+the field's absence MUST leave a response valid for a storefront that reports none.
+
+#### Scenario: The administrator reads the storefront's principal
+
+- **WHEN** the administrator reads an api-family storefront's system status through the
+  canonical storefront client
+- **THEN** the response carries the storefront's marketplace principal, and its liveness
+  probe does not
+
+### Requirement: The api family shares one access vocabulary and kit
+
+API credits, and every API-selling domain that follows it, MUST form the `api`
+family, with one vocabulary package under `domains/api` and one family kit of
+distributions beneath it, placed under the family directory the scope rule
+names. A domain of the family MUST NOT define the purchase shape, issuance
+digests, key authority, issuance composition, buyer flows, mechanism stages, or
+bearer gate of its own, nor obtain them by importing another. Another
+domain selling prepaid bearer access MUST be able to compose the kit by
+supplying contributions alone, without the kit learning its listing schema or
+branching on its identity; access sold without a prepaid balance — by
+subscription, by invoice, or under a provider's own authentication — is outside
+the kit's scope until its ledger-free distribution exists.
+
+#### Scenario: API credits composes the kit
+
+- **WHEN** the API-credits storefront, authority service, gated sample app, and
+  buyer plugin are built
+- **THEN** each imports the family distributions and no other domain, and the
+  architecture check classifies every family project from its path with no
+  override row
+
+#### Scenario: A third prepaid-access domain is added
+
+- **WHEN** a new domain under the `api` family selling prepaid bearer access
+  supplies its selling and buying bundles, its capacity profile, and its
+  service root
+- **THEN** it composes the storefront, authority, gate, and buyer flows without
+  a change to any `domains/api` distribution
+
 ## Evidence
 
 - Layer, scope, and kind rules over every project: `make check-architecture`, `docs/development/ARCHITECTURE.toml`, `scripts/architecture.py`, and `scripts/tests/test_architecture.py`; VM concept-module and contract-construction guardrails: `domains/vms/storefront/tests/unit/test_architecture_imports.py`.

@@ -11,7 +11,7 @@
  * Decision vocabulary (status + machine-readable body) is identical
  * across languages — it is the behavioral contract the conformance
  * fixtures pin (`../conformance`). This is a direct port of the Python
- * `apicredits_middleware.gate`.
+ * `arkhai_api_gate.gate`.
  *
  * Concurrency: JavaScript is single-threaded, so a synchronous
  * read-modify-write of the state map is already atomic. The Python lock
@@ -44,10 +44,24 @@ export interface GateDecision {
 
 interface KeyState {
   verify: VerifyResult;
-  verifyExpires: number; // monotonic ms
+  verifyExpires: number; // monotonic seconds
   estimatedBalance: number;
+  secretFingerprint: Uint8Array;
+  verifiedTicket: number;
   pending: ConsumeItem[];
   exhausted: boolean;
+}
+
+async function fingerprint(secret: string): Promise<Uint8Array> {
+  return new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret)));
+}
+
+/** Constant-time equality of two fingerprints. */
+function sameFingerprint(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
 }
 
 /** Monotonic clock in seconds (mirrors Python's `time.monotonic()`). */
@@ -91,10 +105,15 @@ export class TokenGate {
   private readonly client: TokensApi;
   private readonly states = new Map<string, KeyState>();
   private flushTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly clock: () => number;
+  // Orders verifications by when they start; a clock cannot, since two
+  // reads may return the same value.
+  private lastTicket = 0;
 
-  constructor(cfg: GateConfig, client: TokensApi) {
+  constructor(cfg: GateConfig, client: TokensApi, options: { clock?: () => number } = {}) {
     this.cfg = cfg;
     this.client = client;
+    this.clock = options.clock ?? nowSeconds;
   }
 
   // -- lifecycle ----------------------------------------------------
@@ -147,15 +166,36 @@ export class TokenGate {
   }
 
   private async verifiedState(keyId: string, secret: string): Promise<VerifyResult> {
-    const now = nowSeconds();
+    // The key id is public, read off any bearer header, so a cached
+    // verification answers only for the exact secret that earned it.
+    const secretFingerprint = await fingerprint(secret);
+    const now = this.clock();
     const cached = this.states.get(keyId);
-    if (cached && cached.verifyExpires > now && cached.verify.valid) {
+    if (
+      cached &&
+      cached.verifyExpires > now &&
+      cached.verify.valid &&
+      sameFingerprint(cached.secretFingerprint, secretFingerprint)
+    ) {
       return cached.verify;
     }
 
+    const ticket = ++this.lastTicket;
     const verify = await this.client.verify(keyId, secret);
 
     const existing = this.states.get(keyId);
+    if (existing && existing.verifiedTicket > ticket) {
+      // A verification that started after this one has already answered;
+      // an older answer must not replace what it knew.
+      return verify;
+    }
+    if (existing && !verify.valid && !sameFingerprint(existing.secretFingerprint, secretFingerprint)) {
+      // A refused secret other than the cached one says nothing about the
+      // cached credential, so it must not evict it; but an older answer for
+      // this secret must not be cached over it.
+      existing.verifiedTicket = Math.max(existing.verifiedTicket, ticket);
+      return verify;
+    }
     if (existing) {
       // Keep the running estimate (it may be ahead of the verify-reported
       // balance because of un-flushed charges).
@@ -165,12 +205,16 @@ export class TokenGate {
       existing.verify = verify;
       existing.verifyExpires = now + this.cfg.verifyTtlSeconds;
       existing.estimatedBalance = estimated;
+      existing.secretFingerprint = secretFingerprint;
+      existing.verifiedTicket = ticket;
       if (verify.valid) existing.exhausted = false;
     } else {
       this.states.set(keyId, {
         verify,
         verifyExpires: now + this.cfg.verifyTtlSeconds,
         estimatedBalance: verify.balance,
+        secretFingerprint,
+        verifiedTicket: ticket,
         pending: [],
         exhausted: false,
       });

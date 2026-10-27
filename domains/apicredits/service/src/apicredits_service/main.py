@@ -11,12 +11,12 @@ import apicredits_service.container as _container_module
 from apicredits_service.config import settings
 from apicredits_service.controllers.keys_controller import make_keys_router
 from apicredits_service.controllers.system_controller import make_health_router, make_system_router
-from apicredits_service.db.database import load_pool_directory
 from apicredits_service.identity import (
     expected_principals,
     require_signer,
     signed_authentication_enabled,
 )
+from arkhai_api_authority import load_pool_directory, site_route_contracts
 from market_site.auth import (
     CAPACITY_ROUTE_CONTRACTS,
     EXCLUDED_PATHS,
@@ -24,7 +24,9 @@ from market_site.auth import (
 )
 from market_site.router import make_capacity_router
 from apicredits_service.middleware.auth import AdminKeyAuthMiddleware
-from apicredits_service.middleware.route_contracts import CREDITS_ROUTE_CONTRACTS
+
+# The authority's routes, adapted from the declarations its clients sign from.
+CREDITS_ROUTE_CONTRACTS = site_route_contracts()
 
 
 logging.basicConfig(
@@ -139,9 +141,12 @@ app.add_middleware(
 #   /api/v1/capacity/*               <- site quota ledger (market_site)
 # ---------------------------------------------------------------------------
 app.include_router(make_health_router())                                       # /health
-app.include_router(make_system_router(), prefix="/api/v1")                     # /api/v1/system/*
+app.include_router(                                                            # /api/v1/system/*
+    make_system_router(lambda: _container_module.resolved_system_service),
+    prefix="/api/v1",
+)
 app.include_router(                                                            # /api/v1/issuance, /api/v1/keys/*
-    make_keys_router(lambda: _container_module.resolved_keys_service),
+    make_keys_router(lambda: _container_module.resolved_route_service),
     prefix="/api/v1",
 )
 app.include_router(                                                            # /api/v1/capacity/*

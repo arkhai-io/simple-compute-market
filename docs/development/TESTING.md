@@ -110,7 +110,12 @@ Two narrow exceptions are permitted:
    before it ever reached the HTTP layer). These verify the *server's*
    validation boundary, not the client's, and must only assert on
    status codes, never on response body field names, and must be
-   clearly commented as rejection-path tests.
+   clearly commented as rejection-path tests. The one exception is the
+   API-credits compatibility baselines
+   (`domains/apicredits/service/tests/integration/test_compat_baseline.py`,
+   `domains/apicredits/storefront/tests/integration/test_compat_baseline.py`):
+   their refusal records diff each refusal's status and body against the
+   recorded release, because the body is the compatibility surface they hold.
 2. **Service-internal state setup** — inserting DB rows directly to
    establish precondition state that cannot be expressed through any
    HTTP API endpoint. This is not an HTTP call at all; it is standard
@@ -387,7 +392,14 @@ project of its own:
 - **API-credit lane** (`make -C e2e-tests test-e2e-apicredits`): the credits
   registry, service, storefront, and gated sample app, a compute-schema registry
   of the lane's own that the credits deal's discovery is routed away from, and
-  the dev chain.
+  the dev chain. The lane mounts the engine socket into the test container
+  (`BUYER_MACHINE_DOCKER_SOCKET`), and its upgrade/rollback scenario
+  (`e2e_credits_service_rollback`,
+  `e2e-tests/tests/e2e/roles/scenarios/apicredits/test_credits_service_upgrade_rollback.py`)
+  runs last: through that socket it starts the previous release's pre-kit image
+  over a copy of the database the deal scenarios wrote, and the current image
+  over a database the pre-kit image wrote, and checks each reads the other's
+  grants and serves the live route surface.
 
 The compute lanes' provisioning services run their mock profile because the
 run selects it: `PROVISIONING_MODE` (`mock` or `real`, default `mock`) is read
@@ -556,8 +568,9 @@ proving that no execution layer relies on another layer's earlier decision:
   Provisioning integration tests own server-side refusal through the typed
   client — status and stored state only, per the rejection-path rule — plus the
   upgrade migration, the startup refusal, and every projected pool carrying both
-  declarations. The API-credits service's integration suite owns its own
-  migration and startup refusal.
+  declarations. The api family authority library's integration suite
+  (`domains/api/authority/tests/integration/test_pool_declarations_migration.py`)
+  owns the API-credits service's migration and startup refusal.
 - Provider and backing immutability follow the same split. `kit/resource-pools`
   unit tests own the pure stored-versus-proposed comparison; no database is
   needed to prove it. Its library integration suite owns preserved state on
@@ -890,8 +903,9 @@ assertions of the same behavior. Keeping the trace in data, not in each
 language's test code, is what makes "identical behavior across
 languages" a checkable claim rather than an assumption.
 
-**Current example:** the API-credits gating middleware's Python
-(reference implementation), TypeScript, and Rust ports all replay
+**Current example:** the api family's bearer gate — the Python
+`arkhai-api-gate` (reference implementation) and the API-credits
+TypeScript and Rust middlewares — all replay
 `domains/apicredits/middleware/conformance/session.json` — one recorded
 session of requests against the gate, with each step asserting the
 allow/deny decision, the deny body's machine-readable error code,
@@ -900,7 +914,7 @@ stateful collaborators the step is meant to exercise (cache-hit
 skipping, zero-calls-on-known-exhaustion). See
 `domains/apicredits/middleware/conformance/README.md` for what each step
 field asserts, and the runners at
-`domains/apicredits/middleware/python/tests/conformance_runner.py`,
+`domains/api/gate/tests/conformance_runner.py`,
 `domains/apicredits/middleware/typescript/test/conformanceRunner.ts`,
 and `domains/apicredits/middleware/rust/tests/conformance.rs`.
 

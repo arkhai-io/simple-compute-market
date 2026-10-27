@@ -1,6 +1,6 @@
 {
   "name": "@arkhai/apicredits-middleware",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Seller-side API-credits gating middleware: verify + meter prepaid API credits against the credits service, map exhaustion to a 402 with a purchase pointer. Behavioral parity with the Python and Rust middlewares (../conformance).",
   "type": "module",
   "license": "MIT",

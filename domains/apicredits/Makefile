@@ -25,10 +25,11 @@ test-buyer:
 test-sample-app:
 	cd sample-app && make test
 
-# Cross-language middleware parity: all three implementations replay the
-# shared conformance/session.json. Python is the reference; TS runs under
-# Node's native type-stripping; Rust drives reqwest against an in-process
-# axum mock. Each needs its own toolchain (uv / node+npm / cargo).
+# Cross-language gate parity: the TypeScript and Rust middlewares replay the
+# shared conformance/session.json that the Python reference, the family gate,
+# replays in `make test-api-gate`. TS runs under Node's native type-stripping;
+# Rust drives reqwest against an in-process axum mock. Each needs its own
+# toolchain (node+npm / cargo).
 check-middleware-toolchains:
 	@node -e 'const v=process.versions.node.split(".").map(Number); process.exit((v[0] > 22 || (v[0] === 22 && v[1] >= 6)) && ["strip", "transform"].includes(process.features.typescript) ? 0 : 1)' 2>/dev/null || { \
 		echo "ERROR: API-credits TypeScript middleware tests require Node.js >= 22.6 with native TypeScript type stripping enabled."; \
@@ -62,6 +63,5 @@ check-middleware-toolchains:
 	}
 
 test-middleware: check-middleware-toolchains
-	cd middleware/python && make test
 	cd middleware/typescript && npm install --no-audit --no-fund --silent && npm run check
 	cd middleware/rust && cargo test

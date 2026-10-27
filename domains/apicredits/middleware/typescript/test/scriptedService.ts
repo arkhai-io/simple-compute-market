@@ -21,9 +21,20 @@ interface ServiceScript {
   consume?: Record<string, ConsumeEntry[]>;
 }
 
+/** The verify body's secret, or null when it carries none, so the step fails rather than the harness. */
+function sentSecret(raw: string): string | null {
+  try {
+    const body = JSON.parse(raw) as { secret?: unknown };
+    return typeof body?.secret === "string" ? body.secret : null;
+  } catch {
+    return null;
+  }
+}
+
 export class ScriptedService {
   readonly verifyCalls = new Map<string, number>();
   readonly consumeCalls = new Map<string, number>();
+  readonly verifiedSecrets: (string | null)[] = [];
   private readonly cursor = new Map<string, number>();
   private readonly verify: Record<string, Record<string, unknown>[]>;
   private readonly consume: Record<string, ConsumeEntry[]>;
@@ -54,11 +65,12 @@ export class ScriptedService {
     return [...this.consumeCalls.values()].reduce((a, b) => a + b, 0);
   }
 
-  private route(path: string): { status: number; body: unknown } {
+  private route(path: string, raw: string): { status: number; body: unknown } {
     const parts = path.replace(/^\/+|\/+$/g, "").split("/");
     if (path.endsWith("/verify")) {
       const keyId = parts[parts.length - 2];
       this.bump(this.verifyCalls, keyId);
+      this.verifiedSecrets.push(sentSecret(raw));
       return { status: 200, body: this.next("verify", keyId, this.verify) };
     }
     if (path.endsWith("/consume")) {
@@ -71,7 +83,6 @@ export class ScriptedService {
   }
 
   private handle(req: IncomingMessage, res: ServerResponse): void {
-    // Drain the body (validates that the client sends well-formed JSON).
     let raw = "";
     req.on("data", (chunk) => {
       raw += chunk;
@@ -83,7 +94,7 @@ export class ScriptedService {
         res.writeHead(status, { "content-type": "application/json" });
         res.end(payload);
       };
-      const routed = this.route(path);
+      const routed = this.route(path, raw);
       send(routed.status, routed.body);
     });
   }
@@ -101,8 +112,8 @@ export class ScriptedService {
             hostname: "127.0.0.1",
             port: 30_000 + Math.floor(Math.random() * 20_000),
             fetch: async (request: Request) => {
-              await request.text();
-              const routed = this.route(new URL(request.url).pathname);
+              const raw = await request.text();
+              const routed = this.route(new URL(request.url).pathname, raw);
               return Response.json(routed.body, { status: routed.status });
             },
           });

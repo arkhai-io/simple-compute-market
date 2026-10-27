@@ -1,0 +1,42 @@
+[project]
+name = "arkhai-api-selling-arkhai-payments"
+version = "0.1.0"
+license = "MIT"
+description = "The api family's selling-side Arkhai payments library: the seller's payment stage and its quota hold, receipt-gated issuance and refunds, the payer and clause validators, and the payment reconciliation loop."
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "arkhai-api>=0.1.0",
+    "arkhai-api-selling>=0.4.0",
+    "arkhai-core>=0.4.0",
+    "arkhai-kit-arkhai-payments>=0.3.0",
+    "arkhai-kit-identity>=0.4.0",
+    "arkhai-kit-negotiation-runtime>=0.6.0",
+    "arkhai-kit-settlement-runtime>=0.4.0",
+    "arkhai-kit-storefront>=0.8.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/arkhai_api_selling_arkhai_payments"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = [
+    # `schema` is the issuance and evidence wire key; see the vocabulary's pyproject.
+    "ignore:Field name \"schema\".*shadows an attribute:UserWarning:arkhai_api.issuance",
+    "ignore:Field name \"schema\".*shadows an attribute:UserWarning:arkhai_api.evidence",
+    "ignore:Field name \"schema\".*shadows an attribute:UserWarning:arkhai_api_contracts.models",
+    "ignore:Field name \"schema\" in \"Issuance(Request|Result|Response)\" shadows an attribute in parent:UserWarning:pydantic.main",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23.8,<1.0.0",
+]

@@ -7,9 +7,13 @@ snapshot.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
-from apicredits_storefront.listing_source_check import build_listing_source_check
+from arkhai_api_selling.quota_listing import build_listing_source_check
+
+from apicredits_storefront.container import SELLING_CONTRIBUTIONS
 from tests.integration.credit_negotiation import FakeCapacity
 
 
@@ -41,7 +45,9 @@ class _Site(FakeCapacity):
 
 
 async def _check(db, site):
-    return await build_listing_source_check(lambda _repository: site)(db, "L-tok")
+    return await build_listing_source_check(
+        SELLING_CONTRIBUTIONS, lambda _repository: site
+    )(db, "L-tok")
 
 
 async def test_an_unchanged_source_matches(db):
@@ -89,3 +95,20 @@ async def test_an_unconfigured_site_is_unverifiable(db, site_id):
     site.site_names = [site_id]
 
     assert (await _check(db, site)).outcome == "unverifiable"
+
+
+async def test_a_listing_naming_another_quota_resource_than_its_binding_is_a_declared_mismatch(db):
+    """Issuance reads the listing the Agreement names; one whose resource no
+    longer matches the resource its binding pinned is refused before any
+    seller decision or acceptance."""
+    stored = (await db.load_listing(listing_id="L-tok"))["listing_resource"]
+    resource = json.loads(stored) if isinstance(stored, str) else dict(stored)
+    await db.update_listing(
+        listing_id="L-tok",
+        listing_resource={**resource, "resource_id": "other-quota"},
+    )
+
+    verdict = await _check(db, _Site())
+
+    assert verdict.outcome == "declared_mismatch"
+    assert "other than its binding" in verdict.reason

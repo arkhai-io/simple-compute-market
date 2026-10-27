@@ -171,3 +171,87 @@ test("fetch adapter returns 401 on a missing key", async () => {
   );
   assert.equal(ok.status, 200);
 });
+
+/** Fails rather than hangs when a gate never reaches the held verification. */
+function within<T>(promise: Promise<T>, ms = 5000): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`not settled within ${ms} ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+const CLOCKS: [string, (() => number) | undefined][] = [
+  ["monotonic", undefined],
+  ["frozen", () => 100],
+];
+
+/** Holds the first verification of one secret, answering it valid, until the test releases it. */
+class HeldVerificationClient extends FakeClient {
+  verified: string[] = [];
+  private readonly held: string;
+  private readonly accepted: string;
+  private holding = false;
+  private markStarted!: () => void;
+  private releaseHeld!: () => void;
+  readonly started = new Promise<void>((resolve) => (this.markStarted = resolve));
+  private readonly released = new Promise<void>((resolve) => (this.releaseHeld = resolve));
+
+  constructor(held: string, accepted: string) {
+    super(10);
+    this.held = held;
+    this.accepted = accepted;
+  }
+
+  release(): void {
+    this.releaseHeld();
+  }
+
+  override async verify(_keyId: string, secret: string): Promise<VerifyResult> {
+    this.verified.push(secret);
+    if (secret === this.held && !this.holding) {
+      this.holding = true;
+      this.markStarted();
+      await this.released;
+      return { valid: true, status: "active", balance: 10 };
+    }
+    return secret === this.accepted
+      ? { valid: true, status: "active", balance: 10 }
+      : { valid: false, status: null, balance: 0 };
+  }
+}
+
+for (const [clockName, clock] of CLOCKS) test(`a late answer for an older secret does not replace a newer one (${clockName} clock)`, async () => {
+  const client = new HeldVerificationClient("ak_k.old", "ak_k.new");
+  const gate = new TokenGate(cfg(), client, { clock });
+
+  const old = gate.authorize("Bearer ak_k.old");
+  await within(client.started);
+  assert.ok((await gate.authorize("Bearer ak_k.new")).allowed);
+  client.release();
+  assert.ok((await within(old)).allowed);
+
+  const again = await gate.authorize("Bearer ak_k.old");
+
+  assert.equal(again.allowed, false);
+  assert.equal(again.status, 401);
+  assert.deepEqual(client.verified, ["ak_k.old", "ak_k.new", "ak_k.old"]);
+});
+
+for (const [clockName, clock] of CLOCKS) test(`a late answer does not outlast a newer refusal of the same secret (${clockName} clock)`, async () => {
+  const client = new HeldVerificationClient("ak_k.old", "ak_k.new");
+  const gate = new TokenGate(cfg(), client, { clock });
+
+  assert.ok((await gate.authorize("Bearer ak_k.new")).allowed);
+  const old = gate.authorize("Bearer ak_k.old");
+  await within(client.started);
+  assert.equal((await gate.authorize("Bearer ak_k.old")).allowed, false);
+  client.release();
+  await within(old);
+
+  const again = await gate.authorize("Bearer ak_k.old");
+
+  assert.equal(again.allowed, false);
+  assert.equal(again.status, 401);
+  assert.deepEqual(client.verified, ["ak_k.new", "ak_k.old", "ak_k.old", "ak_k.old"]);
+});

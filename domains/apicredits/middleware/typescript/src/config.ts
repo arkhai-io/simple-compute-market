@@ -7,7 +7,7 @@
  * the 402/403 body so a client whose credits ran out knows where to buy
  * more (the re-purchase loop).
  *
- * This mirrors the Python reference (`apicredits_middleware.config`); the
+ * This mirrors the Python reference (`arkhai_api_gate.config`); the
  * behavioral contract is pinned by `../conformance/session.json`.
  */
 

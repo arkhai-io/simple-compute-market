@@ -27,6 +27,12 @@ directory = "domains/compute"
 vocabulary = "arkhai-compute"
 tokens = []
 
+[[families]]
+name = "api"
+directory = "domains/api"
+vocabulary = "arkhai-api"
+tokens = []
+
 [[domains]]
 name = "vms"
 directory = "domains/vms"
@@ -39,10 +45,10 @@ directory = "domains/bare_metal"
 family = "compute"
 tokens = ["bare_metal.v1"]
 
-# API credits has no shared vocabulary beneath it, so no family.
 [[domains]]
 name = "apicredits"
 directory = "domains/apicredits"
+family = "api"
 tokens = ["api_credits.v1"]
 
 [[mechanisms]]
@@ -201,15 +207,6 @@ owner = "align-package-paths-with-layers"
 since = 2026-10-13
 reason = "The VM Alkahest settlement codec, whose name does not carry its mechanism."
 
-[[overrides]]
-project = "arkhai-apicredits-domain"
-layer = "specialization"
-kind = "library"
-scope = ["apicredits", "alkahest", "arkhai-payments"]
-owner = "align-package-paths-with-layers"
-since = 2026-10-13
-reason = "The API-credits domain holds both mechanisms' settlement codecs, and its name carries neither."
-
 # Divergences the check reports, each owned by the change that removes it. A
 # row excuses one finding of the rule it names and fails once it excuses
 # nothing; its owner may not be archived while the row stands.
@@ -244,6 +241,38 @@ target = "arkhai-core-storefront"
 owner = "kit-owned-storefront-auth-and-persistence"
 since = 2026-10-13
 reason = "The vocabulary's publication adapter uses PublicationSource, which moves to a storefront contracts kit."
+
+[[exceptions]]
+rule = "layer"
+project = "arkhai-api-selling"
+target = "arkhai-core-storefront"
+owner = "kit-owned-storefront-auth-and-persistence"
+since = 2026-10-23
+reason = "The selling library imports from the storefront role its domain registry types (listing bindings, registrations, and the registry its accepted-listing records are keyed under), the system status models, the aggregate capacity client, the placement policies, the stage-event log, the marketplace request authentication and response signing it binds for a storefront, the SQLite market-state client and migrations its persistence extends, the listing, negotiation, settlement, and system wire models its route services answer with, and the negotiation service's error; where each lands is for the owning change to settle. Otherwise it writes through the repository its caller passes."
+
+[[exceptions]]
+rule = "layer"
+project = "arkhai-api-buying"
+target = "arkhai-core-buyer"
+owner = "kit-owned-buyer-orchestration"
+since = 2026-10-25
+reason = "The buying library imports the buyer role's package root and its buyer_config, cli, deal_helpers, negotiation_client, orchestration, orchestrator, policy_surface, registry_config, run_log, and settlement modules, which move to a buyer orchestration kit."
+
+[[exceptions]]
+rule = "layer"
+project = "arkhai-api-buying-alkahest"
+target = "arkhai-core-buyer"
+owner = "kit-owned-buyer-orchestration"
+since = 2026-10-25
+reason = "The buyer-side Alkahest library imports the buyer role's buyer_config, negotiation_client, orchestration, and run_log modules, which move to a buyer orchestration kit."
+
+[[exceptions]]
+rule = "layer"
+project = "arkhai-api-buying-arkhai-payments"
+target = "arkhai-core-buyer"
+owner = "kit-owned-buyer-orchestration"
+since = 2026-10-25
+reason = "The buyer-side payments library imports the buyer role's buyer_config, orchestration, and orchestrator modules, which move to a buyer orchestration kit."
 
 [[exceptions]]
 rule = "scope"

@@ -3,7 +3,7 @@ payload, and the answer_key_challenge pass-through.
 
 Mocks the HTTP transport inside ``core_buyer.negotiation_client`` and
 drives ``negotiate_with_seller`` exactly as the credits CLI does: the
-API-credits default guards, ``unit_count`` = requested quantity, and the
+family's default guards, ``unit_count`` = requested quantity, and the
 ``api_credits.v1`` provision terms fixed at round 0.
 """
 
@@ -17,10 +17,11 @@ from unittest.mock import patch
 from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
 from market_policy.negotiation_middleware import load_negotiation_chain
 
-from arkhai_apicredits_buyer.buyer_client import negotiate_with_seller
+from arkhai_api_buying.negotiate import negotiate_with_seller
+from arkhai_apicredits_buyer.cli import SETTLEMENT
 from arkhai_apicredits.negotiation import make_api_credits_provision_terms
-from arkhai_apicredits.negotiation.buyer_policies import (  # noqa: F401 — registers the middleware
-    APICREDITS_BUYER_GUARDS,
+from arkhai_api_buying.guards import (  # noqa: F401 — registers the middleware
+    BUYER_GUARDS,
     answer_key_challenge,
 )
 from market_alkahest.schemas import EscrowProposal
@@ -46,7 +47,7 @@ def _chain():
     Built explicitly instead of through ``load_buyer_chain`` so the
     test never reads the developer's buyer.toml.
     """
-    return load_negotiation_chain([*APICREDITS_BUYER_GUARDS, "listed_price"])
+    return load_negotiation_chain([*BUYER_GUARDS, "listed_price"])
 
 
 def _escrow_proposal() -> EscrowProposal:
@@ -200,6 +201,7 @@ def _negotiate(
     with patch("core_buyer.negotiation_client.urllib.request.urlopen") as mock_urlopen:
         mock_urlopen.side_effect = _urlopen_fake(responses, captured)
         return negotiate_with_seller(
+            SETTLEMENT,
             seller_url="http://seller:8002",
             principal=_BUYER_SIGNER.identity,
             signer=_BUYER_SIGNER,

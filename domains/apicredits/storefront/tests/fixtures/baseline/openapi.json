@@ -1,0 +1,3587 @@
+{
+  "components": {
+    "schemas": {
+      "AdminPauseResponse": {
+        "properties": {
+          "message": {
+            "default": "",
+            "title": "Message",
+            "type": "string"
+          },
+          "paused": {
+            "title": "Paused",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "paused"
+        ],
+        "title": "AdminPauseResponse",
+        "type": "object"
+      },
+      "AdvanceRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "counter",
+              "accept",
+              "exit"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "proposal": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposal"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "AdvanceRequest",
+        "type": "object"
+      },
+      "AdvanceResponse": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "proposal": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposal"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "AdvanceResponse",
+        "type": "object"
+      },
+      "Agreement": {
+        "additionalProperties": false,
+        "description": "Accepted deal terms passed unchanged from negotiation to settlement.",
+        "properties": {
+          "accepted_at": {
+            "title": "Accepted At",
+            "type": "string"
+          },
+          "amount": {
+            "title": "Amount",
+            "type": "string"
+          },
+          "asset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset"
+          },
+          "buyer": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Buyer",
+            "type": "object"
+          },
+          "duration_seconds": {
+            "minimum": 0.0,
+            "title": "Duration Seconds",
+            "type": "integer"
+          },
+          "listing_hash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Listing Hash",
+            "type": "string"
+          },
+          "listing_id": {
+            "minLength": 1,
+            "title": "Listing Id",
+            "type": "string"
+          },
+          "negotiation_id": {
+            "minLength": 1,
+            "title": "Negotiation Id",
+            "type": "string"
+          },
+          "provision_terms": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provision Terms"
+          },
+          "seller": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Seller",
+            "type": "object"
+          },
+          "settlement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SettlementOption"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "settlement_params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settlement Params"
+          },
+          "start_utc": {
+            "title": "Start Utc",
+            "type": "string"
+          }
+        },
+        "required": [
+          "negotiation_id",
+          "listing_id",
+          "listing_hash",
+          "buyer",
+          "seller",
+          "amount",
+          "duration_seconds",
+          "start_utc",
+          "accepted_at"
+        ],
+        "title": "Agreement",
+        "type": "object"
+      },
+      "ApiCreditsSettleRequest": {
+        "additionalProperties": false,
+        "description": "Settlement input for Alkahest or payments by negotiation ID.",
+        "properties": {
+          "buyer_evm_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Buyer Evm Address"
+          },
+          "buyer_principal": {
+            "$ref": "#/components/schemas/Identity"
+          },
+          "chain_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chain Name"
+          },
+          "negotiation_id": {
+            "title": "Negotiation Id",
+            "type": "string"
+          },
+          "settlement_mechanism": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settlement Mechanism"
+          }
+        },
+        "required": [
+          "negotiation_id",
+          "buyer_principal"
+        ],
+        "title": "ApiCreditsSettleRequest",
+        "type": "object"
+      },
+      "CloseListingResponse": {
+        "description": "Response for POST /api/v1/listings/{listing_id}/close.",
+        "properties": {
+          "listing_id": {
+            "title": "Listing Id",
+            "type": "string"
+          },
+          "root_agent_response": {
+            "default": "",
+            "title": "Root Agent Response",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "listing_id"
+        ],
+        "title": "CloseListingResponse",
+        "type": "object"
+      },
+      "EscrowDemand": {
+        "description": "One arbiter demand paired with an escrow obligation.\n\n``arbiter`` is the deployed arbiter contract address. ``demand_data``\nis the JSON-shaped input for that arbiter's codec; settlement codecs\nown encoding it into on-chain demand bytes.",
+        "properties": {
+          "arbiter": {
+            "description": "Deployed arbiter contract address for this demand.",
+            "title": "Arbiter",
+            "type": "string"
+          },
+          "chain_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional chain identifier for listings that advertise demands across multiple chains.",
+            "title": "Chain Name"
+          },
+          "demand_data": {
+            "additionalProperties": true,
+            "description": "Codec-specific arbiter demand data.",
+            "title": "Demand Data",
+            "type": "object"
+          }
+        },
+        "required": [
+          "arbiter"
+        ],
+        "title": "EscrowDemand",
+        "type": "object"
+      },
+      "EscrowProposal": {
+        "description": "Buyer's escrow proposal at negotiation round 0.\n\nReferences one of the listing's ``accepted_escrows`` entries by\n``(chain_name, escrow_address)`` and supplies the buyer-committable\nEscrowData fields. ``amount`` is intentionally not on the proposal \u2014\nit's derived at settlement from the agreed price + duration. The\nseller echoes back the accepted proposal verbatim on the negotiation\noutcome so settlement code reconstructs the same on-chain\nobligation_data on both sides.",
+        "properties": {
+          "chain_name": {
+            "description": "Chain identifier; must match the picked accepted_escrows entry.",
+            "title": "Chain Name",
+            "type": "string"
+          },
+          "demand": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EscrowDemand"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Buyer-selected concrete arbiter demand. Listing-level ``demands`` advertises seller-allowed options; a proposal selects exactly one. Multiple subconditions are represented inside one logical arbiter demand, such as AllArbiter."
+          },
+          "demands": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/EscrowDemand"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Deprecated proposal-level alias for a one-item selected ``demand``. Kept temporarily for older clients; remove after the next wire compatibility window. Listing-level ``demands`` remains the allowed-options list.",
+            "title": "Demands"
+          },
+          "escrow_address": {
+            "description": "Escrow contract address; must match the picked accepted_escrows entry.",
+            "title": "Escrow Address",
+            "type": "string"
+          },
+          "expiration_unix": {
+            "description": "Absolute UTC unix-time the on-chain escrow attestation expires. Both sides commit to this single timestamp; no clock-drift tolerance window.",
+            "exclusiveMinimum": 0.0,
+            "title": "Expiration Unix",
+            "type": "integer"
+          },
+          "fields": {
+            "additionalProperties": true,
+            "description": "Complete buyer-committable EscrowData fields (arbiter, token, \u2026). Excludes ``amount`` and arbiter demand bytes, which are derived at settlement.",
+            "title": "Fields",
+            "type": "object"
+          },
+          "literal_fields": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Forward-looking sibling of ``fields`` for the generic-escrow migration. When set, mirrors ``fields`` (literal obligation-data keys the buyer commits to). Readers should prefer the canonical accessor ``accepted_token_address`` which handles either shape.",
+            "title": "Literal Fields"
+          },
+          "rates": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RateValue"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Forward-looking sibling for multi-rate templates. Today negotiation produces a single scalar amount that becomes the primary rate-bearing field at settlement; future TokenBundle proposals carry one ``RateValue`` per rate-bearing field.",
+            "title": "Rates"
+          }
+        },
+        "required": [
+          "chain_name",
+          "escrow_address",
+          "expiration_unix"
+        ],
+        "title": "EscrowProposal",
+        "type": "object"
+      },
+      "ForceAcceptRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "amount"
+        ],
+        "title": "ForceAcceptRequest",
+        "type": "object"
+      },
+      "ForceAcceptResponse": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "amount": {
+            "title": "Amount",
+            "type": "string"
+          },
+          "source": {
+            "default": "admin_force_accept",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "amount"
+        ],
+        "title": "ForceAcceptResponse",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "properties": {
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          },
+          "chain_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chain Id"
+          },
+          "checks": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Checks",
+            "type": "object"
+          },
+          "disclosures": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disclosures"
+          },
+          "lifecycle": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/LoopStatus"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lifecycle"
+          },
+          "listing_cardinality_mode_explanations": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Listing Cardinality Mode Explanations"
+          },
+          "paused": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paused"
+          },
+          "principal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Identity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provisioning_contract_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provisioning Contract Version"
+          },
+          "publication_derivation": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publication Derivation"
+          },
+          "site_projections": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/ProjectionFamilyStatus"
+                  },
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Site Projections"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "storefront_domains": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storefront Domains"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      },
+      "Identity": {
+        "additionalProperties": false,
+        "description": "A canonical scheme-tagged marketplace principal.",
+        "properties": {
+          "identifier": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Identifier",
+            "type": "string"
+          },
+          "scheme": {
+            "$ref": "#/components/schemas/IdentityScheme"
+          }
+        },
+        "required": [
+          "scheme",
+          "identifier"
+        ],
+        "title": "Identity",
+        "type": "object"
+      },
+      "IdentityScheme": {
+        "description": "Identity schemes supported by the marketplace wire contract.",
+        "enum": [
+          "eip191",
+          "ed25519"
+        ],
+        "title": "IdentityScheme",
+        "type": "string"
+      },
+      "ListingListResponse": {
+        "description": "Response for GET /api/v1/listings.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "listings": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Listings",
+            "type": "array"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total_after_filter": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total After Filter"
+          }
+        },
+        "required": [
+          "listings",
+          "count",
+          "limit",
+          "offset"
+        ],
+        "title": "ListingListResponse",
+        "type": "object"
+      },
+      "ListingResponse": {
+        "additionalProperties": true,
+        "description": "Single listing \u2014 returned by GET /api/v1/listings/{id}.",
+        "properties": {
+          "accepted_escrows": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted Escrows"
+          },
+          "demands": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Demands"
+          },
+          "listing_id": {
+            "title": "Listing Id",
+            "type": "string"
+          },
+          "listing_resource": {
+            "title": "Listing Resource"
+          },
+          "max_duration_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Duration Seconds"
+          },
+          "paused": {
+            "default": false,
+            "title": "Paused",
+            "type": "boolean"
+          },
+          "rate_structure": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Structure"
+          },
+          "seller_principal": {
+            "$ref": "#/components/schemas/Identity"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "storefront_url": {
+            "title": "Storefront Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "listing_id",
+          "status",
+          "storefront_url",
+          "seller_principal"
+        ],
+        "title": "ListingResponse",
+        "type": "object"
+      },
+      "LoopCycleError": {
+        "description": "The error that ended a loop's cycle, as status may show it.\n\n`message` is present only for an error the storefront declared\ndisclosable -- its own configuration and publication errors, whose text\nnames keys and reasons. Any other error is reported by its type alone, so\nno credential, secret, or private URL reaches status.",
+        "properties": {
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "LoopCycleError",
+        "type": "object"
+      },
+      "LoopCycleOutcome": {
+        "description": "The terminal outcome of one loop cycle, whether its timer or an\noperator's step ran it (`trigger`). A failed cycle names the stage it\nfailed in -- `compose`, `run`, or `converge` -- unless it was cancelled\nbefore any stage began.",
+        "properties": {
+          "completed": {
+            "title": "Completed",
+            "type": "boolean"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LoopCycleError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "finished_at": {
+            "title": "Finished At",
+            "type": "string"
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage"
+          },
+          "trigger": {
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "finished_at",
+          "trigger",
+          "completed"
+        ],
+        "title": "LoopCycleOutcome",
+        "type": "object"
+      },
+      "LoopStatus": {
+        "description": "One lifecycle loop as the storefront's loop controller reports it.\n\n`state` is the controller's: `starting`, `running`, `pausing`, `paused`,\n`exited`, or `cancelled`; it is `None` for a loop whose timer is not\nrunning, such as one an operator only steps. It is independent of\n`last_outcome`: a running loop whose last cycle failed is still running,\nand an exited loop runs no further cycles whatever its last outcome was.",
+        "properties": {
+          "last_outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LoopCycleOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "LoopStatus",
+        "type": "object"
+      },
+      "NegotiateContinueRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "counter",
+              "accept",
+              "exit"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "buyer_principal": {
+            "$ref": "#/components/schemas/Identity"
+          },
+          "proposal": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposal"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "settlement_selection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SettlementSelection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "action",
+          "buyer_principal"
+        ],
+        "title": "NegotiateContinueRequest",
+        "type": "object"
+      },
+      "NegotiateContinueResponse": {
+        "properties": {
+          "accepted_escrow_proposal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EscrowProposal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "accepted_escrow_terms": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted Escrow Terms"
+          },
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "agreement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Agreement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "agreement_bytes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agreement Bytes"
+          },
+          "buyer_principal": {
+            "$ref": "#/components/schemas/Identity"
+          },
+          "proposal": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposal"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "seller_principal": {
+            "$ref": "#/components/schemas/Identity"
+          },
+          "settlement_data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settlement Data"
+          },
+          "settlement_plan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SettlementPlan"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "settlement_selection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SettlementSelection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "action",
+          "buyer_principal",
+          "seller_principal"
+        ],
+        "title": "NegotiateContinueResponse",
+        "type": "object"
+      },
+      "NegotiateNewRequest": {
+        "additionalProperties": false,
+        "description": "Round 0 of a negotiation.\n\nThe buyer publishes two structured artifacts: ``provision_terms``\n(what they want delivered) and ``proposal`` (the on-chain escrow\ntuple, picked from the listing's ``accepted_escrows``). Scalar payment\nescrows carry the buyer's absolute opening bid in ``fields[\"amount\"]``;\namountless exact escrows may omit it. Both artifacts are validated\nagainst the listing's acceptance set on the seller side.",
+        "properties": {
+          "buyer_agent_url": {
+            "default": "",
+            "title": "Buyer Agent Url",
+            "type": "string"
+          },
+          "buyer_principal": {
+            "$ref": "#/components/schemas/Identity"
+          },
+          "listing_id": {
+            "title": "Listing Id",
+            "type": "string"
+          },
+          "proposal": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposal"
+          },
+          "provision_terms": {
+            "$ref": "#/components/schemas/ProvisionTerms"
+          },
+          "settlement_selection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SettlementSelection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "listing_id",
+          "buyer_principal",
+          "provision_terms"
+        ],
+        "title": "NegotiateNewRequest",
+        "type": "object"
+      },
+      "NegotiateNewResponse": {
+        "description": "Seller's round-0 response.\n\n``proposal`` carries the seller's counter (when action=\"counter\")\nor the agreed proposal echoed back (when action=\"accept\"). For\n\"exit\" / \"reject\" it's absent. ``accepted_provision_terms`` and\n``accepted_escrow_proposal`` echo back the buyer's round-0 ask\nafter the seller validated it.\n\n``settlement_plan`` is the negotiated outcome's canonical carrier\n(mechanism-neutral obligations); ``accepted_escrow_terms`` is its\nLEGACY flat-alkahest mirror, kept for buyers that predate the plan\ncarrier and removed with the client-wheel wire bump.\n\n``settlement_data`` carries an opaque seller-owned payload for the\nselected settlement stage.",
+        "properties": {
+          "accepted_escrow_proposal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EscrowProposal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "accepted_escrow_terms": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted Escrow Terms"
+          },
+          "accepted_provision_terms": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProvisionTerms"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "agreement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Agreement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "agreement_bytes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agreement Bytes"
+          },
+          "buyer_principal": {
+            "$ref": "#/components/schemas/Identity"
+          },
+          "negotiation_id": {
+            "title": "Negotiation Id",
+            "type": "string"
+          },
+          "proposal": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposal"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "seller_principal": {
+            "$ref": "#/components/schemas/Identity"
+          },
+          "settlement_data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settlement Data"
+          },
+          "settlement_plan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SettlementPlan"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "settlement_selection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SettlementSelection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "negotiation_id",
+          "buyer_principal",
+          "seller_principal",
+          "action"
+        ],
+        "title": "NegotiateNewResponse",
+        "type": "object"
+      },
+      "NegotiationDetailResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "agreed_amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agreed Amount"
+          },
+          "buyer_principal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Identity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "escrows": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Escrows",
+            "type": "array"
+          },
+          "messages": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "negotiation_id": {
+            "title": "Negotiation Id",
+            "type": "string"
+          },
+          "our_listing_id": {
+            "title": "Our Listing Id",
+            "type": "string"
+          },
+          "round_count": {
+            "default": 0,
+            "title": "Round Count",
+            "type": "integer"
+          },
+          "seller_principal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Identity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stage_events": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Stage Events",
+            "type": "array"
+          },
+          "terminal_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terminal State"
+          },
+          "their_agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Their Agent Id"
+          }
+        },
+        "required": [
+          "negotiation_id",
+          "our_listing_id"
+        ],
+        "title": "NegotiationDetailResponse",
+        "type": "object"
+      },
+      "NegotiationListResponse": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "listing_id": {
+            "title": "Listing Id",
+            "type": "string"
+          },
+          "negotiations": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Negotiations",
+            "type": "array"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "listing_id",
+          "negotiations",
+          "count",
+          "limit",
+          "offset"
+        ],
+        "title": "NegotiationListResponse",
+        "type": "object"
+      },
+      "PauseListingResponse": {
+        "description": "Response for POST /api/v1/listings/{id}/pause and /resume.",
+        "properties": {
+          "listing_id": {
+            "title": "Listing Id",
+            "type": "string"
+          },
+          "message": {
+            "default": "",
+            "title": "Message",
+            "type": "string"
+          },
+          "paused": {
+            "title": "Paused",
+            "type": "boolean"
+          },
+          "registry_status": {
+            "default": "",
+            "title": "Registry Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "listing_id",
+          "paused"
+        ],
+        "title": "PauseListingResponse",
+        "type": "object"
+      },
+      "ProjectionFamilyStatus": {
+        "description": "One projection family's (resource-pool or capacity-bucket) load\nstate for one configured site, as reported on the operator status\nsurface. Absence of a site, or a `not_loaded`/`unavailable`/`invalid`\nstate, means the projection has not yet been confirmed -- never\nauthoritative empty capacity.\n\nfetched_at:\n    ISO8601 UTC timestamp of the last time this generation was\n    *confirmed* current -- includes an unchanged-identity poll\n    confirmation, not only a full snapshot transfer. See\n    `core_storefront.site_projections.ProjectionCacheView`.",
+        "properties": {
+          "digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Digest"
+          },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "ProjectionFamilyStatus",
+        "type": "object"
+      },
+      "ProvisionTerms": {
+        "additionalProperties": false,
+        "description": "Versioned, schema-opaque delivery terms negotiated with escrow terms.\n\n``kind`` selects the domain interpreter, ``version`` selects that\ndomain-owned provision payload schema, and ``payload`` is opaque to core.\nLegacy flat compute fields and transitional key names are intentionally\nrejected.",
+        "properties": {
+          "kind": {
+            "description": "Stable domain interpreter for this provision payload.",
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "description": "Domain-specific provision terms. Opaque to market core.",
+            "title": "Payload",
+            "type": "object"
+          },
+          "version": {
+            "description": "Domain-owned provision payload schema version.",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "version"
+        ],
+        "title": "ProvisionTerms",
+        "type": "object"
+      },
+      "PublishFromQuotaRequest": {
+        "description": "Seller's quota-backed publish request.",
+        "properties": {
+          "accepted_escrows": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Accepted Escrows",
+            "type": "array"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "openapi_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Openapi Url"
+          },
+          "paused": {
+            "default": false,
+            "title": "Paused",
+            "type": "boolean"
+          },
+          "resource_id": {
+            "description": "Quota resource in the credits service's ledger.",
+            "title": "Resource Id",
+            "type": "string"
+          },
+          "service_name": {
+            "title": "Service Name",
+            "type": "string"
+          },
+          "settlement_clauses": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settlement Clauses"
+          }
+        },
+        "required": [
+          "resource_id",
+          "service_name"
+        ],
+        "title": "PublishFromQuotaRequest",
+        "type": "object"
+      },
+      "PublishFromQuotaResponse": {
+        "properties": {
+          "listing_id": {
+            "title": "Listing Id",
+            "type": "string"
+          },
+          "registry_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Registry Status"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "listing_id"
+        ],
+        "title": "PublishFromQuotaResponse",
+        "type": "object"
+      },
+      "RateValue": {
+        "description": "One rate-bearing slot on an accepted escrow / proposal.\n\n``field`` is the dotted/indexed path into the obligation data\n(``\"amount\"`` for ERC-20 escrows; ``\"erc20Amounts[0]\"``,\n``\"nativeAmount\"`` etc. for TokenBundle). ``per`` is the unit the\nrate scales by \u2014 ``\"hour\"`` for the time-rate case. ``value`` is\nthe rate itself in base units, uint256-domain (decimal-digit string\non the wire, Python int internally).\n\nNegotiation pressure points at ``value``; ``field`` and ``per``\ncome from the seller's escrow template and are non-negotiable.",
+        "properties": {
+          "field": {
+            "description": "Obligation-data field path the rate populates.",
+            "title": "Field",
+            "type": "string"
+          },
+          "per": {
+            "default": "hour",
+            "description": "Unit the rate scales by.",
+            "title": "Per",
+            "type": "string"
+          },
+          "value": {
+            "description": "Rate amount in payment-token base units (uint256).",
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "value"
+        ],
+        "title": "RateValue",
+        "type": "object"
+      },
+      "RefundSettlementResponse": {
+        "description": "Response for ``POST /api/v1/settlements/{negotiation_id}/refund``.",
+        "properties": {
+          "negotiation_id": {
+            "title": "Negotiation Id",
+            "type": "string"
+          },
+          "settlement_ref": {
+            "title": "Settlement Ref",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "negotiation_id",
+          "settlement_ref",
+          "status"
+        ],
+        "title": "RefundSettlementResponse",
+        "type": "object"
+      },
+      "SettleResponse": {
+        "additionalProperties": true,
+        "description": "Response for POST /api/v1/settle/{escrow_uid} (202 while provisioning).\n\n``fulfillment_id`` is the durable fulfillment path's identity, always\n``None`` until ``begin_fulfillment`` returns one; ``provisioning_job_id``\nis the legacy ephemeral executor-job identity and is always ``None``\nfor a fulfillment that went through the durable path instead.",
+        "properties": {
+          "buyer_principal": {
+            "$ref": "#/components/schemas/Identity"
+          },
+          "escrow_uid": {
+            "title": "Escrow Uid",
+            "type": "string"
+          },
+          "fulfillment_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fulfillment Id"
+          },
+          "obligation_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Obligation Ref"
+          },
+          "provisioning_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provisioning Job Id"
+          },
+          "seller_principal": {
+            "$ref": "#/components/schemas/Identity"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "escrow_uid",
+          "buyer_principal",
+          "seller_principal",
+          "status"
+        ],
+        "title": "SettleResponse",
+        "type": "object"
+      },
+      "SettleStatusResponse": {
+        "additionalProperties": true,
+        "description": "Response for GET /api/v1/settle/{escrow_uid}/status.\n\nSee ``SettleResponse`` for the ``fulfillment_id``/``provisioning_job_id``\ndistinction.",
+        "properties": {
+          "buyer_principal": {
+            "$ref": "#/components/schemas/Identity"
+          },
+          "escrow_uid": {
+            "title": "Escrow Uid",
+            "type": "string"
+          },
+          "fulfillment_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fulfillment Id"
+          },
+          "obligation_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Obligation Ref"
+          },
+          "provisioning_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provisioning Job Id"
+          },
+          "seller_principal": {
+            "$ref": "#/components/schemas/Identity"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tenant_credentials": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Credentials"
+          }
+        },
+        "required": [
+          "escrow_uid",
+          "buyer_principal",
+          "seller_principal",
+          "status"
+        ],
+        "title": "SettleStatusResponse",
+        "type": "object"
+      },
+      "SettleWaitResponse": {
+        "description": "Response for GET /api/v1/admin/settle/{escrow_uid}/wait.\n\nMirrors the registry-agent wait pattern: ``ready`` indicates whether a\nterminal state was reached before the timeout; ``status`` is the raw\nsettlement job status (``ready`` | ``failed`` | ``provisioning``).\n\n``provisioning_job_id`` is the legacy ephemeral executor-job identity;\nit is always ``None`` for a fulfillment that went through the durable\nfulfillment path (there is no executor job id in that architecture).\n``fulfillment_id`` is that path's durable identity and is the field a\ncaller should prefer once available.",
+        "properties": {
+          "elapsed_ms": {
+            "title": "Elapsed Ms",
+            "type": "integer"
+          },
+          "fulfillment_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fulfillment Id"
+          },
+          "provisioning_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provisioning Job Id"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ready",
+          "status",
+          "elapsed_ms"
+        ],
+        "title": "SettleWaitResponse",
+        "type": "object"
+      },
+      "SettlementObligation": {
+        "description": "One obligation in a settlement plan.\n\nPlans and obligations belong to mechanisms serviced through the\nobligation runtime; a mechanism that settles from the Agreement alone\ncreates none. The typed fields describe an escrow-style obligation: who\nfunds it, who collects it, how much of what, when collection gives way to\nreclaim, and which conditions gate collection. Everything needed to\n*materialize and verify* the obligation under its mechanism (for alkahest,\nthe chain, contract address and ``ObligationData`` struct) rides in\n``params``, interpreted by the kit codec registered for ``mechanism``.\nCore code drives obligations through injected per-mechanism hooks and\nnever reads ``params``.\n\n``amount``/``asset`` are the *display/lifecycle* view of the\nobligation's value (None when the mechanism's value isn't a scalar,\ne.g. a token-bundle escrow); the mechanism params remain the\nauthoritative materialization input, and the codec's verification is\nresponsible for their consistency.\n\n``conditions`` carries declared condition descriptors for the servicing\nengine. Opaque to core; empty means \"whatever the mechanism params\nalready encode\": for alkahest the arbiter demand tree inside ``params``\nis authoritative and is decoded by the kit codec on demand.",
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Obligation value in the asset's base units (uint256-domain; decimal-digit string on the wire, Python int internally). None when the mechanism's value isn't a single scalar.",
+            "title": "Amount"
+          },
+          "asset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mechanism-scoped asset identifier \u2014 ERC-20 contract address for alkahest token escrows, a currency code for fiat. None when not applicable (e.g. bundle escrows).",
+            "title": "Asset"
+          },
+          "claimant": {
+            "description": "Which side collects when the condition set passes. The payer reclaims after ``expiration_unix`` if the claimant never collected. Payment escrow: buyer pays, seller claims; penalty bond: seller posts, buyer claims.",
+            "enum": [
+              "buyer",
+              "seller"
+            ],
+            "title": "Claimant",
+            "type": "string"
+          },
+          "claimant_principal": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Canonical scheme-tagged principal authorized to collect this obligation. Required by mechanisms that do not derive authority from a mechanism-specific wallet.",
+            "title": "Claimant Principal"
+          },
+          "conditions": {
+            "description": "Declared condition descriptors gating collection. Opaque to core; interpreted by the mechanism codec / domain policy.",
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Conditions",
+            "type": "array"
+          },
+          "expiration_unix": {
+            "description": "Absolute UTC unix-time collect-vs-reclaim boundary. Absolute (not relative-to-creation) so both sides share one agreed timestamp with no clock-drift window.",
+            "exclusiveMinimum": 0.0,
+            "title": "Expiration Unix",
+            "type": "integer"
+          },
+          "mechanism": {
+            "description": "Settlement mechanism codec identifier (e.g. ``alkahest.v1``). Selects the kit codec that interprets ``params``.",
+            "title": "Mechanism",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": true,
+            "description": "Mechanism-specific materialization/verification params. Opaque to market core.",
+            "title": "Params",
+            "type": "object"
+          },
+          "payer": {
+            "description": "Which side funds/materializes this obligation (calls ``doObligation`` for alkahest; creates the hold/intent for a fiat mechanism).",
+            "enum": [
+              "buyer",
+              "seller"
+            ],
+            "title": "Payer",
+            "type": "string"
+          },
+          "payer_principal": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Canonical scheme-tagged principal authorized to fund this obligation. Required by mechanisms that do not derive authority from a mechanism-specific wallet.",
+            "title": "Payer Principal"
+          }
+        },
+        "required": [
+          "payer",
+          "claimant",
+          "expiration_unix",
+          "mechanism"
+        ],
+        "title": "SettlementObligation",
+        "type": "object"
+      },
+      "SettlementOption": {
+        "additionalProperties": false,
+        "description": "One immutable, mechanism-tagged settlement choice on a listing.",
+        "properties": {
+          "asset": {
+            "minLength": 1,
+            "title": "Asset",
+            "type": "string"
+          },
+          "mechanism": {
+            "minLength": 1,
+            "title": "Mechanism",
+            "type": "string"
+          },
+          "option_id": {
+            "title": "Option Id",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": true,
+            "title": "Params",
+            "type": "object"
+          },
+          "rates": {
+            "items": {
+              "$ref": "#/components/schemas/RateValue"
+            },
+            "title": "Rates",
+            "type": "array"
+          }
+        },
+        "required": [
+          "option_id",
+          "mechanism",
+          "asset"
+        ],
+        "title": "SettlementOption",
+        "type": "object"
+      },
+      "SettlementPlan": {
+        "description": "The negotiated settlement plan both sides derive identically.\n\nGeneralizes the single accepted-escrow handoff: a plan is N\nobligations (payment escrows, interval escrows, penalty bonds \u2014\npossibly under different mechanisms) plus the off-chain duties each\nparty takes on while servicing the deal. Plans belong to mechanisms\nserviced through the obligation runtime; a mechanism that settles from\nthe Agreement alone creates none. The determinism contract extends\nunchanged in kind: both sides must derive the same plan from the shared\nmessage history; for mechanisms whose materialization is not\nindependently derivable, determinism covers the agreed terms and the\ncodec verifies the materialized object against them.\n\n``service_terms`` is the attachment point for heartbeat cadence and\nschema, oracle identity, evidence format, and interval boundaries.\nOpaque to core; empty for plans with no off-chain duties beyond the\nmechanism defaults.",
+        "properties": {
+          "buyer_principal": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Canonical scheme-tagged buyer principal bound at acceptance.",
+            "title": "Buyer Principal"
+          },
+          "obligations": {
+            "description": "Every obligation the deal materializes.",
+            "items": {
+              "$ref": "#/components/schemas/SettlementObligation"
+            },
+            "title": "Obligations",
+            "type": "array"
+          },
+          "seller_principal": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Canonical scheme-tagged seller principal bound at acceptance.",
+            "title": "Seller Principal"
+          },
+          "service_terms": {
+            "additionalProperties": true,
+            "description": "Off-chain servicing duties (heartbeat cadence/schema, oracle identity, interval boundaries). Opaque to market core.",
+            "title": "Service Terms",
+            "type": "object"
+          }
+        },
+        "required": [
+          "obligations"
+        ],
+        "title": "SettlementPlan",
+        "type": "object"
+      },
+      "SettlementSelection": {
+        "additionalProperties": false,
+        "description": "Buyer selection of one exact listing settlement option.\n\n``expiration_unix`` is required by mechanisms that materialize expiring\nobligations, such as Alkahest. Agreement-only mechanisms omit it.",
+        "properties": {
+          "expiration_unix": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expiration Unix"
+          },
+          "mechanism": {
+            "minLength": 1,
+            "title": "Mechanism",
+            "type": "string"
+          },
+          "option_id": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Option Id",
+            "type": "string"
+          },
+          "params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Params"
+          }
+        },
+        "required": [
+          "mechanism",
+          "option_id"
+        ],
+        "title": "SettlementSelection",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "MarketplaceIdentityIdentifier": {
+        "description": "Part of the body-bound arkhai.market-request-signature.v2 authentication envelope.",
+        "in": "header",
+        "name": "X-Market-Identity-Identifier",
+        "type": "apiKey"
+      },
+      "MarketplaceIdentityScheme": {
+        "description": "Part of the body-bound arkhai.market-request-signature.v2 authentication envelope.",
+        "in": "header",
+        "name": "X-Market-Identity-Scheme",
+        "type": "apiKey"
+      },
+      "MarketplaceRequestId": {
+        "description": "Part of the body-bound arkhai.market-request-signature.v2 authentication envelope.",
+        "in": "header",
+        "name": "X-Market-Request-ID",
+        "type": "apiKey"
+      },
+      "MarketplaceRole": {
+        "description": "Part of the body-bound arkhai.market-request-signature.v2 authentication envelope.",
+        "in": "header",
+        "name": "X-Market-Role",
+        "type": "apiKey"
+      },
+      "MarketplaceSignature": {
+        "description": "Part of the body-bound arkhai.market-request-signature.v2 authentication envelope.",
+        "in": "header",
+        "name": "X-Market-Signature",
+        "type": "apiKey"
+      },
+      "MarketplaceSignatureVersion": {
+        "description": "Part of the body-bound arkhai.market-request-signature.v2 authentication envelope.",
+        "in": "header",
+        "name": "X-Market-Signature-Version",
+        "type": "apiKey"
+      },
+      "MarketplaceTimestamp": {
+        "description": "Part of the body-bound arkhai.market-request-signature.v2 authentication envelope.",
+        "in": "header",
+        "name": "X-Market-Timestamp",
+        "type": "apiKey"
+      }
+    }
+  },
+  "info": {
+    "description": "Seller-side storefront for the Arkhai API-credits marketplace.\n\nAdmin and authenticated endpoints require the shared scheme-tagged marketplace request-signature version 2 headers.",
+    "title": "Arkhai API-Credits Storefront",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/admin/lifecycle/pause": {
+      "post": {
+        "description": "Hold every timer loop at its next cycle boundary; trading is unaffected.\\n\\nRequires all marketplace v2 signature headers with `X-Market-Role: admin`.",
+        "operationId": "pause_lifecycle_loops_api_v1_admin_lifecycle_pause_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Pause Lifecycle Loops Api V1 Admin Lifecycle Pause Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "MarketplaceIdentityIdentifier": [],
+            "MarketplaceIdentityScheme": [],
+            "MarketplaceRequestId": [],
+            "MarketplaceRole": [],
+            "MarketplaceSignature": [],
+            "MarketplaceSignatureVersion": [],
+            "MarketplaceTimestamp": []
+          }
+        ],
+        "summary": "Pause Lifecycle Loops",
+        "tags": [
+          "admin-lifecycle"
+        ],
+        "x-market-role": "admin"
+      }
+    },
+    "/api/v1/admin/lifecycle/resume": {
+      "post": {
+        "description": "Return every timer loop to work.\\n\\nRequires all marketplace v2 signature headers with `X-Market-Role: admin`.",
+        "operationId": "resume_lifecycle_loops_api_v1_admin_lifecycle_resume_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Resume Lifecycle Loops Api V1 Admin Lifecycle Resume Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "MarketplaceIdentityIdentifier": [],
+            "MarketplaceIdentityScheme": [],
+            "MarketplaceRequestId": [],
+            "MarketplaceRole": [],
+            "MarketplaceSignature": [],
+            "MarketplaceSignatureVersion": [],
+            "MarketplaceTimestamp": []
+          }
+        ],
+        "summary": "Resume Lifecycle Loops",
+        "tags": [
+          "admin-lifecycle"
+        ],
+        "x-market-role": "admin"
+      }
+    },
+    "/api/v1/admin/lifecycle/{loop}/dry-run": {
+      "post": {
+        "description": "Report the loop's next cycle without applying it, where it offers a preview.\\n\\nRequires all marketplace v2 signature headers with `X-Market-Role: admin`.",
+        "operationId": "dry_run_lifecycle_cycle_api_v1_admin_lifecycle__loop__dry_run_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "loop",
+            "required": true,
+            "schema": {
+              "title": "Loop",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Dry Run Lifecycle Cycle Api V1 Admin Lifecycle  Loop  Dry Run Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "MarketplaceIdentityIdentifier": [],
+            "MarketplaceIdentityScheme": [],
+            "MarketplaceRequestId": [],
+            "MarketplaceRole": [],
+            "MarketplaceSignature": [],
+            "MarketplaceSignatureVersion": [],
+            "MarketplaceTimestamp": []
+          }
+        ],
+        "summary": "Dry Run Lifecycle Cycle",
+        "tags": [
+          "admin-lifecycle"
+        ],
+        "x-market-role": "admin"
+      }
+    },
+    "/api/v1/admin/lifecycle/{loop}/run-cycle": {
+      "post": {
+        "description": "Run exactly the cycle the loop's timer runs, whether or not loops are held.\\n\\nRequires all marketplace v2 signature headers with `X-Market-Role: admin`.",
+        "operationId": "run_lifecycle_cycle_api_v1_admin_lifecycle__loop__run_cycle_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "loop",
+            "required": true,
+            "schema": {
+              "title": "Loop",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Run Lifecycle Cycle Api V1 Admin Lifecycle  Loop  Run Cycle Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "MarketplaceIdentityIdentifier": [],
+            "MarketplaceIdentityScheme": [],
+            "MarketplaceRequestId": [],
+            "MarketplaceRole": [],
+            "MarketplaceSignature": [],
+            "MarketplaceSignatureVersion": [],
+            "MarketplaceTimestamp": []
+          }
+        ],
+        "summary": "Run Lifecycle Cycle",
+        "tags": [
+          "admin-lifecycle"
+        ],
+        "x-market-role": "admin"
+      }
+    },
+    "/api/v1/admin/pause": {
+      "post": {
+        "description": "Refuse new negotiations until resumed or the process restarts.\\n\\nRequires all marketplace v2 signature headers with `X-Market-Role: admin`.",
+        "operationId": "pause_api_v1_admin_pause_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPauseResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "MarketplaceIdentityIdentifier": [],
+            "MarketplaceIdentityScheme": [],
+            "MarketplaceRequestId": [],
+            "MarketplaceRole": [],
+            "MarketplaceSignature": [],
+            "MarketplaceSignatureVersion": [],
+            "MarketplaceTimestamp": []
+          }
+        ],
+        "summary": "Pause",
+        "tags": [
+          "admin"
+        ],
+        "x-market-role": "admin"
+      }
+    },
+    "/api/v1/admin/resume": {
+      "post": {
+        "description": "Open new negotiations again.\\n\\nRequires all marketplace v2 signature headers with `X-Market-Role: admin`.",
+        "operationId": "resume_api_v1_admin_resume_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPauseResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "MarketplaceIdentityIdentifier": [],
+            "MarketplaceIdentityScheme": [],
+            "MarketplaceRequestId": [],
+            "MarketplaceRole": [],
+            "MarketplaceSignature": [],
+            "MarketplaceSignatureVersion": [],
+            "MarketplaceTimestamp": []
+          }
+        ],
+        "summary": "Resume",
+        "tags": [
+          "admin"
+        ],
+        "x-market-role": "admin"
+      }
+    },
+    "/api/v1/admin/settle/{escrow_uid}/wait": {
+      "get": {
+        "description": "\\n\\nRequires all marketplace v2 signature headers with `X-Market-Role: admin`.",
+        "operationId": "AdminSettleController_wait_for_settlement_api_v1_admin_settle__escrow_uid__wait_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "escrow_uid",
+            "required": true,
+            "schema": {
+              "title": "Escrow Uid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum seconds to wait (server-enforced, max 120)",
+            "in": "query",
+            "name": "timeout",
+            "required": false,
+            "schema": {
+              "default": 60.0,
+              "description": "Maximum seconds to wait (server-enforced, max 120)",
+              "exclusiveMinimum": 0,
+              "maximum": 120,
+              "title": "Timeout",
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettleWaitResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "MarketplaceIdentityIdentifier": [],
+            "MarketplaceIdentityScheme": [],
+            "MarketplaceRequestId": [],
+            "MarketplaceRole": [],
+            "MarketplaceSignature": [],
+            "MarketplaceSignatureVersion": [],
+            "MarketplaceTimestamp": []
+          }
+        ],
+        "summary": "Long-poll until settlement reaches a terminal state (admin)",
+        "tags": [
+          "admin-settle",
+          "admin-settle"
+        ],
+        "x-market-role": "admin"
+      }
+    },
+    "/api/v1/listings": {
+      "get": {
+        "operationId": "ListingsController_list_listings_api_v1_listings_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "paused",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Paused"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListingListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List local listings",
+        "tags": [
+          "listings",
+          "listings"
+        ]
+      }
+    },
+    "/api/v1/listings/publish-from-quota": {
+      "post": {
+        "operationId": "ListingsController_publish_from_quota_api_v1_listings_publish_from_quota_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishFromQuotaRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublishFromQuotaResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create + publish a listing backed by a quota resource (seller auth)",
+        "tags": [
+          "listings",
+          "listings"
+        ]
+      }
+    },
+    "/api/v1/listings/{listing_id}": {
+      "get": {
+        "operationId": "ListingsController_get_listing_api_v1_listings__listing_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "listing_id",
+            "required": true,
+            "schema": {
+              "title": "Listing Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListingResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get a single listing",
+        "tags": [
+          "listings",
+          "listings"
+        ]
+      }
+    },
+    "/api/v1/listings/{listing_id}/close": {
+      "post": {
+        "operationId": "ListingsController_close_listing_api_v1_listings__listing_id__close_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "listing_id",
+            "required": true,
+            "schema": {
+              "title": "Listing Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CloseListingResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Close a listing (seller auth)",
+        "tags": [
+          "listings",
+          "listings"
+        ]
+      }
+    },
+    "/api/v1/listings/{listing_id}/negotiations": {
+      "get": {
+        "description": "\\n\\nRequires all marketplace v2 signature headers with `X-Market-Role: admin`.",
+        "operationId": "NegotiationsController_list_negotiations_api_v1_listings__listing_id__negotiations_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "listing_id",
+            "required": true,
+            "schema": {
+              "title": "Listing Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "terminal_state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Terminal State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NegotiationListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "MarketplaceIdentityIdentifier": [],
+            "MarketplaceIdentityScheme": [],
+            "MarketplaceRequestId": [],
+            "MarketplaceRole": [],
+            "MarketplaceSignature": [],
+            "MarketplaceSignatureVersion": [],
+            "MarketplaceTimestamp": []
+          }
+        ],
+        "summary": "List negotiations for a listing",
+        "tags": [
+          "negotiations",
+          "negotiations"
+        ],
+        "x-market-role": "admin"
+      }
+    },
+    "/api/v1/listings/{listing_id}/negotiations/{neg_id}": {
+      "get": {
+        "description": "\\n\\nRequires all marketplace v2 signature headers with `X-Market-Role: admin`.",
+        "operationId": "NegotiationsController_get_negotiation_api_v1_listings__listing_id__negotiations__neg_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "listing_id",
+            "required": true,
+            "schema": {
+              "title": "Listing Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "neg_id",
+            "required": true,
+            "schema": {
+              "title": "Neg Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NegotiationDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "MarketplaceIdentityIdentifier": [],
+            "MarketplaceIdentityScheme": [],
+            "MarketplaceRequestId": [],
+            "MarketplaceRole": [],
+            "MarketplaceSignature": [],
+            "MarketplaceSignatureVersion": [],
+            "MarketplaceTimestamp": []
+          }
+        ],
+        "summary": "Get negotiation detail",
+        "tags": [
+          "negotiations",
+          "negotiations"
+        ],
+        "x-market-role": "admin"
+      }
+    },
+    "/api/v1/listings/{listing_id}/negotiations/{neg_id}/advance": {
+      "post": {
+        "description": "\\n\\nRequires all marketplace v2 signature headers with `X-Market-Role: admin`.",
+        "operationId": "NegotiationsController_advance_negotiation_api_v1_listings__listing_id__negotiations__neg_id__advance_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "listing_id",
+            "required": true,
+            "schema": {
+              "title": "Listing Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "neg_id",
+            "required": true,
+            "schema": {
+              "title": "Neg Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdvanceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdvanceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "MarketplaceIdentityIdentifier": [],
+            "MarketplaceIdentityScheme": [],
+            "MarketplaceRequestId": [],
+            "MarketplaceRole": [],
+            "MarketplaceSignature": [],
+            "MarketplaceSignatureVersion": [],
+            "MarketplaceTimestamp": []
+          }
+        ],
+        "summary": "Drive one negotiation round (admin)",
+        "tags": [
+          "negotiations",
+          "negotiations"
+        ],
+        "x-market-role": "admin"
+      }
+    },
+    "/api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept": {
+      "post": {
+        "description": "\\n\\nRequires all marketplace v2 signature headers with `X-Market-Role: admin`.",
+        "operationId": "NegotiationsController_force_accept_negotiation_api_v1_listings__listing_id__negotiations__neg_id__force_accept_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "listing_id",
+            "required": true,
+            "schema": {
+              "title": "Listing Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "neg_id",
+            "required": true,
+            "schema": {
+              "title": "Neg Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForceAcceptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForceAcceptResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "MarketplaceIdentityIdentifier": [],
+            "MarketplaceIdentityScheme": [],
+            "MarketplaceRequestId": [],
+            "MarketplaceRole": [],
+            "MarketplaceSignature": [],
+            "MarketplaceSignatureVersion": [],
+            "MarketplaceTimestamp": []
+          }
+        ],
+        "summary": "Force-accept a negotiation (admin)",
+        "tags": [
+          "negotiations",
+          "negotiations"
+        ],
+        "x-market-role": "admin"
+      }
+    },
+    "/api/v1/listings/{listing_id}/pause": {
+      "post": {
+        "description": "\\n\\nRequires all marketplace v2 signature headers with `X-Market-Role: admin`.",
+        "operationId": "ListingsController_pause_listing_api_v1_listings__listing_id__pause_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "listing_id",
+            "required": true,
+            "schema": {
+              "title": "Listing Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PauseListingResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "MarketplaceIdentityIdentifier": [],
+            "MarketplaceIdentityScheme": [],
+            "MarketplaceRequestId": [],
+            "MarketplaceRole": [],
+            "MarketplaceSignature": [],
+            "MarketplaceSignatureVersion": [],
+            "MarketplaceTimestamp": []
+          }
+        ],
+        "summary": "Pause a listing (admin)",
+        "tags": [
+          "listings",
+          "listings"
+        ],
+        "x-market-role": "admin"
+      }
+    },
+    "/api/v1/listings/{listing_id}/resume": {
+      "post": {
+        "description": "\\n\\nRequires all marketplace v2 signature headers with `X-Market-Role: admin`.",
+        "operationId": "ListingsController_resume_listing_api_v1_listings__listing_id__resume_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "listing_id",
+            "required": true,
+            "schema": {
+              "title": "Listing Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PauseListingResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "MarketplaceIdentityIdentifier": [],
+            "MarketplaceIdentityScheme": [],
+            "MarketplaceRequestId": [],
+            "MarketplaceRole": [],
+            "MarketplaceSignature": [],
+            "MarketplaceSignatureVersion": [],
+            "MarketplaceTimestamp": []
+          }
+        ],
+        "summary": "Resume a listing and publish to registry (admin)",
+        "tags": [
+          "listings",
+          "listings"
+        ],
+        "x-market-role": "admin"
+      }
+    },
+    "/api/v1/negotiate/new": {
+      "post": {
+        "description": "Requires shared body-bound marketplace signature version 2 headers.",
+        "operationId": "NegotiateController_negotiate_new_api_v1_negotiate_new_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NegotiateNewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NegotiateNewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start a new negotiation",
+        "tags": [
+          "negotiate",
+          "negotiate"
+        ]
+      }
+    },
+    "/api/v1/negotiate/{neg_id}": {
+      "post": {
+        "description": "Requires shared body-bound marketplace signature version 2 headers.",
+        "operationId": "NegotiateController_negotiate_continue_api_v1_negotiate__neg_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "neg_id",
+            "required": true,
+            "schema": {
+              "title": "Neg Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NegotiateContinueRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NegotiateContinueResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Advance an existing negotiation",
+        "tags": [
+          "negotiate",
+          "negotiate"
+        ]
+      }
+    },
+    "/api/v1/settle/{escrow_uid}": {
+      "post": {
+        "description": "Buyer-facing. Requires marketplace request-signature version 2 headers.",
+        "operationId": "SettleController_settle_escrow_api_v1_settle__escrow_uid__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "escrow_uid",
+            "required": true,
+            "schema": {
+              "title": "Escrow Uid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiCreditsSettleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettleResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit settlement / kick off credit issuance",
+        "tags": [
+          "settle",
+          "settle"
+        ]
+      }
+    },
+    "/api/v1/settle/{escrow_uid}/status": {
+      "get": {
+        "description": "Buyer-facing. Requires marketplace request-signature version 2 headers.",
+        "operationId": "SettleController_settle_status_api_v1_settle__escrow_uid__status_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "escrow_uid",
+            "required": true,
+            "schema": {
+              "title": "Escrow Uid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettleStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Poll settlement status",
+        "tags": [
+          "settle",
+          "settle"
+        ]
+      }
+    },
+    "/api/v1/settlements/{negotiation_id}/refund": {
+      "post": {
+        "description": "Seller-facing. Requires the storefront's own seller v2 signature. A mechanism with seller refunds reverses the deal's still-held payment and records it refunded so issuance cannot start; credits already issued are left in place. Other mechanisms refund through their own path (409).",
+        "operationId": "refund_settlement_api_v1_settlements__negotiation_id__refund_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "negotiation_id",
+            "required": true,
+            "schema": {
+              "title": "Negotiation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefundSettlementResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refund an accepted deal through its settlement mechanism",
+        "tags": [
+          "settlements"
+        ]
+      }
+    },
+    "/api/v1/system/events": {
+      "get": {
+        "description": "\\n\\nRequires all marketplace v2 signature headers with `X-Market-Role: admin`.",
+        "operationId": "SystemController_stream_events_api_v1_system_events_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "since_id",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Since Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "stream",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Stream",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Stage"
+            }
+          },
+          {
+            "in": "query",
+            "name": "listing_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Listing Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "negotiation_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Negotiation Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "MarketplaceIdentityIdentifier": [],
+            "MarketplaceIdentityScheme": [],
+            "MarketplaceRequestId": [],
+            "MarketplaceRole": [],
+            "MarketplaceSignature": [],
+            "MarketplaceSignatureVersion": [],
+            "MarketplaceTimestamp": []
+          }
+        ],
+        "summary": "Stage event log",
+        "tags": [
+          "system",
+          "system"
+        ],
+        "x-market-role": "admin"
+      }
+    },
+    "/api/v1/system/health": {
+      "get": {
+        "operationId": "SystemController_health_versioned_api_v1_system_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Versioned health alias",
+        "tags": [
+          "system",
+          "system"
+        ]
+      }
+    },
+    "/api/v1/system/status": {
+      "get": {
+        "operationId": "SystemController_system_status_api_v1_system_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Full diagnostic status",
+        "tags": [
+          "system",
+          "system"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "SystemController_health_bare_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Liveness probe",
+        "tags": [
+          "system",
+          "system"
+        ]
+      }
+    }
+  }
+}

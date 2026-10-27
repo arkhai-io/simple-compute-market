@@ -33,18 +33,15 @@ from storefront_client.client import StorefrontClientError
 
 import apicredits_storefront.container as container
 from apicredits_storefront.controllers.lifecycle_controller import router
-from apicredits_storefront.lifecycle_steps import (
+from arkhai_api_selling.lifecycle import (
     CAPACITY_EVENTS_POLLER,
     NEGOTIATION_WATCHDOG,
     SETTLEMENT_SERVICING,
-    api_credit_loop_controller,
+    loop_controller,
     capacity_site_loop_name,
-    register_api_credit_lifecycle_steps,
-    register_api_credit_loops,
 )
-from apicredits_storefront.middleware import admin_auth
-from apicredits_storefront.middleware.response_auth import authenticate_response
-from apicredits_storefront.utils.sqlite_client import SQLiteClient
+from apicredits_storefront.container import storefront_sqlite_client
+from apicredits_storefront.utils import config as storefront_config
 from tests._settings_overrides import settings_overrides
 
 # Deterministic development keys for this test only; never used on any network.
@@ -126,20 +123,20 @@ async def start_storefront(tmp_path, monkeypatch):
     Returns a factory taking the servicing interval and the capacity runtime;
     every other interval is far longer than any test waits.
     """
-    db = SQLiteClient(db_path=str(tmp_path / "lifecycle.db"))
+    db = storefront_sqlite_client(db_path=str(tmp_path / "lifecycle.db"))
     obligations = _Obligations()
     monkeypatch.setattr(container, "resolved_sqlite_client", db)
     monkeypatch.setattr(container, "resolved_marketplace_signer", STOREFRONT_SIGNER)
     monkeypatch.setattr(container, "resolved_settlement_composition", None)
     monkeypatch.setattr(
-        admin_auth,
+        storefront_config,
         "resolve_admin_identities",
         lambda: TrustedIdentitySet(identities=(ADMIN_SIGNER.identity,)),
     )
     started: list = []
 
     def start(*, servicing_interval: float = _LONG_INTERVAL, sites: _QuotaSites | None = None):
-        loops = api_credit_loop_controller()
+        loops = loop_controller()
         worker = SettlementServicingWorker(
             runtime=object(),
             repository=obligations,
@@ -148,16 +145,16 @@ async def start_storefront(tmp_path, monkeypatch):
         )
         monkeypatch.setattr(container, "resolved_settlement_worker", worker)
         monkeypatch.setattr(container, "resolved_loop_controller", loops)
-        register_api_credit_lifecycle_steps(loops)
+        container.STOREFRONT_LOOPS.register_steps(loops)
         with settings_overrides(
             negotiation_watchdog_interval=_LONG_INTERVAL,
             settlement_servicing_interval_seconds=servicing_interval,
         ):
-            register_api_credit_loops(loops, capacity_runtime=sites or _QuotaSites())
+            container.STOREFRONT_LOOPS.register_loops(loops, capacity_runtime=sites or _QuotaSites())
         capacity_aggregate = loops.start_loops()[CAPACITY_EVENTS_POLLER]
         started.append(loops)
         app = FastAPI()
-        app.middleware("http")(authenticate_response)
+        app.middleware("http")(container.AUTH.sign_responses)
         app.include_router(router)
         return _Storefront(app, loops, obligations, capacity_aggregate)
 
@@ -307,9 +304,9 @@ def test_every_sites_poller_is_listed_before_its_first_cycle(monkeypatch):
     """The fan-out declares each site's poller when it registers, so status
     lists every site before the fan-out has started, let alone polled."""
     monkeypatch.setattr(container, "resolved_settlement_composition", None)
-    loops = api_credit_loop_controller()
+    loops = loop_controller()
 
-    register_api_credit_loops(loops, capacity_runtime=_QuotaSites())
+    container.STOREFRONT_LOOPS.register_loops(loops, capacity_runtime=_QuotaSites())
 
     assert loops.states() == {
         capacity_site_loop_name("quota-east"): "starting",

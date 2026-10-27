@@ -1,17 +1,11 @@
-"""Health and version endpoints."""
+"""Health and version bindings."""
 
 from __future__ import annotations
 
-from importlib.metadata import PackageNotFoundError, version as _pkg_version
+from typing import Callable
 
-from fastapi import APIRouter
-
-
-def _service_version() -> str:
-    try:
-        return _pkg_version("arkhai-apicredits-service")
-    except PackageNotFoundError:
-        return "dev"
+from arkhai_api_authority import SystemRouteService
+from fastapi import APIRouter, Depends
 
 
 def make_health_router() -> APIRouter:
@@ -25,7 +19,7 @@ def make_health_router() -> APIRouter:
     return router
 
 
-def make_system_router() -> APIRouter:
+def make_system_router(get_service: Callable[[], SystemRouteService]) -> APIRouter:
     router = APIRouter(prefix="/system", tags=["system"])
 
     @router.get("/health")
@@ -33,7 +27,7 @@ def make_system_router() -> APIRouter:
         return {"status": "ok"}
 
     @router.get("/version")
-    def version() -> dict:
-        return {"service": "arkhai-apicredits-service", "version": _service_version()}
+    def version(service: SystemRouteService = Depends(get_service)) -> dict:
+        return service.version()
 
     return router

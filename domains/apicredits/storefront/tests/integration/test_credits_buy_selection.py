@@ -20,13 +20,10 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from arkhai_apicredits_buyer import (
-    buy_cli,
-    common,
-    payments,
-    settlement_composition,
-    settlement_stages,
-)
+from arkhai_api_buying import buy as buy_cli
+from arkhai_api_buying import settlement_composition
+from arkhai_api_buying_arkhai_payments import payments
+from arkhai_api_buying_arkhai_payments import stage as settlement_stages
 from arkhai_apicredits_buyer.cli import app as buyer_app
 from core_buyer import BuyResult, orchestration
 from core_buyer.buyer_config import ResolvedBuyerIdentity
@@ -42,16 +39,12 @@ from market_identity import TrustedIdentitySet
 from typer.testing import CliRunner
 
 import apicredits_storefront.container as container
-from apicredits_storefront import settlement_stages as seller_settlement_stages
 from apicredits_storefront.controllers.negotiate_controller import (
     router as negotiate_router,
 )
 from apicredits_storefront.domain_runtime import get_market_domain_contract
-from apicredits_storefront.middleware.response_auth import authenticate_response
-from apicredits_storefront.negotiation_runtime import (
-    build_api_credit_negotiation_runtime,
-)
-from apicredits_storefront.settlement_composition import SELLER_STAGES
+from apicredits_storefront.server import build_api_credit_negotiation_runtime
+from apicredits_storefront.container import SELLER_STAGES
 from tests._settings_overrides import settings_overrides
 from tests.integration.credit_negotiation import (
     BUYER_SIGNER,
@@ -98,7 +91,7 @@ async def storefront(db, fake_capacity, key_records, monkeypatch):
         ),
         client_for_owner=FakePaymentsClient(),
     )
-    composition = SimpleNamespace(arkhai_payments_stage=stage)
+    composition = SimpleNamespace(servicing={ARKHAI_PAYMENTS_MECHANISM: stage})
     runtime = build_api_credit_negotiation_runtime(
         _DOMAIN,
         accepted_obligation_dispatch={ARKHAI_PAYMENTS_MECHANISM: None},
@@ -108,7 +101,7 @@ async def storefront(db, fake_capacity, key_records, monkeypatch):
     )
     holds = QuotaHolds()
     monkeypatch.setattr(
-        seller_settlement_stages, "build_capacity_runtime", lambda _factory: holds
+        container.QUOTA_CAPACITY, "runtime", lambda _factory: holds
     )
     monkeypatch.setattr(container, "resolved_sqlite_client", db)
     monkeypatch.setattr(container, "resolved_negotiation_runtime", runtime)
@@ -119,7 +112,7 @@ async def storefront(db, fake_capacity, key_records, monkeypatch):
         settlement_options=[payment_option(_PAYMENT_RATE).model_dump(mode="json")],
     )
     app = FastAPI()
-    app.middleware("http")(authenticate_response)
+    app.middleware("http")(container.AUTH.sign_responses)
     app.include_router(negotiate_router)
     with settings_overrides(
         **{
@@ -159,7 +152,7 @@ def buyer(storefront, monkeypatch, tmp_path):
         "resolve_registry_api_keys": lambda: {},
     }
     for name, seam in seams.items():
-        monkeypatch.setattr(common, name, seam)
+        monkeypatch.setattr(buy_cli, name, seam)
     monkeypatch.setattr(
         buy_cli, "query_registry_for_matches_multi", lambda *_a, **_kw: [dict(listing)]
     )
@@ -186,7 +179,7 @@ def buyer(storefront, monkeypatch, tmp_path):
             agreed_amount=negotiation.outcome.agreed_amount,
         )
 
-    monkeypatch.setattr(settlement_stages, "settle_api_credit_negotiation", settle)
+    monkeypatch.setattr(settlement_stages, "settle_negotiation", settle)
     return SimpleNamespace(settled=settled)
 
 

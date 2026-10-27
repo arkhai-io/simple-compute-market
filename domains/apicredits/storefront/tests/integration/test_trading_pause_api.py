@@ -13,9 +13,7 @@ from __future__ import annotations
 import httpx
 import pytest
 from apicredits_storefront.domain_runtime import get_market_domain_contract
-from apicredits_storefront.negotiation_runtime import (
-    build_api_credit_negotiation_runtime,
-)
+from apicredits_storefront.server import build_api_credit_negotiation_runtime
 from fastapi import FastAPI
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_negotiation_runtime import StorefrontPausedError
@@ -29,8 +27,7 @@ from apicredits_storefront.controllers.system_controller import (
 from apicredits_storefront.controllers.trading_pause_controller import (
     router as trading_pause_router,
 )
-from apicredits_storefront.middleware import admin_auth
-from apicredits_storefront.middleware.response_auth import authenticate_response
+from apicredits_storefront.utils import config as storefront_config
 from tests._settings_overrides import settings_overrides
 from tests.integration.credit_negotiation import (
     BUYER_PRINCIPAL,
@@ -52,13 +49,13 @@ async def storefront(db, fake_capacity, key_records, monkeypatch):
     monkeypatch.setattr(container, "resolved_negotiation_runtime", runtime)
     monkeypatch.setattr(container, "resolved_marketplace_signer", SELLER_SIGNER)
     monkeypatch.setattr(
-        admin_auth,
+        storefront_config,
         "resolve_admin_identities",
         lambda: TrustedIdentitySet(identities=(ADMIN_SIGNER.identity,)),
     )
     container.trading_pause.resume()
     app = FastAPI()
-    app.middleware("http")(authenticate_response)
+    app.middleware("http")(container.AUTH.sign_responses)
     app.include_router(trading_pause_router)
     app.include_router(system_router)
     try:

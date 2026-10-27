@@ -14,6 +14,10 @@ the project's `uv.lock` when it runs, so no caller lists them:
   uv cache cannot supply a previous build of a same-version wheel.
 - `install-wheel` installs the project's own distribution, at the version its
   `pyproject.toml` declares, from the wheelhouse alone.
+- `require-wheels` fails, naming each one, when the wheelhouse lacks a wheel
+  for an internal package at the version the project's lock records, so a
+  later `reinit` cannot resolve that package from an index, or install a
+  stale wheel, instead.
 - `lock [PROJECT ...]` relocks projects against the current wheelhouse and
   installs nothing. It upgrades every internal package and every other
   repository distribution the lock names, so one that has drifted to a
@@ -63,10 +67,14 @@ def _read_toml(path: Path) -> dict:
         raise DerivationError(f"{path} is not valid TOML: {exc}") from None
 
 
-def wheelhouse_packages(project: Path, wheelhouse: Path) -> list[str]:
-    """Normalised names the project's lock resolves from ``wheelhouse``."""
+def wheelhouse_requirements(project: Path, wheelhouse: Path) -> list[tuple[str, str]]:
+    """Each (normalised name, version) pair the project's lock resolves from ``wheelhouse``.
+
+    A lock may hold one name at several versions, under different markers; each
+    is a wheel the wheelhouse must hold.
+    """
     lock = project / "uv.lock"
-    names: set[str] = set()
+    requirements: set[tuple[str, str]] = set()
     for package in _read_toml(lock).get("package", []):
         registry = (package.get("source") or {}).get("registry")
         if not isinstance(registry, str) or "://" in registry:
@@ -76,8 +84,24 @@ def wheelhouse_packages(project: Path, wheelhouse: Path) -> list[str]:
                 f"{lock} resolves {package['name']} from {registry}, which is "
                 f"not the repository wheelhouse"
             )
-        names.add(normalise(package["name"]))
-    return sorted(names)
+        requirements.add((normalise(package["name"]), str(package["version"])))
+    return sorted(requirements)
+
+
+def wheelhouse_packages(project: Path, wheelhouse: Path) -> list[str]:
+    """Normalised names the project's lock resolves from ``wheelhouse``."""
+    return sorted({name for name, _ in wheelhouse_requirements(project, wheelhouse)})
+
+
+def wheels_present(wheelhouse: Path) -> set[tuple[str, str]]:
+    """The (normalised name, version) pairs ``wheelhouse`` holds a wheel for."""
+    present: set[tuple[str, str]] = set()
+    for wheel in wheelhouse.glob("*.whl"):
+        # A wheel file name is name-version[-build]-python-abi-platform.whl.
+        parts = wheel.name[: -len(".whl")].split("-")
+        if len(parts) >= 5:
+            present.add((normalise(parts[0]), parts[1]))
+    return present
 
 
 def declared_distribution(project: Path) -> tuple[str, str]:
@@ -122,6 +146,17 @@ def relative_wheelhouse(project: Path, wheelhouse: Path) -> str:
 
 def _each(flag: str, values: Sequence[str]) -> list[str]:
     return [arg for value in values for arg in (flag, value)]
+
+
+def missing_wheels(project: Path, root: Path) -> list[str]:
+    """Each internal package the project's lock names without a wheel at the locked version, as ``name==version``."""
+    wheelhouse = root / WHEELHOUSE_NAME
+    present = wheels_present(wheelhouse)
+    return [
+        f"{name}=={version}"
+        for name, version in wheelhouse_requirements(project, wheelhouse)
+        if (name, version) not in present
+    ]
 
 
 def reinit_command(project: Path, root: Path) -> list[str]:
@@ -199,6 +234,7 @@ def _parser() -> argparse.ArgumentParser:
     for name, help_text in (
         ("reinit", "sync the project environment, refreshing internal packages"),
         ("install-wheel", "install the project's own wheel from the wheelhouse"),
+        ("require-wheels", "fail when the wheelhouse lacks an internal package's wheel at its locked version"),
     ):
         sub = commands.add_parser(name, help=help_text)
         sub.add_argument("--project", type=Path, default=Path.cwd())
@@ -222,6 +258,14 @@ def main(argv: Sequence[str] | None = None, *, root: Path = ROOT,
             planned = [(project, lock_command(project, root, repository)) for project in projects]
         else:
             project = args.project.resolve()
+            if args.command == "require-wheels":
+                missing = missing_wheels(project, root)
+                if missing:
+                    raise DerivationError(
+                        f"{project} needs wheels the wheelhouse lacks: {', '.join(missing)}; "
+                        "build them first"
+                    )
+                return 0
             if args.command == "reinit":
                 command = reinit_command(project, root)
             elif args.command == "image":

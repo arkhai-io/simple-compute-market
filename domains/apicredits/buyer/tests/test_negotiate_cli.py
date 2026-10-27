@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 from core_buyer.buyer_config import ResolvedBuyerIdentity
+from core_buyer.orchestrator import BuyResult
 from core_buyer.registry_config import RegistryAuthority
 from core_buyer.run_log import read_run
 from market_config.config_loader import ChainConfig
@@ -17,7 +18,11 @@ from market_core.schemas import Agreement, RateValue, SettlementOption, derive_s
 from market_identity import Ed25519Signer, ResponseEnvelope, TrustedIdentitySet, canonical_body_hash, sign_response
 from typer.testing import CliRunner
 
-from arkhai_apicredits_buyer import common, negotiate_cli, payments, settlement_composition, settlement_stages
+from arkhai_api_buying import buy as buy_cli
+from arkhai_api_buying import common, settlement_composition
+from arkhai_api_buying import negotiate as negotiate_cli
+from arkhai_api_buying_alkahest import stage as settlement_stages
+from arkhai_api_buying_arkhai_payments import payments
 from arkhai_apicredits_buyer.cli import app
 from test_negotiation_flow import _MockResponse, _request_header
 
@@ -96,7 +101,7 @@ def surface(monkeypatch, tmp_path):
         }
         monkeypatch.setattr(common, "fetch_listing_dict", lambda *a, **kw: dict(listing))
         monkeypatch.setattr("core_buyer.orchestration.fetch_listing_dict", lambda *a, **kw: dict(listing))
-        monkeypatch.setattr("arkhai_apicredits_buyer.negotiate_cli.fetch_listing_dict", lambda *a, **kw: dict(listing))
+        monkeypatch.setattr("arkhai_api_buying.negotiate.fetch_listing_dict", lambda *a, **kw: dict(listing))
         state.option = option
         return state
 
@@ -215,14 +220,21 @@ def test_payment_cli_resume_uses_recorded_selection_without_fresh_admission(surf
 
 
 @pytest.mark.parametrize("prices,amount", [
-    (("--initial-price", "2", "--max-price", "3", "--token-decimals", "2"), 800),
+    (("--initial-price", "2", "--max-price", "3"), 800),
     ((), 400),
 ])
-def test_alkahest_cli_keeps_explicit_scaling_and_derived_base_units(surface, monkeypatch, prices, amount):
+def test_alkahest_cli_scales_explicit_prices_by_the_selected_token(surface, monkeypatch, prices, amount):
     state = surface.configure("alkahest.v1")
     chain = ChainConfig(name="anvil", rpc_url="http://rpc", chain_id=31337)
-    monkeypatch.setattr(common, "buyer_chains", lambda: {"anvil": chain})
-    monkeypatch.setattr(settlement_stages, "resolve_buyer_wallet", lambda **kw: ("0x" + "11" * 20, None))
+    monkeypatch.setattr(settlement_stages, "buyer_chains", lambda: {"anvil": chain})
+    monkeypatch.setattr(settlement_stages, "resolve_buyer_wallet", lambda: ("0x" + "11" * 20, None))
+    read = []
+
+    def resolve_token(token, **kw):
+        read.append((token, kw["chain_id"]))
+        return SimpleNamespace(decimals=2)
+
+    monkeypatch.setattr(settlement_stages, "resolve_token", resolve_token)
     _transport(monkeypatch, state, ["exit"])
     result = _fresh(*prices)
     assert result.exit_code == 4, (result.output, result.exception)
@@ -231,6 +243,7 @@ def test_alkahest_cli_keeps_explicit_scaling_and_derived_base_units(surface, mon
     assert proposal["chain_name"] == "anvil"
     assert proposal["escrow_address"] == _ENTRY["escrow_address"]
     assert proposal["fields"]["token"] == _TOKEN
+    assert read == ([(_TOKEN, 31337)] if prices else [])
 
 
 def test_selected_alkahest_refuses_missing_wallet_before_seller_request(surface, monkeypatch):
@@ -240,3 +253,118 @@ def test_selected_alkahest_refuses_missing_wallet_before_seller_request(surface,
     assert result.exit_code == 2, (result.output, result.exception)
     assert "Missing EVM address" in result.output
     assert state.requests == []
+
+
+def test_negotiate_refuses_a_listing_on_several_configured_chains_under_yes(surface, monkeypatch):
+    state = surface.configure("alkahest.v1")
+    anvil = ChainConfig(name="anvil", rpc_url="http://rpc", chain_id=31337)
+    other = ChainConfig(name="base", rpc_url="http://rpc-base", chain_id=8453)
+    monkeypatch.setattr(settlement_stages, "buyer_chains", lambda: {"anvil": anvil, "base": other})
+    monkeypatch.setattr(settlement_stages, "resolve_buyer_wallet", lambda: ("0x" + "11" * 20, None))
+    listing = common.fetch_listing_dict()
+    second = {**_ENTRY, "chain_name": "base"}
+    option = state.option.model_copy(update={
+        "params": {"accepted_escrow": second},
+        "option_id": derive_settlement_option_id(
+            mechanism="alkahest.v1", asset=_TOKEN, rates=state.option.rates,
+            params={"accepted_escrow": second},
+        ),
+    })
+    listing["settlement_options"].append(option.model_dump(mode="json"))
+    listing["accepted_escrows"].append(second)
+    monkeypatch.setattr("arkhai_api_buying.negotiate.fetch_listing_dict", lambda *a, **kw: dict(listing))
+    _transport(monkeypatch, state, ["exit"])
+
+    result = _fresh()
+
+    assert result.exit_code == 2, (result.output, result.exception)
+    output = " ".join(result.output.split())
+    assert "'credits-1'" in output and "['anvil', 'base']" in output
+    assert state.requests == []
+
+
+def test_buy_scales_explicit_prices_by_the_selected_listings_token(surface, monkeypatch):
+    surface.configure("alkahest.v1")
+    chain = ChainConfig(name="anvil", rpc_url="http://rpc", chain_id=31337)
+    monkeypatch.setattr(settlement_stages, "buyer_chains", lambda: {"anvil": chain})
+    # A deterministic development key for this test only; never used on any network.
+    monkeypatch.setattr(settlement_stages, "resolve_buyer_wallet", lambda: ("0x" + "11" * 20, "0x" + "77" * 32))
+    monkeypatch.setattr(
+        settlement_stages, "resolve_token", lambda token, **_kw: SimpleNamespace(decimals=2),
+    )
+    for name in (
+        "resolve_fresh_buyer_identity", "resolve_indexer_urls", "resolve_registry_authorities",
+        "resolve_registry_api_keys", "resolve_indexer_urls_for_schema", "resolve_negotiation_config",
+    ):
+        monkeypatch.setattr(buy_cli, name, getattr(common, name))
+    monkeypatch.setattr(buy_cli, "resolve_discovery_timeout", lambda **_kw: 1.0)
+    monkeypatch.setattr(
+        buy_cli, "query_registry_for_matches_multi",
+        lambda *a, **kw: [common.fetch_listing_dict("http://registry", "credits-1")],
+    )
+    monkeypatch.setattr(buy_cli, "load_buyer_chain", lambda *a, **kw: None)
+    seen = {}
+
+    def run_buy(*, constraints, matches, **_kw):
+        seen.update(initial=constraints.initial_price, maximum=constraints.max_price, matches=matches)
+        return BuyResult(status="exited", reason="stopped by the test")
+
+    monkeypatch.setattr(buy_cli, "run_buy", run_buy)
+
+    result = CliRunner().invoke(app, [
+        "credits", "buy", "--quantity", "4", "--initial-price", "2", "--max-price", "3", "--yes",
+    ])
+
+    assert result.exit_code == 4, (result.output, result.exception)
+    assert (seen["initial"], seen["maximum"]) == (200, 300)
+    assert [match["listing_id"] for match in seen["matches"]] == ["credits-1"]
+
+
+def test_buy_refuses_explicit_prices_across_mechanisms_of_different_units(surface, monkeypatch):
+    surface.configure("arkhai.payments.v1")
+    payment_listing = {**common.fetch_listing_dict(), "listing_id": "credits-2"}
+    surface.configure("alkahest.v1")
+    escrow_listing = common.fetch_listing_dict()
+    chain = ChainConfig(name="anvil", rpc_url="http://rpc", chain_id=31337)
+    monkeypatch.setattr(settlement_stages, "buyer_chains", lambda: {"anvil": chain})
+    # A deterministic development key for this test only; never used on any network.
+    monkeypatch.setattr(settlement_stages, "resolve_buyer_wallet", lambda: ("0x" + "11" * 20, "0x" + "77" * 32))
+    monkeypatch.setattr(
+        settlement_stages, "resolve_token", lambda token, **_kw: SimpleNamespace(decimals=2),
+    )
+    for name in (
+        "resolve_fresh_buyer_identity", "resolve_indexer_urls", "resolve_registry_authorities",
+        "resolve_registry_api_keys", "resolve_indexer_urls_for_schema", "resolve_negotiation_config",
+    ):
+        monkeypatch.setattr(buy_cli, name, getattr(common, name))
+    monkeypatch.setattr(buy_cli, "resolve_discovery_timeout", lambda **_kw: 1.0)
+    monkeypatch.setattr(
+        buy_cli, "query_registry_for_matches_multi",
+        lambda *a, **kw: [dict(payment_listing), dict(escrow_listing)],
+    )
+    monkeypatch.setattr(buy_cli, "load_buyer_chain", lambda *a, **kw: None)
+
+    def run_buy(**_kw):
+        raise AssertionError("a buy across units was negotiated")
+
+    monkeypatch.setattr(buy_cli, "run_buy", run_buy)
+
+    result = CliRunner().invoke(app, [
+        "credits", "buy", "--quantity", "4", "--initial-price", "2", "--max-price", "3", "--yes",
+    ])
+
+    assert result.exit_code == 2, (result.output, result.exception)
+    output = " ".join(result.output.split())
+    assert "alkahest.v1" in output and "arkhai.payments.v1" in output
+
+
+@pytest.mark.parametrize("command", ["buy", "negotiate", "settle"])
+@pytest.mark.parametrize(
+    "flag",
+    ["--evm-private-key", "--evm-address", "--chain", "--token-contract", "--token-decimals", "--escrow-uid"],
+)
+def test_a_mechanism_override_flag_is_refused(command, flag):
+    # A deterministic development key for this test only; never used on any network.
+    result = CliRunner().invoke(app, ["credits", command, flag, "0x" + "77" * 32])
+    assert result.exit_code == 2
+    assert "No such option" in result.output

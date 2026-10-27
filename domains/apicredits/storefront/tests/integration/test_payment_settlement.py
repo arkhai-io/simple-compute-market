@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import httpx
 import pytest
+from arkhai_api_selling.quota_listing import record_accepted_listing
 from fastapi import FastAPI
 from market_arkhai_payments import (
     ARKHAI_PAYMENTS_MECHANISM,
@@ -25,18 +27,18 @@ from market_arkhai_payments import (
     servicing_stage,
 )
 from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt
+from market_core import ImmutableFulfillmentCapability
 from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from storefront_client import StorefrontClient, StorefrontClientError
 
 import apicredits_storefront.container as _container
 from apicredits_storefront.controllers.settle_controller import router, settlements_router
-from apicredits_storefront.middleware.response_auth import authenticate_response
+from apicredits_storefront.domain_runtime import get_market_domain_contract
 from apicredits_storefront.services.fulfillment_service import build_api_credit_failure_policy
-from apicredits_storefront.services.payment_settlement_service import (
-    ApiCreditPaymentSettlementService,
-)
-from apicredits_storefront.utils.sqlite_client import SQLiteClient
+from apicredits_storefront.container import SELLER_STAGES
+from apicredits_storefront.container import storefront_sqlite_client
+from arkhai_api_selling.persistence import StorefrontSQLiteClient
 from arkhai_apicredits.negotiation.terms import make_api_credits_provision_terms
 from tests._settings_overrides import settings_overrides
 from tests.listing_bindings import upsert_bound_listing
@@ -88,11 +90,11 @@ def _option() -> SettlementOption:
     return SettlementOption(option_id=derive_settlement_option_id(**body), **body)
 
 
-async def _seed(db: SQLiteClient, stage: PaymentSellerStage):
+async def _seed(db: StorefrontSQLiteClient, stage: PaymentSellerStage, *, agreement_listing: str = LISTING):
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     agreement = Agreement(
         negotiation_id=NEGOTIATION,
-        listing_id=LISTING,
+        listing_id=agreement_listing,
         listing_hash="0" * 64,
         buyer=BUYER.identity.model_dump(mode="json"),
         seller=SELLER.identity.model_dump(mode="json"),
@@ -149,8 +151,8 @@ async def _seed(db: SQLiteClient, stage: PaymentSellerStage):
 
 @pytest.fixture
 async def harness(tmp_path):
-    async def build(*, actions=("emit_event",), enabled=True):
-        db = SQLiteClient(db_path=str(tmp_path / "credits.db"))
+    async def build(*, actions=("emit_event",), enabled=True, agreement_listing=LISTING):
+        db = storefront_sqlite_client(db_path=str(tmp_path / "credits.db"))
         payments = FakePaymentsClient()
         config = ArkhaiPaymentsConfig(
             enabled=enabled,
@@ -161,13 +163,11 @@ async def harness(tmp_path):
             development_auth=True,
         )
         stage = servicing_stage(config, client_for_owner=payments)
-        data = await _seed(db, stage)
+        data = await _seed(db, stage, agreement_listing=agreement_listing)
         issuer = Issuer(db)
         composition = SimpleNamespace(
-            domain=SimpleNamespace(fulfillment=issuer), arkhai_payments_stage=stage,
-        )
-        composition.payment_service = lambda store: ApiCreditPaymentSettlementService(
-            db=store, composition=composition, stage=stage, mechanism=ARKHAI_PAYMENTS_MECHANISM
+            domain=SimpleNamespace(fulfillment=issuer), servicing={ARKHAI_PAYMENTS_MECHANISM: stage},
+            contributions=_container.SELLING_CONTRIBUTIONS, stages=SELLER_STAGES,
         )
         _container.resolved_sqlite_client = db
         _container.resolved_marketplace_signer = SELLER
@@ -175,7 +175,7 @@ async def harness(tmp_path):
         app = FastAPI()
         app.include_router(router)
         app.include_router(settlements_router)
-        app.middleware("http")(authenticate_response)
+        app.middleware("http")(_container.AUTH.sign_responses)
         transport = httpx.ASGITransport(app=app)
         publishers = TrustedIdentitySet(identities=(SELLER.identity,))
         built = SimpleNamespace(
@@ -234,6 +234,54 @@ async def test_a_verified_receipt_issues_credits_once(harness):
     evidence = await h.db.load_settlement_evidence(negotiation_id=NEGOTIATION)
     assert evidence.status == "verified" and evidence.settlement_ref == h.data.transaction_id
     assert await h.db.load_escrow(escrow_uid=NEGOTIATION) is None
+
+
+async def test_a_listing_changed_after_acceptance_settles_what_was_accepted(harness):
+    """The payment service issues from the listing recorded at acceptance, not
+    from a listing whose service changed in place under the same quota resource."""
+    h = await harness()
+    composition = _container.resolved_settlement_composition
+    composition.domain = replace(
+        get_market_domain_contract(),
+        fulfillment=ImmutableFulfillmentCapability(fulfill=h.issuer.fulfill),
+    )
+    listing = await h.db.load_listing(listing_id=LISTING)
+    await record_accepted_listing(
+        _container.SELLING_CONTRIBUTIONS, h.db, domain=composition.domain,
+        negotiation_id=NEGOTIATION, listing_id=LISTING, listing_record=listing,
+    )
+    stored = listing["listing_resource"]
+    resource = json.loads(stored) if isinstance(stored, str) else dict(stored)
+    await h.db.update_listing(
+        listing_id=LISTING, listing_resource={**resource, "service_name": "another", "base_url": "http://other.local"},
+    )
+
+    h.serve()
+    ready = await h.buyer.settle_agreement(NEGOTIATION)
+
+    assert ready.status == "ready"
+    evidence = await h.db.load_settlement_evidence(negotiation_id=NEGOTIATION)
+    accepted = evidence.evidence["delivery"]["listing_resource"]
+    assert (accepted["service_name"], accepted["base_url"]) == ("sample", "http://sample.local")
+
+
+async def test_an_agreement_naming_another_listing_than_its_thread_is_refused(harness):
+    h = await harness(agreement_listing="listing-elsewhere")
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    await upsert_bound_listing(
+        h.db, listing_id="listing-elsewhere", status="open", created_at=now, updated_at=now,
+        listing_resource={
+            "service_name": "elsewhere", "resource_id": "svc-quota", "capacity_site_id": "quota",
+            "offering_mode": "api_credits", "base_url": "http://elsewhere.local",
+        },
+        accepted_escrows=[], fulfillment_resource=None, max_duration_seconds=None,
+        storefront_url="http://test", seller_principal=SELLER.identity,
+    )
+
+    h.serve()
+    assert await _status_code(lambda: h.buyer.settle_agreement(NEGOTIATION)) == 409
+    assert h.issuer.issued == []
+    assert await h.db.load_settlement_evidence(negotiation_id=NEGOTIATION) is None
 
 
 async def test_an_impostor_receipt_is_refused_without_a_grant(harness):
@@ -317,7 +365,7 @@ async def test_a_refund_after_issuance_start_records_both(harness):
 
 def _restart(tmp_path, h, *, approved: bool):
     """A fresh composition over the same SQLite file, as after a process restart."""
-    db = SQLiteClient(db_path=str(tmp_path / "credits.db"))
+    db = storefront_sqlite_client(db_path=str(tmp_path / "credits.db"))
     payments = FakePaymentsClient()
     if approved:
         payments.serve(build_signed_receipt(signer=SERVICE, mandate=h.data.mandate))
@@ -332,10 +380,8 @@ def _restart(tmp_path, h, *, approved: bool):
     stage = servicing_stage(config, client_for_owner=payments)
     issuer = Issuer(db)
     composition = SimpleNamespace(
-        domain=SimpleNamespace(fulfillment=issuer), arkhai_payments_stage=stage,
-    )
-    composition.payment_service = lambda store: ApiCreditPaymentSettlementService(
-        db=store, composition=composition, stage=stage, mechanism=ARKHAI_PAYMENTS_MECHANISM
+        domain=SimpleNamespace(fulfillment=issuer), servicing={ARKHAI_PAYMENTS_MECHANISM: stage},
+        contributions=_container.SELLING_CONTRIBUTIONS,
     )
     _container.resolved_sqlite_client = db
     _container.resolved_settlement_composition = composition
@@ -344,31 +390,27 @@ def _restart(tmp_path, h, *, approved: bool):
 
 async def test_an_approved_payment_converges_after_restart_without_the_buyer(harness, tmp_path):
     """The buyer approved, never settled, and the storefront restarted: the seller issues credits."""
-    from apicredits_storefront.lifecycle_steps import payment_reconciliation_step
-
     h = await harness()
     restarted = _restart(tmp_path, h, approved=True)
 
     # The registered step: what the timer loop and an operator's step run.
-    done = await payment_reconciliation_step()
+    done = await _container.PAYMENTS_STAGE.reconciliation_step()
 
     assert (done["attempted"], done["failed"]) == (1, 0)
     assert restarted.issuer.issued == [NEGOTIATION]
     progress = await restarted.db.load_issuance_progress(reference=NEGOTIATION)
     assert progress["status"] == "ready"
 
-    again = await payment_reconciliation_step()
+    again = await _container.PAYMENTS_STAGE.reconciliation_step()
     assert again["attempted"] == 0
     assert restarted.issuer.issued == [NEGOTIATION]
 
 
 async def test_reconciliation_leaves_an_unapproved_payment_pending(harness, tmp_path):
-    from apicredits_storefront.lifecycle_steps import payment_reconciliation_step
-
     h = await harness()
     restarted = _restart(tmp_path, h, approved=False)
 
-    done = await payment_reconciliation_step()
+    done = await _container.PAYMENTS_STAGE.reconciliation_step()
 
     assert (done["attempted"], done["failed"]) == (1, 0)
     assert restarted.issuer.issued == []
@@ -423,7 +465,7 @@ async def test_completed_deals_never_crowd_out_an_unsettled_one(harness):
         _complete(h.db.db_path, completed)
     h.serve()
 
-    service = _container.resolved_settlement_composition.payment_service(h.db)
+    service = _container.PAYMENTS_STAGE.service(h.db, _container.resolved_settlement_composition)
     done = await service.reconcile_once(limit=1)
 
     assert (done.attempted, done.failed) == (1, 0)
@@ -439,7 +481,7 @@ async def test_a_malformed_agreement_never_stops_reconciliation(harness):
     )
     h.serve()
 
-    service = _container.resolved_settlement_composition.payment_service(h.db)
+    service = _container.PAYMENTS_STAGE.service(h.db, _container.resolved_settlement_composition)
     done = await service.reconcile_once(limit=1)
 
     assert (done.attempted, done.failed) == (1, 0)

@@ -1,8 +1,8 @@
 # @arkhai/apicredits-middleware (TypeScript)
 
 Seller-side gating middleware for the API-credits domain — the
-TypeScript sibling of the Python reference
-(`../python`). It extracts the bearer key from the `Authorization`
+TypeScript sibling of the Python reference, the api family's gate
+(`domains/api/gate`, `arkhai-api-gate`). It extracts the bearer key from the `Authorization`
 header, verifies it against the credits service (short-TTL cache), meters
 each request by consuming credits (synchronously near exhaustion,
 optionally batched above a low-balance threshold), and maps a drained

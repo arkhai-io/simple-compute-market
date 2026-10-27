@@ -1,6 +1,6 @@
 ARG PYTHON_VERSION=3.13
 
-# Stage 1: install the sample app + its middleware from the monorepo
+# Stage 1: install the sample app + the family gate from the monorepo
 # wheels. Built from the repo root so .dist/ is in context.
 FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS builder
 

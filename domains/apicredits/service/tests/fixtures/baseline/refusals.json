@@ -1,0 +1,131 @@
+{
+  "adjust_below_zero": {
+    "body": {
+      "detail": "adjustment -999 would take balance 3 below zero"
+    },
+    "status": 409
+  },
+  "changed_reuse": {
+    "body": {
+      "detail": "Request ID was reused with changed signed content"
+    },
+    "status": 409
+  },
+  "consume_insufficient_credits": {
+    "body": {
+      "balance": 0,
+      "error": "insufficient_credits"
+    },
+    "status": 402
+  },
+  "consume_key_not_found": {
+    "body": {
+      "balance": 0,
+      "error": "key_not_found"
+    },
+    "status": 404
+  },
+  "consume_key_revoked": {
+    "body": {
+      "balance": 0,
+      "error": "key_revoked"
+    },
+    "status": 403
+  },
+  "exact_retry_refused": {
+    "body": {
+      "detail": "This operation cannot be safely retried under the same request ID. Reissue it with a new request ID once the outcome of the first attempt is known."
+    },
+    "status": 409
+  },
+  "issuance_fulfillment_conflict": {
+    "body": {
+      "detail": "fulfillment_id is already bound to a different issuance request",
+      "error": "fulfillment_conflict"
+    },
+    "status": 409
+  },
+  "issuance_invalid": {
+    "body": {
+      "detail": [
+        {
+          "loc": [
+            "body"
+          ],
+          "msg": "Value error, request_digest does not match issuance request",
+          "type": "value_error"
+        }
+      ]
+    },
+    "status": 422
+  },
+  "issuance_key_not_found": {
+    "body": {
+      "detail": "key 'ak_missing' not found",
+      "error": "key_not_found"
+    },
+    "status": 404
+  },
+  "issuance_key_not_owned": {
+    "body": {
+      "detail": "key is bound to a different marketplace principal",
+      "error": "key_not_owned"
+    },
+    "status": 403
+  },
+  "issuance_not_found": {
+    "body": {
+      "detail": "issuance not found"
+    },
+    "status": 404
+  },
+  "issuance_quota_exhausted": {
+    "body": {
+      "detail": "no quota resource can cover 100 units",
+      "error": "quota_exhausted"
+    },
+    "status": 409
+  },
+  "key_not_found": {
+    "body": {
+      "detail": "key 'ak_missing' not found"
+    },
+    "status": 404
+  },
+  "no_trusted_principal_for_role": {
+    "body": {
+      "detail": "No trusted principal is configured for this role"
+    },
+    "status": 403
+  },
+  "revoke_key_not_found": {
+    "body": {
+      "detail": "key 'ak_missing' not found"
+    },
+    "status": 404
+  },
+  "role_not_authorized": {
+    "body": {
+      "detail": "Marketplace role is not authorized"
+    },
+    "status": 403
+  },
+  "unauthenticated": {
+    "body": {
+      "detail": "Missing X-Market-Signature-Version header"
+    },
+    "status": 401
+  },
+  "unknown_route": {
+    "body": {
+      "detail": "no authenticated site contract for GET /api/v1/no-such-route"
+    },
+    "status": 404
+  },
+  "untrusted_principal": {
+    "body": {
+      "detail": "Invalid marketplace authentication"
+    },
+    "status": 403
+  }
+}

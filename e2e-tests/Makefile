@@ -89,6 +89,8 @@ test-container-module:
 # passes its own.
 NETWORK ?= simple-market-service_default
 BUYER_MODULE ?= e2e_deal_buyer_cli or e2e_buy
+# The engine socket to mount into the test container; empty mounts none.
+BUYER_MACHINE_DOCKER_SOCKET ?=
 # The VM lane's scenarios. `e2e_alkahest_escrow_codecs` needs only the chain and
 # stays here; `multi_registry` reads VM's two registries;
 # `e2e_non_erc20_settlement` settles native-token and ERC1155 escrows against
@@ -98,8 +100,10 @@ E2E_MODULE ?= e2e_deal or e2e_deal_buyer_cli or e2e_buy or multi_registry \
               or e2e_listing_shapes or e2e_vm_introduction \
               or e2e_non_erc20_settlement
 # The API-credit lane's scenarios. The payment deal is blocked without a
-# payments target and skips naming it.
-E2E_APICREDITS_MODULE ?= e2e_credits_deal or e2e_credits_payment_deal
+# payments target and skips naming it; the upgrade/rollback scenario runs last
+# over the database the deal scenarios wrote.
+E2E_APICREDITS_MODULE ?= e2e_credits_deal or e2e_credits_payment_deal \
+                         or e2e_credits_service_rollback
 # The bare-metal lane's scenarios. `e2e_bare_metal_deal` is in neither lane: it
 # needs a real whole host to SSH into, which the pipeline never has.
 E2E_BARE_METAL_MODULE ?= e2e_bare_metal_publication or e2e_bare_metal_introduction \
@@ -115,6 +119,7 @@ test-buyer-machine:
 		-v $(CURDIR)/config:/app/config:ro \
 		-v $(CURDIR)/conftest.py:/app/conftest.py:ro \
 		-v $(CURDIR)/pyproject.toml:/app/pyproject.toml:ro \
+		$(if $(BUYER_MACHINE_DOCKER_SOCKET),-v $(BUYER_MACHINE_DOCKER_SOCKET):/var/run/docker.sock,) \
 		$(IMAGE_NAME):$(IMAGE_TAG) \
 		.venv/bin/pytest -m "$(BUYER_MODULE)" $(PYTEST_ARGS)
 
@@ -258,7 +263,8 @@ test-e2e-apicredits:
 	cd .. && docker compose --env-file "$(E2E_APICREDITS_ENV)" $(E2E_APICREDITS_COMPOSE) down -v --remove-orphans
 	cd .. && $(MAKE) build-e2e-apicredits
 	cd .. && $(call e2e_up,$(E2E_APICREDITS_ENV),$(E2E_APICREDITS_COMPOSE))
-	$(MAKE) test-buyer-machine NETWORK=$(E2E_APICREDITS_PROJECT)_default BUYER_MODULE="$(E2E_APICREDITS_MODULE)"
+	$(MAKE) test-buyer-machine NETWORK=$(E2E_APICREDITS_PROJECT)_default BUYER_MODULE="$(E2E_APICREDITS_MODULE)" \
+		BUYER_MACHINE_DOCKER_SOCKET=/var/run/docker.sock
 
 e2e-apicredits-down:
 	cd .. && $(call e2e_env_if_missing,$(E2E_APICREDITS_ENV),e2e-apicredits-dev-env)

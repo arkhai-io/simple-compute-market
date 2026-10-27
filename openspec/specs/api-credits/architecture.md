@@ -20,7 +20,15 @@ Credits are not a replenishing liability limit. Issuance commits finite quota th
 
 ## Authority boundaries
 
-The API-credits domain owns versioned listing, provision-intent, pricing, terms, and result meaning. The storefront composes publication, seller policy, settlement verification, and fulfillment jobs. The credits service is authoritative for API keys, hashed secrets, balances, grants, consumption idempotency, and quota-ledger mutations.
+API credits is a composition of the [api family](../api-family/architecture.md).
+The domain owns its versioned listing schema, its kind bindings of the family's
+provision intent, terms, and result carriers, the meaning of `service_name`, and
+the values it contributes to the family's bundles. Pricing, the negotiation
+guards, and the code that registers a seeded quota and publishes a listing over
+it are the family's, in `selling`; API credits keeps its `[seed]` values. The
+storefront composes publication, seller policy, settlement verification, and
+fulfillment jobs. The credits service is authoritative for API keys, hashed
+secrets, balances, grants, consumption idempotency, and quota-ledger mutations.
 
 Only the storefront's selected seller stage verifies settlement sources and
 owns delivery authorization. The credits service receives the existing
@@ -51,6 +59,13 @@ stale and operator controls may bypass ordinary policy.
 
 ## Idempotency boundaries
 
+The request digest, fulfillment identity, evidence digest, and portable
+fulfillment reference are the family vocabulary's label-parameterized functions
+(`arkhai_api.issuance`, `arkhai_api.evidence`). API credits passes its
+`api-credits` label (`arkhai_apicredits.label`) with its exact existing schema
+strings, so its recorded digests and identities are unchanged, and another
+domain's label digests the same request differently.
+
 Every grant uses the same deterministic fulfillment identity derived from its
 negotiation ID, irrespective of settlement mechanism. Negotiation and fulfillment
 IDs are unique in `credit_grants`. The immutable canonical request digest binds
@@ -71,7 +86,7 @@ A newly issued secret is not guaranteed to be returned exactly once: an unused-k
 
 ## Middleware role
 
-Python, TypeScript, and Rust gates implement the same observable verification and consumption protocol. A gate parses credentials, asks the service to verify and consume a fixed configured amount, and maps authority results to HTTP admission outcomes.
+Python, TypeScript, and Rust gates implement the same observable verification and consumption protocol. The Python gate is the family's `arkhai_api_gate`, configured with the API-credits environment prefix; see [the gate](../api-family/architecture.md#the-gate). A gate parses credentials, asks the service to verify and consume a fixed configured amount, and maps authority results to HTTP admission outcomes.
 
 Caching and batching reduce service calls but do not create another balance authority. Cached verification may delay observation of revocation for its configured TTL. Optional batching uses an optimistic local estimate and flushes to the service; authoritative balance and idempotency remain server-side.
 
@@ -81,10 +96,14 @@ Common issuance consumes verified validated purchase facts and a retry policy
 supplied by the selected stage. Alkahest preparation verifies the source once
 before reserving the delivery job; delivery reads the saved matching evidence
 instead of repeating preparation inside terminal failure handling. That stage
-owns signed issuance publication, on-chain attestation and compensation. If
-attestation fails after issuance, it attempts balance adjustment and revokes a
-key created solely for that operation. Compensation is best-effort recovery
-across authorities, not an atomic chain/database transaction.
+owns signed issuance publication, on-chain attestation and compensation.
+Issuance whose outcome is unknown stays open and is re-driven under the same
+fulfillment identity. If the attestation is definitely refused or was never
+submitted, the stage adjusts the balance and revokes a key created solely for
+that operation. An attestation whose outcome is unknown is not compensated: the
+obligation parks for an operator, the grant stands, and the buyer's credential
+is kept in its private result. Compensation is best-effort recovery across
+authorities, not an atomic chain/database transaction.
 
 Failure/rollback context names `settlement_ref` and `negotiation_id`. Capacity
 release retains the exact hold identity and correlates by negotiation, not a
@@ -93,29 +112,45 @@ legacy DTOs and the site ledger's existing correlation API retain escrow names.
 
 ## Implementation composition
 
-The storefront talks to the credits service through one domain-owned
-HTTP client, `CreditsServiceClient` (`domains/apicredits/settlement/credits_client.py`),
-constructed once at the storefront's composition boundary
-(`apicredits_storefront/services/credits_service_client.py`'s
-`get_credits_service_client()`) and reused by every settlement and
-key-lookup caller, rather than each operation constructing its own
-transient client. This mirrors the `kit/site` + `kit/site-client` split
-used for the separate operator-facing capacity-administration surface
-(`SiteCapacityAdminClient`): a typed client package, independently
-versioned request/response models, and centralized authentication,
-timeout, and error-translation behavior.
+Each API-credits composition root composes the api family's libraries:
 
-The service tracks its own schema evolution in a `schema_migrations`
-table, applied in-process at application startup before the service is
-ready to serve requests. The service has no separate deployment step
-(no Kubernetes init container, no standalone migration CLI) to run
-migrations ahead of the application process — in-process startup
-migration is the current, non-provisional mechanism for the current
-deployment topology, not a placeholder for a future one.
+- The service root, `domains/apicredits/service` (`apicredits_service`),
+  composes `arkhai_api_authority` with the `api-credits` label and its capacity
+  profile (`apicredits_service.config`): offering mode, pool provider, and
+  deliverable and advertisable modes all `api_credits`, the default pool, and
+  the backed label. It installs the site kit's authentication over the
+  library's adapted route declarations and binds the library's route services
+  in its own controllers. Its distribution, image, entry point, and version
+  response are the service's own.
+- The storefront composes `arkhai_api_selling` and the two selling-side
+  mechanism libraries through its `SellingContributions` bundle in
+  `domains/apicredits/storefront/src/apicredits_storefront/container.py`,
+  which also builds the seller stage table, the loops, authentication,
+  persistence, and the route services once.
+  Its controllers are class-based bindings over `selling`'s route services,
+  because the recorded OpenAPI document carries the class in each route's name.
+  It talks to the credits service through the family's `AuthorityClient`
+  (`arkhai_api_client`), constructed once by
+  `get_credits_service_client()` in
+  `domains/apicredits/storefront/src/apicredits_storefront/services/credits_service_client.py`
+  and reused by every settlement and key-lookup caller.
+- The buyer plugin, `arkhai_apicredits_buyer`, is the registration of
+  `arkhai_api_buying` with its `BuyingContributions` and the two buyer-side
+  mechanism stages.
+- The domain library, `arkhai_apicredits`, keeps the listing schema, the kind
+  bindings, and the label.
 
-Every API-credit package resolves its internal dependencies from built
-wheels, not repository-relative editable paths or `pythonpath`
-fallbacks — see `docs/development/ARCHITECTURE.md#wheel-based-development`.
+The service tracks its schema evolution in a `schema_migrations` table. The
+authority library's migration chain runs in-process at application startup,
+before the service is ready to serve requests, followed by the library's
+initialization of the profile's pool. The service has no separate deployment
+step (no Kubernetes init container, no standalone migration CLI) to run
+migrations ahead of the application process — in-process startup migration is
+the current, non-provisional mechanism for the current deployment topology.
+
+Every API-credit package resolves its internal dependencies from built wheels,
+not repository-relative editable paths or `pythonpath` fallbacks — see
+[The wheelhouse](../../../docs/development/BUILD_AND_PACKAGING.md#the-wheelhouse).
 
 ### Listing bindings and the bound pool
 
@@ -177,6 +212,7 @@ API credits intentionally has no compute-provisioning capability. A non-physical
 
 ## Related contracts
 
+- [API family](../api-family/spec.md)
 - [Market composition](../market-composition/spec.md)
 - [Negotiation protocol](../negotiation-protocol/spec.md)
 - [Settlement servicing](../settlement-servicing/spec.md)

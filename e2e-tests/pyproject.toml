@@ -51,9 +51,16 @@ dependencies = [
     # The API-credits schema plugin, discovered by the same `market`
     # binary (one binary, many registry schemas); its verbs are
     # namespaced under `market credits …`.
-    "arkhai-apicredits-buyer>=0.5.0",
+    "arkhai-apicredits-buyer>=0.6.0",
+    "arkhai-apicredits-domain>=0.8.0",
+    # The API-credit lane's upgrade/rollback scenario drives the probe services
+    # through the family's typed client and builds issuances from the vocabulary.
+    "arkhai-api>=0.1.0",
+    "arkhai-api-client>=0.1.0",
     "arkhai-kit-arkhai-payments>=0.3.0",
     "arkhai-kit-policy>=0.4.0",
+    # The API-credit lane's upgrade/rollback scenario starts service images.
+    "docker>=7.1.0",
 ]
 
 [tool.uv]
@@ -101,6 +108,7 @@ markers = [
     "multi_registry: Multi-registry publish + discovery e2e scenario (stops at negotiation start)",
     "e2e_credits_deal: Full API-credits deal driven by `market credits buy` — discover, negotiate a new key, settle, consume to 402, top up the existing key, consume again",
     "e2e_credits_payment_deal: API-credit deal settled through arkhai.payments.v1 — approval, receipt-gated issuance, run-log re-drive, and a seller refund; blocked without a reachable payments target",
+    "e2e_credits_service_rollback: API-credit lane — the previous service release over a copy of the database the current image wrote, and the current image over one the previous release wrote, each serving the route surface and reading every grant; fails, never skips, without the images or the engine",
     "e2e_bare_metal_deal: Full installed-plugin whole-host deal — discovery, negotiation, settlement, SSH access, teardown, and access revocation",
     "e2e_bare_metal_publication: Bare-metal lane — publication from pool declarations, discovery, withdrawal, and reinstatement against a mock-profile site",
     "e2e_bare_metal_payment_deal: Bare-metal fixed-term payment purchase — receipt-gated mock access, same-settlement re-drive, seller refund and separate physical teardown; blocked without a reachable payments target",

@@ -137,22 +137,98 @@ wheels = [
 ]
 
 [[package]]
-name = "arkhai-apicredits-buyer"
-version = "0.5.0"
-source = { editable = "." }
+name = "arkhai-api"
+version = "0.1.0"
+source = { registry = "../../../.dist" }
 dependencies = [
-    { name = "alkahest-py" },
-    { name = "arkhai-apicredits-domain" },
+    { name = "arkhai-kit-identity" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_api-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-api-buying"
+version = "0.3.0"
+source = { registry = "../../../.dist" }
+dependencies = [
+    { name = "arkhai-api" },
     { name = "arkhai-core" },
     { name = "arkhai-core-buyer" },
-    { name = "arkhai-kit-alkahest" },
-    { name = "arkhai-kit-arkhai-payments" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-settlement-runtime" },
-    { name = "eth-account" },
     { name = "rich" },
+    { name = "typer" },
+]
+wheels = [
+    { path = "arkhai_api_buying-0.3.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-api-buying-alkahest"
+version = "0.2.0"
+source = { registry = "../../../.dist" }
+dependencies = [
+    { name = "alkahest-py" },
+    { name = "arkhai-api-buying" },
+    { name = "arkhai-core-buyer" },
+    { name = "arkhai-kit-alkahest" },
+    { name = "arkhai-kit-config" },
+    { name = "arkhai-kit-identity" },
+    { name = "arkhai-kit-policy" },
+    { name = "rich" },
+    { name = "typer" },
+]
+wheels = [
+    { path = "arkhai_api_buying_alkahest-0.2.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-api-buying-arkhai-payments"
+version = "0.1.2"
+source = { registry = "../../../.dist" }
+dependencies = [
+    { name = "arkhai-api-buying" },
+    { name = "arkhai-core" },
+    { name = "arkhai-core-buyer" },
+    { name = "arkhai-kit-arkhai-payments" },
+    { name = "arkhai-kit-config" },
+    { name = "arkhai-kit-settlement-runtime" },
+    { name = "rich" },
+    { name = "typer" },
+]
+wheels = [
+    { path = "arkhai_api_buying_arkhai_payments-0.1.2-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-api-contracts"
+version = "0.4.0"
+source = { registry = "../../../.dist" }
+dependencies = [
+    { name = "arkhai-api" },
+    { name = "arkhai-core" },
+    { name = "arkhai-kit-identity" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_api_contracts-0.4.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-apicredits-buyer"
+version = "0.8.0"
+source = { editable = "." }
+dependencies = [
+    { name = "arkhai-api-buying" },
+    { name = "arkhai-api-buying-alkahest" },
+    { name = "arkhai-api-buying-arkhai-payments" },
+    { name = "arkhai-apicredits-domain" },
+    { name = "arkhai-core" },
+    { name = "arkhai-core-buyer" },
     { name = "typer" },
 ]
 
@@ -163,47 +239,48 @@ test = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "arkhai-kit-alkahest" },
+    { name = "arkhai-kit-config" },
+    { name = "arkhai-kit-identity" },
+    { name = "arkhai-kit-policy" },
     { name = "pytest" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "alkahest-py", specifier = "==1.1.2" },
-    { name = "arkhai-apicredits-domain", specifier = ">=0.5.0" },
+    { name = "arkhai-api-buying", specifier = ">=0.3.0" },
+    { name = "arkhai-api-buying-alkahest", specifier = ">=0.2.0" },
+    { name = "arkhai-api-buying-arkhai-payments", specifier = ">=0.1.2" },
+    { name = "arkhai-apicredits-domain", specifier = ">=0.12.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
     { name = "arkhai-core-buyer", specifier = ">=0.5.0" },
-    { name = "arkhai-kit-alkahest", specifier = ">=0.7.0" },
-    { name = "arkhai-kit-arkhai-payments", specifier = ">=0.3.0" },
-    { name = "arkhai-kit-config" },
-    { name = "arkhai-kit-identity", specifier = "==0.4.0" },
-    { name = "arkhai-kit-policy" },
-    { name = "arkhai-kit-settlement-runtime" },
-    { name = "eth-account", specifier = ">=0.13.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0.0" },
-    { name = "rich", specifier = ">=13.7.0" },
     { name = "typer", specifier = ">=0.12.0" },
 ]
 provides-extras = ["test"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8.0.0" }]
+dev = [
+    { name = "arkhai-kit-alkahest", specifier = ">=0.8.0" },
+    { name = "arkhai-kit-config", specifier = ">=0.4.0" },
+    { name = "arkhai-kit-identity", specifier = "==0.4.0" },
+    { name = "arkhai-kit-policy", specifier = ">=0.5.0" },
+    { name = "pytest", specifier = ">=8.0.0" },
+]
 
 [[package]]
 name = "arkhai-apicredits-domain"
-version = "0.6.0"
+version = "0.12.0"
 source = { registry = "../../../.dist" }
 dependencies = [
+    { name = "arkhai-api" },
+    { name = "arkhai-api-contracts" },
     { name = "arkhai-core" },
-    { name = "arkhai-kit-alkahest" },
-    { name = "arkhai-kit-arkhai-payments" },
-    { name = "arkhai-kit-identity" },
-    { name = "arkhai-kit-policy" },
-    { name = "arkhai-kit-settlement-runtime" },
     { name = "httpx" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_apicredits_domain-0.6.0-py3-none-any.whl" },
+    { path = "arkhai_apicredits_domain-0.12.0-py3-none-any.whl" },
 ]
 
 [[package]]

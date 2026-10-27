@@ -3,7 +3,7 @@
 # The seller side of the token-gated-API market: a registry/indexer instance
 # speaking the api_credits schema, the credits service (keys / prepaid credits /
 # quota ledger), the credits storefront (self-seeds one quota-backed listing on
-# startup), and a sample gated app behind the Python token-gating middleware.
+# startup), and a sample gated app behind the api family's bearer gate.
 # The buyer drives it with `market credits buy` through the root overlay's
 # one-shot buyer service. Mutable XDG profile/run state and the strict
 # provider-secret mount are separate from this seller-only domain stack.
@@ -94,7 +94,9 @@ services:
       start_period: 10s
 
   # 3. Sample gated app — one metered endpoint (/api/forecast) behind the
-  # Python token-gating middleware. Verifies/consumes against credits-service.
+  # api family's bearer gate (arkhai-api-gate), which reads the
+  # APICREDITS_MIDDLEWARE_ prefix the sample app passes it. Verifies/consumes
+  # against credits-service.
   sample-app:
     image: arkhai:apicredits-sample-app
     depends_on:

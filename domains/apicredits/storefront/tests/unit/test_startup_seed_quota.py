@@ -1,19 +1,21 @@
-"""_register_seed_quota: delegates to the typed capacity-administration
-client rather than constructing its own HTTP request.
+"""The seed's quota registration: through the typed capacity-administration
+client, in the credits authority's default pool, as an API-credits resource.
 """
 
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 
 import httpx
 import pytest
 from core_storefront.auth import signed_response_headers
 from market_identity import Ed25519Signer, TrustedIdentitySet
+from market_site_client import SiteCapacityAdminClient
 
-from apicredits_storefront import startup
-
+import apicredits_storefront.container as container
+from apicredits_storefront import server
 
 
 _SELLER_SIGNER = Ed25519Signer(bytes.fromhex("22" * 32))
@@ -42,6 +44,29 @@ def _signed_response(
         else httpx.Response(status, text=body, headers=headers)
     )
 
+def _seed(handle):
+    def client(base_url, *, signer, expected_authorities, **kwargs):
+        return SiteCapacityAdminClient(
+            base_url,
+            signer=signer,
+            expected_authorities=expected_authorities,
+            timeout=kwargs["timeout"],
+            max_timestamp_skew=kwargs["max_timestamp_skew"],
+            transport=httpx.MockTransport(handle),
+        )
+
+    return replace(
+        server.listing_seed(),
+        admin_client=client,
+        site=lambda: SimpleNamespace(
+            url="http://credits-service:8082",
+            expected_authorities=TrustedIdentitySet(
+                identities=(_AUTHORITY_SIGNER.identity,),
+            ),
+        ),
+    )
+
+
 @pytest.mark.asyncio
 async def test_register_seed_quota_sends_expected_request_via_the_typed_client(monkeypatch):
     captured = {}
@@ -56,43 +81,9 @@ async def test_register_seed_quota_sends_expected_request_via_the_typed_client(m
             body={"resource_id": "demo-quota"},
         )
 
-    monkeypatch.setattr(
-        startup,
-        "_capacity_authority_site",
-        lambda: SimpleNamespace(
-            url="http://credits-service:8082",
-            expected_authorities=TrustedIdentitySet(
-                identities=(_AUTHORITY_SIGNER.identity,),
-            ),
-        ),
-    )
-    import apicredits_storefront.container as container
     monkeypatch.setattr(container, "resolved_marketplace_signer", _SELLER_SIGNER)
 
-    import market_site_client
-    real_client_cls = market_site_client.SiteCapacityAdminClient
-
-    def _client_with_test_transport(
-        base_url,
-        *,
-        signer,
-        expected_authorities,
-        **kwargs,
-    ):
-        return real_client_cls(
-            base_url,
-            signer=signer,
-            expected_authorities=expected_authorities,
-            timeout=kwargs["timeout"],
-            max_timestamp_skew=kwargs["max_timestamp_skew"],
-            transport=httpx.MockTransport(handle),
-        )
-
-    monkeypatch.setattr(
-        market_site_client, "SiteCapacityAdminClient", _client_with_test_transport,
-    )
-
-    await startup._register_seed_quota(resource_id="demo-quota", total_units=100)
+    await _seed(handle).register_quota(resource_id="demo-quota", total_units=100)
 
     assert captured["path"] == "/api/v1/capacity/resources/demo-quota"
     assert captured["headers"]["x-market-role"] == "seller"
@@ -107,41 +98,7 @@ async def test_register_seed_quota_raises_runtime_error_on_client_failure(monkey
     def handle(request: httpx.Request) -> httpx.Response:
         return _signed_response(request, status=500, body="ledger unavailable")
 
-    monkeypatch.setattr(
-        startup,
-        "_capacity_authority_site",
-        lambda: SimpleNamespace(
-            url="http://credits-service:8082",
-            expected_authorities=TrustedIdentitySet(
-                identities=(_AUTHORITY_SIGNER.identity,),
-            ),
-        ),
-    )
-    import apicredits_storefront.container as container
     monkeypatch.setattr(container, "resolved_marketplace_signer", _SELLER_SIGNER)
 
-    import market_site_client
-    real_client_cls = market_site_client.SiteCapacityAdminClient
-
-    def _client_with_test_transport(
-        base_url,
-        *,
-        signer,
-        expected_authorities,
-        **kwargs,
-    ):
-        return real_client_cls(
-            base_url,
-            signer=signer,
-            expected_authorities=expected_authorities,
-            timeout=kwargs["timeout"],
-            max_timestamp_skew=kwargs["max_timestamp_skew"],
-            transport=httpx.MockTransport(handle),
-        )
-
-    monkeypatch.setattr(
-        market_site_client, "SiteCapacityAdminClient", _client_with_test_transport,
-    )
-
     with pytest.raises(RuntimeError, match="demo-quota"):
-        await startup._register_seed_quota(resource_id="demo-quota", total_units=100)
+        await _seed(handle).register_quota(resource_id="demo-quota", total_units=100)

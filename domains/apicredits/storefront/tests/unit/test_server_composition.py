@@ -5,24 +5,19 @@ from contextlib import contextmanager
 from copy import deepcopy
 from types import SimpleNamespace
 
-import market_policy.negotiation_thread as negotiation_thread
+import arkhai_api_selling.lifecycle as lifecycle_module
 import pytest
+from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
 from market_identity import Ed25519Signer
 from storefront_client.settlement_routes import unmounted_settlement_routes
 
 import apicredits_storefront.container as container
 import apicredits_storefront.server as server
-from apicredits_storefront import startup
 from apicredits_storefront.utils import config as storefront_config
 from apicredits_storefront.domain_runtime import get_market_domain_contract
-from apicredits_storefront.lifecycle_steps import (
-    api_credit_loop_controller,
-    negotiation_watchdog_policy,
-    register_api_credit_lifecycle_steps,
-    register_api_credit_loops,
-)
+from arkhai_api_selling.lifecycle import loop_controller
 from apicredits_storefront.retired_settings import retired_setting_problems
-from apicredits_storefront.services.capacity_client import capacity_poll_interval
+from apicredits_storefront.utils.config import capacity_poll_interval, negotiation_watchdog_policy
 from apicredits_storefront.startup_refusal import StorefrontStartupError
 from tests._settings_overrides import settings_overrides
 
@@ -123,12 +118,12 @@ async def test_startup_registers_and_starts_every_loop(monkeypatch, payments):
     """
     domain = get_market_domain_contract()
     composition = (
-        SimpleNamespace(payment_service=lambda _db: object()) if payments else None
+        SimpleNamespace(servicing={ARKHAI_PAYMENTS_MECHANISM: object()}) if payments else None
     )
     monkeypatch.setattr(container, "resolved_settlement_composition", composition)
     monkeypatch.setattr(container, "resolved_sqlite_client", object())
-    loops = api_credit_loop_controller()
-    register_api_credit_lifecycle_steps(loops)
+    loops = loop_controller()
+    container.STOREFRONT_LOOPS.register_steps(loops)
 
     async def _noop():
         return None
@@ -147,16 +142,17 @@ async def test_startup_registers_and_starts_every_loop(monkeypatch, payments):
     monkeypatch.setattr(container, "resolved_settlement_runtime", None)
     monkeypatch.setattr(container, "resolved_settlement_worker", object())
     monkeypatch.setattr(container, "resolved_loop_controller", loops)
-    monkeypatch.setattr(negotiation_thread, "get_thread_store", lambda **_kwargs: None)
-    monkeypatch.setattr(startup, "_preflight_credits_service", _noop)
-    monkeypatch.setattr(startup, "_seed_demo_listing", _noop)
+    monkeypatch.setattr(lifecycle_module, "get_thread_store", lambda **_kwargs: None)
+    monkeypatch.setattr(server, "preflight_credits_service", _noop)
+    monkeypatch.setattr(server, "_seed_demo_listing", _noop)
+    monkeypatch.setattr(server, "mechanism_startup_steps", lambda _stages: ())
 
     timed = {"negotiation_watchdog", "settlement_servicing"}
     if payments:
         timed.add("payment_reconciliation")
     loops.request_pause(True)
     try:
-        await startup._startup_tasks(domain=domain, capacity_runtime=_HeldFeeds())
+        await server._startup_tasks(domain=domain, capacity_runtime=_HeldFeeds())
         await asyncio.wait_for(loops.await_quiescence(), timeout=1.0)
 
         assert set(loops.registered_loop_names()) == {*timed, "capacity_events_poller"}
@@ -342,11 +338,11 @@ def test_an_unusable_payment_reconciliation_interval_refuses_its_registration(mo
     monkeypatch.setattr(
         container,
         "resolved_settlement_composition",
-        SimpleNamespace(payment_service=lambda _db: object()),
+        SimpleNamespace(servicing={ARKHAI_PAYMENTS_MECHANISM: object()}),
     )
     monkeypatch.setattr(container, "resolved_sqlite_client", object())
     with settings_overrides(payment_reconciliation_interval=0):
         with pytest.raises(ValueError, match=r"^\[payment_reconciliation_interval\] "):
-            register_api_credit_loops(
-                api_credit_loop_controller(), capacity_runtime=SimpleNamespace(site_ids=())
+            container.STOREFRONT_LOOPS.register_loops(
+                loop_controller(), capacity_runtime=SimpleNamespace(site_ids=())
             )

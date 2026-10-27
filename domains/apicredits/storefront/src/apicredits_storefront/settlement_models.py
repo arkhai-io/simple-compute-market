@@ -1,13 +1,9 @@
-"""Strict API-credit settlement request models."""
+"""The API-credits settle request: the family's, under the component name this storefront serves."""
 
 from __future__ import annotations
 
-from core_storefront.models.settle_models import SettleRequest
+from arkhai_api_selling.route_services import QuotaSettleRequest
 
 
-class ApiCreditsSettleRequest(SettleRequest):
+class ApiCreditsSettleRequest(QuotaSettleRequest):
     """Settlement input for Alkahest or payments by negotiation ID."""
-
-    buyer_evm_address: str | None = None
-    chain_name: str | None = None
-    settlement_mechanism: str | None = None

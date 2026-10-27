@@ -12,11 +12,11 @@ FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 
-.PHONY: helm-values-schema e2e-dev-identities e2e-dev-identities-env e2e-vms-dev-env e2e-apicredits-dev-env e2e-apicredits-stack-env e2e-bare-metal-dev-env review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-python-version check-project-layout lock
+.PHONY: helm-values-schema e2e-dev-identities e2e-dev-identities-env e2e-vms-dev-env e2e-apicredits-dev-env e2e-apicredits-stack-env e2e-bare-metal-dev-env review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-api test-api-client test-api-authority test-api-selling test-api-selling-alkahest test-api-selling-arkhai-payments test-api-buying test-api-buying-alkahest test-api-buying-arkhai-payments test-api-gate test-vms-domain test-vms-buyer test-apicredits test-kits dist dist-release dist-ci dist-ci-kits dist-api dist-api-contracts dist-api-client dist-api-authority dist-api-selling dist-api-selling-alkahest dist-api-selling-arkhai-payments dist-api-buying dist-api-buying-alkahest dist-api-buying-arkhai-payments dist-api-gate dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-python-version check-project-layout lock
 .PHONY: check-architecture check-architecture-layers check-architecture-scope check-architecture-dependencies check-architecture-kinds check-architecture-change architecture-report
 .PHONY: test-release-tooling test-deployment-packaging test-registry-client test-provisioning-adapter test-e2e-unit
 .PHONY: dist-arkhai-core-registry
-.PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits
+.PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits build-apicredits-service-prekit
 .PHONY: dist-bare-metal-buyer
 .PHONY: run-e2e fetch-e2e-logs
 .PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
@@ -114,7 +114,7 @@ dist-core: ## Build arkhai-core wheel into .dist/
 	@ls $(DIST_DIR)/arkhai_core-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-core produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-arkhai-core-buyer: ## Build arkhai-core-buyer wheel into .dist/
+dist-arkhai-core-buyer: dist-registry-client ## Build arkhai-core-buyer wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd core/buyer && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_core_buyer-*-none-any.whl > /dev/null 2>&1 || \
@@ -136,31 +136,60 @@ dist-bare-metal-storefront: dist-core dist-arkhai-core-storefront dist-kits ## B
 # bare-metal ones above are. `dist-domains` already builds all of these
 # through the domain aggregate; these exist so one wheel can be rebuilt on
 # its own while iterating, which is what
-# `domains/apicredits/sample-app/Makefile` and
-# `domains/apicredits/middleware/python`'s workflow both tell you to do
-# from the repository root.
+# `domains/apicredits/sample-app/Makefile` tells you to do from the
+# repository root.
 #
 # Prerequisites are each wheel's own internal dependencies, so a target
 # invoked directly on a clean tree resolves instead of failing in
 # `uv build` on a missing `.dist` entry.
-dist-apicredits-domain: dist-core dist-identity dist-alkahest dist-policy ## Build arkhai-apicredits-domain wheel into .dist/
+dist-api: dist-identity ## Build arkhai-api, the api-family vocabulary, into .dist/
+	cd domains && $(MAKE) dist-api DIST_DIR=$(DIST_DIR)
+
+dist-api-contracts: dist-identity dist-core ## Build arkhai-api-contracts wheel into .dist/ (domains/Makefile builds arkhai-api first)
+	cd domains && $(MAKE) dist-api-contracts DIST_DIR=$(DIST_DIR)
+
+dist-api-client: dist-identity ## Build arkhai-api-client wheel into .dist/ (domains/Makefile builds the vocabulary and contracts first)
+	cd domains && $(MAKE) dist-api-client DIST_DIR=$(DIST_DIR)
+
+dist-api-authority: dist-identity dist-ci-kits ## Build arkhai-api-authority wheel into .dist/ (domains/Makefile builds the vocabulary and contracts first)
+	cd domains && $(MAKE) dist-api-authority DIST_DIR=$(DIST_DIR)
+
+dist-api-selling: dist-identity dist-core dist-registry-client dist-arkhai-core-storefront dist-ci-kits dist-policy dist-alkahest dist-config ## Build arkhai-api-selling wheel into .dist/ (domains/Makefile builds the vocabulary, contracts, and client first)
+	cd domains && $(MAKE) dist-api-selling DIST_DIR=$(DIST_DIR)
+
+dist-api-selling-alkahest: dist-api-selling ## Build arkhai-api-selling-alkahest wheel into .dist/
+	cd domains && $(MAKE) dist-api-selling-alkahest DIST_DIR=$(DIST_DIR)
+
+dist-api-selling-arkhai-payments: dist-api-selling ## Build arkhai-api-selling-arkhai-payments wheel into .dist/
+	cd domains && $(MAKE) dist-api-selling-arkhai-payments DIST_DIR=$(DIST_DIR)
+
+dist-api-buying: dist-identity dist-core dist-arkhai-core-buyer dist-ci-kits dist-policy dist-config ## Build arkhai-api-buying wheel into .dist/ (domains/Makefile builds the vocabulary first)
+	cd domains && $(MAKE) dist-api-buying DIST_DIR=$(DIST_DIR)
+
+dist-api-buying-alkahest: dist-api-buying dist-alkahest ## Build arkhai-api-buying-alkahest wheel into .dist/
+	cd domains && $(MAKE) dist-api-buying-alkahest DIST_DIR=$(DIST_DIR)
+
+dist-api-buying-arkhai-payments: dist-api-buying ## Build arkhai-api-buying-arkhai-payments wheel into .dist/
+	cd domains && $(MAKE) dist-api-buying-arkhai-payments DIST_DIR=$(DIST_DIR)
+
+dist-api-gate: dist-identity ## Build arkhai-api-gate wheel into .dist/
+	cd domains && $(MAKE) dist-api-gate DIST_DIR=$(DIST_DIR)
+
+dist-apicredits-domain: dist-core dist-identity dist-alkahest ## Build arkhai-apicredits-domain wheel into .dist/
 	cd domains && $(MAKE) dist-apicredits-domain DIST_DIR=$(DIST_DIR)
 
-dist-apicredits-service: dist-identity dist-ci-kits dist-apicredits-domain dist-apicredits-middleware ## Build arkhai-apicredits-service wheel into .dist/
+dist-apicredits-service: dist-identity dist-ci-kits dist-apicredits-domain dist-api-gate ## Build arkhai-apicredits-service wheel into .dist/
 	cd domains && $(MAKE) dist-apicredits-service DIST_DIR=$(DIST_DIR)
 
 dist-apicredits-storefront: dist-apicredits-domain dist-arkhai-core-storefront dist-registry-client dist-ci-kits dist-config ## Build arkhai-apicredits-storefront wheel into .dist/
 	cd domains && $(MAKE) dist-apicredits-storefront DIST_DIR=$(DIST_DIR)
 
-dist-apicredits-middleware: dist-identity ## Build arkhai-apicredits-middleware wheel into .dist/
-	cd domains && $(MAKE) dist-apicredits-middleware DIST_DIR=$(DIST_DIR)
-
-# Depends on the middleware wheel because the sample app requires it with
-# the `signed` extra, which resolves arkhai-kit-identity out of .dist/.
-dist-apicredits-sample-app: dist-apicredits-middleware ## Build arkhai-apicredits-sample-app wheel into .dist/
+# Depends on the gate wheel because the sample app requires it with the
+# `signed` extra, which resolves arkhai-kit-identity out of .dist/.
+dist-apicredits-sample-app: dist-api-gate ## Build arkhai-apicredits-sample-app wheel into .dist/
 	cd domains && $(MAKE) dist-apicredits-sample-app DIST_DIR=$(DIST_DIR)
 
-dist-apicredits-buyer: dist-apicredits-domain dist-arkhai-core-buyer dist-ci-kits dist-config ## Build arkhai-apicredits-buyer wheel into .dist/
+dist-apicredits-buyer: dist-apicredits-domain dist-api-buying-alkahest dist-api-buying-arkhai-payments ## Build arkhai-apicredits-buyer wheel into .dist/
 	cd domains && $(MAKE) dist-apicredits-buyer DIST_DIR=$(DIST_DIR)
 
 dist-kits: ## Build kit-owned wheels into .dist/
@@ -195,7 +224,7 @@ test-deployment-packaging: test-release-tooling ## Run release tooling plus Helm
 dist-clean: ## Remove .dist/ directory
 	rm -rf $(DIST_DIR)
 
-test: test-core test-kits test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-registry-client test-storefront test-provisioning-adapter test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-e2e-unit test-deployment-packaging ## Run every unit and integration suite; the docker-compose e2e scenarios and cluster `helm test` are separate
+test: test-core test-kits test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-registry-client test-storefront test-provisioning-adapter test-bare-metal test-compute test-api test-vms-domain test-vms-buyer test-apicredits test-e2e-unit test-deployment-packaging ## Run every unit and integration suite; the docker-compose e2e scenarios and cluster `helm test` are separate
 
 test-core:
 	cd core && make test
@@ -240,6 +269,43 @@ test-bare-metal:
 test-compute:
 	$(MAKE) -C domains test-compute
 
+test-api:
+	$(MAKE) -C domains test-api
+
+test-api-client:
+	$(MAKE) -C domains test-api-client
+
+test-api-authority:
+	$(MAKE) -C domains test-api-authority
+
+test-api-selling: dist-api-selling ## Run the api-family selling tests, building every internal wheel they install first
+	python3 scripts/uv_project.py require-wheels --project domains/api/selling
+	$(MAKE) -C domains test-api-selling
+
+test-api-selling-alkahest: dist-api-selling-alkahest ## Run the api-family selling-side Alkahest tests, building every internal wheel they install first
+	python3 scripts/uv_project.py require-wheels --project domains/api/selling-alkahest
+	$(MAKE) -C domains test-api-selling-alkahest
+
+test-api-selling-arkhai-payments: dist-api-selling-arkhai-payments ## Run the api-family selling-side Arkhai payments tests, building every internal wheel they install first
+	python3 scripts/uv_project.py require-wheels --project domains/api/selling-arkhai-payments
+	$(MAKE) -C domains test-api-selling-arkhai-payments
+
+test-api-buying: dist-api-buying ## Run the api-family buying tests, building every internal wheel they install first
+	python3 scripts/uv_project.py require-wheels --project domains/api/buying
+	$(MAKE) -C domains test-api-buying
+
+test-api-buying-alkahest: dist-api-buying-alkahest ## Run the api-family buyer-side Alkahest tests, building every internal wheel they install first
+	python3 scripts/uv_project.py require-wheels --project domains/api/buying-alkahest
+	$(MAKE) -C domains test-api-buying-alkahest
+
+test-api-buying-arkhai-payments: dist-api-buying-arkhai-payments ## Run the api-family buyer-side Arkhai payments tests, building every internal wheel they install first
+	python3 scripts/uv_project.py require-wheels --project domains/api/buying-arkhai-payments
+	$(MAKE) -C domains test-api-buying-arkhai-payments
+
+test-api-gate: dist-api-gate dist-api-contracts ## Run the api-family gate tests, building every internal wheel they install first
+	python3 scripts/uv_project.py require-wheels --project domains/api/gate
+	$(MAKE) -C domains test-api-gate
+
 test-vms-domain:
 	$(MAKE) -C domains test-vms-domain
 
@@ -248,10 +314,6 @@ test-vms-buyer:
 
 test-apicredits:
 	$(MAKE) -C domains test-apicredits
-
-# Compatibility alias for the cross-language middleware parity suite.
-test-apicredits-middleware:
-	$(MAKE) -C domains test-apicredits-middleware
 
 test-kits:
 	cd kit && make test
@@ -454,8 +516,24 @@ build-e2e-vm: build-e2e-base ## Build the VM end-to-end lane's images
 build-e2e-bare-metal: build-e2e-base ## Build the bare-metal end-to-end lane's images
 	$(MAKE) -j3 build-registry build-provisioning build-bare-metal-storefront
 
-build-e2e-apicredits: build-e2e-base ## Build the API-credit end-to-end lane's images
+build-e2e-apicredits: build-e2e-base build-apicredits-service-prekit ## Build the API-credit end-to-end lane's images
 	$(MAKE) -j4 build-registry build-apicredits-service build-apicredits-storefront build-apicredits-sample-app
+
+# The previous service release, built from the pinned base commit's own
+# wheelhouse in a temporary worktree.
+APICREDITS_SERVICE_PREKIT_COMMIT := 9720ac59697a132f48913b91448c8224ece35cde
+APICREDITS_SERVICE_PREKIT_WORKTREE := $(CURDIR)/.worktrees/apicredits-service-prekit
+
+build-apicredits-service-prekit: ## Build arkhai:apicredits-service-prekit, the previous service release, from the pinned base commit
+	git cat-file -e $(APICREDITS_SERVICE_PREKIT_COMMIT)^{commit} 2>/dev/null || \
+		git fetch --depth 1 origin $(APICREDITS_SERVICE_PREKIT_COMMIT)
+	git worktree remove --force $(APICREDITS_SERVICE_PREKIT_WORKTREE) 2>/dev/null || true
+	git worktree prune
+	git worktree add --detach $(APICREDITS_SERVICE_PREKIT_WORKTREE) $(APICREDITS_SERVICE_PREKIT_COMMIT)
+	( $(MAKE) -C $(APICREDITS_SERVICE_PREKIT_WORKTREE) dist && \
+	  cd $(APICREDITS_SERVICE_PREKIT_WORKTREE) && docker build --ulimit nofile=65536:65536 \
+		-f domains/apicredits/service/Dockerfile -t arkhai:apicredits-service-prekit . ); \
+	status=$$?; git worktree remove --force $(APICREDITS_SERVICE_PREKIT_WORKTREE); exit $$status
 
 # Seller-only build: the two runtime images a seller actually needs
 # (`arkhai:storefront`, `arkhai:compute-provisioning`) and just the wheels they

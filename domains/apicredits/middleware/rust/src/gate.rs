@@ -10,7 +10,7 @@
 //! Decision vocabulary (status + machine-readable body) is identical
 //! across languages — it is the behavioral contract the conformance
 //! fixtures pin (`../conformance`). Direct port of the Python
-//! `apicredits_middleware.gate`.
+//! `arkhai_api_gate.gate`.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -18,6 +18,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 use tokio::task::JoinHandle;
 
 use crate::client::{ConsumeItem, TokensApi, VerifyResult, INSUFFICIENT_CREDITS, KEY_NOT_FOUND, KEY_REVOKED};
@@ -63,8 +64,19 @@ struct KeyState {
     verify: VerifyResult,
     verify_expires: Instant,
     estimated_balance: i64,
+    secret_fingerprint: [u8; 32],
+    verified_ticket: u64,
     pending: Vec<ConsumeItem>,
     exhausted: bool,
+}
+
+fn fingerprint(secret: &str) -> [u8; 32] {
+    Sha256::digest(secret.as_bytes()).into()
+}
+
+/// Constant-time equality of two fingerprints.
+fn same_fingerprint(a: &[u8; 32], b: &[u8; 32]) -> bool {
+    a.iter().zip(b).fold(0u8, |diff, (x, y)| diff | (x ^ y)) == 0
 }
 
 /// Extract the bearer secret from an `Authorization` header. Accepts
@@ -101,16 +113,27 @@ pub struct TokenGate<C> {
     client: C,
     states: Mutex<HashMap<String, KeyState>>,
     idem_counter: AtomicU64,
+    // Orders verifications by when they start; a clock cannot, since two
+    // reads may return the same instant.
+    tickets: AtomicU64,
+    clock: fn() -> Instant,
     flush_handle: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl<C: TokensApi + 'static> TokenGate<C> {
     pub fn new(cfg: GateConfig, client: C) -> Self {
+        Self::with_clock(cfg, client, Instant::now)
+    }
+
+    /// A gate reading time from `clock`, which serves only verify expiry.
+    pub fn with_clock(cfg: GateConfig, client: C, clock: fn() -> Instant) -> Self {
         Self {
             cfg,
             client,
             states: Mutex::new(HashMap::new()),
             idem_counter: AtomicU64::new(0),
+            tickets: AtomicU64::new(1),
+            clock,
             flush_handle: Mutex::new(None),
         }
     }
@@ -186,21 +209,40 @@ impl<C: TokensApi + 'static> TokenGate<C> {
     }
 
     async fn verified_state(&self, key_id: &str, secret: &str) -> VerifyResult {
-        let now = Instant::now();
+        // The key id is public, read off any bearer header, so a cached
+        // verification answers only for the exact secret that earned it.
+        let now = (self.clock)();
+        let secret_fingerprint = fingerprint(secret);
         {
             let states = self.states.lock().unwrap();
             if let Some(state) = states.get(key_id) {
-                if state.verify_expires > now && state.verify.valid {
+                if state.verify_expires > now
+                    && state.verify.valid
+                    && same_fingerprint(&state.secret_fingerprint, &secret_fingerprint)
+                {
                     return state.verify.clone();
                 }
             }
         }
 
+        let ticket = self.tickets.fetch_add(1, Ordering::Relaxed);
         let verify = self.client.verify(key_id, secret).await;
 
         let ttl = Duration::from_secs_f64(self.cfg.verify_ttl_seconds);
         let mut states = self.states.lock().unwrap();
         match states.get_mut(key_id) {
+            // A verification that started after this one has already
+            // answered; an older answer must not replace what it knew.
+            Some(existing) if existing.verified_ticket > ticket => {}
+            // A refused secret other than the cached one says nothing about
+            // the cached credential, so it must not evict it; but an older
+            // answer for this secret must not be cached over it.
+            Some(existing)
+                if !verify.valid
+                    && !same_fingerprint(&existing.secret_fingerprint, &secret_fingerprint) =>
+            {
+                existing.verified_ticket = existing.verified_ticket.max(ticket);
+            }
             Some(existing) => {
                 // Keep the running estimate (it may be ahead of the
                 // verify-reported balance because of un-flushed charges).
@@ -212,6 +254,8 @@ impl<C: TokensApi + 'static> TokenGate<C> {
                 existing.verify = verify.clone();
                 existing.verify_expires = now + ttl;
                 existing.estimated_balance = estimated;
+                existing.secret_fingerprint = secret_fingerprint;
+                existing.verified_ticket = ticket;
                 if verify.valid {
                     existing.exhausted = false;
                 }
@@ -223,6 +267,8 @@ impl<C: TokensApi + 'static> TokenGate<C> {
                         verify: verify.clone(),
                         verify_expires: now + ttl,
                         estimated_balance: verify.balance,
+                        secret_fingerprint,
+                        verified_ticket: ticket,
                         pending: Vec::new(),
                         exhausted: false,
                     },
@@ -486,5 +532,145 @@ mod tests {
         assert!(d.allowed);
         assert_eq!(gate.client.consume_calls.lock().unwrap().len(), 1);
         assert!(gate.client.batch_calls.lock().unwrap().is_empty());
+    }
+
+    /// Holds the first verification of one secret, answering it valid,
+    /// until the test releases it.
+    struct HeldVerificationClient {
+        held: String,
+        holding: StdMutex<bool>,
+        accepted: String,
+        verified: StdMutex<Vec<String>>,
+        started: tokio::sync::Notify,
+        release: tokio::sync::Notify,
+    }
+
+    impl TokensApi for HeldVerificationClient {
+        async fn verify(&self, _key_id: &str, secret: &str) -> VerifyResult {
+            self.verified.lock().unwrap().push(secret.to_string());
+            let held =
+                secret == self.held && !std::mem::replace(&mut *self.holding.lock().unwrap(), true);
+            if held {
+                self.started.notify_one();
+                self.release.notified().await;
+            }
+            let valid = held || secret == self.accepted;
+            VerifyResult {
+                valid,
+                status: valid.then(|| "active".to_string()),
+                balance: if valid { 10 } else { 0 },
+            }
+        }
+
+        async fn consume(&self, _key_id: &str, amount: i64, _idem: Option<&str>) -> ConsumeResult {
+            ConsumeResult {
+                ok: true,
+                balance: 9,
+                consumed: amount,
+                duplicate: false,
+                reason: None,
+            }
+        }
+
+        async fn consume_batch(&self, _items: &[ConsumeItem]) -> Vec<ConsumeResult> {
+            Vec::new()
+        }
+    }
+
+    fn frozen() -> Instant {
+        static FROZEN: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+        *FROZEN.get_or_init(Instant::now)
+    }
+
+    fn held_gate(clock: fn() -> Instant) -> Arc<TokenGate<HeldVerificationClient>> {
+        Arc::new(TokenGate::with_clock(
+            cfg(0.0, 0),
+            HeldVerificationClient {
+                held: "ak_k.old".to_string(),
+                holding: StdMutex::new(false),
+                accepted: "ak_k.new".to_string(),
+                verified: StdMutex::new(Vec::new()),
+                started: tokio::sync::Notify::new(),
+                release: tokio::sync::Notify::new(),
+            },
+            clock,
+        ))
+    }
+
+    /// Fails rather than hangs when a gate never reaches the held verification.
+    async fn within<F: std::future::Future>(future: F) -> F::Output {
+        tokio::time::timeout(Duration::from_secs(5), future)
+            .await
+            .expect("not settled within 5 s")
+    }
+
+    async fn hold_old_secret(
+        gate: &Arc<TokenGate<HeldVerificationClient>>,
+    ) -> tokio::task::JoinHandle<GateDecision> {
+        let held = gate.clone();
+        let old = tokio::spawn(async move { held.authorize(Some("Bearer ak_k.old"), None).await });
+        within(gate.client.started.notified()).await;
+        old
+    }
+
+    #[tokio::test]
+    async fn a_late_answer_for_an_older_secret_does_not_replace_a_newer_one_monotonic_clock() {
+        a_late_answer_for_an_older_secret_does_not_replace_a_newer_one_under(Instant::now).await;
+    }
+
+    #[tokio::test]
+    async fn a_late_answer_for_an_older_secret_does_not_replace_a_newer_one_frozen_clock() {
+        a_late_answer_for_an_older_secret_does_not_replace_a_newer_one_under(frozen).await;
+    }
+
+    async fn a_late_answer_for_an_older_secret_does_not_replace_a_newer_one_under(
+        clock: fn() -> Instant,
+    ) {
+        let gate = held_gate(clock);
+
+        let old = hold_old_secret(&gate).await;
+        assert!(gate.authorize(Some("Bearer ak_k.new"), None).await.allowed);
+        gate.client.release.notify_one();
+        assert!(within(old).await.unwrap().allowed);
+
+        let again = gate.authorize(Some("Bearer ak_k.old"), None).await;
+
+        assert!(!again.allowed);
+        assert_eq!(again.status, 401);
+        assert_eq!(
+            *gate.client.verified.lock().unwrap(),
+            ["ak_k.old", "ak_k.new", "ak_k.old"]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_late_answer_does_not_outlast_a_newer_refusal_of_the_same_secret_monotonic_clock() {
+        a_late_answer_does_not_outlast_a_newer_refusal_of_the_same_secret_under(Instant::now).await;
+    }
+
+    #[tokio::test]
+    async fn a_late_answer_does_not_outlast_a_newer_refusal_of_the_same_secret_frozen_clock() {
+        a_late_answer_does_not_outlast_a_newer_refusal_of_the_same_secret_under(frozen).await;
+    }
+
+    async fn a_late_answer_does_not_outlast_a_newer_refusal_of_the_same_secret_under(
+        clock: fn() -> Instant,
+    ) {
+        let gate = held_gate(clock);
+
+        assert!(gate.authorize(Some("Bearer ak_k.new"), None).await.allowed);
+        let old = hold_old_secret(&gate).await;
+        assert!(!gate.authorize(Some("Bearer ak_k.old"), None).await.allowed);
+        gate.client.release.notify_one();
+        within(old).await.unwrap();
+
+        let again = gate.authorize(Some("Bearer ak_k.old"), None).await;
+
+        assert!(!again.allowed);
+        assert_eq!(again.status, 401);
+        assert_eq!(
+            *gate.client.verified.lock().unwrap(),
+            ["ak_k.new", "ak_k.old", "ak_k.old", "ak_k.old"]
+        );
     }
 }

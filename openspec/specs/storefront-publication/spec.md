@@ -998,6 +998,20 @@ prohibition does not exempt it from source-publication reconciliation.
 - **WHEN** capacity-availability reconciliation runs, including after a settlement against an unbacked listing
 - **THEN** no unbacked listing is closed, reopened, or resized by it
 
+### Requirement: Reconciliation reads every listing once
+
+The core storefront's listing pages MUST be ordered by `(created_at, listing_id)`,
+which no write changes, and MUST accept a keyset cursor, the last row's
+`(created_at, listing_id)`, from which the next page continues. A reconciliation pass
+that pages through listings MUST page by that cursor rather than by offset, so that a
+listing it closes, reopens, or publishes during the pass neither shifts another listing
+out of the pass nor brings one into it twice.
+
+#### Scenario: A reconciliation pass writes while it pages
+
+- **WHEN** a reconciliation pass pages through listings by the keyset cursor and changes listings on an earlier page, or publishes a new listing, before reading the next page
+- **THEN** every listing that existed when the pass began is visited exactly once
+
 ### Requirement: The seller's inventory guard checks a listing against its own source
 
 Before every seller decision in a negotiation round, and before a buyer's or an
@@ -2700,7 +2714,7 @@ refuse to start with a configured release model its domain cannot deliver.
 - Unbacked listings publish only options their domain does not fulfil through capacity: `domains/vms/storefront/tests/unit/test_unbacked_settlement_options.py` and `test_settlement_composition.py`.
 - Each publisher builds only its named contributions: `core/storefront/tests/unit/test_publication_plugins.py` and `domains/vms/storefront/tests/unit/test_publication_wiring.py`.
 - Durable seller close, kept by every later write: `core/storefront/tests/integration/test_listing_closure.py`, `kit/capacity-publication/tests/unit/test_publication.py`, `domains/apicredits/storefront/tests/integration/test_publish_reconcile.py`, and `domains/bare_metal/storefront/tests/test_publication_cycle.py`.
-- Registry convergence: `core/storefront/tests/integration/test_listing_closure.py`, `kit/capacity-publication/tests/unit/test_registry_convergence.py`, and `domains/apicredits/storefront/tests/unit/test_capacity_reconcile_converges.py`.
+- Registry convergence: `core/storefront/tests/integration/test_listing_closure.py`, `kit/capacity-publication/tests/unit/test_registry_convergence.py`, and `domains/api/selling/tests/unit/test_reconcile_order.py`.
 - Loop controls from either client variant: `domains/vms/storefront/tests/unit/test_lifecycle_client_parity.py`.
 - Bare-metal shape derivation and its holds: `domains/bare_metal/tests/test_shapes.py`, `test_storefront_publication.py`, and `test_publication.py`; the published flat fields against the compute schema, `test_schema.py`.
 - Bare-metal publication with shape-bearing identity, successors, region holds, and reports: `domains/bare_metal/storefront/tests/test_publication_cycle.py` and `test_persistence.py`; system evidence in `e2e-tests/tests/e2e/roles/scenarios/bare_metal/test_bare_metal_publication.py`, stages 03b and 06.

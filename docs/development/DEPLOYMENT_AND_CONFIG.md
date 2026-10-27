@@ -853,6 +853,13 @@ deployment topology:
   requirement for a service that doesn't yet have the first option's
   topology, not an exception to it.
 
+The API-credits service is of the second kind, and its migrations are the
+api family authority library's (`domains/api/authority`): on every start it
+runs the library's migration chain, then the library's runtime
+initialization, which seeds the capacity profile's pool when it is absent and
+checks every stored pool's declarations, refusing to start on a pool without
+valid ones. An existing pool keeps its stored values.
+
 See `docs/development/TESTING.md` for how migration behavior itself is
 validated (fresh bootstrap, idempotent rerun, drift detection).
 

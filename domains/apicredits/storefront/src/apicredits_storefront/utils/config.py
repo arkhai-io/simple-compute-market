@@ -22,6 +22,10 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from arkhai_api_selling.capacity import CapacitySite, read_capacity_sites
+from arkhai_api_selling.lifecycle import LoopSettings
+from arkhai_api_selling.negotiation import RoundSettings
+from arkhai_api_selling.system import SystemSettings
 from dynaconf import Dynaconf
 from core_storefront.identity_config import IdentityConfig, resolve_storefront_signer
 from core_storefront.multi_registry_client import RegistryAuthorityTrust
@@ -33,6 +37,7 @@ from market_config.config_loader import (
     storefront_config_files,
 )
 from market_config.setting_types import positive_seconds
+from market_storefront_kit import NegotiationWatchdogPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -339,3 +344,66 @@ def settlement_servicing_interval(source: Dynaconf | None = None) -> float:
 AGENT_ID: str = _validate_agent_id(settings.get("agent_id", ""))
 AGENT_NAME: str = str(settings.get("agent_name") or AGENT_ID)
 BASE_URL_OVERRIDE: str = str(settings.get("base_url", "http://localhost:8002"))
+
+
+def capacity_sites() -> tuple[dict[str, CapacitySite], str]:
+    """Each configured capacity site, and the placement."""
+    return read_capacity_sites(
+        settings.get("capacity.sites"),
+        settings.get("capacity.placement", ""),
+        sites_key="capacity.sites",
+    )
+
+
+def configured_site_ids() -> tuple[str, ...]:
+    return tuple(capacity_sites()[0])
+
+
+def capacity_poll_interval() -> float:
+    """`[capacity].poll_interval`, five seconds unless stated, refused by its key unless positive."""
+    return seconds_setting("capacity.poll_interval", 5)
+
+
+def negotiation_watchdog_policy() -> NegotiationWatchdogPolicy:
+    """The watchdog's timeout and interval, each refused by its key unless positive seconds."""
+    return NegotiationWatchdogPolicy(
+        timeout_seconds=seconds_setting("negotiation_timeout_seconds", 1800),
+        interval_seconds=seconds_setting("negotiation_watchdog_interval", 60),
+        log_loop_start=False,
+        log_cutoff=False,
+    )
+
+
+LOOP_SETTINGS = LoopSettings(
+    watchdog=negotiation_watchdog_policy,
+    settlement_servicing_interval=settlement_servicing_interval,
+    capacity_poll_interval=capacity_poll_interval,
+)
+
+
+def round_settings() -> RoundSettings:
+    """What the seller's round reads, read once per round."""
+    return RoundSettings(
+        floor_key="pricing.default_min_price",
+        negotiation_config=settings.get("negotiation"),
+        chain_config_paths={
+            name: chain.alkahest_address_config_path for name, chain in CHAINS.items()
+        },
+        default_min_price=settings.get("pricing.default_min_price"),
+    )
+
+
+def system_settings() -> SystemSettings:
+    return SystemSettings(
+        registry_urls=tuple(settings.registry.urls or ()),
+        registry_auth=settings.registry.auth or {},
+        authority_url=credits_service_url(),
+    )
+
+
+def seed_settings() -> Any:
+    """The ``[seed]`` table, naming its listing's service ``service`` unless it names one."""
+    seed = settings.get("seed")
+    if not isinstance(seed, Mapping):
+        return seed
+    return {**seed, "service_name": str(seed.get("service_name", "service"))}

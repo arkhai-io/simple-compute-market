@@ -7,9 +7,24 @@
       "dist": "arkhai-kit-identity"
     },
     {
+      "key": "api",
+      "path": "domains/api",
+      "dist": "arkhai-api"
+    },
+    {
       "key": "core",
       "path": "core",
       "dist": "arkhai-core"
+    },
+    {
+      "key": "api-contracts",
+      "path": "domains/api/contracts",
+      "dist": "arkhai-api-contracts"
+    },
+    {
+      "key": "api-client",
+      "path": "domains/api/client",
+      "dist": "arkhai-api-client"
     },
     {
       "key": "kit-settlement-runtime",
@@ -97,6 +112,11 @@
       "dist": "arkhai-kit-site"
     },
     {
+      "key": "api-authority",
+      "path": "domains/api/authority",
+      "dist": "arkhai-api-authority"
+    },
+    {
       "key": "kit-site-client",
       "path": "kit/site-client",
       "dist": "arkhai-kit-site-client"
@@ -125,6 +145,41 @@
       "key": "kit-storefront",
       "path": "kit/storefront",
       "dist": "arkhai-kit-storefront"
+    },
+    {
+      "key": "api-selling",
+      "path": "domains/api/selling",
+      "dist": "arkhai-api-selling"
+    },
+    {
+      "key": "api-selling-alkahest",
+      "path": "domains/api/selling-alkahest",
+      "dist": "arkhai-api-selling-alkahest"
+    },
+    {
+      "key": "api-selling-arkhai-payments",
+      "path": "domains/api/selling-arkhai-payments",
+      "dist": "arkhai-api-selling-arkhai-payments"
+    },
+    {
+      "key": "api-buying",
+      "path": "domains/api/buying",
+      "dist": "arkhai-api-buying"
+    },
+    {
+      "key": "api-buying-alkahest",
+      "path": "domains/api/buying-alkahest",
+      "dist": "arkhai-api-buying-alkahest"
+    },
+    {
+      "key": "api-buying-arkhai-payments",
+      "path": "domains/api/buying-arkhai-payments",
+      "dist": "arkhai-api-buying-arkhai-payments"
+    },
+    {
+      "key": "api-gate",
+      "path": "domains/api/gate",
+      "dist": "arkhai-api-gate"
     },
     {
       "key": "compute",
@@ -238,11 +293,6 @@
       "path": "domains/apicredits/buyer",
       "dist": "arkhai-apicredits-buyer",
       "wheel_only": true
-    },
-    {
-      "key": "apicredits-middleware",
-      "path": "domains/apicredits/middleware/python",
-      "dist": "arkhai-apicredits-middleware"
     },
     {
       "key": "apicredits-storefront",

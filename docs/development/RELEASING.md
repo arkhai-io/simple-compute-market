@@ -3,8 +3,8 @@
 `.github/workflows/publish-pypi.yml` publishes the project's Python
 packages to PyPI.
 
-Registries, storefronts, provisioning, buyers, and the metering
-middleware are roles that operators, sellers, and buyers install and run
+Registries, storefronts, provisioning, buyers, and the bearer gate
+are roles that operators, sellers, and buyers install and run
 independently. Each of those roles is published, along with the
 libraries and SDK clients they build on. Three packages are not roles
 and are not published: the end-to-end test harness (`arkhai-e2e-tests`),
@@ -56,6 +56,17 @@ the one its `pyproject.toml` declares.
 | `arkhai-kit-resource-pools-client` | `kit/resource-pools-client/` | `arkhai-kit-resource-pools-contracts` |
 | `arkhai-kit-storefront` | `kit/storefront/` | `arkhai-core`, `arkhai-core-storefront`, `arkhai-kit-alkahest`, `arkhai-kit-identity`, `arkhai-kit-negotiation-runtime` |
 | `arkhai-compute` | `domains/compute/` | `arkhai-kit-capability-shape` |
+| `arkhai-api` | `domains/api/` | `arkhai-kit-identity` |
+| `arkhai-api-contracts` | `domains/api/contracts/` | `arkhai-api`, `arkhai-core`, `arkhai-kit-identity` |
+| `arkhai-api-client` | `domains/api/client/` | `arkhai-api-contracts`, `arkhai-kit-identity` |
+| `arkhai-api-authority` | `domains/api/authority/` | `arkhai-api`, `arkhai-api-contracts`, `arkhai-kit-identity`, `arkhai-kit-resource-pools`, `arkhai-kit-resource-pools-contracts`, `arkhai-kit-site` |
+| `arkhai-api-selling` | `domains/api/selling/` | `arkhai-api`, `arkhai-api-client`, `arkhai-core`, `arkhai-core-registry-client`, `arkhai-core-storefront`, `arkhai-kit-capacity-publication`, `arkhai-kit-identity`, `arkhai-kit-negotiation-runtime`, `arkhai-kit-policy`, `arkhai-kit-resource-pools`, `arkhai-kit-settlement-runtime`, `arkhai-kit-site-client`, `arkhai-kit-storefront` |
+| `arkhai-api-selling-alkahest` | `domains/api/selling-alkahest/` | `arkhai-api-selling`, `arkhai-core`, `arkhai-kit-alkahest`, `arkhai-kit-identity`, `arkhai-kit-negotiation-runtime`, `arkhai-kit-settlement-runtime` |
+| `arkhai-api-selling-arkhai-payments` | `domains/api/selling-arkhai-payments/` | `arkhai-api`, `arkhai-api-selling`, `arkhai-core`, `arkhai-kit-arkhai-payments`, `arkhai-kit-identity`, `arkhai-kit-negotiation-runtime`, `arkhai-kit-settlement-runtime`, `arkhai-kit-storefront` |
+| `arkhai-api-buying` | `domains/api/buying/` | `arkhai-api`, `arkhai-core`, `arkhai-core-buyer`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-policy`, `arkhai-kit-settlement-runtime` |
+| `arkhai-api-buying-alkahest` | `domains/api/buying-alkahest/` | `arkhai-api-buying`, `arkhai-core-buyer`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-policy` |
+| `arkhai-api-buying-arkhai-payments` | `domains/api/buying-arkhai-payments/` | `arkhai-api-buying`, `arkhai-core`, `arkhai-core-buyer`, `arkhai-kit-arkhai-payments`, `arkhai-kit-config`, `arkhai-kit-settlement-runtime` |
+| `arkhai-api-gate` | `domains/api/gate/` | none (`signed` extra: `arkhai-kit-identity`) |
 | `arkhai-bare-metal` | `domains/bare_metal/` | `arkhai-compute`, `arkhai-core`, `arkhai-kit-capability-shape`, `arkhai-kit-resource-pools-contracts` (`storefront` extra: `arkhai-core-storefront`) |
 | `arkhai-bare-metal-storefront` | `domains/bare_metal/storefront/` | `arkhai-bare-metal`, `arkhai-compute-provisioning-client`, `arkhai-compute-provisioning-contracts`, `arkhai-core`, `arkhai-core-registry-client`, `arkhai-core-storefront`, `arkhai-core-storefront-client`, `arkhai-kit-alkahest`, `arkhai-kit-arkhai-payments`, `arkhai-kit-capacity-publication`, `arkhai-kit-config`, `arkhai-kit-contact-exchange`, `arkhai-kit-delivery`, `arkhai-kit-delivery-apprise`, `arkhai-kit-identity`, `arkhai-kit-negotiation-runtime`, `arkhai-kit-policy`, `arkhai-kit-pool-overrides`, `arkhai-kit-resource-pools`, `arkhai-kit-resource-pools-contracts`, `arkhai-kit-settlement-runtime`, `arkhai-kit-site-client`, `arkhai-kit-storefront` |
 | `arkhai-bare-metal-buyer` | `domains/bare_metal/buyer/` | `arkhai-bare-metal`, `arkhai-core`, `arkhai-core-buyer`, `arkhai-core-registry-client`, `arkhai-kit-alkahest`, `arkhai-kit-arkhai-payments`, `arkhai-kit-contact-exchange`, `arkhai-kit-identity`, `arkhai-kit-settlement-runtime` |
@@ -73,11 +84,10 @@ the one its `pyproject.toml` declares.
 | `arkhai-compute-provisioning-ansible` | `provisioning/compute/ansible/` | `arkhai-compute-provisioning`, `arkhai-compute-provisioning-contracts`, `arkhai-core`, `arkhai-kit-config`, `arkhai-kit-resource-pools` |
 | `arkhai-compute-provisioning-service` | `provisioning/compute/service/` | `arkhai-compute-provisioning`, `arkhai-compute-provisioning-ansible`, `arkhai-compute-provisioning-contracts`, `arkhai-core`, `arkhai-core-storefront-client`, `arkhai-kit-config`, `arkhai-kit-fulfillment`, `arkhai-kit-identity`, `arkhai-kit-resource-pools`, `arkhai-kit-resource-pools-contracts`, `arkhai-kit-site` (`adapters` extra: `arkhai-bare-metal-provisioning-adapter`, `arkhai-vms-provisioning-adapter`) |
 | `arkhai-vms-storefront` | `domains/vms/storefront/` | `arkhai-bare-metal`, `arkhai-bare-metal-storefront`, `arkhai-compute-provisioning-client`, `arkhai-compute-provisioning-contracts`, `arkhai-core`, `arkhai-core-registry-client`, `arkhai-core-storefront`, `arkhai-core-storefront-client`, `arkhai-kit-alkahest`, `arkhai-kit-arkhai-payments`, `arkhai-kit-capability-admissibility`, `arkhai-kit-capacity-publication`, `arkhai-kit-config`, `arkhai-kit-contact-exchange`, `arkhai-kit-delivery`, `arkhai-kit-delivery-apprise`, `arkhai-kit-fulfillment`, `arkhai-kit-identity`, `arkhai-kit-negotiation-runtime`, `arkhai-kit-policy`, `arkhai-kit-pool-overrides`, `arkhai-kit-resource-pools`, `arkhai-kit-resource-pools-contracts`, `arkhai-kit-settlement-runtime`, `arkhai-kit-site`, `arkhai-kit-site-client`, `arkhai-kit-storefront`, `arkhai-vms`, `arkhai-vms-listings`, `arkhai-vms-negotiation`, `arkhai-vms-settlement` |
-| `arkhai-apicredits-domain` | `domains/apicredits/` | `arkhai-core`, `arkhai-kit-alkahest`, `arkhai-kit-arkhai-payments`, `arkhai-kit-identity`, `arkhai-kit-policy`, `arkhai-kit-settlement-runtime` |
-| `arkhai-apicredits-buyer` | `domains/apicredits/buyer/` | `arkhai-apicredits-domain`, `arkhai-core`, `arkhai-core-buyer`, `arkhai-kit-alkahest`, `arkhai-kit-arkhai-payments`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-policy`, `arkhai-kit-settlement-runtime` |
-| `arkhai-apicredits-middleware` | `domains/apicredits/middleware/python/` | none (`signed` extra: `arkhai-kit-identity`) |
-| `arkhai-apicredits-storefront` | `domains/apicredits/storefront/` | `arkhai-apicredits-domain`, `arkhai-core`, `arkhai-core-registry-client`, `arkhai-core-storefront`, `arkhai-core-storefront-client`, `arkhai-kit-alkahest`, `arkhai-kit-arkhai-payments`, `arkhai-kit-capacity-publication`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-negotiation-runtime`, `arkhai-kit-policy`, `arkhai-kit-resource-pools`, `arkhai-kit-settlement-runtime`, `arkhai-kit-site-client`, `arkhai-kit-storefront` |
-| `arkhai-apicredits-service` | `domains/apicredits/service/` | `arkhai-kit-identity`, `arkhai-kit-resource-pools`, `arkhai-kit-resource-pools-contracts`, `arkhai-kit-site` |
+| `arkhai-apicredits-domain` | `domains/apicredits/` | `arkhai-api`, `arkhai-api-contracts`, `arkhai-core` |
+| `arkhai-apicredits-buyer` | `domains/apicredits/buyer/` | `arkhai-api-buying`, `arkhai-api-buying-alkahest`, `arkhai-api-buying-arkhai-payments`, `arkhai-apicredits-domain`, `arkhai-core`, `arkhai-core-buyer` |
+| `arkhai-apicredits-storefront` | `domains/apicredits/storefront/` | `arkhai-api-client`, `arkhai-api-selling`, `arkhai-api-selling-alkahest`, `arkhai-api-selling-arkhai-payments`, `arkhai-apicredits-domain`, `arkhai-core`, `arkhai-core-storefront`, `arkhai-core-storefront-client`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-negotiation-runtime`, `arkhai-kit-settlement-runtime`, `arkhai-kit-storefront` |
+| `arkhai-apicredits-service` | `domains/apicredits/service/` | `arkhai-api`, `arkhai-api-authority`, `arkhai-api-contracts`, `arkhai-kit-identity`, `arkhai-kit-resource-pools`, `arkhai-kit-resource-pools-contracts`, `arkhai-kit-site` |
 
 This set is defined once, by the `PACKAGES` table in the workflow's
 `detect-changes` job and the per-package path filters beside it. Adding a

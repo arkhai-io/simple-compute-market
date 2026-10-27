@@ -1,0 +1,42 @@
+[project]
+name = "arkhai-api-contracts"
+version = "0.4.0"
+license = "MIT"
+description = "The api family's wire models and negotiation carriers and its authority's route declarations, without the authority."
+requires-python = ">=3.12,<3.14"
+# Models and plain-data declarations only, so a client signs a request and a
+# service root assembles its authentication table without the authority kit.
+dependencies = [
+    "arkhai-api>=0.1.0",
+    "arkhai-core>=0.4.0",
+    "arkhai-kit-identity>=0.4.0",
+    "pydantic>=2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/arkhai_api_contracts"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+filterwarnings = [
+    # `schema` is the issuance response's wire key; see the vocabulary's pyproject.
+    "ignore:Field name \"schema\".*shadows an attribute:UserWarning:arkhai_api.issuance",
+    "ignore:Field name \"schema\".*shadows an attribute:UserWarning:arkhai_api.evidence",
+    "ignore:Field name \"schema\".*shadows an attribute:UserWarning:arkhai_api_contracts.models",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+# The package allowlist: every distribution this package may declare or import
+# beyond the standard library, because its lightness is part of its contract.
+# make check-architecture holds it; see docs/development/ARCHITECTURE.md, "Kind".
+[tool.arkhai.architecture]
+allowed-dependencies = ["arkhai-api", "arkhai-core", "arkhai-kit-identity", "pydantic"]

@@ -15,9 +15,7 @@ from __future__ import annotations
 import httpx
 import pytest
 from apicredits_storefront.domain_runtime import get_market_domain_contract
-from apicredits_storefront.negotiation_runtime import (
-    build_api_credit_negotiation_runtime,
-)
+from apicredits_storefront.server import build_api_credit_negotiation_runtime
 from core_storefront.stage_log import set_stage_event_db_path
 from fastapi import FastAPI
 from market_identity import Ed25519Signer, TrustedIdentitySet
@@ -33,8 +31,7 @@ from apicredits_storefront.controllers.settle_controller import admin_settle_rou
 from apicredits_storefront.controllers.system_controller import (
     router as system_router,
 )
-from apicredits_storefront.middleware import admin_auth
-from apicredits_storefront.middleware.response_auth import authenticate_response
+from apicredits_storefront.utils import config as storefront_config
 from tests._settings_overrides import settings_overrides
 from tests.integration.credit_negotiation import (
     BUYER_PRINCIPAL,
@@ -57,13 +54,13 @@ async def storefront(db, fake_capacity, key_records, monkeypatch):
     monkeypatch.setattr(container, "resolved_negotiation_runtime", runtime)
     monkeypatch.setattr(container, "resolved_marketplace_signer", SELLER_SIGNER)
     monkeypatch.setattr(
-        admin_auth,
+        storefront_config,
         "resolve_admin_identities",
         lambda: TrustedIdentitySet(identities=(ADMIN_SIGNER.identity,)),
     )
     set_stage_event_db_path(db.db_path)
     app = FastAPI()
-    app.middleware("http")(authenticate_response)
+    app.middleware("http")(container.AUTH.sign_responses)
     app.include_router(negotiations_router)
     app.include_router(system_router)
     app.include_router(admin_settle_router)

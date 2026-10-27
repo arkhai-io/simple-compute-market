@@ -159,7 +159,6 @@ def test_credits_full_deal(
         # goes through the typed resource query, the same surface the
         # VM buyer filters on.
         "--resource", 'service_name="weather-api"',
-        "--chain", "anvil",
         "--max-matches", "5",
         "--max-rounds", "10",
         "--poll-interval", "1.0",
@@ -190,9 +189,8 @@ def test_credits_full_deal(
         settlement_id=str(lifecycle[-1]["escrow_uid"]),
     )
 
-    creds = buy.wait_for_event(
-        "credentials_delivered", timeout=10.0,
-    )["credentials"]
+    buy.wait_for_event("credentials_delivered", timeout=10.0)
+    creds = credits_buyer_cli.credentials("credits", buy.run_id)
     secret = creds["secret"]
     base_url = creds["base_url"]
     key_id = creds["key_id"]
@@ -233,7 +231,6 @@ def test_credits_full_deal(
         # goes through the typed resource query, the same surface the
         # VM buyer filters on.
         "--resource", 'service_name="weather-api"',
-        "--chain", "anvil",
         "--max-matches", "5",
         "--max-rounds", "10",
         "--poll-interval", "1.0",

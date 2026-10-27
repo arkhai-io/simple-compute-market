@@ -181,3 +181,38 @@ def test_a_derivation_failure_runs_nothing(tmp_path, breakage):
     command = "install-wheel" if breakage == "no-version" else "reinit"
     assert uv_project.main([command, "--project", str(project)], root=root, run=run) == 2
     assert run.calls == []
+
+
+def test_require_wheels_checks_every_locked_version_of_a_name_and_matches_wheels_by_normalised_name(tmp_path, capsys):
+    root = _repository(tmp_path)
+    project = _project(root, sources={"Arkhai_Kit.Config": WHEELHOUSE})
+    with (project / "uv.lock").open("a", encoding="utf-8") as lock:
+        # The same kit at a second version, as a marker-split lock records it.
+        lock.write('\n[[package]]\nname = "arkhai-kit-config"\nversion = "2.0.0"\nsource = { registry = "../../.dist" }\n')
+    (root / ".dist" / "arkhai_kit_config-1.0.0-py3-none-any.whl").write_bytes(b"")
+
+    assert uv_project.wheelhouse_requirements(project, root / ".dist") == [
+        ("arkhai-kit-config", "1.0.0"), ("arkhai-kit-config", "2.0.0"),
+    ]
+    assert uv_project.main(["require-wheels", "--project", str(project)], root=root, run=_Recorder()) == 2
+    assert "lacks: arkhai-kit-config==2.0.0;" in capsys.readouterr().err
+
+    (root / ".dist" / "arkhai_kit_config-2.0.0-py3-none-any.whl").write_bytes(b"")
+    assert uv_project.main(["require-wheels", "--project", str(project)], root=root, run=_Recorder()) == 0
+
+
+def test_require_wheels_names_each_internal_package_without_a_wheel_at_its_locked_version(tmp_path, capsys):
+    root = _repository(tmp_path)
+    project = _project(root, sources={"arkhai-kit-site": WHEELHOUSE, "arkhai-kit-config": WHEELHOUSE})
+    (root / ".dist" / "arkhai_kit_site-1.0.0-py3-none-any.whl").write_bytes(b"")
+    # A wheel of the config kit exists, but not at the version the lock records.
+    (root / ".dist" / "arkhai_kit_config-0.9.0-py3-none-any.whl").write_bytes(b"")
+    run = _Recorder()
+
+    assert uv_project.main(["require-wheels", "--project", str(project)], root=root, run=run) == 2
+    assert "lacks: arkhai-kit-config==1.0.0;" in capsys.readouterr().err
+    assert run.calls == []
+
+    (root / ".dist" / "arkhai_kit_config-1.0.0-py3-none-any.whl").write_bytes(b"")
+    assert uv_project.main(["require-wheels", "--project", str(project)], root=root, run=run) == 0
+    assert run.calls == []

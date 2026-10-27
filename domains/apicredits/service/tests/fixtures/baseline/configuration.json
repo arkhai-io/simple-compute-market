@@ -1,0 +1,37 @@
+{
+  "environment_variables": [
+    "ACTIVE_PROFILES",
+    "APICREDITS_DATABASE_URL",
+    "APICREDITS_HOST",
+    "APICREDITS_LOG_LEVEL",
+    "APICREDITS_MAX_TIMESTAMP_SKEW",
+    "APICREDITS_PORT",
+    "APICREDITS_SITE_PRINCIPAL",
+    "APICREDITS_SITE_SIGNING_KEY_FILE",
+    "APICREDITS_STOREFRONT_ADMIN_KEY",
+    "APICREDITS_STOREFRONT_ADMIN_KEY_FILE",
+    "APICREDITS_TRUSTED_PRINCIPALS",
+    "APICREDITS_TRUSTED_PRINCIPALS__ADMIN",
+    "APICREDITS_TRUSTED_PRINCIPALS__SELLER",
+    "APICREDITS_TRUSTED_PRINCIPALS__SERVICE",
+    "CONFIG_DIRECTORY",
+    "STOREFRONT_TOML_PATH"
+  ],
+  "envvar_prefix": "APICREDITS",
+  "envvar_separator": "__",
+  "settings_keys": [
+    "database_url",
+    "host",
+    "log_level",
+    "max_timestamp_skew",
+    "port",
+    "site_principal",
+    "site_signing_key_file",
+    "storefront_admin_key",
+    "storefront_admin_key_file",
+    "trusted_principals",
+    "trusted_principals.admin",
+    "trusted_principals.seller",
+    "trusted_principals.service"
+  ]
+}

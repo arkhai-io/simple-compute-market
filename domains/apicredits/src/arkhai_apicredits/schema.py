@@ -1,22 +1,25 @@
-"""API-credits market schema and public domain vocabulary."""
+"""The API-credits listing, and the family's carriers bound to its kind literal."""
 
 from __future__ import annotations
 
 import json
 from typing import Any, Literal
 
-from market_core.schemas import SettlementOption, SettlementSelection
-from market_identity import Identity
+from arkhai_api_contracts.carriers import (
+    materialization_model,
+    message_model,
+    receipt_model,
+    result_model,
+    terms_model,
+)
+from market_core.schemas import SettlementOption
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from arkhai_apicredits.listings.models import (
     API_CREDITS_KIND,
     ApiCreditsResource,
 )
-from arkhai_apicredits.negotiation.terms import (
-    API_CREDITS_PROVISION_KIND,
-    ApiCreditsProvisionTerms,
-)
+from arkhai_apicredits.negotiation.terms import API_CREDITS_PROVISION_KIND
 
 API_CREDITS_SCHEMA_KIND = API_CREDITS_KIND
 
@@ -72,124 +75,8 @@ class ApiCreditsListing(BaseModel):
         return self
 
 
-class ApiCreditsMessage(ApiCreditsProvisionTerms):
-    """API-credits negotiation message payload."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    settlement_selection: SettlementSelection | None = None
-    buyer_principal: Identity | None = None
-    seller_principal: Identity | None = None
-
-    kind: Literal["api_credits.v1"] = API_CREDITS_PROVISION_KIND
-
-    @model_validator(mode="after")
-    def _validate_message(self) -> "ApiCreditsMessage":
-        if self.quantity is None or self.quantity < 1:
-            raise ValueError("payload.quantity must be >= 1")
-        if self.key_mode not in {"new", "existing"}:
-            raise ValueError("payload.key.mode must be 'new' or 'existing'")
-        if self.key_mode == "existing" and not self.key_id:
-            raise ValueError("payload.key.key_id is required for existing keys")
-        selected_fields = (
-            self.settlement_selection,
-            self.buyer_principal,
-            self.seller_principal,
-        )
-        if any(value is not None for value in selected_fields) and any(
-            value is None for value in selected_fields
-        ):
-            raise ValueError(
-                "settlement selection and canonical buyer/seller principals "
-                "must be recorded together"
-            )
-        return self
-
-
-class ApiCreditsTerms(ApiCreditsMessage):
-    """Canonical agreed API-credits terms produced by negotiation."""
-
-    listing_ref: str | None = None
-
-
-class ApiCreditsMaterialization(BaseModel):
-    """Settlement-to-fulfillment handoff for an API-credits agreement."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    kind: Literal["api_credits.v1"] = API_CREDITS_SCHEMA_KIND
-    escrow_uid: str | None = None
-    quantity: int = Field(ge=1)
-    key_mode: Literal["new", "existing"] = "new"
-    key_id: str | None = None
-    listing_resource: ApiCreditsResource | None = None
-    settlement_ref: dict[str, Any] | None = None
-    obligation_ref: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    fulfillment_id: str | None = Field(default=None, min_length=1)
-    mechanism: str | None = Field(default=None, min_length=1)
-
-    @model_validator(mode="after")
-    def _validate_materialization(self) -> "ApiCreditsMaterialization":
-        if self.escrow_uid is not None and not self.escrow_uid.strip():
-            raise ValueError("escrow_uid must be non-empty")
-        if self.escrow_uid is None and self.obligation_ref is None:
-            raise ValueError("materialization requires escrow_uid or obligation_ref")
-        if self.obligation_ref is not None and (
-            self.mechanism is None or self.fulfillment_id is None
-        ):
-            raise ValueError(
-                "mechanism-neutral materialization requires mechanism and fulfillment_id"
-            )
-        if self.key_mode == "existing" and not self.key_id:
-            raise ValueError("key_id is required for existing keys")
-        return self
-
-
-class ApiCreditsReceipt(BaseModel):
-    """Domain receipt for API-credit issuance/fulfillment state."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    kind: Literal["api_credits.v1"] = API_CREDITS_SCHEMA_KIND
-    status: str
-    escrow_uid: str | None = None
-    obligation_ref: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    mechanism: str | None = None
-    capacity_reservation_id: str | None = None
-    key_id: str | None = None
-    fulfillment_uid: str | None = None
-    fulfillment_id: str | None = None
-    credentials_ref: dict[str, Any] | None = None
-    result_ref: dict[str, Any] | None = None
-
-    @model_validator(mode="after")
-    def _validate_receipt(self) -> "ApiCreditsReceipt":
-        if self.escrow_uid is None and self.obligation_ref is None:
-            raise ValueError("receipt requires escrow_uid or obligation_ref")
-        if not self.status.strip():
-            raise ValueError("status must be non-empty")
-        return self
-
-
-class ApiCreditsResult(BaseModel):
-    """Result shape for API-credit issuance/fulfillment slots."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    kind: Literal["api_credits.v1"] = API_CREDITS_SCHEMA_KIND
-    action: str
-    status: str = "success"
-    fulfillment_uid: str | None = None
-    obligation_ref: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    mechanism: str | None = None
-    fulfillment_id: str | None = None
-    credentials_ref: dict[str, Any] | None = None
-    details: dict[str, Any] | None = None
-
-    @model_validator(mode="after")
-    def _validate_result(self) -> "ApiCreditsResult":
-        if not self.action.strip():
-            raise ValueError("action must be non-empty")
-        if not self.status.strip():
-            raise ValueError("status must be non-empty")
-        return self
+ApiCreditsMessage = message_model(API_CREDITS_PROVISION_KIND)
+ApiCreditsTerms = terms_model(API_CREDITS_PROVISION_KIND)
+ApiCreditsMaterialization = materialization_model(API_CREDITS_SCHEMA_KIND, ApiCreditsResource)
+ApiCreditsReceipt = receipt_model(API_CREDITS_SCHEMA_KIND)
+ApiCreditsResult = result_model(API_CREDITS_SCHEMA_KIND)

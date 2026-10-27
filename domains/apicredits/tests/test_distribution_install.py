@@ -78,8 +78,8 @@ assert "site-packages" in module_path.parts
 def test_service_schema_module_imports_from_built_wheel(
     wheels: dict[str, Path],
 ) -> None:
-    """The service wheel installs one package, `apicredits_service`, and its
-    schema module imports from the installed wheel rather than from source.
+    """The service wheel installs one package, `apicredits_service`, a root whose
+    schema comes from the installed authority wheel rather than from source.
     """
     venv = wheels["service"].parent / "venv-service"
     subprocess.run(
@@ -106,12 +106,13 @@ def test_service_schema_module_imports_from_built_wheel(
     )
     code = """
 from pathlib import Path
-from apicredits_service.db import models
-module_path = Path(models.__file__).resolve()
+from apicredits_service import container
+from arkhai_api_authority import models
 assert hasattr(models, "ApiKey")
 assert hasattr(models, "CreditGrant")
 assert hasattr(models, "ConsumptionEvent")
-assert "site-packages" in module_path.parts
+for module in (container, models):
+    assert "site-packages" in Path(module.__file__).resolve().parts, module.__name__
 """
     subprocess.run(
         [str(python), "-I", "-c", code],
@@ -173,12 +174,8 @@ def test_storefront_domain_imports_resolve_without_a_raw_source_copy(
 import importlib
 for name in (
     "arkhai_apicredits.domain_runtime",
-    "arkhai_apicredits.negotiation.storefront_round",
     "arkhai_apicredits.listings.models",
-    "arkhai_apicredits.listings.pricing",
-    "arkhai_apicredits.listings.reconciler",
     "arkhai_apicredits.negotiation.terms",
-    "arkhai_apicredits.settlement",
 ):
     mod = importlib.import_module(name)
     assert "site-packages" in mod.__file__, (name, mod.__file__)

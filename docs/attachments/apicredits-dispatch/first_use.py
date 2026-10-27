@@ -33,7 +33,7 @@ from apicredits_storefront.domain_runtime import get_market_domain_contract
 from apicredits_storefront.settlement_composition import SELLER_STAGES, build_storefront_settlement_registry
 from apicredits_storefront.settlement_models import ApiCreditsSettleRequest
 from apicredits_storefront.settlement_stages import project_progress
-from apicredits_storefront.utils.sqlite_client import SQLiteClient
+from apicredits_storefront.container import storefront_sqlite_client
 from domains.apicredits.negotiation.terms import make_api_credits_provision_terms
 from domains.apicredits.settlement import mandate_policy_from_agreement
 from domains.apicredits.settlement.credits_client import CreditsServiceClient
@@ -97,7 +97,7 @@ async def drive(root: Path) -> dict:
         authority.resolved_capacity_ledger_service.register_resource(
             resource_id="svc-quota", total_units=100, resource_type="api_credits",
         )
-        db = SQLiteClient(str(root / "storefront.db"))
+        db = storefront_sqlite_client(str(root / "storefront.db"))
         client = LostAcknowledgementClient(
             "http://credits.local", os.environ["APICREDITS_STOREFRONT_ADMIN_KEY"],
             transport=httpx.ASGITransport(app=app),
@@ -195,7 +195,7 @@ async def drive(root: Path) -> dict:
             with sqlite3.connect(root / "credits.db") as conn:
                 assert conn.execute("SELECT COUNT(*) FROM credit_grants").fetchone()[0] == 1
             # Reopen storefront persistence to exclude worktree-local state.
-            context["db"] = db = SQLiteClient(str(root / "storefront.db"))
+            context["db"] = db = storefront_sqlite_client(str(root / "storefront.db"))
             ready = await stage.redrive(**context)
             assert ready["status"] == "ready"
             try:

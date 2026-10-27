@@ -10,17 +10,15 @@ import pytest
 
 from core_storefront.auth import signed_response_headers
 from core_storefront.capacity import CapacityDelta
+from market_alkahest.dev_chain import anvil_address_book_path
 from market_capacity_publication import CapacityReconcileContext
+from market_config.config_loader import ChainConfig
 from market_core.schemas import SettlementOption
 
-from apicredits_storefront.services import capacity_client as cc_module
-from apicredits_storefront.services.capacity_client import _capacity_reconciler
-from apicredits_storefront.services.listing_service import ListingService
-from apicredits_storefront.services.publication_service import (
-    close_order,
-    close_token_listings_after_capacity_change,
-)
-from apicredits_storefront.utils import sqlite_client as sqlite_module
+from apicredits_storefront import container
+from apicredits_storefront.domain_runtime import get_market_domain_contract
+from apicredits_storefront.server import build_listing_service
+from apicredits_storefront.container import SELLER_STAGES
 from market_site_client import SiteCapacityClient
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from tests.integration.credit_negotiation import payment_option
@@ -122,7 +120,25 @@ class _QuotaRuntime:
         }
 
 
+class _NoMechanismSections:
+    def mechanism_config(self, _key):
+        return None
+
+
 class _SettlementComposition:
+    stages = SELLER_STAGES
+    # The escrow's release conditions derive from the development chain's
+    # address book under no configured section.
+    settlement_config = _NoMechanismSections()
+    mechanism_resources = {
+        "chains": {
+            "anvil": ChainConfig(
+                name="anvil", rpc_url="http://anvil.test", chain_id=31337,
+                alkahest_address_config_path=str(anvil_address_book_path()),
+            )
+        }
+    }
+
     async def readiness(self) -> tuple[()]:
         return ()
 
@@ -133,15 +149,21 @@ class _SettlementComposition:
     ) -> tuple[list[dict], list[dict], tuple[()]]:
         return [], [], ()
 
-    def release_conditions(self, _accepted_escrows) -> list[dict]:
-        return []
+
+def _listing_service(db, composition):
+    return build_listing_service(
+        get_market_domain_contract(),
+        sqlite_client=db,
+        seller_principal=SELLER_PRINCIPAL,
+        settlement_composition=composition,
+    )
 
 
 @pytest.fixture
 async def db(tmp_path):
-    from apicredits_storefront.utils.sqlite_client import SQLiteClient
+    from apicredits_storefront.container import storefront_sqlite_client
 
-    return SQLiteClient(db_path=str(tmp_path / "publish.db"))
+    return storefront_sqlite_client(db_path=str(tmp_path / "publish.db"))
 
 
 async def _insert_listing(db, listing_id: str, resource_id: str, status: str):
@@ -177,23 +199,11 @@ async def test_publish_from_quota_requires_registered_sellable_resource(
     db,
     monkeypatch,
 ):
-    from apicredits_storefront.services import capacity_client as cc_module
-    from apicredits_storefront.services.listing_service import ListingService
-    from apicredits_storefront.utils import sqlite_client as sqlite_module
-
-    monkeypatch.setattr(sqlite_module, "_sqlite_client", db)
+    monkeypatch.setattr(container, "_sqlite_client", db)
     runtime = _QuotaRuntime({"svc-quota": 42, "svc-empty": 0})
-    monkeypatch.setattr(
-        cc_module,
-        "build_capacity_runtime",
-        lambda factory: runtime,
-    )
+    monkeypatch.setattr(container.QUOTA_CAPACITY, "runtime", lambda factory: runtime)
 
-    svc = ListingService(
-        sqlite_client=db,
-        seller_principal=SELLER_PRINCIPAL,
-        settlement_composition=_SettlementComposition(),
-    )
+    svc = _listing_service(db, _SettlementComposition())
     result = await svc.publish_from_quota(
         resource_id="svc-quota",
         service_name="Acme Inference",
@@ -243,21 +253,10 @@ async def test_publish_from_quota_validates_listing_through_domain_runtime(
     db,
     monkeypatch,
 ):
-    from apicredits_storefront.services import capacity_client as cc_module
-    from apicredits_storefront.services.listing_service import ListingService
-
     runtime = _QuotaRuntime({"svc-quota": 42})
-    monkeypatch.setattr(
-        cc_module,
-        "build_capacity_runtime",
-        lambda factory: runtime,
-    )
+    monkeypatch.setattr(container.QUOTA_CAPACITY, "runtime", lambda factory: runtime)
 
-    svc = ListingService(
-        sqlite_client=db,
-        seller_principal=SELLER_PRINCIPAL,
-        settlement_composition=_SettlementComposition(),
-    )
+    svc = _listing_service(db, _SettlementComposition())
     with pytest.raises(ValueError, match="service_name"):
         await svc.publish_from_quota(
             resource_id="svc-quota",
@@ -274,32 +273,22 @@ async def test_publish_from_quota_validates_listing_through_domain_runtime(
 
 
 async def test_capacity_deltas_close_and_reopen_token_listings(db, monkeypatch):
-    from apicredits_storefront.services.publication_service import (
-        close_token_listings_after_capacity_change,
-        reopen_token_listings_after_capacity_change,
-    )
-    from apicredits_storefront.utils import sqlite_client as sqlite_module
-
-    monkeypatch.setattr(sqlite_module, "_sqlite_client", db)
-    from apicredits_storefront.services import publication_service as publication_module
-
+    monkeypatch.setattr(container, "_sqlite_client", db)
     monkeypatch.setattr(
-        publication_module,
-        "build_capacity_runtime",
-        lambda factory: _QuotaRuntime({"svc-live": 10, "svc-dry": 5}),
+        container.QUOTA_CAPACITY, "runtime", lambda factory: _QuotaRuntime({"svc-live": 10, "svc-dry": 5})
     )
     await _insert_listing(db, "L-live", "svc-live", "open")
     await _insert_listing(db, "L-dry", "svc-dry", "open")
 
     availability = await _QuotaRuntime({"svc-live": 10, "svc-dry": 0}).availability()
-    closed = await close_token_listings_after_capacity_change(db, availability)
+    closed = await container.QUOTA_PUBLICATION.close_after_capacity_change(db, availability)
     assert closed == ["L-dry"]
     assert (await db.load_listing(listing_id="L-dry"))["status"] == "closed"
     assert (await db.load_listing(listing_id="L-live"))["status"] == "open"
 
     # Quota released → the listing reopens.
     availability = await _QuotaRuntime({"svc-live": 10, "svc-dry": 5}).availability()
-    reopened = await reopen_token_listings_after_capacity_change(db, availability)
+    reopened = await container.QUOTA_PUBLICATION.reopen_after_capacity_change(db, availability)
     assert reopened == ["L-dry"]
     assert (await db.load_listing(listing_id="L-dry"))["status"] == "open"
 
@@ -309,27 +298,23 @@ async def test_capacity_release_does_not_reopen_a_listing_its_seller_closed(
 ):
     """The capacity-event reconciler, entered as a released delta, leaves a
     seller's close alone while still reopening a listing quota exhaustion closed."""
-    monkeypatch.setattr(sqlite_module, "_sqlite_client", db)
-    from apicredits_storefront.services import publication_service as publication_module
-
+    monkeypatch.setattr(container, "_sqlite_client", db)
     monkeypatch.setattr(
-        publication_module,
-        "build_capacity_runtime",
-        lambda factory: _QuotaRuntime({"svc-a": 5, "svc-b": 5}),
+        container.QUOTA_CAPACITY, "runtime", lambda factory: _QuotaRuntime({"svc-a": 5, "svc-b": 5})
     )
     await _insert_listing(db, "L-withdrawn", "svc-a", "open")
     await _insert_listing(db, "L-exhausted", "svc-b", "open")
 
-    await close_order({"listing_id": "L-withdrawn"})
+    await container.QUOTA_PUBLICATION.close(db, "L-withdrawn")
     exhausted = await _QuotaRuntime({"svc-a": 0, "svc-b": 0}).availability()
-    await close_token_listings_after_capacity_change(db, exhausted)
+    await container.QUOTA_PUBLICATION.close_after_capacity_change(db, exhausted)
     assert (await db.load_listing(listing_id="L-withdrawn"))["closed_by"] == "seller"
     assert (await db.load_listing(listing_id="L-exhausted"))["closed_by"] == (
         "reconciliation"
     )
 
     released = await _QuotaRuntime({"svc-a": 5, "svc-b": 5}).availability()
-    await _capacity_reconciler(lambda: db)(
+    await container.QUOTA_PUBLICATION.reconciler(lambda: db)(
         CapacityReconcileContext(
             projections=(),
             availability=released,
@@ -347,35 +332,25 @@ async def test_a_resource_moved_to_another_pool_does_not_reopen_its_listing(
 ):
     """Released quota reopens only a listing whose resource is still in the pool
     it was bound to, even when the new pool declares the same backing."""
-    monkeypatch.setattr(sqlite_module, "_sqlite_client", db)
-    from apicredits_storefront.services import publication_service as publication_module
-    from apicredits_storefront.services.publication_service import (
-        close_token_listings_after_capacity_change,
-        reopen_token_listings_after_capacity_change,
-    )
-
+    monkeypatch.setattr(container, "_sqlite_client", db)
     await _insert_listing(db, "L-moved", "svc-a", "open")
     exhausted = await _QuotaRuntime({"svc-a": 0}).availability()
-    assert await close_token_listings_after_capacity_change(db, exhausted) == ["L-moved"]
+    assert await container.QUOTA_PUBLICATION.close_after_capacity_change(db, exhausted) == ["L-moved"]
 
     monkeypatch.setattr(
-        publication_module,
-        "build_capacity_runtime",
-        lambda factory: _QuotaRuntime({"svc-a": 5}, pool_id="other"),
+        container.QUOTA_CAPACITY, "runtime", lambda factory: _QuotaRuntime({"svc-a": 5}, pool_id="other")
     )
     released = await _QuotaRuntime({"svc-a": 5}).availability()
 
-    assert await reopen_token_listings_after_capacity_change(db, released) == []
+    assert await container.QUOTA_PUBLICATION.reopen_after_capacity_change(db, released) == []
     assert (await db.load_listing(listing_id="L-moved"))["status"] == "closed"
 
 
 async def _reconcile_release(db, monkeypatch, runtime):
     """Run the capacity reconciler as the ledger feeds a pool move: a release."""
-    from apicredits_storefront.services import publication_service as publication_module
-
-    monkeypatch.setattr(sqlite_module, "_sqlite_client", db)
-    monkeypatch.setattr(publication_module, "build_capacity_runtime", lambda factory: runtime)
-    await _capacity_reconciler(lambda: db)(
+    monkeypatch.setattr(container, "_sqlite_client", db)
+    monkeypatch.setattr(container.QUOTA_CAPACITY, "runtime", lambda factory: runtime)
+    await container.QUOTA_PUBLICATION.reconciler(lambda: db)(
         CapacityReconcileContext(
             projections=(),
             availability=await runtime.availability(),
@@ -414,16 +389,9 @@ async def test_an_unreadable_source_closes_no_open_listing(db, monkeypatch):
 
 
 def _quota_service(db, monkeypatch, runtime):
-    from apicredits_storefront.services import capacity_client as cc_module
-    from apicredits_storefront.services.listing_service import ListingService
-
-    monkeypatch.setattr(sqlite_module, "_sqlite_client", db)
-    monkeypatch.setattr(cc_module, "build_capacity_runtime", lambda factory: runtime)
-    return ListingService(
-        sqlite_client=db,
-        seller_principal=SELLER_PRINCIPAL,
-        settlement_composition=_SettlementComposition(),
-    )
+    monkeypatch.setattr(container, "_sqlite_client", db)
+    monkeypatch.setattr(container.QUOTA_CAPACITY, "runtime", lambda factory: runtime)
+    return _listing_service(db, _SettlementComposition())
 
 
 _ALKAHEST_ESCROW = {
@@ -489,10 +457,10 @@ async def test_an_unbacked_credits_pool_yields_no_listing(db, monkeypatch):
 
 
 async def test_a_database_with_an_unbound_listing_is_refused(tmp_path):
-    from apicredits_storefront.utils.sqlite_client import SQLiteClient
+    from apicredits_storefront.container import storefront_sqlite_client
 
     path = str(tmp_path / "unbound.db")
-    db = SQLiteClient(db_path=path)
+    db = storefront_sqlite_client(db_path=path)
     await db.upsert_listing(
         listing_id="L-old",
         status="open",
@@ -513,7 +481,7 @@ async def test_a_database_with_an_unbound_listing_is_refused(tmp_path):
     )
 
     with pytest.raises(RuntimeError, match="L-old.*fresh database"):
-        SQLiteClient(db_path=path)
+        storefront_sqlite_client(db_path=path)
 
 
 class _PaymentComposition(_SettlementComposition):
@@ -528,15 +496,11 @@ class _PaymentComposition(_SettlementComposition):
 
 async def test_a_published_payment_option_is_stored_as_its_json_value(db, monkeypatch):
     option = payment_option().model_dump(mode="json")
-    monkeypatch.setattr(sqlite_module, "_sqlite_client", db)
+    monkeypatch.setattr(container, "_sqlite_client", db)
     monkeypatch.setattr(
-        cc_module, "build_capacity_runtime", lambda factory: _QuotaRuntime({"svc-quota": 42})
+        container.QUOTA_CAPACITY, "runtime", lambda factory: _QuotaRuntime({"svc-quota": 42})
     )
-    svc = ListingService(
-        sqlite_client=db,
-        seller_principal=SELLER_PRINCIPAL,
-        settlement_composition=_PaymentComposition(option),
-    )
+    svc = _listing_service(db, _PaymentComposition(option))
 
     result = await svc.publish_from_quota(
         resource_id="svc-quota", service_name="Acme", accepted_escrows=[]

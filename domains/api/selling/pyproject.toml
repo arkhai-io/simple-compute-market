@@ -1,0 +1,53 @@
+[project]
+name = "arkhai-api-selling"
+version = "0.4.0"
+license = "MIT"
+description = "The api family's selling library: negotiation, publication, the quota-backed listing and its lifecycle, issuance from verified settlement, the storefront's persistence, authentication, and route services, and the mechanism-neutral settlement composition, over each domain's contribution bundle."
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "arkhai-api>=0.1.0",
+    "arkhai-api-client>=0.1.0",
+    "arkhai-core>=0.4.0",
+    "arkhai-core-registry-client>=0.12.1",
+    "arkhai-core-storefront>=0.18.0",
+    "arkhai-kit-capacity-publication>=0.10.4",
+    "arkhai-kit-identity>=0.4.0",
+    "arkhai-kit-negotiation-runtime>=0.6.0",
+    "arkhai-kit-policy>=0.5.0",
+    "arkhai-kit-resource-pools>=0.7.0",
+    "arkhai-kit-settlement-runtime>=0.4.0",
+    "arkhai-kit-site-client>=0.11.0",
+    "arkhai-kit-storefront>=0.8.0",
+    # The authentication module reads the request and signs the response.
+    "fastapi~=0.115.8",
+    "httpx>=0.27",
+    "pydantic>=2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/arkhai_api_selling"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = [
+    # `schema` is the issuance and evidence wire key; see the vocabulary's pyproject.
+    "ignore:Field name \"schema\".*shadows an attribute:UserWarning:arkhai_api.issuance",
+    "ignore:Field name \"schema\".*shadows an attribute:UserWarning:arkhai_api.evidence",
+    "ignore:Field name \"schema\".*shadows an attribute:UserWarning:arkhai_api_contracts.models",
+    "ignore:Field name \"schema\" in \"Issuance(Request|Result|Response)\" shadows an attribute in parent:UserWarning:pydantic.main",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23.8,<1.0.0",
+    # The backing labels the quota-listing tests build pools from. Test-only.
+    "arkhai-kit-resource-pools-contracts>=0.2.0",
+]
