@@ -999,7 +999,7 @@ branch also raises two pins there, on `arkhai-core` and
 The branch edits the kit's `settlement_config.py` and bare metal's
 `test_http_introductions.py`, which this section does not touch.
 
-- [ ] 7.1 Add the seller-delivery claim table, keyed by the introduction's
+- [x] 7.1 Add the seller-delivery claim table, keyed by the introduction's
   obligation reference, with an insert that succeeds for exactly one caller. Add
   a migration that creates the table empty (D9).
   `contact_introductions_redaction_only` is untouched.
@@ -1007,7 +1007,31 @@ The branch edits the kit's `settlement_config.py` and bare metal's
     one introduction, and exactly one succeeds. The redaction trigger still
     refuses every update but the redaction.
   - `test_migrations.py`: a fresh database and a rerun are covered.
-- [ ] 7.2 `IntroductionRouteService.start` claims once completion succeeds, and
+
+  Migration `20261027_008_contact_introduction_seller_dispatch_claims` creates
+  `contact_introduction_seller_dispatches` (`obligation_ref` primary key,
+  `claimed_at`), empty; its comment says why it is not a column and that an
+  introduction revealed before it existed holds no claim. The row function
+  `claim_seller_dispatch` is an `INSERT OR IGNORE` answering whether it
+  inserted; `SQLiteIntroductionStore.claim_seller_dispatch` runs it and
+  commits. Both storefronts spread `CONTACT_EXCHANGE_MIGRATIONS` into their
+  chains, so they gain it with no edit. Library integration
+  (`test_composition.py`, file-backed SQLite):
+  - two connections: the first's uncommitted claim makes the second's refuse
+    as locked; after the commit the second finds it claimed; a rolled-back
+    claim leaves the introduction claimable;
+  - four concurrent store claims have exactly one winner, and a later claim
+    loses;
+  - after a reveal through the composition, the claim row exists, the
+    redaction trigger still refuses a changed `agreement_ref` and a changed
+    contact, and retention's redaction still applies.
+
+  `test_migrations.py`: a fresh database holds an empty claim table; a rerun
+  keeps every claim and introduction; a database migrated by the earlier two
+  migrations, holding an introduction, gains an empty table whose first claim
+  wins. All pass. The kit's `__init__.py` exports the migration ID and the row
+  function beside the others.
+- [x] 7.2 `IntroductionRouteService.start` claims once completion succeeds, and
   only the start that wins schedules the seller's delivery. A failed claim write
   answers 503. A failed start's 503 detail says that starting the introduction
   again completes it (D9).
@@ -1021,7 +1045,40 @@ The branch edits the kit's `settlement_config.py` and bare metal's
   - deletion committing while a start completes, where the start still
     dispatches its one claimed delivery;
   - re-delivery of a deleted introduction, which is refused.
-- [ ] 7.3 Application integration (`test_introduction_delivery_claim.py`, through
+
+  `IntroductionRouteCallbacks` gains a required `claim_seller_dispatch`
+  (`ClaimSellerDispatch`), wired by the composition to the store. `start`
+  no longer decides delivery by whether a record existed before it: after
+  persist and completion it claims, and only a won claim delivers. A failed
+  completion or a failed claim write answers 503 with
+  `INTRODUCTION_COMPLETION_UNAVAILABLE`, which ends "starting the introduction
+  again completes it"; the detail stays a string, as it was. A start finding the payloads deleted still completes and answers 410
+  without claiming. Unit (`test_introduction_routes.py`), the harness's claim
+  an in-memory set:
+  - an exact replay of a completed start answers its recording and neither
+    completes nor delivers;
+  - a first completion that fails answers the 503, leaves the record, claims
+    and delivers nothing, then a new start delivers once and a third nothing;
+  - a failed start replayed exactly answers its recorded 503, completing and
+    claiming nothing;
+  - two starts held at completion together, then released: one dispatch;
+  - three repeat starts after a completed reveal: still one dispatch;
+  - a claim write failing once answers 503, and the next start claims and
+    delivers;
+  - a deletion committing between completion and the claim: the start
+    delivers the buyer's contact it read, and a later start answers 410 and
+    delivers nothing. The existing test of a deletion during completion still
+    passes.
+
+  Re-delivery is not the route service's: it is
+  `ContactExchangeComposition.load_revealed`/`seller_view`, and its refusal
+  of a deleted introduction is the existing library integration test
+  `test_redelivery_reads_the_durable_reveal_and_stops_after_deletion`
+  (`test_composition.py`), unchanged and passing; no unit case was added for
+  it. Also in `test_composition.py`, through the composition and real
+  storage: a collection failing once answers 503, and of the next two starts
+  one delivers. All pass.
+- [x] 7.3 Application integration (`test_introduction_delivery_claim.py`, through
   the VM storefront's typed introduction clients, with completion failing once
   at an injected collaborator):
   - the first start answers 503 and names starting again;
@@ -1029,9 +1086,35 @@ The branch edits the kit's `settlement_config.py` and bare metal's
     sink receives exactly one dispatch;
   - further starts dispatch nothing;
   - the operator's explicit re-delivery still sends.
-- [ ] 7.4 Bump `arkhai-kit-contact-exchange` by a minor version, since its schema
+
+  `test_an_interrupted_reveal_is_delivered_to_the_seller_once`, on the VM
+  full-app harness (`publication_app` with contacts) served over loopback,
+  through the production buyer's `IntroductionTransport`. The test composes
+  contact exchange as the lifespan does, with the delivery kit's
+  `SellerIntroductionDelivery` over one recording sink wrapped to count the
+  dispatches the reveal schedules, and sets it in the container the
+  introductions controller reads per request, so the shared harness is not
+  edited. The injected collaborator is the settlement runtime: the test hands
+  the composition a wrapper of the app's real runtime whose first `collect`
+  fails, every other call delegating. Asserted: the first start answers 503
+  carrying `INTRODUCTION_COMPLETION_UNAVAILABLE`, with the record stored and
+  nothing dispatched; the next start reveals, one dispatch is scheduled, and
+  the sink receives it (waited on with a bounded event); two further starts
+  reveal and schedule nothing; the sink's one event is the seller's, carrying
+  the buyer's contact; the operator's re-delivery, as the `redeliver` command
+  runs it (`seller_view` then `redeliver`), reports the sink delivered and the
+  sink receives a second event. Against the earlier start, which delivered
+  only when no record existed, the second start's dispatch would not happen.
+  Passes.
+- [x] 7.4 Bump `arkhai-kit-contact-exchange` by a minor version, since its schema
   and the start's answer change. Run `make lock`.
-- [ ] 7.5 **Verification checkpoint.**
+
+  Amended by the owner's decision A (section 6's notes): no bump here. The
+  branch bumps `arkhai-kit-contact-exchange` to `0.4.0` with the four exact
+  pins on it, and section 10 confirms the bump once the branch has merged. No
+  dependency changed, so no lock did; `make check-packaging` confirms every
+  lock current.
+- [x] 7.5 **Verification checkpoint.**
   - Unit, library integration, and application integration: 7.1–7.3.
   - Run `make test` in `kit/contact-exchange`, `kit/delivery`, and the VM and
     bare-metal storefronts.
@@ -1042,6 +1125,38 @@ The branch edits the kit's `settlement_config.py` and bare metal's
   does not stop an ordinary first delivery. Neither fails a completion. No
   scenario is owed: the interrupted reveal is one storefront's transaction,
   which library and application integration own.
+
+  Corrected: only `e2e_vm_introduction` observes seller-side delivery (its
+  `test_05` finds exactly one Mailpit message for the deal), so it is the
+  evidence that a first start still claims and delivers.
+  `e2e_bare_metal_introduction` reveals through the claim-taking start on the
+  bare-metal storefront's migrated database but observes no seller sink. No
+  scenario is owed.
+
+  `make test` (full): `kit/contact-exchange` 141 (unit and library
+  integration); `kit/delivery` 66; the VM storefront 1103 unit and 450
+  integration; the bare-metal storefront 444; the VM buyer 202; the bare-metal
+  buyer 15. All pass. `make check-packaging` passes. `make check-change`
+  passes but for the closeout citation section 1 notes. After the
+  fresh-context fixes below, `kit/contact-exchange` (141), the VM storefront
+  (1103 and 450), and the bare-metal storefront (444) were run again and pass.
+
+  Handoff: the fresh-context check found the application test patching the
+  live runtime (now an injected wrapper), the dispatch docstring claiming the
+  claim records a scheduled dispatch (it records only which start
+  dispatches, sink or none), the migration comment stating the empty table's
+  consequence without the reason it is acceptable, the claim key lacking
+  `NOT NULL`, and the module docstring naming only one table; all corrected.
+  Left for closeout's documentation compliance (27): the permanent
+  `openspec/specs/contact-exchange-settlement/spec.md` scenario "A deletion
+  overlaps a start that has already revealed" says the start "delivers it if
+  it is the first reveal", and the capability defines the reveal as the
+  persist; with the claim, the deliverer is the start that claims, which after
+  a failed completion is not the start that persisted. The change has no
+  `contact-exchange-settlement` delta, so the wording needs one (or the
+  promotion record must name the edit) before archive. Also left:
+  `core/buyer/tests/unit/test_introductions.py` feeds the old 503 detail as a
+  canned answer; harmless, since it tests the buyer's reporting of any 503.
 
 ## 8. The VM storefront's senderless fulfillment callbacks are removed
 
