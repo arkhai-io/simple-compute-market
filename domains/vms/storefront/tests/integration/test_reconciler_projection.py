@@ -28,7 +28,6 @@ from arkhai_vms_listings.listing_comparison import (
 from arkhai_vms_listings.pricing_resolution import GpuPricingFields
 from arkhai_vms_listings.reconciler import (
     PoolHintResolutionSettings,
-    derivation_reports,
     stored_listing_key,
 )
 from market_storefront.publication_binding import prepare_vm_listing_binding
@@ -47,6 +46,7 @@ from tests._reconciler_cases import (  # noqa: F401  (db_path is a fixture)
     _seed_listing,
     _shape_slices,
     _shaped_pool,
+    _site_report,
     db_path,
     stale_open_listing_ids,
 )
@@ -127,7 +127,7 @@ def test_an_undecodable_stored_override_holds_its_pool(db_path):
     # Unreadable is not absent: the pool is held, not published from its hint.
     assert slices == []
     assert ("pool", "site-a", "gpu") in holds
-    assert derivation_reports()["site-a"]["unreadable_shapes"]["gpu"] == [
+    assert _site_report()["unreadable_shapes"]["gpu"] == [
         "storefront_override: terms: the stored value is not JSON"
     ]
 
@@ -261,7 +261,7 @@ def test_an_unreadable_declaration_holds_its_pool(db_path):
 
     assert slices == []
     assert ("pool", "site-a", "gpu") in holds
-    assert "period" in derivation_reports()["site-a"]["unreadable_asking_rates"]["gpu"][0]
+    assert "period" in _site_report()["unreadable_asking_rates"]["gpu"][0]
 
 
 def test_an_unreadable_override_holds_its_pool_rather_than_falling_through(db_path):
@@ -297,7 +297,7 @@ def test_a_rate_for_a_shape_the_pool_does_not_publish_is_reported(db_path):
     )
 
     assert _rates_by_gpu_count(slices) == {1: {"amount": "2.10", "asset": "usd", "period": "hour"}}
-    (reported,) = derivation_reports()["site-a"]["unpublished_asking_rates"]["gpu"]
+    (reported,) = _site_report()["unpublished_asking_rates"]["gpu"]
     assert reported["shape"] == unlisted
 
 
@@ -373,4 +373,4 @@ def test_a_pool_stating_no_region_is_reported_and_still_derived(db_path):
 
     assert slices and all(row["region"] is None for row in slices)
     assert holds == set()
-    assert derivation_reports()["site-a"]["regionless_pools"] == ["gpu"]
+    assert _site_report()["regionless_pools"] == ["gpu"]

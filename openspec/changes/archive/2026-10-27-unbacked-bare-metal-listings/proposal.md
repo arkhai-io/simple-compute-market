@@ -78,7 +78,7 @@ follow-up change.
   than fatal, derive release conditions only for ready clauses, and have every readiness
   blocker state whether it is a configuration or a reachability blocker.
 - Probe each Alkahest chain apart from readiness, in a `kit/alkahest` loop each storefront
-  registers, at most once per interval with bounded calls, telling an unreachable chain
+  registers, on a timer interval with bounded calls, telling an unreachable chain
   (reachability) from a wrong chain or a missing contract (configuration), and rebuilding a
   chain client that could not be constructed.
 - Create the API-credit seed listing from a loop step that waits for its dependencies,
@@ -179,11 +179,25 @@ None.
   last probe; an unpinned escrow proposal is refused; bare metal's fulfillment routes
   answer 404 for an introduction deal; an API-credit create refused only for reachability
   answers 503; the storefronts' lifecycle loops gain `alkahest-chain-probe`, and API
-  credits' `listing-seed`.
+  credits' `listing-seed`; the provisioning service's fulfillment-convergence and
+  lease-watchdog pause and resume routes answer `at_gate` beside `paused`, typed as
+  `WorkerPauseResponse`.
 - Configuration: the VM storefront's `[seller.provisioning]` `fail_on_unreachable` and
   `preflight_timeout`, and the API-credit storefront's `credits` counterparts, are
   removed; an Alkahest probe interval is added. A backed bare-metal listing's payload and binding are
-  unchanged.
+  unchanged. `storefront config migrate` accepts a clause naming a disabled mechanism, which
+  publication drops; a non-mapping `mechanism_input` is refused for every consumer.
+- Buyers: both compute buyers' delivered introductions name as counterparty the seller the
+  Agreement names, as `introduction-delivery` requires; the bare-metal `buy` command's three
+  run-shape defects are fixed (task 22.7). Design decision 27 makes a command module's own
+  factory functions the one seam its tests replace; the bare-metal buyer CLI takes that
+  shape, and the other CLIs' patches are a roadmap gap.
+- Change-workflow tooling, taken in on owner dispositions during implementation:
+  `scripts/change_workflow/wrapper.py` handles SIGTERM, `scripts/round_view.py` rebuilds the
+  index after each reset, `scripts/validate_slice.py`'s Helm and lane selections,
+  `.agents/skills/change-validate/SKILL.md`'s Helm instruction, and
+  `docs/agents/change-workflow.md`. `docs/development/RELEASING.md` states that a change
+  bumps each package at most once.
 
 ## Permanent documentation impact
 
@@ -195,7 +209,8 @@ None.
       `negotiation-protocol`, `settlement-servicing`, `settlement-configuration`,
       `buyer-orchestration`, `deployment-state`, and `test-compatibility`, and the
       `storefront-publication`, `physical-provisioning`, `resource-pool-management`,
-      `market-composition`, and `settlement-configuration` architecture companions.
+      `market-composition`, `settlement-configuration`, and `buyer-orchestration`
+      architecture companions.
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
@@ -225,6 +240,15 @@ and the change index.
 - No dependency-waiting init containers and degraded start; incoherent own configuration
   stops startup; Helm test-pod labels — `DEPLOYMENT_AND_CONFIG.md` and `deployment-state`.
 - Module-scoped holds of shared services — `TESTING.md` and `test-compatibility`.
+- A command module's factory functions as its one test seam (decision 27) — `TESTING.md`'s
+  mocking convention.
+- `storefront config migrate` accepts a clause naming a disabled mechanism —
+  `DEPLOYMENT_AND_CONFIG.md`; a publication clause's mechanism input is a mapping —
+  `settlement-configuration`.
+- The run-log's opaque listing record, a resumed amount taken from the Agreement, and the plan
+  check on the escrow settle hook — `buyer-orchestration` spec and companion. A delivered
+  introduction naming the Agreement's seller as counterparty is what `introduction-delivery`
+  already requires, so it promotes nothing.
 
 ## Dependencies
 

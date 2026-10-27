@@ -194,6 +194,7 @@ def build_settlement_runtime(
     sqlite_client,
     alkahest_clients,
     marketplace_signer,
+    chain_probe=None,
 ):
     """Compose VM policy and explicit settlement mechanisms."""
     from market_storefront.settlement_composition import (
@@ -205,4 +206,5 @@ def build_settlement_runtime(
         sqlite_client=sqlite_client,
         alkahest_clients=alkahest_clients,
         marketplace_signer=marketplace_signer,
+        chain_probe=chain_probe,
     )

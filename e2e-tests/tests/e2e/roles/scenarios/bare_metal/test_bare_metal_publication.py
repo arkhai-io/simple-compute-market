@@ -34,12 +34,15 @@ from market_pool_overrides import SyncPoolOverrideClient, pool_override_statuses
 from registry_client.query import compile_resource_query
 from market_resource_pools_contracts import PoolCreate, PoolUpdate
 
+from tests.e2e.roles.helpers.compute_deal import assert_storefront_loops_held
 from tests.e2e.roles.helpers.domain_deal import require_state
 from tests.e2e.roles.scenarios.bare_metal.conftest import lane_setting
 
 pytestmark = [
+    # Listed first, so the hold is taken before, and released after, every
+    # other fixture of the module.
+    pytest.mark.usefixtures("storefront_loops_held"),
     pytest.mark.e2e_bare_metal_publication,
-    pytest.mark.usefixtures("bare_metal_loops_held"),
 ]
 
 PUBLICATION = "publication"
@@ -153,8 +156,12 @@ def _with_listing(report: dict[str, Any], listing_id: str) -> list[dict[str, Any
 
 
 class TestStage00_Preconditions:
-    def test_00_the_site_projection_is_loaded(self, bare_metal_storefront_public):
-        """The storefront reads its one site's resource-pool projection."""
+    def test_00_the_site_projection_is_loaded(
+        self, bare_metal_storefront_public, bare_metal_storefront_admin
+    ):
+        """The storefront reads its one site's resource-pool projection, and the
+        module's loops are held, so every publication is a stepped one."""
+        assert_storefront_loops_held(bare_metal_storefront_admin)
         health = bare_metal_storefront_public.get_health()
         site = health.site_projections[lane_setting("site_id")]["resource_pool"]
         assert site["state"] == "loaded", site

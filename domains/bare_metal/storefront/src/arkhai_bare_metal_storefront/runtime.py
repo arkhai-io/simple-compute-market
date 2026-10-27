@@ -13,9 +13,21 @@ from typing import Any
 from core_storefront.auth import AuthError
 from core_storefront.identity_authority import IdentityAuthorityError
 from core_storefront.service_peers import ServicePeerTrust, seed_service_peers
-from market_alkahest import ReleaseModelError, create_alkahest_registration
+from market_alkahest import (
+    ALKAHEST_CONFIG_KEY,
+    AlkahestChainProbe,
+    JsonRpcCall,
+    ProbedChain,
+    ReleaseModelError,
+    create_alkahest_registration,
+    json_rpc_call,
+)
 from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
-from market_capacity_publication import RESOURCE_POOL, SiteProjectionState
+from market_capacity_publication import (
+    RESOURCE_POOL,
+    SiteDerivationLog,
+    SiteProjectionState,
+)
 from market_contact_exchange import (
     MECHANISM as CONTACT_MECHANISM,
 )
@@ -32,7 +44,6 @@ from market_identity import Identity, Signer, TrustedIdentitySet
 from market_negotiation_runtime import NegotiationRuntime
 from market_pool_overrides import PoolOverrideService, SQLitePoolOverrideStore
 from market_settlement_runtime import (
-    SettlementObligationRecord,
     SettlementPublicationClause,
     SettlementRuntime,
     SettlementServicingWorker,
@@ -44,7 +55,7 @@ from market_storefront_kit import (
     NegotiationWatchdogPolicy,
     StorefrontLoopController,
     TradingPause,
-    build_alkahest_clients,
+    alkahest_client_constructor,
 )
 
 from .config import (
@@ -72,7 +83,6 @@ from .pool_overrides import (
     compile_publication_clauses,
     positive_lease_bound,
 )
-from .publication import PublicationDerivation
 from .publication_service import BareMetalRegistryConfiguration
 from .settlement import build_bare_metal_settlement_plan
 from .settlement_composition import (
@@ -118,60 +128,6 @@ def _watchdog_policy(settings: BareMetalStorefrontSettings) -> NegotiationWatchd
         timeout_seconds=settings.negotiation_timeout_seconds,
         interval_seconds=settings.negotiation_watchdog_interval,
     )
-
-
-@dataclass(frozen=True)
-class _RevealRecordingRuntime:
-    """The settlement runtime contact exchange drives an introduction through.
-
-    Collecting the introduction's obligation completes the reveal, so the deal's
-    settlement evidence is recorded once collection succeeds; every other step
-    is the settlement runtime's own.
-    """
-
-    runtime: SettlementRuntime
-    record_collected: Callable[[str], Awaitable[None]]
-
-    async def register_plan(self, *, agreement_ref: str, obligations: list[Any]) -> Any:
-        return await self.runtime.register_plan(
-            agreement_ref=agreement_ref, obligations=obligations
-        )
-
-    async def materialize(
-        self, *, obligation_ref: str, local_principal: Identity, worker_id: str
-    ) -> Any:
-        return await self.runtime.materialize(
-            obligation_ref=obligation_ref,
-            local_principal=local_principal,
-            worker_id=worker_id,
-        )
-
-    async def bind_fulfillment(
-        self, obligation_ref: str, fulfillment_ref: str, *, local_principal: Identity
-    ) -> Any:
-        return await self.runtime.bind_fulfillment(
-            obligation_ref, fulfillment_ref, local_principal=local_principal
-        )
-
-    async def check(
-        self, *, obligation_ref: str, local_principal: Identity, worker_id: str
-    ) -> Any:
-        return await self.runtime.check(
-            obligation_ref=obligation_ref,
-            local_principal=local_principal,
-            worker_id=worker_id,
-        )
-
-    async def collect(
-        self, *, obligation_ref: str, local_principal: Identity, worker_id: str
-    ) -> Any:
-        collected = await self.runtime.collect(
-            obligation_ref=obligation_ref,
-            local_principal=local_principal,
-            worker_id=worker_id,
-        )
-        await self.record_collected(obligation_ref)
-        return collected
 
 
 @dataclass(frozen=True)
@@ -231,9 +187,9 @@ class BareMetalStorefrontRuntime:
         default_factory=PublicationWake, repr=False, compare=False
     )
     #: Each configured site's holds, refusals, and reports from the latest
-    #: publication cycle, which system status reports.
-    publication_derivation: PublicationDerivation = field(
-        default_factory=PublicationDerivation, repr=False, compare=False
+    #: publication cycle that derived it, which system status reports.
+    publication_derivation: SiteDerivationLog = field(
+        default_factory=SiteDerivationLog, repr=False, compare=False
     )
     #: Seconds between the site-projection poller's cycles.
     site_projection_poll_interval_seconds: float = field(
@@ -252,7 +208,14 @@ class BareMetalStorefrontRuntime:
     source_confirmation_clock: Callable[[], datetime] = field(
         default=_utc_now, repr=False, compare=False
     )
+    #: The live Alkahest client map, which ``alkahest_chain_probe`` updates in
+    #: place as it rebuilds a client; every consumer holds this one map.
     chain_clients: Mapping[str, Any] = field(default_factory=dict)
+    #: Each configured chain's last probe result, which Alkahest readiness
+    #: reads; None while no Alkahest section is configured.
+    alkahest_chain_probe: AlkahestChainProbe | None = field(
+        default=None, repr=False, compare=False
+    )
     chain_config_paths: Mapping[str, str | None] = field(default_factory=dict)
     introduction_delivery: Any | None = field(default=None, repr=False)
     escrow_verifier: Callable[..., Awaitable[int]] = field(
@@ -326,9 +289,10 @@ class BareMetalStorefrontRuntime:
                 load_thread=self._accepted_contact_thread,
                 load_obligation=repository.load_settlement_obligation,
                 load_origin=self._negotiation_origin,
-                settlement_runtime=_RevealRecordingRuntime(
-                    self.settlement_runtime, self._record_collected_introduction
-                ),
+                # A revealed introduction is the contact-exchange kit's record,
+                # never settlement evidence: the deal has no settlement or
+                # fulfillment to verify.
+                settlement_runtime=self.settlement_runtime,
                 known_origins=[binding.site_id for binding in self.site_bindings],
                 deliver=self._deliver_introduction,
             ),
@@ -487,22 +451,6 @@ class BareMetalStorefrontRuntime:
             raise ValueError("introduction Agreement differs from the accepted negotiation")
         return thread
 
-    async def _record_collected_introduction(self, obligation_ref: str) -> None:
-        """Record a collected introduction as its deal's settlement evidence."""
-        row = await self.settlement_repository.load_settlement_obligation(obligation_ref)
-        if row is None:
-            raise ValueError("introduction obligation is missing")
-        negotiation_id = SettlementObligationRecord.model_validate(row).agreement_ref
-        thread = await self._accepted_contact_thread(negotiation_id=negotiation_id)
-        if thread is None:
-            raise ValueError("introduction deal is not accepted")
-        accepted = Agreement.model_validate_json(thread["agreement_bytes"])
-        assert accepted.settlement is not None
-        stage = self.domain.settlement.seller_stages[accepted.settlement.mechanism]
-        await stage.record_reveal(
-            self.db, negotiation_id=negotiation_id, obligation_ref=obligation_ref
-        )
-
     def payments_reconciliation_enabled(self) -> bool:
         """Whether accepted payment deals need a seller-side reconciliation loop."""
         return (
@@ -518,7 +466,7 @@ class BareMetalStorefrontRuntime:
             db=self.db,
             seller_wallet=self.seller_evm_address or None,
             chain_clients=(
-                composition.resources.get("clients") or {}
+                composition.chain_clients
                 if composition is not None
                 else {}
             ),
@@ -547,8 +495,6 @@ class BareMetalStorefrontRuntime:
         composition = self.settlement_composition
         if composition is None:
             raise RuntimeError("no bare-metal settlement mechanism is configured")
-        if composition.configures(ALKAHEST_MECHANISM) and not self.seller_evm_address:
-            raise RuntimeError("Alkahest settlement is not configured")
         if self.capacity_client is None or self.fulfillment_client is None:
             return self._settlement_service()
         return self._settlement_service(self.fulfillment_service().begin)
@@ -728,6 +674,18 @@ class BareMetalStorefrontRuntime:
             name: loop.to_dict() for name, loop in self.loops.snapshot().items()
         }
         report["publication_derivation"] = self.publication_derivation.latest()
+        # Readiness reads the chain probe's last results and calls no chain.
+        # Status names nothing being published, so readiness answers for every
+        # configured chain, which servicing accepted deals needs, as every
+        # storefront's status does.
+        report["settlement"] = (
+            [
+                status.safe_projection()
+                for status in await self.settlement_composition.readiness(clauses=())
+            ]
+            if self.settlement_composition is not None
+            else None
+        )
         return report
 
     def _disclosures(self) -> dict[str, dict[str, object]]:
@@ -741,13 +699,10 @@ class BareMetalStorefrontRuntime:
         return self.contact_exchange.disclosures()
 
 
-def _build_chain_clients(
-    chains: Mapping[str, ChainSettings],
-    *,
-    private_key: str,
-    build_clients: Callable[..., Mapping[str, Any]],
-) -> tuple[dict[str, Any], dict[str, str | None]]:
-    """The Alkahest chain clients for ``[Chains]``, signing with the wallet's key."""
+def _alkahest_client_policy(
+    chains: Mapping[str, ChainSettings], *, private_key: str
+) -> AlkahestClientPolicy:
+    """What the Alkahest chain clients for ``[Chains]`` are built from."""
     alkahest_chains = tuple(
         AlkahestChain(
             name=name,
@@ -757,17 +712,17 @@ def _build_chain_clients(
         for name, chain in chains.items()
     )
     missing = ("wallet.private_key",) if alkahest_chains and not private_key else ()
-    clients = build_clients(
-        AlkahestClientPolicy(
-            private_key=private_key,
-            chains=alkahest_chains,
-            missing_requirements=missing,
-        ),
-        logger=logger,
+    return AlkahestClientPolicy(
+        private_key=private_key,
+        chains=alkahest_chains,
+        missing_requirements=missing,
     )
-    return dict(clients), {
-        chain.name: chain.address_config_path for chain in alkahest_chains
-    }
+
+
+def _alkahest_release_models(domain: MarketDomainContract) -> frozenset[str]:
+    """The release models the domain's Alkahest seller entry delivers."""
+    stage = domain.settlement.seller_stages.get(ALKAHEST_MECHANISM)
+    return frozenset(getattr(stage, "release_models", ()) or ())
 
 
 def seed_service_peer_trust(runtime: BareMetalStorefrontRuntime) -> None:
@@ -798,7 +753,10 @@ def build_runtime_from_configuration(
     *,
     credential: str | None = None,
     domain: MarketDomainContract | None = None,
-    build_chain_clients: Callable[..., Mapping[str, Any]] = build_alkahest_clients,
+    build_chain_client: Callable[
+        [AlkahestClientPolicy], Callable[[str], Any] | None
+    ] = alkahest_client_constructor,
+    chain_json_rpc: JsonRpcCall = json_rpc_call,
     site_clients: SiteClientFactories = SiteClientFactories(),
 ) -> BareMetalStorefrontRuntime:
     """Compose the runtime from the storefront's configuration files.
@@ -807,9 +765,10 @@ def build_runtime_from_configuration(
     ``credential`` to ``ARKHAI_IDENTITY_CREDENTIAL``. Nothing durable is built
     until the configuration is known to publish: the startup refusal runs
     before the signer, the settlement composition, or the database.
-    ``build_chain_clients`` builds the Alkahest chain clients, the boundary to
-    the chains the storefront settles on, and ``site_clients`` each site's
-    clients, the boundary to the site authorities.
+    ``build_chain_client`` gives the constructor the chain probe builds each
+    Alkahest chain client with, the boundary to the chains the storefront
+    settles on, ``chain_json_rpc`` the probe's JSON-RPC transport to each chain, and
+    ``site_clients`` each site's clients, the boundary to the site authorities.
 
     The service-peer trust is built here and holds nothing until the server
     starts and ``seed_service_peer_trust`` seeds and loads it.
@@ -838,15 +797,16 @@ def build_runtime_from_configuration(
             resources={"marketplace_signer": signer, "claimant_principal": principal},
         )
     except ReleaseModelError as exc:
-        # A well-formed section asking for a release model bare metal cannot
-        # deliver: the refusal names the model rather than calling it malformed.
+        # A section selecting contradictory release models is incoherent: the
+        # refusal names the models rather than calling the section malformed.
         raise RuntimeError(str(exc)) from exc
     except (TypeError, ValueError) as exc:
         raise RuntimeError("[Settlement] must be strict shared settlement config") from exc
     # A configured Alkahest section, enabled or not, owns the obligations
-    # accepted under it, so its recovery resources are required whenever the
-    # section exists; with no section they would be a second, stale statement
-    # of what the settlement root says.
+    # accepted under it. One that lacks its address, chains, or key cannot
+    # settle, which Alkahest readiness reports by name while the storefront's
+    # other mechanisms run; with no section, those inputs would be a second,
+    # stale statement of what the settlement root says, which is incoherent.
     alkahest_configured = section_check.configures(ALKAHEST_MECHANISM)
     seller_evm_address = active.wallet.address.strip()
     private_key = active.wallet.private_key.strip()
@@ -856,14 +816,29 @@ def build_runtime_from_configuration(
         "[Wallet].private_key": bool(private_key),
     }
     if alkahest_configured:
-        missing = [name for name, present in supplied.items() if not present]
-        if missing:
-            raise RuntimeError(
-                "a configured Alkahest settlement section, enabled or not, requires "
-                + ", ".join(missing)
-            )
-        chain_clients, chain_config_paths = _build_chain_clients(
-            active.chains, private_key=private_key, build_clients=build_chain_clients
+        chain_config_paths = {
+            name: chain.alkahest_address_config_path or None
+            for name, chain in active.chains.items()
+        }
+        alkahest_section = section_check.config.mechanism_config(ALKAHEST_CONFIG_KEY)
+        # The map starts empty and the probe owns it: its first step constructs
+        # each chain's client, bounded, since a websocket client connects while
+        # it is built and composition must not wait on a chain. The composition
+        # and the runtime below are both handed this one dict, which the probe
+        # updates in place.
+        chain_clients: dict[str, Any] = {}
+        chain_probe: AlkahestChainProbe | None = AlkahestChainProbe(
+            [
+                ProbedChain.from_config(name, chain)
+                for name, chain in active.chains.items()
+            ],
+            build_client=build_chain_client(
+                _alkahest_client_policy(active.chains, private_key=private_key)
+            ),
+            clients=chain_clients,
+            interval_seconds=alkahest_section.probe_interval_seconds,
+            rpc_timeout_seconds=alkahest_section.rpc_timeout_seconds,
+            json_rpc=chain_json_rpc,
         )
     else:
         stale = [name for name, present in supplied.items() if present]
@@ -873,14 +848,20 @@ def build_runtime_from_configuration(
                 "Alkahest section: " + ", ".join(stale)
             )
         chain_clients, chain_config_paths = {}, {}
+        chain_probe = None
     settlement_composition = BareMetalStorefrontSettlementComposition.from_raw_config(
         settlement_config,
         resources={
             "marketplace_signer": signer,
             "claimant_principal": principal,
-            "wallet": seller_evm_address or None,
-            "wallet_ready": bool(seller_evm_address),
+            # Bare metal signs its settlement transactions with this key, so
+            # readiness reports a missing key or chain; the composition's
+            # resources are never part of its repr.
+            "wallet": {"address": seller_evm_address, "private_key": private_key},
+            "signs_transactions": True,
+            "deliverable_release_models": _alkahest_release_models(selected_domain),
             "clients": chain_clients,
+            **({"chain_probe": chain_probe} if chain_probe is not None else {}),
             "chains": {
                 name: chain.model_dump(exclude_none=True)
                 for name, chain in active.chains.items()
@@ -952,6 +933,7 @@ def build_runtime_from_configuration(
         seller_evm_address=seller_evm_address,
         settlement_composition=settlement_composition,
         chain_clients=chain_clients,
+        alkahest_chain_probe=chain_probe,
         chain_config_paths=chain_config_paths,
         site_bindings=site_bindings,
         service_peer_trust=service_peer_trust,

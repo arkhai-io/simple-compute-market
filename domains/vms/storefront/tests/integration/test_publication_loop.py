@@ -11,6 +11,9 @@ storefront's own persistence.
 The VM composition fulfils both of its mechanisms through capacity, so an unbacked
 listing has no option it may publish under it. Tests of unbacked supply declare
 ``alkahest.v1`` as not fulfilled through capacity, which is what lets them publish.
+
+Every seller contact here is an address on the reserved ``.invalid`` domain, a
+development value that must never be used on a public network.
 """
 
 from __future__ import annotations
@@ -22,16 +25,27 @@ from dataclasses import asdict
 import pytest
 from market_alkahest.alkahest import get_recipient_arbiter
 from market_alkahest.dev_chain import anvil_address_book_path
+from market_pool_overrides import PoolOverrideClient
+from market_settlement_runtime import ReadinessBlocker
 
 from market_storefront import lifecycle
 from market_storefront.startup import _start_lifecycle_loops
+from market_storefront.utils import config as storefront_config
 
-from tests._settings_overrides import settings_overrides
+from tests._settings_overrides import replaced_setting, settings_overrides
 from tests.fixtures.publication_cycle import validate_cycle_report
+from tests.introduction_deals import (
+    CONTACT_MECHANISM,
+    CONTACT_PUBLISHABLE,
+    offer_introduction,
+)
 from tests.publication_app import (
     BUYER_SIGNER,
     SELLER_WALLET,
     SITE,
+    SITE_B,
+    contact_clause,
+    contact_settlement,
     pool,
     publication_app,
     settlement_clause,
@@ -155,6 +169,38 @@ async def test_an_alkahest_listing_advertises_the_recipient_arbiter_paying_the_s
     ]
 
 
+async def test_an_unready_alkahest_publishes_the_other_options_and_refuses_no_candidate(
+    tmp_path,
+):
+    """An unready Alkahest's clauses publish no option and no release
+    condition, the candidate publishes with its ready mechanism's option, and
+    no candidate is refused for Alkahest. The settlement double reports the
+    blocker the real preflight gives an oracle-gated section with no oracle
+    (spec scenario "Alkahest is unready on a VM storefront"); the preflight
+    itself is the kit's to test."""
+    async with publication_app(
+        tmp_path,
+        mechanism_fulfillment=CONTACT_PUBLISHABLE,
+        contacts={SITE: {"email": "sales@seller.invalid"}},
+    ) as world:
+        world.composition.alkahest_blocker = ReadinessBlocker(
+            code="alkahest.oracle_policy_invalid",
+            message="Settlement.alkahest.oracle_gated requires a trusted oracle",
+            kind="configuration",
+        )
+        world.pools.append(pool("pool-a", backing="backed", gpu_count=1))
+        with replaced_setting("pricing.settlements", [settlement_clause(), contact_clause()]):
+            result = await _cycle(world)
+            (listing,) = (await _listings(world)).values()
+
+    assert result["counts"] == {"publish": 1}
+    assert not listing.get("accepted_escrows")
+    assert not listing.get("demands")
+    assert [option["mechanism"] for option in listing["settlement_options"]] == [
+        CONTACT_MECHANISM
+    ]
+
+
 async def test_a_dry_run_reports_the_cycle_and_changes_nothing(world):
     world.pools.append(pool("broker-a", backing="unbacked", gpu_count=2))
 
@@ -272,7 +318,7 @@ async def test_a_pool_stating_no_region_publishes_nothing_and_is_reported(world)
         if action["action"] == "hold"
     ] == [("broker-a", "pool_region_missing")]
     report = (await world.client.get_system_status()).publication_derivation[SITE]
-    assert report["regionless_pools"] == ["broker-a"]
+    assert report["holds"] == [{"pool_id": "broker-a", "reason": "pool_region_missing"}]
 
 
 async def test_a_preview_leaves_the_reported_derivation_as_the_last_cycle_left_it(world):
@@ -289,8 +335,33 @@ async def test_a_preview_leaves_the_reported_derivation_as_the_last_cycle_left_i
     ran = (await world.client.get_system_status()).publication_derivation[SITE]
 
     assert [action for action in preview["actions"] if action["action"] == "hold"] == []
-    assert previewed["regionless_pools"] == ["broker-a"]
-    assert ran["regionless_pools"] == []
+    assert previewed["holds"] == [{"pool_id": "broker-a", "reason": "pool_region_missing"}]
+    assert ran["holds"] == []
+
+
+async def test_only_a_publication_cycle_records_a_sites_derivation(world):
+    """A site is absent from status until a publication cycle derives it:
+    capacity-event reconciliation and a preview derive the same projection and
+    record nothing."""
+    world.pools.append(_without_region(pool("broker-a", backing="unbacked", gpu_count=2)))
+
+    before = (await world.client.get_system_status()).publication_derivation
+    world.site.emit("reserved")
+    await world.client.admin_run_lifecycle_cycle("capacity-events")
+    reconciled = (await world.client.get_system_status()).publication_derivation
+    await _cycle(world, dry_run=True)
+    previewed = (await world.client.get_system_status()).publication_derivation
+    await _cycle(world)
+    ran = (await world.client.get_system_status()).publication_derivation
+
+    assert before == reconciled == previewed == {}
+    assert ran == {
+        SITE: {
+            "holds": [{"pool_id": "broker-a", "reason": "pool_region_missing"}],
+            "refusals": [],
+            "reports": [],
+        }
+    }
 
 
 async def test_a_regionless_pool_with_no_available_slice_is_still_reported(world):
@@ -399,14 +470,11 @@ async def test_an_older_producer_is_read_as_backed_and_delivery_authorizes(world
 
     result = await _cycle(world)
 
-    assert result["counts"] == {"publish": 1}
+    assert result["counts"] == {"report": 1, "publish": 1}
     (listing_id,) = await _listings(world)
     assert await _backing(world, listing_id) == "backed"
-    status = await world.client.get_system_status()
-    derivation = status["publication_derivation"] if isinstance(status, dict) else (
-        status.publication_derivation
-    )
-    assert derivation[SITE]["compatibility_rule"] is True
+    derivation = (await world.client.get_system_status()).publication_derivation
+    assert derivation[SITE]["reports"] == [{"reason": "legacy_producer_backing"}]
 
 
 async def test_an_unrecognized_backing_value_holds_its_pool(world):
@@ -469,6 +537,13 @@ async def test_a_pool_recreated_with_the_opposite_backing_is_refused(world):
     assert first["counts"] == {"close": 1}
     assert second["counts"] == {"refuse": 1}
     assert await world.db.load_listing_binding(listing_id=listing_id) == binding
+    # Named by its site and pool, the refusal reaches the site's derivation.
+    (refusal,) = (await _derivation(world))["refusals"]
+    assert (refusal["reason"], refusal["pool_id"], refusal["listing_id"]) == (
+        "backing_disagrees",
+        "broker-a",
+        listing_id,
+    )
 
 
 async def test_after_a_cycle_no_listing_lacks_an_explicit_backing(world):
@@ -631,7 +706,8 @@ async def test_an_unbacked_listing_publishes_and_negotiates_to_acceptance(tmp_pa
             )
 
         assert result["action"] == "accept"
-        assert result["accepted_escrow_terms"]
+        assert result["settlement_plan"]["obligations"]
+        assert "accepted_escrow_terms" not in result
         assert await _backing(world, listing_id) == "unbacked"
         assert world.site.reservations == {}
         assert (
@@ -816,6 +892,59 @@ async def test_a_registry_that_missed_a_close_is_repaired_by_the_next_cycle(
     assert (await _cycle(world))["counts"] == {}
 
 
+async def test_a_listing_every_registry_refused_is_published_once_they_answer(registry_world):
+    """A storefront with a candidate to publish while every registry refuses
+    records the listing, reports it unconverged at each registry, and closes
+    nothing; once the registries answer, the next cycle publishes it to each, in
+    the same process."""
+    world = registry_world
+    world.pools.append(pool("broker-a", backing="unbacked"))
+    world.registries.failing = {("publish", url) for url in world.registries.urls}
+
+    refused = await _cycle(world)
+    degraded = await world.client.get_system_status()
+    (listing_id,) = await _listings(world)
+    unpublished = await world.db.load_publications(listing_id=listing_id)
+    diverged = await world.db.list_publication_divergence(registry_urls=world.registries.urls)
+    world.registries.failing.clear()
+    world.registries.sent.clear()
+    answered = await _cycle(world)
+    published = await world.db.load_publications(listing_id=listing_id)
+    converged = await world.db.list_publication_divergence(registry_urls=world.registries.urls)
+
+    assert refused["counts"] == {"publish": 1, "converge": 1, "fail": 1}
+    assert [
+        (a["action"], a.get("registries"), a.get("reason"))
+        for a in refused["actions"]
+        if a.get("listing_id") == listing_id
+    ] == [
+        ("converge", list(world.registries.urls), None),
+        ("fail", None, "registry_not_converged"),
+    ]
+    assert degraded.checks["registry"] == "unreachable"
+    assert degraded.status == "degraded"
+    assert (await _listing(world, listing_id))["status"] == "open"
+    # The storefront records each registry's refusal, and reads both back as
+    # not converged.
+    assert sorted(row["registry_url"] for row in unpublished) == sorted(world.registries.urls)
+    assert all(row["status"] != "published" and row["last_error"] for row in unpublished)
+    assert sorted((row["listing_id"], row["registry_url"]) for row in diverged) == sorted(
+        (listing_id, url) for url in world.registries.urls
+    )
+
+    # Recovered: each registry's record reads published, and nothing diverges.
+    assert {row["registry_url"]: row["status"] for row in published} == {
+        url: "published" for url in world.registries.urls
+    }
+    assert converged == []
+    assert (await _listing(world, listing_id))["status"] == "open"
+    assert answered["counts"] == {"converge": 1}
+    assert sorted(url for url, _ in world.registries.to("publish", listing_id)) == sorted(
+        world.registries.urls
+    )
+    assert (await _cycle(world))["counts"] == {}
+
+
 async def test_a_registry_left_closed_by_a_failed_reopen_is_repaired_by_the_next_cycle(
     registry_world,
 ):
@@ -858,6 +987,17 @@ def _shaped(pool_id="broker-a", *, backing="unbacked", shapes=(_SHAPE,), **kwarg
 async def _report(world) -> dict:
     status = await world.client.get_system_status()
     return status.publication_derivation[SITE]
+
+
+def _entry(report: dict, kind: str, reason: str, pool_id: str) -> dict | None:
+    """The one ``kind`` entry a site's derivation gives ``pool_id`` for ``reason``."""
+    (entry, *more) = [
+        item
+        for item in report[kind]
+        if item["reason"] == reason and item.get("pool_id") == pool_id
+    ] or [None]
+    assert more == []
+    return entry
 
 
 async def test_a_pool_hint_publishes_its_shapes_and_no_default_shapes(world):
@@ -909,9 +1049,11 @@ async def test_a_declaration_shrinking_beneath_a_shape_closes_and_reports_it(wor
     await _cycle(world)
 
     world.pools[0] = _shaped(capacity={**_BIG, "ram_gb": 16})
-    assert (await _cycle(world))["counts"] == {"close": 1}
+    assert (await _cycle(world))["counts"] == {"close": 1, "report": 1}
 
-    (finding,) = (await _report(world))["infeasible_shapes"]["broker-a"]
+    (finding,) = _entry(
+        await _report(world), "reports", "listing_shape_infeasible", "broker-a"
+    )["shapes"]
     assert finding["not_feasible_against"] == "declared"
 
 
@@ -920,7 +1062,7 @@ async def test_backed_memory_being_taken_makes_a_stated_shape_unpublishable(capa
     assert (await _cycle(capacity_world))["counts"] == {"publish": 1}
 
     capacity_world.pools[0] = _shaped(backing="backed", available={**_BIG, "ram_gb": 8})
-    assert (await _cycle(capacity_world))["counts"] == {"close": 1}
+    assert (await _cycle(capacity_world))["counts"] == {"close": 1, "report": 1}
     assert await _listings(capacity_world) == {}
 
 
@@ -1027,7 +1169,8 @@ async def test_the_configured_default_reaches_every_tier_of_a_cycle(tmp_path):
             )
         )
 
-        assert (await _cycle(world))["counts"] == {"publish": 2}
+        # Each stated finding is also a report of the cycle's.
+        assert (await _cycle(world))["counts"] == {"publish": 2, "report": 2}
 
         published = {
             (row["listing_resource"]["pool_id"], row["listing_resource"]["gpu_count"])
@@ -1035,14 +1178,18 @@ async def test_the_configured_default_reaches_every_tier_of_a_cycle(tmp_path):
         }
         assert published == {("generated", 1), ("stated", 1)}
         report = await _report(world)
-        (excluded,) = report["inadmissible_listing_shapes"]["stated"]
+        (excluded,) = _entry(
+            report, "reports", "listing_shape_inadmissible", "stated"
+        )["findings"]
         assert excluded["tier"] == "pool_hint"
         assert [problem["tier"] for problem in excluded["problems"]] == ["configured_default"]
-        (unusable,) = report["unusable_shape_constraints"]["stated"]
+        (unusable,) = _entry(
+            report, "reports", "shape_constraints_unusable", "stated"
+        )["findings"]
         assert {bound["tier"] for bound in unusable["bounds"]} == {
             "pool_hint", "configured_default",
         }
-        assert "generated" not in report["inadmissible_listing_shapes"]
+        assert _entry(report, "reports", "listing_shape_inadmissible", "generated") is None
 
 
 async def test_a_hint_constraint_tightened_past_a_published_offer_closes_it(tmp_path):
@@ -1072,7 +1219,7 @@ async def test_a_hint_constraint_tightened_past_a_published_offer_closes_it(tmp_
         world.pools[0] = _shaped(
             shapes=(_SHAPE, {**widened, "gpu": {"count": {"offer": 2}, "model": "H100"}})
         )
-        assert (await _cycle(world))["counts"] == {"close": 1}
+        assert (await _cycle(world))["counts"] == {"close": 1, "report": 1}
 
         closed = await _listing(world, two_gpu)
         assert (closed["status"], closed["closed_by"]) == ("closed", "reconciliation")
@@ -1271,5 +1418,482 @@ async def test_a_shape_priced_listing_that_would_be_free_is_refused_and_never_po
 
     result = await _cycle(world)
 
-    assert result["counts"] == {"refuse": 1}
+    # The family the pool's rates leave uncharged is reported beside the refusal.
+    assert result["counts"] == {"refuse": 1, "report": 1}
     assert await _listings(world) == {}
+
+
+# -- candidates with no settlement option -----------------------------------
+
+#: What an oracle-gated Alkahest section naming no oracle reports: unready for
+#: its configuration, whatever its chain answers.
+_RULED_OUT = ReadinessBlocker(
+    code="alkahest.oracle_policy_invalid",
+    message="Settlement.alkahest.oracle_gated requires a trusted oracle",
+    kind="configuration",
+)
+#: What Alkahest reports before its chain probe has reached the chain.
+_UNREACHED = ReadinessBlocker(
+    code="alkahest.chain_unreachable",
+    message="chain anvil has not been probed",
+    kind="reachability",
+)
+
+
+def _closes(report: dict) -> dict[str, str]:
+    return {
+        item["listing_id"]: item["reason"]
+        for item in report["actions"]
+        if item["action"] == "close"
+    }
+
+
+def _of(report: dict, action: str) -> list[dict]:
+    return [item for item in report["actions"] if item["action"] == action]
+
+
+async def _derivation(world) -> dict:
+    return (await world.client.get_system_status()).publication_derivation[SITE]
+
+
+async def test_a_listing_whose_only_mechanism_is_configured_away_closes_and_reopens(
+    capacity_world,
+):
+    """Spec scenario "An open listing loses its last option to configuration",
+    on VM: the listing closes as `no_settlement_option`, the refusal is in the
+    site's derivation, and the listing reopens under its identity once its
+    option builds again."""
+    capacity_world.pools.append(pool("pool-a", backing="backed", gpu_count=1))
+    await _cycle(capacity_world)
+    (listing_id,) = await _listings(capacity_world)
+
+    capacity_world.composition.alkahest_blocker = _RULED_OUT
+    unready = await _cycle(capacity_world)
+    closed = await _listing(capacity_world, listing_id)
+    derivation = await _derivation(capacity_world)
+    capacity_world.composition.alkahest_blocker = None
+    restored = await _cycle(capacity_world)
+
+    assert _closes(unready) == {listing_id: "no_settlement_option"}
+    assert (closed["status"], closed["closed_by"]) == ("closed", "reconciliation")
+    (refusal,) = derivation["refusals"]
+    assert (refusal["reason"], refusal["pool_id"], refusal["mechanisms"]) == (
+        "no_settlement_option",
+        "pool-a",
+        ["alkahest.v1"],
+    )
+    assert derivation["holds"] == []
+    assert [item["listing_id"] for item in _of(restored, "reopen")] == [listing_id]
+    assert set(await _listings(capacity_world)) == {listing_id}
+
+
+#: The harness's settlement root with Alkahest, its only mechanism, disabled.
+_ALKAHEST_DISABLED = {"schema_version": 1, "priority": [], "alkahest": {"enabled": False}}
+
+
+@pytest.mark.parametrize("clause_source", ["pool-hint", "configured"])
+async def test_a_listing_whose_mechanism_is_disabled_closes_and_reopens(
+    capacity_world, clause_source
+):
+    """A disabled section is the storefront's configuration ruling its
+    mechanism out, so a listing whose only clause names it closes as
+    `no_settlement_option`, as bare metal's does, and reopens under its
+    identity once the section is enabled again: whether the clause is its
+    pool's own pricing hint or the storefront's configured
+    `[pricing].settlements`."""
+    if clause_source == "pool-hint":
+        hinted = {"gpu": {"H100": {"settlements": [settlement_clause()]}}}
+        capacity_world.pools.append(
+            pool("pool-a", backing="backed", gpu_count=1, pricing=hinted)
+        )
+        configured = []
+    else:
+        capacity_world.pools.append(pool("pool-a", backing="backed", gpu_count=1))
+        configured = [settlement_clause()]
+    with replaced_setting("pricing.settlements", configured):
+        await _cycle(capacity_world)
+        (listing_id,) = await _listings(capacity_world)
+        with replaced_setting("settlement", _ALKAHEST_DISABLED):
+            disabled = await _cycle(capacity_world)
+            closed = await _listing(capacity_world, listing_id)
+            derivation = await _derivation(capacity_world)
+        restored = await _cycle(capacity_world)
+        reopened = await _listing(capacity_world, listing_id)
+
+    assert _closes(disabled) == {listing_id: "no_settlement_option"}
+    assert "publish" not in disabled["counts"]
+    assert (closed["status"], closed["closed_by"]) == ("closed", "reconciliation")
+    (refusal,) = derivation["refusals"]
+    assert (refusal["reason"], refusal["pool_id"], refusal["mechanisms"]) == (
+        "no_settlement_option",
+        "pool-a",
+        ["alkahest.v1"],
+    )
+    assert [item["listing_id"] for item in _of(restored, "reopen")] == [listing_id]
+    assert (reopened["status"], reopened.get("closed_by")) == ("open", None)
+
+
+async def test_a_listing_whose_pool_resolves_no_clause_closes_and_reopens(capacity_world):
+    """Spec scenario "A pool resolves no settlement clause", on VM."""
+    capacity_world.pools.append(pool("pool-a", backing="backed", gpu_count=1))
+    await _cycle(capacity_world)
+    (listing_id,) = await _listings(capacity_world)
+
+    with replaced_setting("pricing.settlements", []):
+        unclaused = await _cycle(capacity_world)
+        closed = await _listing(capacity_world, listing_id)
+    restored = await _cycle(capacity_world)
+
+    assert _closes(unclaused) == {listing_id: "no_settlement_option"}
+    assert "publish" not in unclaused["counts"]
+    assert (closed["status"], closed["closed_by"]) == ("closed", "reconciliation")
+    assert [item["listing_id"] for item in _of(restored, "reopen")] == [listing_id]
+
+
+async def test_an_unknown_mechanism_with_no_open_listing_is_refused_not_held(capacity_world):
+    """A candidate with no listing has nothing to hold, so an unknown mechanism
+    is recorded as its refusal."""
+    capacity_world.composition.alkahest_blocker = _UNREACHED
+    capacity_world.pools.append(pool("pool-a", backing="backed", gpu_count=1))
+
+    await _cycle(capacity_world)
+    derivation = await _derivation(capacity_world)
+
+    assert await _listings(capacity_world) == {}
+    assert derivation["holds"] == []
+    (refusal,) = derivation["refusals"]
+    assert (refusal["reason"], refusal["mechanisms"]) == (
+        "settlement_mechanism_unknown",
+        ["alkahest.v1"],
+    )
+
+
+async def test_a_listing_whose_only_mechanisms_chain_is_unreached_is_held(capacity_world):
+    """Spec scenario "An open listing's mechanism is unreachable": the listing
+    stays open on its last-published terms, and the derivation records a hold."""
+    capacity_world.pools.append(pool("pool-a", backing="backed", gpu_count=1))
+    await _cycle(capacity_world)
+    before = await _listings(capacity_world)
+    (listing_id,) = before
+
+    capacity_world.composition.alkahest_blocker = _UNREACHED
+    report = await _cycle(capacity_world)
+
+    assert await _listings(capacity_world) == before
+    assert _closes(report) == {} and _of(report, "refuse") == []
+    (hold,) = (await _derivation(capacity_world))["holds"]
+    assert (hold["reason"], hold["pool_id"], hold["mechanisms"]) == (
+        "settlement_mechanism_unknown",
+        "pool-a",
+        ["alkahest.v1"],
+    )
+    assert (await _listing(capacity_world, listing_id))["accepted_escrows"]
+
+
+async def test_an_unreached_mechanism_beside_one_ruled_out_holds_the_listing(tmp_path):
+    """Spec scenario "An unreachable mechanism beside one ruled out by
+    configuration": a listing published with only its Alkahest option, beside
+    contact exchange that gives its origin no contact, is held once Alkahest's
+    chain is unreached, because the offer it published is one the storefront
+    would make again once the chain answers."""
+    async with publication_app(
+        tmp_path,
+        contacts={SITE_B: {"email": "sales@other-seller.invalid"}},
+        second_site=True,
+    ) as world:
+        world.pools.append(pool("pool-a", backing="backed", gpu_count=1))
+        with replaced_setting("pricing.settlements", [settlement_clause(), contact_clause()]):
+            await _cycle(world)
+            before = await _listings(world)
+            world.composition.alkahest_blocker = _UNREACHED
+            report = await _cycle(world)
+            after = await _listings(world)
+            derivation = await _derivation(world)
+
+    (listing,) = before.values()
+    assert [option["mechanism"] for option in listing["settlement_options"]] == [
+        "alkahest.v1"
+    ]
+    assert after == before
+    assert _closes(report) == {} and _of(report, "refuse") == []
+    (hold,) = derivation["holds"]
+    assert (hold["reason"], hold["mechanisms"]) == (
+        "settlement_mechanism_unknown",
+        ["alkahest.v1"],
+    )
+
+
+async def test_a_mechanism_both_misconfigured_and_unreached_closes_its_listing(
+    capacity_world,
+):
+    """Spec scenario "A mechanism with both kinds of blocker"."""
+    capacity_world.pools.append(pool("pool-a", backing="backed", gpu_count=1))
+    await _cycle(capacity_world)
+    (listing_id,) = await _listings(capacity_world)
+
+    # Both kinds at once, as the preflight reports an oracle-gated section
+    # naming no oracle whose chain is down.
+    capacity_world.composition.alkahest_blockers = (_RULED_OUT, _UNREACHED)
+    report = await _cycle(capacity_world)
+
+    assert _closes(report) == {listing_id: "no_settlement_option"}
+
+
+async def test_a_stored_override_leaving_no_admissible_clause_closes_the_unbacked_listing(
+    tmp_path,
+):
+    """Spec scenario "A pool override leaves no admissible clause": an open
+    unbacked listing whose stored override comes to name only a mechanism VM
+    fulfils through capacity is refused with no admissible mechanism and
+    closed, and reopens under its identity once the override offers contact
+    exchange again."""
+    async with publication_app(
+        tmp_path,
+        mechanism_fulfillment=CONTACT_PUBLISHABLE,
+        contacts={SITE: {"email": "sales@seller.invalid"}},
+    ) as world:
+        world.pools.append(pool("broker-a", backing="unbacked", gpu_count=1))
+        await offer_introduction(world, SITE, "broker-a")
+        await _cycle(world)
+        (listing_id,) = await _listings(world)
+
+        await PoolOverrideClient(world.client).put_pool_override(
+            {
+                "site_id": SITE,
+                "pool_id": "broker-a",
+                "offering_mode": "vm",
+                "settlements": [settlement_clause()],
+            }
+        )
+        refused = await _cycle(world)
+        closed = await _listing(world, listing_id)
+        derivation = await _derivation(world)
+        await offer_introduction(world, SITE, "broker-a")
+        restored = await _cycle(world)
+        reopened = await _listings(world)
+
+    assert _closes(refused) == {listing_id: "no_settlement_option"}
+    assert "publish" not in refused["counts"]
+    assert (closed["status"], closed["closed_by"]) == ("closed", "reconciliation")
+    (refusal,) = derivation["refusals"]
+    assert (refusal["reason"], refusal["pool_id"], refusal["mechanisms"]) == (
+        "no_settlement_option",
+        "broker-a",
+        [],
+    )
+    assert [item["listing_id"] for item in _of(restored, "reopen")] == [listing_id]
+    assert set(reopened) == {listing_id}
+
+
+async def test_an_unreached_mechanism_the_unbacked_listing_cannot_publish_holds_nothing(
+    tmp_path,
+):
+    """Spec scenario "An unreachable mechanism the candidate could never
+    publish": a restarted storefront whose configuration no longer gives the
+    listing's origin a contact closes its unbacked contact listing, although
+    Alkahest's chain is unreached, since unbacked VM supply cannot publish
+    Alkahest."""
+    async with publication_app(
+        tmp_path,
+        mechanism_fulfillment=CONTACT_PUBLISHABLE,
+        contacts={SITE: {"email": "sales@seller.invalid"}},
+        second_site=True,
+    ) as world:
+        world.pools.append(pool("broker-a", backing="unbacked", gpu_count=1))
+        with replaced_setting("pricing.settlements", [settlement_clause(), contact_clause()]):
+            await _cycle(world)
+            (listing_id,) = await _listings(world)
+
+    async with publication_app(
+        tmp_path,
+        mechanism_fulfillment=CONTACT_PUBLISHABLE,
+        contacts={SITE_B: {"email": "sales@other-seller.invalid"}},
+        second_site=True,
+    ) as restarted:
+        restarted.pools.append(pool("broker-a", backing="unbacked", gpu_count=1))
+        restarted.composition.alkahest_blocker = _UNREACHED
+        with replaced_setting("pricing.settlements", [settlement_clause(), contact_clause()]):
+            report = await _cycle(restarted)
+        derivation = await _derivation(restarted)
+
+    assert _closes(report) == {listing_id: "no_settlement_option"}
+    assert derivation["holds"] == []
+    (refusal,) = derivation["refusals"]
+    assert refusal["mechanisms"] == [CONTACT_MECHANISM]
+
+
+async def test_a_contact_only_candidate_whose_origin_has_no_contact_yields_no_listing(
+    tmp_path,
+):
+    """Spec scenario "An unbacked candidate's origin has no contact"."""
+    async with publication_app(
+        tmp_path,
+        mechanism_fulfillment=CONTACT_PUBLISHABLE,
+        contacts={SITE_B: {"email": "sales@other-seller.invalid"}},
+        second_site=True,
+    ) as world:
+        world.pools.append(pool("broker-a", backing="unbacked", gpu_count=1))
+        await offer_introduction(world, SITE, "broker-a")
+        report = await _cycle(world)
+        listings = await _listings(world)
+        derivation = await _derivation(world)
+
+    assert listings == {}
+    assert "publish" not in report["counts"]
+    (refusal,) = derivation["refusals"]
+    assert (refusal["reason"], refusal["pool_id"]) == ("no_settlement_option", "broker-a")
+    assert refusal["shape_digest"]
+
+
+def _stored_terms(row: dict) -> tuple:
+    return tuple(
+        row.get(name)
+        for name in ("accepted_escrows", "settlement_options", "demands", "max_duration_seconds")
+    )
+
+
+@pytest.mark.parametrize("form", ["pool-hint-mapping", "configured-dsl-text"])
+async def test_a_clause_that_cannot_be_read_never_closes_its_listing(capacity_world, form):
+    """A clause naming Alkahest, whose section is disabled, that Alkahest
+    cannot read -- a mapping with a field the clause does not define, or DSL
+    text stating Alkahest's fields unqualified -- is a defect, not Alkahest
+    ruled out: the candidate is refused as `payload_unbuildable` under its
+    site, and its open listing keeps its identity and terms and publishes
+    nothing. A readable clause naming the disabled mechanism closes it
+    (`test_a_listing_whose_mechanism_is_disabled_closes_and_reopens`)."""
+    capacity_world.pools.append(pool("pool-a", backing="backed", gpu_count=1))
+    await _cycle(capacity_world)
+    (listing_id,) = await _listings(capacity_world)
+    before = await _listing(capacity_world, listing_id)
+    asset = settlement_clause()["asset"]
+    if form == "pool-hint-mapping":
+        capacity_world.pools[0] = pool(
+            "pool-a",
+            backing="backed",
+            gpu_count=1,
+            pricing={"gpu": {"H100": {"settlements": [{**settlement_clause(), "unknown": True}]}}},
+        )
+        defaults: dict = {}
+    else:
+        # The configured per-model default, given as JSON text holding DSL
+        # clauses: the one route by which clause text reaches a VM cycle.
+        defaults = {
+            "gpu": {
+                "H100": {
+                    "settlements": json.dumps(
+                        [
+                            f"mechanism=alkahest asset={asset} rate=100/hour chain=anvil "
+                            "escrow_kind=erc20_escrow_obligation_default"
+                        ]
+                    )
+                }
+            }
+        }
+    sent = len(capacity_world.registries.sent)
+    # Replaced at its root: `pricing.defaults` is unset in the harness, and
+    # unsetting a dotted key on exit would leave the table for later tests.
+    pricing = {
+        **dict(storefront_config.settings.get("pricing") or {}),
+        "settlements": [],
+        "defaults": defaults,
+    }
+
+    with (
+        replaced_setting("pricing", pricing),
+        replaced_setting("settlement", _ALKAHEST_DISABLED),
+    ):
+        report = await _cycle(capacity_world)
+        after = await _listing(capacity_world, listing_id)
+        derivation = await _derivation(capacity_world)
+
+    assert set(await _listings(capacity_world)) == {listing_id}
+    assert (after["status"], after.get("closed_by")) == ("open", None)
+    assert _stored_terms(after) == _stored_terms(before)
+    assert len(capacity_world.registries.sent) == sent
+    assert _closes(report) == {} and "publish" not in report["counts"]
+    assert derivation["holds"] == []
+    (refusal,) = derivation["refusals"]
+    assert (refusal["reason"], refusal["pool_id"]) == ("payload_unbuildable", "pool-a")
+
+
+_SITE_CONTACT = {SITE: {"email": "sales@seller.invalid"}}
+
+
+async def _unbacked_contact_listing(world) -> str:
+    world.pools.append(pool("broker-a", backing="unbacked", gpu_count=1))
+    await offer_introduction(world, SITE, "broker-a")
+    await _cycle(world)
+    (listing_id,) = await _listings(world)
+    return listing_id
+
+
+async def _override_clauses(world, *clauses: dict) -> None:
+    await PoolOverrideClient(world.client).put_pool_override(
+        {
+            "site_id": SITE,
+            "pool_id": "broker-a",
+            "offering_mode": "vm",
+            "settlements": list(clauses),
+        }
+    )
+
+
+async def test_a_disabled_mechanism_an_unbacked_listing_cannot_publish_is_not_classified(
+    tmp_path,
+):
+    """Admissibility comes before classification: an unbacked listing whose
+    override names only Alkahest, which unbacked VM supply cannot publish,
+    closes with no mechanism named once Alkahest is disabled. The disabled
+    mechanism is outside what the listing could publish, so it is not reported
+    as ruled out."""
+    async with publication_app(
+        tmp_path, mechanism_fulfillment=CONTACT_PUBLISHABLE, contacts=_SITE_CONTACT
+    ) as world:
+        listing_id = await _unbacked_contact_listing(world)
+        await _override_clauses(world, settlement_clause())
+        alkahest_off = {
+            **contact_settlement(_SITE_CONTACT),
+            "priority": [CONTACT_MECHANISM],
+            "alkahest": {"enabled": False},
+        }
+        with (
+            replaced_setting("pricing.settlements", []),
+            replaced_setting("settlement", alkahest_off),
+        ):
+            report = await _cycle(world)
+            derivation = await _derivation(world)
+
+    assert _closes(report) == {listing_id: "no_settlement_option"}
+    (refusal,) = derivation["refusals"]
+    assert (refusal["reason"], refusal["mechanisms"]) == ("no_settlement_option", [])
+
+
+async def test_only_the_admissible_mechanisms_of_a_mixed_list_are_classified(tmp_path):
+    """An unbacked listing whose override names Alkahest, unreached, and
+    contact exchange, disabled, closes naming contact exchange alone: the
+    disabled mechanism it could publish is ruled out, and Alkahest, which it
+    could never publish, is neither ruled out nor unknown, so its outage holds
+    nothing."""
+    async with publication_app(
+        tmp_path, mechanism_fulfillment=CONTACT_PUBLISHABLE, contacts=_SITE_CONTACT
+    ) as world:
+        listing_id = await _unbacked_contact_listing(world)
+        await _override_clauses(world, settlement_clause(), contact_clause())
+        settlement = contact_settlement(_SITE_CONTACT)
+        contact_off = {
+            **settlement,
+            "priority": ["alkahest.v1"],
+            "contact": {**settlement["contact"], "enabled": False},
+        }
+        world.composition.alkahest_blocker = _UNREACHED
+        with replaced_setting("settlement", contact_off):
+            report = await _cycle(world)
+            derivation = await _derivation(world)
+
+    assert _closes(report) == {listing_id: "no_settlement_option"}
+    assert derivation["holds"] == []
+    (refusal,) = derivation["refusals"]
+    assert (refusal["reason"], refusal["mechanisms"]) == (
+        "no_settlement_option",
+        [CONTACT_MECHANISM],
+    )

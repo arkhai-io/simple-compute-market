@@ -11,13 +11,48 @@ service.
 
 A view is attached where the wire carries it: a resource view under a projected
 resource's ``publication_views``, a pool view under a pool's ``pool_views``.
+
+A resource view is built with its pool's context, since what a view may carry
+can depend on the pool's declarations -- its backing among them. A projection
+never raises on a declaration's content: declarations reach the site from any
+client, and one that a view builder could not handle would otherwise fail the
+site's whole projection. It returns instead why it could not build a view,
+which the projected resource carries as ``publication_view_problems``.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol
+
+from market_resource_pools_contracts.hints import PoolDeclarations
+
+
+@dataclass(frozen=True)
+class InventoryPoolContext:
+    """The pool a capacity declaration belongs to, as a resource view sees it.
+
+    ``declarations`` are the pool's resolved advertisement and backing
+    declarations; the service that builds the context resolves them and
+    interprets none of them.
+    """
+
+    pool_id: str
+    provider: str
+    declarations: PoolDeclarations
+
+
+@dataclass(frozen=True)
+class ResourceViews:
+    """What one projection built from one declaration.
+
+    ``views`` maps each view built to its content; ``problems`` maps each view
+    it declares but could not build to why, one message per reason.
+    """
+
+    views: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    problems: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 class InventoryViewProjection(Protocol):
@@ -35,9 +70,11 @@ class InventoryViewProjection(Protocol):
     consumed_attributes: frozenset[str]
 
     def resource_views(
-        self, declaration: Mapping[str, Any], *, pool_id: str
-    ) -> Mapping[str, Mapping[str, Any]]:
-        """Views of one capacity declaration, which belongs to ``pool_id``."""
+        self, declaration: Mapping[str, Any], *, pool: InventoryPoolContext
+    ) -> ResourceViews:
+        """Views of one capacity declaration in ``pool``, and the problems that
+        kept any declared view from being built. Never raises on the
+        declaration's content."""
 
     def pool_views(
         self, db: Any, *, pool_id: str, provider: str
@@ -56,14 +93,29 @@ class InventoryViews:
         return frozenset().union(*(p.consumed_attributes for p in self.projections))
 
     def resource_views(
-        self, declaration: Mapping[str, Any], *, pool_id: str
-    ) -> dict[str, dict[str, Any]]:
+        self, declaration: Mapping[str, Any], *, pool: InventoryPoolContext
+    ) -> ResourceViews:
         views: dict[str, dict[str, Any]] = {}
+        problems: dict[str, tuple[str, ...]] = {}
         for projection in self.projections:
-            produced = projection.resource_views(declaration, pool_id=pool_id)
-            _check_declared(projection, produced, projection.resource_view_ids)
-            views.update({view_id: dict(view) for view_id, view in produced.items()})
-        return views
+            produced = projection.resource_views(declaration, pool=pool)
+            _check_declared(projection, produced.views, projection.resource_view_ids)
+            _check_declared(projection, produced.problems, projection.resource_view_ids)
+            both = sorted(set(produced.views) & set(produced.problems))
+            if both:
+                # A view is either built or not; reporting both leaves a reader
+                # no way to tell which to believe.
+                raise ValueError(
+                    f"inventory projection {type(projection).__name__} produced "
+                    f"view(s) and problems for the same view: {', '.join(both)}"
+                )
+            views.update(
+                {view_id: dict(view) for view_id, view in produced.views.items()}
+            )
+            problems.update(
+                {view_id: tuple(found) for view_id, found in produced.problems.items()}
+            )
+        return ResourceViews(views=views, problems=problems)
 
     def pool_views(
         self, db: Any, *, pool_id: str, provider: str
@@ -122,7 +174,9 @@ def compose_inventory_views(
 
 
 __all__ = [
+    "InventoryPoolContext",
     "InventoryViewProjection",
     "InventoryViews",
+    "ResourceViews",
     "compose_inventory_views",
 ]

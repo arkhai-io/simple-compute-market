@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from core_buyer.registry_config import RegistryAuthority
+from core_buyer.run_log import read_run, runs_dir
 from market_config.config_loader import ChainConfig
 from market_core.schemas import RateValue, derive_settlement_option_id
 from typer.testing import CliRunner
@@ -99,6 +100,30 @@ def test_selected_stage_controls_fresh_prices_and_proposal(negotiation, monkeypa
     assert negotiation["settlement_selection"].mechanism == mechanism
     if mechanism == "arkhai.payments.v1":
         assert negotiation["settlement_selection"].params == {"payer_account": "11111111-1111-4111-8111-111111111111"}
+
+
+_DEMANDS = [{
+    "chain_name": "anvil", "arbiter": "0x" + "cc" * 20,
+    "demand_data": {"recipient": "0x" + "dd" * 20},
+}]
+
+
+@pytest.mark.parametrize(
+    "mechanism,recorded",
+    [("alkahest.v1", {"release_conditions": _DEMANDS}), ("arkhai.payments.v1", {})],
+)
+def test_the_selected_stage_records_its_listing_at_start_and_end(
+    negotiation, monkeypatch, mechanism, recorded
+):
+    listing = _configure(monkeypatch, mechanism)
+    listing["demands"] = _DEMANDS
+    result = _run("--initial-price", "2", "--max-price", "3")
+    assert result.exit_code == 4, (result.output, result.exception)
+
+    (path,) = runs_dir().glob("*.jsonl")
+    events = {event["event"]: event for event in read_run(path.stem)}
+    assert events["run_started"]["listing_record"] == recorded
+    assert events["run_ended"]["listing_record"] == recorded
 
 
 def test_alkahest_wallet_guard_stops_before_negotiation(negotiation, monkeypatch):

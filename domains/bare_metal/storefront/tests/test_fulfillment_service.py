@@ -61,6 +61,7 @@ class FakeDb:
             **LISTING_HARDWARE,
             host_id="machine-a",
             physical_host_id="host-a",
+            access_methods=["ssh"],
         )
 
     async def load_thread_binding(self, *, negotiation_id):

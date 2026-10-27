@@ -22,6 +22,7 @@ from apicredits_storefront.listing_publication import (
 )
 from apicredits_storefront.middleware.admin_auth import require_admin_principal
 from apicredits_storefront.middleware.seller_auth import make_seller_auth_dep
+from apicredits_storefront.services.listing_service import SettlementMechanismUnreachable
 from core_storefront.models.listing_models import (
     CloseListingResponse,
     ListingListResponse,
@@ -153,6 +154,10 @@ class ListingsController:
                 base_url=body.base_url,
                 paused=body.paused,
             )
+        except SettlementMechanismUnreachable as exc:
+            # Retryable: the resource, its pool, and the configuration were found
+            # sound, and a mechanism the request uses has not been reached yet.
+            raise HTTPException(status_code=503, detail=str(exc))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         except Exception as exc:

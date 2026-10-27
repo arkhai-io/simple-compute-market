@@ -90,7 +90,7 @@ def test_clause_only_listing_request_is_a_valid_publication_input() -> None:
         settlement_composition_provider=lambda: object(),
     )
 
-    _offer, accepted, options, _demands = service._parse_listing_resource_and_escrows(request)
+    _offer, accepted, options = service._parse_listing_resource_and_escrows(request)
 
     assert accepted == []
     assert options == []
@@ -135,15 +135,12 @@ async def test_clause_only_create_persists_canonical_clause_before_publication(
         alkahest_clients={},
         settlement_composition_provider=lambda: composition,
         source_backing_resolver=lambda **_source: BACKED,
+        registry_publisher=AsyncMock(return_value={"status": "published"}),
     )
     monkeypatch.setattr(
         service,
         "_compile_publication_clauses",
         lambda _request, *, composition: (clause,),
-    )
-    monkeypatch.setattr(
-        "market_storefront.services.publication_service.publish_order_to_registry",
-        AsyncMock(return_value={"status": "published"}),
     )
     request = VmCreateListingRequest(
         listing_resource={
@@ -251,7 +248,7 @@ async def test_registration_composition_receives_ordered_example_clauses() -> No
         settlements=clauses,
     )
 
-    accepted, options = await service._derive_settlement_artifacts(
+    accepted, options, readiness = await service._derive_settlement_artifacts(
         request,
         clauses=tuple(clauses),
         origin="default",
@@ -259,6 +256,7 @@ async def test_registration_composition_receives_ordered_example_clauses() -> No
 
     assert accepted == []
     assert options == [option]
+    assert readiness == ()
     composition.publication_artifacts.assert_awaited_once_with(
         {
             "accepted_escrows": [],

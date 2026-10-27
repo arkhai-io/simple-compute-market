@@ -460,6 +460,26 @@ def _add_alkahest_lease_ready_evidence(conn: sqlite3.Connection) -> None:
     )
 
 
+def _add_opening_listings(conn: sqlite3.Connection) -> None:
+    """Keep the listing record each negotiation's opening was authorized against.
+
+    The opening authorizes its escrow under that record's release conditions,
+    and the negotiation continues and is accepted against the same record, so a
+    listing refreshed in place while it runs cannot change what the buyer is
+    asked to fund. One row per negotiation, written once.
+    """
+    conn.execute(
+        """
+        CREATE TABLE bare_metal_opening_listings (
+          negotiation_id TEXT PRIMARY KEY,
+          listing_json TEXT NOT NULL CHECK (json_valid(listing_json)),
+          created_at TEXT NOT NULL
+            DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        )
+        """
+    )
+
+
 BARE_METAL_STOREFRONT_MIGRATIONS = (
     # First, so a database written under the retired listing kind is refused
     # before any other pending migration touches a renamed column. On a fresh
@@ -522,5 +542,9 @@ BARE_METAL_STOREFRONT_MIGRATIONS = (
     Migration(
         id="bare-metal-storefront-0014-refuse-reservations-without-their-peer",
         apply=_refuse_reservations_without_their_peer,
+    ),
+    Migration(
+        id="bare-metal-storefront-0015-opening-listings",
+        apply=_add_opening_listings,
     ),
 )

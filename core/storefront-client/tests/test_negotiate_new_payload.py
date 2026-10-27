@@ -156,13 +156,53 @@ def test_sync_client_rejects_legacy_or_incompatible_envelope_before_http(legacy)
         ),
         transport=transport,
     ) as client:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="^provision_terms"):
             client.negotiate_new(
                 listing_id="listing-1",
                 initial_amount=7,
                 provision_terms=legacy,
+                escrow_address="0x" + "11" * 20,
             )
     assert transport.requests == []
+
+
+@pytest.mark.parametrize(
+    "escrow_address",
+    [pytest.param("", id="empty"), pytest.param(None, id="omitted")],
+)
+def test_an_escrow_opening_naming_no_escrow_contract_is_refused_before_http(escrow_address):
+    """A storefront refuses an escrow naming no contract, so the client never
+    fills one in; a caller with no escrow opens selection-only."""
+    transport = _CapturingSyncTransport()
+    kwargs = {**_negotiate_kwargs(_ENVELOPE)}
+    kwargs.pop("escrow_address")
+    if escrow_address is not None:
+        kwargs["escrow_address"] = escrow_address
+    with SyncStorefrontClient(
+        "http://test", signer=_SIGNER, caller_role="buyer",
+        expected_publishers=TrustedIdentitySet(identities=(_PUBLISHER.identity,)),
+        transport=transport,
+    ) as client:
+        with pytest.raises(ValueError, match="escrow_address"):
+            client.negotiate_new(**kwargs)
+
+    assert transport.requests == []
+
+
+def test_an_escrow_opening_names_no_token_it_was_not_given():
+    transport = _CapturingSyncTransport()
+    kwargs = {**_negotiate_kwargs(_ENVELOPE)}
+    kwargs.pop("literal_fields")
+    with SyncStorefrontClient(
+        "http://test", signer=_SIGNER, caller_role="buyer",
+        expected_publishers=TrustedIdentitySet(identities=(_PUBLISHER.identity,)),
+        transport=transport,
+    ) as client:
+        client.negotiate_new(**kwargs)
+
+    body = json.loads(transport.requests[0].content)
+    assert body["proposal"]["escrow_address"] == "0x" + "11" * 20
+    assert body["proposal"]["literal_fields"] == {}
 
 
 _SELECTION = {"mechanism": "example.rated.v1", "option_id": "a" * 64, "expiration_unix": 2_000}
@@ -250,7 +290,13 @@ def test_an_escrow_opening_with_a_selection_is_unchanged():
         transport=transport,
     ) as client:
         client.negotiate_new(
-            **_selection_kwargs(_ENVELOPE, selection_only=False, chain_name="", literal_fields={})
+            **_selection_kwargs(
+                _ENVELOPE,
+                selection_only=False,
+                chain_name="",
+                escrow_address="0x" + "11" * 20,
+                literal_fields={},
+            )
         )
 
     body = json.loads(transport.requests[0].content)

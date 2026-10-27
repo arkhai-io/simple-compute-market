@@ -162,6 +162,20 @@ def test_done_without_edits_leaves_a_clean_worktree(repo: Path) -> None:
     assert _status(repo) == set()
 
 
+def test_done_leaves_no_phantom_edit_for_an_empty_file_the_round_added(repo: Path) -> None:
+    """An intent-to-add entry for an empty file records the empty blob, which is
+    also what the round's commit records, so a reset alone keeps its flag and
+    the unchanged file reads as an edit."""
+    base = _git(repo, "rev-parse", "HEAD")
+    head = _write(repo, {"tests/integration/__init__.py": ""})
+    _start(repo, base)
+
+    rounds.done(repo)
+
+    assert _git(repo, "rev-parse", "HEAD") == head
+    assert _status(repo) == set()
+
+
 def test_the_base_is_the_latest_triaged_validation(repo: Path) -> None:
     first = _git(repo, "rev-parse", "HEAD")
     second = _write(repo, {"src/kept.py": "2\n"})

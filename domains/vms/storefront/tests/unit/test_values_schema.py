@@ -280,6 +280,21 @@ def test_a_refused_key_stays_refused_as_null(definition) -> None:
         assert not _refusals(definition, accepted), accepted
 
 
+def test_the_removed_provisioning_preflight_settings_are_refused_in_any_spelling(definition) -> None:
+    """The storefront starts without waiting for its provisioning service, so the
+    chart refuses the settings that would bound a wait; the section's other keys
+    pass."""
+    for refused in (
+        {"provisioning": {"fail_on_unreachable": False}},
+        {"PROVISIONING": {"Fail_On_Unreachable": True}},
+        {"provisioning": {"preflight_timeout": 30}},
+        {"Provisioning": {"PREFLIGHT_TIMEOUT": 30}},
+        {"provisioning": {"preflight_timeout": None}},
+    ):
+        assert _refusals(definition, refused), refused
+    assert not _refusals(definition, {"provisioning": {"service_url": "http://x", "timeout": 60}})
+
+
 def test_an_instance_of_an_unshipped_sink_stays_open(definition) -> None:
     (choices,) = _delivery(definition)["additionalProperties"]["dependencies"].values()
     unshipped = choices["anyOf"][-1]

@@ -16,7 +16,7 @@ availability.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sized
 from typing import Literal, TypeVar
 
 from .vocabulary import (
@@ -54,6 +54,33 @@ class CapacityNotAdmittedError(RuntimeError):
     A conflict with the listing's backing, distinct from an identity fault such
     as an unknown site or a changed binding.
     """
+
+
+class DeliveryTermsError(ValueError):
+    """A listing or view carries delivery terms its backing does not allow.
+
+    A :class:`ValueError`, so a model validator applying
+    :meth:`CapacityBacking.delivery_term_constraints` reports it as a
+    validation error. ``terms`` names every offending term.
+    """
+
+    def __init__(self, message: str, terms: tuple[str, ...]) -> None:
+        self.terms = terms
+        super().__init__(message)
+
+
+def _delivery_term_present(value: object) -> bool:
+    """Whether a delivery term's value commits to something.
+
+    Neither absent nor ``None``; a string or collection only when non-empty. A
+    boolean is present as either value, since a backed host reported
+    unavailable is a stated term, not a missing one.
+    """
+    if value is None:
+        return False
+    if isinstance(value, Sized):
+        return len(value) > 0
+    return True
 
 
 class CapacityBacking:
@@ -191,6 +218,45 @@ class CapacityBacking:
                 dropped.append(name)
         return tuple(kept), tuple(dropped)
 
+    def carry_delivery_terms(self, terms: Mapping[str, _T]) -> dict[str, _T]:
+        """The delivery terms a view or payload built for this supply carries.
+
+        Delivery terms are the fields a domain names as committing the
+        marketplace to delivering something, such as a host or its access
+        methods. Backed supply carries them as given; unbacked supply carries
+        none, whatever its declaration names, because nothing would stand
+        behind them.
+        """
+        if not self._admitted:
+            return {}
+        return dict(terms)
+
+    def delivery_term_constraints(self, terms: Mapping[str, object]) -> None:
+        """Refuse delivery terms this supply's listing or view may not carry.
+
+        ``terms`` maps every delivery term the caller's domain names to its
+        value, ``None`` for an absent one. Backed supply requires each present;
+        unbacked supply requires each absent. A term is present when it is not
+        ``None``, and a string or collection only when non-empty; a boolean is
+        present as either value. The refusal names every offending term.
+        """
+        # A term offends when its presence differs from what this backing owes.
+        offending = tuple(
+            name
+            for name, value in terms.items()
+            if _delivery_term_present(value) is not self._admitted
+        )
+        if not offending:
+            return
+        if self._admitted:
+            problem = f"missing or empty delivery terms: {', '.join(offending)}"
+        else:
+            problem = f"delivery terms carried: {', '.join(offending)}"
+        raise DeliveryTermsError(
+            f"capacity_backing {self.label!r} listing or view: {problem}",
+            offending,
+        )
+
 
 BACKED = CapacityBacking("backed", admitted=True)
 UNBACKED = CapacityBacking("unbacked", admitted=False)
@@ -249,6 +315,7 @@ __all__ = [
     "CapacityBacking",
     "CapacityBackingLabel",
     "CapacityNotAdmittedError",
+    "DeliveryTermsError",
     "UnknownCapacityBackingError",
     "admitted_backing",
     "capacity_backing",

@@ -29,6 +29,7 @@ from core_storefront.domain_registry import (
     StorefrontDomainRegistryError,
 )
 from core_storefront.stage_log import stage_event
+from market_alkahest import ALKAHEST_CHAIN_PROBE_LOOP, ALKAHEST_CHAIN_PROBE_ROUTE
 from market_capacity_publication import (
     CapacityBindingError,
     CapacityConfigurationError,
@@ -42,6 +43,7 @@ from market_storefront_kit import (
 )
 
 import apicredits_storefront.container as _container
+from apicredits_storefront.listing_seed import LISTING_SEED, LISTING_SEED_ROUTE
 from apicredits_storefront.services.capacity_client import (
     build_capacity_runtime,
     capacity_events_poller_loop,
@@ -173,6 +175,38 @@ async def payment_reconciliation_step() -> Mapping[str, Any]:
     return {"loop": PAYMENT_RECONCILIATION, "attempted": done.attempted, "failed": done.failed}
 
 
+async def alkahest_chain_probe_step() -> Mapping[str, Any]:
+    """Probe each configured chain."""
+    probe = _container.resolved_alkahest_chain_probe
+    if probe is None:
+        raise LifecycleRouteError(503, "Alkahest chain probe is not composed")
+    return {"loop": ALKAHEST_CHAIN_PROBE_LOOP, **(await probe.step())}
+
+
+async def listing_seed_step() -> Mapping[str, Any]:
+    """One attempt at the configured seed listing, until it is done or given up."""
+    seed = _container.resolved_listing_seed
+    if seed is None:
+        raise LifecycleRouteError(503, "no seed listing is configured")
+    return await seed.step()
+
+
+#: How often the seed is retried while it waits. Short, so the seed publishes
+#: moments after the chain probe's first cycle reaches its chain rather than a
+#: whole probe interval later; a cycle once the seed is done or given up does
+#: nothing.
+LISTING_SEED_INTERVAL_SECONDS = 2.0
+
+
+def _listing_seed_interval() -> float:
+    """The seed's retry interval, no longer than the chain probe's, so a seed
+    waiting on a chain retries after every probe cycle."""
+    probe = _container.resolved_alkahest_chain_probe
+    if probe is None:
+        return LISTING_SEED_INTERVAL_SECONDS
+    return min(LISTING_SEED_INTERVAL_SECONDS, probe.interval_seconds)
+
+
 def _capacity_runtime() -> Any:
     client = _sqlite_client()
     try:
@@ -225,6 +259,16 @@ def register_api_credit_lifecycle_steps(loops: StorefrontLoopController) -> None
         step=capacity_events_step,
         preview=capacity_events_preview,
     )
+    # Registered with the loop it steps, which runs only when Alkahest is composed.
+    if _container.resolved_alkahest_chain_probe is not None:
+        loops.register_step(
+            ALKAHEST_CHAIN_PROBE_LOOP,
+            route=ALKAHEST_CHAIN_PROBE_ROUTE,
+            step=alkahest_chain_probe_step,
+        )
+    # Registered with the loop it steps, which runs only when a seed is configured.
+    if _container.resolved_listing_seed is not None:
+        loops.register_step(LISTING_SEED, route=LISTING_SEED_ROUTE, step=listing_seed_step)
 
 
 def _capacity_site_names(runtime: Any | None) -> tuple[str, ...]:
@@ -255,10 +299,14 @@ def register_api_credit_loops(
     runs, so startup registers what the running configuration states. Each
     sweep changes durable deals, so its first cycle is due one interval after
     its timer starts, giving an operator who holds the loops as the storefront
-    starts a whole interval to do so. ``capacity_runtime`` is the runtime the
-    pollers drain, the configured one unless given. ``start_loops`` on the
-    controller then starts every one. Returns each registered loop's interval,
-    by loop name.
+    starts a whole interval to do so. While Alkahest is composed the chain
+    probe is registered too, its first cycle as its timer starts, since
+    readiness reads every chain unprobed until it has run. While a seed is
+    configured, the listing seed is registered too, its first attempt as its
+    timer starts and retried every couple of seconds while it waits.
+    ``capacity_runtime`` is the runtime the pollers drain, the configured one
+    unless given. ``start_loops`` on the controller then starts every one.
+    Returns each registered loop's interval, by loop name.
     """
     intervals = {
         NEGOTIATION_WATCHDOG: negotiation_watchdog_policy().interval_seconds,
@@ -278,6 +326,23 @@ def register_api_credit_loops(
             step=step,
             interval_seconds=intervals[name],
             initial_delay_seconds=intervals[name],
+        )
+    probe = _container.resolved_alkahest_chain_probe
+    if probe is not None:
+        intervals[ALKAHEST_CHAIN_PROBE_LOOP] = probe.interval_seconds
+        loops.register_loop(
+            ALKAHEST_CHAIN_PROBE_LOOP,
+            route=ALKAHEST_CHAIN_PROBE_ROUTE,
+            step=alkahest_chain_probe_step,
+            interval_seconds=probe.interval_seconds,
+        )
+    if _container.resolved_listing_seed is not None:
+        intervals[LISTING_SEED] = _listing_seed_interval()
+        loops.register_loop(
+            LISTING_SEED,
+            route=LISTING_SEED_ROUTE,
+            step=listing_seed_step,
+            interval_seconds=intervals[LISTING_SEED],
         )
     loops.register_fan_out(
         CAPACITY_EVENTS_POLLER,

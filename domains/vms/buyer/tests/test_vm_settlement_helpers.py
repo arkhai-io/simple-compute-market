@@ -135,7 +135,7 @@ def test_alkahest_resume_settles_without_restating_negotiated_terms(monkeypatch)
         token_contract=_TOKEN,
         token_decimals=18,
         accepted_escrow_proposal={"chain_name": "anvil"},
-        accepted_escrow_terms=None,
+        listing_record=None,
         escrow_uid="0x" + "55" * 32,
         seller_url="http://seller",
         negotiation_id="neg-accepted-ssh",

@@ -16,16 +16,15 @@ from arkhai_vms import VmProvisionTerms, normalize_vm_provision_terms
 from core_storefront.domain_lifecycle import (
     StorefrontFulfillmentContext,
     StorefrontFulfillmentPorts,
-    StorefrontSettlementBuildContext,
     StorefrontSettlementFulfillmentInput,
-    build_domain_settlement_artifacts,
     fulfill_domain,
 )
 from core_storefront.stage_log import stage_event
 from market_alkahest import (
     ALKAHEST_CONFIG_KEY,
     ALKAHEST_MECHANISM_ID,
-    require_deliverable_release_model,
+    AlkahestChainProbe,
+    configured_release_model,
 )
 from market_arkhai_payments import (
     PaymentSellerStage,
@@ -88,7 +87,8 @@ class VmSettlementComposition:
     evidence_clients: Mapping[str, Any]
     settlement_config: SettlementConfig
     configuration_registry: SettlementConfigurationRegistry
-    mechanism_resources: Mapping[str, Any]
+    # Carries the seller wallet's key, so it is never part of the repr.
+    mechanism_resources: Mapping[str, Any] = field(repr=False)
     arkhai_payments_stage: PaymentSellerStage | None = None
     payments_coordinator: VmPaymentsCoordinator | None = None
 
@@ -232,23 +232,9 @@ class VmSettlementComposition:
             settlement_options.extend(
                 dict(item) for item in envelope.get("settlement_options", ())
             )
-        if not accepted_escrows and not settlement_options:
-            raise RuntimeError("no enabled settlement mechanism is ready")
+        # Nothing published is returned as such, with the readiness that
+        # explains it: whether that refuses a listing, and how, is the caller's.
         return accepted_escrows, settlement_options, readiness
-
-
-def _settlement_plan_obligations(
-    *,
-    domain: MarketDomainContract,
-    context: StorefrontSettlementBuildContext,
-    stage: Any,
-    listing: Mapping[str, Any],
-) -> tuple[dict[str, Any], ...]:
-    artifacts = build_domain_settlement_artifacts(
-        domain, context, build_plan=partial(stage.build_plan, listing=listing)
-    )
-    obligations = artifacts.settlement_plan["obligations"]
-    return tuple(dict(item) for item in obligations)
 
 
 async def prepare_vm_settlement(
@@ -314,44 +300,31 @@ async def prepare_vm_settlement(
         raise ValueError(
             f"chain {accepted_chain!r} is not configured on this storefront"
         )
+    # The deal settles under the plan committed when it was accepted, which
+    # is what the buyer funded; a listing changed since cannot change it.
+    plan = thread.get("settlement_plan")
+    raw_obligations = plan.get("obligations") if isinstance(plan, Mapping) else None
+    if not isinstance(raw_obligations, list) or not raw_obligations:
+        raise ValueError(
+            f"Negotiation {negotiation_id} has no committed settlement plan"
+        )
+    obligations = tuple(dict(item) for item in raw_obligations)
     # Escrow verification reads the attestation off the chain through the
     # alkahest client's escrow codecs, so it takes the chain client the
     # mechanism adapter resolves rather than the adapter itself — the same
     # object the admin dry-run and the resume sweep pass.
-    obligation_index = await escrow_verification.verify_escrow_for_settlement(
+    obligation_index = await escrow_verification.verify_escrow_against_plan(
         escrow_uid=escrow_uid,
-        seller_wallet=storefront_config.get_evm_wallet_address(),
-        agreed_price=int(thread["agreed_price"]),
-        agreed_duration_seconds=provision.duration_seconds,
-        listing=order,
+        settlement_plan=plan,
         alkahest_client=mechanism_client.chain_client(accepted_chain),
         chain_name=accepted_chain,
+        escrow_address=proposal.escrow_address,
         alkahest_address_config_path=chain.alkahest_address_config_path,
-        escrow_proposal=proposal,
     )
     if not isinstance(obligation_index, int):
         raise ValueError("escrow verification did not identify an exact obligation")
 
     buyer_principal = Identity.model_validate(thread.get("buyer_principal"))
-    obligations = _settlement_plan_obligations(
-        domain=domain, stage=stage, listing=dict(order),
-        context=StorefrontSettlementBuildContext(
-            binding=thread_binding.binding,
-            negotiation_id=negotiation_id,
-            listing_id=str(listing_id),
-            site_id=thread_binding.site_id,
-            proposal=proposal,
-            agreed_amount=int(thread["agreed_price"]),
-            duration_seconds=provision.duration_seconds,
-            buyer_principal=buyer_principal,
-            seller_principal=local_principal,
-            seller_wallet_address=storefront_config.get_evm_wallet_address(),
-            chain_config_paths={
-                name: config.alkahest_address_config_path
-                for name, config in storefront_config.CHAINS.items()
-            },
-        ),
-    )
     if obligation_index < 0 or obligation_index >= len(obligations):
         raise ValueError(
             f"verified obligation index {obligation_index} is outside the accepted plan"
@@ -833,25 +806,27 @@ async def preflight_settlement_mechanisms(
     return readiness
 
 
-def require_vm_release_model(
-    domain: MarketDomainContract, settlement_config: SettlementConfig | None = None
+def require_coherent_release_model(
+    settlement_config: SettlementConfig | None = None,
 ) -> None:
-    """Refuse a configured Alkahest release model ``domain`` cannot deliver.
+    """Refuse a configured Alkahest section that selects contradictory models.
 
-    A configured section owns the deals accepted under it, enabled or not, so
-    its release model must be one the domain's Alkahest entry declares. With no
+    A section stating both the oracle-gated and the interruptible model names
+    two arbiters for one escrow, which is incoherent configuration rather than
+    an unusable mechanism, so it stops startup, enabled or not. A coherent model
+    the domain cannot deliver is a readiness blocker instead. With no
     ``settlement_config``, the storefront's own configuration is resolved.
     """
     if settlement_config is None:
         settlement_config = build_storefront_settlement_registry().resolve(
             storefront_config.settlement_config_mapping(), role="seller"
         )
-    alkahest_section = settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY)
-    alkahest_stage = domain.settlement.seller_stages.get(ALKAHEST_MECHANISM_ID)
-    if alkahest_section is not None and alkahest_stage is not None:
-        require_deliverable_release_model(
-            alkahest_section, alkahest_stage.release_models
-        )
+    configured_release_model(settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY))
+
+
+def _alkahest_release_models(domain: MarketDomainContract) -> frozenset[str]:
+    stage = domain.settlement.seller_stages.get(ALKAHEST_MECHANISM_ID)
+    return frozenset(getattr(stage, "release_models", ()) or ())
 
 
 def build_vm_settlement_composition(
@@ -860,8 +835,15 @@ def build_vm_settlement_composition(
     sqlite_client: Any,
     alkahest_clients: Mapping[str, Any],
     marketplace_signer: Signer,
+    chain_probe: AlkahestChainProbe | None = None,
 ) -> VmSettlementComposition:
-    """Construct the VM runtime from explicit settlement mechanisms."""
+    """Construct the VM runtime from explicit settlement mechanisms.
+
+    ``alkahest_clients`` is the live map the chain probe updates in place, so
+    every consumer here holds it rather than a copy and reaches a client the
+    probe builds; ``chain_probe`` is the probe whose results Alkahest
+    readiness reads.
+    """
     registry_owner = getattr(sqlite_client, "domain_registry", None)
     if registry_owner is None:
         raise RuntimeError(
@@ -878,18 +860,25 @@ def build_vm_settlement_composition(
         storefront_config.settlement_config_mapping(),
         role="seller",
     )
-    require_vm_release_model(domain, settlement_config)
+    require_coherent_release_model(settlement_config)
     alkahest_section = settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY)
     mechanism_resources: dict[str, Any] = {
         "marketplace_signer": marketplace_signer,
-        "clients": dict(alkahest_clients),
+        "clients": alkahest_clients,
         "get_client": lambda chain: alkahest_clients.get(chain or ""),
         "chains": storefront_config.CHAINS,
         "default_chain": getattr(storefront_config.settings, "chain_name", None),
+        # Readiness reports a configured model VM's Alkahest entry cannot
+        # deliver, and a missing key or chain, since VM signs its settlement
+        # transactions with the seller wallet.
+        "deliverable_release_models": _alkahest_release_models(domain),
+        "signs_transactions": True,
     }
-    if alkahest_section is not None and (
-        bool(getattr(alkahest_section, "enabled", False)) or alkahest_clients
-    ):
+    if chain_probe is not None:
+        mechanism_resources["chain_probe"] = chain_probe
+    if alkahest_section is not None:
+        # Whenever a section is configured, enabled or not: readiness reads the
+        # wallet, and a disabled section still services its accepted deals.
         mechanism_resources["wallet"] = {
             "address": storefront_config.get_evm_wallet_address(),
             "private_key": storefront_config.get_evm_wallet_private_key(),
@@ -919,7 +908,7 @@ def build_vm_settlement_composition(
                 "[SETTLEMENT] disabled mechanism has no recoverable client: %s",
                 registration.mechanism_id,
             )
-    evidence_clients = dict(alkahest_clients)
+    evidence_clients = alkahest_clients
     # A fulfillment attempt provisions a VM, and the storefront gives that its
     # own bound. The operation lease has to outlive it, or the deal is handed to
     # a second worker while the first is still provisioning.

@@ -14,9 +14,10 @@ sides install it, so the pair lives here:
   resource a site serves it in, with the declared capacity and attributes a
   listing's shape is read from.
 
-Only what a consumer depends on is checked: the Physical Resource and host it
-names, the pool it repeats, whether the whole machine is available, and the
-public fields a listing is built from.
+Only what a consumer depends on is checked: the Physical Resource it names, the
+pool it repeats, the public fields a listing is built from, and the delivery
+terms -- host, physical host, access methods, availability -- its pool's
+backing allows, through the same carrier a storefront reads the view with.
 """
 
 from __future__ import annotations
@@ -24,12 +25,18 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from arkhai_bare_metal.projections import BareMetalResourceProjection
+from market_resource_pools_contracts.backing import BACKED, CapacityBacking
+
+from arkhai_bare_metal.projections import (
+    BareMetalResourceProjection,
+    TrustedBareMetalResource,
+)
 
 
 def build_bare_metal_publication_view(
     physical_resource_id: str = "resource-1",
     *,
+    backing: CapacityBacking = BACKED,
     pool_id: str | None = "pool-1",
     host_id: str = "machine-1",
     physical_host_id: str = "physical-host-1",
@@ -38,19 +45,26 @@ def build_bare_metal_publication_view(
     capacity: Mapping[str, Any] | None = None,
     capabilities: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """One canonical view, as a site serializes it.
+    """One canonical view, as a site serializes it for a pool of ``backing``.
 
-    The view repeats the declaration's capacity. It carries no publication-only
-    ``capabilities`` unless a test supplies some to prove they are ignored.
+    Its delivery terms pass through ``backing`` as the site's view builder
+    passes them, so a backed view carries them as given and an unbacked view
+    carries none. The view repeats the declaration's capacity. It carries no
+    publication-only ``capabilities`` unless a test supplies some to prove they
+    are ignored.
     """
     return {
         "physical_resource_id": physical_resource_id,
         "pool_id": pool_id,
-        "physical_host_id": physical_host_id,
-        "host_id": host_id,
-        "available": available,
+        **backing.carry_delivery_terms(
+            {
+                "physical_host_id": physical_host_id,
+                "host_id": host_id,
+                "available": available,
+                "access_methods": list(access_methods),
+            }
+        ),
         "allocation_mode": "exclusive",
-        "access_methods": list(access_methods),
         "capacity": dict(capacity if capacity is not None else DEFAULT_CAPACITY),
         "capabilities": dict(capabilities or {}),
     }
@@ -65,6 +79,7 @@ def build_bare_metal_projected_resource(
     physical_resource_id: str = "resource-1",
     *,
     pool_id: str = "pool-1",
+    backing: CapacityBacking = BACKED,
     enabled: bool = True,
     capacity: Mapping[str, Any] | None = None,
     attributes: Mapping[str, Any] | None = None,
@@ -74,6 +89,7 @@ def build_bare_metal_projected_resource(
 
     ``attributes`` defaults to the declaration a whole-host seller registers:
     the GPU model admission matches, and the accounting facts the site reads.
+    The default view is the one a site builds in a pool of ``backing``.
     """
     declared_capacity = dict(capacity if capacity is not None else DEFAULT_CAPACITY)
     declared_attributes = dict(
@@ -98,6 +114,7 @@ def build_bare_metal_projected_resource(
                 if view is not None
                 else build_bare_metal_publication_view(
                     physical_resource_id,
+                    backing=backing,
                     pool_id=pool_id,
                     available=enabled,
                     capacity=declared_capacity,
@@ -110,20 +127,27 @@ def build_bare_metal_projected_resource(
 def validate_bare_metal_publication_view(
     view: Mapping[str, Any],
     *,
+    backing: CapacityBacking,
     physical_resource_id: str | None = None,
     pool_id: str | None = None,
 ) -> None:
-    """Assert a view real code produced has the shape consumers derive from.
+    """Assert a view real code produced is one a consumer accepts in a pool of ``backing``.
 
-    When the caller names the containing resource or pool, the view must
-    repeat exactly those: a consumer refuses a site generation whose view
-    disagrees with its container.
+    The view is read through the carrier a storefront uses, so its delivery
+    terms are held to ``backing`` by the one rule both sides apply. When the
+    caller names the containing resource or pool, the view must repeat exactly
+    those: a consumer refuses a site generation whose view disagrees with its
+    container.
     """
-    BareMetalResourceProjection.model_validate(view)
-    assert isinstance(view.get("available"), bool), "view must state availability"
-    for field in ("physical_resource_id", "host_id", "physical_host_id"):
-        value = view.get(field)
-        assert isinstance(value, str) and value.strip(), f"view must name its {field}"
+    parsed = BareMetalResourceProjection.model_validate(view)
+    TrustedBareMetalResource(
+        # A view naming no pool takes its container's; with neither named,
+        # containment has nothing to check against.
+        pool_id=pool_id or parsed.pool_id or "uncontained",
+        enabled=True,
+        view=parsed,
+        capacity_backing=backing.label,
+    )
     if physical_resource_id is not None:
         assert view["physical_resource_id"] == physical_resource_id, (
             f"view names {view['physical_resource_id']!r}, "

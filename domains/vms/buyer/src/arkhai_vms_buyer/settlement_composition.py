@@ -57,6 +57,18 @@ def advertised_plan_validator(match: Mapping[str, Any]):
     return buyer_stage(selected.selection.mechanism).plan_validator(match, selected)
 
 
+def accepted_listing_record(match: Mapping[str, Any], _proposal: Any) -> dict[str, Any]:
+    """What the selected entry records about a match's listing at acceptance.
+
+    The entry is the match's selected settlement option, from which the
+    buyer's proposal was built.
+    """
+    selected = match.get("_selected_settlement")
+    if not isinstance(selected, SelectedSettlementOption):
+        return {}
+    return buyer_stage(selected.selection.mechanism).listing_record(match)
+
+
 def validate_buyer_acceptance(outcome) -> None:
     if outcome.agreement is None or outcome.agreement.settlement is None:
         raise RuntimeError("accepted work has no Agreement settlement option")

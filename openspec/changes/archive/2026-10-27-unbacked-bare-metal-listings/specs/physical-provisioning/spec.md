@@ -84,8 +84,8 @@ projected with the view whether or not it names a host.
 - **GIVEN** a capacity declaration in an unbacked pool with an enabled bare-metal
   publication and no host
 - **WHEN** the resource-pool projection is produced
-- **THEN** the view is produced carrying the resource's identity, pool, shape,
-  capabilities, and region, and no host identity, access methods, or availability
+- **THEN** the view is produced carrying the resource's identity, pool, capacity, and
+  capabilities, and no host identity, access methods, or availability
 
 #### Scenario: An unbacked declaration names a host
 

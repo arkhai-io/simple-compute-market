@@ -112,8 +112,9 @@ nothing above the compute family learns of it:
   declaration types it now imports.
 - The provisioning service, the composition root, reads the `ResourcePool` rows in its
   own resource pass, resolves each pool once through the shared resolver, and passes each
-  declaration its pool's context; it interprets none of it. One row-to-context function
-  serves both this pass and `load_capacity_pool_metadata`, so the two cannot drift.
+  declaration its pool's context; it interprets none of it. The row-to-context function
+  serves this pass alone; `load_capacity_pool_metadata` reads the provider from the same
+  column, as the Section 16 settlement below records.
 - The VM and bare-metal provisioning adapters take the new signature; the bare-metal
   adapter declares `arkhai-kit-resource-pools-contracts` wherever it imports from it.
 - `kit/site`'s `resource_pool_projection`, which rebuilds each projected resource from
@@ -121,6 +122,16 @@ nothing above the compute family learns of it:
   present, as it copies `publication_views`, and neither reads nor interprets it; the
   site-client resource-pool fixture both sides of the boundary test against carries it.
   `kit/resource-pools` and core do not change.
+
+Settled in implementation (Section 16): the row-to-context function serves the resource
+pass alone. `load_capacity_pool_metadata` projects a pool's raw tags, which readers
+resolve through the same shared resolver, and calls each pool view with the row's ID and
+provider; routing it through the context would resolve declarations the pool pass never
+reads, and a pool whose declarations do not resolve would lose its metadata. Both passes
+read the provider from the one column, so they cannot drift on it. A stored row whose
+declarations do not resolve — which no write path produces, since startup refuses it —
+gives its members no context, so they project with no views and no problems, as a
+member whose pool has no row does, and the service logs a warning.
 
 `kit/site` still calls the pool directory and the resource inventory separately, and the
 two reads need not agree by construction: a pool's `capacity_backing` and provider are
@@ -144,6 +155,13 @@ no host or no access methods, a missing or invalid `allocation_mode`, a missing
 `physical_host_id` attribute, and a private-looking capacity or capability key are all
 such cases; the existing no-host rule is one of them. The bare-metal storefront reports
 each as a `publication_view_unbuildable` entry in its site derivation (decision 10).
+
+Settled in implementation (Section 19, decided with the maintainer): such a declaration
+is unreadable, not withdrawn, so an open listing of its resource is held, neither closed
+nor refreshed, as `ARCHITECTURE.md`'s rule for holding or closing a listing requires; a
+disabled declaration or a pool that no longer admits bare metal still closes it as a
+withdrawn source. Closing it, the behaviour when the resource simply had no view, was
+rejected: it would turn every declaration fault into a delisting.
 
 Rejected: refusing a malformed attribute when the declaration is written. Its
 backing-dependent rules need a site read of pool state, which `ARCHITECTURE.md` forbids
@@ -298,6 +316,34 @@ payload failures keep their behaviour: reported, with the listing left as it is,
 defect never delists anything. API credits does not publish through the runner; what an
 unready Alkahest does to an open API-credit listing is recorded in decision 19.
 
+Settled in implementation (Section 18):
+
+- **One recording and close for both storefronts.** `kit/capacity-publication`'s
+  `RefusedCandidates` records every payload refusal under its site
+  (`record_payload_refusal`) and is each storefront's close hook, closing the open listing
+  bound under the candidate's derivation key through the storefront's own reconciliation;
+  each domain supplies only its derivation key and source and its reconciliation close.
+  Its reason codes beside `no_settlement_option` are `settlement_mechanism_unknown`, a
+  hold where the candidate's listing is open and a refusal otherwise -- a hold, beside
+  the failure, when the open-listing lookup itself fails, since an unknown mechanism
+  leaves any listing as it is and the runner does not guard its payload builder -- and
+  `payload_unbuildable`, any other payload failure, its text as the entry's error.
+  `MechanismReadiness.unknown` in `kit/settlement-runtime` is the one definition of an
+  unknown mechanism.
+- **A disabled mechanism's clause is dropped wherever it is stated.** A clause is read in
+  full apart from configuration (`parse_settlement_publication_clause`), so a malformed
+  clause stays a payload failure that leaves its listing as it is, and a stated
+  `mechanism_input` that is not a mapping is malformed rather than read as no input. A
+  readable clause naming a mechanism whose section is absent or disabled is dropped, and
+  rules that mechanism out, whether it comes from a pool's hint, an override, or the
+  storefront's own `[pricing].settlements`: in both domains a listing it alone priced
+  closes, where VM had refused its own configured clause for the whole cycle and left
+  every listing open. `storefront config migrate --scope settlement|publication`
+  validates its result through the same reading, so it accepts a configuration whose
+  clause names a disabled mechanism, as the storefront starts with one, and publication
+  drops that clause (settled in 160 F4's triage: migration answers whether the storefront
+  accepts its result, and disabling a mechanism is a deliberate operator act).
+
 Rejected: closing whenever any mechanism is ruled out by configuration, which let an
 unrelated, unusable mechanism decide whether an outage delists supply; classifying every
 configured mechanism, which let an outage on a mechanism the candidate could never use
@@ -320,7 +366,16 @@ now in a pool other than its bound one. The recheck finds the resource by its bo
 and Physical Resource, so a resource moved to another pool answers that the resource is no
 longer projected under its pool, a declared mismatch. A site whose projection the
 storefront does not hold, or holds unconfirmed, refuses openings as retryable for either
-backing. The inventory guard is unchanged.
+backing. The inventory guard's rules are unchanged but for the branch below.
+
+Settled in implementation (Section 19): the guard gains one branch, for decision 4's
+held resource. A resource the site projects, enabled in a pool admitting bare metal, with
+the problems that kept it from building a bare-metal view is refused as a declared
+mismatch, the storefront's own record of the refusal naming the site's problem: the
+declaration no longer yields the listing it published, and an opening against it is not
+retryable, while publication holds the listing so that a declaration fault never delists
+it. A disabled one, or one whose pool no longer admits bare metal, is a withdrawn source,
+as any such resource is.
 
 #### 9. A deal settled by introduction has no settlement or fulfillment, in both domains
 
@@ -367,6 +422,15 @@ The two domains' delivery route surfaces differ — VM reports delivery through 
 status, bare metal through negotiation-keyed fulfillment routes — and unifying them is
 `kit-owned-listing-and-fulfillment-lifecycles`', which keeps this rule.
 
+Settled in implementation (Section 20): bare metal's stage resolution is a module function
+the fulfillment routes call from the domain's stage table, so they resolve the stage
+without building the settlement service, which builds the fulfillment service; the
+contact stage has no `verify` or `revalidate`, and the settlement service refuses a call
+reaching an entry with none as completing outside settlement, which the routes' refusal
+never lets a contact deal do. An introduction deal records no settlement reference, so
+its settle status addressed by obligation reference answers 404 "settlement not found",
+and addressed by negotiation ID the 409; no buyer makes the first call.
+
 Rejected: patching bare metal's fulfillment routes alone; unifying the route surfaces here;
 a requirement for a storefront composed without fulfillment, which production composition
 cannot build; deciding by `fulfils_through_capacity` with the invariant that a stage not
@@ -395,11 +459,30 @@ made, each a reason code with its pool or Physical Resource and detail — is ke
   start is absent, so a site present with empty lists always means a clean cycle.
 - **Logged on change.** Each entry is logged as a warning when it first appears in a
   site's summary and at info when it clears; a standing condition is logged once, not
-  every cycle, and previews never log.
+  every cycle, and previews never log. An entry's error text is not part of what makes
+  it the same entry, so a standing site hold whose source answers differently each
+  cycle is not logged again.
+- **A site held whole keeps its last entries.** When a cycle cannot read a site at all —
+  its projection is not held, or this domain refuses the generation — the site's hold
+  names no pool, and the entries of the last derivation that did read the site stand
+  beside it, since they still describe the pools whose listings the hold keeps. They
+  clear, and are logged as clearing, only once a cycle reads the site again. Settled in
+  implementation (Section 17): letting them clear made every outage log each pool's
+  entries as cleared and raise them again on recovery.
 
 Bare metal had logged every pool condition every cycle, previews included; VM logged its
 whole report again whenever any part changed, from a module-level dictionary that also
 served status.
+
+Settled in implementation (Section 17): an entry's keys say what it names — a pool-level
+entry carries `pool_id`, a member entry `pool_id` and `physical_resource_id` in both
+domains, and a site-level hold neither, which is how the kit tells a site held whole. The
+conversion of a cycle's reports into entries is each domain's, since the categories are;
+bare metal holds a pool held whole once per reason at the pool, with its problems, as VM
+does, and still reports a machine's own declaration problems inside it. Both cycles
+record after their run stage, so run-stage refusals reach the log, and a cycle failing
+before it records leaves the previous derivation. No scenario reads
+`publication_derivation`; its shape is application-integration evidence.
 
 Rejected: bare metal copying VM's rule in its own code (two implementations of one rule);
 once per projection generation (repeats standing conditions on unrelated changes);
@@ -419,6 +502,15 @@ Negotiation and settlement for an unbacked bare-metal listing sit on the kit neg
 runtime and settlement composition `bare-metal-mock-provisioned-deal` composed for bare
 metal. Settlement, the reveal, per-origin contact resolution, seller-side delivery, and
 retention key only on the listing's origin site and need no change.
+
+Settled in 159 F1 / 160 F2's triage: buyer-side delivery did need one. Both compute
+buyers named the counterparty from a deal field that does not exist, so every delivered
+event named none, against `introduction-delivery`'s "The delivered event carries the
+introduction without interpreting it". Each buyer's `request-introduction` now records
+the accepted Agreement on its run, and delivery names the seller that Agreement names,
+through core's `accepted_seller_principal`; the listing's trusted publisher set may hold
+several identities, so no member of it stands in. The shared reveal stage asserts the
+delivered event's counterparty in both lanes.
 
 #### 13. Bare metal publishes on a loop over held projections
 
@@ -472,6 +564,21 @@ unbacked pool's listings close on the next cycle.
   VM storefront. The maintainer runs the Helm part locally when that round is validated;
   if it has not run by closeout it is recorded as unrun.
 
+Settled in implementation (Section 22, and task 22.7 on the maintainer's word): the
+bare-metal buyer's `request-introduction` and `buy` had never run against a storefront and
+failed three ways: they passed no advertised option to the negotiation, recorded the
+publisher principals as a bare list the core run-log loader refuses, and decoded none of
+the provision terms the seller echoes. Both now do all three as VM's buyer does. The
+advertised option does not decide whether the seller accepts; it tells the buyer's
+opening policy that the option bargains an amount, without which the opening carries
+none and the deal closes at the seller's price. It is no guard against a substituted
+option: an Agreement's option ID must derive from its content and equal the selection's.
+The shared stages hold every stage to the shared state's fields, a driver's
+`seed_supply` returning what the stage records, so the source check sees who produced each
+handoff. The seller-mail sink names the development overlay's Mailpit; the base
+bare-metal stack runs none, and its seller mail goes undelivered, which never fails a
+reveal.
+
 #### 15. Goal 7 closes on single-site evidence
 
 The live two-seller scenario — two seller sites behind one storefront — needs one
@@ -499,6 +606,20 @@ obligation rather than a listing, and the three domains call it; bare metal's ac
 builds its plan from the listing record the opening authorized. Planning confirms the
 smaller acceptance question.
 
+Settled in implementation (Section 7): the kit's form matches the escrow to one of the
+committed plan's Alkahest obligations on the accepted proposal's chain and escrow
+contract, and is the registration's settlement verifier. Bare metal records the
+opening's listing record and continues every round, acceptance and force-accept among
+them, against it, with the current record's status: the runtime builds acceptance from
+the record it resolved, so that record is the one continuation resolves. The dry-run
+verify request names only the negotiation, since the plan determines every term the
+request used to carry; an older caller sending the terms is refused 422. The opening's
+record is a table of its own written once per negotiation, not atomically with the
+opening's other writes: a thread with no recorded record, as one opened before the
+migration, continues against the current record. The record carries the current
+`status`, which preserves no check, since the runtime checks a listing live and unpaused
+only at the opening.
+
 Every other reader of a deal's settlement terms after acceptance reads the same plan:
 
 - VM's administrator dry-run verify checks an escrow against the committed plan of the
@@ -512,6 +633,25 @@ Every other reader of a deal's settlement terms after acceptance reads the same 
 
 With the settle paths reading the plan, nothing after acceptance re-materializes under a
 listing's `demands`, which VM and bare metal publication refresh in place.
+
+Settled in round 1's triage (85 F5, the codec): verification still finds the escrow
+contract's codec through the seller's current address book, and the guarantee is what
+verification can honour. A change to the release policy, the wallet, or the release
+condition's address-book entries changes nothing for an accepted deal; an address book
+that stops naming the escrow contract a deal funded leaves that deal unverifiable, as it
+leaves it uncollectable, since the SDK client collects through the same address
+configuration. That is a limit beside decision 19's, recorded there: the buyer's escrow
+stays reclaimable at expiry, so the exposure is the seller's own. Recording the escrow kind
+in the plan was rejected: it would carry verification one step further and stall the deal
+at collection, while adding a plan field both parties derive and compare.
+
+Settled in round 1's triage (85 F17): VM resolves a continuation against the listing as
+it now stands, and a publication cycle repricing the opening's option changes the
+option's identity. Its round hook refuses such a continuation by name,
+`pinned_option_withdrawn`, before any policy, rather than pricing it from no option.
+Continuing against the opening's listing record in VM too, as bare metal does, would give
+the compute domains one continuation semantics; no change owns it, and it is recorded as
+an unowned row in `ROADMAP.md`'s Goal 4 at closeout.
 
 Rejected: handing it to `version-accepted-artifacts`, whose subject is evolving stored
 accepted artifacts across releases rather than which reference verification reads; handing
@@ -536,15 +676,17 @@ re-derives the mandate and requires equality.
   the back-fill that synthesized it from the plan.
 - The buyer always materializes the escrow itself, through `kit/alkahest`, from its
   accepted proposal or selection and the listing's advertised release condition.
-- Where the seller sent a plan, the buyer requires its own derivation to equal the plan's
-  obligation before funding. The domain-supplied plan check `core/buyer` already declares,
-  `AdvertisedPlanValidatorFn`, runs on every branch that receives a plan and on resume
-  rather than only on the selection branch, and API credits supplies it as VM does;
-  `core/buyer` gains no import of `kit/alkahest`.
+- The buyer requires its own derivation to equal the seller's plan obligation before
+  funding, on every path that funds an escrow: `core/buyer`'s escrow settle hook runs a
+  required plan-check port over the buyer's own derivation before any escrow is created,
+  and every resume derives through `kit/alkahest`, which holds the derivation to the
+  recorded plan. A seller accepts an escrow only with its plan, so an acceptance carrying
+  none is refused before funding, `seller_plan_missing` (85 F12). `core/buyer` gains no
+  import of `kit/alkahest`.
 - The run-log records the selected listing's advertised release conditions at acceptance.
-  A resumed run derives the escrow from the Agreement's selected option and those
-  conditions, checking the recorded seller plan against them, rather than refusing or
-  funding blindly.
+  A resumed run derives the escrow from its recorded accepted proposal and those
+  conditions, at the recorded Agreement's exact amount, and holds it to the recorded
+  seller plan, rather than refusing or funding blindly.
 - A run-log that predates the recorded conditions is refused before funding, naming the
   reason: the run was accepted before release conditions were recorded, so a new run is
   needed. Resuming it as before would fund the seller's terms unchecked. Only runs
@@ -552,7 +694,31 @@ re-derives the mandate and requires equality.
   a run whose escrow exists resumes, since it derives nothing.
 
 Removing the field is benign for an older buyer, which falls back to its own
-`build_escrow_terms` derivation when the reply carries none.
+`build_escrow_terms` derivation when the reply carries none. The legacy coercions go with
+it, so a run-log whose plan is in the pre-plan flat shape no longer loads; such a run has
+no funds at stake.
+
+Settled in implementation (Section 9): the plan check runs where funds move rather than by
+widening `AdvertisedPlanValidatorFn`, which is unchanged and still checks the selection
+branch at acceptance. `core/buyer`'s escrow settle hook takes a required plan-check port,
+which each buyer fills with `kit/alkahest`'s `require_escrow_terms_fund_plan` and which runs
+over the buyer's own derivation before any escrow is created; every resume path derives
+through the kit's `derive_accepted_escrow_terms`, which holds the derivation to the recorded
+plan. API credits therefore supplies the check through its settle hook, not a plan
+validator: its buyer opens with escrow proposals, which the selection-branch validator never
+sees. The run-log carries what the selected settlement entry records about its listing as one
+opaque `listing_record`, written and read by `kit/alkahest` (`release_conditions_record`,
+`recorded_release_conditions`), so core never names a release condition. The record and a
+resume's reading of it are promoted at closeout to the `buyer-orchestration` companion
+(23.9). `market buy` writes
+it when negotiation starts and in an agreed completion; the negotiate CLIs write it at run
+start and run end, whatever the outcome; a resume reads the record of the listing it resumes.
+A resumed derivation takes the agreed amount exactly from the recorded Agreement, since the
+run-log's `agreed_amount` passes through a float, and derives from the run's recorded
+accepted proposal rather than from the Agreement's selected option: the release condition
+comes from the buyer's own record of the listing and the amount from the Agreement, while the
+escrow contract, token, and expiry are the accepted proposal's, which the buyer's round guard
+already held to its opening, and the result must still equal the seller's plan.
 
 The settlement plan stays in the reply as the seller's committed copy the buyer compares
 against, which also detects derivation skew between buyer and seller before funds move.
@@ -583,9 +749,47 @@ three domains and bare metal's chain-blind fallback, verification's default-kind
 and `_accepted_escrow_for_proposal`'s zero-address case. This closes Goal 6's unowned
 roadmap gap on how such a proposal is priced: it is refused.
 
-The rationale is the wire, not the clients: no buyer in this repository sends an unpinned
-proposal, but the protocol admitted one, and anything the wire admits must be handled
-whichever client sent it.
+The rationale is the wire, not the clients: the storefront client filled in the zero
+address for a caller naming no escrow, so lane deals sent unpinned proposals, and whatever
+the client, the wire must refuse one.
+
+Deals accepted with their escrow contract unpinned before this release can no longer be
+verified: their plan names the zero address, which no codec resolves. They are a cutover,
+not a migration (round 1's triage, 85 F5): their escrows stay reclaimable by the buyer at
+expiry. Bare metal has not been released as a domain, so no deployed bare-metal deal is
+affected.
+
+Settled in round 1's triage (85 F6): what can settle is the listing's, and policies decide
+only whether and at what price to deal within what the listing offers. So the seller-side
+kit entry points, `authorize_escrow_proposal` and the acceptance's plan materialization
+through it, refuse an escrow outside the listing's `accepted_escrows`, or with a literal
+field such as the token other than its entry's (`escrow_not_in_accepted_set`,
+`escrow_field_mismatch`, in the `ReleaseConditionError` family), whatever policies ran, a
+custom seller hook's included; and bare metal always runs `escrow_shape_guard` first, after
+its inventory guard, as VM and API credits run their default guards, so the early,
+explained refusal no longer depends on a seller's chain. A buyer's own derivation, which
+may carry only the recorded release conditions, is unchanged: it is held to the seller's
+plan. Treating an omitted guard as consent to any token was rejected: no seller could
+price that, and a seller wanting a second token lists it.
+
+Settled in implementation (Section 8): a proposal selecting nothing the listing offers is
+priced from no entry and no floor. VM and API credits give an escrow proposal selecting
+nothing reference amount zero, and the escrow-shape guard refuses it at the opening as an
+escrow the listing does not accept, which now includes any escrow against a listing
+accepting none. A selection matching no option is priced at zero in VM, where its opening
+guard refuses it, and refused by API credits' pricing. A zero reference is safe only if a
+guard refuses before any decider, so both domains run their default guards first, in their
+fixed order, wherever an operator's chain names one. Bare metal, whose guard a seller may
+omit, refuses such a proposal in pricing before any policy. Every domain prices the buyer's
+pinned opening, which acceptance settles, and reads from it whether the round bargains an
+amount, as `negotiation-protocol` already requires, so a counter naming another option
+cannot change what the seller negotiates from. VM's Alkahest entry funds the escrow its
+selected option names, so a buyer's escrow carrier beside a selection was never
+materialized: VM's seller stage now refuses an unpinned carrier at acceptance, as
+materializing it would, but does not compare a pinned carrier with the option's entry,
+so one naming another contract is accepted against the option's. The unpinned predicate
+exists twice, in `kit/policy` and `kit/alkahest`, since the mechanism-neutral policy kit
+may not import the Alkahest kit.
 
 Rejected: resolving an unpinned proposal to the listing's single entry on its chain, with
 or without kit enforcement, which keeps an inferred input in the settlement path; adding
@@ -608,11 +812,23 @@ the contract every mechanism shares, so each case is an Alkahest readiness block
   chains, or its wallet key, each named by its blocker.
 
 Release conditions are derived only for ready Alkahest clauses: `kit/alkahest`'s
-`publication_release_conditions` takes the clauses' readiness and returns nothing for an
-unready mechanism, and VM, bare metal, and API credits call it after readiness. VM had
+`escrow_release_conditions` takes the published escrows and the readiness they were
+published under and returns nothing for an unready mechanism, and VM, bare metal, and API
+credits call it after readiness. VM had
 derived conditions before readiness and refused every candidate per cycle. In API credits
 this covers the escrows a listing request supplies as well as those its clauses compile,
 so an unready Alkahest yields no API-credit escrow option on either path.
+
+Settled in round 1's triage (85 F9): VM's operator create derives the conditions for
+every escrow it publishes, those its clauses compile and those the request supplies
+alike, under the readiness the escrows were judged on, as API credits does. The create
+request keeps its `demands` field and refuses a supplied value, as it refuses supplied
+`settlement_options`: a listing advertises only what the storefront's own
+`[Settlement.alkahest]` configuration can settle. The published listing's `demands` and
+the buyer proposal's selected `demand` are unchanged. A listing paying a seller address
+other than the storefront's configured one would be a new feature in its own change.
+Keeping supplied `demands` and refusing one that differs from the derivation was rejected:
+it keeps an input the storefront can only compare and refuse.
 
 Two startup refusals move to readiness: bare metal's refusal of a configured section
 missing its address, chains, or key, and every storefront's refusal of an undeliverable
@@ -632,7 +848,9 @@ governs publication only, so two known limits follow:
   seller unable to service or collect them; a buyer's escrow stays reclaimable at expiry,
   so the exposure is the seller's own. Startup does not refuse on open obligations, which
   would make it depend on stored deal state and restore the dependency on Alkahest; the
-  blocker naming the missing input is the operator's signal.
+  blocker naming the missing input is the operator's signal. An address book that stops
+  naming the escrow contract an open deal funded is the same limit (decision 16, 85 F5):
+  the deal can be neither verified nor collected.
 - An API-credit listing's options are fixed when it is created and never re-derived, so
   one whose Alkahest becomes unready keeps advertising its Alkahest option until its
   seller closes it. Deals accepted on it verify against their committed plan and settle
@@ -659,8 +877,8 @@ so the field is wire-safe. Reachability is produced by one chain probe in `kit/a
   SDK client or a JSON-RPC call against the chain's `rpc_url`.
 - **Who owns it.** The probe is one `kit/alkahest` object holding the configured chains,
   a per-chain client constructor supplied at composition, the live client map, each
-  chain's last result and when it was taken, and an async step that probes the chains
-  that are due. Consumers are handed that map, and the probe updates it in place, so a
+  chain's last result and when it was taken, and an async step that probes every chain.
+  Consumers are handed that map, and the probe updates it in place, so a
   chain whose client could not be constructed is probed like any other and its rebuilt
   client reaches every consumer, rather than being dropped for the life of the process.
   Each storefront composing Alkahest builds the probe beside its clients, passing a
@@ -670,14 +888,34 @@ so the field is wire-safe. Reachability is produced by one chain probe in `kit/a
   registration per domain. `kit/storefront` gains nothing Alkahest-specific, so the
   client factory's later move into the Alkahest registration carries no probe with it.
 - **Cadence.** Readiness is evaluated per candidate, per status read, and at startup, so
-  the probe runs apart from it: in the `alkahest-chain-probe` loop, at most once per
-  chain per probe interval (a setting, 30 seconds by default), with the pause and
-  `run-cycle` step every storefront loop has. The Alkahest preflight reads each chain's
+  the probe runs apart from it: in the `alkahest-chain-probe` loop, whose timer probes
+  each chain once per probe interval (a setting, 30 seconds by default), with the pause
+  and `run-cycle` step every storefront loop has. The Alkahest preflight reads each chain's
   last result and makes no chain call. A chain not yet probed since start reads as
   reachability, so a fresh storefront holds its open listings rather than closing them.
   A result does not expire: while the loops are held, readiness reads the last result
   however old, as a held scenario expects. Status reports each chain's result and when it
-  was taken.
+  was taken. Every step probes every chain, so an operator's explicit step always acts on
+  the chain as it is; the loop's timer is what bounds how often a chain is called
+  (settled in implementation, Section 4, after a step that skipped chains probed within
+  the interval made an explicit step a no-op).
+- **A disabled section names what it lacks.** "Enabled or not" needs the settlement
+  runtime: it built a disabled section's readiness itself and never ran its preflight, so
+  a disabled section could report only `disabled`. It now lists, after `disabled`, the
+  configuration blockers the mechanism's preflight reports for a disabled section,
+  dropping reachability ones. Each preflight decides what that is: Alkahest's seller
+  preflight reports its wallet, key, chains, address configuration, and release model,
+  and nothing about publication; contact exchange reports its missing profiles or
+  contact; Arkhai payments reports nothing; a buyer's preflights report nothing. Settled
+  in implementation (Section 5). A limit follows: bare metal services its accepted
+  payment deals whatever `enabled` says, so a disabled Arkhai-payments section missing a
+  credential reports nothing.
+- **Status carries readiness.** No storefront's system status reported mechanism readiness,
+  so the probe's results had nowhere to appear. Each storefront's status gains a
+  mechanism-neutral `settlement` list, each composed mechanism's readiness as its safe
+  projection, and Alkahest's projection carries the per-chain probe results; core's status
+  model and the storefront client carry the list without interpreting it. Planning settled
+  this during implementation (Section 4).
 - **Paths that publish once.** Only reconciling paths can wait for a later cycle, so
   API credits' one-shot paths are shaped around reachability:
   - The configured seed no longer runs in startup. It is the `listing-seed` loop step,
@@ -685,10 +923,25 @@ so the field is wire-safe. Reachability is produced by one chain probe in `kit/a
     reached for its quota registration or a mechanism its clauses use is unknown; gives
     up, logging once, on a configuration failure; and finishes once the listing exists,
     created or found. A storefront whose dependencies answer publishes its seed within a
-    probe interval of start.
+    probe interval of start. Settled in implementation (Section 6): the seed waits
+    whenever any mechanism it uses is unknown, not only when nothing would publish,
+    since a listing's options are fixed at creation; the step retries every 2 seconds,
+    or the probe's interval if shorter, so the seed follows the probe's first result
+    rather than a whole interval later; and the cycle that gives up fails, so the loop
+    controller records and logs it, its report naming a reason code or error type,
+    never an error's text. A given-up seed's failure stays in loop status only until
+    its next cycle, which completes as a no-op, since the loop controller cannot end a
+    timer loop; the ERROR record and the step's `given_up` report remain.
   - A create refused only because a mechanism is unknown answers 503, naming the
     unreached mechanism and that the create can be retried once it is reached; a
-    configuration refusal answers 400 with its blocker codes, as today.
+    configuration refusal answers 400 with its blocker codes, as today. Settled in
+    implementation (Section 6): "only" means every unready mechanism the request uses is
+    unknown, a mechanism counting as used when a clause names it by ID or configuration
+    key, or, for Alkahest, when escrows are supplied, and only when the pool's backing
+    admits it; the refusal follows the resource and pool checks, so a create told to
+    retry publishes once the mechanism answers, and it names every chain the request
+    uses Alkahest on. A create with one mechanism unknown and another unready for its
+    configuration answers 400, while the seed waits.
   - The storefront CLI's `publish` and `listings` commands are clients of the running
     storefront's routes, through the typed listing client, which gains a list method,
     rather than building the storefront's services or opening its database in their own
@@ -696,6 +949,31 @@ so the field is wire-safe. Reachability is produced by one chain probe in `kit/a
     negotiate, and a process with no loops would never have a probe result.
 - **Timeouts.** Each RPC call is bounded, 5 seconds by default; a timed-out run records
   an unreachable result and is retried at the next interval, never in a tight loop.
+  Settled in round 1's triage (85 F8): the probe waits for its construction of a missing
+  client no longer than the same timeout, since a websocket client connects while it is
+  built. Settled in round 1's second triage (122 F1): a thread cannot be stopped, so at
+  most one construction per chain runs, on a daemon thread of its own rather than the
+  loop's default executor, which every database call shares; a probe finding it still
+  running starts no other, and a later probe adopts a construction that finishes late.
+  Starting one per probe would let a construction that never returns fill the default
+  executor within minutes and stall the whole storefront.
+- **A chain needs its client** (85 F7). Servicing settles through the client, so a chain
+  whose client the probe could not construct reads `alkahest.chain_unreachable` whatever
+  its JSON-RPC calls answer; a probe given no constructor, because the policy lacks the
+  wallet key, reports what the chain answers, beside the key's own blocker. A websocket
+  `rpc_url` is probed over HTTP at the same host, port, and path; a provider serving the
+  two on different endpoints reads unreachable, which `DEPLOYMENT_AND_CONFIG.md` states at
+  closeout. A configurable probe endpoint was not added.
+- **What status readiness means** (85 F10). Readiness judges the chains what is being
+  published names: the escrows a candidate publishes, or one `chain_name`. With no
+  publication input it judges every configured chain, since servicing an accepted deal
+  needs whichever chain it was accepted on, and a composition's `default_chain` selects
+  nothing there. Every storefront's status asks with no publication input, so `ready`
+  means every configured chain is reachable and deployed, and publication keeps judging a
+  candidate's own chains. Readiness stays per mechanism, so a candidate's Alkahest options
+  on all its chains wait for every one of them; the `settlement-configuration` companion
+  records that limit at closeout. Per-chain readiness was not taken up: it would change the
+  readiness contract every mechanism shares.
 
 Rejected: one kit startup check refusing every case (makes a seller who does not want
 Alkahest depend on its section being usable); per-candidate refusal at publication;
@@ -722,10 +1000,17 @@ never started. Both init containers are removed, as the bare-metal chart has non
 relies on a `startupProbe`, and the storefront's own loops retry.
 
 The VM storefront starts with its registry and chain unreachable. An unreachable chain
-makes Alkahest unready with a reachability blocker from its probe (decision 19); an
-unreachable registry shows as a failed publication or convergence cycle in loop status,
-retried each cycle. `/health` stays a process check and the degraded state is reported
-through system status, as bare metal reports it.
+makes Alkahest unready with a reachability blocker from its probe (decision 19). An
+unreachable registry is reported by the registry check as unreachable and by the
+storefront as degraded; the publication cycle still completes, each listing it could not
+publish recording `registry_not_converged`, and the next cycle publishes once the registry
+answers. A failed cycle would repeat what the registry check and each listing already
+say, and would misreport a cycle in which one registry refused and another published.
+`/health` stays a process check and the degraded state is reported through system
+status, as bare metal reports it. A storefront that starts with its site
+unreachable has no projection of it, so its publication cycle holds that site's listings
+and closes none, while the registry check reports the registry unreachable and the
+storefront degraded.
 
 A wait inside the process holds the service back as an init container does, so the same
 rule reaches the storefronts' own startup:
@@ -736,10 +1021,19 @@ rule reaches the storefronts' own startup:
   and settlement calls to it fail retryably, and VM's held site projection already treats
   an unreachable site as unknown, so no listing closes for it. Bare metal has no such
   preflight.
-- An Alkahest chain whose client could not be constructed at start is rebuilt at its next
-  probe (decision 19), so the storefront recovers without a restart. Planning confirms
-  whether construction touches the RPC; a construction failure the address configuration
-  causes remains the configuration blocker `alkahest.address_config_invalid`.
+- Startup constructs no Alkahest client: each storefront's client map starts empty and the
+  chain probe (decision 19) constructs every client at its first step, waiting on each no
+  longer than its RPC timeout, and again at each probe until it succeeds, so the
+  storefront recovers without a restart. A websocket client connects while it is built,
+  and an endpoint that accepts the connection and never upgrades it would otherwise hold
+  startup for good; bounding a construction at startup instead would still hold the
+  service back on its chain, which the rejected alternative below rules out. A
+  construction failure the address configuration causes remains the configuration blocker
+  `alkahest.address_config_invalid`. Settled in round 2's triage (139 F1): with no client
+  built at start, a settle for a configured chain the probe has not reached yet answers
+  503 for a retry in all three storefronts, and one for a chain the storefront does not
+  configure keeps its refusal. The kit's `build_alkahest_clients` stays, documented as
+  unbounded and not for a storefront's startup, since other changes' designs name it.
 - The VM storefront chart gains a `startupProbe` mirroring the bare-metal chart's, so a
   slow start is not judged by the liveness probe alone.
 
@@ -761,7 +1055,9 @@ the selector labels its Deployment selects by, so a selector-based `kubectl logs
 test-labels helper carrying chart, version, managed-by, instance, and
 `app.kubernetes.io/component: test`, but not `app.kubernetes.io/name`, which every
 Deployment selector requires. A render test over both topology releases asserts no Pod
-annotated `helm.sh/hook: test` carries all of any Deployment's `matchLabels`. The
+annotated `helm.sh/hook: test` carries all of any Deployment's `matchLabels` or any
+Service's selector, since a Service selecting a test pod would route traffic to it, and
+that each release renders its expected test pods. The
 bare-metal test pod gains the hook delete policy the others have.
 
 Rejected: adding `component: test` while keeping `name`, which leaves registry and
@@ -787,10 +1083,15 @@ convergence:
   storefront, the provisioning service) built on those helpers; bare metal's and VM
   introduction's own copies are replaced;
 - a module takes the holds it needs with `usefixtures`, listed first so they are released
-  last, after the module's other cleanup; stages assert a hold, through system status for
-  loops and the fixture's own state for the lease watchdog, and never pause or resume a
-  service;
-- a unit check over the scenario source refuses any direct call of a pause route.
+  last, after the module's other cleanup; the lane's cleanup fixtures are not autouse, since
+  pytest sets an autouse fixture up first and so finalises it after the holds, and each
+  module lists them after its holds; stages assert a hold through live system status, for
+  loops and the lease watchdog alike, which a module that lost its hold would fail, where
+  the state the fixture saw when it took the hold could not; and they never pause or resume
+  a service;
+- a unit check over the scenario source refuses any direct call of a pause route, and
+  another reads the fixture order pytest resolves for every scenario module and refuses a
+  hold released before the module's other cleanup.
 
 A module killed by `helm test`'s timeout runs no finaliser, and only a restart clears its
 pause; modules in a lane run serially.
@@ -826,6 +1127,16 @@ repair it.
     refused with a signed 409 asking for a new request ID. It has only the unsigned-500
     half of the gap, so it answers the signed 500 and records nothing. Outcome recording
     for every authority is `redesign-authenticated-requests`'s subject.
+
+Settled in implementation (Section 10): a pool with both an invalid declaration and an
+unserved provider reports its declarations at its first refused start and the provider
+once they are repaired; neither refusal changes state. The API-credits service composes
+no pool handlers, so it gets no provider check. Corrected in round 1's triage (85 F15): a
+failure after a route has started its response is not caught — Starlette's
+`BaseHTTPMiddleware` ends the body stream and re-raises only after sending, so the
+middleware would sign, and the provisioning service record, a truncated body under the
+original status. No route streams today; one that does needs the middleware to detect
+that failure or refuse streamed responses.
 
 Rejected: tolerating the row on reads with a problems field, which adds a pool wire field
 and a non-importable export entry; mapping the error in the read routes only.
@@ -879,6 +1190,49 @@ closeout edited this change:
   re-verification), and the unmatched-route item is restated as an unsigned 404, never a
   405, which a typed client reports as missing response authentication.
 - `redesign-storefront-stage-events` is proposed, on dev.
+- `move-escrow-into-alkahest`'s `ARCHITECTURE.toml` exception row excusing
+  `arkhai-kit-alkahest`'s undeclared import of `arkhai-kit-config` is deleted: the probe
+  settings use `kit/config`'s `PositiveSeconds`, so the kit now declares the dependency and
+  the row excuses nothing. The divergence that change owns — the kit reading a user
+  configuration file for the best-price timeout — is a content judgement no check sees; it
+  stays recorded in `ARCHITECTURE.md`'s "Where the current tree diverges" and in that
+  change's proposal, and is unchanged.
+- `move-escrow-into-alkahest`'s other `ARCHITECTURE.toml` exception row, excusing
+  `arkhai-core`'s `alkahest.v1` vocabulary for the legacy escrow wire coercions, is deleted
+  in Section 9: decision 17 removes those coercions with the reply's escrow terms, so the row
+  excuses nothing and the architecture check requires its removal.
+
+### E. Test seams
+
+#### 27. A command module's factories are its test seam
+
+Settled in 160 F3's triage. `TESTING.md`'s mocking convention injects collaborators
+through the constructor, and a Typer command, a module-level function the framework
+calls, has none. Every CLI in the repository -- each storefront's operator commands and
+each domain's buyer commands -- was tested by replacing names in the module under test,
+some of them library names (`sqlite3.connect`, `alkahest_py.AlkahestClient`), names a
+module imports from another (one API-credit test replaces `fetch_listing_dict` in three
+modules), or names inside core (`urllib.request.urlopen`). An import-style change can
+silently undo such a patch, and the test then runs the real collaborator.
+
+The rule: a command module is its own composition root. It builds its collaborators
+through module-level factory functions it defines, named for what they provide, and those
+factories are its seam. A test replaces a factory on the module that defines it, and
+nothing else -- no library name, no name the module imports, no name inside core.
+
+In this change the bare-metal buyer CLI takes the shape: it defines `fresh_identity`,
+`recovery_identity`, `registry_client` (moved from its configuration module, which now
+holds configuration only) and a new `payment_approval`, and the storefront-side helper
+this change's tests drive it through replaces only those. The other CLIs' library and
+cross-module patches, and the bare-metal buyer package's own older unit test that
+replaces names its CLI imports, are a `ROADMAP.md` gap row at closeout, for a follow-up
+change.
+
+Rejected: a context object injected through `register_commands` or `ctx.obj` for every
+CLI, which matches the convention's letter but touches every command module and about
+forty test files across three domains and core, and adds plumbing to every command;
+accepting module patching for CLIs as it stands, which codifies the cross-module and
+library patches whose cost is above.
 
 ### Permanent documentation
 
@@ -892,9 +1246,10 @@ Spec deltas this change carries:
   sells one whole unit", "Bare-metal opening rechecks its listing against its source" (on
   its held-projection text), "Complete bare-metal seller lifecycle" (an unpinned opening is
   refused; an unusable Alkahest section is unready), "An Alkahest listing advertises its
-  release conditions" (an undeliverable model is unready), and "Publication derives all
+  release conditions" (an undeliverable model is unready), "Publication derives all
   ready settlement options" (no ready mechanism refuses the candidate rather than failing
-  publication).
+  publication), and "A storefront that cannot publish refuses to start" (a pool resolving
+  no settlement clause is refused, and its open listing closed, rather than held).
 - `physical-provisioning`: modify "A bare-metal publication view is built from its capacity
   declaration" and "Domains contribute their inventory views"; add "A failure after
   authentication is answered signed".
@@ -906,8 +1261,9 @@ Spec deltas this change carries:
   reply carries no escrow terms".
 - `settlement-servicing`: add "Settlement verifies against the accepted plan".
 - `settlement-configuration`: add "An Alkahest section that cannot settle makes Alkahest
-  unready", "Readiness blockers state their kind", and "Alkahest probes its chains apart
-  from readiness".
+  unready", "Readiness blockers state their kind", "Alkahest probes its chains apart
+  from readiness", and "A publication clause's mechanism input is a mapping"; modify "Priority orders choices but never changes accepted settlement"
+  (with no ready mechanism the candidate is refused, rather than publication failing).
 - `buyer-orchestration`: add "A buyer funds only what it derives" and "Two domains may not
   register one root command".
 - `deployment-state`: add "A deployment does not wait on a service's dependencies" and
@@ -936,16 +1292,21 @@ Promoted at closeout:
   service reports them degraded, and no service waits for one in process either; a
   service refuses to start when its own configuration or stored state is incoherent; a
   Helm test pod carries no selector label of its chart's workloads; the removed
-  `fail_on_unreachable` and `preflight_timeout` settings and the Alkahest probe interval;
+  `fail_on_unreachable` and `preflight_timeout` settings and the Alkahest probe interval
+  and RPC timeout; system status's `settlement` readiness in "System status";
   the rewritten `publication_derivation` passages; the bare-metal lane's mail sink and
-  delivery configuration.
+  delivery configuration; and that `storefront config migrate` accepts a clause naming a
+  disabled mechanism, which publication drops (decision 7).
 - `docs/development/TESTING.md`: the module-hold guidance, in the wording the maintainer
   agreed; the bounded topology render assertion; the new scenario and shared introduction
   stages; the `alkahest-chain-probe` loop in each storefront's row of the loop table, and
-  `listing-seed` in the API-credit row.
+  `listing-seed` in the API-credit row; the command-module factory seam beside the
+  mocking convention (decision 27).
 - The `storefront-publication` architecture companion: bare-metal candidates, delivery
-  terms, the one-unit commitment, the recheck, the site-derivation log, and the no-option
-  close or hold.
+  terms, the one-unit commitment, the recheck, the site-derivation log, the no-option
+  close or hold, and a bare-metal negotiation continuing, accepting, and force-accepting
+  against the listing record its opening authorized (decision 16's Section 7
+  paragraph).
 - The `physical-provisioning` and `resource-pool-management` companions where their
   passages describe the view contract, the resource pass's pool context, and the
   delegate's operations.
@@ -954,12 +1315,17 @@ Promoted at closeout:
   `kit/storefront` as the first shared stage convention.
 - The `settlement-configuration` companion: why the Alkahest chain probe runs apart from
   readiness, and what each blocker kind tells the publication runner.
+- The `buyer-orchestration` companion: the run-log's opaque listing record and its per-listing
+  resume, the exact resumed amount, and the plan check as a port on the escrow settle hook;
+  `ARCHITECTURE.md`'s `kit/alkahest` paragraph: the kit writes and reads that record.
 - The bare-metal seller quickstart's unbacked passage, rewritten as how to list unbacked
   machines; both seller quickstarts' `publication_derivation` passages.
 - `docs/development/ROADMAP.md`: Goal 7's current state and gap row; Goal 6's unowned row
   on unpinned proposals, closed here; and a new Goal 6 row, "An API-credit listing's
   options are fixed at creation, so an unready mechanism's option stays advertised until
-  the seller closes it", owned by "Unowned — needs a new change".
+  the seller closes it", owned by "Unowned — needs a new change"; and a row that CLI
+  tests still replace library names, names a command module imports, or names inside
+  core, against decision 27's factory seam, owned by "Unowned — needs a new change".
 - The change index at completion.
 
 The `TESTING.md` guidance agreed for decision 22:

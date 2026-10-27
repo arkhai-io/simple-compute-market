@@ -42,7 +42,6 @@ def _artifacts():
             ],
             "service_terms": {},
         },
-        "accepted_escrow_terms": [],
     }
 
 

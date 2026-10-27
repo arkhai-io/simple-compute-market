@@ -18,6 +18,7 @@ from typing import Any
 
 from core_storefront.aggregation import AggregateCapacityClient
 from market_capacity_publication import SiteProjectionState
+from market_resource_pools_contracts.backing import BACKED, CapacityBacking
 
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 from arkhai_bare_metal.fixtures.publication_view import build_bare_metal_publication_view
@@ -45,16 +46,28 @@ def listing_source_projection(
     gpu_model: str = LISTING_HARDWARE["gpu_model"],
     region: str | None = LISTING_HARDWARE["region"],
     available: bool = True,
+    backing: CapacityBacking = BACKED,
 ) -> dict[str, Any]:
+    """The seeded listing's site generation; ``backing`` is its pool's, whose
+    delegate decides which delivery terms the view carries.
+
+    ``available=False`` is the machine taken as the site reports it: none of
+    the resource's declared capacity available in its ledger, and, where the
+    backing carries availability on the view, the view saying so. An unbacked
+    view carries no availability, so for unbacked supply the ledger is the
+    only place the site reports the machine taken.
+    """
     declared = dict(DECLARED_CAPACITY if capacity is None else capacity)
     resource = build_projected_resource(
         resource_id,
         capacity=declared,
+        available=None if available else {dimension: 0 for dimension in declared},
         attributes={"gpu_model": gpu_model, "physical_host_id": physical_host_id},
         resource_type="compute.bare-metal",
         publication_views={
             "bare_metal.v2": build_bare_metal_publication_view(
                 resource_id,
+                backing=backing,
                 pool_id=pool_id,
                 host_id=host_id,
                 physical_host_id=physical_host_id,
@@ -65,6 +78,7 @@ def listing_source_projection(
     )
     row = build_resource_pool_row(
         pool_id,
+        capacity_backing=backing.label,
         advertisable_modes=("bare_metal",),
         policy_tags={"region": region},
         resources=[resource],

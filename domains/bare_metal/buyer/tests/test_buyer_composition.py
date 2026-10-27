@@ -18,8 +18,10 @@ from arkhai_bare_metal_buyer.cli import (
 from arkhai_bare_metal_buyer.config import load_bare_metal_buyer_config
 from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
 from arkhai_bare_metal_buyer.plugin import domain
+from core_buyer.cli import build_app
 from core_buyer.introductions import IntroductionPayloadsDeleted
 from market_core import DomainCapability
+from typer.testing import CliRunner
 from market_identity import IdentityScheme, TrustedIdentitySet, create_signer
 from pydantic import BaseModel
 from registry_client import FilterSpecResponse
@@ -191,6 +193,28 @@ def test_introduction_commands_are_registered() -> None:
     assert commands == {"introduce", "introduction"}
 
 
+def test_settlement_commands_sit_under_the_bare_metal_command() -> None:
+    """Spec scenario "Bare metal's settlement commands are namespaced": the
+    plugin registers one root command, so it composes beside a domain whose
+    `settlement` group is at the root, as VM's is."""
+    root = typer.Typer()
+    cli.register_commands(root)
+
+    assert [group.name for group in root.registered_groups] == ["bare-metal"]
+    assert root.registered_commands == []
+    (settlement,) = [
+        group for group in bare_metal_app.registered_groups if group.name == "settlement"
+    ]
+    assert settlement.typer_instance is settlement_app
+
+    app = build_app(domains=[domain])
+    runner = CliRunner()
+    namespaced = runner.invoke(app, ["bare-metal", "settlement", "contact", "--help"])
+    assert namespaced.exit_code == 0, namespaced.output
+    assert "introduce" in namespaced.output
+    assert runner.invoke(app, ["settlement", "contact", "--help"]).exit_code != 0
+
+
 def test_the_context_builds_sinks_before_recovering_the_deal(monkeypatch) -> None:
     """A misconfigured sink is refused before anything is revealed."""
 
@@ -200,7 +224,6 @@ def test_the_context_builds_sinks_before_recovering_the_deal(monkeypatch) -> Non
         settlement_plan={"obligations": []},
         seller_url="https://seller.invalid",
         buyer_principal=None,
-        seller_principals=None,
     )
     identity = SimpleNamespace(signer=object(), profile_id="profile-1")
 

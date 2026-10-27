@@ -186,15 +186,19 @@ def seed_initial_pools_if_fresh() -> None:
 
 
 def verify_pool_declarations() -> None:
-    """Refuse to start while any stored pool lacks valid declarations.
+    """Refuse to start while any stored pool lacks valid declarations or a provider handler.
 
     Runs after the pool document import, so a changed document can repair
     pools before they are checked. A pool without advertisement and backing
     declarations must not reach the resource-pool projection, where a
     consumer could not tell it from a site that predates those declarations.
+    A pool whose provider no registered handler serves cannot be read at
+    all, and waiting does not repair stored state.
     """
-    _container_module.resolved_resource_pool_service.require_valid_stored_declarations()
-    logger.info("Resource-pool declaration check passed")
+    pool_service = _container_module.resolved_resource_pool_service
+    pool_service.require_valid_stored_declarations()
+    pool_service.require_served_stored_providers()
+    logger.info("Resource-pool declaration and provider check passed")
 
 
 def import_capacity_definitions_if_configured() -> None:

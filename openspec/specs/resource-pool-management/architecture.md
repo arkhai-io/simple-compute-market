@@ -34,6 +34,8 @@ Moving inventory to another provider is a second pool and an explicit reassignme
 
 Declarative YAML import is an operator reconciliation surface rather than a second persistence model. Strict validation rejects unknown structure. Dry-run computes the exact change without mutation. Apply is atomic, and canonical export makes equivalent state stable for review and automation. Omitted pools are disabled rather than erased.
 
+Startup refuses stored state it cannot serve, because waiting does not repair it: a stored pool whose declarations are invalid, and a stored pool naming a provider no registered handler serves, each named with its pool and provider. Handlers are fixed by the build and every write refuses an unknown provider, so such a row comes only from outside the service's write paths, and no pool document can repair it; serving it would make every pool list, read, and export fail. Tolerating the row on reads with a problems field was rejected: it would add a pool wire field and an export entry no import accepts.
+
 Validation runs in the order of what each check needs to judge the request. The typed pool models in `kit/resource-pools-contracts` check what the request establishes by itself: mode and backing declarations, and the structure of the hold, SLA, listing-shape, asking-rate and pricing hints. A typed caller and the server therefore refuse a malformed individual write before dispatch or database work, and the server answers HTTP 422. The service checks what needs composition or stored state: handler registration and provider-owned configuration, which need the composed registry the contracts package may not import, and then provider and backing immutability. Those last two are one pure comparison of a stored pool and the proposed values, returning field-specific problems. Individual writes raise its first problem, and documents report every problem prefixed with the entry's submitted index, so the rule has one implementation on every path. Documents carry raw YAML rather than models, so they reuse the same contracts-owned checks with their structured paths and codes. A document with request problems is not compared against stored state, and any problem leaves the whole document unapplied: no entry, no omitted-pool disablement, and, at startup, no new digest. A path is not reordered, and no lookup is added, only to report a different error first.
 
 No pool is created implicitly, and no pool name is special: `default` is an ordinary pool, a document need not name it, and it may be disabled like any other. Migration creates no pool, because a migration's result depends only on code and stored data (see the deployment-state requirement "Service-owned migration history"). Startup imports contributed definitions, then the pool document, then seeds a fresh site, then checks stored declarations, then seeds host inventory, so a site's pools exist with their declared providers before any host or declaration can name them. A configured pool document that is missing or invalid fails startup; the seed never stands in for it.
@@ -79,13 +81,30 @@ the API-credit schema does not, since every credit listing is backed. Every deci
 and unbacked supply is one of the delegate's operations: the declaration rules above,
 admitting a capacity effect, placing a hold, judging supply against its declaration
 and then, where availability bounds it, against availability, which labels
-availability reconciliation may touch, and which settlement clauses an unbacked
-listing keeps. Consumers ask it to act and never learn the category, so none
+availability reconciliation may touch, which settlement clauses an unbacked
+listing keeps, and which delivery terms a listing carries. Consumers ask it to act and never learn the category, so none
 branches on the label, and a further category is a change to the delegate rather
 than to its callers. A delegate exposing flags for callers to test would only move
 those branches; one that performed effects would need clients and bindings its
 contracts package may not import, so each operation takes the caller's work as an
 argument and decides whether and how it runs.
+
+Delivery terms are the fields a domain names as committing the marketplace to
+delivering something — for bare metal a host's identity, its access methods, and a
+view's availability. On a backed listing an admission authority stands behind them;
+on an unbacked one nothing does, so a declared host or access method there would
+advertise a machine and access the marketplace does not deliver. The delegate
+decides them through two domain-neutral operations over the fields the domain
+names: `carry_delivery_terms`, where the site builds a publication view, passes a
+backed pool's terms through and carries none of an unbacked pool's, whatever the
+declaration names; and `delivery_term_constraints`, where a model validates,
+requires every term present on backed supply and every term absent on unbacked
+supply. A term is present when it is neither absent nor null, and a string or
+collection only when non-empty; a boolean is present as either value, because an
+unavailable backed host's `available` is a legitimate `False`. The domain names
+the fields and the delegate decides, so no domain branches on backing to build or
+check a view (see the [storefront publication
+architecture](../storefront-publication/architecture.md#bare-metal-listing-shapes)).
 
 The delegate is a kit rather than core or the compute family because backing applies
 to every market whose listings are admitted against capacity an authority holds — VM

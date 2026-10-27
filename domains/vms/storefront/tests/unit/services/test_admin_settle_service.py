@@ -1,7 +1,7 @@
 """Unit tests for AdminSettleService.
 
 These tests isolate the service logic from HTTP, the chain, and real inventory.
-All external calls (verify_escrow_for_settlement, _build_provisioning_job_spec)
+All external calls (verify_escrow_against_plan, _build_provisioning_job_spec)
 are patched so the tests verify:
 
   1. verify_escrow_dry_run — correct delegation and result mapping
@@ -11,6 +11,7 @@ The integration tests in test_settle_controller.py cover the full HTTP path.
 """
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -57,7 +58,6 @@ def svc(db):
 
 _LISTING_ID = "listing-abc"
 _ESCROW_UID = "escrow-xyz"
-_SELLER_WALLET = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
 _LISTING_ROW = {
     "listing_id": _LISTING_ID,
     "status": "open",
@@ -70,34 +70,49 @@ _LISTING_ROW = {
 # verify_escrow_dry_run
 # ---------------------------------------------------------------------------
 
+_NEGOTIATION_ID = "neg-accepted"
+_ESCROW_ADDRESS = "0x" + "11" * 20
+_PLAN = {"obligations": [{"mechanism": "alkahest.v1"}], "service_terms": {}}
+
+
+def _accepted_thread(*, mechanism: str = "alkahest.v1", terminal: str = "success"):
+    """An accepted Alkahest deal's thread: its Agreement, proposal, and plan."""
+    return {
+        "negotiation_id": _NEGOTIATION_ID,
+        "terminal_state": terminal,
+        "agreement_bytes": json.dumps({"settlement": {"mechanism": mechanism}}).encode(),
+        "settlement_data": {
+            "accepted_escrow_proposal": {
+                "chain_name": "anvil",
+                "escrow_address": _ESCROW_ADDRESS,
+                "expiration_unix": 1_900_000_000,
+            }
+        },
+        "settlement_plan": _PLAN,
+    }
+
+
 class TestVerifyEscrowDryRun:
-    async def test_raises_value_error_when_listing_not_found(self, svc, db):
-        """Missing listing → ValueError (controller maps to 404)."""
-        db.load_listing.return_value = None
+    @pytest.mark.parametrize("thread", [None, _accepted_thread(terminal="")])
+    async def test_raises_value_error_without_an_accepted_negotiation(
+        self, svc, db, thread
+    ):
+        """No accepted negotiation → ValueError (controller maps to 404)."""
+        db.load_negotiation_thread_row.return_value = thread
         with pytest.raises(ValueError, match="not found"):
             await svc.verify_escrow_dry_run(
-                escrow_uid=_ESCROW_UID,
-                listing_id=_LISTING_ID,
-                seller_wallet=_SELLER_WALLET,
-                agreed_price=5000,
-                agreed_duration_seconds=3600,
-                chain_name='anvil',
+                escrow_uid=_ESCROW_UID, negotiation_id=_NEGOTIATION_ID
             )
 
     async def test_returns_valid_true_when_verification_passes(self, svc, db):
-        """verify_escrow_for_settlement succeeds → valid=True, no reason."""
-        db.load_listing.return_value = _LISTING_ROW
+        """Verification against the plan succeeds → valid=True, no reason."""
+        db.load_negotiation_thread_row.return_value = _accepted_thread()
         with patch(
-            "market_storefront.services.admin_settle_service.verify_escrow_for_settlement",
+            "market_storefront.services.admin_settle_service.verify_escrow_against_plan",
             new=AsyncMock(),
         ) as mock_verify:
             result = await svc.verify_escrow_dry_run(
-                escrow_uid=_ESCROW_UID,
-                listing_id=_LISTING_ID,
-                seller_wallet=_SELLER_WALLET,
-                agreed_price=5000,
-                agreed_duration_seconds=3600,
-                chain_name='anvil',
+                escrow_uid=_ESCROW_UID, negotiation_id=_NEGOTIATION_ID
             )
         mock_verify.assert_awaited_once()
         assert result["valid"] is True
@@ -107,46 +122,52 @@ class TestVerifyEscrowDryRun:
     async def test_returns_valid_false_when_verification_fails(self, svc, db):
         """EscrowVerificationError → valid=False with reason string."""
         from market_storefront.utils.escrow_verification import EscrowVerificationError
-        db.load_listing.return_value = _LISTING_ROW
+        db.load_negotiation_thread_row.return_value = _accepted_thread()
         with patch(
-            "market_storefront.services.admin_settle_service.verify_escrow_for_settlement",
+            "market_storefront.services.admin_settle_service.verify_escrow_against_plan",
             new=AsyncMock(side_effect=EscrowVerificationError("token mismatch")),
         ):
             result = await svc.verify_escrow_dry_run(
-                escrow_uid=_ESCROW_UID,
-                listing_id=_LISTING_ID,
-                seller_wallet=_SELLER_WALLET,
-                agreed_price=5000,
-                agreed_duration_seconds=3600,
-                chain_name='anvil',
+                escrow_uid=_ESCROW_UID, negotiation_id=_NEGOTIATION_ID
             )
         assert result["valid"] is False
         assert result["escrow_uid"] == _ESCROW_UID
         assert "token mismatch" in result["reason"]
 
-    async def test_passes_correct_args_to_verify(self, svc, db):
-        """verify_escrow_for_settlement is called with the exact values from the request."""
-        db.load_listing.return_value = _LISTING_ROW
+    async def test_a_deal_not_settled_by_alkahest_is_not_valid(self, svc, db):
+        db.load_negotiation_thread_row.return_value = _accepted_thread(
+            mechanism="arkhai.payments.v1"
+        )
         with patch(
-            "market_storefront.services.admin_settle_service.verify_escrow_for_settlement",
+            "market_storefront.services.admin_settle_service.verify_escrow_against_plan",
+            new=AsyncMock(),
+        ) as mock_verify:
+            result = await svc.verify_escrow_dry_run(
+                escrow_uid=_ESCROW_UID, negotiation_id=_NEGOTIATION_ID
+            )
+        mock_verify.assert_not_awaited()
+        assert result["valid"] is False
+        assert "does not select Alkahest" in result["reason"]
+
+    async def test_verifies_against_the_committed_plan_on_the_accepted_contract(
+        self, svc, db
+    ):
+        """The plan the deal committed, on the chain and escrow contract its
+        accepted proposal names, as settlement verifies it."""
+        db.load_negotiation_thread_row.return_value = _accepted_thread()
+        with patch(
+            "market_storefront.services.admin_settle_service.verify_escrow_against_plan",
             new=AsyncMock(),
         ) as mock_verify:
             await svc.verify_escrow_dry_run(
-                escrow_uid=_ESCROW_UID,
-                listing_id=_LISTING_ID,
-                seller_wallet=_SELLER_WALLET,
-                agreed_price=7000,
-                agreed_duration_seconds=7200,
-                chain_name='anvil',
+                escrow_uid=_ESCROW_UID, negotiation_id=_NEGOTIATION_ID
             )
         call_kwargs = mock_verify.call_args.kwargs
         assert call_kwargs["escrow_uid"] == _ESCROW_UID
-        assert call_kwargs["seller_wallet"] == _SELLER_WALLET
-        assert call_kwargs["agreed_price"] == 7000
-        assert call_kwargs["agreed_duration_seconds"] == 7200
-        assert call_kwargs["listing"] is _LISTING_ROW
-        # alkahest_client is now passed instead of chain_rpc_url; the
-        # service constructor receives it as None when not configured.
+        assert call_kwargs["settlement_plan"] == _PLAN
+        assert call_kwargs["chain_name"] == "anvil"
+        assert call_kwargs["escrow_address"] == _ESCROW_ADDRESS
+        assert call_kwargs["alkahest_address_config_path"] == "/fake/alkahest.json"
         assert "alkahest_client" in call_kwargs
 
 

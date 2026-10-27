@@ -6,7 +6,13 @@ import pytest
 from market_site_client import SiteCapacityClientError
 
 
-pytestmark = pytest.mark.e2e_pool_declared_modes
+pytestmark = [
+    # The module holds nothing; it still takes the lane's cleanup.
+    pytest.mark.usefixtures(
+        "ensure_storefront_resumed", "reap_buyer_settle_subprocess", "release_reserved_resources",
+    ),
+    pytest.mark.e2e_pool_declared_modes,
+]
 
 
 def test_undeclared_mode_is_refused_before_a_reservation_exists(site_capacity) -> None:

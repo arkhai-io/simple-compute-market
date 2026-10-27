@@ -74,16 +74,6 @@ def selected_unit_price(
     return checked_credit_total(rate.value, 1)
 
 
-def _accepted_escrows(order: dict[str, Any]) -> list[dict[str, Any]]:
-    raw = order.get("accepted_escrows")
-    if isinstance(raw, str):
-        try:
-            raw = json.loads(raw)
-        except (ValueError, TypeError):
-            return []
-    return [entry for entry in (raw or []) if isinstance(entry, dict)]
-
-
 def _primary_rate_value(entry: dict[str, Any]) -> int | None:
     rates = entry.get("rates")
     if not isinstance(rates, list) or not rates:
@@ -125,10 +115,11 @@ def extract_unit_price_from_order(
     settlement option a ``settlement_selection`` names, or the accepted escrow an
     escrow proposal names, which need not be the listing's first. When that
     artifact advertises no rate the listing is a hidden reserve for it and the
-    floor is ``[seller.pricing].default_min_price``. Without a proposal that
-    selects anything, the listing's first advertised rate stands in. With no
-    rate and no floor there is nothing to negotiate against and the negotiation
-    is refused. See openspec/specs/negotiation-protocol/spec.md, "The seller's
+    floor is ``[seller.pricing].default_min_price``. With no rate and no floor
+    there is nothing to negotiate against and the negotiation is refused. No
+    other entry ever stands in for the one selected, and a proposal selecting
+    nothing the listing offers is priced from no rate and no floor, so it is
+    refused. See openspec/specs/negotiation-protocol/spec.md, "The seller's
     reference amount is the selected option's rate".
     """
     selected = selected_settlement_artifact(order, proposal)
@@ -140,14 +131,10 @@ def extract_unit_price_from_order(
     elif selected is not None:
         advertised = _primary_rate_value(selected)
     else:
-        accepted = _accepted_escrows(order)
-        advertised = _primary_rate_value(accepted[0]) if accepted else None
-        if advertised is None:
-            options = _settlement_options(order)
-            if options:
-                amount_rates = [r for r in options[0].rates if r.field == "amount"]
-                if len(amount_rates) == 1:
-                    advertised = checked_credit_total(amount_rates[0].value, 1)
+        raise ValueError(
+            f"Listing {order.get('listing_id')}: the proposal selects no settlement "
+            "option the listing offers, so nothing prices it."
+        )
     if advertised is not None:
         return advertised
 

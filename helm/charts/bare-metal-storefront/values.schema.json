@@ -607,6 +607,22 @@
                     "array",
                     "null"
                   ]
+                },
+                "^[pP][rR][oO][bB][eE]_[iI][nN][tT][eE][rR][vV][aA][lL]_[sS][eE][cC][oO][nN][dD][sS]$": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 62135596800.0,
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "^[rR][pP][cC]_[tT][iI][mM][eE][oO][uU][tT]_[sS][eE][cC][oO][nN][dD][sS]$": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 62135596800.0,
+                  "type": [
+                    "number",
+                    "null"
+                  ]
                 }
               }
             },

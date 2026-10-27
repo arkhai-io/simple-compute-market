@@ -349,6 +349,36 @@ def test_exact_retry_returns_recorded_outcome_and_changed_reuse_conflicts(identi
     assert calls["count"] == 1
 
 
+def test_a_route_failing_after_authentication_answers_a_signed_500_replayed_exactly(
+    identities, caplog
+):
+    storefront, authority = identities
+    client, calls = _app(storefront, authority)
+    path = "/api/v1/contract/leases/reservation-1/release-oversight"
+    role = _ROUTE_TABLE.resolve("POST", path, {})[0].required_role
+    signer = _ADMIN_SIGNER if role == "admin" else storefront
+
+    async def failing(_: Request):
+        calls["count"] += 1
+        raise RuntimeError("stored row unreadable: internal detail")
+
+    client.app.add_api_route(path, failing, methods=["POST"])
+    headers = _headers(signer, path, {}, request_id="failing-request", role=role)
+
+    with caplog.at_level("ERROR"):
+        first = client.post(path, json={}, headers=headers)
+    retry = client.post(path, json={}, headers=headers)
+
+    assert first.status_code == retry.status_code == 500
+    assert first.json() == retry.json() == {"detail": "Provisioning request failed"}
+    assert "internal detail" not in first.text
+    assert "internal detail" in caplog.text
+    assert _verified_response(first, authority.identity, path, {}).verified
+    assert _verified_response(retry, authority.identity, path, {}).verified
+    # The retry replays the recorded answer; the route runs once.
+    assert calls["count"] == 1
+
+
 def test_legacy_admin_header_is_rejected_and_health_stays_open(identities):
     storefront, authority = identities
     client, calls = _app(storefront, authority)

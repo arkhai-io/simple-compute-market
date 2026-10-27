@@ -28,18 +28,29 @@ from core_storefront.domain_registry import (
 from core_storefront.service_peers import ServicePeerConfigs, ServicePeerTrust
 from core_storefront.services.negotiation_service import NegotiationService
 from core_storefront.stage_log import set_stage_event_db_path, stage_event
-from market_capacity_publication import CapacityRuntime, SiteProjectionState
+from market_capacity_publication import (
+    CapacityRuntime,
+    SiteDerivationLog,
+    SiteProjectionState,
+)
 from market_core import MarketDomainContract
 from market_capability_admissibility import Declaration
 from market_negotiation_runtime import NegotiationRuntime
 from market_pool_overrides import PoolOverrideService, SQLitePoolOverrideStore
+from market_alkahest import (
+    ALKAHEST_CONFIG_KEY,
+    AlkahestChainProbe,
+    JsonRpcCall,
+    ProbedChain,
+    json_rpc_call,
+)
 from market_storefront_kit import (
     AlkahestChain,
     AlkahestClientPolicy,
     StorefrontComposition,
     StorefrontRouteHooks,
     StorefrontServiceHooks,
-    build_alkahest_clients,
+    alkahest_client_constructor,
     build_composed_storefront_app,
 )
 
@@ -60,11 +71,13 @@ from market_storefront.middleware.service_peer_auth import (
 from market_storefront.negotiation_runtime import build_vm_negotiation_runtime
 from market_storefront.utils.config import (
     AGENT_ID,
+    CHAINS,
     get_evm_wallet_address,
     get_evm_wallet_private_key,
     get_service_peer_configs,
     resolve_marketplace_signer,
     settings,
+    settlement_config_mapping,
     storefront_domain_registry,
 )
 from market_storefront.utils.sqlite_client import get_sqlite_client
@@ -79,7 +92,8 @@ from market_storefront.services.publication_terms import (
     parse_configured_admissibility_default,
 )
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
-from market_storefront.settlement_composition import require_vm_release_model
+from market_storefront.settlement_composition import require_coherent_release_model
+from market_storefront.settlement_registry import build_storefront_settlement_registry
 from market_storefront.startup_refusal import require_publishable_storefront
 
 logger = logging.getLogger(__name__)
@@ -103,38 +117,74 @@ def run_serve(
 # ---------------------------------------------------------------------------
 
 
-def _build_alkahest_clients() -> dict[str, Any]:
-    from market_storefront.utils.config import CHAINS, settlement_config_mapping
-
+def _alkahest_client_policy() -> AlkahestClientPolicy | None:
+    """What the storefront's Alkahest clients are built from; ``None`` when no
+    Alkahest section asks for any."""
     alkahest = settlement_config_mapping().get("alkahest", {})
     if not isinstance(alkahest, dict) or not alkahest:
-        return {}
+        return None
     if not bool(alkahest.get("enabled", False)) and not CHAINS:
-        return {}
+        return None
     missing: list[str] = []
     if not get_evm_wallet_address():
         missing.append("wallet.address")
     private_key = get_evm_wallet_private_key()
     if not private_key:
         missing.append("wallet.private_key")
-    return build_alkahest_clients(
-        AlkahestClientPolicy(
-            private_key=private_key,
-            chains=(
-                ()
-                if missing
-                else tuple(
-                    AlkahestChain(
-                        name=name,
-                        rpc_url=chain.rpc_url,
-                        address_config_path=chain.alkahest_address_config_path,
-                    )
-                    for name, chain in CHAINS.items()
+    return AlkahestClientPolicy(
+        private_key=private_key,
+        chains=(
+            ()
+            if missing
+            else tuple(
+                AlkahestChain(
+                    name=name,
+                    rpc_url=chain.rpc_url,
+                    address_config_path=chain.alkahest_address_config_path,
                 )
-            ),
-            missing_requirements=tuple(missing),
+                for name, chain in CHAINS.items()
+            )
         ),
-        logger=logger,
+        missing_requirements=tuple(missing),
+    )
+
+
+AlkahestClientConstructor = Callable[
+    [AlkahestClientPolicy], Callable[[str], Any] | None
+]
+
+
+def _build_alkahest_chain_probe(
+    alkahest_clients: dict[str, Any],
+    *,
+    constructor: AlkahestClientConstructor,
+    json_rpc: JsonRpcCall,
+) -> AlkahestChainProbe | None:
+    """The chain probe over every configured chain, owning ``alkahest_clients``.
+
+    Composed whenever ``[Settlement.alkahest]`` is configured, enabled or not:
+    a disabled section still services the obligations accepted under it, which
+    need their chains' clients. The map starts empty and the probe's first
+    step constructs each client, bounded, since a websocket client connects
+    while it is built and startup must not wait on a chain. ``constructor`` and
+    ``json_rpc`` are its two boundaries, the SDK and the chain's JSON-RPC
+    endpoint.
+    """
+    section = (
+        build_storefront_settlement_registry()
+        .resolve(settlement_config_mapping(), role="seller")
+        .mechanism_config(ALKAHEST_CONFIG_KEY)
+    )
+    if section is None:
+        return None
+    policy = _alkahest_client_policy()
+    return AlkahestChainProbe(
+        [ProbedChain.from_config(name, chain) for name, chain in CHAINS.items()],
+        build_client=(constructor(policy) if policy is not None else None),
+        clients=alkahest_clients,
+        interval_seconds=section.probe_interval_seconds,
+        rpc_timeout_seconds=section.rpc_timeout_seconds,
+        json_rpc=json_rpc,
     )
 
 
@@ -216,6 +266,7 @@ def _build_settlement_composition(
     sqlite_client,
     alkahest_clients,
     marketplace_signer,
+    chain_probe=None,
 ):
     from market_storefront.domain_runtime import build_settlement_runtime
 
@@ -224,6 +275,7 @@ def _build_settlement_composition(
         sqlite_client=sqlite_client,
         alkahest_clients=alkahest_clients,
         marketplace_signer=marketplace_signer,
+        chain_probe=chain_probe,
     )
 
 
@@ -237,8 +289,10 @@ class VmStorefrontServices:
     sqlite_client: Any
     marketplace_signer: Any
     alkahest_clients: dict[str, Any]
+    alkahest_chain_probe: AlkahestChainProbe | None
     capacity_runtime: CapacityRuntime
     site_projections: SiteProjectionState
+    site_derivation_log: SiteDerivationLog
     service_peer_trust: ServicePeerTrust
     listing_service: Any
     negotiation_runtime: NegotiationRuntime
@@ -253,13 +307,14 @@ class VmStorefrontServices:
 
 @dataclass(frozen=True, slots=True)
 class VmCompositionSeams:
-    """What the composition root reads its service-peer trust and its startup
-    refusal through.
+    """What the composition root reads its service-peer trust, its startup
+    refusal, and its Alkahest chains through.
 
     The defaults are production's: the configured service peers, the durable
-    trust over the storefront's database, and the refusal of a configuration
-    that states a retired setting or could never publish. A test of the root's
-    wiring supplies compatible objects instead of patching the module.
+    trust over the storefront's database, the refusal of a configuration that
+    states a retired setting or could never publish, the SDK's per-chain client
+    construction, and JSON-RPC over each chain's ``rpc_url``. A test of the
+    root's wiring supplies compatible objects instead of patching the module.
     """
 
     service_peer_configs: Callable[[], ServicePeerConfigs] = get_service_peer_configs
@@ -267,6 +322,8 @@ class VmCompositionSeams:
         ServicePeerTrust
     )
     startup_refusal: Callable[[], None] = require_publishable_storefront
+    alkahest_client_constructor: AlkahestClientConstructor = alkahest_client_constructor
+    alkahest_json_rpc: JsonRpcCall = json_rpc_call
 
 
 def _build_vm_services(
@@ -282,16 +339,25 @@ def _build_vm_services(
             "VM service composition must use the exact registry-owned domain contract"
         )
     # Before anything is constructed: a configured default the storefront
-    # cannot read, an Alkahest release model it cannot deliver, or a
-    # configuration under which it could never publish stops startup rather
-    # than running without it.
+    # cannot read, a contradictory Alkahest release model, or a configuration
+    # under which it could never publish stops startup rather than running
+    # without it. An Alkahest section that is coherent but cannot settle makes
+    # Alkahest unready instead.
     admissibility_default = parse_configured_admissibility_default()
-    require_vm_release_model(domain)
+    require_coherent_release_model()
     seams.startup_refusal()
     sqlite_client = get_sqlite_client(registry=registry)
     marketplace_signer = resolve_marketplace_signer()
     set_stage_event_db_path(sqlite_client.db_path)
-    alkahest_clients = _build_alkahest_clients()
+    # The probe owns the client map, empty until its first step: every
+    # consumer below is handed this one dict, which the probe updates in place
+    # as it builds clients.
+    alkahest_clients: dict[str, Any] = {}
+    alkahest_chain_probe = _build_alkahest_chain_probe(
+        alkahest_clients,
+        constructor=seams.alkahest_client_constructor,
+        json_rpc=seams.alkahest_json_rpc,
+    )
     from market_storefront.services.capacity_client import build_capacity_runtime_for
 
     # Each site's responses and callbacks are verified against its service
@@ -319,6 +385,7 @@ def _build_vm_services(
         sqlite_client=sqlite_client,
         alkahest_clients=alkahest_clients,
         marketplace_signer=marketplace_signer,
+        chain_probe=alkahest_chain_probe,
     )
     negotiation_runtime = build_vm_negotiation_runtime(
         domain,
@@ -375,8 +442,10 @@ def _build_vm_services(
         sqlite_client=sqlite_client,
         marketplace_signer=marketplace_signer,
         alkahest_clients=alkahest_clients,
+        alkahest_chain_probe=alkahest_chain_probe,
         capacity_runtime=capacity_runtime,
         site_projections=site_projections,
+        site_derivation_log=SiteDerivationLog(),
         service_peer_trust=service_peer_trust,
         listing_service=listing_service,
         negotiation_runtime=negotiation_runtime,
@@ -406,8 +475,10 @@ async def _start_vm_services(services: VmStorefrontServices) -> None:
         services.service_peer_trust.seed()
         _container.resolved_service_peer_trust = services.service_peer_trust
         _container.resolved_alkahest_clients = services.alkahest_clients
+        _container.resolved_alkahest_chain_probe = services.alkahest_chain_probe
         _container.resolved_capacity_runtime = services.capacity_runtime
         _container.resolved_site_projections = services.site_projections
+        _container.resolved_site_derivation_log = services.site_derivation_log
         _container.resolved_listing_service = services.listing_service
         _container.resolved_negotiation_runtime = services.negotiation_runtime
         _container.resolved_negotiation_service = services.negotiation_service

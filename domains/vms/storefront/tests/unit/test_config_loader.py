@@ -89,6 +89,48 @@ def test_structured_settlement_publication_defaults_are_validated() -> None:
     }
 
 
+def _alkahest_clause(**mechanism_input) -> dict:
+    return {
+        "mechanism": "alkahest.v1",
+        "asset": "0x" + "11" * 20,
+        "rate": "2.00",
+        "per": "hour",
+        "mechanism_input": {
+            "chain": "base_sepolia",
+            "escrow_kind": "erc20_escrow_obligation_default",
+            **mechanism_input,
+        },
+    }
+
+
+def test_a_disabled_mechanisms_configured_clause_is_read_for_publication_to_drop() -> None:
+    """Publication drops the clause, ruling the mechanism out, so the defaults
+    keep it rather than refusing the whole configuration."""
+    source = Dynaconf(environments=False)
+    source.set(
+        "settlement",
+        {"schema_version": 1, "priority": [], "alkahest": {"enabled": False}},
+    )
+    source.set("pricing.settlements", [_alkahest_clause()])
+
+    (clause,) = agent_config.settlement_publication_defaults(source)
+
+    assert clause.mechanism == "alkahest.v1"
+    assert clause.mechanism_input["chain"] == "base_sepolia"
+
+
+def test_a_disabled_mechanisms_unreadable_clause_is_still_refused() -> None:
+    source = Dynaconf(environments=False)
+    source.set(
+        "settlement",
+        {"schema_version": 1, "priority": [], "alkahest": {"enabled": False}},
+    )
+    source.set("pricing.settlements", [_alkahest_clause(private_key="must-not-cross")])
+
+    with pytest.raises(ValueError, match="not public metadata"):
+        agent_config.settlement_publication_defaults(source)
+
+
 def test_structured_publication_defaults_reject_partial_or_secret_input() -> None:
     source = Dynaconf(environments=False)
     source.set(

@@ -5,7 +5,6 @@ just ``settings.wallet.address``. There is no per-chain on-chain registration
 step, no agent-card publication, and no heartbeat loop.
 """
 
-import asyncio
 import logging
 from functools import partial
 
@@ -37,54 +36,6 @@ from market_storefront.utils.logging_config import setup_file_logging
 setup_file_logging(settings.log_file_path or None, settings.log_level)
 
 logger = logging.getLogger(__name__)
-
-
-
-
-async def _preflight_provisioning() -> None:
-    """Block startup until the provisioning service responds, or give up."""
-    import httpx
-
-    url = settings.provisioning.service_url.rstrip("/") + "/health"
-    timeout_s = max(int(settings.provisioning.preflight_timeout), 1)
-    deadline = asyncio.get_event_loop().time() + timeout_s
-    last_error: str | None = None
-    attempt = 0
-
-    while True:
-        attempt += 1
-        try:
-            async with httpx.AsyncClient(timeout=5) as http:
-                resp = await http.get(url)
-            if resp.status_code == 200:
-                logger.info(
-                    "[STARTUP] Provisioning service reachable at %s (attempt %d)",
-                    settings.provisioning.service_url,
-                    attempt,
-                )
-                return
-            last_error = f"HTTP {resp.status_code}"
-        except Exception as exc:
-            last_error = f"{type(exc).__name__}: {exc}"
-
-        remaining = deadline - asyncio.get_event_loop().time()
-        if remaining <= 0:
-            break
-        await asyncio.sleep(min(2.0, remaining))
-
-    msg = (
-        f"[STARTUP] Provisioning service at {settings.provisioning.service_url} "
-        f"unreachable after {timeout_s}s ({last_error}). "
-        "For e2e tests without hardware, set ACTIVE_PROFILES=mock on the "
-        "provisioning-service container."
-    )
-    if settings.provisioning.fail_on_unreachable:
-        raise RuntimeError(
-            msg + " Set [seller.provisioning].fail_on_unreachable = false "
-            "to start the storefront anyway (fulfillment will fail until the "
-            "service is reachable)."
-        )
-    logger.error(msg + " Continuing because fail_on_unreachable=false.")
 
 
 def _require_readable_family_rates() -> None:
@@ -216,18 +167,24 @@ def _start_lifecycle_loops() -> None:
 
     After the first projection load, so neither the poller nor publication
     runs its first cycle over projections nothing has loaded, and after
-    settlement preflight, the escrow backfill the servicing sweep depends on,
-    and provisioning preflight, which the capacity-event pollers' feeds need.
-    Introduction retention runs only while contact exchange is composed.
+    settlement preflight and the escrow backfill the servicing sweep depends
+    on. Nothing waits for a dependency to answer: a site, registry, or chain
+    that cannot be reached is reported in system status and retried by the
+    loop that calls it. Introduction retention runs only while contact
+    exchange is composed.
     """
     composition = _container.resolved_contact_exchange
     retention = composition.retention() if composition is not None else None
+    probe = _container.resolved_alkahest_chain_probe
     intervals = register_vm_loops(
         retention_interval_seconds=(
             introduction_retention_sweep_interval(retention.policy.sweep_interval_seconds)
             if retention is not None
             else None
-        )
+        ),
+        alkahest_probe_interval_seconds=(
+            probe.interval_seconds if probe is not None else None
+        ),
     )
     for name in start_loops():
         logger.info("[STARTUP] %s started (interval=%ss)", name, intervals.get(name))
@@ -308,7 +265,6 @@ async def _startup_tasks(*, registry: Any, domain: MarketDomainContract) -> None
                 partial(_backfill_escrow_identity, sqlite_client),
                 error_message="[STARTUP] Escrow identity backfill failed: %s",
             ),
-            StorefrontStartupStep("preflight_provisioning", _preflight_provisioning),
             StorefrontStartupStep(
                 "load_site_projections",
                 _load_site_projections,

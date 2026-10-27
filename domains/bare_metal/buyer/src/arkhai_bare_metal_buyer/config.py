@@ -1,4 +1,4 @@
-"""Secret-free bare-metal buyer configuration and trusted client composition."""
+"""Secret-free bare-metal buyer configuration."""
 
 from __future__ import annotations
 
@@ -7,16 +7,10 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from core_buyer import (
-    ResolvedBuyerIdentity,
-    resolve_fresh_buyer_identity,
-    resolve_recovery_buyer_identity,
-)
 from market_arkhai_payments import ArkhaiPaymentsConfig
 from market_arkhai_payments.models import AccountId
 from market_identity import Identity, TrustedIdentitySet
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from registry_client import SyncRegistryClient
 
 _CONFIG_ENV = "BARE_METAL_BUYER_CONFIG"
 
@@ -84,31 +78,3 @@ def load_bare_metal_buyer_config(
     if isinstance(principals, list):
         section["registry_principals"] = tuple(principals)
     return BareMetalBuyerConfig.model_validate(section)
-
-
-def fresh_identity() -> ResolvedBuyerIdentity:
-    """Resolve the active profile signer for new buyer work."""
-
-    return resolve_fresh_buyer_identity()
-
-
-def recovery_identity(run_id: str) -> ResolvedBuyerIdentity:
-    """Resolve the exact retained signer recorded for one run."""
-
-    return resolve_recovery_buyer_identity(run_id)
-
-
-def registry_client(
-    config: BareMetalBuyerConfig,
-    identity: ResolvedBuyerIdentity,
-) -> SyncRegistryClient:
-    """Create a signed registry client without accepting secrets in domain config."""
-
-    return SyncRegistryClient(
-        config.registry_url,
-        timeout=config.timeout_seconds,
-        signer=identity.signer,
-        caller_role="buyer",
-        expected_registries=config.registry_trust,
-        registry_authority=config.registry_authority,
-    )

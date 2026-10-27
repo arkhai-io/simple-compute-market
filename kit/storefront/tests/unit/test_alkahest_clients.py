@@ -3,9 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import market_storefront_kit.alkahest_clients as subject
+import pytest
 from market_storefront_kit import (
     AlkahestChain,
     AlkahestClientPolicy,
+    alkahest_client_constructor,
     build_alkahest_clients,
 )
 
@@ -88,6 +90,48 @@ def test_factory_omits_only_the_chain_that_fails(monkeypatch):
 
     assert tuple(clients) == ("good",)
     assert len(log.warnings) == 1
+
+
+def test_the_constructor_builds_one_chain_and_raises_for_one_that_fails(monkeypatch):
+    def resolve(network, *, config_path):
+        if network == "bad":
+            raise ValueError("bad config")
+        return config_path
+
+    monkeypatch.setattr(
+        subject,
+        "_load_dependencies",
+        lambda: (Client, lambda name: name, lambda _path: None, resolve),
+    )
+    construct = alkahest_client_constructor(
+        AlkahestClientPolicy(
+            private_key="secret",
+            chains=(
+                AlkahestChain("bad", "http://bad"),
+                AlkahestChain("good", "http://good", "good.json"),
+            ),
+        )
+    )
+
+    assert construct is not None
+    assert construct("good").kwargs == {
+        "private_key": "secret",
+        "rpc_url": "http://good",
+        "address_config": "good.json",
+    }
+    with pytest.raises(ValueError, match="bad config"):
+        construct("bad")
+
+
+def test_no_constructor_while_a_requirement_is_missing():
+    assert (
+        alkahest_client_constructor(
+            AlkahestClientPolicy(
+                private_key=None, chains=(AlkahestChain("anvil", "http://rpc"),)
+            )
+        )
+        is None
+    )
 
 
 def test_factory_fails_closed_before_loading_sdk_when_requirements_are_missing(

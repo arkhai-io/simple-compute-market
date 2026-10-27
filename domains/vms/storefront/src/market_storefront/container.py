@@ -20,8 +20,13 @@ if TYPE_CHECKING:
     )
     from core_storefront.service_peers import ServicePeerTrust
     from core_storefront.services.negotiation_service import NegotiationService
+    from market_alkahest import AlkahestChainProbe
     from market_capability_admissibility import Declaration
-    from market_capacity_publication import CapacityRuntime, SiteProjectionState
+    from market_capacity_publication import (
+        CapacityRuntime,
+        SiteDerivationLog,
+        SiteProjectionState,
+    )
     from market_contact_exchange import ContactExchangeComposition
     from market_delivery import SellerIntroductionDelivery
     from market_identity import Signer
@@ -45,14 +50,20 @@ resolved_capacity_runtime: CapacityRuntime | None = None
 # Both projection families of every configured site, built once over the
 # capacity runtime's aggregate and read by every consumer in the process.
 resolved_site_projections: SiteProjectionState | None = None
+# Each configured site's latest publication derivation, which publication
+# cycles record and system status reports.
+resolved_site_derivation_log: SiteDerivationLog | None = None
 # Each configured site's service-peer principals, held in memory: the site's
 # responses and its callbacks are both verified against them.
 resolved_service_peer_trust: ServicePeerTrust | None = None
 
-# AlkahestClient instances keyed by chain name. Populated from
-# AlkahestService.build_clients(). May be empty if no chains are
-# configured or all clients failed to initialise.
+# AlkahestClient instances keyed by chain name: the live map the chain probe
+# updates in place, so a client it rebuilds reaches every reader. May be empty
+# if no chains are configured or no client could be constructed yet.
 resolved_alkahest_clients: dict[str, Any] = {}
+# Each configured chain's last probe result, which Alkahest readiness reads;
+# absent when no Alkahest section is configured.
+resolved_alkahest_chain_probe: AlkahestChainProbe | None = None
 
 resolved_listing_service: ListingService | None = None
 resolved_negotiation_service: NegotiationService | None = None
@@ -85,8 +96,10 @@ def clear_lifespan_state(*, registry: StorefrontDomainRegistry) -> None:
     global resolved_negotiation_runtime
     global resolved_capacity_runtime
     global resolved_site_projections
+    global resolved_site_derivation_log
     global resolved_service_peer_trust
     global resolved_alkahest_clients
+    global resolved_alkahest_chain_probe
     global resolved_listing_service
     global resolved_negotiation_service
     global resolved_system_service
@@ -109,9 +122,11 @@ def clear_lifespan_state(*, registry: StorefrontDomainRegistry) -> None:
     resolved_sqlite_client = None
     resolved_marketplace_signer = None
     resolved_alkahest_clients = {}
+    resolved_alkahest_chain_probe = None
     resolved_negotiation_runtime = None
     resolved_capacity_runtime = None
     resolved_site_projections = None
+    resolved_site_derivation_log = None
     resolved_service_peer_trust = None
     resolved_listing_service = None
     resolved_negotiation_service = None

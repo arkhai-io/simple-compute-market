@@ -123,6 +123,21 @@ _CASES = {
         {"provisioning": {"identity": {"principals": [_SITE.identity.model_dump(mode="json")]}}},
         [RETIRED_SETTINGS_HEADING, "provisioning.identity was removed"],
     ),
+    "the removed provisioning preflight": (
+        # Replaced at its root, so the retired keys are gone again afterwards.
+        {
+            "provisioning": {
+                "service_url": "http://site.test:8081",
+                "fail_on_unreachable": False,
+                "preflight_timeout": 30,
+            }
+        },
+        [
+            RETIRED_SETTINGS_HEADING,
+            "provisioning.fail_on_unreachable was removed",
+            "provisioning.preflight_timeout was removed",
+        ],
+    ),
 }
 
 

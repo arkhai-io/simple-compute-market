@@ -48,6 +48,17 @@ _PROVISIONING_AUTHORITIES = TrustedIdentitySet(
 )
 
 
+#: The fixture listing's escrow, token, and release condition: development
+#: values naming no deployed contract, never for a public network.
+_LISTED_ESCROW = "0x000000000000000000000000000000000000abcd"
+_LISTED_TOKEN = "0x0000000000000000000000000000000000000001"
+_CONDITION = {
+    "chain_name": "test",
+    "arbiter": "0x" + "22" * 20,
+    "demand_data": {"recipient": "0x" + "33" * 20},
+}
+
+
 async def _noop_reconcile(_context) -> None:
     return None
 
@@ -151,12 +162,11 @@ async def db(tmp_path) -> SQLiteClient:
         },
         accepted_escrows=[{
             "chain_name": "test",
-            "escrow_address": "0x000000000000000000000000000000000000abcd",
-            "literal_fields": {
-                "token": "0x0000000000000000000000000000000000000001",
-            },
+            "escrow_address": _LISTED_ESCROW,
+            "literal_fields": {"token": _LISTED_TOKEN},
             "rates": [{"field": "amount", "per": "hour", "value": "1000"}],
         }],
+        demands=[_CONDITION],
         fulfillment_resource=None,
         max_duration_seconds=3600,
         storefront_url="http://seller:8001",
@@ -376,9 +386,19 @@ class TestNegotiationRuntimePauseGuard:
         monkeypatch.setattr(trading_pause(), "_paused", False)
 
         from market_core.schemas import EscrowProposal, ProvisionTerms
+        # The listed escrow under the listing's condition, so the round's
+        # guards pass and only the source verdict decides.
+        proposal = EscrowProposal(
+            chain_name="test",
+            escrow_address=_LISTED_ESCROW,
+            fields={"amount": 5000},
+            literal_fields={"token": _LISTED_TOKEN},
+            demand=_CONDITION,
+            expiration_unix=2000000000,
+        )
         with pytest.raises(NegotiationUnavailableError) as exc_info:
             await _start(sqlite_client=db,
-            our_listing_id="order-001", buyer_principal=_BUYER_PRINCIPAL, seller_principal=_SELLER_PRINCIPAL, proposal=EscrowProposal(chain_name="anvil", escrow_address="0x"+"0"*40, fields={"amount": 5000, "token": "0x"+"a"*40}, expiration_unix=2000000000),
+            our_listing_id="order-001", buyer_principal=_BUYER_PRINCIPAL, seller_principal=_SELLER_PRINCIPAL, proposal=proposal,
             provision_terms=ProvisionTerms(
                 kind="compute.v1",
                 version=1,
