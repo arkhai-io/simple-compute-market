@@ -21,11 +21,11 @@ Marketplace roles MUST NOT own ledger state or implement cash movement, Stripe t
 #### Scenario: A storefront watches a deal
 
 - **WHEN** a storefront watches a hosted deal
-- **THEN** it stores the payment authority's event sequence and the arbitration record's sequence as its cursors and stores no balance or settled amount of its own
+- **THEN** it stores the payment authority's event sequence and the arbitration record's sequence and the dispute authority's record sequence as its cursors and stores no balance or settled amount of its own
 
 ### Requirement: Arkhai payments authority remains external
 
-`kit/arkhai-payments` MUST consume the payments service's published HTTP and JSON Schema contract, vendored with its conformance vectors and identified by content hash rather than by source location, and generate its Python wire models from it, rather than importing the service implementation or copying a TypeScript contract. The payments service MUST remain the authority for its ledger, account credentials, fees, hold release and hold extensions, and payment-provider operations. Cases and their outcomes MUST belong to the agreement's dispute authority, which acts at the payments service only through its own authorities.
+`kit/arkhai-payments` MUST consume the payments service's published HTTP and JSON Schema contract, vendored with its conformance vectors and identified by content hash rather than by source location, and generate its Python wire models from it, rather than importing the service implementation or copying a TypeScript contract. The payments service MUST remain the authority for its ledger, account credentials, fees, hold release and hold extensions, and payment-provider operations. Cases and their outcomes MUST belong to the agreement's dispute authority, an independent party that acts at the payments service only through its own authorities and answers parties in its own protocol.
 
 #### Scenario: Payments service owns the ledger
 
@@ -35,4 +35,4 @@ Marketplace roles MUST NOT own ledger state or implement cash movement, Stripe t
 #### Scenario: A case is filed on a hosted deal
 
 - **WHEN** a buyer files a case on an `arkhai.payments.v1` deal
-- **THEN** it files at the intake of the agreement's dispute mechanism, and the payments service records only the dispute authority's `extend`, `lift` and outcome effects
+- **THEN** it files with the agreement's dispute authority, and the payments service records only that authority's `extend`, `lift` and outcome effects

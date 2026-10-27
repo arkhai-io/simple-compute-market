@@ -1,8 +1,13 @@
+## RENAMED Requirements
+
+- FROM: `### Requirement: Only the seller reverses a held payment`
+- TO: `### Requirement: Only the seller refunds a held payment`
+
 ## MODIFIED Requirements
 
 ### Requirement: The payments mandate is derived exactly from the Agreement
 
-The mandate's `deal` MUST be `sha256(JCS(agreement))` and its transaction ID `sha256(JCS(mandate))`. It MUST name `settlement_params.payer_account` as `from`, the selected option's payee account as `to`, and one `once` part for the agreed amount and asset, with mandate-level authorities. Every hold MUST last no less than the Agreement's term end plus the option's `adjudication.dispute_window_seconds`, and approval MUST expire after the option's `approval_window`. A hosted option MUST NOT carry `bond` until the payments service can hold a seller-funded part. It MUST use the service's published fee policy and the fixed nonce `arkhai.payments.v1`. A `once`-only mandate MUST authorize no `start` and no `stop`, and MUST authorize `reverse` for the seller and Arkhai dispute authority, and MUST list only the Arkhai dispute authority under the one `extend` authorities key, which also authorizes `lift`. Each part MUST carry `maxHoldExtension` from `adjudication.case_hold_max_seconds`, `null` when unbounded. A `reverse` MAY name a part and an amount up to what that part still holds.
+The mandate's `deal` MUST be `sha256(JCS(agreement))` and its transaction ID `sha256(JCS(mandate))`. It MUST name `settlement_params.payer_account` as `from`, the selected option's payee account as `to`, and one `once` part for the agreed amount and asset, with mandate-level authorities. Every `once` hold MUST last no less than the Agreement's term end plus the option's `adjudication.dispute_window_seconds`, and approval MUST expire after the option's `approval_window`. A hosted option MUST NOT carry `bond` until the payments service can hold a seller-funded part. It MUST use the service's published fee policy and the fixed nonce `arkhai.payments.v1`. A `once`-only mandate MUST authorize no `start` and no `stop`, and MUST authorize `reverse` for the seller and the agreement's dispute authority, the account its `adjudication.dispute` names, and MUST list only that authority under the one `extend` authorities key, which also authorizes `lift`. The dispute authority's account MUST come from the option, not from `[Settlement.arkhai_payments]`. Each part MUST carry `maxHoldExtension` from `adjudication.case_hold_max_seconds`, `null` when unbounded. A `reverse` MAY name a part and an amount up to what that part still holds.
 
 #### Scenario: Hold and approval expiry follow the accepted timing
 
@@ -19,9 +24,9 @@ The mandate's `deal` MUST be `sha256(JCS(agreement))` and its transaction ID `sh
 - **WHEN** a seller configures a hosted option with `bond`
 - **THEN** the builder refuses to emit it, naming the unsupported term
 
-### Requirement: Only the seller reverses a held payment
+### Requirement: Only the seller refunds a held payment
 
-A refund MUST be seller-initiated through `reverse`, which is authorized for the seller and the Arkhai dispute authority and never for the buyer. A full refund MUST keep its ordering against delivery start; a partial `reverse` that leaves money held, such as a discount on a running deal, MUST record no refund intent and change no deal status. The payments service releases an un-reversed hold without a settlement-service call.
+A refund MUST be seller-initiated through `reverse`. `reverse` is authorized for the seller and the agreement's dispute authority, which uses it only to apply outcomes, and never for the buyer. A full refund MUST keep its ordering against delivery start; a partial `reverse` that leaves money held, such as a discount on a running deal, MUST record no refund intent and change no deal status. The payments service releases an un-reversed hold without a settlement-service call.
 
 #### Scenario: Seller operator refunds a held payment
 
@@ -48,5 +53,5 @@ A refund MUST be seller-initiated through `reverse`, which is authorized for the
 - **WHEN** delivery fails or a buyer requests settlement after any outcome
 - **THEN** no storefront issues `reverse` unless a seller-authenticated refund
   request names the deal, or the seller has enabled the `refund` failure action
-  and the deal failed before any delivery; the buyer's recourse is a case at the
-  intake of the agreement's dispute mechanism
+  and the deal failed before any delivery; the buyer's recourse is a case with the
+  agreement's dispute authority

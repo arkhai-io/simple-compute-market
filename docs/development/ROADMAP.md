@@ -281,6 +281,7 @@ Current limits: escrow claimant, expiration, and condition fields remain in exis
 |---|---|
 | Live Arkhai payment and domain delivery qualification | The payments service's end-to-end tests, which import this repository's published packages; this repository's payment scenario runs only against a configured target |
 | An escrow proposal naming no contract is priced, in every compute domain, from the listing's first accepted escrow; which escrow prices it, or whether it is refused, is undecided | Unowned — needs a new change |
+| Post-commitment lifecycle: early ends, per-deal dispute authorities with per-case hold extensions, and kept evidence | [`agreed-evidence-and-early-termination`](../../openspec/changes/agreed-evidence-and-early-termination/) |
 | Spot / interruptible deals on payment rate parts, with teardown on stop | [`spot-deals-through-arkhai-payments`](../../openspec/changes/spot-deals-through-arkhai-payments/) |
 | Isolate escrow carriers and the conditional-escrow port fully within Alkahest | [`move-escrow-into-alkahest`](../../openspec/changes/move-escrow-into-alkahest/) |
 | Escrow fields in listing, registry and storefront-client wire formats | [`drop-escrow-from-shared-wire`](../../openspec/changes/drop-escrow-from-shared-wire/) |
