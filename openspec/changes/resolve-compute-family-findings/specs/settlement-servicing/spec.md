@@ -7,12 +7,31 @@ the obligation for it, MUST NOT count that deferral as a failed attempt: the obl
 MUST be due again on the worker's next servicing cycle, and the error backoff MUST NOT
 lengthen. A failed ready step keeps the error backoff.
 
+The settlement operation journal MUST record the deferral: a ready step defers through the
+runtime's deferral operation, which in one write releases the fulfillment lease, returns
+the attempt its reservation counted, marks the operation deferred, and makes it due at
+once. The worker MUST read the operation after the ready step returns and MUST NOT apply
+the error backoff to a deferred operation; an operation still pending and not deferred
+keeps the error backoff.
+
 #### Scenario: Delivery takes several cycles
 
 - **WHEN** a ready step defers an obligation because its delivery is not yet active, on
   several consecutive cycles
 - **THEN** each deferral leaves the obligation due on the next cycle, and its attempts are
   not counted toward the backoff
+
+#### Scenario: The process stops just after a deferral
+
+- **WHEN** a ready step's deferral is written and the process stops before the worker
+  schedules anything
+- **THEN** the restarted worker finds the obligation due, its lease free, and the
+  deferral's attempt not counted
+
+#### Scenario: A ready step returns without deferring or starting
+
+- **WHEN** a ready step returns, has not deferred, and has bound no fulfillment
+- **THEN** the obligation takes the error backoff
 
 #### Scenario: A ready step fails
 

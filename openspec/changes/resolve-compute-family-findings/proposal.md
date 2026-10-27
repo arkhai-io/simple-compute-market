@@ -56,15 +56,17 @@ Behaviour that answers wrongly:
   recorded one answers a typed 409 rather than a 500 (D12).
 - Bare-metal begin reads the scheduled resource's own physical identity, and the
   schedule response names its host, so a declaration that does not repeat them in its
-  publication settings can be fulfilled (D13).
+  publication settings can be fulfilled; the compute provisioning contract becomes major
+  3, accepted alone, carrying the host and the removed lease state (D13, D5).
 - VM's operator `create_vm` refuses a guest name provisioning's rules reject (D17).
 - The policy kit's refusals name `[negotiation].policies` and where built-ins come
   from (D18); fulfillment convergence prints its counts (D19).
 - Bare metal's servicing worker reports its events, every scheduled retry is logged, a
-  deferred delivery is rechecked every servicing cycle, and the settle wait polls
-  through a failed status read (D8).
-- An introduction's seller-side delivery happens once, whenever the reveal completes
-  (D9).
+  deferred delivery, recorded as such in the operation journal, is rechecked every
+  servicing cycle, and the settle wait polls through a failed status read (D8).
+- An introduction's seller-side delivery is dispatched at most once, claimed by the
+  start that completes the reveal, and no buyer request makes it send again; a new
+  start completes an interrupted reveal (D9).
 - A seller's wallet address and key name one account, as an Alkahest readiness rule;
   the address is derived when absent (D10).
 - Alkahest address books are named per chain in `[Settlement.alkahest.address_books]`,
@@ -88,12 +90,15 @@ None.
 - `site-capacity`: reservation states; the site middleware's unmatched-route answer and
   the site client's report.
 - `physical-provisioning`: the provisioning middleware's unmatched-route answer and the
-  family client's report; operator guest names.
+  family client's report; operator guest names; the typed worker-control and mock-rule
+  models and the domains' client extensions.
 - `compute-provisioning-contract`: the lifecycle event provisioning sends; the schedule
-  response's host and physical identity.
+  response's host and physical identity; contract major 3.
+- `market-composition`: the mock rule routes' typed answers.
 - `storefront-publication`: the bare-metal delivery conflict and begin.
 - `settlement-servicing`: deferred delivery, retry reporting, and the settle wait.
-- `introduction-delivery`: once-only seller delivery after an interrupted reveal.
+- `introduction-delivery`: at most one seller-side dispatch, claimed by the completing
+  start; an interrupted reveal completed by a new start.
 - `settlement-configuration`: wallet address and key; Alkahest address books.
 
 ## Non-Goals
@@ -143,7 +148,9 @@ buyer, training README), `domains/bare_metal/` (storefront, domain package, buye
 bare-metal Helm charts' values, and the seller and buyer quickstarts.
 
 Wire: removed VM callback routes and client methods; reservation states and
-`LeaseState.PROVISIONING_FAILED` removed; `host_id` on the schedule response; typed
+`LeaseState.PROVISIONING_FAILED` removed; `host_id` on the schedule response; compute
+provisioning contract major 3, accepted alone, so provisioning and its storefronts
+upgrade together; typed
 mock-rule and worker-control responses; unmatched-route statuses. Configuration:
 `[Settlement.alkahest.address_books]` replaces two keys; `[Wallet].address` becomes
 optional for a seller. Persistence: a reservation-state conversion in the provisioning
@@ -164,17 +171,23 @@ Each is a minor bump of its package under the repository's pre-1.0 versioning po
   why an unroutable request is unsigned →
   `openspec/specs/physical-provisioning/architecture.md`, "Canonical requests, durable
   replay, and signed responses" (D3).
-- The lifecycle event provisioning sends; the schedule response's identities →
-  `openspec/specs/compute-provisioning-contract/spec.md` (D4, D13).
+- The lifecycle event provisioning sends; the schedule response's identities; contract
+  major 3 → `openspec/specs/compute-provisioning-contract/spec.md` (D4, D13, D5).
+- Typed worker-control and mock-rule models owned by the contracts distribution, and the
+  domains' client extensions → `openspec/specs/physical-provisioning/spec.md`, "Compute-owned
+  caller contract"; the rule routes' typed answers →
+  `openspec/specs/market-composition/spec.md`, "Compute mock executors share one
+  compute-family mechanism" (D14, D15).
 - Reservation states and their upgrade conversion → `openspec/specs/site-capacity/spec.md`
   and `architecture.md` (D5).
 - The service's migration history names the tables its database holds →
   `openspec/specs/physical-provisioning/architecture.md`, "Compute composition" (D6).
-- Deferred-delivery cadence, retry reporting, the settle wait →
+- Deferred-delivery cadence and its journal record, retry reporting, the settle wait →
   `openspec/specs/settlement-servicing/spec.md` (D8).
-- Once-only seller delivery → `openspec/specs/introduction-delivery/spec.md`; the
-  buyer-retry limit → a new architecture companion for `contact-exchange-settlement`
-  (D9).
+- At-most-once seller dispatch by claim, and no counterparty-triggered re-send →
+  `openspec/specs/introduction-delivery/spec.md`; the buyer-retry limit and why a new
+  start, not a replay, completes a reveal → a new architecture companion for
+  `contact-exchange-settlement` (D9).
 - Wallet address and key; address books → `openspec/specs/settlement-configuration/spec.md`,
   `docs/development/DEPLOYMENT_AND_CONFIG.md`, the seller, bare-metal seller, and buyer
   quickstarts (D10, D11).

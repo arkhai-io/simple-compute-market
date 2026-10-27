@@ -2,11 +2,20 @@
 
 ### Requirement: Delivery fires once per reveal and re-delivery is explicit
 
-Delivery MUST occur once per introduction, on the introduction start that completes its
-reveal, whether that is the first start or a retry of one whose completion failed. The
-introduction MUST record that its seller's side was told, so an idempotent replay, a
-subsequent read of the durable reveal, or a later start MUST NOT deliver again. Each side
-MUST offer an explicit operator action that re-delivers an already-revealed introduction.
+Seller-side delivery MUST be dispatched at most once per introduction, by the
+introduction start that completes its reveal, whether that is the first start or a new
+start after one whose completion failed. Once completion succeeds, the start MUST claim
+the introduction's seller-side delivery with a write that succeeds for exactly one
+caller, and only the start that claims it MUST dispatch; an exact replay, a subsequent
+read of the durable reveal, or any other start, concurrent or later, MUST NOT dispatch
+again. The claim records that dispatch was scheduled, not that a sink received it: a
+dispatch lost before it ran, or failed at every sink, is recovered only by re-delivery.
+Each side MUST offer an explicit operator action that re-delivers an already-revealed
+introduction, and no counterparty request MUST cause a side's sinks to send again.
+
+An exact replay of a start whose completion failed MUST answer its recorded outcome and
+MUST NOT complete the reveal; a new start, with a fresh request identity, completes it.
+The failed start's answer MUST say that starting the introduction again completes it.
 
 An introduction whose contact payloads have been deleted MUST NOT be delivered: an
 introduction start that finds the payloads already deleted MUST NOT deliver, and an
@@ -25,9 +34,27 @@ even if the deletion commits before that delivery is dispatched.
 #### Scenario: A reveal's first completion failed
 
 - **WHEN** a buyer's first introduction start persisted the introduction and answered 503
-  because completion failed, and the buyer's next start completes it
-- **THEN** the seller's side is told once, on that next start
-- **AND** no later start delivers again
+  because completion failed, and the buyer's next start, a new request, completes it
+- **THEN** the seller's side is dispatched once, by that next start
+- **AND** no later start dispatches again
+
+#### Scenario: A failed start is replayed exactly
+
+- **WHEN** a start whose completion failed and answered 503 is resent as an exact replay
+- **THEN** the replay answers the recorded 503
+- **AND** nothing is completed or delivered
+
+#### Scenario: Two starts complete a reveal concurrently
+
+- **WHEN** two starts with different request identities complete the same introduction
+  at once
+- **THEN** exactly one of them claims the seller-side delivery and dispatches it
+- **AND** the other dispatches nothing
+
+#### Scenario: A buyer repeats a completed start
+
+- **WHEN** a buyer sends further starts for an introduction whose reveal already completed
+- **THEN** each answers the durable reveal and no seller-side sink is contacted
 
 #### Scenario: Operator re-delivers after a failed send
 

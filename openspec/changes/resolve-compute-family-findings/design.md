@@ -146,7 +146,8 @@ are never assigned, yet held-state sums, the lease transitions, the terminal set
 lease-state projection, VM's interrupt and release code, and API credits all decide about
 them. Both members go, with every reader, the lease contract's
 `LeaseState.PROVISIONING_FAILED`, and the mapping entries. `site-capacity` states the
-remaining states.
+remaining states. Removing a lease state changes the compute provisioning contract, so it
+is part of that contract's major 3 (D13).
 
 The column is a plain string, so no schema change is needed, but a stored row in either
 state would change behaviour silently: a `provisioning` row would stop counting as held,
@@ -222,7 +223,19 @@ Three parts.
    production nothing wakes it: the only wake is in the administrator's settle wait.
    `kit/settlement-runtime` therefore treats a deferral as not a failure: it does not
    count as an attempt, and a deferred obligation is rechecked on the next servicing
-   cycle. Only bare metal defers today. The administrator wait keeps its wake, which a
+   cycle. Only bare metal defers today.
+
+   The operation journal records the deferral (24 F4). A ready hook defers by calling
+   `SettlementRuntime.defer_fulfillment`, which in one journal write releases the
+   fulfillment lease, returns the attempt `reserve_fulfillment` counted, marks the
+   operation deferred, and makes it due at once. After the hook returns without a
+   fulfillment reference, the worker reads the operation, as its scheduling already
+   does: a deferred operation keeps its due time and takes no backoff; any other
+   operation still pending takes the error backoff as today, and a hook that raises
+   stays on the error path. The hook's signature is unchanged, and `service_obligation`
+   behaves as a sweep does. Rejected: a typed outcome returned by the hook, which is a
+   second signal that must agree with the lease it released and still needs a journal
+   write to return the attempt. The administrator wait keeps its wake, which a
    scenario holding the loops needs, so `storefront-publication`'s scenario is unchanged.
    This is distinct from `settlement-servicing`'s deferred fulfillment *outcome*, which a
    domain's own convergence finishes. `kit-owned-listing-and-fulfillment-lifecycles`,
@@ -241,17 +254,37 @@ with this change depending on it (that change is undesigned and behind
 `IntroductionRouteService.start` judges a first reveal by whether a record existed before
 the call, and delivers to the seller's sinks only then. A first call that persisted the
 record and then failed completion answers 503 before delivering; a retry finds the record,
-completes, and skips delivery, so the seller is never told. The introduction store gains
-a seller-delivery marker, set after dispatch, and the seller's side is told exactly once,
-on whichever start completes the reveal. Operator re-delivery is unaffected.
+completes, and skips delivery, so the seller is never told.
 
-Completing an interrupted reveal stays the buyer's retry. Completion is local, idempotent
-bookkeeping, and the durable reveal record is what matters to either party; finishing it
-without the buyer would hand the seller the buyer's contact while the buyer saw a 503.
-The 503's detail says a retry completes the reveal, and the limit is documented.
+The introduction store gains a seller-delivery claim (24 F1). Once completion succeeds,
+the start claims it with a conditional write that succeeds for exactly one caller, and
+only the start that wins schedules the seller's delivery; any other start, concurrent or
+later, skips it. Each introduction therefore has at most one seller-side dispatch, made by
+the start that completes the reveal. The claim records that dispatch was scheduled, not
+that a sink received anything: a dispatch lost to process exit, or failed at every sink,
+is recovered by the operator's re-delivery, as a failed send is today, consistent with
+delivery being best-effort beside the durable reveal. A claim write that fails after
+completion succeeded answers 503, and the buyer's next start claims it. The claim also
+closes the race in which two concurrent first starts both find no record and both deliver.
 
-Rejected: a sweep that completes and delivers without the buyer; handing completion to
-`kit-owned-listing-and-fulfillment-lifecycles`.
+Seller-side delivery is never a counterparty's lever: a buyer repeating starts, by mistake
+or deliberately, cannot make the seller's sinks send again. Re-delivery stays the seller
+operator's explicit action, and the buyer's own copy is sent by the buyer's own process.
+
+Completing an interrupted reveal stays the buyer's, by a new start (24 F2). Completion is
+local, idempotent bookkeeping, and the durable reveal record is what matters to either
+party; finishing it without the buyer would hand the seller the buyer's contact while the
+buyer saw a 503. A new start carries a fresh request identity, as the buyer client gives
+every start, and reaches completion. An exact replay of the failed request answers its
+recorded 503 and completes nothing, as every route answers an exact replay; resuming
+completion on a replay would break that rule for a case a new start already handles. The
+503's detail says to start the introduction again, and the limit is documented.
+
+Rejected: delivering on every start that completes the reveal, which hands the buyer a
+way to make the seller's sinks send again; a durable delivery outbox with sink-level
+idempotency, which would make best-effort delivery guaranteed at the cost of a servicing
+loop and an idempotency duty on every sink; a sweep that completes and delivers without
+the buyer; handing completion to `kit-owned-listing-and-fulfillment-lifecycles`.
 
 ### D10. A seller's wallet address and key name one account
 
@@ -335,6 +368,17 @@ publication settings to repeat; a conforming declaration fails begin. Begin comp
 scheduled resource's top-level `physical_host_id` and a `host_id` the schedule response
 now carries, from the declaration. The e2e driver stops declaring the nested copies.
 
+The response is a versioned contract, so it is versioned rather than changed in place
+(24 F3). The compute provisioning contract becomes major 3, carrying the schedule
+response's required `host_id` and D5's removed lease state, and every party accepts only
+major 3, as major 2 replaced major 1. The provisioning service, the storefronts, and the
+family and domain clients of a deployment upgrade together, and roll back together; a
+mismatched pair refuses each request, naming the supported major, as "Explicit contract
+incompatibility" requires, rather than failing begin on a missing field. Rejected: a minor
+2.1 with a new minor-version check where bare metal needs it, which allows a mixed rollout
+of the schedule response but adds a check the contract has no machinery for and leaves
+D5's enum removal unversioned.
+
 ### D14. Mock-rule routes are typed
 
 Response models for the shared rule route service sit in `compute_provisioning_contracts`,
@@ -348,6 +392,13 @@ integration conftest call them.
 `check-leases`, `run-cycle`, `advance-cycle`, and identity rotation return models in
 `compute_provisioning_contracts/system.py`, beside `WorkerPauseResponse` from
 `unbacked-bare-metal-listings`' branch. The e2e helpers read their attributes.
+
+D14's and D15's ownership is normative (24 F5): `physical-provisioning`'s "Compute-owned
+caller contract" names the mock-rule and worker-control response models among those the
+contracts distribution owns, and lets each compute domain's client package extend the
+family client for the routes it mounts; `market-composition`'s mock-executor requirement
+says the rule route service answers with those models. Their fields stay in code, held by
+the contract tests, and their failures are answered as every provisioning route's are.
 
 ### D16. VM binds pool overrides at `POOL_OVERRIDES_PATH`
 
@@ -423,6 +474,10 @@ Two rounds, each reviewed before the next, then closeout.
   - D3, D5, D8, D12, D15, D19, and D4's e2e stage;
   - D10 and D11.
 - **Closeout**: promotion, the roadmap, the index, archive.
+
+D13 defines the compute provisioning contract's major 3 in round 1 and D5 removes a lease
+state from it in round 2. No release may carry major 3 without D5's removal, which would
+be changing a released major in place; planning orders the work so none does.
 
 ## Edits to other changes
 
