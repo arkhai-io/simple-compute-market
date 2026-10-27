@@ -4230,7 +4230,7 @@ configuration.
       bump, so it stays; its floor on `arkhai-bare-metal-buyer` rises to 0.6.0, whose
       `market bare-metal settlement` the scenario runs. `make lock` relocked `e2e-tests`,
       with the buyer's 0.6.0 from Section 21.
-- [ ] 22.6 **Verify.** `make test-e2e-unit`; `make -C e2e-tests test-e2e-bare-metal` and
+- [x] 22.6 **Verify.** `make test-e2e-unit`; `make -C e2e-tests test-e2e-bare-metal` and
       `test-e2e-vm` (system); `make test`; `make check-packaging`. End-to-end:
       `e2e_bare_metal_unbacked_introduction` and `e2e_vm_introduction`.
       **Left unchecked:** the two system lanes did not run here, since this session may
@@ -4243,6 +4243,11 @@ configuration.
       Still unchecked after 22.7, for the same reason. No end-to-end scenario covers
       22.7: the one scenario running `buy`, `e2e_bare_metal_deal`, is in no lane
       (Section 22 notes).
+      Checked from the owner's validation of `cbe39b4` (Section 22 before 22.7), run in
+      their own environment: pipeline run 40486963495 succeeded, with
+      `e2e_bare_metal_unbacked_introduction` passing 9 tests on e2e-bare-metal and
+      `e2e_vm_introduction` 6 on e2e-vm; local `check-packaging` and `make test` and the
+      Helm part passed. 22.7's `buy` change has no end-to-end coverage, as above.
 - [x] 22.7 `domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/cli.py` `buy_bare_metal`:
       fix the three defects 22.3's correction fixed in `request_introduction`, which
       `buy` shares. It passes the listing's advertised settlement option, so the seller
