@@ -16,6 +16,10 @@ compute service composition
 
 The offering-mode-neutral composition root lets generic services dispatch by recorded executor or provider identity without importing a concrete domain implementation.
 
+The resource-pool projection a site serves is neutral, and a domain that publishes more — a view of a whole machine it sells, or a pool's configured defaults — contributes an `InventoryViewProjection` from `compute_provisioning.inventory_views`, which owns the protocol and its composer. The service merges what each projection returns and never names a domain's view, attribute, or provider configuration. A resource view is built with its pool's context, an `InventoryPoolContext` of pool ID, provider, and the pool's resolved declarations, because what a view may carry depends on them: a bare-metal view carries its delivery terms only where the pool's backing delegate passes them through (see the [resource-pool management architecture](../resource-pool-management/architecture.md#advertisement-delivery-and-backing)). The provisioning service, as the composition root, reads the pool rows in its own resource pass, resolves each pool once through the shared resolver, and hands each declaration its pool's context, interpreting none of it; the pool pass reads raw tags and the provider from the same column, so the two passes cannot drift on a pool's provider. A stored pool whose declarations do not resolve, which startup refuses and no write path produces, gives its members no context, so they project with no views and no problems, and the service logs a warning. Building the context is compute-family work, so it sits at the contributed-view seam and nothing above the compute family learns of it: `kit/site` copies the per-resource result into its projection without reading it, and `kit/resource-pools` and core do not see it.
+
+A contributed projection never raises on a declaration's content. Declarations reach the site over its API from any client, and one a view builder could not handle would otherwise fail the site's whole resource-pool projection, every pool and every domain with it. `resource_views` returns a `ResourceViews` of the views it built and, per declared view it could not build, the reasons, which the projected resource carries as `publication_view_problems` keyed by view identifier. A backed bare-metal declaration naming no host or no access methods, a missing or invalid `allocation_mode` or `physical_host_id`, and a private-looking capacity or capability key are such cases. A storefront reads a resource with problems as an unreadable declaration and holds its listing (see the [storefront publication architecture](../storefront-publication/architecture.md#reconciliation)). Refusing a malformed attribute when the declaration is written was rejected: its backing-dependent rules need a site read of pool state that the site may not take while its edge into the pool authority stands, so a write-time check would be partial and the projection would still have to tolerate what it missed.
+
 ## Registration boundary
 
 Adapters register executor actions and FulfillmentProviders explicitly. Duplicate identities fail during startup because silent replacement would make persisted records execute under a different implementation. Provider and executor registration remain independent: fulfillment create/status/teardown and lease-release actions have different contracts and may evolve separately.
@@ -36,14 +40,16 @@ Operational inventory is authoritative service state, not a checked-in Ansible i
 
 The bare-metal storefront is a client of the accepted POOLS-7 scheduling and fulfillment contracts, not a second job repository or convergence worker. It derives one `SettlementResource` request from the immutable accepted listing/site/Physical Resource and agreed bare-metal terms, submits it to the provisioning authority bound to that site, and persists only returned reservation, settlement-resource, and fulfillment correlations.
 
-The storefront's seller table binds payment, Alkahest and fused contact stages;
-its purchase table binds payment only. Each seller persists one
+The storefront's seller table binds payment, Alkahest and contact stages;
+its purchase table binds payment only. A payment or Alkahest seller persists one
 `bare_metal.settlement-evidence.v1` payload in negotiation-keyed
 `bare_metal_settlement_records`, bound to the exact Agreement digest and an
 immutable established reference. Verified source/delivery cannot be replaced.
 Physical lifecycle correlations, progress and private results remain separate.
-Contact evidence contains a reveal reference, not duplicated PII or a physical
-phase. No escrow row or payment chain-name sentinel is alternative authority.
+A contact-exchange deal records no settlement evidence: it completes by its
+introduction, whose reveal is the contact-exchange kit's own record, and it has
+no settlement or fulfillment to load. No escrow row or payment chain-name
+sentinel is alternative authority.
 
 Common begin, recovery/status, access/result and teardown load verified evidence
 through the accepted entry. Payment rechecks the mandate and trusted signed
@@ -122,6 +128,31 @@ canonical response body. Clients verify every field against the expected
 authority before accepting an acknowledgement. This distinguishes an
 authenticated authority outcome from an unsigned status code or a correctly
 signed response produced by the wrong service.
+
+A route that fails after the caller was authenticated still answers signed: a
+500 with a fixed, non-revealing detail, the error itself going to the service's
+log. An unsigned 500 would reach the caller's typed client as missing response
+authentication rather than as the authority's failure. The provisioning
+service's middleware records that answer as the request's outcome, as it
+records any, so an exact retry replays the same signed 500 instead of finding
+the reservation in progress until its dispatch lease expires. `kit/site`'s
+middleware, which the API-credits service composes, keeps reservations but no
+outcomes, so it answers the signed 500 and records nothing; an exact retry is
+handled as its route's retry contract says. Neither middleware catches a failure
+after a route has started its response: the body stream ends and the error is
+re-raised only once the status is sent, so the middleware would sign, and the
+provisioning service record, a truncated body under the original status. No
+route streams its response, so the limit is latent; a streaming route needs the
+middleware to detect that failure or to refuse streamed responses.
+
+One such failure is refused at startup instead: the service does not start
+while a stored pool names a provider no registered handler serves. Handlers are fixed by
+the build and every write refuses an unknown provider, so such a row comes only
+from outside the service's write paths, no pool document can repair it, and
+every read of it would fail; startup names each pool and provider, beside its
+refusal of stored pools whose declarations are invalid. Unreadable own state
+stops startup because waiting does not repair it, where an unavailable
+dependency starts the service degraded.
 
 ### Scheme, credential, and package boundaries
 

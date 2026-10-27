@@ -258,9 +258,9 @@ explicit capacity-backed value. They are semantically known to be backed and MUS
 NOT depend on an absent field to be classified.
 
 Every compute-family domain publishing into the compute listing shape MUST publish
-the value, including a domain whose listings are always capacity-backed. The value
-belongs to the compute listing shape; a registry profile with a different schema
-identity is not required to carry it.
+the value its listing binding records. The value belongs to the compute listing
+shape; a registry profile with a different schema identity is not required to carry
+it.
 
 #### Scenario: A buyer queries for unbacked supply
 
@@ -285,7 +285,8 @@ identity is not required to carry it.
 #### Scenario: A bare-metal listing is published
 
 - **WHEN** a bare-metal storefront publishes a listing into the compute listing shape
-- **THEN** the listing carries an explicit capacity-backed value and is returned by an exact filter for backed supply
+- **THEN** the listing carries the backing its listing binding records, backed or
+  unbacked, and is returned by an exact filter for that backing alone
 
 ### Requirement: The filter grammar can compare exact decimal values
 

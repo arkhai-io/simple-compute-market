@@ -422,6 +422,15 @@ The two domains' delivery route surfaces differ — VM reports delivery through 
 status, bare metal through negotiation-keyed fulfillment routes — and unifying them is
 `kit-owned-listing-and-fulfillment-lifecycles`', which keeps this rule.
 
+Settled in implementation (Section 20): bare metal's stage resolution is a module function
+the fulfillment routes call from the domain's stage table, so they resolve the stage
+without building the settlement service, which builds the fulfillment service; the
+contact stage has no `verify` or `revalidate`, and the settlement service refuses a call
+reaching an entry with none as completing outside settlement, which the routes' refusal
+never lets a contact deal do. An introduction deal records no settlement reference, so
+its settle status addressed by obligation reference answers 404 "settlement not found",
+and addressed by negotiation ID the 409; no buyer makes the first call.
+
 Rejected: patching bare metal's fulfillment routes alone; unifying the route surfaces here;
 a requirement for a storefront composed without fulfillment, which production composition
 cannot build; deciding by `fulfils_through_capacity` with the invariant that a stage not
@@ -464,6 +473,16 @@ made, each a reason code with its pool or Physical Resource and detail — is ke
 Bare metal had logged every pool condition every cycle, previews included; VM logged its
 whole report again whenever any part changed, from a module-level dictionary that also
 served status.
+
+Settled in implementation (Section 17): an entry's keys say what it names — a pool-level
+entry carries `pool_id`, a member entry `pool_id` and `physical_resource_id` in both
+domains, and a site-level hold neither, which is how the kit tells a site held whole. The
+conversion of a cycle's reports into entries is each domain's, since the categories are;
+bare metal holds a pool held whole once per reason at the pool, with its problems, as VM
+does, and still reports a machine's own declaration problems inside it. Both cycles
+record after their run stage, so run-stage refusals reach the log, and a cycle failing
+before it records leaves the previous derivation. No scenario reads
+`publication_derivation`; its shape is application-integration evidence.
 
 Rejected: bare metal copying VM's rule in its own code (two implementations of one rule);
 once per projection generation (repeats standing conditions on unrelated changes);
@@ -545,6 +564,21 @@ unbacked pool's listings close on the next cycle.
   VM storefront. The maintainer runs the Helm part locally when that round is validated;
   if it has not run by closeout it is recorded as unrun.
 
+Settled in implementation (Section 22, and task 22.7 on the maintainer's word): the
+bare-metal buyer's `request-introduction` and `buy` had never run against a storefront and
+failed three ways: they passed no advertised option to the negotiation, recorded the
+publisher principals as a bare list the core run-log loader refuses, and decoded none of
+the provision terms the seller echoes. Both now do all three as VM's buyer does. The
+advertised option does not decide whether the seller accepts; it tells the buyer's
+opening policy that the option bargains an amount, without which the opening carries
+none and the deal closes at the seller's price. It is no guard against a substituted
+option: an Agreement's option ID must derive from its content and equal the selection's.
+The shared stages hold every stage to the shared state's fields, a driver's
+`seed_supply` returning what the stage records, so the source check sees who produced each
+handoff. The seller-mail sink names the development overlay's Mailpit; the base
+bare-metal stack runs none, and its seller mail goes undelivered, which never fails a
+reveal.
+
 #### 15. Goal 7 closes on single-site evidence
 
 The live two-seller scenario — two seller sites behind one storefront — needs one
@@ -579,7 +613,12 @@ opening's listing record and continues every round, acceptance and force-accept 
 them, against it, with the current record's status: the runtime builds acceptance from
 the record it resolved, so that record is the one continuation resolves. The dry-run
 verify request names only the negotiation, since the plan determines every term the
-request used to carry.
+request used to carry; an older caller sending the terms is refused 422. The opening's
+record is a table of its own written once per negotiation, not atomically with the
+opening's other writes: a thread with no recorded record, as one opened before the
+migration, continues against the current record. The record carries the current
+`status`, which preserves no check, since the runtime checks a listing live and unpaused
+only at the opening.
 
 Every other reader of a deal's settlement terms after acceptance reads the same plan:
 
@@ -655,7 +694,9 @@ re-derives the mandate and requires equality.
   a run whose escrow exists resumes, since it derives nothing.
 
 Removing the field is benign for an older buyer, which falls back to its own
-`build_escrow_terms` derivation when the reply carries none.
+`build_escrow_terms` derivation when the reply carries none. The legacy coercions go with
+it, so a run-log whose plan is in the pre-plan flat shape no longer loads; such a run has
+no funds at stake.
 
 Settled in implementation (Section 9): the plan check runs where funds move rather than by
 widening `AdvertisedPlanValidatorFn`, which is unchanged and still checks the selection
@@ -742,7 +783,13 @@ fixed order, wherever an operator's chain names one. Bare metal, whose guard a s
 omit, refuses such a proposal in pricing before any policy. Every domain prices the buyer's
 pinned opening, which acceptance settles, and reads from it whether the round bargains an
 amount, as `negotiation-protocol` already requires, so a counter naming another option
-cannot change what the seller negotiates from.
+cannot change what the seller negotiates from. VM's Alkahest entry funds the escrow its
+selected option names, so a buyer's escrow carrier beside a selection was never
+materialized: VM's seller stage now refuses an unpinned carrier at acceptance, as
+materializing it would, but does not compare a pinned carrier with the option's entry,
+so one naming another contract is accepted against the option's. The unpinned predicate
+exists twice, in `kit/policy` and `kit/alkahest`, since the mechanism-neutral policy kit
+may not import the Alkahest kit.
 
 Rejected: resolving an unpinned proposal to the listing's single entry on its chain, with
 or without kit enforcement, which keeps an inferred input in the settlement path; adding
@@ -860,7 +907,9 @@ so the field is wire-safe. Reachability is produced by one chain probe in `kit/a
   preflight reports its wallet, key, chains, address configuration, and release model,
   and nothing about publication; contact exchange reports its missing profiles or
   contact; Arkhai payments reports nothing; a buyer's preflights report nothing. Settled
-  in implementation (Section 5).
+  in implementation (Section 5). A limit follows: bare metal services its accepted
+  payment deals whatever `enabled` says, so a disabled Arkhai-payments section missing a
+  credential reports nothing.
 - **Status carries readiness.** No storefront's system status reported mechanism readiness,
   so the probe's results had nowhere to appear. Each storefront's status gains a
   mechanism-neutral `settlement` list, each composed mechanism's readiness as its safe
@@ -880,10 +929,19 @@ so the field is wire-safe. Reachability is produced by one chain probe in `kit/a
     or the probe's interval if shorter, so the seed follows the probe's first result
     rather than a whole interval later; and the cycle that gives up fails, so the loop
     controller records and logs it, its report naming a reason code or error type,
-    never an error's text.
+    never an error's text. A given-up seed's failure stays in loop status only until
+    its next cycle, which completes as a no-op, since the loop controller cannot end a
+    timer loop; the ERROR record and the step's `given_up` report remain.
   - A create refused only because a mechanism is unknown answers 503, naming the
     unreached mechanism and that the create can be retried once it is reached; a
-    configuration refusal answers 400 with its blocker codes, as today.
+    configuration refusal answers 400 with its blocker codes, as today. Settled in
+    implementation (Section 6): "only" means every unready mechanism the request uses is
+    unknown, a mechanism counting as used when a clause names it by ID or configuration
+    key, or, for Alkahest, when escrows are supplied, and only when the pool's backing
+    admits it; the refusal follows the resource and pool checks, so a create told to
+    retry publishes once the mechanism answers, and it names every chain the request
+    uses Alkahest on. A create with one mechanism unknown and another unready for its
+    configuration answers 400, while the seed waits.
   - The storefront CLI's `publish` and `listings` commands are clients of the running
     storefront's routes, through the typed listing client, which gains a list method,
     rather than building the storefront's services or opening its database in their own
@@ -971,7 +1029,11 @@ rule reaches the storefronts' own startup:
   startup for good; bounding a construction at startup instead would still hold the
   service back on its chain, which the rejected alternative below rules out. A
   construction failure the address configuration causes remains the configuration blocker
-  `alkahest.address_config_invalid`.
+  `alkahest.address_config_invalid`. Settled in round 2's triage (139 F1): with no client
+  built at start, a settle for a configured chain the probe has not reached yet answers
+  503 for a retry in all three storefronts, and one for a chain the storefront does not
+  configure keeps its refusal. The kit's `build_alkahest_clients` stays, documented as
+  unbounded and not for a storefront's startup, since other changes' designs name it.
 - The VM storefront chart gains a `startupProbe` mirroring the bare-metal chart's, so a
   slow start is not judged by the liveness probe alone.
 
@@ -1065,6 +1127,16 @@ repair it.
     refused with a signed 409 asking for a new request ID. It has only the unsigned-500
     half of the gap, so it answers the signed 500 and records nothing. Outcome recording
     for every authority is `redesign-authenticated-requests`'s subject.
+
+Settled in implementation (Section 10): a pool with both an invalid declaration and an
+unserved provider reports its declarations at its first refused start and the provider
+once they are repaired; neither refusal changes state. The API-credits service composes
+no pool handlers, so it gets no provider check. Corrected in round 1's triage (85 F15): a
+failure after a route has started its response is not caught — Starlette's
+`BaseHTTPMiddleware` ends the body stream and re-raises only after sending, so the
+middleware would sign, and the provisioning service record, a truncated body under the
+original status. No route streams today; one that does needs the middleware to detect
+that failure or refuse streamed responses.
 
 Rejected: tolerating the row on reads with a problems field, which adds a pool wire field
 and a non-importable export entry; mapping the error in the read routes only.

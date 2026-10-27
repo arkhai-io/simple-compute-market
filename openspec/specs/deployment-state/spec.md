@@ -332,11 +332,8 @@ The chart MAY refuse a release whose parts disagree with each other: internal-re
 trust whose authority or principals do not include the release's registry identity;
 provisioning trust, or a provisioning service peer for a site bound to the internal
 provisioning service, that does not include the release's provisioning principal; or a
-stated port that differs from the agent's. The chart MAY read the passed-through
-configuration to make a Kubernetes decision, such as waiting for a configured chain's
-RPC endpoint, or for the internal registry when the agent uses it, before the
-storefront starts. The chart MUST match every key it reads or writes as the
-storefront's loader matches it, without regard to case, and MUST refuse a
+stated port that differs from the agent's. The chart MUST match every key it reads or
+writes as the storefront's loader matches it, without regard to case, and MUST refuse a
 configuration that states one key in two spellings at any depth.
 
 A chart that runs several agents MUST key them by agent name, never list them. A
@@ -947,6 +944,59 @@ The provisioning chart MUST render each entry of `configFiles` verbatim into its
 #### Scenario: An operator file takes a reserved name
 - **WHEN** a release names an operator file `pool-definitions.yaml`, `config.yml`, `config-production.yml`, `..`, or a path rather than a file name
 - **THEN** rendering fails naming the refused name
+
+### Requirement: A deployment does not wait on a service's dependencies
+
+A chart MUST NOT hold a service back with init containers that wait for or validate its
+external dependencies, such as a registry, a chain, or a site, and a service MUST NOT
+wait for one, or refuse to start because one is unreachable, in its own startup. The
+service MUST start while a dependency is unreachable, report the dependency as degraded
+in its status while its process health check answers, and recover without a restart when
+the dependency answers. A chart whose service starts slowly MUST give it a startup probe,
+so that a slow start is not judged by its liveness probe.
+
+#### Scenario: The VM storefront starts before its registry and chain
+
+- **WHEN** the VM storefront starts while its registry, its site, and its chain are
+  unreachable
+- **THEN** it starts and answers its health check; its status reports the registry check
+  unreachable, the storefront degraded, and Alkahest unready with a reachability blocker;
+  its publication cycle holds the listings of the site whose projection it has not loaded
+  and closes none of them
+- **AND** Alkahest becomes ready once the chain answers, and publication reaches the
+  registry once it answers, both without a restart
+
+#### Scenario: A storefront starts before its site or service
+
+- **WHEN** the VM storefront starts while its provisioning service is unreachable, or the
+  API-credit storefront while its credits service is
+- **THEN** it starts and answers its health check, calls to that service fail retryably,
+  and they succeed once it answers, without a restart
+
+#### Scenario: A storefront chart renders
+
+- **WHEN** the VM or bare-metal storefront chart is rendered
+- **THEN** its Deployment carries no init container that waits on a dependency, and its
+  container carries a startup probe
+
+### Requirement: Helm test pods carry no workload selector labels
+
+A Helm test pod MUST NOT carry every selector label of any workload its release deploys,
+so that selecting a workload's pods by label never returns a test pod. A test pod MUST
+carry the release's instance label and `app.kubernetes.io/component: test`, and MUST NOT
+carry `app.kubernetes.io/name`.
+
+#### Scenario: A registry's pods are selected
+
+- **WHEN** an operator selects the registry Deployment's pods by its selector labels after
+  `helm test` has run
+- **THEN** only the registry's own pods are returned
+
+#### Scenario: Both topology releases are rendered
+
+- **WHEN** both local topology releases are rendered
+- **THEN** no Pod annotated `helm.sh/hook: test` carries all of any rendered Deployment's
+  `matchLabels` or any rendered Service's selector
 
 ## Evidence
 

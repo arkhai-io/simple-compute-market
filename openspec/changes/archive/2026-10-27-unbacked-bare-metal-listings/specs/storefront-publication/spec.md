@@ -257,6 +257,43 @@ again.
   each with a pool that states no region
 - **THEN** both report it under the site's `holds` with the reason `pool_region_missing`
 
+### Requirement: API-credit listing creation waits for or names an unreachable mechanism
+
+An API-credit storefront's configured seed listing MUST be created by a lifecycle loop
+step, never during startup: the step MUST wait while the credits service cannot be
+reached or a mechanism the seed's clauses use is unknown, MUST stop after logging once on
+a configuration failure, and MUST stop once the listing exists. A create request refused
+only because a mechanism's readiness is unknown MUST answer 503 naming the unreached
+mechanism, and a create refused for configuration MUST answer 400 with its blocker codes.
+The storefront CLI's listing commands MUST act through the running storefront's routes and
+MUST NOT build the storefront's services or open its database in their own process.
+
+#### Scenario: A storefront starts with its dependencies up
+
+- **WHEN** an API-credit storefront with a configured seed starts while its chain and its
+  credits service answer
+- **THEN** the seed listing is published once its chain's first probe succeeds
+
+#### Scenario: A storefront starts with its chain down
+
+- **WHEN** an API-credit storefront with a configured seed starts while its chain cannot
+  be reached, and the chain later answers
+- **THEN** no seed listing is created while the chain is unreachable, and it is published
+  after a probe reaches the chain, without a restart
+
+#### Scenario: An operator creates a listing before the chain is reached
+
+- **WHEN** an operator creates an API-credit listing whose only mechanism is Alkahest
+  before any probe has reached its chain
+- **THEN** the storefront answers 503 naming Alkahest's unreached chain, and the same
+  request succeeds once a probe reaches it
+
+#### Scenario: An operator publishes through the CLI
+
+- **WHEN** an operator runs the storefront CLI's publish command
+- **THEN** the listing is created by the running storefront through its create route, and
+  the command fails naming the storefront when it cannot be reached
+
 ## MODIFIED Requirements
 
 ### Requirement: A bare-metal listing sells one whole unit
@@ -496,43 +533,6 @@ naming the model, rather than refusing startup.
 - **WHEN** a VM operator's create request supplies `demands`
 - **THEN** the storefront refuses the request, since the conditions a listing advertises
   are derived from the storefront's own configuration, and creates no listing
-
-### Requirement: API-credit listing creation waits for or names an unreachable mechanism
-
-An API-credit storefront's configured seed listing MUST be created by a lifecycle loop
-step, never during startup: the step MUST wait while the credits service cannot be
-reached or a mechanism the seed's clauses use is unknown, MUST stop after logging once on
-a configuration failure, and MUST stop once the listing exists. A create request refused
-only because a mechanism's readiness is unknown MUST answer 503 naming the unreached
-mechanism, and a create refused for configuration MUST answer 400 with its blocker codes.
-The storefront CLI's listing commands MUST act through the running storefront's routes and
-MUST NOT build the storefront's services or open its database in their own process.
-
-#### Scenario: A storefront starts with its dependencies up
-
-- **WHEN** an API-credit storefront with a configured seed starts while its chain and its
-  credits service answer
-- **THEN** the seed listing is published once its chain's first probe succeeds
-
-#### Scenario: A storefront starts with its chain down
-
-- **WHEN** an API-credit storefront with a configured seed starts while its chain cannot
-  be reached, and the chain later answers
-- **THEN** no seed listing is created while the chain is unreachable, and it is published
-  after a probe reaches the chain, without a restart
-
-#### Scenario: An operator creates a listing before the chain is reached
-
-- **WHEN** an operator creates an API-credit listing whose only mechanism is Alkahest
-  before any probe has reached its chain
-- **THEN** the storefront answers 503 naming Alkahest's unreached chain, and the same
-  request succeeds once a probe reaches it
-
-#### Scenario: An operator publishes through the CLI
-
-- **WHEN** an operator runs the storefront CLI's publish command
-- **THEN** the listing is created by the running storefront through its create route, and
-  the command fails naming the storefront when it cannot be reached
 
 ### Requirement: Publication derives all ready settlement options
 
