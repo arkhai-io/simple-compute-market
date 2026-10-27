@@ -47,6 +47,7 @@ from market_storefront.domain_runtime import build_vm_storefront_domain, build_v
 from market_storefront.utils.sqlite_client import SQLiteClient
 from storefront_client.client import StorefrontClient, StorefrontClientError
 from market_storefront.publication_binding import prepare_vm_listing_binding
+from market_storefront.utils import config as storefront_config
 from tests.fake_site import FakeSite, site_capacity
 
 _TEST_SELLER_PRINCIPAL = Identity(
@@ -283,8 +284,6 @@ def _chain_answering(*, recipient: str = _SELLER_WALLET, amount: int = _AMOUNT):
 @pytest.fixture
 def anvil_book(monkeypatch):
     """The storefront's anvil chain, reading the development address book."""
-    from market_storefront.utils import config as storefront_config
-
     monkeypatch.setattr(
         storefront_config,
         "CHAINS",

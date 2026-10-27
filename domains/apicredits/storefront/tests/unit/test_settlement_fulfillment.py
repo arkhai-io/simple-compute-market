@@ -13,7 +13,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 from market_alkahest import RECIPIENT_RELEASE
+from apicredits_storefront import settlement_stages
 from apicredits_storefront.settlement_models import ApiCreditsSettleRequest
+from apicredits_storefront.settlement_stages import AlkahestSellerStage, SettlementRefusal
+from apicredits_storefront.utils import config as config_module
 from market_core import SettlementEvidence
 from market_identity import Ed25519Signer
 
@@ -758,9 +761,6 @@ async def test_a_listing_changed_since_acceptance_settles_against_the_committed_
     acceptance; settlement still verifies and registers the plan it committed,
     which re-deriving from the listing would no longer authorize."""
     db, neg_id = settled_db
-    from apicredits_storefront import settlement_stages
-    from apicredits_storefront.utils import config as config_module
-
     committed = (await db.load_negotiation_thread_row(negotiation_id=neg_id))[
         "settlement_plan"
     ]
@@ -1024,9 +1024,6 @@ async def test_a_chain_with_no_client_is_retryable_only_when_configured(
     configured chain it has not built yet is refused 503 for a retry, and one
     for a chain the storefront does not configure is refused outright (the
     route answers that ``ValueError`` 400)."""
-    from apicredits_storefront import settlement_stages
-    from apicredits_storefront.settlement_stages import AlkahestSellerStage, SettlementRefusal
-
     monkeypatch.setattr(settlement_stages, "CHAINS", configured)
     stage = AlkahestSellerStage(
         fulfils_through_capacity=True, release_models=frozenset({RECIPIENT_RELEASE})

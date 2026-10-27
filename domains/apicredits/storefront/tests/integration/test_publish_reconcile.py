@@ -230,9 +230,6 @@ async def test_supplied_escrows_are_judged_on_their_own_chains_beside_clauses(
 ):
     """An escrow a request supplies publishes only while Alkahest is ready on
     its own chain, whatever the clauses beside it compile."""
-    from apicredits_storefront.services import capacity_client as cc_module
-    from apicredits_storefront.services.listing_service import ListingService
-
     monkeypatch.setattr(sqlite_module, "_sqlite_client", db)
     monkeypatch.setattr(
         cc_module, "build_capacity_runtime", lambda factory: _QuotaRuntime({"svc-quota": 42})

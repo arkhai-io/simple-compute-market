@@ -4486,6 +4486,47 @@ Pre-closeout triage fixes (review 176), made against `1e1eb7f`:
   `test_buy_resume_cli.py`'s patches of `escrow_client` names, which nothing on its path
   reads, predate this change and fall under the same row.
 
+Closeout fix round (23.2), made against `32807f5`:
+
+- **The seven test imports 23.2 names are at module level.** None needed a reason to stay
+  local. `test_publish_reconcile.py` drops its two redundant local imports, since the
+  module already imports `capacity_client as cc_module` and `ListingService` at its top.
+  `test_settlement_fulfillment.py` imports `settlement_stages`, `AlkahestSellerStage`,
+  `SettlementRefusal`, and `utils.config as config_module` at its top. No cycle holds them
+  local: `settlement_stages`' module-level imports (`container`, whose project imports
+  are under `TYPE_CHECKING`; `listing_binding`; `capacity_client`; `issuance_evidence`;
+  `utils.config`) never import it back, and the config module's one import of the
+  settlement composition is inside a function. The unit file already loaded the config
+  module at import through `tests.integration.credit_negotiation`, and
+  `tests/unit/test_sync_negotiation.py` imports `settlement_stages` at module level
+  before any other storefront module. The suite run alone does not prove the absence
+  of a cycle here, since earlier integration modules load `settlement_stages` first.
+  `test_settle_controller.py` imports `market_storefront.utils.config as
+  storefront_config` beside its other `market_storefront` imports, one of which
+  (`middleware.admin_identity`) already loads it.
+- **Left as they were:** the older function-local imports in
+  `test_settlement_fulfillment.py` and `test_publish_reconcile.py` that this change did
+  not add. Several in the unit file now repeat a module-level binding under the same
+  name, such as `settlement_stages` and `config_module`. They are redundant but harmless,
+  and 23.2 owes only the imports the change added.
+- **Evidence.** `make test` passed every suite up to the Helm render, which could not
+  start for want of `helm` (exit 127), as in every session of this change. Those suites
+  include the API-credit storefront (241 passed, its `tests/unit` and `tests/integration`
+  with both API-credit files among them; `test_publish_reconcile.py` drives
+  `ListingService` and the reconciler directly, which is library integration), the VM
+  storefront's unit suite (1132 passed, 1 skipped) and its application-integration
+  suite (477 passed, all nine `test_settle_controller.py` tests among them), bare-metal
+  storefront 502, and e2e unit 169. `make check-change` (comment hygiene among its
+  checks) and `make check-packaging` passed. A pyflakes pass with the VM storefront's
+  ruff was denied in this session, and the repository's checks do not run ruff. No
+  version or lock moves.
+- **Fresh-context check of the fix diff:** no breach of the guidance; the moved names are
+  all used and no cycle or new import-time effect follows. Taken up: the cycle argument
+  above in place of "held under the real suites", the comment-hygiene disclosure, and
+  line widths.
+- **End-to-end:** no scenario exercises test-module imports. The fix commit's validation
+  runs the pipeline as the gate before closeout resumes at 23.2.
+
 ## 23. Closeout
 
 The closeout task of `openspec/README.md#plan-closeout-requirements`, in its order,
@@ -4531,6 +4572,8 @@ change to implementation.
       failure beside it (the API-credit unit file keeps many older function-local imports;
       only these, which the change added, are owed). Closeout resumes at 23.2 once that
       commit is validated.*
+      *Fix round: all seven moved to module level, none needing a reason to stay local
+      ("Closeout fix round (23.2)" above). Closeout confirms them and checks this task.*
 - [ ] 23.3 **Documentation compliance.** Re-check D1–D27 against
       `openspec/README.md#documentation-placement` and `AGENTS.md`'s "Documentation
       ownership": behaviour in the `spec.md` deltas, rationale in the architecture
