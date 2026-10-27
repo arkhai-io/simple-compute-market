@@ -623,6 +623,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "fastapi-utils" },
     { name = "pydantic" },
+    { name = "pyyaml" },
     { name = "sqlalchemy" },
     { name = "typing-inspect" },
 ]

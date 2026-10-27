@@ -19,25 +19,14 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
-from compute_provisioning_service.db.database import create_db_engine, run_migrations
 from vm_provisioning_adapter.db import Relay, RelayPortLease
 from vm_provisioning_adapter.services.relay_port_allocator import (
     RelayPortAllocator,
     RelayWindowExhaustedError,
 )
-
-@pytest.fixture
-def session_factory(tmp_path):
-    engine = create_db_engine(
-        f"sqlite:///{tmp_path / 'relay-ports.db'}", is_sqlite=True
-    )
-    run_migrations(engine)
-    try:
-        yield sessionmaker(bind=engine)
-    finally:
-        engine.dispose()
 
 
 @pytest.fixture
@@ -203,8 +192,6 @@ class TestAllocation:
     ):
         """Uniqueness is pinned where it is enforced, not in the allocator that
         could be rewritten around it."""
-        from sqlalchemy.exc import IntegrityError
-
         _relay(session_factory)
         lease = allocator.allocate(
             relay_id="site-a", owner_kind="fulfillment", owner_id="cr-1"

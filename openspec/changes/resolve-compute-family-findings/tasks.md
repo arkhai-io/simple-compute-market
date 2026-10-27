@@ -657,7 +657,7 @@ Shared with the branch: the VM adapter's `pyproject.toml`. The branch edits its
 version line and the `arkhai-compute-provisioning` floor. This section edits
 the `dev` group, many lines below. Also locks.
 
-- [ ] 5.1 Declare the partial unique index `uq_relay_port_leases_active_owner` on
+- [x] 5.1 Declare the partial unique index `uq_relay_port_leases_active_owner` on
   VM's `relay_port_leases` model, so that a schema built from the models has it.
   Service migration `20260901_001` still creates it where it is absent (D20).
   - Library integration (adapter): over the VM schema fixture, two retries
@@ -665,7 +665,40 @@ the `dev` group, many lines below. Also locks.
   - Persistence integration (service): a database migrated from before
     `20260901_001` gains the index. A fresh database, created from the models,
     migrates without error.
-- [ ] 5.2 Move the suites listed above into the VM adapter, over a VM schema
+
+  `RelayPortLease.__table_args__` declares the index (`unique`, with
+  `sqlite_where` and `postgresql_where` on `released_at IS NULL`), its comment
+  carrying the rationale the migration's comment gives; the migration's comment
+  now says the model declares it too. Tests:
+  - Library integration, VM adapter, `test_relay_port_leases.py`
+    `TestOneActiveLeasePerOwner`, over the VM schema fixture (VM's models
+    alone, so the declared index is the only one): two sessions each write a
+    lease for one owner on different ports before either commits, as two
+    retries that each found no active lease would; the second commit is refused
+    and the owner holds one port. A released lease does not hold its owner. The
+    rows are written directly, so this shows the database's refusal, not the
+    allocator taking a port twice for one owner, which no test exercises.
+  - Persistence integration, service, new `test_relay_migrations.py`
+    `TestTheActiveOwnerIndex`, over file-backed SQLite:
+    - `test_a_lease_table_lacking_the_index_gains_it`: a stored
+      `relay_port_leases` table in the shape `20260901_001` creates (with
+      `host_name`, before the host-identity rename), without the index and
+      with no migration history, gains the partial index from
+      `run_migrations` and refuses a second active lease for one owner. This
+      is a constructed state: `20260901_001` created the table and the index
+      together, so no recorded history holds one without the other, and a
+      database from before `20260901_001` has no lease table at all, which
+      schema creation now makes with the index.
+    - `test_a_fresh_database_created_from_the_models_migrates`: a fresh
+      database migrates twice without error, the index and its refusal in
+      place. The migration's own `IF NOT EXISTS` statement would also create
+      the index, so this does not by itself show the model's declaration; the
+      adapter's tests do.
+
+    Both pass `check_schema_version`.
+
+  All pass.
+- [x] 5.2 Move the suites listed above into the VM adapter, over a VM schema
   fixture built from VM's models. `TestTheDigestGate` stays in the service,
   since it tests the service's importer (D20).
   Verify:
@@ -673,13 +706,59 @@ the `dev` group, many lines below. Also locks.
     `domains/vms/provisioning/adapter`, whose target runs both `unit/` and
     `integration/`;
   - the service suite no longer contains them.
-- [ ] 5.3 Confirm that `database.py` imports VM's metadata at module level and
+
+  Moved with `git mv`: `test_vm_codec.py` to the adapter's `tests/unit/`, and
+  `test_relay_administration.py`, `test_relay_port_allocator.py`,
+  `test_relay_port_leases.py`, and `test_ansible_pool_config_handler.py` to a
+  new `tests/integration/` package. Its `conftest.py` builds the VM schema
+  fixture: the resource-pool tables, which `ansible_pool_configs` references,
+  then VM's metadata, on file-backed SQLite with a connection per session; no
+  moved suite imports the provisioning service any longer. `pyyaml` joins the
+  adapter's runtime `dependencies`, not its `dev` group as planned: besides the
+  codec suite, the adapter's own `services/relay_definitions.py` imports
+  `yaml`, and only `arkhai-kit-resource-pools` had been bringing it in.
+
+  Plan correction: besides `TestTheDigestGate`, `test_relay_port_leases.py`'s
+  `TestMigrations` also tests the service's migrations (the constraints and
+  columns `run_migrations` leaves, the definition-document digest table, an
+  idempotent rerun), not VM's models, so it stays in the service by D20's own
+  reason. They are the service's new `test_definition_document_digest.py`
+  (`TestTheDigestGate`, unchanged but for its importer import, now at module
+  level) and `test_relay_migrations.py` (`TestMigrations`, beside 5.1's
+  persistence tests).
+
+  Edits in the moved files: the schema fixture in place of `run_migrations`;
+  function-local `yaml`, `datetime`, and `IntegrityError` imports hoisted to
+  module level; and docstrings that narrated an earlier design reworded to the
+  current one. `test_relays_api.py`'s docstring, which cited the relay suite at
+  a path it never had, now names the adapter's. `make test` in the adapter: 256
+  passed (55 before, plus 92 codec and 107 relay and pool-configuration tests
+  moved, plus 2 new); the service suite no longer contains them (unit 662 →
+  570, application integration 539 → 434, which keeps the 11 retained tests and
+  the 2 new persistence tests). The physical-provisioning spec's Evidence
+  section still names the old paths (its lines on relay administration and on
+  the Ansible pool configuration), and credits definition-document
+  reconciliation to the relay suite, which no longer holds
+  `TestTheDigestGate`; closeout rewrites them (27.9), since until then they
+  are broken citations.
+
+  The moved suites are D20's list. Other suites that test VM-adapter code from
+  the service's tree stay there, as D20 does not name them:
+  `unit/services/test_vm_operations_service.py`,
+  `test_host_operations_service.py`, `test_legacy_vm_fulfillment_backfill.py`,
+  `test_vm_inventory_views.py` (which the adapter's `make test` also runs), and
+  `unit/models/test_jobs_models.py`.
+- [x] 5.3 Confirm that `database.py` imports VM's metadata at module level and
   that no comment in it or in `db/migrations.py` still says the module imports
   without the adapters, or that the VM adapter is optional to it (D6). No code
   change is expected; if such a comment is found, rewrite it to say that the
   service's database holds VM's tables, so its metadata and migration history
   name them. The rationale is promoted at closeout (27.9).
-- [ ] 5.4 **Verification checkpoint.**
+
+  Confirmed: `database.py` imports `vm_provisioning_adapter.db.Base` at module
+  level, and a search of `db/` finds no comment saying the module imports
+  without the adapters or that the VM adapter is optional. No change.
+- [x] 5.4 **Verification checkpoint.**
   - Library and persistence integration: 5.1.
   - Run `make test` in `domains/vms/provisioning/adapter` and
     `provisioning/compute/service`.
@@ -688,6 +767,26 @@ the `dev` group, many lines below. Also locks.
   End-to-end: the VM lane's deals take relay ports through the composed service
   on a freshly migrated database (`e2e_deal`, `e2e_deal_buyer_cli`). No scenario
   is owed.
+
+  `make test`: VM adapter 256 passed (unit and library integration);
+  `provisioning/compute/service` 570 unit and 434 integration. No version bump:
+  the VM adapter's model gains an index, which the service's migration already
+  creates on every migrated database, and the adapter took its one bump in
+  section 2; `make lock` added `pyyaml` to the adapter's lock. The full `make
+  test` passes; `make check-packaging` passes; `make check-change` passes but
+  for the closeout citation section 1 notes. The end-to-end statement stands.
+
+  Handoff: the fresh-context check found `pyyaml` to be a runtime import, the
+  index tests' docstrings and notes claiming more than they show, and the
+  migration comment describing a history no database has; each was
+  corrected as recorded above. It also found a latent defect this section
+  leaves, because it predates it and no task covers it:
+  `RelayPortAllocator.allocate_in_session` retries on every `IntegrityError`,
+  so if a concurrent retry for the same owner commits first, the owner index's
+  refusal is retried port by port and ends as a false
+  `RelayWindowExhaustedError`. It needs a design decision (re-read the owner's
+  lease, or refuse as a conflict) and belongs to whichever change next touches
+  relay allocation.
 
 ## 6. `kit/policy` carries no training tooling, and its refusals name the right things
 

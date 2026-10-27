@@ -478,7 +478,10 @@ def _migrate_relay_reachable_hosts(engine: Engine) -> None:
         # port. Partial rather than plain: release is soft, so a released lease
         # keeps its row and an unconditional constraint would stop an owner
         # ever holding a second lease across its whole history. Both SQLite
-        # (3.8+) and PostgreSQL support the partial form.
+        # (3.8+) and PostgreSQL support the partial form. VM's model declares
+        # the same index, so a schema created from the models already has it
+        # and this statement changes nothing there; it creates the index only on
+        # a lease table that lacks it.
         connection.execute(text(
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_relay_port_leases_active_owner "
             "ON relay_port_leases (owner_kind, owner_id) "

@@ -23,6 +23,8 @@ dependencies = [
     "typing-inspect>=0.9.0",
     "sqlalchemy>=2.0",
     "cryptography>=42.0",
+    # Relay definition documents are YAML.
+    "pyyaml>=6.0",
 ]
 
 [build-system]
