@@ -4492,16 +4492,45 @@ The closeout task of `openspec/README.md#plan-closeout-requirements`, in its ord
 replacing the placeholder 2.1. It edits documentation only; a part needing code returns the
 change to implementation.
 
-- [ ] 23.1 **Comment hygiene.** Confirm `make check-comment-hygiene` passes, and read the
+- [x] 23.1 **Comment hygiene.** Confirm `make check-comment-hygiene` passes, and read the
       comments and docstrings the change added (the diff from its branch point on `dev`)
       for fuzzier provenance: none names this change, a review, a round, or a migration,
       and none describes the removed preflights, init containers, `accepted_escrow_terms`,
       or unbacked refusal as history.
+      *Closeout: `make check-comment-hygiene` passed at `c6e2108`. The added comment and
+      string lines of the diff from `73d3760` (`dev`'s merge base) were searched for
+      provenance wording (previously, formerly, moved, removed, review, round, migration,
+      legacy, preflight, init container, `accepted_escrow_terms`): the matches state current
+      behaviour — the chart's "no init container waits" rule, the API-credit startup
+      refusing retired settings, operator error text naming a removed setting, and the
+      change-workflow tests' own "round" vocabulary. Nothing to rewrite.*
 - [ ] 23.2 **Import placement.** Confirm every import each section added or touched is at
       module level, or has its reason beside it (a verified cycle or a deliberate lazy
       load) — in particular `compute_provisioning`'s and the bare-metal adapter's contracts
       imports, each storefront's chain-probe imports, and the e2e hold helpers. One that
       should move returns the change to implementation.
+      *Closeout (returns the change to implementation): every indented import the diff from
+      `73d3760` adds was read. The production ones are under `TYPE_CHECKING` or carry their
+      reason (the API-credit and VM storefront CLIs import their config module only after
+      `--config` runs). Seven import statements, all in tests the change added, are function-local with no
+      reason beside them:*
+      - *`domains/apicredits/storefront/tests/integration/test_publish_reconcile.py`,
+        `test_supplied_escrows_are_judged_on_their_own_chains_beside_clauses`:
+        `capacity_client as cc_module` and `ListingService`, both already imported at the
+        module's top under the same names, so the local imports are redundant;*
+      - *`domains/apicredits/storefront/tests/unit/test_settlement_fulfillment.py`,
+        `test_a_listing_changed_since_acceptance_settles_against_the_committed_plan`:
+        `settlement_stages` and `utils.config as config_module`; and
+        `test_a_chain_with_no_client_is_retryable_only_when_configured`:
+        `settlement_stages`, `AlkahestSellerStage`, and `SettlementRefusal`;*
+      - *`domains/vms/storefront/tests/integration/test_settle_controller.py`, fixture
+        `anvil_book`: `market_storefront.utils.config as storefront_config`, where the
+        module already imports `market_storefront` modules at its top and fifteen VM test
+        modules import the config module at module level.*
+      *Fix round: move each to module level, or, where the move fails, write the real
+      failure beside it (the API-credit unit file keeps many older function-local imports;
+      only these, which the change added, are owed). Closeout resumes at 23.2 once that
+      commit is validated.*
 - [ ] 23.3 **Documentation compliance.** Re-check D1–D27 against
       `openspec/README.md#documentation-placement` and `AGENTS.md`'s "Documentation
       ownership": behaviour in the `spec.md` deltas, rationale in the architecture
