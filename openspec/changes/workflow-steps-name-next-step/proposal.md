@@ -55,8 +55,12 @@ step rather than inferring one.
 - A change's records are converted to the new format when its branch first carries
   the new code, by a committed `convert` command, which rewrites the log's lines in
   place, appends one line recording the conversion, and the owner's direction to
-  where the change stands, which it proposes and the owner confirms, all in one
-  replacement of the log; it refuses a change with a triage in progress. Every new log line carries a format marker; the computation reads only the
+  where the change stands, which it proposes from the latest routing decision and
+  the owner confirms, attesting each triage no marked outcome names, all in one
+  replacement of the log made under the log's lock; it refuses a change with a
+  triage in progress. The log's readers and appenders reopen the log when the file
+  they locked was replaced, so no line is lost to the replacement. Every new log
+  line carries a format marker; the computation reads only the
   new format, detects a change not yet converted by a line without the marker, or
   by records with no log, and names the owner with the command for it. A later
   change removes the command and the detection once every change not yet cleaned up

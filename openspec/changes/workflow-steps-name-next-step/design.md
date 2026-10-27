@@ -392,19 +392,37 @@ workspace, in three parts:
   D5 decision line `by: owner`, which the log's writer checks as it checks every
   direction. The command proposes the direction, and the owner, whom the
   computation named, confirms it or gives `--next` in its place. It proposes from
-  the latest triage file's token as that token leads in its phase today —
-  `Advance` and a `## Gate` beginning `Passed` the phase's advancing exit,
-  `Another round` the review of the same kind, `Returned` the step a recorded
-  confirmation directed. A direction checks no exit guard, so where the edge from
-  that triage's node to the proposed node carries an exit guard not met, evaluated
-  by the table's own guards, the command proposes the guard's remedy carrying the
-  node as its target: `{"step": "validate", "target": {"step": "round"}}` for a
-  round's fix commit not yet validated. Where the log holds a step's run after the
-  latest triage's, the token no longer states the present: the command proposes
-  nothing, names those runs, and requires `--next`. A return not yet confirmed,
-  its run rewritten in place, is proposed as the direction to its target that
-  resolves that run's seq; the owner declining it writes no direction, and the
-  return waits for the owner as any return does.
+  the latest routing decision after the latest triage. Where a decision line
+  carrying `next` follows that triage and no run of its target is logged after it,
+  that decision is the route the change is on (D5), and the command proposes its
+  converted target — a recorded confirmation of a return among them; where an
+  unwaivable entry guard of a node it names is no longer met, it proposes nothing,
+  shows the triage and the decision, and requires `--next` (43 F3). Otherwise it
+  proposes from the latest triage file's token as that token leads in its phase
+  today — `Advance` and a `## Gate` beginning `Passed` the phase's advancing exit,
+  `Another round` the review of the same kind. A direction checks no exit guard,
+  so where the edge from that triage's node to the proposed node carries an exit
+  guard not met, evaluated by the table's own guards, the command proposes the
+  guard's remedy carrying the node as its target:
+  `{"step": "validate", "target": {"step": "round"}}` for a round's fix commit not
+  yet validated. Where the log holds a step's run after the latest triage's, the
+  token no longer states the present: the command proposes nothing, names those
+  runs, and requires `--next`. A return not yet confirmed, its run rewritten in
+  place, is proposed as the direction to its target that resolves that run's seq;
+  the owner declining it writes no direction, and the return waits for the owner
+  as any return does.
+
+  The confirmation also attests the conversion line's `triaged`. Before the owner
+  confirms, the command lists every review it will name there, each with the first
+  line of the `## Next` or `## Gate` it read, and flags those no triage outcome
+  carrying the marker names. A triage under the new skill whose interactive session
+  closed after writing `## Next` and before `record` leaves no line in the log, and
+  its prose may begin with an older token's words, so the command cannot tell it
+  from a finished older triage; only the owner knows whether a session ended
+  without recording (D8). Confirming attests that each flagged triage finished; the
+  owner declining leaves the log as it was, for the triage to be finished with
+  `record`, whose marked outcome then names its review, and the command to be run
+  again (43 F1).
 
 ```json
 {"seq": 46, "step": "convert", "outcome": "converted", "format": 2,
@@ -425,13 +443,25 @@ names no review, so every older triage would gain an appended line, placed after
 the runs its exit already led to, and the computation would name those runs again
 (30 F1). The conversion and the direction come last, and state the present.
 
-The command writes the converted log — the rewritten lines, the conversion line,
-and the direction — to a temporary file beside the log, checks that the log is
-unchanged since it read it, starting over if it is not, and renames the file over
-the log; a change with records and no log gains its log the same way. An
-interrupted conversion so leaves either the older log, still detected, or the
-converted one whole, never marked lines without their conversion line, and a retry
-is running the command again (36 F3). A rerun after a line without the marker was
+The command takes the log's exclusive lock before it reads the log and holds it
+until after it has written the converted log — the rewritten lines, the
+conversion line, and the direction — to a temporary file beside the log and
+renamed that file over the log; a change with records and no log gains its log
+the same way. An interrupted conversion so leaves either the older log, still
+detected, or the converted one whole, never marked lines without their conversion
+line, and a retry is running the command again (36 F3).
+
+A lock is held on a file, not on its name, so a process that opened the log
+before the rename and waited for the lock would otherwise take it on the replaced
+file and append there, where no reader looks. Every reader and appender of the
+log therefore, after taking its lock, compares the file it locked with the file
+the log's name now holds, by inode, and opens and locks the log again when they
+differ, so a line appended while the log is converted lands in the converted log
+(43 F2). The older tooling does not make that check, so the command is run when
+the computation names it, between steps: a change takes the new code by a merge
+within a step, before its round's validation and review start, and the wrapper of
+the run that converts appends its own line after its session ends, opening the
+log by name after the rename. A rerun after a line without the marker was
 appended — the converting run's own last line, which the wrapper that started it
 appends unmarked — converts again: it rewrites what is unmarked and states the
 present again, and, a run then following the latest triage, requires `--next`.
@@ -492,6 +522,18 @@ Rejected:
 - *A completion marker written after the conversion line* (review 36 F3's
   alternative): a second check on every route, for a state the single replacement
   never leaves.
+- *A separate lock file beside the log*, taken by every reader, appender, and the
+  converter (review 43 F2's alternative): protects no process the inode check does
+  not, since the older tooling knows neither, and leaves a second file in
+  `reviews/` for archive cleanup's history copy to carry.
+- *The log rewritten in place under its lock*, so every process, older ones
+  included, appends to the one file: an interruption partway through the write
+  leaves a truncated log, which needs a journal and a recovery path (36 F3).
+- *Conversion only while nothing else runs*: nothing can check it, since no run
+  records its start (D8).
+- *A separate refusal of every triage whose completion is not established*, unless
+  attested by a flag (review 43 F1's suggestion): the owner already confirms the
+  conversion, and the attestation is part of what they confirm.
 
 ### D8 — Recovery
 
@@ -570,8 +612,9 @@ Two rounds:
   entry guards and the writer's refusals on them, validation's carried target and
   a direction's nested one, the terminal `done`, the result's `target` and the
   undeclared-exit rule, routing on outcomes, and the `triaged` rule, the file-time
-  rules and the older readings deleted, with the log's format marker, the
-  `convert` command, and the detection of a change not yet converted (D7),
+  rules and the older readings deleted, with the log's format marker, its readers'
+  and appenders' check of the file they locked, the `convert` command, and the
+  detection of a change not yet converted (D7),
   run on this change's records, since the computation it lands reads only the new
   format; then every skill's handoff and interactive ending, triage's prose
   `## Next`, the entry checks asking the computation and the pre-closeout review's
@@ -597,10 +640,15 @@ within round 2.
   stops at the owner until its records are converted, which the owner does by one
   command when the computation names it.
 - Where a converted change stands is the owner's direction at conversion, not a
-  reconstruction: the command's proposal folds in an unmet exit guard's remedy and
-  proposes nothing after a later run, but a wrong direction routes the change
-  wrongly, which the owner corrects by another. The older history keeps its own
-  lines, readable as they were written.
+  reconstruction: the command's proposal follows a later unused direction, folds in
+  an unmet exit guard's remedy, and proposes nothing after a later run, but a wrong
+  direction routes the change wrongly, which the owner corrects by another. The
+  older history keeps its own lines, readable as they were written. Likewise the
+  conversion's `triaged` rests on the owner's attestation for every triage no
+  marked outcome names.
+- A process of the older tooling that opened the log just before the conversion's
+  rename and waited for its lock appends to the replaced file, and its line is
+  lost; the command is run between steps, when no such process runs.
 - The command and the detection outlive this change until every change not yet
   cleaned up has taken the new code; their removal is a later change's.
 - A direction may name a node that makes no sense from where the change stands;

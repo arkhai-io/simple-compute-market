@@ -467,12 +467,19 @@ MUST refuse a change with a triage file in progress by the older reading — wit
 neither `## Next` nor `## Gate`, and no marked triage outcome naming its review —
 naming the review. It MUST rewrite the log's lines in place, each keeping its seq,
 so every decision still names the run it named; MUST append one conversion line
-naming, as `triaged`, every review with a triage file, and no exit; MUST append
-after it the owner's direction to the node the change stands at, which the
-owner confirms or gives, and which the command proposes with the remedy of any
-unmet exit guard on the edge it follows, and does not propose when a step's run
-follows the latest triage; and MUST replace the log in one step, so that an
-interrupted conversion leaves the older log. Once the owner confirms
+naming, as `triaged`, every review with a triage file, and no exit, naming a review
+no marked triage outcome names only once the owner, shown the heading line its
+triage file was read from, confirms that triage finished; MUST append after it the
+owner's direction to the node the change stands at, which the owner confirms or
+gives, and which the command proposes from the latest routing decision after the
+latest triage — a later direction whose target has not run, or else the triage's
+token — with the remedy of any unmet exit guard on the edge it follows, and does
+not propose when a step's run follows the latest triage or a later direction's
+target can no longer be entered; MUST hold the log's lock from its read through
+replacing the log in one step, so that an interrupted conversion leaves the older
+log; and every reader and appender of the log MUST, once it holds its lock, open
+the log again when the file it locked is no longer the one the log's name holds,
+so a line appended while the log is converted is kept. Once the owner confirms
 a return, the returned review MUST NOT govern what follows, so the work the return
 leads to is implemented, validated, and reviewed afresh, as a round of its own even
 where it reworks a section the returned round implemented; a return the owner
@@ -626,6 +633,28 @@ routes on a triage file's `## Next`.
   and a planning run is logged after that triage's run
 - **THEN** the conversion proposes nothing, names the planning run, and writes
   nothing until the owner gives the node with `--next`
+
+#### Scenario: A conversion follows a later direction
+
+- **WHEN** a change's latest triage file is a design review's, recording
+  `Another round`, and the owner's later decision directing planning is logged with
+  no planning run after it
+- **THEN** the conversion proposes `{"step": "plan"}`, not another design review
+
+#### Scenario: A conversion's triage is not attested
+
+- **WHEN** a change's latest triage file has `## Next` written as prose and no
+  triage outcome names its review, because the triage's interactive session closed
+  before `record`, and the owner declines the conversion that lists it
+- **THEN** the log is unchanged; once the triage's outcome is recorded with
+  `record`, running the conversion again names the review by that outcome
+
+#### Scenario: An append waits on the conversion
+
+- **WHEN** a step's run opens the log to append its outcome while the conversion
+  holds the log's lock, and takes the lock after the converted log has replaced it
+- **THEN** the run finds the file it locked replaced, opens the log again, and its
+  line is appended to the converted log
 
 #### Scenario: A conversion is interrupted
 
