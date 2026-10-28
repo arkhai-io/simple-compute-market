@@ -3160,15 +3160,99 @@ Files:
   - `scenarios/vms/{conftest.py,compute_deal_driver.py,test_full_deal_buyer_cli.py,test_buy_oneshot_buyer_cli.py,test_listing_shapes.py,test_non_erc20_settlement.py}`;
   - `scenarios/bare_metal/{conftest.py,compute_deal_driver.py,test_bare_metal_payment_deal.py}`.
 
-- [ ] 21.1 The harness builds the family client with VM's mount and bare
+- [x] 21.1 The harness builds the family client with VM's mount and bare
   metal's mount, the latter from `arkhai_bare_metal.provisioning_routes`'
   values. The callers read the typed models' attributes (D14).
   Verify:
   - `make -C e2e-tests test-unit` passes, including the stage-set check;
   - no e2e source builds a mock-rule path or operation by hand.
-- [ ] 21.2 **Verification checkpoint.**
+
+  `ProvisioningTestClient` builds a `SyncComputeProvisioningClient`, signing
+  in the `admin` role, and over it two `SyncMockRuleClient`s:
+  - `vm_rules`, at `VM_MOCK_ROUTE_MOUNT`;
+  - `bare_metal_rules`, at a `MockRouteMount` built from
+    `arkhai_bare_metal.provisioning_routes`' two values.
+
+  Its hand-written rule and evaluate-job methods, both domains', are gone,
+  and so are the `_post` and `_delete` helpers that only they used. The
+  shared `/test/jobs/*` summary, wait, and drain are the family's routes.
+  The harness still signs them itself, against the family's own table, since
+  each long poll needs a timeout longer than the server's wait. The harness
+  also takes an optional `transport`, passed to both its HTTP clients, as
+  the test seam.
+
+  A job's evaluate-job parameters are its domain's. VM's body is
+  `vm_job_evaluation(host, vm_action=…)` in VM's driver module, and bare
+  metal's driver states its own.
+
+  Callers:
+  - the VM and bare-metal drivers, `test_full_deal_buyer_cli.py`,
+    `test_buy_oneshot_buyer_cli.py`, `test_listing_shapes.py`,
+    `test_non_erc20_settlement.py`, and `test_bare_metal_payment_deal.py`
+    add `MockRuleCreate` models through `vm_rules` or `bare_metal_rules`;
+  - the shared stage 08c and `test_non_erc20_settlement.py` read
+    `MockJobEvaluation`'s attributes, and the drivers'
+    `evaluate_create_job` returns that model;
+  - `delete_mock_rules_if_present` takes one domain's rules client, and
+    bare metal's driver uses it in place of its own try/except loops.
+
+  The VM conftest's `storefront_service_client` docstring now names the one
+  callback it drives, capacity released, which section 8's handoff left for
+  this section, and no longer recounts what scenarios once did.
+
+  Results:
+  - Unit (`e2e-tests/tests/unit/test_provisioning_test_client.py`, new):
+    - The harness is built over an `httpx.MockTransport` that records each
+      request and refuses it. Each of the five operations of `vm_rules` and
+      of `bare_metal_rules` reaches its own method and path, under `/test`
+      and `/test/bare-metal`, with the `admin` role header.
+    - A second test pins each mount's operation prefix, which the paths do
+      not show: `provisioning_test` and `provisioning_test_bare_metal`.
+    - The test parses no response, so receiving the typed models is the
+      family client's own tests' to show (`test_mock_rules.py`). The
+      scenarios show it once the lanes run them.
+    - Pass, 3 cases.
+  - `make -C e2e-tests test-unit`: 169 passed before the new file, 172 with
+    it, the stage-set check included.
+  - `uv run pytest --collect-only tests/e2e` imports every scenario module,
+    driver, and conftest: 210 collected, no errors.
+  - A search of the e2e sources finds no caller building a mock-rule or
+    evaluate-job path, no `provisioning_test` operation name, and none of
+    the removed method names. The paths and names appear only as the new
+    unit test's expected values.
+  - `scenarios/bare_metal/conftest.py`, named in the Files list, is
+    unchanged: its constructor call fits the new signature.
+
+  No scenario ran: the edited drivers and scenarios are evidence only once
+  the lanes run them.
+
+  Handoff, from the fresh-context check. It found no behaviour change in the
+  scenarios:
+  - The family client drops unset fields as the old harness did, so the
+    request bodies, paths, operations, and timeouts are the same.
+  - The rule calls now raise the family client's errors. No caller catches
+    the harness's own error, which now covers only `/test/jobs/*`.
+
+  Fixed:
+  - Two notes overstated what was shown: the search result, and the unit
+    test's reach. Both are restated above, and the operation prefixes are
+    now pinned.
+  - The harness's route table comment was wrong. It now resolves against
+    the family's table.
+  - `_signed` had a dead body parameter. Removed.
+  - The error docstring is narrowed to `/test/jobs/*`.
+  - `vm_job_evaluation` moved from the shared harness to VM's driver.
+  - A stale citation, which named a nonexistent `test_programmable_mock.py`
+    in `test_full_deal_buyer_cli.py`, now names
+    `tests/integration/test_system_api.py`.
+- [x] 21.2 **Verification checkpoint.**
   - Run `make -C e2e-tests test-unit`, `make lock`, `make check-packaging`, and
     `make check-comment-hygiene`.
+
+  `make lock` changed nothing: `e2e-tests` already declared the family
+  client (`>=0.9.0`). `make check-packaging` and `make check-comment-hygiene`
+  pass. Full `make test` passes, run before the fresh-context fixes. No
+  bump: `arkhai-e2e-tests` is not published (`RELEASING.md`).
 
   End-to-end: every scenario that installs mock rules is the evidence for this
   section:

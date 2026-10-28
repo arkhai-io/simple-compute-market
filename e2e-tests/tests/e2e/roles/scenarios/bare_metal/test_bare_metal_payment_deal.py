@@ -19,6 +19,7 @@ from typing import Any
 import pytest
 from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTION
 from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
+from compute_provisioning_contracts import MockRuleCreate
 from core_buyer.profile_service import BuyerProfileService
 from core_buyer.run_log import read_run, read_run_identity
 from market_arkhai_payments import (
@@ -234,9 +235,11 @@ def payment_supply(
             (driver.create_rule_id, NODE_GRANT_ACCESS_ACTION),
             (driver.teardown_rule_id, NODE_RECLAIM_ACCESS_ACTION),
         ):
-            provisioning_test_client.add_bare_metal_mock_rule(
-                rule_id=rule_id, match={"action": action, "host_id": driver.host_id},
-                pause_before_result=False,
+            provisioning_test_client.bare_metal_rules.add_rule(
+                MockRuleCreate(
+                    rule_id=rule_id, match={"action": action, "host_id": driver.host_id},
+                    pause_before_result=False,
+                )
             )
         preview = dry_run_storefront(storefront_admin_client, "publication")
         assert any(
@@ -278,9 +281,9 @@ def payment_supply(
                 # Deleting a rule that is already gone reports it not deleted;
                 # only a real failure raises, and it is reported like any step's.
                 ("remove the access-grant mock rule", lambda: provisioning_test_client
-                 .delete_bare_metal_mock_rule(driver.create_rule_id)),
+                 .bare_metal_rules.delete_rule(driver.create_rule_id)),
                 ("remove the access-reclaim mock rule", lambda: provisioning_test_client
-                 .delete_bare_metal_mock_rule(driver.teardown_rule_id)),
+                 .bare_metal_rules.delete_rule(driver.teardown_rule_id)),
                 ("drain provisioning", lambda: provisioning_test_client.drain(timeout=30)),
                 ("remove the pool override", lambda: overrides.delete_pool_override(
                     driver.site_id, driver.pool_id, "bare_metal",

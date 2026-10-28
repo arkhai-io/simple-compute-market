@@ -264,18 +264,20 @@ def wait_for_stage_event(
 # Provisioning mock rules and fulfillment convergence
 # ---------------------------------------------------------------------------
 
-def delete_mock_rules_if_present(provisioning_test_client, *rule_ids: str) -> None:
+def delete_mock_rules_if_present(rules, *rule_ids: str) -> None:
     """Best-effort cleanup for stateful provisioning mock rules.
 
-    The mock-rule service preserves insertion order. When multiple e2e
-    scenarios run in one pytest process against one stack, a stale broad
-    create rule can match before the rule that the current scenario just
-    armed. Delete known scenario rule ids before arming a new rule so each
-    scenario controls its own evaluation order.
+    ``rules`` is one domain's mock-rule client, as the provisioning test
+    client offers it (``vm_rules``, ``bare_metal_rules``). The mock-rule
+    service preserves insertion order. When multiple e2e scenarios run in one
+    pytest process against one stack, a stale broad create rule can match
+    before the rule that the current scenario just armed. Delete known
+    scenario rule ids before arming a new rule so each scenario controls its
+    own evaluation order.
     """
     for rule_id in rule_ids:
         try:
-            provisioning_test_client.delete_mock_rule(rule_id)
+            rules.delete_rule(rule_id)
         except Exception as exc:
             log.debug("Could not delete mock rule %s: %s", rule_id, exc)
 

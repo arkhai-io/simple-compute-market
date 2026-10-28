@@ -2,9 +2,14 @@
 
 This client is **test infrastructure only** — it targets the ``/test/*``
 endpoints that are only mounted when ``ACTIVE_PROFILES`` includes ``mock``.
-It is intentionally separate from the canonical ``SyncComputeProvisioningClient``
-because the test controller is not part of the provisioning service's
-public API contract.
+
+The rule and evaluate-job routes are the compute family's mock mechanism,
+which each domain mounts under its own prefix: ``vm_rules`` and
+``bare_metal_rules`` are the family's ``SyncMockRuleClient`` over VM's and
+bare metal's mounts, signing from the declarations each mount yields and
+answering the family's models. The shared ``/test/jobs/*`` observation routes
+are the family's too, and this client signs them itself: their long polls each
+need a timeout of their own, longer than the server's wait.
 
 Usage::
 
@@ -15,16 +20,18 @@ Usage::
     )
 
     # Add a rule that pauses before returning
-    client.add_mock_rule(
-        rule_id="pause-create",
-        match={"vm_action": "create", "host_id": "kvm1"},
-        pause_before_result=True,
+    client.vm_rules.add_rule(
+        MockRuleCreate(
+            rule_id="pause-create",
+            match={"vm_action": "create", "host_id": "kvm1"},
+            pause_before_result=True,
+        )
     )
 
     # ... submit job via normal API ...
 
     # Release the gate
-    client.resume_rule("pause-create")
+    client.vm_rules.resume_rule("pause-create")
 
     # Wait deterministically for terminal state
     result = client.wait_for_job(job_id, timeout=15)
@@ -36,20 +43,20 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
 import httpx
-from arkhai_bare_metal import (
+from arkhai_bare_metal.provisioning_routes import (
     BARE_METAL_MOCK_OPERATION_PREFIX,
     BARE_METAL_MOCK_ROUTE_PREFIX,
 )
+from compute_provisioning_client import SyncComputeProvisioningClient, SyncMockRuleClient
 from compute_provisioning_contracts import (
     MockRouteMount,
-    assemble_provisioning_route_table,
     canonical_provisioning_request_body,
     resolve_provisioning_route_contract,
 )
-from vm_provisioning_operator import VM_PROVISIONING_ROUTES
+from vm_provisioning_operator import VM_MOCK_ROUTE_MOUNT
 from market_identity import (
     EMPTY_BODY,
     AuthenticatedResponse,
@@ -73,20 +80,17 @@ SIGNATURE_HEADER = "X-Market-Signature"
 
 log = logging.getLogger(__name__)
 
-# The routes the provisioning service authenticates under the mock profile:
-# the family kit's and each composed domain's, including their test routes.
-# Bare metal mounts only the family's mock routes, so its declarations are its
-# mount's.
-_ROUTE_TABLE = assemble_provisioning_route_table(
-    VM_PROVISIONING_ROUTES,
-    MockRouteMount(
-        BARE_METAL_MOCK_ROUTE_PREFIX, BARE_METAL_MOCK_OPERATION_PREFIX
-    ).route_declarations(),
+#: Where bare metal mounts the family's mock routes.
+BARE_METAL_MOCK_ROUTE_MOUNT = MockRouteMount(
+    BARE_METAL_MOCK_ROUTE_PREFIX, BARE_METAL_MOCK_OPERATION_PREFIX
 )
 
 
 class ProvisioningTestClientError(Exception):
-    """Non-2xx response from the provisioning test controller."""
+    """A refused or unverifiable answer from a ``/test/jobs/*`` route.
+
+    The mock-rule clients raise the family client's own errors.
+    """
 
 
 class ProvisioningTestClient:
@@ -109,6 +113,9 @@ class ProvisioningTestClient:
     expected_authorities:
         The provisioning service's own signing principal, so responses are
         verified as well as requests.
+    transport:
+        The HTTP transport every request goes through; the network's, unless
+        a test supplies one.
     """
 
     def __init__(
@@ -119,13 +126,30 @@ class ProvisioningTestClient:
         expected_authorities: TrustedIdentitySet,
         timeout: float = 15.0,
         max_timestamp_skew: int = 300,
+        transport: httpx.BaseTransport | None = None,
     ) -> None:
         self._base = base_url.rstrip("/")
         self._timeout = timeout
         self._signer = signer
         self._expected_authorities = expected_authorities
         self._max_timestamp_skew = max_timestamp_skew
-        self._client = httpx.Client(base_url=self._base, timeout=timeout)
+        self._client = httpx.Client(
+            base_url=self._base, timeout=timeout, transport=transport
+        )
+        # The mock routes' operations are administrator operations.
+        self._family = SyncComputeProvisioningClient(
+            self._base,
+            signer,
+            "admin",
+            expected_authorities,
+            timeout=timeout,
+            transport=transport,
+            max_timestamp_skew=max_timestamp_skew,
+        )
+        self.vm_rules = SyncMockRuleClient(self._family, VM_MOCK_ROUTE_MOUNT)
+        self.bare_metal_rules = SyncMockRuleClient(
+            self._family, BARE_METAL_MOCK_ROUTE_MOUNT
+        )
 
     # ------------------------------------------------------------------
     # Request authentication
@@ -136,28 +160,24 @@ class ProvisioningTestClient:
         method: str,
         path: str,
         *,
-        body: Any = EMPTY_BODY,
         query: dict[str, Any] | None = None,
     ) -> tuple[dict[str, str], str, str, str]:
-        """Build v2 authentication headers for one request.
+        """Build v2 authentication headers for one bodiless request.
 
-        The operation, resource, and required role all come from the shared
+        The operation, resource, and required role all come from the family's
         route contract rather than being restated here, so this client cannot
         drift from the table the service authorizes against. Query values are
         stringified because that is how they reach the service, and the signed
         body must match what the service recomputes.
         """
         contract, resource = resolve_provisioning_route_contract(
-            method,
-            path,
-            body if body is not EMPTY_BODY else EMPTY_BODY,
-            table=_ROUTE_TABLE,
+            method, path, EMPTY_BODY
         )
         canonical_query = {
             key: str(value) for key, value in (query or {}).items() if value is not None
         }
         canonical = canonical_provisioning_request_body(
-            method, path, body, query=canonical_query
+            method, path, EMPTY_BODY, query=canonical_query
         )
         request_id = uuid.uuid4().hex
         authenticated = sign_request(
@@ -184,6 +204,7 @@ class ProvisioningTestClient:
         }, request_id, contract.operation, resource
 
     def close(self) -> None:
+        self._family.close()
         self._client.close()
 
     def __enter__(self) -> "ProvisioningTestClient":
@@ -213,37 +234,6 @@ class ProvisioningTestClient:
         if resp.status_code >= 400:
             raise ProvisioningTestClientError(
                 f"GET {self._base}{path} returned {resp.status_code}: {resp.text[:200]}"
-            )
-        return body
-
-    def _post(self, path: str, body: dict | None = None) -> dict:
-        payload = body if body is not None else {}
-        headers, request_id, operation, resource = self._signed(
-            "POST", path, body=payload
-        )
-        resp = self._client.post(
-            path, json=payload, timeout=self._timeout, headers=headers
-        )
-        body = self._verify(
-            resp, method="POST", operation=operation,
-            resource=resource, request_id=request_id,
-        )
-        if resp.status_code >= 400:
-            raise ProvisioningTestClientError(
-                f"POST {self._base}{path} returned {resp.status_code}: {resp.text[:200]}"
-            )
-        return body
-
-    def _delete(self, path: str) -> dict:
-        headers, request_id, operation, resource = self._signed("DELETE", path)
-        resp = self._client.delete(path, timeout=self._timeout, headers=headers)
-        body = self._verify(
-            resp, method="DELETE", operation=operation,
-            resource=resource, request_id=request_id,
-        )
-        if resp.status_code >= 400:
-            raise ProvisioningTestClientError(
-                f"DELETE {self._base}{path} returned {resp.status_code}: {resp.text[:200]}"
             )
         return body
 
@@ -306,149 +296,6 @@ class ProvisioningTestClient:
                 f"verification: {getattr(result, 'reason', 'unverified')}"
             )
         return body
-
-    # ------------------------------------------------------------------
-    # Mock rule management
-    # ------------------------------------------------------------------
-
-    def add_mock_rule(
-        self,
-        *,
-        rule_id: str = "",
-        match: dict[str, Any] | None = None,
-        pause_before_result: bool = False,
-        result_stdout: Optional[str] = None,
-        fail_with: Optional[str] = None,
-    ) -> dict:
-        """POST /test/mock-rules — add a when→then rule.
-
-        Parameters
-        ----------
-        rule_id:
-            Caller-chosen identifier for resume/delete.  Auto-assigned
-            if empty.
-        match:
-            Subset of ``AnsibleJobParams`` fields.  A job matches when all
-            keys in ``match`` are present and equal in the job params.
-            Empty dict is a catch-all.
-        pause_before_result:
-            If True, the mock blocks at ``wait_for_playbook`` until
-            ``resume_rule`` is called.
-        result_stdout:
-            Ansible stdout to inject on success.  Falls back to the
-            default fake stdout if None.
-        fail_with:
-            If set, the mock raises ``AnsibleError`` with this message
-            instead of returning a result.
-        """
-        body: dict[str, Any] = {
-            "rule_id": rule_id,
-            "match": match or {},
-            "pause_before_result": pause_before_result,
-        }
-        if result_stdout is not None:
-            body["result_stdout"] = result_stdout
-        if fail_with is not None:
-            body["fail_with"] = fail_with
-        return self._post("/test/mock-rules", body)
-
-    def list_mock_rules(self) -> list[dict]:
-        """GET /test/mock-rules — return active rules in evaluation order."""
-        return self._get("/test/mock-rules")  # type: ignore[return-value]
-
-    def delete_mock_rule(self, rule_id: str) -> dict:
-        """DELETE /test/mock-rules/{rule_id} — remove a rule."""
-        return self._delete(f"/test/mock-rules/{rule_id}")
-
-    def resume_rule(self, rule_id: str) -> dict:
-        """POST /test/mock-rules/{rule_id}/resume — release a paused job gate."""
-        return self._post(f"/test/mock-rules/{rule_id}/resume")
-
-    def evaluate_job(
-        self,
-        host: str,
-        *,
-        vm_target: str = "eval-target",
-        ssh_pubkey: str | None = None,
-        vm_action: str = "create",
-    ) -> dict:
-        """POST /test/evaluate-job — dry-run job evaluation.
-
-        Returns a dict with:
-          params_valid: bool
-          host_exists: bool
-          rule_matched: str | None  — rule_id of the first matching mock rule
-          would_pause: bool         — True when the matched rule has pause_before_result
-          errors: list[str]
-
-        Use this in e2e stage 9a to confirm the provisioning gate is correctly
-        armed before calling POST /api/v1/settle/{uid}.
-        """
-        body: dict[str, Any] = {
-            "host": host,
-            "vm_target": vm_target,
-            "vm_action": vm_action,
-        }
-        if ssh_pubkey is not None:
-            body["ssh_pubkey"] = ssh_pubkey
-        return self._post("/test/evaluate-job", body)
-
-    # ------------------------------------------------------------------
-    # Bare-metal mock rules — match bare-metal access jobs only
-    # ------------------------------------------------------------------
-
-    def add_bare_metal_mock_rule(
-        self,
-        *,
-        rule_id: str = "",
-        match: dict[str, Any] | None = None,
-        pause_before_result: bool = False,
-        result_stdout: Optional[str] = None,
-        fail_with: Optional[str] = None,
-    ) -> dict:
-        """POST /test/bare-metal/mock-rules — add a rule for bare-metal jobs.
-
-        Same rule semantics as ``add_mock_rule``; the bare-metal adapter's mock
-        evaluates these and never the VM rules.
-        """
-        body: dict[str, Any] = {
-            "rule_id": rule_id,
-            "match": match or {},
-            "pause_before_result": pause_before_result,
-        }
-        if result_stdout is not None:
-            body["result_stdout"] = result_stdout
-        if fail_with is not None:
-            body["fail_with"] = fail_with
-        return self._post("/test/bare-metal/mock-rules", body)
-
-    def list_bare_metal_mock_rules(self) -> list[dict]:
-        """GET /test/bare-metal/mock-rules"""
-        return self._get("/test/bare-metal/mock-rules")  # type: ignore[return-value]
-
-    def delete_bare_metal_mock_rule(self, rule_id: str) -> dict:
-        """DELETE /test/bare-metal/mock-rules/{rule_id}"""
-        return self._delete(f"/test/bare-metal/mock-rules/{rule_id}")
-
-    def resume_bare_metal_rule(self, rule_id: str) -> dict:
-        """POST /test/bare-metal/mock-rules/{rule_id}/resume"""
-        return self._post(f"/test/bare-metal/mock-rules/{rule_id}/resume")
-
-    def evaluate_bare_metal_job(
-        self,
-        host: str,
-        *,
-        action: str,
-        physical_host_id: str | None = None,
-        escrow_uid: str | None = None,
-    ) -> dict:
-        """POST /test/bare-metal/evaluate-job — dry-run a bare-metal access job."""
-        body: dict[str, Any] = {"host": host, "action": action}
-        if physical_host_id is not None:
-            body["physical_host_id"] = physical_host_id
-        if escrow_uid is not None:
-            body["escrow_uid"] = escrow_uid
-        return self._post("/test/bare-metal/evaluate-job", body)
 
     # ------------------------------------------------------------------
     # Job observation
