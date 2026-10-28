@@ -741,8 +741,8 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
       working evidence, cited by their log lines.
       Validation 91 passed at `4e7912531`, the pre-closeout commit, which `HEAD`
       before closeout (`6e732fd29`) differs from only in the index: local (`make
-      check-packaging`, `make test`); Helm (namespace
-      `validate-workflow-steps-name-next-step`, the scenario pod exiting 0 on the
+      check-packaging`, `make test`); Helm (in the change's validation namespace,
+      the scenario pod exiting 0 on the
       scenarios the default charts serve); and e2e.yml run 40689900549, success, its
       lanes e2e-vm, e2e-bare-metal, and e2e-apicredits. No scenario exercises the
       workflow tooling, as the record's coverage section says, so `make test` is
