@@ -148,7 +148,7 @@ def _alkahest_client_policy() -> AlkahestClientPolicy:
             AlkahestChain(
                 name=name,
                 rpc_url=chain.rpc_url,
-                address_config_path=books[name],
+                address_book=books[name],
             )
             for name, chain in CHAINS.items()
         ),

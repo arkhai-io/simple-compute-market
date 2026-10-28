@@ -328,11 +328,6 @@ async def test_with_no_publication_input_every_configured_chain_is_judged(
             ("alkahest.rpc_missing", "configuration"),
         ),
         (
-            {"address_config_path": "/nonexistent/alkahest-addresses.json"},
-            {},
-            ("alkahest.address_config_invalid", "configuration"),
-        ),
-        (
             {},
             {"require_asset": True},
             ("alkahest.asset_missing", "configuration"),
@@ -340,7 +335,6 @@ async def test_with_no_publication_input_every_configured_chain_is_judged(
     ],
     ids=[
         "rpc-missing",
-        "address-config-invalid",
         "asset-missing",
     ],
 )

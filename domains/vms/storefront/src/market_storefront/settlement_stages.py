@@ -248,7 +248,7 @@ class VmAlkahestSellerStage:
             alkahest_client=client,
             chain_name=chain_name,
             escrow_address=proposal.escrow_address,
-            alkahest_address_config_path=config.chain_address_books()[chain_name],
+            address_book=config.chain_address_books()[chain_name],
         )
         if index != source["obligation_index"]:
             raise ValueError("Alkahest recovered obligation changed")

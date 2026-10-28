@@ -95,7 +95,10 @@ from market_storefront.services.publication_terms import (
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.settlement_composition import require_coherent_release_model
 from market_storefront.settlement_registry import build_storefront_settlement_registry
-from market_storefront.startup_refusal import require_publishable_storefront
+from market_storefront.startup_refusal import (
+    refuse_retired_address_book_keys,
+    require_publishable_storefront,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +145,7 @@ def _alkahest_client_policy() -> AlkahestClientPolicy | None:
                 AlkahestChain(
                     name=name,
                     rpc_url=chain.rpc_url,
-                    address_config_path=books[name],
+                    address_book=books[name],
                 )
                 for name, chain in CHAINS.items()
             )
@@ -348,8 +351,11 @@ def _build_vm_services(
     # cannot read, a contradictory Alkahest release model, or a configuration
     # under which it could never publish stops startup rather than running
     # without it. An Alkahest section that is coherent but cannot settle makes
-    # Alkahest unready instead.
+    # Alkahest unready instead. A retired address-book key is refused before
+    # the release model resolves the section, which would refuse it only as
+    # an unknown key.
     admissibility_default = parse_configured_admissibility_default()
+    refuse_retired_address_book_keys()
     require_coherent_release_model()
     seams.startup_refusal()
     sqlite_client = get_sqlite_client(registry=registry)

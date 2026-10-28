@@ -112,7 +112,7 @@ class AdminSettleService:
                 alkahest_client=alkahest,
                 chain_name=chain_name,
                 escrow_address=proposal.escrow_address,
-                alkahest_address_config_path=address_books[chain_name],
+                address_book=address_books[chain_name],
             )
         except EscrowVerificationError as exc:
             return {"valid": False, "escrow_uid": escrow_uid, "reason": str(exc)}

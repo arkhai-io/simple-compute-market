@@ -339,7 +339,7 @@ async def verify_escrow_against_plan(
     alkahest_client: Any,
     chain_name: str,
     escrow_address: str,
-    alkahest_address_config_path: str | None,
+    address_book: str | None,
     now_unix: int | None = None,
     get_obligation_fn: Any = None,
 ) -> int:
@@ -354,8 +354,8 @@ async def verify_escrow_against_plan(
 
     Nothing is re-derived from the listing, the seller's wallet, or the release
     policy: those may have changed since acceptance, and the buyer funded the
-    plan. The address configuration is read only to find the escrow
-    contract's codec.
+    plan. ``address_book`` is the chain's Alkahest address book, ``None`` for
+    the SDK's built-in addresses, read only to find the escrow contract's codec.
 
     Raises ``EscrowVerificationError`` on any mismatch, or when the plan holds
     no Alkahest obligation on that contract.
@@ -392,7 +392,7 @@ async def verify_escrow_against_plan(
         )
     if get_obligation_fn is None:
         get_obligation_fn = _codec_reader(
-            _escrow_codec(chain_name, escrow_address, alkahest_address_config_path)
+            _escrow_codec(chain_name, escrow_address, address_book)
         )
     return await _match_on_chain(
         escrow_uid=escrow_uid,

@@ -110,7 +110,7 @@ async def test_a_seller_trading_on_two_chains_uses_each_chains_own_book(
                 status = await admin.get_system_status()
 
     (policy,) = chains.policies
-    assert {chain.name: chain.address_config_path for chain in policy.chains} == {
+    assert {chain.name: chain.address_book for chain in policy.chains} == {
         "anvil": _BOOK,
         "base_sepolia": None,
     }

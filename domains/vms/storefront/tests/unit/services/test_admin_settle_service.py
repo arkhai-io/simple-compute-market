@@ -180,7 +180,7 @@ class TestVerifyEscrowDryRun:
         assert call_kwargs["settlement_plan"] == _PLAN
         assert call_kwargs["chain_name"] == "anvil"
         assert call_kwargs["escrow_address"] == _ESCROW_ADDRESS
-        assert call_kwargs["alkahest_address_config_path"] == "/fake/alkahest.json"
+        assert call_kwargs["address_book"] == "/fake/alkahest.json"
         assert "alkahest_client" in call_kwargs
 
 

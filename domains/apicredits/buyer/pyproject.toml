@@ -17,7 +17,7 @@ dependencies = [
   "arkhai-apicredits-domain>=0.5.0",
   "arkhai-kit-alkahest>=0.11.0",
   "arkhai-kit-arkhai-payments>=0.3.0",
-  "arkhai-kit-config",
+  "arkhai-kit-config>=0.5.0",
   "arkhai-kit-identity==0.4.0",
   "arkhai-kit-policy",
   "arkhai-kit-settlement-runtime",

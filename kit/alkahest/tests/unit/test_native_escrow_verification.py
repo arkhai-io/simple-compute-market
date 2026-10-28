@@ -111,7 +111,7 @@ async def _verify_plan(plan, client, *, addresses: str = _ADDRESSES) -> int:
         alkahest_client=client,
         chain_name=_CHAIN,
         escrow_address=_native_proposal().escrow_address,
-        alkahest_address_config_path=addresses,
+        address_book=addresses,
         now_unix=_EXPIRATION - 3600,
     )
 

@@ -130,7 +130,8 @@ class ProbedChain:
     name: str
     rpc_url: str
     chain_id: int | None = None
-    address_config_path: str | None = None
+    #: The chain's Alkahest address book; ``None`` for the SDK's built-in addresses.
+    address_book: str | None = None
 
     @classmethod
     def from_config(
@@ -153,7 +154,7 @@ class ProbedChain:
             name=name,
             rpc_url=str(value("rpc_url") or ""),
             chain_id=int(chain_id) if chain_id is not None else None,
-            address_config_path=address_book or None,
+            address_book=address_book or None,
         )
 
 
@@ -181,7 +182,7 @@ def required_contract_addresses(chain: ProbedChain) -> dict[str, str]:
     """
     network = get_alkahest_network(chain.name)
     config = resolve_alkahest_address_config(
-        network, config_path=chain.address_config_path
+        network, config_path=chain.address_book
     )
     if config is None:
         config = _sdk_addresses_for_chain(network)

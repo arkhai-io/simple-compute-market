@@ -440,7 +440,7 @@ async def verify_alkahest(
             alkahest_client=client,
             chain_name=proposal.chain_name,
             escrow_address=proposal.escrow_address,
-            alkahest_address_config_path=service.chain_config_paths.get(
+            address_book=service.chain_config_paths.get(
                 proposal.chain_name,
             ),
         )
@@ -602,7 +602,7 @@ async def revalidate_alkahest(
             alkahest_client=client,
             chain_name=proposal.chain_name,
             escrow_address=proposal.escrow_address,
-            alkahest_address_config_path=service.chain_config_paths.get(
+            address_book=service.chain_config_paths.get(
                 proposal.chain_name,
             ),
         )

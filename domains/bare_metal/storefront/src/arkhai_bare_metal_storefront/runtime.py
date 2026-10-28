@@ -722,7 +722,7 @@ def _alkahest_client_policy(
         AlkahestChain(
             name=name,
             rpc_url=chain.rpc_url,
-            address_config_path=address_books.get(name),
+            address_book=address_books.get(name),
         )
         for name, chain in chains.items()
     )

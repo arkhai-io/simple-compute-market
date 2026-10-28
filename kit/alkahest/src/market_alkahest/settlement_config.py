@@ -73,13 +73,57 @@ class AlkahestPublicationInput(BaseModel):
         return value
 
 
+ADDRESS_BOOKS_TABLE = "[Settlement.alkahest.address_books]"
+_RETIRED_SECTION_KEY = "address_config_path"
+_RETIRED_CHAIN_KEY = "alkahest_address_config_path"
+
+
+def retired_address_book_refusal(path: str) -> str:
+    """Why the retired address-book key at ``path`` is refused, and what replaces it."""
+    return (
+        f"{path} is retired: name each chain's Alkahest address book under "
+        f"{ADDRESS_BOOKS_TABLE}"
+    )
+
+
+def retired_address_book_keys(
+    settlement: Mapping[str, Any] | None, chains: Mapping[str, Any] | None
+) -> list[str]:
+    """Each retired address-book key a role's configuration states, as a path.
+
+    ``settlement`` is the role's ``[Settlement]`` table and ``chains`` its
+    ``[Chains]`` table, either absent. Keys match in any case, as the roles'
+    loaders read them. A chain's book is named only in
+    :data:`ADDRESS_BOOKS_TABLE`; every role refuses these keys, before its
+    settlement section is resolved, with :func:`retired_address_book_refusal`.
+    """
+    found: list[str] = []
+    for name, chain in (chains or {}).items():
+        if isinstance(chain, Mapping) and any(
+            str(key).lower() == _RETIRED_CHAIN_KEY for key in chain
+        ):
+            found.append(f"[Chains.{name}].{_RETIRED_CHAIN_KEY}")
+    section = next(
+        (
+            value
+            for key, value in (settlement or {}).items()
+            if str(key).lower() == ALKAHEST_CONFIG_KEY
+        ),
+        None,
+    )
+    if isinstance(section, Mapping) and any(
+        str(key).lower() == _RETIRED_SECTION_KEY for key in section
+    ):
+        found.append(f"[Settlement.alkahest].{_RETIRED_SECTION_KEY}")
+    return found
+
+
 class AlkahestSettlementConfig(BaseModel):
     """Alkahest-owned policy; identity, wallet, and chains are injected resources."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     enabled: bool = False
-    address_config_path: str | None = None
     #: Each configured chain's address book, by chain name; a chain's book is
     #: resolved through :func:`alkahest_address_book`.
     address_books: dict[str, str] = Field(default_factory=dict)
@@ -96,13 +140,13 @@ class AlkahestSettlementConfig(BaseModel):
         default=DEFAULT_TIMEOUT_SECONDS, json_schema_extra={"roles": ["seller"]}
     )
 
-    @field_validator("address_config_path")
+    @model_validator(mode="before")
     @classmethod
-    def validate_address_config_path(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        if not value or value != value.strip():
-            raise ValueError("address_config_path must be non-empty and trimmed")
+    def refuse_the_retired_section_key(cls, value: Any) -> Any:
+        if isinstance(value, Mapping) and _RETIRED_SECTION_KEY in value:
+            raise ValueError(
+                retired_address_book_refusal(f"[Settlement.alkahest].{_RETIRED_SECTION_KEY}")
+            )
         return value
 
     @field_validator("address_books", mode="before")
@@ -475,8 +519,7 @@ def _address_config_blockers(
                 + ", which is not a configured settlement chain",
             )
         )
-    paths = (config.address_config_path, *config.address_books.values())
-    if any(path and not _validate_address_file(path) for path in paths):
+    if any(not _validate_address_file(path) for path in config.address_books.values()):
         blockers.append(
             _configuration_blocker(
                 "alkahest.address_config_invalid",
@@ -697,7 +740,7 @@ def _alkahest_escrow_from_clause(
         )
     rpc_url = _resource_value(chain, "rpc_url")
     chain_id = _resource_value(chain, "chain_id")
-    address_config_path = alkahest_address_book(config, publication.chain)
+    address_book = alkahest_address_book(config, publication.chain)
     # Registration and clause validation remain dependency-light. Load the
     # chain client and token resolver only when materializing a public option.
     from .alkahest import get_erc20_escrow_obligation_default
@@ -729,7 +772,7 @@ def _alkahest_escrow_from_clause(
         )
     escrow_address = get_erc20_escrow_obligation_default(
         publication.chain,
-        config_path=address_config_path,
+        config_path=address_book,
     )
     return {
         "chain_name": publication.chain,
@@ -934,9 +977,12 @@ __all__ = [
     "alkahest_escrow_kind_projection",
     "validate_alkahest_publication_input",
     "ALKAHEST_MECHANISM_ID",
+    "ADDRESS_BOOKS_TABLE",
     "AlkahestSettlementConfig",
     "alkahest_address_book",
     "alkahest_buyer_compatibility",
+    "retired_address_book_keys",
+    "retired_address_book_refusal",
     "alkahest_client_factory",
     "alkahest_option_builder",
     "alkahest_preflight",

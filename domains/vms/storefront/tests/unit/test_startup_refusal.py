@@ -13,6 +13,7 @@ from market_identity import Ed25519Signer
 from market_storefront.startup_refusal import (
     StorefrontStartupError,
     publication_startup_problems,
+    refuse_retired_address_book_keys,
     require_publishable_storefront,
     retired_setting_problems,
 )
@@ -117,6 +118,38 @@ def test_the_removed_provisioning_trust_set_is_refused() -> None:
         "that site, which rotate through the storefront's identity routes"
     ]
     assert publication_startup_problems(source) == []
+
+
+@pytest.mark.parametrize(
+    ("changes", "path"),
+    [
+        (
+            {"chains": {"anvil": {"rpc_url": "ws://anvil:8545",
+                                  "alkahest_address_config_path": "/book.json"}}},
+            "[Chains.anvil].alkahest_address_config_path",
+        ),
+        (
+            {"settlement": {"schema_version": 1, "priority": ["alkahest.v1"],
+                            "alkahest": {"enabled": True,
+                                         "address_config_path": "/book.json"}}},
+            "[Settlement.alkahest].address_config_path",
+        ),
+    ],
+    ids=["chain-key", "section-key"],
+)
+def test_a_retired_address_book_key_is_refused_naming_the_table(changes, path) -> None:
+    """Spec scenario "A retired key is stated", for the VM storefront."""
+    source = _source(**changes)
+
+    (problem,) = retired_setting_problems(source)
+    assert problem.startswith(f"{path} is retired")
+    assert "[Settlement.alkahest.address_books]" in problem
+    assert "/book.json" not in problem
+    with pytest.raises(StorefrontStartupError, match="states retired settings"):
+        require_publishable_storefront(source)
+    # The server runs this before it resolves the section for its release model.
+    with pytest.raises(StorefrontStartupError, match="address_books"):
+        refuse_retired_address_book_keys(source)
 
 
 def test_a_provisioning_mode_the_storefront_never_read_is_ignored() -> None:

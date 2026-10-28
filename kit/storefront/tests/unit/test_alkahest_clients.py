@@ -49,7 +49,7 @@ def test_factory_builds_each_chain_from_injected_immutable_values(monkeypatch):
                 AlkahestChain(
                     name="anvil",
                     rpc_url="http://rpc",
-                    address_config_path="addresses.json",
+                    address_book="addresses.json",
                 ),
             ),
         )

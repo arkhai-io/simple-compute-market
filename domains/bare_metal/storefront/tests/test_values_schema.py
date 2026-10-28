@@ -71,7 +71,7 @@ def test_the_document_is_closed_to_the_settings_the_storefront_reads() -> None:
     assert _allowed(peer, "role", "site_id", "principals")
     chain = _field(definition, "Chains")["additionalProperties"]
     assert chain["additionalProperties"] is False
-    assert _allowed(chain, "rpc_url", "chain_id", "alkahest_address_config_path")
+    assert _allowed(chain, "rpc_url", "chain_id")
 
 
 def test_the_wallet_key_is_refused_and_the_registry_takes_no_write_token() -> None:

@@ -58,9 +58,21 @@ _LEGACY_ALKAHEST_FIELDS: dict[str, tuple[str, Callable[[Any], Any] | None]] = {
         lambda value: _address_list(value),
     ),
 }
+#: The retired address-book keys, and the table that replaced both.
+_CHAIN_BOOK_KEY = "alkahest_address_config_path"
+_SECTION_BOOK_KEY = "address_config_path"
+_ADDRESS_BOOKS = ("Settlement", "alkahest", "address_books")
+
+
+def _book_text(item: Any) -> str:
+    return str(_plain(item) or "").strip()
+
+
 _ALKAHEST_FIELDS = frozenset(
     {
-        "address_config_path",
+        "address_books",
+        "probe_interval_seconds",
+        "rpc_timeout_seconds",
         "enabled",
         "interruptible",
         "interruptible_oracle_addresses",
@@ -318,7 +330,18 @@ class _Planner:
             )
 
     def migrate_address_books(self) -> None:
-        occurrences: list[tuple[tuple[str, ...], Any]] = []
+        """Move each retired address-book key into ``Settlement.alkahest.address_books``.
+
+        A chain's own key names that chain's book. The section key named one
+        book for every chain, so it moves to the one configured chain, or to
+        the chains whose own keys name that same book; where neither says which
+        chains it served, the operator must, and migration refuses. A chain
+        named two different books is refused too. An empty key names nothing
+        and is removed.
+        """
+        configured: list[str] = []
+        chain_books: dict[str, tuple[tuple[str, ...], Any]] = {}
+        empty: list[tuple[str, ...]] = []
         for chains_name in ("Chains", "chains"):
             chains = self.document.get(chains_name)
             if not isinstance(chains, Mapping):
@@ -326,53 +349,79 @@ class _Planner:
             for chain_name, chain in chains.items():
                 if not isinstance(chain, Mapping):
                     continue
-                field = "alkahest_address_config_path"
-                if field in chain:
-                    occurrences.append(
-                        ((chains_name, str(chain_name), field), chain[field])
+                name = str(chain_name)
+                if name not in configured:
+                    configured.append(name)
+                if _CHAIN_BOOK_KEY not in chain:
+                    continue
+                source = (chains_name, name, _CHAIN_BOOK_KEY)
+                item = chain[_CHAIN_BOOK_KEY]
+                if not _book_text(item):
+                    empty.append(source)
+                    continue
+                if name in chain_books and _book_text(chain_books[name][1]) != _book_text(item):
+                    raise SettlementMigrationConflict(
+                        _path_text(chain_books[name][0]), _path_text(source)
                     )
-        if not occurrences:
-            return
-        self.alkahest_seen = True
-        self.enablement_sources.setdefault("alkahest", _path_text(occurrences[0][0]))
-        nonempty = [
-            entry for entry in occurrences if str(_plain(entry[1]) or "").strip()
+                chain_books.setdefault(name, (source, item))
+
+        moves: list[tuple[tuple[str, ...], str, Any]] = [
+            (source, name, item) for name, (source, item) in chain_books.items()
         ]
-        if nonempty:
-            first_path, first_item = nonempty[0]
-            conflicting = next(
-                (
-                    entry
-                    for entry in nonempty[1:]
-                    if str(_plain(entry[1])).strip() != str(_plain(first_item)).strip()
-                ),
-                None,
-            )
-            if conflicting is not None:
-                raise SettlementMigrationConflict(
-                    _path_text(first_path), _path_text(conflicting[0])
+        section_source = ("Settlement", "alkahest", _SECTION_BOOK_KEY)
+        section_item = _lookup(self.document, section_source)
+        if section_item is not None and not _book_text(section_item):
+            empty.append(section_source)
+        elif section_item is not None:
+            book = _book_text(section_item)
+            if len(configured) == 1:
+                served = configured
+            else:
+                served = [
+                    name
+                    for name, (_source, item) in chain_books.items()
+                    if _book_text(item) == book
+                ]
+            if not served:
+                raise SettlementMigrationError(
+                    f"cannot tell which chains {_path_text(section_source)} served; "
+                    f"name each chain's book under {_path_text(_ADDRESS_BOOKS)}"
                 )
-        destination = ("Settlement", "alkahest", "address_config_path")
-        if nonempty:
-            first_path, first_item = nonempty[0]
-            destination_item = _lookup(self.document, destination)
-            if destination_item is not None and not _same_value(
-                destination_item, first_item
-            ):
+            moves.extend((section_source, name, section_item) for name in served)
+
+        books = _lookup(self.document, _ADDRESS_BOOKS)
+        planned: dict[str, tuple[tuple[str, ...], Any]] = {}
+        for source, name, item in moves:
+            current = books.get(name) if isinstance(books, Mapping) else None
+            if current is not None and _book_text(current) != _book_text(item):
                 raise SettlementMigrationConflict(
-                    _path_text(first_path), _path_text(destination)
+                    _path_text(source), _path_text((*_ADDRESS_BOOKS, name))
                 )
-            if destination_item is None:
-                parent = _ensure_table(self.document, destination[:-1])
-                parent[destination[-1]] = copy.deepcopy(first_item)
-            for source, _item in occurrences:
+            if name in planned and _book_text(planned[name][1]) != _book_text(item):
+                raise SettlementMigrationConflict(
+                    _path_text(planned[name][0]), _path_text(source)
+                )
+            planned.setdefault(name, (source, item))
+
+        if planned:
+            table = _ensure_table(self.document, _ADDRESS_BOOKS)
+            for name, (_source, item) in planned.items():
+                if name not in table:
+                    # Trimmed, as the table requires, keeping a comment the
+                    # retired key carried.
+                    moved = tomlkit.item(_book_text(item))
+                    _copy_trivia(item, moved)
+                    table[name] = moved
+        for source, name, _item in moves:
+            if _lookup(self.document, source) is not None:
                 _delete_path(self.document, source)
-                self.actions.append(
-                    MigrationAction("move", _path_text(source), _path_text(destination))
+            self.actions.append(
+                MigrationAction(
+                    "move", _path_text(source), _path_text((*_ADDRESS_BOOKS, name))
                 )
-        else:
-            for source, _item in occurrences:
-                self.remove(source)
+            )
+        for source in empty:
+            self.remove(source)
 
     def migrate_priority(self) -> None:
         source = ("settlement", "mechanism_priority")
@@ -468,6 +517,7 @@ def is_legacy_settlement_path(path: str) -> bool:
         "interruptible_oracle_address",
         "settlement.hosted",
         "settlement.mechanism_priority",
+        f"settlement.alkahest.{_SECTION_BOOK_KEY}",
     }:
         return True
     if normalized.startswith(
@@ -478,7 +528,7 @@ def is_legacy_settlement_path(path: str) -> bool:
     return (
         len(parts) >= 3
         and parts[0] == "chains"
-        and parts[-1] == "alkahest_address_config_path"
+        and parts[-1] == _CHAIN_BOOK_KEY
     )
 
 
@@ -637,11 +687,16 @@ def _reject_remaining_legacy(parsed: Mapping[str, Any]) -> None:
         if not isinstance(chains, Mapping):
             continue
         for chain_name, chain in chains.items():
-            if isinstance(chain, Mapping) and "alkahest_address_config_path" in chain:
+            if isinstance(chain, Mapping) and _CHAIN_BOOK_KEY in chain:
                 raise SettlementMigrationValidationError(
                     "legacy settlement path "
-                    f"{chains_name}.{chain_name}.alkahest_address_config_path remains"
+                    f"{chains_name}.{chain_name}.{_CHAIN_BOOK_KEY} remains"
                 )
+    section_key = ("Settlement", "alkahest", _SECTION_BOOK_KEY)
+    if _lookup(parsed, section_key) is not None:
+        raise SettlementMigrationValidationError(
+            f"legacy settlement path {_path_text(section_key)} remains"
+        )
 
 
 def _write_all(fd: int, content: bytes) -> None:

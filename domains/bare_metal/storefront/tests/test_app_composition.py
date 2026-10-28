@@ -605,7 +605,7 @@ async def test_a_configured_alkahest_section_composes_its_client_and_worker(
     assert runtime.settlement_worker is not None
     assert "settlement-servicing" in runtime.loops.step_routes()
     # The chain's book, from the Alkahest section, reaches client construction.
-    assert policy.chains[0].address_config_path == "addresses.json"
+    assert policy.chains[0].address_book == "addresses.json"
     # The chain probe owns the one live client map every consumer holds, and
     # readiness reads it through the composition's resources.
     probe = runtime.alkahest_chain_probe

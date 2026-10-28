@@ -4016,12 +4016,63 @@ Files:
   (`domains/vms/storefront/tests/unit/cli/test_settlement.py`, and the VM
   buyer's).
 
-- [ ] 26.1 `[Chains.<name>].alkahest_address_config_path` and
+- [x] 26.1 `[Chains.<name>].alkahest_address_config_path` and
   `[Settlement.alkahest].address_config_path` are each refused with a
   diagnostic naming `[Settlement.alkahest.address_books]`, in every
   storefront's and buyer's loader (D11). Unit: "A retired key is stated", for
   each key and each loader.
-- [ ] 26.2 The migration tool moves each retired key into the map (D11):
+
+  `kit/alkahest` owns the refusal:
+  - `retired_address_book_keys(settlement, chains)` finds either key in any
+    spelling;
+  - `retired_address_book_refusal(path)` names the key and the table, and
+    never the value. It names no command: the bare-metal storefront, the
+    API-credit storefront, and an API-credit-only buyer have no settlement
+    migration command, a gap that predates this change.
+
+  The settlement registry refuses the section key as an unknown key of
+  `Settlement.alkahest`, naming no table, so each role checks before it
+  resolves its section:
+  - VM and API-credit storefronts: `retired_setting_problems`, under the
+    startup refusal's "the storefront states retired settings". The VM
+    server also calls `refuse_retired_address_book_keys` before it reads the
+    release model, which resolves the section. Running the whole startup
+    refusal first instead was tried and reverted: the contradictory
+    release-model tests (`test_release_model_startup.py`) rely on that
+    refusal coming first;
+  - bare metal: its settings model, so `load_storefront_settings` refuses by
+    key;
+  - VM and API-credit buyers: `common.refuse_retired_address_book_keys`, from
+    `chain_address_book` and `resolve_buyer_settlement_policy`.
+
+  `AlkahestSettlementConfig` drops `address_config_path` and refuses it
+  naming the table, for a caller validating the section directly.
+  `kit/config`'s `ChainConfig` and bare metal's `ChainSettings` drop the
+  chain key.
+
+  The values schemas drop the section key, so every chart refuses it at
+  render, and the bare-metal chart drops the chain key. The VM and umbrella
+  charts do not type `Chains`, so they pass a chain key through to the
+  storefront, whose startup refuses it. The three schema files were edited by
+  hand, as at section 23, since `make helm-values-schema` stays denied; the
+  drift tests pass against them.
+  `alkahest.py`'s `anvil` diagnostics now name the table.
+
+  Unit, "A retired key is stated", for both keys:
+  - `kit/alkahest` (`test_address_books.py`): the finder in any spelling,
+    and the section's own refusal;
+  - VM storefront (`test_startup_refusal.py`): the refusal text, and
+    `require_publishable_storefront` and `refuse_retired_address_book_keys`
+    refusing. The server's startup order is not exercised by it;
+  - API-credit storefront (`test_server_composition.py`):
+    `retired_setting_problems`;
+  - bare metal (`test_config_loader.py`): `load_storefront_settings`;
+  - VM and API-credit buyers (`test_address_books.py`): `chain_address_book`
+    and `resolve_buyer_settlement_policy` each.
+
+  The bare-metal buyer reads no book and states none, so it has no
+  refusal.
+- [x] 26.2 The migration tool moves each retired key into the map (D11):
   - a per-chain key moves to its own chain;
   - the section key moves to the one configured chain, or to the chains whose
     per-chain keys name the same book;
@@ -4033,9 +4084,87 @@ Files:
   Application integration: the storefront's `config migrate --scope settlement
   --check` and `--write --backup`, and the buyer's `market config migrate`, move
   the keys ("A configuration is migrated").
-- [ ] 26.3 A repository search finds the retired keys only in the migration
+
+  `migrate_address_books` no longer folds every per-chain book into the one
+  section key:
+  - an empty key names nothing and is removed;
+  - the moved value is copied whole, so a comment on it moves too;
+  - the refusal names the section key and the table, not the value.
+
+  An address-book move no longer marks Alkahest as configured for the
+  priority migration, so a book alone adds no mechanism to `priority`. The
+  priority migration still writes `enabled` to match the priority whenever
+  any move ran, which no test covers for a book move alone.
+
+  The migrated candidate's allowed Alkahest fields now include
+  `probe_interval_seconds` and `rpc_timeout_seconds`, which a seller stating
+  either could not migrate past before. Migration matches the retired keys
+  in their exact spelling, though the loaders refuse them in any case; a key
+  in another case is refused at startup and not migrated.
+  `is_legacy_settlement_path` now treats the section key as legacy, so
+  `config set` refuses to write it, and the migrated candidate's check
+  refuses either key remaining.
+
+  Unit (`kit/config/tests/unit/test_settlement_migration.py`):
+  - `test_each_per_chain_address_book_moves_to_its_own_chain`, which
+    replaces the test that called two chains' different books a conflict;
+  - `test_the_section_key_moves_to_the_one_configured_chain`;
+  - `test_the_section_key_moves_to_the_chains_whose_own_keys_name_its_book`;
+  - `test_a_section_key_whose_chains_cannot_be_told_is_refused_naming_both_keys`,
+    which also asserts the file and backup are untouched;
+  - `test_two_different_books_for_one_chain_are_a_conflict`, a chain key
+    against a stated table entry, and
+    `test_a_chain_key_and_the_section_key_naming_two_books_are_a_conflict`;
+  - `test_a_moved_book_is_trimmed_as_the_table_requires`;
+  - `test_a_completed_address_book_migration_reruns_as_a_no_op`.
+
+  "Naming both keys" is read as naming the section key and the table it
+  moves to. Untested: `Chains` against `chains` naming one chain, the
+  section key with no chain configured, an empty key's removal, and the
+  candidate check refusing a section key left behind.
+
+  The two existing migration tests now expect the table.
+
+  The command-level tests below run the real command over a file with the
+  real migration. They are unit tests of the command modules (Typer's
+  runner), not application integration: neither role has an app to drive
+  for a CLI command.
+  - VM storefront (`tests/unit/cli/test_config.py`),
+    `test_settlement_migration_moves_the_retired_address_book_keys`: `--check`
+    reports the move and writes nothing, and `--write --backup` moves both
+    keys and keeps the original as `.bak`.
+  - VM buyer (`tests/test_config_migration_cli.py`),
+    `test_buyer_migration_moves_the_retired_address_book_keys`: `market config
+    migrate --write --backup` moves a chain key.
+
+  Results: `kit/config` 264 passed, VM buyer 213, and the VM storefront's
+  unit suite 1147.
+- [x] 26.3 A repository search finds the retired keys only in the migration
   code, the refusal diagnostics, and their tests (D11).
-- [ ] 26.4 Bump `arkhai-kit-config` and every package whose loader changed. Run
+
+  Three readers carried the retired spelling as a name of their own. Each is
+  renamed so the search is clean:
+  - `verify_escrow_against_plan`'s `alkahest_address_config_path` keyword
+    becomes `address_book`, at every storefront caller;
+  - `ProbedChain.address_config_path` becomes `address_book`;
+  - `kit/storefront`'s `AlkahestChain.address_config_path` becomes
+    `address_book`, which bumps `arkhai-kit-storefront`.
+
+  A search outside `openspec/`, the virtual environments, and the locks
+  finds the keys in:
+  - `kit/config`'s migration;
+  - `kit/alkahest`'s refusal;
+  - their tests and the loaders' refusal tests;
+  - the chart, topology, and deployment-surface tests asserting their
+    absence.
+
+  The documents also still name them: `docs/seller-quickstart.md`,
+  `docs/bare-metal-seller-quickstart.md`, `docs/buyer-quickstart.md`,
+  `docs/cookbooks/vllm-apicredits-seller.md`, and
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`. Each is a closeout
+  destination in the design-promotion record (27.9), so they are left for
+  closeout.
+- [x] 26.4 Bump `arkhai-kit-config` and every package whose loader changed. Run
   `make lock`, and `make helm-values-schema` if a model changed.
   **Verification checkpoint:**
   - 26.1–26.3;
@@ -4054,6 +4183,50 @@ Files:
   - `e2e_deal`, `e2e_deal_buyer_cli`, `e2e_buy`, and `e2e_non_erc20_settlement`;
   - `e2e_bare_metal_mock_deal`;
   - `e2e_credits_deal`.
+
+  Bumps:
+  - `arkhai-kit-config` 0.4.1 → 0.5.0, its first bump in this change, since
+    `ChainConfig` drops a field;
+  - `arkhai-kit-storefront` 0.9.0 → 0.10.0, for `AlkahestChain.address_book`.
+    The three storefronts' exact pins move with it;
+  - the storefronts, buyers, and `arkhai-kit-alkahest` were already bumped in
+    this change;
+  - floors on `arkhai-kit-config>=0.5.0` are raised in the VM and API-credit
+    storefronts and buyers, whose migration commands need it.
+
+  `make lock` moved `arkhai-kit-config` in 21 locks and `arkhai-kit-storefront`
+  in 5. No values schema needed regenerating beyond the hand edits above.
+
+  Results:
+  - full `make test`: passes. It includes `kit/config`, `kit/alkahest`,
+    `kit/storefront`, the three storefronts, the three buyers, and
+    `make -C helm test-render` with its loader checks;
+  - `make check-packaging`: passes;
+  - `make check-change`, which includes comment hygiene: only the closeout
+    citation, as before.
+
+  Owed by validation, the `tests.yml` `release · deployment contracts` job:
+  as the plan states it.
+
+  Handoff:
+  - The operator documents naming the retired keys are closeout's (27.9).
+    So is the companion's "an empty wallet address or key" line (section
+    22).
+  - The registry refuses the section key as unknown before the model's own
+    refusal is reached; each role's own check runs first, so an operator
+    sees the named refusal. The VM storefront's escrow CLI, refund action,
+    and listing service do not run the startup refusal: run alone against
+    such a configuration they would ignore a chain key, though the server
+    will not start on it.
+  - Follow-ups, from the fresh-context check:
+    - the bare-metal and API-credit storefronts, and an API-credit-only
+      buyer, have no settlement migration command, so the spec's migration
+      requirement holds only where a role has one;
+    - `kit/config`'s migration encodes the Alkahest table's meaning beside
+      `kit/alkahest`'s refusal, continuing the existing placement of
+      settlement migration in the foundation kit.
+  - Sections 25 and 26 must ship together: section 25's buyers ignore the
+    retired keys, and this section refuses them.
 
 ## 27. Closeout
 

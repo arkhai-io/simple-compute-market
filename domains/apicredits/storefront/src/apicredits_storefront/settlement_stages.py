@@ -342,7 +342,7 @@ async def _prepare_alkahest_settlement(
         alkahest_client=mechanism_client,
         chain_name=chain_name,
         escrow_address=proposal.escrow_address,
-        alkahest_address_config_path=chain_address_books().get(chain_name),
+        address_book=chain_address_books().get(chain_name),
     )
     if not isinstance(matched_index, int) or not 0 <= matched_index < len(obligations):
         raise ValueError(

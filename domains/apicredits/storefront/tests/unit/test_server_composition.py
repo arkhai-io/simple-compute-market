@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import market_policy.negotiation_thread as negotiation_thread
 import pytest
+from dynaconf import Dynaconf
 from market_alkahest import AlkahestChainProbe
 from market_identity import Ed25519Signer
 from storefront_client.settlement_routes import unmounted_settlement_routes
@@ -94,7 +95,7 @@ def test_api_credit_chain_values_are_contributed_to_shared_factory(monkeypatch):
 
     assert policy.private_key == "secret"
     assert policy.missing_requirements == ()
-    assert [(c.name, c.rpc_url, c.address_config_path) for c in policy.chains] == [
+    assert [(c.name, c.rpc_url, c.address_book) for c in policy.chains] == [
         ("anvil", "http://rpc", "addresses.json"),
         ("base_sepolia", "http://base", None),
     ]
@@ -395,6 +396,39 @@ def test_the_capacity_poll_interval_is_five_seconds_only_when_unstated():
 
 def test_a_configuration_stating_no_renamed_setting_is_not_refused():
     assert retired_setting_problems() == []
+
+
+def _source(values: dict) -> Dynaconf:
+    source = Dynaconf(environments=False)
+    for key, value in values.items():
+        source.set(key, value)
+    return source
+
+
+@pytest.mark.parametrize(
+    ("values", "path"),
+    [
+        (
+            {"chains": {"anvil": {"rpc_url": "ws://anvil:8545",
+                                  "alkahest_address_config_path": "/book.json"}}},
+            "[Chains.anvil].alkahest_address_config_path",
+        ),
+        (
+            {"settlement": {"schema_version": 1, "priority": ["alkahest.v1"],
+                            "alkahest": {"enabled": True,
+                                         "address_config_path": "/book.json"}}},
+            "[Settlement.alkahest].address_config_path",
+        ),
+    ],
+    ids=["chain-key", "section-key"],
+)
+def test_a_retired_address_book_key_is_refused_naming_the_table(values, path):
+    """Spec scenario "A retired key is stated", for the API-credit storefront."""
+    (problem,) = retired_setting_problems(_source(values))
+
+    assert problem.startswith(f"{path} is retired")
+    assert "[Settlement.alkahest.address_books]" in problem
+    assert "/book.json" not in problem
 
 
 @pytest.mark.parametrize(

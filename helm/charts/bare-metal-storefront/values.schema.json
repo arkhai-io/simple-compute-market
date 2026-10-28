@@ -568,16 +568,6 @@
                     "null"
                   ]
                 },
-                "^[aA][dD][dD][rR][eE][sS][sS]_[cC][oO][nN][fF][iI][gG]_[pP][aA][tT][hH]$": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
                 "^[aA][dD][dD][rR][eE][sS][sS]_[bB][oO][oO][kK][sS]$": {
                   "additionalProperties": {
                     "type": [
@@ -1619,16 +1609,6 @@
                 "anyOf": [
                   {
                     "type": "integer"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "^[aA][lL][kK][aA][hH][eE][sS][tT]_[aA][dD][dD][rR][eE][sS][sS]_[cC][oO][nN][fF][iI][gG]_[pP][aA][tT][hH]$": {
-                "anyOf": [
-                  {
-                    "type": "string"
                   },
                   {
                     "type": "null"
