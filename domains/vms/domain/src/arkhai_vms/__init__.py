@@ -12,6 +12,7 @@ from arkhai_vms.capability_shapes import (
     flatten_vm_shape,
     price_vm_shape,
     vm_family_rate,
+    vm_listing_resource_shape,
     vm_shape_digest,
     vm_shape_problems,
 )
@@ -70,6 +71,7 @@ __all__ = [
     "flatten_vm_shape",
     "price_vm_shape",
     "vm_family_rate",
+    "vm_listing_resource_shape",
     "vm_shape_digest",
     "vm_shape_problems",
     "DEFAULT_LISTING_SHAPE_GENERATOR",

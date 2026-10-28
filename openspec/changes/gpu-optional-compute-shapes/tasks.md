@@ -484,13 +484,22 @@ tests `domains/vms/domain/tests/test_schema.py`,
 `domains/vms/storefront/tests/unit/{test_resources.py,test_listing_model_capacity_identity.py}`,
 `domains/vms/storefront/tests/integration/test_listings_api.py`.
 
-- [ ] 5.1 Make `ComputeResource.gpu_count` and `gpu_model` optional, and replace
+- [x] 5.1 Make `ComputeResource.gpu_count` and `gpu_model` optional, and replace
   `VmListing`'s presence checks with flattening the resource's quantity and attribute fields
   through the compute schema, so the shape kit refuses one GPU field without the other and a
   mapping with no quantity (D6, D1). Unit (`test_schema.py`): a GPU-less listing validates;
   `gpu_model` alone, `gpu_count` alone, and no quantity are refused naming the shape kit's
   reason.
-- [ ] 5.2 One dispatch rule at every seam (D6 "Dispatch"): `Resource.parse_from_dict`
+  *Done.* One reader, `arkhai_vms.vm_listing_resource_shape` (`capability_shapes.py`), builds
+  a flat resource's shape through `unflatten_shape`, taking only the schema's flat names and
+  reading a `None` value as absent; `VmListing`'s validator and a new `ComputeResource`
+  after-validator both call it, so neither restates the rule. Unit, `domains/vms/domain`
+  `make test`: 58 passed — a GPU-less listing validates and reads as `{cpu, memory}`; GPU
+  fields stated as `None` state nothing; model alone, count alone, no quantity, and zero GPUs
+  are refused with the kit's reason. `ComputeResource`'s refusals are 5.2's unit cases.
+  Outside the plan's files: `test_domain_runtime_wiring.py` matched the old message and now
+  matches `gpu.model: is required`.
+- [x] 5.2 One dispatch rule at every seam (D6 "Dispatch"): `Resource.parse_from_dict`
   (`models.py`), `resource_is_compute` (`pricing.py`), the adapter registry's
   `parse_resource_from_dict` and the compute adapter's discriminator (`resources.py`), and
   `format_resource` (`buyer_cli.py`). An explicit `resource_type` selects its adapter;
@@ -499,22 +508,78 @@ tests `domains/vms/domain/tests/test_schema.py`,
   mapping, and an explicit `resource_type` each dispatch as the rule says; a mapping with no
   quantity is refused by compute validation; `resource_is_compute` and `format_resource`
   agree with the parser.
-- [ ] 5.3 The `ComputeResource` serializer omits an absent `gpu_count` and `gpu_model` as it
+  *Done.* The rule is `payload_resource_type` in `models.py`, beside `COMPUTE_RESOURCE_TYPE`
+  and `TOKEN_RESOURCE_TYPE`; `parse_from_dict`, `resource_is_compute`, and `format_resource`
+  call it. The adapter registry keeps third-party adapters selectable by their key, so its
+  rule is: a registered `resource_type`, else an adapter whose `discriminator_key` the
+  payload carries, else compute; the compute adapter's key is now `None`, and over the
+  built-in adapters this is the same rule, which is how D6's "one rule" holds while a
+  registered extension adapter can still select itself. `resource_is_compute` of an object
+  is now `isinstance(…, ComputeResource)`, not `hasattr(…, "gpu_model")`, and an empty
+  mapping is not compute, so `extract_compute_from_order` still refuses an order with no
+  `listing_resource`. `format_resource` renders every non-compute payload as a token, so its
+  JSON fallback, which the rule left unreachable but for a token type with no `token` key,
+  is gone. Unit (VM storefront `tests/unit`, 1146 passed): each of the four payloads
+  dispatches alike through `payload_resource_type`, both parsers, `resource_is_compute`, and
+  `format_resource` (for compute, by its `region=` line); a GPU-less mapping parses with
+  both GPU fields `None`; one GPU field alone and no quantity are refused by
+  `ComputeResource`'s validation (the old "Cannot determine resource type" case is gone,
+  since no mapping is undecidable); an empty mapping is not compute and its order is
+  refused; a token-typed payload renders as a token. The buyer's `format_resource` test
+  (`domains/vms/buyer`, 207 passed) is unchanged.
+- [x] 5.3 The `ComputeResource` serializer omits an absent `gpu_count` and `gpu_model` as it
   omits `asking_rate` (D6 "Serialization"). Unit (`test_listing_model_capacity_identity.py`
   or `test_resources.py`): a GPU-less resource's `model_dump(mode="json")` has no GPU key; a
   stored listing whose resource holds `gpu_model: null` and one missing the key compare equal
   under `compare_listing`, so no stored listing churns.
-- [ ] 5.4 Application integration (`test_listings_api.py`, through the storefront's typed
+  *Done.* The wrap serializer now drops `asking_rate`, `gpu_count`, and `gpu_model` when
+  `None`. Unit (`test_resources.py`): a GPU-less resource's `model_dump()`, its
+  `model_dump(mode="json")`, and the compute adapter's `to_dict` carry neither GPU key; a GPU
+  resource dumps both GPU fields; a stored resource with both GPU fields `null` and a
+  fresh one without them compare `unchanged`. `compare_listing` needed no change: it already
+  compares an identity field only when both sides publish it.
+- [x] 5.4 Application integration (`test_listings_api.py`, through the storefront's typed
   client): the publication path's `parse_resource_from_dict` accepts a GPU-less payload,
   still parses a stored GPU listing, and refuses a compute mapping with no quantity (D6,
   D11).
-- [ ] 5.5 **Verification checkpoint.** Unit 5.1–5.3; application integration 5.4. Run
+  *Done.* Application integration, VM storefront `tests/integration` (481 passed), through
+  `StorefrontClient.create_listing` against the in-process listings app: a GPU-less
+  resource with a `{cpu, memory}` listing shape is created and stored with no GPU key; a GPU
+  resource naming no `resource_type`, as every stored VM listing does, is created and
+  stored with its GPU fields; a compute resource stating no quantity is refused with 400
+  naming the empty shape. That refusal is the domain codec's (`VmListing`, which runs first
+  in `_parse_listing_resource_and_escrows` and reads the shape through the same
+  `vm_listing_resource_shape`), not `parse_resource_from_dict`'s, whose own refusal is 5.2's
+  unit case. The parser's one production caller, `derive_listing`, serves both create and
+  the publication loop's refresh comparison, so these cases run the loop's derivation too.
+- [x] 5.5 **Verification checkpoint.** Unit 5.1–5.3; application integration 5.4. Run
   `make test` in `domains/vms/domain` and `domains/vms/storefront` (`arkhai_vms_listings`
   has no suite of its own; its behaviour suites live in the VM storefront's unit suite),
   and `make check-comment-hygiene`.
   End-to-end: every VM lane scenario publishes GPU listings through the changed dispatch
   and serializer (`e2e_deal`, `e2e_listing_shapes`, `e2e_compute_dynamic_listings`); section
   8 adds the GPU-less one.
+  *Done.* After `make dist`: `domains/vms/domain` 58 passed; `domains/vms/storefront` 1146
+  unit and 481 integration passed; `domains/vms/buyer` 207 passed; `make check-change`
+  (comment hygiene included) passes; root `make test` exited 0 before the fresh-context
+  check's fixes, after which the storefront and buyer suites were rerun and pass. No
+  dependency or lock changed. End-to-end, confirmed as planned: `e2e_deal`,
+  `e2e_listing_shapes`, and `e2e_compute_dynamic_listings` publish GPU listings through the
+  changed models; none states a GPU-less shape until section 8.
+
+  Fresh-context check: no layering, packaging, import, or comment-hygiene problem. Fixed
+  from it: `payload_resource_type`'s docstring claimed every seam called it (the registry
+  reduces to it instead, now said); `format_resource`'s token branch re-tested the `token`
+  key; `resource_is_compute({})` had become true; the test module's docstring; and four
+  overstated notes (5.3's `to_dict` and "unchanged", 5.4's refusal and "only caller").
+  Declined: raising `arkhai-vms-listings`' `arkhai-vms>=0.6.0` bound for the new
+  `vm_listing_resource_shape`, since every lock pins the tree's 0.7.0 wheel and versions
+  are not bumped per change.
+
+  *Handoff.* `DEPLOYMENT_AND_CONFIG.md` ("Storefront listing shapes and pool overrides",
+  the constraint bullet) still says "`gpu.count` and `gpu.model` are required, so
+  `gpu.count` always states an `offer`"; the promotion record does not name it, so closeout
+  (9.9) should rewrite it to "required together".
 
 ## 6. VM publication of GPU-less shapes
 
