@@ -160,8 +160,36 @@ Files: `domains/bare_metal/src/arkhai_bare_metal/{schema.py,shapes.py}`;
   claim of one `units` and no attribute, which the same matcher admits. The storefront's
   loader copies `BareMetalListing.claimed_attributes` into that record
   (`sqlite_client.py`, `load_bare_metal_fulfillment_context`); the property is unit-tested
-  in 2.1, the loader path for a GPU-less listing is not. The bare-metal storefront has no
-  test that reserves against a real site ledger; the lane has none either (2.6).
+  in 2.1, the loader path for a GPU-less listing is not.
+  *Implementation-round fix (review 22 F1): the claim through a real site.*
+  `tests/integration/test_site_reservation.py` runs the fulfillment service against a
+  real site over the wire. The site is `kit/site`'s capacity router over a real
+  `CapacityLedgerService`, configured as the compute provisioning service configures its
+  own (`unit_claim_keys=("units", "gpu_count")`, `mirror_dimension="gpu_count"`), in a
+  FastAPI app signing as the site authority, holding one GPU-less whole-host declaration
+  (`units: 1, vcpu_count: 64, ram_gb: 512`, no GPU attribute) in a pool delivering
+  `bare_metal`. `BareMetalFulfillmentService.begin` reaches it through the production
+  capacity client, `AggregateCapacityClient` over `SiteCapacityClient` over
+  `ASGITransport`, from a record whose `claimed_attributes` is a GPU-less
+  `BareMetalListing`'s. The site admits the claim, holds it against that resource with
+  dimensions `{units: 1}` and no attribute constraint but the pinned `resource_id`, and
+  leases it at commit, leaving the resource's `units` at 0 available. Its scalar
+  `available_units` is `None`, since it mirrors `gpu_count`, which the declaration does
+  not name; the test asserts both. It is still below application integration: the
+  storefront's app and persistence, its settlement evidence, and provisioning are
+  in-memory stand-ins, and the loader path stays untested as above. The test's own
+  imports led to declaring `sqlalchemy` in the storefront's `dev` group (`make lock`) and
+  to a comment on `arkhai-kit-site` naming the router and ledger.
+  Evidence: `make -C domains test-bare-metal` — `domains/bare_metal` 194 passed (unit);
+  `domains/bare_metal/storefront` 507 passed (unit and integration, the new test among
+  them); buyer 16 and provisioning adapter 57 passed. `make check-packaging`, `make
+  check-comment-hygiene`, and `make check-change` pass. Root `make test` passed (exit 0),
+  after the relock.
+  Fresh-context check of the fix's diff: it found the test importing `sqlalchemy` and
+  `starlette` undeclared (now `sqlalchemy` in `dev`, `Response` from `fastapi`), an
+  unasserted `available_units` claim in this note (now asserted), and 2.6 overstating the
+  level and implying validation 23 ran the test (both reworded). No comment-hygiene,
+  fixture, or placement problem.
 - [x] 2.4 Application integration (`test_publication_cycle.py`): one publication cycle
   over a site projecting a GPU-less machine publishes it, and the registry body the cycle
   sends has no GPU key (D7, D11).
@@ -185,8 +213,8 @@ Files: `domains/bare_metal/src/arkhai_bare_metal/{schema.py,shapes.py}`;
   test-e2e-unit`, and `make check-comment-hygiene`.
   End-to-end: `e2e_bare_metal_publication` (2.5) proves the GPU-less machine's publication
   and discovery; `e2e_bare_metal_mock_deal` and `e2e_bare_metal_introduction` prove GPU
-  machines are unchanged. The GPU-less claim is proven at application integration (2.3); no
-  further scenario is owed.
+  machines are unchanged. The GPU-less claim is proven against a real site's admission
+  (2.3); no further scenario is owed.
   *Done.* Unit 2.1–2.3; 2.3's service test and 2.4's cycle test are below application
   integration, as their notes say. `domains/bare_metal` 194 passed;
   `domains/bare_metal/storefront` 506 passed (its provisioning adapter 16 and buyer 57 also
@@ -197,13 +225,14 @@ Files: `domains/bare_metal/src/arkhai_bare_metal/{schema.py,shapes.py}`;
   End-to-end, confirmed: `e2e_bare_metal_publication` (stage 05e) proves the GPU-less
   machine's publication and discovery; `e2e_bare_metal_mock_deal`,
   `e2e_bare_metal_introduction`, and `e2e_bare_metal_unbacked_introduction` run GPU
-  machines through the changed listing model. No scenario reserves a GPU-less machine, so
-  the GPU-less claim's evidence is the unit tests in 2.3, and the claim reaching a real
-  site's admission is unproven above unit level.
+  machines through the changed listing model; validation 23 passed all three lanes at
+  `834e192ac`. No scenario reserves a GPU-less machine. The claim's admission, reservation,
+  and commit at a real site are proven by 2.3's round fix (review 22 F1), which postdates
+  validation 23: the fulfillment service against a real site over the wire, still below
+  application integration, since the storefront's app and persistence are stand-ins and
+  the loader path is untested.
 
-  *Handoff.* A bare-metal storefront test that reserves through a real site ledger does not
-  exist; adding one is the way to lift 2.3 to application integration if review asks.
-  `docs/development/DEPLOYMENT_AND_CONFIG.md` ("Definition documents", the bare-metal
+  *Handoff.* `docs/development/DEPLOYMENT_AND_CONFIG.md` ("Definition documents", the bare-metal
   declaration bullet) still says `gpu_count` and `gpu_model` are required for bare-metal
   publication; the promotion record names the quickstart's matching paragraph but not that
   bullet, so closeout (9.9) should rewrite it too.
