@@ -66,7 +66,7 @@ class FakeSiteAuthority:
             if reservation.get("release_job_id") not in (None, release_job_id):
                 return None
             return reservation
-        if reservation["state"] not in {"reserved", "provisioning", "leased", "release_failed"}:
+        if reservation["state"] not in {"reserved", "leased", "release_failed"}:
             return None
         reservation["release_requested_at"] = datetime.now(timezone.utc).isoformat()
         reservation.update(state="releasing", release_job_id=release_job_id)
@@ -76,7 +76,7 @@ class FakeSiteAuthority:
         self, capacity_reservation_id, *, reason, message=None, release_job_id=None
     ):
         reservation = self.reservations[capacity_reservation_id]
-        if reservation["state"] not in {"reserved", "provisioning", "leased", "releasing"}:
+        if reservation["state"] not in {"reserved", "leased", "releasing"}:
             return None
         if (
             reservation["state"] == "releasing"

@@ -176,7 +176,7 @@ async def test_the_required_contracts_are_read_from_the_chains_address_book() ->
             return super().__call__(rpc_url, method, params, timeout)
 
     probe = AlkahestChainProbe(
-        [ProbedChain(name="anvil", rpc_url="http://anvil.test", address_config_path=book)],
+        [ProbedChain(name="anvil", rpc_url="http://anvil.test", address_book=book)],
         json_rpc=Recording(),
         clock=Clock(),
     )
@@ -184,7 +184,7 @@ async def test_the_required_contracts_are_read_from_the_chains_address_book() ->
     await probe.step()
 
     expected = required_contract_addresses(
-        ProbedChain(name="anvil", rpc_url="http://anvil.test", address_config_path=book)
+        ProbedChain(name="anvil", rpc_url="http://anvil.test", address_book=book)
     )
     assert set(expected) == {label for _path, label in REQUIRED_CONTRACTS}
     assert seen == list(expected.values())
@@ -197,7 +197,7 @@ def test_an_address_book_naming_no_required_contract_cannot_be_probed(tmp_path) 
 
     with pytest.raises(Exception):
         required_contract_addresses(
-            ProbedChain(name="anvil", rpc_url="http://anvil.test", address_config_path=str(book))
+            ProbedChain(name="anvil", rpc_url="http://anvil.test", address_book=str(book))
         )
 
 

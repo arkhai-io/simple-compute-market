@@ -31,13 +31,19 @@ from .release_conditions import (
     release_conditions,
 )
 from .settlement_config import (
+    ADDRESS_BOOKS_TABLE,
     ALKAHEST_CONFIG_KEY,
     ALKAHEST_MECHANISM_ID,
     AlkahestSettlementConfig,
+    alkahest_address_book,
     create_alkahest_registration,
+    retired_address_book_keys,
+    retired_address_book_refusal,
+    wallet_account_address,
 )
 
 __all__ = [
+    "ADDRESS_BOOKS_TABLE",
     "ALKAHEST_CHAIN_PROBE_LOOP",
     "ALKAHEST_CHAIN_PROBE_ROUTE",
     "ALKAHEST_CONFIG_KEY",
@@ -56,10 +62,14 @@ __all__ = [
     "RECIPIENT_RELEASE",
     "RELEASE_MODELS",
     "ReleaseModelError",
+    "alkahest_address_book",
     "configured_release_model",
     "create_alkahest_registration",
     "escrow_release_conditions",
     "json_rpc_call",
     "release_conditions",
+    "retired_address_book_keys",
+    "retired_address_book_refusal",
     "verify_escrow_against_plan",
+    "wallet_account_address",
 ]

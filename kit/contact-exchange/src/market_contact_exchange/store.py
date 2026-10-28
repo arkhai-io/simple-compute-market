@@ -3,7 +3,7 @@
 The table and its row functions belong to this kit, so the asynchronous access
 a storefront needs over them does too: each operation opens its own
 connection on a worker thread, runs one row function, and commits, so no
-composing storefront carries a copy of the same four wrappers.
+composing storefront carries a copy of the same wrappers.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ from typing import TypeVar
 
 from .introduction_routes import IntroductionRecord
 from .migrations import (
+    claim_seller_dispatch,
     delete_introduction_payloads,
     insert_introduction,
     load_introduction,
@@ -52,6 +53,15 @@ class SQLiteIntroductionStore:
     async def load(self, obligation_ref: str) -> IntroductionRecord | None:
         return await asyncio.to_thread(
             self._run, lambda conn: load_introduction(conn, obligation_ref), commit=False
+        )
+
+    async def claim_seller_dispatch(self, obligation_ref: str) -> bool:
+        """Claim one introduction's seller-side delivery; ``True`` for the one winner."""
+
+        return await asyncio.to_thread(
+            self._run,
+            lambda conn: claim_seller_dispatch(conn, obligation_ref),
+            commit=True,
         )
 
     async def delete_payloads(self, obligation_ref: str, deleted_at: datetime) -> bool:

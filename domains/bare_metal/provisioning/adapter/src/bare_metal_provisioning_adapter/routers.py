@@ -11,14 +11,15 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from arkhai_bare_metal.provisioning_client import BARE_METAL_PROVISIONING_ROUTES
-
-from bare_metal_provisioning_adapter.controllers.test_controller import make_mock_router
+from bare_metal_provisioning_adapter.controllers.test_controller import (
+    BARE_METAL_MOCK_ROUTE_MOUNT,
+    make_mock_router,
+)
 
 
 def bare_metal_route_contracts():
-    """The signed contracts of every route bare metal mounts, test routes included."""
-    return BARE_METAL_PROVISIONING_ROUTES
+    """The signed contracts of every route bare metal mounts: its mock routes."""
+    return BARE_METAL_MOCK_ROUTE_MOUNT.route_declarations()
 
 
 def bare_metal_mock_router(

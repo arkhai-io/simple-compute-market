@@ -34,6 +34,7 @@ import logging
 from importlib import resources
 
 import pytest
+from compute_provisioning_contracts import MockRuleCreate
 from market_alkahest.dev_chain import anvil_address_book_path
 
 from market_alkahest.alkahest import (
@@ -335,27 +336,28 @@ class TestStageB3_ArmProvisioning:
         require_state(deal_state, "_provisioning_mock_mode", "resume_confirmed")
 
         delete_mock_rules_if_present(
-            provisioning_test_client,
+            provisioning_test_client.vm_rules,
             BUY_RULE_ID,
             "e2e-create-pause",
         )
-        provisioning_test_client.add_mock_rule(
-            rule_id=BUY_RULE_ID,
-            match={"vm_action": "create"},
-            pause_before_result=False,
-            # The create fact the VM playbook prints, with the forwarded port and
-            # the time access became ready: a create reporting neither says
-            # nothing a buyer can use, and fails.
-            result_stdout=(
-                'ok: [kvm1] => {\n    "vm_creation_data": '
-                '{"action": "create", "vm_name": "e2e-buy-vm", "tenant_user": "vmuser", '
-                '"external_ssh_port": "2222", "timestamp": "2030-01-01T00:00:01Z", '
-                '"tenant_ssh_key_path": "/tmp/e2e.key", "frp": {"enabled": false}, '
-                '"authentication": {"tenant": {"ssh_commands": '
-                '{"external": "ssh vmuser@localhost", '
-                '"internal": "ssh vmuser@10.0.0.1"}}}}\n}\n'
-            ),
-            fail_with=None,
+        provisioning_test_client.vm_rules.add_rule(
+            MockRuleCreate(
+                rule_id=BUY_RULE_ID,
+                match={"vm_action": "create"},
+                pause_before_result=False,
+                # The create fact the VM playbook prints, with the forwarded port
+                # and the time access became ready: a create reporting neither
+                # says nothing a buyer can use, and fails.
+                result_stdout=(
+                    'ok: [kvm1] => {\n    "vm_creation_data": '
+                    '{"action": "create", "vm_name": "e2e-buy-vm", "tenant_user": "vmuser", '
+                    '"external_ssh_port": "2222", "timestamp": "2030-01-01T00:00:01Z", '
+                    '"tenant_ssh_key_path": "/tmp/e2e.key", "frp": {"enabled": false}, '
+                    '"authentication": {"tenant": {"ssh_commands": '
+                    '{"external": "ssh vmuser@localhost", '
+                    '"internal": "ssh vmuser@10.0.0.1"}}}}\n}\n'
+                ),
+            )
         )
         deal_state.provisioning_gate_armed = True
         log.info("[B3] Provisioning create rule armed (no pause): %s", BUY_RULE_ID)

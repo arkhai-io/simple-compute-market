@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timezone
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 
 import pytest
 from market_alkahest import (
@@ -13,7 +13,9 @@ from market_alkahest import (
     ChainProbeResult,
     create_alkahest_registration,
     verify_escrow_against_plan,
+    wallet_account_address,
 )
+from market_alkahest.dev_chain import anvil_address_book_path
 from market_alkahest.settlement_config import alkahest_preflight
 from market_core.schemas import SettlementOption
 from market_settlement_runtime import (
@@ -93,13 +95,17 @@ async def test_enabled_alkahest_reports_sanitized_prerequisite_blockers() -> Non
     assert "rpc_url" not in projection
 
 
-WALLET = "0x" + "11" * 20
+# Anvil's first published development account, its key and the address the key
+# signs as. Well-known development values; never use them on a public network.
+WALLET_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+WALLET = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
 ORACLE = "0x" + "22" * 20
+OTHER_ACCOUNT = "0x" + "44" * 20
 
 
 def _seller_resources(**overrides) -> dict:
     resources = {
-        "wallet": {"address": WALLET, "private_key": "0x" + "33" * 32},
+        "wallet": {"address": WALLET, "private_key": WALLET_KEY},
         "chains": {"anvil": {"rpc_url": "http://anvil.test", "chain_id": 31337}},
         "chain_name": "anvil",
         "clients": {"anvil": object()},
@@ -152,7 +158,7 @@ async def test_a_complete_seller_section_is_ready() -> None:
         ),
         (
             {},
-            {"wallet": {"address": "", "private_key": "0x" + "33" * 32}},
+            {"wallet": {"address": "", "private_key": ""}},
             ("alkahest.wallet_address_missing", "configuration"),
         ),
         (
@@ -177,7 +183,7 @@ async def test_a_complete_seller_section_is_ready() -> None:
         "interruptible-no-oracle",
         "interruptible-oracle-is-wallet",
         "undeliverable-model",
-        "empty-wallet-with-clients",
+        "no-address-and-no-key",
         "empty-bare-wallet",
         "no-wallet-key",
         "no-chains",
@@ -322,11 +328,6 @@ async def test_with_no_publication_input_every_configured_chain_is_judged(
             ("alkahest.rpc_missing", "configuration"),
         ),
         (
-            {"address_config_path": "/nonexistent/alkahest-addresses.json"},
-            {},
-            ("alkahest.address_config_invalid", "configuration"),
-        ),
-        (
             {},
             {"require_asset": True},
             ("alkahest.asset_missing", "configuration"),
@@ -334,7 +335,6 @@ async def test_with_no_publication_input_every_configured_chain_is_judged(
     ],
     ids=[
         "rpc-missing",
-        "address-config-invalid",
         "asset-missing",
     ],
 )
@@ -344,6 +344,111 @@ async def test_each_chain_and_input_blocker_states_its_kind(
     config = AlkahestSettlementConfig.model_validate({"enabled": True, **policy})
 
     assert expected in await _blockers(config, _seller_resources(**resources))
+
+
+def test_the_address_books_parse_as_a_table_of_chain_to_book() -> None:
+    config = AlkahestSettlementConfig.model_validate(
+        {"address_books": {"anvil": "/etc/arkhai/alkahest/anvil.json"}}
+    )
+
+    assert config.address_books == {"anvil": "/etc/arkhai/alkahest/anvil.json"}
+    assert AlkahestSettlementConfig().address_books == {}
+    # A layered loader's own mapping type is a table too.
+    assert AlkahestSettlementConfig.model_validate(
+        {"address_books": MappingProxyType({"anvil": "/book.json"})}
+    ).address_books == {"anvil": "/book.json"}
+
+
+@pytest.mark.parametrize(
+    "books",
+    [
+        {" anvil": "/book.json"},
+        {"": "/book.json"},
+        {"anvil": ""},
+        {"anvil": " /book.json"},
+        {"anvil": 7},
+        ["anvil"],
+    ],
+    ids=["untrimmed-chain", "empty-chain", "empty-book", "untrimmed-book", "not-a-path", "a-list"],
+)
+def test_an_address_book_entry_that_is_not_a_chain_and_a_path_is_refused(books) -> None:
+    with pytest.raises(ValidationError) as refused:
+        AlkahestSettlementConfig.model_validate({"address_books": books})
+
+    assert refused.value.errors()[0]["loc"][0] == "address_books"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enabled", [True, False], ids=["enabled", "disabled"])
+async def test_an_address_book_naming_no_configured_chain_is_a_blocker_naming_it(
+    enabled: bool,
+) -> None:
+    book = str(anvil_address_book_path())
+    config = AlkahestSettlementConfig(
+        enabled=enabled, address_books={"anvil": book, "anvill": book}
+    )
+
+    status = await alkahest_preflight(config, _seller_resources(), "seller")
+
+    (blocker,) = status.blockers
+    assert (blocker.code, blocker.kind) == (
+        "alkahest.address_book_chain_unknown",
+        "configuration",
+    )
+    assert "'anvill'" in blocker.message
+    assert "'anvil'," not in blocker.message
+
+
+@pytest.mark.asyncio
+async def test_a_buyers_address_book_naming_no_configured_chain_is_a_blocker() -> None:
+    status = await alkahest_preflight(
+        AlkahestSettlementConfig(
+            enabled=True, address_books={"anvill": str(anvil_address_book_path())}
+        ),
+        {
+            "wallet": {"address": WALLET},
+            "chains": {"anvil": {"rpc_url": "http://anvil.test"}},
+            "default_chain": "anvil",
+        },
+        "buyer",
+    )
+
+    assert [blocker.code for blocker in status.blockers] == [
+        "alkahest.address_book_chain_unknown"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_address_book_keys_are_not_judged_without_a_chains_mapping() -> None:
+    config = AlkahestSettlementConfig(
+        enabled=True, address_books={"anvil": str(anvil_address_book_path())}
+    )
+
+    status = await alkahest_preflight(config, {"wallet": {"address": WALLET}}, "buyer")
+
+    assert "alkahest.address_book_chain_unknown" not in {
+        blocker.code for blocker in status.blockers
+    }
+
+
+@pytest.mark.asyncio
+async def test_an_address_book_on_a_configured_chain_raises_no_blocker() -> None:
+    config = AlkahestSettlementConfig(
+        enabled=True, address_books={"anvil": str(anvil_address_book_path())}
+    )
+
+    assert await _blockers(config, _seller_resources()) == set()
+
+
+@pytest.mark.asyncio
+async def test_an_address_book_that_cannot_be_loaded_is_a_blocker() -> None:
+    config = AlkahestSettlementConfig(
+        enabled=True, address_books={"anvil": "/nonexistent/alkahest-addresses.json"}
+    )
+
+    assert await _blockers(config, _seller_resources()) == {
+        ("alkahest.address_config_invalid", "configuration")
+    }
 
 
 @pytest.mark.asyncio
@@ -356,6 +461,96 @@ async def test_a_wallet_given_as_a_bare_address_is_read_as_one() -> None:
     )
 
     assert blockers == set()
+
+
+@pytest.mark.asyncio
+async def test_the_address_names_another_account() -> None:
+    """Readiness's part of spec scenario "The address names another account"."""
+    blockers = await _blockers(
+        AlkahestSettlementConfig(enabled=True),
+        _seller_resources(wallet={"address": OTHER_ACCOUNT, "private_key": WALLET_KEY}),
+    )
+
+    assert blockers == {("alkahest.wallet_address_mismatch", "configuration")}
+
+
+@pytest.mark.asyncio
+async def test_an_address_differing_only_in_case_names_the_same_account() -> None:
+    # Neither the checksummed form the key derives nor the lowercase fixture.
+    uppercase = "0x" + WALLET[2:].upper()
+
+    blockers = await _blockers(
+        AlkahestSettlementConfig(enabled=True),
+        _seller_resources(wallet={"address": uppercase, "private_key": WALLET_KEY}),
+    )
+
+    assert blockers == set()
+
+
+@pytest.mark.asyncio
+async def test_the_address_is_omitted() -> None:
+    """The kit's part of spec scenario "The address is omitted": readiness and
+    ``wallet_account_address`` read the key's account as the seller's."""
+    wallet = {"private_key": WALLET_KEY}
+
+    blockers = await _blockers(
+        AlkahestSettlementConfig(enabled=True), _seller_resources(wallet=wallet)
+    )
+
+    assert blockers == set()
+    assert wallet_account_address(wallet).lower() == WALLET
+    assert wallet_account_address({"address": OTHER_ACCOUNT, "private_key": WALLET_KEY}) == (
+        OTHER_ACCOUNT
+    )
+    assert wallet_account_address(OTHER_ACCOUNT) == OTHER_ACCOUNT
+    assert wallet_account_address(None) == ""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "policy",
+    [
+        {"oracle_gated": True, "trusted_oracle_addresses": [WALLET]},
+        {"interruptible": True, "interruptible_oracle_addresses": [WALLET]},
+    ],
+    ids=["trusted-oracle", "interruptible-oracle"],
+)
+@pytest.mark.parametrize(
+    "address", [OTHER_ACCOUNT, None], ids=["another-address", "no-address"]
+)
+async def test_the_oracle_is_the_signing_key(policy: dict, address: str | None) -> None:
+    """Spec scenario "The oracle is the signing key": whatever address is
+    configured, an oracle that is the key's account is the seller's own, and
+    readiness is unready."""
+    wallet = {"private_key": WALLET_KEY}
+    if address is not None:
+        wallet["address"] = address
+    config = AlkahestSettlementConfig.model_validate({"enabled": True, **policy})
+
+    blockers = await _blockers(
+        config,
+        _seller_resources(
+            wallet=wallet,
+            deliverable_release_models=frozenset({"oracle_gated", "interruptible"}),
+        ),
+    )
+
+    assert ("alkahest.oracle_is_seller_wallet", "configuration") in blockers
+
+
+@pytest.mark.asyncio
+async def test_a_buyer_whose_address_is_not_its_keys_is_not_refused() -> None:
+    status = await alkahest_preflight(
+        AlkahestSettlementConfig(enabled=True),
+        {
+            "wallet": {"address": OTHER_ACCOUNT, "private_key": WALLET_KEY},
+            "chains": {"anvil": {"rpc_url": "http://anvil.test"}},
+            "default_chain": "anvil",
+        },
+        "buyer",
+    )
+
+    assert status.ready is True
 
 
 @pytest.mark.asyncio
@@ -471,7 +666,10 @@ async def test_a_complete_disabled_section_reports_nothing_beside_being_disabled
     ("overrides", "expected"),
     [
         ({"wallet": {"address": WALLET}}, {"alkahest.wallet_key_missing"}),
-        ({"wallet": {"private_key": "0x" + "33" * 32}}, {"alkahest.wallet_address_missing"}),
+        (
+            {"wallet": {"address": OTHER_ACCOUNT, "private_key": WALLET_KEY}},
+            {"alkahest.wallet_address_mismatch"},
+        ),
         ({"chains": {}}, {"alkahest.chains_missing"}),
         (
             {"deliverable_release_models": frozenset({"recipient"})},

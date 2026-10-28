@@ -60,12 +60,15 @@ enabled = false
 
 [wallet]
 # Sensitive — populated by Secret overlay in k8s, by local file otherwise.
+# The address is optional: omitted, it is the account the key signs as.
 address     = ""
 private_key = ""
 
 # [chains.<name>] tables — one per chain the operator transacts on, same
-# schema as the VM storefront (rpc_url required; chain_id and
-# alkahest_address_config_path optional).
+# schema as the VM storefront (rpc_url required; chain_id optional). A chain
+# on a deployment's own Alkahest contracts names its address book under
+# [settlement.alkahest.address_books]; one it does not name uses the SDK's
+# built-in addresses.
 
 [registry]
 urls              = []

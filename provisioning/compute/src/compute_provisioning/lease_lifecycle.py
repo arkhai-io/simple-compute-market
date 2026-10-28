@@ -128,7 +128,7 @@ class LeaseLifecycleService:
     """
 
     TERMINAL_SUCCESS_STATES = {"released", "force_released"}
-    TERMINAL_FAILURE_STATES = {"release_failed", "unmanaged", "provisioning_failed"}
+    TERMINAL_FAILURE_STATES = {"release_failed", "unmanaged"}
 
     def __init__(
         self,

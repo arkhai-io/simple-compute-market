@@ -12,6 +12,7 @@ from market_site_client.client import (  # noqa: F401
     SiteCapacityAuthenticationError,
     SiteCapacityClient,
     SiteCapacityClientError,
+    SiteCapacityUnauthenticatedResponseError,
     resolve_capacity_route,
 )
 from market_site_client.models import (  # noqa: F401

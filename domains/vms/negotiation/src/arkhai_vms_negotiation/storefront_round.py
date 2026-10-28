@@ -157,10 +157,15 @@ def _policy_map_needs_rl(policies_by_kind: dict[str, list[str]]) -> bool:
 def _load_storefront_chain(
     *,
     negotiation_config: Any = None,
-    chains: Mapping[str, Any] | None = None,
+    chain_config_paths: Mapping[str, str | None] | None = None,
     extra_policy_paths: Iterable[str | Path] | None = None,
 ) -> list[NegotiationMiddleware]:
-    """Resolve the VM storefront's configured negotiation middleware chain."""
+    """Resolve the VM storefront's configured negotiation middleware chain.
+
+    ``chain_config_paths`` maps each configured chain to its Alkahest address
+    book, ``None`` for the SDK's built-in addresses, as the storefront resolved
+    it; the escrow-kind dispatch reads each escrow's kind through it.
+    """
     _discover_file_policies(extra_policy_paths=extra_policy_paths)
 
     negotiation_cfg = negotiation_config
@@ -169,14 +174,10 @@ def _load_storefront_chain(
     if policies_by_kind:
         if _policy_map_needs_rl(policies_by_kind):
             _maybe_register_rl_middleware()
-        chain_config_paths = {
-            name: chain.alkahest_address_config_path
-            for name, chain in (chains or {}).items()
-        }
         return load_negotiation_chain(_DEFAULT_GUARDS) + [
             make_escrow_kind_dispatch_middleware(
                 policies_by_kind,
-                chain_config_paths=chain_config_paths,
+                chain_config_paths=dict(chain_config_paths or {}),
             )
         ]
 
@@ -258,7 +259,7 @@ async def _run_default_seller_round_policy(
     strategy_label: str | None = None,
     listing_source: ListingSourceVerdict | None = None,
     negotiation_config: Any = None,
-    chains: Mapping[str, Any] | None = None,
+    chain_config_paths: Mapping[str, str | None] | None = None,
     extra_policy_paths: Iterable[str | Path] | None = None,
     default_min_price: Any = None,
 ) -> SellerRoundResult:
@@ -325,7 +326,7 @@ async def _run_default_seller_round_policy(
 
     chain = _load_storefront_chain(
         negotiation_config=negotiation_config,
-        chains=chains,
+        chain_config_paths=chain_config_paths,
         extra_policy_paths=extra_policy_paths,
     )
     context = NegotiationContext(
@@ -360,7 +361,7 @@ async def _run_default_seller_round_policy(
 @dataclass
 class _DefaultSellerRoundHook:
     negotiation_config: Any = None
-    chains: Mapping[str, Any] | None = None
+    chain_config_paths: Mapping[str, str | None] | None = None
     extra_policy_paths: Iterable[str | Path] | None = None
     default_min_price: Any = None
 
@@ -380,7 +381,7 @@ class _DefaultSellerRoundHook:
             strategy_label=strategy_label,
             listing_source=listing_source,
             negotiation_config=self.negotiation_config,
-            chains=self.chains,
+            chain_config_paths=self.chain_config_paths,
             extra_policy_paths=self.extra_policy_paths,
             default_min_price=self.default_min_price,
         )
@@ -389,7 +390,7 @@ class _DefaultSellerRoundHook:
 def default_seller_round_hook(
     *,
     negotiation_config: Any = None,
-    chains: Mapping[str, Any] | None = None,
+    chain_config_paths: Mapping[str, str | None] | None = None,
     extra_policy_paths: Iterable[str | Path] | None = None,
     default_min_price: Any = None,
 ) -> SellerRoundHook:
@@ -397,10 +398,12 @@ def default_seller_round_hook(
 
     Each call takes the round's ``listing_source``, the negotiation runtime's
     check of the listing against its own source, which the inventory guard reads.
+    ``chain_config_paths`` is each chain's Alkahest address book as the
+    storefront resolved it.
     """
     return _DefaultSellerRoundHook(
         negotiation_config=negotiation_config,
-        chains=chains,
+        chain_config_paths=chain_config_paths,
         extra_policy_paths=extra_policy_paths,
         default_min_price=default_min_price,
     )

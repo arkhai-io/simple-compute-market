@@ -19,6 +19,7 @@ from core_buyer.orchestration import (
     wait_for_settlement,
 )
 from market_alkahest.plans import require_escrow_terms_fund_plan
+from market_alkahest import alkahest_address_book
 from market_alkahest.proposals import (
     ReleaseConditionError,
     derive_accepted_escrow_terms,
@@ -76,7 +77,8 @@ class BuyerResumeContext:
     signer: Any
     resolve_seller_principals: Callable
     resolve_policy: Callable[[], Any]
-    resolve_address_config: Callable[[], str | None]
+    #: The Alkahest address book the buyer names for a chain, by chain name.
+    resolve_address_book: Callable[[str], str | None]
     poll_interval: float
     timeout: float
     console: Console
@@ -116,10 +118,7 @@ class AlkahestBuyerStage:
         # book, or the SDK's deployment addresses for a public chain that names
         # none. The local development chain has no SDK addresses, so there an
         # unconfigured chain leaves the condition unreadable and the plan refused.
-        chain = common.buyer_chains().get(str(entry.get("chain_name") or ""))
-        addr_config_path = (
-            chain.alkahest_address_config_path if chain is not None else None
-        )
+        addr_config_path = common.chain_address_book(str(entry.get("chain_name") or ""))
 
         def validate(plan):
             try:
@@ -199,9 +198,10 @@ class AlkahestBuyerStage:
             address, private_key = common.resolve_buyer_wallet()
             if not address or not private_key:
                 raise ValueError("selected Alkahest settlement requires [Wallet] credentials")
-            policy = context.resolve_policy()
-            section = policy.config.mechanism_config("alkahest")
-            path = getattr(section, "address_config_path", None)
+            # Escrow terms and the escrow itself read this chain's own book.
+            path = alkahest_address_book(
+                context.resolve_policy().config.mechanism_config("alkahest"), chain.name
+            )
             build_terms = build_terms or make_buyer_payment_escrow_terms_fn(
                 chain_name=chain.name, addr_config_path=path,
             )
@@ -423,7 +423,6 @@ def _resume_alkahest(context: BuyerResumeContext) -> dict:
     console = context.console
     if not deal.escrow_uid and deal.accepted_escrow_proposal is None:
         raise typer.BadParameter("accepted Alkahest work has no escrow artifacts; recovery will not synthesize them")
-    alkahest_address_config_path = context.resolve_address_config()
     accepted_ssh_public_key, effective_duration = _accepted_provision_inputs(deal)
     effective_token = deal.token_contract
     effective_token_decimals: int | None = (
@@ -442,6 +441,7 @@ def _resume_alkahest(context: BuyerResumeContext) -> dict:
         )
         raise typer.Exit(2)
     chain_cfg = common.chain_by_name(chain_cfg_name)
+    address_book = context.resolve_address_book(chain_cfg.name)
     chain: SimpleNamespace | ChainSettings
     if deal.accepted_escrow_proposal is not None:
         resolved_buyer_address, resolved_buyer_private_key = common.resolve_buyer_wallet()
@@ -462,7 +462,7 @@ def _resume_alkahest(context: BuyerResumeContext) -> dict:
             buyer_private_key=resolved_buyer_private_key,
             rpc_url=chain_cfg.rpc_url,
             chain_name=chain_cfg.name,
-            alkahest_addr_config=alkahest_address_config_path,
+            alkahest_addr_config=address_book,
             token_contract=effective_token or "",
             token_decimals=effective_token_decimals,
         )
@@ -475,7 +475,7 @@ def _resume_alkahest(context: BuyerResumeContext) -> dict:
             token_contract=effective_token,
             token_decimals=effective_token_decimals,
         )
-        chain.alkahest_addr_config = alkahest_address_config_path
+        chain.alkahest_addr_config = address_book
     resolved_uid = deal.escrow_uid
     header = Table.grid(padding=(0, 2))
     header.add_column(style="bold")

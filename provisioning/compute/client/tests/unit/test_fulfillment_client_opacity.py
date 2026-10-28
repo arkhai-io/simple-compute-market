@@ -141,6 +141,50 @@ def _fulfillment_request(**overrides: Any) -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
+async def test_a_schedule_answer_of_another_major_is_refused_and_nothing_begun() -> None:
+    """A storefront calls a service that has not been upgraded: the signed
+    major-2 answer names no host, and the client refuses it by its version,
+    naming the major it supports, so its caller begins nothing."""
+    handler = _RecordingHandler()
+
+    def major_2(request: httpx.Request) -> httpx.Response:
+        handler.requests.append(request)
+        return _signed_response(
+            request,
+            {
+                "contract_version": "2.0",
+                "settlement_resource_id": _SETTLEMENT_RESOURCE_ID,
+                "pool_id": "pool-mock",
+                "resource_kind": "compute.gpu",
+                "provider": "ansible",
+                "attributes": {},
+            },
+            "provisioning_fulfillment_schedule",
+        )
+
+    provisioning = ComputeProvisioningClient(
+        "http://provisioning.test",
+        signer=_CALLER,
+        caller_role="seller",
+        expected_authorities=TrustedIdentitySet(identities=(_AUTHORITY.identity,)),
+        transport=httpx.MockTransport(major_2),
+    )
+    try:
+        with pytest.raises(ValueError, match="supported majors: 3"):
+            await provisioning.schedule_resource(
+                FulfillmentScheduleRequest(
+                    capacity_reservation_id=_CAPACITY_RESERVATION_ID, market="vms"
+                )
+            )
+    finally:
+        await provisioning.close()
+
+    assert [request.url.path for request in handler.requests] == [
+        "/api/v1/fulfillment/schedule"
+    ]
+
+
+@pytest.mark.asyncio
 async def test_schedule_begin_send_no_placement_fields() -> None:
     """`ComputeProvisioningClient` never sends `resource_id` as a required
     or populated field across schedule/begin -- proved from the client's

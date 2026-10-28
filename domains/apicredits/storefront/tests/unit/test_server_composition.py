@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import market_policy.negotiation_thread as negotiation_thread
 import pytest
+from dynaconf import Dynaconf
 from market_alkahest import AlkahestChainProbe
 from market_identity import Ed25519Signer
 from storefront_client.settlement_routes import unmounted_settlement_routes
@@ -26,7 +27,7 @@ from apicredits_storefront.listing_seed import ListingSeed
 from apicredits_storefront.retired_settings import retired_setting_problems
 from apicredits_storefront.services.capacity_client import capacity_poll_interval
 from apicredits_storefront.startup_refusal import StorefrontStartupError
-from tests._settings_overrides import settings_overrides
+from tests._settings_overrides import replaced_setting, settings_overrides
 
 
 def test_api_credit_routes_use_shared_storefront_shell():
@@ -73,19 +74,30 @@ async def test_api_credit_lifespan_carries_exact_domain_container(monkeypatch):
 
 
 def test_api_credit_chain_values_are_contributed_to_shared_factory(monkeypatch):
-    chain = SimpleNamespace(
-        rpc_url="http://rpc",
-        alkahest_address_config_path="addresses.json",
-    )
-    monkeypatch.setattr(server, "CHAINS", {"anvil": chain})
+    """Each chain's book comes from the Alkahest section: ``anvil``'s is named,
+    and ``base_sepolia``, which the table does not name, has none."""
+    chains = {
+        "anvil": SimpleNamespace(rpc_url="http://rpc"),
+        "base_sepolia": SimpleNamespace(rpc_url="http://base"),
+    }
+    monkeypatch.setattr(server, "CHAINS", chains)
+    monkeypatch.setattr(storefront_config, "CHAINS", chains)
 
-    with settings_overrides(**{"wallet.private_key": "secret"}):
+    with settings_overrides(**{"wallet.private_key": "secret"}), replaced_setting(
+        "settlement",
+        {
+            "schema_version": 1,
+            "priority": [],
+            "alkahest": {"address_books": {"anvil": "addresses.json"}},
+        },
+    ):
         policy = server._alkahest_client_policy()
 
     assert policy.private_key == "secret"
     assert policy.missing_requirements == ()
-    assert [(c.name, c.rpc_url, c.address_config_path) for c in policy.chains] == [
-        ("anvil", "http://rpc", "addresses.json")
+    assert [(c.name, c.rpc_url, c.address_book) for c in policy.chains] == [
+        ("anvil", "http://rpc", "addresses.json"),
+        ("base_sepolia", "http://base", None),
     ]
 
 
@@ -384,6 +396,39 @@ def test_the_capacity_poll_interval_is_five_seconds_only_when_unstated():
 
 def test_a_configuration_stating_no_renamed_setting_is_not_refused():
     assert retired_setting_problems() == []
+
+
+def _source(values: dict) -> Dynaconf:
+    source = Dynaconf(environments=False)
+    for key, value in values.items():
+        source.set(key, value)
+    return source
+
+
+@pytest.mark.parametrize(
+    ("values", "path"),
+    [
+        (
+            {"chains": {"anvil": {"rpc_url": "ws://anvil:8545",
+                                  "alkahest_address_config_path": "/book.json"}}},
+            "[Chains.anvil].alkahest_address_config_path",
+        ),
+        (
+            {"settlement": {"schema_version": 1, "priority": ["alkahest.v1"],
+                            "alkahest": {"enabled": True,
+                                         "address_config_path": "/book.json"}}},
+            "[Settlement.alkahest].address_config_path",
+        ),
+    ],
+    ids=["chain-key", "section-key"],
+)
+def test_a_retired_address_book_key_is_refused_naming_the_table(values, path):
+    """Spec scenario "A retired key is stated", for the API-credit storefront."""
+    (problem,) = retired_setting_problems(_source(values))
+
+    assert problem.startswith(f"{path} is retired")
+    assert "[Settlement.alkahest.address_books]" in problem
+    assert "/book.json" not in problem
 
 
 @pytest.mark.parametrize(

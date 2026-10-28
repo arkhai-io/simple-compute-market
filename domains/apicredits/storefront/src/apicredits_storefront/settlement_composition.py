@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from arkhai_apicredits.settlement import CreditsServiceClient
+from core_storefront.stage_log import stage_event
 from market_alkahest import (
     ALKAHEST_CONFIG_KEY,
     ALKAHEST_MECHANISM_ID,
@@ -299,6 +300,13 @@ def require_coherent_release_model(settlement_config: Any = None) -> None:
     configured_release_model(settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY))
 
 
+def record_servicing_event(event: str, fields: dict[str, Any]) -> None:
+    """Record a servicing worker's event as a ``claims`` stage event, as every
+    storefront composing the worker does, so a failing step is on the deal's
+    record."""
+    stage_event("claims", event, **fields)
+
+
 def build_api_credit_settlement_composition(
     *,
     domain: MarketDomainContract,
@@ -323,9 +331,7 @@ def build_api_credit_settlement_composition(
     repository = SettlementSQLiteRepository(
         sqlite_client.db_path, apply_migrations=False
     )
-    seller_wallet_address = str(
-        storefront_config.settings.get("wallet.address", "") or ""
-    )
+    seller_wallet_address = storefront_config.seller_wallet_address()
     seller_wallet_key = str(storefront_config.settings.get("wallet.private_key", "") or "")
     resources: dict[str, Any] = {
         "marketplace_signer": marketplace_signer,
@@ -333,11 +339,12 @@ def build_api_credit_settlement_composition(
         "get_client": lambda chain: alkahest_clients.get(chain or ""),
         "chains": storefront_config.CHAINS,
         "default_chain": next(iter(storefront_config.CHAINS), None),
-        # Readiness reads the seller wallet: with no address no escrow could
-        # pay the seller, whatever clients are composed, and the storefront
+        # Readiness reads the seller wallet. With neither an address nor a key
+        # no escrow could pay the seller, whatever clients are composed; an
+        # address its key does not sign as names two accounts. The storefront
         # submits its issuance evidence on chain with the key, so a missing key
-        # or chain makes Alkahest unready. A configured model the Alkahest entry cannot
-        # deliver is reported the same way.
+        # or chain makes Alkahest unready. A configured model the Alkahest entry
+        # cannot deliver is reported the same way.
         "wallet": {"address": seller_wallet_address, "private_key": seller_wallet_key},
         "signs_transactions": True,
         "deliverable_release_models": SELLER_STAGES[ALKAHEST_MECHANISM_ID].release_models,
@@ -372,6 +379,7 @@ def build_api_credit_settlement_composition(
         repository,
         worker_id=f"api-credit-storefront:{storefront_config.AGENT_ID}",
         interval_seconds=storefront_config.settlement_servicing_interval(),
+        on_event=record_servicing_event,
     )
     composition = ApiCreditsSettlementComposition(
         domain=domain,

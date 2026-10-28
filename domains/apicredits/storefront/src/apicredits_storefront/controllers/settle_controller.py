@@ -176,6 +176,7 @@ class AdminSettleController:
             ready=waited["ready"],
             status=waited["status"],
             elapsed_ms=waited["elapsed_ms"],
+            last_error=waited.get("last_error"),
         )
 
 

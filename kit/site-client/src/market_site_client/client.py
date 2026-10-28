@@ -69,6 +69,16 @@ class SiteCapacityAuthenticationError(SiteCapacityAdminClientError):
     """A response did not carry a valid acknowledgement from the authority."""
 
 
+class SiteCapacityUnauthenticatedResponseError(SiteCapacityAuthenticationError):
+    """The answer carried no response authentication at all.
+
+    Refused like any unverifiable answer, and reported by its status alone:
+    an unsigned answer is what a site gives a request it cannot route, and
+    also what anything between the client and the site may give, so nothing
+    it says is repeated.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class CapacityRouteContract:
     """One authenticated capacity route and its semantic v2 context."""
@@ -338,6 +348,12 @@ class _AuthenticatedSiteClient:
         request_id: str,
         body: Any,
     ) -> None:
+        if SIGNATURE_HEADER not in response.headers:
+            raise SiteCapacityUnauthenticatedResponseError(
+                f"site authority answered HTTP {response.status_code} "
+                "without response authentication",
+                status_code=response.status_code,
+            )
         try:
             principal = Identity(
                 scheme=response.headers[IDENTITY_SCHEME_HEADER],

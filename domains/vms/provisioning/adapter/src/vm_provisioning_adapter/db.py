@@ -6,7 +6,18 @@ metadata, and its migration history reads these models to create and evolve
 them.
 """
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import func
 from sqlalchemy.sql.expression import true as sa_true
@@ -147,6 +158,19 @@ class RelayPortLease(Base):
     __tablename__ = "relay_port_leases"
     __table_args__ = (
         UniqueConstraint("relay_id", "remote_port", name="uq_relay_port_leases_endpoint"),
+        # One active lease per owner, enforced rather than only queried, so two
+        # concurrent retries of one fulfillment cannot both take a port. Partial
+        # because release is soft: a released lease keeps its row, and an
+        # unconditional constraint would stop an owner ever holding a second
+        # lease across its history. SQLite (3.8+) and PostgreSQL both support it.
+        Index(
+            "uq_relay_port_leases_active_owner",
+            "owner_kind",
+            "owner_id",
+            unique=True,
+            sqlite_where=text("released_at IS NULL"),
+            postgresql_where=text("released_at IS NULL"),
+        ),
     )
 
     id = Column(String, primary_key=True)

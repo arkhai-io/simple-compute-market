@@ -9,7 +9,8 @@ tests drive were added because these tests needed them.
 
 What this covers that the unit tests cannot: that the controller, its routes,
 its status codes, and the client's serialization agree. The service-level
-behaviour behind them is covered in `tests/unit/services/test_relay_administration.py`.
+behaviour behind them is covered by the VM adapter's
+`tests/integration/test_relay_administration.py`.
 """
 
 from __future__ import annotations

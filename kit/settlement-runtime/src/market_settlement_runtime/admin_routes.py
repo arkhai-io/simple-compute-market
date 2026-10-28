@@ -93,29 +93,54 @@ class SettlementAdminRouteService:
         """Block until the settlement is terminal or ``timeout`` elapses.
 
         ``ready`` says whether a terminal state was reached; the status mapping
-        the domain reports is returned beside it either way.
+        the domain reports is returned beside it either way. A status read that
+        fails is a poll that found nothing terminal, since the wait is how an
+        operator learns the outcome and one failed read is not one: the wait
+        polls on, and a wait that ends unready after a failed last read carries
+        its ``last_error``. A refusal the hook raises, a ``LookupError`` for a
+        settlement it does not know or a :class:`SettlementAdminRouteError`, is
+        an answer, not a failed read, and ends the wait as it did.
         """
 
         start = self._clock()
         deadline = start + min(max(timeout, 0.0), MAX_WAIT_SECONDS)
+        status: dict[str, Any] = {}
+        last_error: str | None = None
         while True:
-            status = dict(await self._settle_status(escrow_uid) or {})
-            if status and self._is_terminal(status):
-                return self._waited(status, ready=True, start=start)
+            try:
+                status = dict(await self._settle_status(escrow_uid) or {})
+            except (LookupError, SettlementAdminRouteError):
+                raise
+            except Exception as exc:
+                last_error = f"{type(exc).__name__}: {exc}"
+            else:
+                last_error = None
+                if status and self._is_terminal(status):
+                    return self._waited(status, ready=True, start=start)
             remaining = deadline - self._clock()
             if remaining <= 0:
-                return self._waited(status, ready=False, start=start)
+                return self._waited(
+                    status, ready=False, start=start, last_error=last_error
+                )
             await asyncio.sleep(min(self._poll_seconds, remaining))
 
     def _waited(
-        self, status: dict[str, Any], *, ready: bool, start: float
+        self,
+        status: dict[str, Any],
+        *,
+        ready: bool,
+        start: float,
+        last_error: str | None = None,
     ) -> dict[str, Any]:
-        return {
+        waited = {
             **status,
             "ready": ready,
             "status": status.get("status") or ("unknown" if not ready else ""),
             "elapsed_ms": int((self._clock() - start) * 1000),
         }
+        if last_error is not None:
+            waited["last_error"] = last_error
+        return waited
 
 
 __all__ = [

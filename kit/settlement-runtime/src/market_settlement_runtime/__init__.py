@@ -105,6 +105,7 @@ from .servicing import (
     TerminalCallback,
 )
 from .sqlite_repository import (
+    SETTLEMENT_AWAITING_DELIVERY_MIGRATION_ID,
     SETTLEMENT_MECHANISM_PARAMS_MIGRATION_ID,
     SETTLEMENT_MIGRATION_ID,
     SETTLEMENT_PRINCIPAL_MIGRATION_ID,
@@ -123,6 +124,7 @@ __all__ = [
     "AcceptedObligationArtifacts",
     "AcceptedObligationBuilder",
     "SETTLEMENT_MIGRATION_ID",
+    "SETTLEMENT_AWAITING_DELIVERY_MIGRATION_ID",
     "SETTLEMENT_MECHANISM_PARAMS_MIGRATION_ID",
     "SETTLEMENT_PRINCIPAL_MIGRATION_ID",
     "CompiledSettlementClause",

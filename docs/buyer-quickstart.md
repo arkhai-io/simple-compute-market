@@ -100,9 +100,13 @@ TOML.
 
 Settlement mechanisms are explicit and disabled by default.
 
-An Alkahest buyer enables and prioritizes `alkahest.v1`, supplies
-`[Settlement.alkahest].address_config_path`, and fills the generated `[Wallet]`
-and `[Chains.<name>]` tables. Enabling a mechanism does not make an incompatible
+An Alkahest buyer enables and prioritizes `alkahest.v1`, fills the generated
+`[Wallet]` and `[Chains.<name>]` tables, and names an address book in
+`[Settlement.alkahest.address_books]` for each chain whose Alkahest contracts are
+not the SDK's built-in ones, such as a local Anvil: `anvil = "/path/to/book.json"`.
+The retired `[Chains.<name>].alkahest_address_config_path` and
+`[Settlement.alkahest].address_config_path` are refused; `market config migrate
+--scope settlement` moves them. Enabling a mechanism does not make an incompatible
 listing selectable; discovery still requires one advertised compatible option.
 
 Import a legacy `[Identity]` explicitly before removing it. The credential must

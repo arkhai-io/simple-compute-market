@@ -74,7 +74,7 @@ class ApiCreditsSellerRoundHook(Protocol):
 def _load_chain(
     *,
     negotiation_config: Any = None,
-    chains: Mapping[str, Any] | None = None,
+    chain_config_paths: Mapping[str, str | None] | None = None,
 ) -> list[NegotiationMiddleware]:
     """Resolve the API-credits storefront's negotiation middleware chain.
 
@@ -82,18 +82,17 @@ def _load_chain(
     ``policies`` list, a ``policy_mode`` terminal default, or a
     per-escrow-kind dispatch table. (File-policy discovery and the RL
     strategies are VM-storefront features this domain doesn't ship.)
+    ``chain_config_paths`` maps each configured chain to its Alkahest address
+    book, ``None`` for the SDK's built-in addresses, as the storefront
+    resolved it; the escrow-kind dispatch reads each escrow's kind through it.
     """
     raw_policies = getattr(negotiation_config, "policies", None)
     policies_by_kind = normalize_policies_by_escrow_kind_config(raw_policies)
     if policies_by_kind:
-        chain_config_paths = {
-            name: chain.alkahest_address_config_path
-            for name, chain in (chains or {}).items()
-        }
         return load_negotiation_chain(_DEFAULT_GUARDS) + [
             make_escrow_kind_dispatch_middleware(
                 policies_by_kind,
-                chain_config_paths=chain_config_paths,
+                chain_config_paths=dict(chain_config_paths or {}),
             )
         ]
 
@@ -160,7 +159,7 @@ async def _run_seller_round(
     strategy_label: str | None,
     policy_inputs: dict[str, Any],
     negotiation_config: Any,
-    chains: Mapping[str, Any] | None,
+    chain_config_paths: Mapping[str, str | None] | None,
     default_min_price: Any,
 ) -> SellerRoundResult:
     listing_dict = dict(listing)
@@ -192,7 +191,9 @@ async def _run_seller_round(
         else 0
     )
 
-    chain = _load_chain(negotiation_config=negotiation_config, chains=chains)
+    chain = _load_chain(
+        negotiation_config=negotiation_config, chain_config_paths=chain_config_paths
+    )
     context = NegotiationContext(
         direction="maximize",
         our_reference_amount=int(reference_amount),
@@ -232,13 +233,13 @@ class _DefaultSellerRoundHook:
         key_lookup: KeyLookup | None,
         *,
         negotiation_config: Any = None,
-        chains: Mapping[str, Any] | None = None,
+        chain_config_paths: Mapping[str, str | None] | None = None,
         default_min_price: Any = None,
     ) -> None:
         self._capacity = capacity
         self._key_lookup = key_lookup
         self._negotiation_config = negotiation_config
-        self._chains = chains
+        self._chain_config_paths = chain_config_paths
         self._default_min_price = default_min_price
 
     async def __call__(
@@ -281,7 +282,7 @@ class _DefaultSellerRoundHook:
             strategy_label=strategy_label,
             policy_inputs=policy_inputs,
             negotiation_config=self._negotiation_config,
-            chains=self._chains,
+            chain_config_paths=self._chain_config_paths,
             default_min_price=self._default_min_price,
         )
 
@@ -291,7 +292,7 @@ def default_seller_round_hook(
     key_lookup: KeyLookup | None = None,
     *,
     negotiation_config: Any = None,
-    chains: Mapping[str, Any] | None = None,
+    chain_config_paths: Mapping[str, str | None] | None = None,
     default_min_price: Any = None,
 ) -> ApiCreditsSellerRoundHook:
     """Build the default API-credits seller round hook.
@@ -306,6 +307,6 @@ def default_seller_round_hook(
         capacity,
         key_lookup,
         negotiation_config=negotiation_config,
-        chains=chains,
+        chain_config_paths=chain_config_paths,
         default_min_price=default_min_price,
     )

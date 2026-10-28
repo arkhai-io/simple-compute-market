@@ -14,6 +14,7 @@ import re
 import uuid
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from sqlalchemy import Engine, MetaData, inspect, text
 from sqlalchemy.engine import Connection
@@ -478,7 +479,10 @@ def _migrate_relay_reachable_hosts(engine: Engine) -> None:
         # port. Partial rather than plain: release is soft, so a released lease
         # keeps its row and an unconditional constraint would stop an owner
         # ever holding a second lease across its whole history. Both SQLite
-        # (3.8+) and PostgreSQL support the partial form.
+        # (3.8+) and PostgreSQL support the partial form. VM's model declares
+        # the same index, so a schema created from the models already has it
+        # and this statement changes nothing there; it creates the index only on
+        # a lease table that lacks it.
         connection.execute(text(
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_relay_port_leases_active_owner "
             "ON relay_port_leases (owner_kind, owner_id) "
@@ -3269,6 +3273,53 @@ def _remove_vm_fulfillment_request_fields(engine: Engine, fields: frozenset[str]
             )
 
 
+#: Reservation states nothing writes, each with the state its row moves to: a
+#: ``provisioning`` row held capacity and an ``unmanaged`` one holds it until an
+#: operator repairs it; a ``provisioning_failed`` row held none and a
+#: ``force_released`` one holds none.
+_RETIRED_RESERVATION_STATES = (
+    ("provisioning", "unmanaged"),
+    ("provisioning_failed", "force_released"),
+)
+
+
+def _migrate_retired_reservation_states(engine: Engine) -> None:
+    """Convert every reservation stored in a state nothing writes.
+
+    No lifecycle transition writes ``provisioning`` or ``provisioning_failed``,
+    and no reader decides about either, so a stored row moves to the state
+    that keeps it held or free and that an operator's tools act on. Each converted row's failure reason names the state it held,
+    and the reason it had, if any, moves into its failure message. A database
+    holding neither state is unchanged, so a rerun changes nothing.
+    """
+    if not _table_exists(engine, "capacity_reservations"):
+        return
+    with engine.begin() as connection:
+        for retired, replacement in _RETIRED_RESERVATION_STATES:
+            connection.execute(
+                text(
+                    "UPDATE capacity_reservations SET state = :replacement, "
+                    "failure_reason = :reason, "
+                    "failure_message = :message "
+                    "|| COALESCE(' Its earlier reason: ' || failure_reason || '.', '') "
+                    "|| COALESCE(' ' || failure_message, ''), "
+                    "released_at = CASE WHEN :replacement = 'force_released' "
+                    "THEN COALESCE(released_at, :now) ELSE released_at END "
+                    "WHERE state = :retired"
+                ),
+                {
+                    "retired": retired,
+                    "replacement": replacement,
+                    "reason": f"retired_state_{retired}",
+                    "message": (
+                        f"Stored as {retired}, a state nothing writes; "
+                        f"converted to {replacement}."
+                    ),
+                    "now": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+
+
 def _migrate_active_fulfillment_targets_on_reservations(engine: Engine) -> None:
     """Record each active job-backed fulfillment's target on its reservation.
 
@@ -3546,5 +3597,9 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20261027_001_vm_fulfillment_request_carries_no_connectivity",
         _migrate_vm_fulfillment_request_carries_no_connectivity,
+    ),
+    Migration(
+        "20261028_001_retired_reservation_states",
+        _migrate_retired_reservation_states,
     ),
 )

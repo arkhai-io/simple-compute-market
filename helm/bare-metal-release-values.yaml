@@ -118,7 +118,9 @@ bare-metal-storefront:
         - alkahest.v1
       alkahest:
         enabled: true
-        address_config_path: /etc/arkhai/alkahest/alkahest_anvil_addresses.json
+        # Release 1's dev-env address book, mounted by alkahestAddressBook.
+        address_books:
+          anvil: /etc/arkhai/alkahest/alkahest_anvil_addresses.json
         oracle_gated: false
         trusted_oracle_addresses: []
         interruptible: false
@@ -130,7 +132,6 @@ bare-metal-storefront:
     Chains:
       anvil:
         rpc_url: ws://arkhai-node-operator-dev-env:8545
-        alkahest_address_config_path: /etc/arkhai/alkahest/alkahest_anvil_addresses.json
     pricing:
       # The dev chain's test ERC-20, deployed at a deterministic address on
       # release 1's Anvil, as the bare-metal lane sells: a well-known development

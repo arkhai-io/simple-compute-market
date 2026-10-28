@@ -24,6 +24,7 @@ from market_site_client import (
     SiteCapacityAuthenticationError,
     SiteCapacityClient,
     SiteCapacityClientError,
+    SiteCapacityUnauthenticatedResponseError,
 )
 
 
@@ -468,17 +469,53 @@ def test_expected_authorities_must_be_a_trusted_set_or_a_provider(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", ("missing", "unknown"))
-async def test_missing_or_unknown_response_protocol_is_rejected(
-    capacity_client: SiteCapacityClient, site: FakeSite, failure: str
+async def test_an_unknown_response_protocol_is_rejected_as_malformed(
+    capacity_client: SiteCapacityClient, site: FakeSite
 ) -> None:
-    if failure == "missing":
-        site.omit_response_authentication = True
-    else:
-        site.response_protocol = "arkhai.market-response.v1"
+    site.response_protocol = "arkhai.market-response.v1"
 
-    with pytest.raises(SiteCapacityAuthenticationError, match="missing or malformed"):
-        await capacity_client.snapshot(request_id=f"protocol-{failure}")
+    with pytest.raises(SiteCapacityAuthenticationError, match="missing or malformed") as excinfo:
+        await capacity_client.snapshot(request_id="protocol-unknown")
+    assert not isinstance(excinfo.value, SiteCapacityUnauthenticatedResponseError)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", (200, 405))
+async def test_an_answer_with_no_response_authentication_is_reported_unauthenticated(
+    signer_pair: tuple[Signer, Signer], status_code: int
+) -> None:
+    """Refused, and reported by status alone.
+
+    The unsigned answer's body and headers carry text that must not reach the
+    report: whatever sent it, the client cannot tell what it says is true.
+    """
+    caller, authority = signer_pair
+    sent: list[httpx.Request] = []
+
+    def unsigned(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(
+            status_code,
+            json={"detail": "body-canary"},
+            headers={"Allow": "header-canary"},
+        )
+
+    client = SiteCapacityClient(
+        "http://site-authority:8081",
+        caller,
+        TrustedIdentitySet(identities=(authority.identity,)),
+        transport=httpx.MockTransport(unsigned),
+    )
+    with pytest.raises(SiteCapacityUnauthenticatedResponseError) as excinfo:
+        await client.snapshot(request_id=f"unsigned-{status_code}")
+
+    report = str(excinfo.value)
+    assert excinfo.value.status_code == status_code
+    assert f"HTTP {status_code}" in report
+    assert "without response authentication" in report
+    request_signature = sent[0].headers["X-Market-Signature"]
+    for leaked in ("body-canary", "header-canary", request_signature):
+        assert leaked not in report
 
 
 @pytest.mark.asyncio

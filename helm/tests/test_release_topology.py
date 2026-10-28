@@ -201,8 +201,9 @@ def test_release_two_publishes_to_release_ones_registry_under_its_pinned_trust()
     deployment = _source(_release_two(), "bare-metal-storefront/templates/deployment.yaml")
     assert f'name: "{RELEASE_ONE}-dev-env-alkahest-addresses"' in {line.strip() for line in deployment.splitlines()}
     path = "/etc/arkhai/alkahest/alkahest_anvil_addresses.json"
-    assert storefront["Chains"]["anvil"]["alkahest_address_config_path"] == path
-    assert storefront["Settlement"]["alkahest"]["address_config_path"] == path
+    assert storefront["Settlement"]["alkahest"]["address_books"] == {"anvil": path}
+    assert "alkahest_address_config_path" not in storefront["Chains"]["anvil"]
+    assert "address_config_path" not in storefront["Settlement"]["alkahest"]
 
 
 def test_release_two_runs_only_its_storefront_and_provisioning_service() -> None:

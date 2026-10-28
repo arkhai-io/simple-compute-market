@@ -46,24 +46,15 @@ from market_storefront.services.capacity_client import (
     site_pool_projection,
 )
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
-from market_storefront.failure_actions import (
-    FulfillmentFailureContext,
-    apply_fulfillment_failure_policy,
-    configured_failure_actions,
-)
 from market_storefront.middleware.admin_auth import require_admin_key
 from market_storefront.models.capacity_admin_models import (
     CapacityReleasedEventRequest,
     FulfillmentEventResponse,
-    FulfillmentFailedEventRequest,
-    FulfillmentStartedEventRequest,
     InterruptDealRequest,
     InterruptDealResponse,
     ReleaseReservationsResponse,
-    ReleaseStartedEventRequest,
     ReserveCapacityRequest,
     ReserveCapacityResponse,
-    UsageStartedEventRequest,
 )
 from market_storefront import lifecycle as _lifecycle
 from market_storefront import lifecycle_steps as _lifecycle_steps  # noqa: F401 - registers the steps
@@ -73,6 +64,7 @@ from market_storefront_kit import (
     TradingPauseRouteService,
 )
 from market_pool_overrides import (
+    POOL_OVERRIDES_PATH,
     PoolOverrideDeleteResponse,
     PoolOverrideListResponse,
     PoolOverrideRecord,
@@ -97,11 +89,14 @@ from market_resource_pools_contracts.backing import (
 logger = logging.getLogger(__name__)
 
 # Site-ledger reservation states that still hold capacity.
-_INTERRUPTIBLE_HELD_STATES = frozenset(
-    {"reserved", "provisioning", "leased", "releasing"}
-)
+_INTERRUPTIBLE_HELD_STATES = frozenset({"reserved", "leased", "releasing"})
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
+
+# Unprefixed: its routes are declared at the pool-override kit's
+# `POOL_OVERRIDES_PATH`, the path the kit's client signs and the administrator
+# middleware binds, so the three name one path by construction.
+pool_overrides_router = APIRouter(tags=["admin"])
 
 
 #: Route alias -> the loop's registered name. Aliases are hyphenated where loop
@@ -505,76 +500,6 @@ class AdminController:
         )
         return {"sites": summary}
 
-    # -- storefront pool overrides ------------------------------------------
-    # Site and pool IDs are operator-chosen strings with no character
-    # restriction, so they travel in the body or query, never the path.
-
-    @staticmethod
-    def _pool_overrides() -> PoolOverrideRouteService:
-        return PoolOverrideRouteService(_container.resolved_pool_override_service)
-
-    @staticmethod
-    def _http(exc: PoolOverrideRouteError) -> HTTPException:
-        return HTTPException(status_code=exc.status_code, detail=exc.detail)
-
-    @router.put(
-        "/pool-overrides",
-        response_model=PoolOverrideWriteResponse,
-        summary="Replace one pool override, checked against the live site (admin)",
-    )
-    async def put_pool_override(
-        self, record: PoolOverrideRecord
-    ) -> PoolOverrideWriteResponse:
-        """Replace the whole override at the record's site, pool, and offering mode.
-
-        Refused with 422 for an unconfigured site, a mode no market serves, or
-        vocabulary or clauses that do not validate; 503 (retryable) when the site
-        cannot answer usably; and 404 when its live projection lacks the pool. A
-        shape no member is feasible for is reported, not refused.
-        """
-        try:
-            return await self._pool_overrides().replace(record)
-        except PoolOverrideRouteError as exc:
-            raise self._http(exc) from exc
-
-    @router.get(
-        "/pool-overrides",
-        response_model=PoolOverrideResponse | PoolOverrideListResponse,
-        summary="Read one pool override, or list them (admin)",
-    )
-    async def get_pool_overrides(
-        self,
-        site_id: str | None = Query(default=None),  # noqa: B008
-        pool_id: str | None = Query(default=None),  # noqa: B008
-        offering_mode: str | None = Query(default=None),  # noqa: B008
-    ) -> PoolOverrideResponse | PoolOverrideListResponse:
-        """With a site, pool, and offering mode, one override; otherwise a list,
-        optionally narrowed to a site or to one site's pool."""
-        try:
-            return await self._pool_overrides().read(
-                site_id=site_id, pool_id=pool_id, offering_mode=offering_mode
-            )
-        except PoolOverrideRouteError as exc:
-            raise self._http(exc) from exc
-
-    @router.delete(
-        "/pool-overrides",
-        response_model=PoolOverrideDeleteResponse,
-        summary="Delete one pool override; idempotent (admin)",
-    )
-    async def delete_pool_override(
-        self,
-        site_id: str = Query(),  # noqa: B008
-        pool_id: str = Query(),  # noqa: B008
-        offering_mode: str = Query(),  # noqa: B008
-    ) -> PoolOverrideDeleteResponse:
-        try:
-            return await self._pool_overrides().delete(
-                site_id=site_id, pool_id=pool_id, offering_mode=offering_mode
-            )
-        except PoolOverrideRouteError as exc:
-            raise self._http(exc) from exc
-
     @staticmethod
     def _json_object(value: Any) -> dict[str, Any]:
         if isinstance(value, dict):
@@ -662,8 +587,9 @@ class AdminController:
         *,
         site_id: str,
         capacity_reservation_id: str,
-    ) -> tuple[dict[str, Any] | None, PublicationBinding, str | None]:
-        """Resolve one reservation through its supplied authority and durable listing."""
+    ) -> PublicationBinding:
+        """Resolve one reservation's binding through its supplied authority and
+        durable listing."""
         from market_site_client import SiteCapacityClientError
         from market_storefront.services.capacity_client import (
             capacity_binding_for_listing,
@@ -685,50 +611,34 @@ class AdminController:
                 raise CapacityBindingError(
                     "reservation authority disagrees with the durable listing binding"
                 )
-            return reservation, binding, listing_id
+            return binding
         # A reservation with no listing exists only because the site admitted
         # it, so its binding takes the backing an admitted reservation implies.
         source_id = str((reservation or {}).get("resource_id") or capacity_reservation_id)
-        return (
-            reservation,
-            PublicationBinding(site_id, "vm", source_id, admitted_backing()),
-            None,
-        )
+        return PublicationBinding(site_id, "vm", source_id, admitted_backing())
 
     async def _apply_fulfillment_event(
         self,
         *,
         capacity_reservation_id: str,
         site_id: str,
-        event_name: str,
-        state: str,
-        close_oversized: bool = False,
-        reopen_available: bool = False,
-        release_reservation: bool = False,
         provider_resource_id: str | None = None,
-        failure_reason: str | None = None,
-        failure_message: str | None = None,
-        **_extra: Any,
     ) -> FulfillmentEventResponse:
-        """Record an event against its exact site and reservation identity."""
+        """Apply a capacity release: release the reservation against its exact
+        site and reservation identity, then reopen the listings its release
+        made available."""
         result: dict[str, Any] = {"resource_id": provider_resource_id}
         try:
-            _reservation, binding, _listing_id = await self._reservation_binding(
+            binding = await self._reservation_binding(
                 site_id=site_id,
                 capacity_reservation_id=capacity_reservation_id,
             )
-            if release_reservation:
-                released = await self._runtime().release(
-                    binding,
-                    capacity_reservation_id=capacity_reservation_id,
-                    failure_reason=failure_reason,
-                    failure_message=failure_message,
-                )
-                if released is not None:
-                    result = released
-                    result.setdefault(
-                        "gpu_count", released.get("allocated_gpu_count")
-                    )
+            released = await self._runtime().release(
+                binding, capacity_reservation_id=capacity_reservation_id
+            )
+            if released is not None:
+                result = released
+                result.setdefault("gpu_count", released.get("allocated_gpu_count"))
         except CapacityNotAdmittedError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except CapacityBindingError as exc:
@@ -739,32 +649,23 @@ class AdminController:
                 detail=f"Could not reach site {site_id!r} for reservation "
                 f"{capacity_reservation_id!r}: {exc}",
             ) from exc
-        closed_listing_ids = (
-            await self._close_oversized_compute_listings(site_id)
-            if close_oversized
-            else []
-        )
-        reopened_listing_ids = (
-            await self._reopen_available_compute_listings(site_id)
-            if reopen_available
-            else []
-        )
+        reopened_listing_ids = await self._reopen_available_compute_listings(site_id)
         stage_event(
             "fulfillment",
-            event_name,
+            "capacity_released",
             capacity_reservation_id=capacity_reservation_id,
             resource_id=result.get("resource_id"),
             gpu_count=result.get("gpu_count"),
-            closed_listing_ids=closed_listing_ids,
+            closed_listing_ids=[],
             reopened_listing_ids=reopened_listing_ids,
         )
         return FulfillmentEventResponse(
             capacity_reservation_id=capacity_reservation_id,
-            state=state,
+            state="released",
             resource_id=result.get("resource_id"),
             gpu_count=result.get("gpu_count"),
             resource_state=result.get("resource_state"),
-            closed_listing_ids=closed_listing_ids,
+            closed_listing_ids=[],
             reopened_listing_ids=reopened_listing_ids,
         )
 
@@ -849,65 +750,6 @@ class AdminController:
         return reopened_listing_ids
 
     @router.post(
-        "/fulfillment/events/started",
-        response_model=FulfillmentEventResponse,
-        summary="Record provisioning fulfillment start (admin)",
-    )
-    async def fulfillment_started(
-        self,
-        body: FulfillmentStartedEventRequest,
-    ) -> FulfillmentEventResponse:
-        return await self._apply_fulfillment_event(
-            capacity_reservation_id=body.capacity_reservation_id,
-            site_id=body.site_id,
-            event_name="started",
-            state="provisioning",
-            close_oversized=True,
-            provider_id=body.provider_id,
-            provider_job_id=body.provider_job_id,
-            provider_resource_id=body.resource_id,
-        )
-
-    @router.post(
-        "/fulfillment/events/usage-started",
-        response_model=FulfillmentEventResponse,
-        summary="Record compute usage start (admin)",
-    )
-    async def usage_started(
-        self,
-        body: UsageStartedEventRequest,
-    ) -> FulfillmentEventResponse:
-        return await self._apply_fulfillment_event(
-            capacity_reservation_id=body.capacity_reservation_id,
-            site_id=body.site_id,
-            event_name="usage_started",
-            state="leased",
-            close_oversized=True,
-            provider_id=body.provider_id,
-            provider_lease_id=body.provider_lease_id,
-            provider_resource_id=body.resource_id,
-            lease_end_utc=body.lease_end_utc,
-        )
-
-    @router.post(
-        "/fulfillment/events/release-started",
-        response_model=FulfillmentEventResponse,
-        summary="Record compute release start (admin)",
-    )
-    async def release_started(
-        self,
-        body: ReleaseStartedEventRequest,
-    ) -> FulfillmentEventResponse:
-        return await self._apply_fulfillment_event(
-            capacity_reservation_id=body.capacity_reservation_id,
-            site_id=body.site_id,
-            event_name="release_started",
-            state="releasing",
-            close_oversized=True,
-            provider_lease_id=body.provider_lease_id,
-        )
-
-    @router.post(
         "/fulfillment/events/capacity-released",
         response_model=FulfillmentEventResponse,
         summary="Record compute capacity release (admin)",
@@ -929,84 +771,9 @@ class AdminController:
         applied = await self._apply_fulfillment_event(
             capacity_reservation_id=event["capacity_reservation_id"],
             site_id=event["site_id"],
-            event_name="capacity_released",
-            state="released",
-            close_oversized=False,
-            reopen_available=True,
-            release_reservation=True,
-            provider_lease_id=event.get("provider_lease_id"),
             provider_resource_id=event.get("resource_id"),
-            released_at=event.get("released_at"),
         )
         return applied.model_dump(mode="python")
-
-    @router.post(
-        "/fulfillment/events/failed",
-        response_model=FulfillmentEventResponse,
-        summary="Record provisioning fulfillment failure (admin)",
-    )
-    async def fulfillment_failed(
-        self,
-        body: FulfillmentFailedEventRequest,
-    ) -> FulfillmentEventResponse:
-        try:
-            reservation, _binding, listing_id = await self._reservation_binding(
-                site_id=body.site_id,
-                capacity_reservation_id=body.capacity_reservation_id,
-            )
-        except CapacityBindingError as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
-        except Exception as exc:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Could not reach site {body.site_id!r} for reservation "
-                f"{body.capacity_reservation_id!r}: {exc}",
-            ) from exc
-        if reservation is None or listing_id is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Reservation {body.capacity_reservation_id!r} not found",
-            )
-        deal_ref = reservation.get("deal_ref") or {}
-        # The reservation's own escrow is the one commit recorded on a hold
-        # placed before the deal had an escrow; its deal reference never
-        # learns it.
-        escrow_uid = (
-            body.escrow_uid or reservation.get("escrow_uid") or deal_ref.get("escrow_uid")
-        )
-        result = await apply_fulfillment_failure_policy(
-            self._db,
-            FulfillmentFailureContext(
-                capacity_reservation_id=body.capacity_reservation_id,
-                escrow_uid=escrow_uid,
-                listing_id=listing_id,
-                provider_id=body.provider_id,
-                provider_job_id=body.provider_job_id,
-                provider_resource_id=body.resource_id,
-                resource_id=body.resource_id,
-                reason=body.reason,
-                message=body.message,
-                logs_ref=body.logs_ref,
-                source="admin_event",
-            ),
-            capacity=self._runtime(),
-            site_projections=self._site_projections,
-        )
-        if "release_capacity" in configured_failure_actions() and result.state is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Reservation {body.capacity_reservation_id!r} not found",
-            )
-        return FulfillmentEventResponse(
-            capacity_reservation_id=result.capacity_reservation_id
-            or body.capacity_reservation_id,
-            state=result.state or "unchanged",
-            resource_id=result.resource_id,
-            gpu_count=result.gpu_count,
-            resource_state=result.resource_state,
-            closed_listing_ids=[],
-            reopened_listing_ids=result.reopened_listing_ids,
-        )
 
     async def _open_bound_vm_listing_ids(self) -> set[str]:
         """Snapshot open listings with canonical durable VM bindings."""
@@ -1164,7 +931,7 @@ class AdminController:
         try:
             sites = remote_site_clients(self._capacity())
             for site_name, client in sites.items():
-                for state in ("reserved", "provisioning", "leased", "releasing"):
+                for state in ("reserved", "leased", "releasing"):
                     for reservation in await client.list_reservations(state=state):
                         done = await client.release(
                             capacity_reservation_id=reservation.get(
@@ -1182,3 +949,81 @@ class AdminController:
                 exc,
             )
         return released
+
+
+# -- storefront pool overrides ------------------------------------------------
+# Site and pool IDs are operator-chosen strings with no character restriction,
+# so they travel in the body or query, never the path.
+
+
+@cbv(pool_overrides_router)
+class PoolOverrideController:
+    def __init__(self, _key: None = Depends(require_admin_key)) -> None:
+        """Refuse a request no authenticating middleware admitted, as every
+        admin route does."""
+
+    @staticmethod
+    def _pool_overrides() -> PoolOverrideRouteService:
+        return PoolOverrideRouteService(_container.resolved_pool_override_service)
+
+    @staticmethod
+    def _http(exc: PoolOverrideRouteError) -> HTTPException:
+        return HTTPException(status_code=exc.status_code, detail=exc.detail)
+
+    @pool_overrides_router.put(
+        POOL_OVERRIDES_PATH,
+        response_model=PoolOverrideWriteResponse,
+        summary="Replace one pool override, checked against the live site (admin)",
+    )
+    async def put_pool_override(
+        self, record: PoolOverrideRecord
+    ) -> PoolOverrideWriteResponse:
+        """Replace the whole override at the record's site, pool, and offering mode.
+
+        Refused with 422 for an unconfigured site, a mode no market serves, or
+        vocabulary or clauses that do not validate; 503 (retryable) when the site
+        cannot answer usably; and 404 when its live projection lacks the pool. A
+        shape no member is feasible for is reported, not refused.
+        """
+        try:
+            return await self._pool_overrides().replace(record)
+        except PoolOverrideRouteError as exc:
+            raise self._http(exc) from exc
+
+    @pool_overrides_router.get(
+        POOL_OVERRIDES_PATH,
+        response_model=PoolOverrideResponse | PoolOverrideListResponse,
+        summary="Read one pool override, or list them (admin)",
+    )
+    async def get_pool_overrides(
+        self,
+        site_id: str | None = Query(default=None),  # noqa: B008
+        pool_id: str | None = Query(default=None),  # noqa: B008
+        offering_mode: str | None = Query(default=None),  # noqa: B008
+    ) -> PoolOverrideResponse | PoolOverrideListResponse:
+        """With a site, pool, and offering mode, one override; otherwise a list,
+        optionally narrowed to a site or to one site's pool."""
+        try:
+            return await self._pool_overrides().read(
+                site_id=site_id, pool_id=pool_id, offering_mode=offering_mode
+            )
+        except PoolOverrideRouteError as exc:
+            raise self._http(exc) from exc
+
+    @pool_overrides_router.delete(
+        POOL_OVERRIDES_PATH,
+        response_model=PoolOverrideDeleteResponse,
+        summary="Delete one pool override; idempotent (admin)",
+    )
+    async def delete_pool_override(
+        self,
+        site_id: str = Query(),  # noqa: B008
+        pool_id: str = Query(),  # noqa: B008
+        offering_mode: str = Query(),  # noqa: B008
+    ) -> PoolOverrideDeleteResponse:
+        try:
+            return await self._pool_overrides().delete(
+                site_id=site_id, pool_id=pool_id, offering_mode=offering_mode
+            )
+        except PoolOverrideRouteError as exc:
+            raise self._http(exc) from exc

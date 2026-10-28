@@ -376,9 +376,7 @@ class KeysService:
         reservation = self._ledger.get_reservation_by_escrow(fulfillment_id)
         if reservation is None and capacity_reservation_id:
             reservation = self._ledger.get_reservation(capacity_reservation_id)
-        if reservation is not None and reservation["state"] in {
-            "reserved", "provisioning", "leased",
-        }:
+        if reservation is not None and reservation["state"] in {"reserved", "leased"}:
             backing_resource = self._ledger.get_reservation_backing_resource_id(
                 reservation["capacity_reservation_id"]
             )

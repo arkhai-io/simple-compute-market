@@ -115,8 +115,8 @@ therefore runs `make check-uv-version` first, which refuses an older uv, naming 
 versions; change validation runs it before building anything, and CI's `tests.yml` and
 `e2e.yml` install uv 0.12.19. The minimum is `MINIMUM` in `scripts/check_uv_version.py`.
 
-Relocking needs the indexes each lock resolves from. `kit/policy`, `domains/vms/buyer`,
-and `domains/vms/storefront` declare the PyTorch CPU index, so relocking them needs
+Relocking needs the indexes each lock resolves from. `domains/vms/buyer` and
+`domains/vms/storefront` declare the PyTorch CPU index, so relocking them needs
 `download.pytorch.org`; resolution fetches metadata only, not the wheels.
 
 ## Images

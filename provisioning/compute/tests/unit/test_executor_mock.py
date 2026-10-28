@@ -10,6 +10,13 @@ from compute_provisioning.jobs.executor_mock import (
     MockRuleRouteService,
     MockRuleSet,
 )
+from compute_provisioning_contracts import (
+    MockRuleAdded,
+    MockRuleCreate,
+    MockRuleDeleted,
+    MockRuleResumed,
+    MockRuleView,
+)
 
 
 def test_first_matching_rule_wins_and_an_empty_match_catches_all() -> None:
@@ -163,21 +170,43 @@ def test_route_service_drives_its_own_rule_set() -> None:
     rules = MockRuleSet()
     routes = MockRuleRouteService(lambda: rules)
 
-    added = routes.add({"rule_id": "r", "match": {"action": "grant"}})
+    added = routes.add(MockRuleCreate(rule_id="r", match={"action": "grant"}))
 
-    assert added == {"rule_id": "r", "status": "added"}
-    assert routes.list()[0]["match"] == {"action": "grant"}
-    assert routes.delete("r") == {"rule_id": "r", "deleted": True}
-    assert routes.delete("r") == {"rule_id": "r", "deleted": False}
+    assert added == MockRuleAdded(rule_id="r", status="added")
+    assert routes.list() == [
+        MockRuleView(
+            rule_id="r",
+            match={"action": "grant"},
+            pause_before_result=False,
+            fail_with=None,
+            result_stdout=False,
+            paused=False,
+            waiting=0,
+        )
+    ]
+    assert routes.delete("r") == MockRuleDeleted(rule_id="r", deleted=True)
+    assert routes.delete("r") == MockRuleDeleted(rule_id="r", deleted=False)
+
+
+def test_route_service_assigns_a_rule_id_and_hides_the_output() -> None:
+    rules = MockRuleSet()
+    routes = MockRuleRouteService(lambda: rules)
+
+    added = routes.add(MockRuleCreate(match={"action": "grant"}, result_stdout="out"))
+
+    assert isinstance(added, MockRuleAdded) and added.rule_id
+    [listed] = routes.list()
+    assert isinstance(listed, MockRuleView)
+    assert (listed.rule_id, listed.result_stdout) == (added.rule_id, True)
 
 
 def test_route_service_refuses_resume_of_a_rule_without_a_gate() -> None:
     rules = MockRuleSet()
     routes = MockRuleRouteService(lambda: rules)
-    routes.add({"rule_id": "gated", "match": {}, "pause_before_result": True})
-    routes.add({"rule_id": "open", "match": {}})
+    routes.add(MockRuleCreate(rule_id="gated", pause_before_result=True))
+    routes.add(MockRuleCreate(rule_id="open"))
 
-    assert routes.resume("gated") == {"rule_id": "gated", "resumed": True}
+    assert routes.resume("gated") == MockRuleResumed(rule_id="gated", resumed=True)
     with pytest.raises(ProvisioningRouteError) as refused:
         routes.resume("open")
     assert refused.value.status_code == 404

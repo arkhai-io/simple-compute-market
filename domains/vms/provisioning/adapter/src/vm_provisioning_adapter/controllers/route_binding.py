@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
 from compute_provisioning.route_errors import ProvisioningRouteError, require_composed
@@ -19,6 +19,14 @@ def routed(call: Callable[[], T]) -> T:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
+async def routed_async(call: Awaitable[T]) -> T:
+    """Await a route service call, answering its refusal with its status and detail."""
+    try:
+        return await call
+    except ProvisioningRouteError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
 def dependency(accessor: Callable[[], T | None], what: str) -> Callable[[], T]:
     """A route dependency resolving ``accessor`` per request, 503 while it is unset."""
 
@@ -28,4 +36,4 @@ def dependency(accessor: Callable[[], T | None], what: str) -> Callable[[], T]:
     return resolve
 
 
-__all__ = ["dependency", "routed"]
+__all__ = ["dependency", "routed", "routed_async"]

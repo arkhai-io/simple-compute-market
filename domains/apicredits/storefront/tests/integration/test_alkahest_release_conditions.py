@@ -44,9 +44,10 @@ from tests.integration.test_publish_reconcile import _QuotaRuntime
 SEED = b"\x22" * 32
 SELLER_SIGNER = Ed25519Signer(SEED)
 ADMIN_SIGNER = Ed25519Signer(b"\x44" * 32)
-SELLER_WALLET = "0x" + "33" * 20
-# A deterministic development key; never used on a public network.
-SELLER_WALLET_KEY = "0x" + "55" * 32
+# Anvil's first published development account, a key and the address it signs
+# as, so the seller wallet names one account; never used on a public network.
+SELLER_WALLET = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+SELLER_WALLET_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 ORACLE = "0x" + "cd" * 20
 ESCROW = {
     "chain_name": "anvil",
@@ -54,12 +55,7 @@ ESCROW = {
     "literal_fields": {"token": "0x" + "01" * 20},
     "rates": [{"field": "amount", "per": "token", "value": "100"}],
 }
-ANVIL = ChainConfig(
-    name="anvil",
-    rpc_url="http://anvil.test",
-    chain_id=31337,
-    alkahest_address_config_path=str(anvil_address_book_path()),
-)
+ANVIL = ChainConfig(name="anvil", rpc_url="http://anvil.test", chain_id=31337)
 ALKAHEST_CLAUSE = {
     "mechanism": "alkahest.v1",
     "asset": "0x" + "01" * 20,
@@ -96,10 +92,16 @@ def _replaced(**roots):
 
 
 def _settlement(*, enabled: bool = True, **alkahest) -> dict:
+    """``[Settlement]`` with Alkahest on the anvil chain, whose book is the
+    development address book the kit installs."""
     return {
         "schema_version": 1,
         "priority": ["alkahest.v1"] if enabled else [],
-        "alkahest": {"enabled": enabled, **alkahest},
+        "alkahest": {
+            "enabled": enabled,
+            "address_books": {"anvil": str(anvil_address_book_path())},
+            **alkahest,
+        },
     }
 
 
@@ -234,6 +236,20 @@ async def test_a_published_listing_advertises_the_recipient_arbiter_paying_the_s
     ]
 
 
+async def test_a_seller_stating_only_a_key_publishes_the_keys_account_as_recipient(
+    storefront,
+):
+    with _replaced(wallet={"private_key": SELLER_WALLET_KEY}):
+        async with _started(_settlement()) as (listings, public, _admin):
+            created = await listings.publish_from_quota(_supplied_escrows())
+            listing = await public.get_listing(created.listing_id)
+
+    assert created.status == "created"
+    assert [demand["demand_data"] for demand in listing.extra["demands"]] == [
+        {"recipient": SELLER_WALLET.lower()}
+    ]
+
+
 UNSETTLEABLE = {
     "interruptible": (
         {"interruptible": True, "interruptible_oracle_addresses": [ORACLE]},
@@ -271,6 +287,27 @@ async def test_supplied_escrows_publish_no_alkahest_option_while_it_is_unready(
         with pytest.raises(StorefrontClientError, match=blocker) as refused:
             await listings.publish_from_quota(_supplied_escrows())
 
+    assert refused.value.status_code == 400
+
+
+async def test_an_address_naming_another_account_leaves_alkahest_unready(storefront):
+    """Spec scenario "The address names another account": the storefront
+    starts, its status reports Alkahest unready with
+    ``alkahest.wallet_address_mismatch``, and supplied escrows publish no
+    Alkahest option."""
+    with _replaced(wallet={"address": ORACLE, "private_key": SELLER_WALLET_KEY}):
+        async with _started(_settlement()) as (listings, _public, admin):
+            status = await admin.get_system_status()
+            with pytest.raises(
+                StorefrontClientError, match="alkahest.wallet_address_mismatch"
+            ) as refused:
+                await listings.publish_from_quota(_supplied_escrows())
+
+    (alkahest,) = [item for item in status.settlement if item["mechanism"] == "alkahest.v1"]
+    assert alkahest["ready"] is False
+    assert ("alkahest.wallet_address_mismatch", "configuration") in {
+        (b["code"], b["kind"]) for b in alkahest["blockers"]
+    }
     assert refused.value.status_code == 400
 
 
@@ -507,16 +544,13 @@ async def test_startup_does_not_wait_on_a_chain_whose_client_never_finishes_buil
 async def test_status_reports_a_configured_chain_no_listing_publishes_on(storefront):
     """Status names nothing being published, so a second configured chain that
     does not answer is reported, as servicing a deal accepted on it would need."""
-    second = ChainConfig(
-        name="base_sepolia",
-        rpc_url="http://base.test",
-        chain_id=31337,
-        alkahest_address_config_path=str(anvil_address_book_path()),
-    )
+    second = ChainConfig(name="base_sepolia", rpc_url="http://base.test", chain_id=31337)
+    book = str(anvil_address_book_path())
+    settlement = _settlement(address_books={"anvil": book, "base_sepolia": book})
     chains = _Chains({"anvil": ANVIL.rpc_url, "base_sepolia": second.rpc_url})
     chains.answering.add("anvil")
     with patch.dict(storefront_config.CHAINS, {"anvil": ANVIL, "base_sepolia": second}):
-        async with _started(_settlement(), seams=chains.seams()) as (_listings, _public, admin):
+        async with _started(settlement, seams=chains.seams()) as (_listings, _public, admin):
             status = _alkahest_status(await admin.get_system_status())
 
     assert [blocker["code"] for blocker in status["blockers"]] == ["alkahest.chain_unreachable"]

@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Callable
 
 from market_identity import Identity, IdentityScheme
@@ -276,6 +277,55 @@ def _migrate_reservation_release_requested_at(engine: Engine) -> None:
         )
 
 
+#: Reservation states nothing writes, each with the state its row moves to: a
+#: ``provisioning`` row held quota and an ``unmanaged`` one holds it until an
+#: operator repairs it; a ``provisioning_failed`` row held none and a
+#: ``force_released`` one holds none.
+_RETIRED_RESERVATION_STATES = (
+    ("provisioning", "unmanaged"),
+    ("provisioning_failed", "force_released"),
+)
+
+
+def _migrate_retired_reservation_states(engine: Engine) -> None:
+    """Convert every reservation stored in a state nothing writes.
+
+    No transition of the site ledger this service composes writes
+    ``provisioning`` or ``provisioning_failed``, and this service's readers
+    decide about neither, so a stored row moves to the state that keeps it held
+    or free and that an operator's tools act on. Each converted row's failure
+    reason names the state it held, and the reason it had, if any, moves into
+    its failure message. A database holding neither state is unchanged, so a
+    rerun changes nothing.
+    """
+    if not _table_exists(engine, "capacity_reservations"):
+        return
+    with engine.begin() as connection:
+        for retired, replacement in _RETIRED_RESERVATION_STATES:
+            connection.execute(
+                text(
+                    "UPDATE capacity_reservations SET state = :replacement, "
+                    "failure_reason = :reason, "
+                    "failure_message = :message "
+                    "|| COALESCE(' Its earlier reason: ' || failure_reason || '.', '') "
+                    "|| COALESCE(' ' || failure_message, ''), "
+                    "released_at = CASE WHEN :replacement = 'force_released' "
+                    "THEN COALESCE(released_at, :now) ELSE released_at END "
+                    "WHERE state = :retired"
+                ),
+                {
+                    "retired": retired,
+                    "replacement": replacement,
+                    "reason": f"retired_state_{retired}",
+                    "message": (
+                        f"Stored as {retired}, a state nothing writes; "
+                        f"converted to {replacement}."
+                    ),
+                    "now": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+
+
 _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260731_001_apicredits_schema_baseline",
@@ -296,5 +346,9 @@ _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20261005_005_reservation_release_requested_at",
         _migrate_reservation_release_requested_at,
+    ),
+    Migration(
+        "20261028_006_retired_reservation_states",
+        _migrate_retired_reservation_states,
     ),
 )

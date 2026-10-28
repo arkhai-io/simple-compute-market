@@ -51,7 +51,11 @@ from apicredits_storefront.services.capacity_client import (
     build_capacity_client,
 )
 from apicredits_storefront.services.keys_lookup import lookup_key_record
-from apicredits_storefront.utils.config import CHAINS, settings
+from apicredits_storefront.utils.config import (
+    chain_address_books,
+    seller_wallet_address,
+    settings,
+)
 from arkhai_apicredits.listings.pricing import determine_strategy_from_order
 from arkhai_apicredits.negotiation.storefront_round import (
     ApiCreditsSellerRoundHook,
@@ -77,20 +81,18 @@ def _negotiation_settings() -> Any:
     return settings.get("negotiation")
 
 
-def _chain_settings() -> dict[str, Any]:
-    return dict(CHAINS)
-
-
 def _default_min_price() -> Any:
     return settings.get("pricing.default_min_price")
 
 
 def _chain_config_paths() -> dict[str, str | None]:
-    return {name: chain.alkahest_address_config_path for name, chain in CHAINS.items()}
+    # The negotiation packages take each chain's book as data; the storefront
+    # resolves it through the Alkahest kit.
+    return chain_address_books()
 
 
 def _seller_wallet_address() -> str | None:
-    return str(settings.get("wallet.address", "") or "") or None
+    return seller_wallet_address() or None
 
 
 class _QuotaSnapshot:
@@ -143,7 +145,7 @@ def _default_seller_round_hook(
         _QuotaSnapshot(repository, listing_id),
         lookup_key_record,
         negotiation_config=_negotiation_settings(),
-        chains=_chain_settings(),
+        chain_config_paths=_chain_config_paths(),
         default_min_price=_default_min_price(),
     )
 

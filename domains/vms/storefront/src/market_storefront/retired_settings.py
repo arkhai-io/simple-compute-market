@@ -6,7 +6,9 @@ config set` refuses to write one. A renamed or removed setting also refuses
 startup: running at a default the operator did not choose, or with a switch the
 storefront no longer honours, would change behaviour silently. The retired
 inventory settings do not refuse startup, because no setting replaces them;
-their inventory is declared at provisioning.
+their inventory is declared at provisioning. A key the storefront never read,
+such as `[provisioning] mode`, is not catalogued: stating it changes nothing,
+so it is ignored rather than refused.
 
 This module reads no configuration and imports nothing heavier than the standard
 library, so the command line can consult it without loading the storefront.

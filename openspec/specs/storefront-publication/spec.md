@@ -3018,6 +3018,42 @@ MUST NOT build the storefront's services or open its database in their own proce
 - **THEN** the listing is created by the running storefront through its create route, and
   the command fails naming the storefront when it cannot be reached
 
+### Requirement: A bare-metal delivery that conflicts with its recorded result is refused
+
+When the site reports, for an active bare-metal fulfillment, a delivery other than the
+result the storefront recorded, the buyer's status, result, and access reads MUST answer a
+typed 409 `delivery_conflict`, and the recorded result MUST stand. The storefront MUST NOT
+answer such a read with an unhandled error.
+
+#### Scenario: The site reports a different delivery
+
+- **WHEN** a buyer reads the status of a fulfillment whose site now reports a delivery that
+  differs from the recorded result
+- **THEN** the read answers 409 `delivery_conflict` and the recorded result is unchanged
+
+### Requirement: Bare-metal begin reads the scheduled resource's own identity
+
+Bare-metal fulfillment MUST begin only when the scheduled resource's host and physical
+machine, as the schedule response names them, equal the accepted terms'. A schedule
+response that names no host conflicts with the terms. It MUST NOT require the
+declaration's publication settings to repeat them.
+
+#### Scenario: A declaration names its machine once
+
+- **WHEN** a deal is settled on a Physical Resource whose declaration names its host and
+  physical machine and whose publication settings repeat neither
+- **THEN** fulfillment begins
+
+#### Scenario: The scheduled resource is another machine
+
+- **WHEN** the schedule response names a physical machine other than the accepted terms'
+- **THEN** fulfillment does not begin, and the deal reports the conflict
+
+#### Scenario: The scheduled resource names no host
+
+- **WHEN** the schedule response for a bare-metal deal names no host
+- **THEN** fulfillment does not begin, and the deal reports the conflict
+
 ## Evidence
 
 - Canonical listing, negotiation, settlement, fulfillment, and stage-log principals: `core/storefront/tests/unit/test_identity_migrations.py`, `test_settle_identity_models.py`, `test_sqlite_client_escrow_fulfillment_identity.py`, and `test_stage_log_identity.py`.

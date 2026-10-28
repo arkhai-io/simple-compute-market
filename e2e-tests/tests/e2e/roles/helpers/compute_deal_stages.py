@@ -35,6 +35,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, Protocol
 
+from compute_provisioning_contracts import MockJobEvaluation
+
 from tests.e2e.roles.helpers.compute_deal import (
     advance_fulfillment_to,
     assert_lease_watchdog_held,
@@ -261,9 +263,8 @@ class ComputeDealDriver(Protocol):
     def release_create_gate(self) -> None:
         """Release the create job `arm_create_gate` held."""
 
-    def evaluate_create_job(self, host_id: str) -> dict[str, Any]:
-        """The provisioning job evaluation: `params_valid`, `host_exists`,
-        `rule_matched`, and `would_pause`."""
+    def evaluate_create_job(self, host_id: str) -> MockJobEvaluation:
+        """The provisioning job evaluation of the domain's create job."""
 
     def evaluate_settle_arguments(self) -> dict[str, Any]:
         """The domain's arguments to the settlement preview."""
@@ -588,8 +589,8 @@ class Stage00g_AlkahestConfigured:
             f"Storefront alkahest client is not configured for anvil: "
             f"checks.alkahest={alkahest_check!r}\n"
             "The on-chain escrow phases (07, 07b) will fail without a working AlkahestClient.\n"
-            "Fix: configure the anvil chain's rpc_url and "
-            "alkahest_address_config_path for the storefront."
+            "Fix: configure the anvil chain's rpc_url, and its book under "
+            "[Settlement.alkahest.address_books], for the storefront."
         )
         deal_state._alkahest_configured = True
         log.info("[00g] Alkahest configured: checks.alkahest=%s", alkahest_check)
@@ -1021,7 +1022,7 @@ class Stage08c_EvaluateProvisioningJob:
     def test_08c_evaluate_provisioning_job(
         self, deal_driver: ComputeDealDriver, deal_state: ComputeDealState
     ):
-        """POST /test/evaluate-job → params_valid=True, the create rule matched (dry-run).
+        """The domain's evaluate-job → params_valid=True, the create rule matched (dry-run).
 
         Exercises the provisioning service's job routing in isolation:
         confirms the host exists in inventory, the job params are valid,
@@ -1035,20 +1036,20 @@ class Stage08c_EvaluateProvisioningJob:
         )
 
         result = deal_driver.evaluate_create_job(host_id)
-        assert result.get("params_valid") is True, (
-            f"Provisioning job params invalid. errors={result.get('errors')!r}"
+        assert result.params_valid is True, (
+            f"Provisioning job params invalid. errors={result.errors!r}"
         )
-        assert result.get("host_exists") is True, (
+        assert result.host_exists is True, (
             f"Host {host_id!r} not found in provisioning inventory."
         )
-        assert result.get("rule_matched") == deal_driver.create_rule_id, (
+        assert result.rule_matched == deal_driver.create_rule_id, (
             f"Expected mock rule {deal_driver.create_rule_id!r} to match, "
-            f"got rule_matched={result.get('rule_matched')!r}."
+            f"got rule_matched={result.rule_matched!r}."
         )
-        assert result.get("would_pause") is True
+        assert result.would_pause is True
         deal_state._provision_job_evaluated = True
         log.info("[08c] Provisioning job evaluate: host=%s rule=%s",
-                 host_id, result.get("rule_matched"))
+                 host_id, result.rule_matched)
 
 
 # ===========================================================================
@@ -1306,7 +1307,7 @@ class Stage10b_LeaseCycleBeginsTeardown:
         require_state(deal_state, "_termination_requested", "deal_lease",
                       "reserved_resource_id")
         summary = provisioning_client.check_leases()
-        assert summary.get("checked", 0) >= 1, summary
+        assert summary.checked >= 1, summary
         lease = deal_state.deal_lease.refresh()
         assert lease.get("status") == "releasing", lease
         fulfillment_id = lease.get("fulfillment_id")
@@ -1328,8 +1329,7 @@ class Stage11a_TeardownDispatch:
         self, provisioning_client, storefront_admin_client, deal_state: ComputeDealState,
     ):
         require_state(deal_state, "teardown_fulfillment_id", "reserved_resource_id")
-        diagnostics = provisioning_client.advance_fulfillment_convergence_cycle()
-        assert "before" in diagnostics and "after" in diagnostics
+        provisioning_client.advance_fulfillment_convergence_cycle()
         fulfillment = provisioning_client.get_fulfillment_status(
             deal_state.teardown_fulfillment_id
         ).model_dump(mode="json")
@@ -1363,7 +1363,7 @@ class Stage11b_TeardownCompletion:
         )
 
         release_summary = provisioning_client.check_leases()
-        assert release_summary.get("released", 0) >= 1, release_summary
+        assert release_summary.released >= 1, release_summary
         lease = deal_state.deal_lease.refresh()
         assert lease.get("status") == "released", lease
 

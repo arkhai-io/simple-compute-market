@@ -48,6 +48,16 @@ the scenario covers registry publication, buyer discovery, and negotiations.
 This establishes a working two-storefront topology. Multiple storefronts per
 site remain outside its scope.
 
+The provisioning service and the site authorities answer a request that matches
+no route by what failed to match — 404 for an unknown path, 405 naming the
+allowed methods, 400 for an unbindable body resource — and the provisioning
+service refuses overlapping route contributions when it composes its table. The
+compute family owns its mock mechanism's routes whole, with typed answers and one
+typed client, and the worker controls answer typed models. The compute
+provisioning contract is major 3: the schedule response names the scheduled
+resource's host, bare-metal begin reads the scheduled identity, and a provisioning
+service and the storefronts calling it upgrade together.
+
 | Open gap | Owned by |
 |---|---|
 | The relay path is implemented but unverified on a rented host: reload preservation of live sessions, the port window, teardown release, and relay deletion under live leases remain to be proved or decided | [`relay-vm-access-without-a-dashboard`](../../openspec/changes/relay-vm-access-without-a-dashboard/) |
@@ -59,7 +69,6 @@ site remain outside its scope.
 | Site admission and scheduling never read a host record's enabled flag, so a create can be admitted and placed on a disabled host and its dispatch retries until an operator re-enables it | Unowned — needs a new change |
 | No end-to-end lane runs a relay-backed pool, which is why a relay-backed VM's wrong delivered address went unnoticed | Unowned — needs a new change, beside [`relay-vm-access-without-a-dashboard`](../../openspec/changes/relay-vm-access-without-a-dashboard/) |
 | Every provisioning route admits the administrator; whether every other service should take the same stance has not been decided | Unowned — needs a repository-wide decision |
-| Small defects and dead surfaces in the compute family and the kits around it: unmatched routes answered with one undifferentiated 404, untyped mock-rule and worker-control responses, senderless VM fulfillment callbacks, reservation states nothing writes, a bare-metal delivery conflict answered 500, a deferred bare-metal delivery rechecked on an error backoff, an introduction's seller delivery lost after a failed first completion, an unchecked seller wallet address, and an Alkahest address book named twice | [`resolve-compute-family-findings`](../../openspec/changes/resolve-compute-family-findings/) |
 
 Dropping the frozen tables is deliberately excluded from the retirement and belongs to a later follow-up, once operators have had a deployment cycle to extract what they need from them.
 

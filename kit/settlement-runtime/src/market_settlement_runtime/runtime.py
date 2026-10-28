@@ -266,15 +266,22 @@ class SettlementRuntime:
         local_principal: Identity,
         worker_id: str,
     ) -> None:
-        """Release a fulfillment lease while asynchronous work remains pending."""
+        """Release a fulfillment lease while its delivery is not yet ready.
+
+        Waiting on delivery is not a failure: the attempt the lease counted is
+        returned and the operation is due again at once, marked awaiting
+        delivery, so the servicing worker rechecks it on its next cycle rather
+        than backing it off. Any later reservation clears the mark.
+        """
         record = await self._load(obligation_ref)
         self._require_principal(record, local_principal, "claimant")
-        await self._finish(
-            record,
-            "fulfill",
-            worker_id,
-            state="pending",
+        marked = await self._repository.mark_fulfillment_awaiting_delivery(
+            obligation_ref=record.obligation_ref,
+            lease_owner=worker_id,
+            now_unix=self._clock(),
         )
+        if not marked:
+            raise RuntimeError("settlement operation lease was lost")
 
     async def retry_fulfillment(
         self,

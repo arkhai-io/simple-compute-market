@@ -1,7 +1,6 @@
 """A relay is an administered resource, and its token is not readable.
 
-Three properties are pinned here, each of which failed differently in the design
-that preceded this one:
+Two properties are pinned here:
 
 * A relay's rendezvous, window, and token are stated once, on a row that pools
   reference. Held per pool, two pools sharing a relay could allocate from one
@@ -9,31 +8,27 @@ that preceded this one:
 * No read path that serves a response, an export, or a reconciliation
   comparison yields an admission token. Only an explicitly named execution read
   does.
-* Reconciliation of a definition document follows a change to that document. A
-  process restart is not a change, and re-applying a document nobody submitted
-  reverts whatever else changed the database.
 
-External boundary: SQLAlchemy against in-memory SQLite, as elsewhere in this
-suite. The database is deterministic and does no network I/O, so the real engine
-is used rather than a mock.
+That reconciling a relay definition document follows a change to the document,
+not a process start, is the service importer's, and its suite tests it.
+
+External boundary: SQLAlchemy against file-backed SQLite, over a schema built
+from VM's own models. The database is deterministic and does no network I/O, so
+the real engine is used rather than a mock.
 """
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
+import yaml
 from compute_provisioning_ansible import render_extra_vars
 from cryptography.fernet import Fernet
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
+from market_resource_pools import ResourcePool
+from sqlalchemy.orm import Session
 
-from compute_provisioning_service.db.database import run_migrations
-from compute_provisioning_service.db.models import (
-    DefinitionDocumentImport,
-    ResourcePool,
-)
 from vm_provisioning_adapter.codec import VmAnsibleCodec
 from vm_provisioning_adapter.db import Relay, RelayPortLease
 from vm_provisioning_adapter.models.jobs_model import VmJobParams
@@ -63,17 +58,6 @@ _PLAYBOOK_PATH = "/configured/playbook.yaml"
 # A development-only Fernet key. Generated for this fixture, never used on any
 # network, and safe to read here precisely because it protects nothing.
 _KEY = Fernet.generate_key().decode()
-
-
-@pytest.fixture
-def session_factory():
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    run_migrations(engine)
-    return sessionmaker(bind=engine)
 
 
 @pytest.fixture
@@ -294,8 +278,6 @@ class TestRelayDefinitionDocuments:
         return {"relays": [entry]}
 
     def _yaml(self, **overrides):
-        import yaml
-
         return yaml.safe_dump(self._document(**overrides))
 
     def test_a_named_profile_key_supplies_the_token(self, relays, settings, session_factory):
@@ -370,8 +352,6 @@ class TestRelayDefinitionDocuments:
         assert relays.get_relay("site-a").vm_port_range_start == 7100
 
     def test_an_unknown_field_is_refused(self):
-        import yaml
-
         document = self._document()
         document["relays"][0]["token_secret_kye"] = "relay_token"
         with pytest.raises(RelayDefinitionError) as excinfo:
@@ -379,8 +359,6 @@ class TestRelayDefinitionDocuments:
         assert "token_secret_kye" in str(excinfo.value)
 
     def test_two_entries_on_one_rendezvous_are_refused(self):
-        import yaml
-
         document = self._document()
         second = dict(document["relays"][0])
         second["id"] = "site-b"
@@ -389,71 +367,11 @@ class TestRelayDefinitionDocuments:
             parse_relay_definitions(yaml.safe_dump(document))
 
     def test_a_missing_required_field_names_it(self):
-        import yaml
-
         document = self._document()
         del document["relays"][0]["vm_port_range_count"]
         with pytest.raises(RelayDefinitionError) as excinfo:
             parse_relay_definitions(yaml.safe_dump(document))
         assert "vm_port_range_count" in str(excinfo.value)
-
-
-class TestTheDigestGate:
-    """Reconciliation follows a change to a document, not a process start.
-
-    Import is idempotent with respect to the document, not the database.
-    Applying it on every startup reverts whatever else changed the database,
-    silently, on eviction, drain, and crash recovery.
-    """
-
-    def _importer(self, session_factory, settings):
-        from compute_provisioning_service.services.definition_documents import (
-            DefinitionDocumentImporter,
-        )
-
-        return DefinitionDocumentImporter(
-            session_factory=session_factory,
-            settings=settings,
-            pool_service=None,
-        )
-
-    def test_nothing_is_recorded_before_a_first_import(self, session_factory):
-        with session_factory() as db:
-            assert db.get(DefinitionDocumentImport, "relays") is None
-
-    def test_a_changed_document_produces_a_different_digest(
-        self, session_factory, settings
-    ):
-        importer = self._importer(session_factory, settings)
-        assert importer.digest_of("relays: []\n") != importer.digest_of("relays: [1]\n")
-
-    def test_a_digest_is_written_and_read_back(self, session_factory, settings):
-        importer = self._importer(session_factory, settings)
-        digest = importer.digest_of("relays: []\n")
-        with session_factory() as db, db.begin():
-            importer._record_digest(db, "relays", digest)
-        with session_factory() as db:
-            assert importer._recorded_digest(db, "relays") == digest
-
-    def test_recording_twice_updates_rather_than_duplicating(
-        self, session_factory, settings
-    ):
-        importer = self._importer(session_factory, settings)
-        with session_factory() as db, db.begin():
-            importer._record_digest(db, "pools", importer.digest_of("a"))
-        with session_factory() as db, db.begin():
-            importer._record_digest(db, "pools", importer.digest_of("b"))
-        with session_factory() as db:
-            assert importer._recorded_digest(db, "pools") == importer.digest_of("b")
-            assert db.query(DefinitionDocumentImport).count() == 1
-
-    def test_pools_and_relays_are_tracked_separately(self, session_factory, settings):
-        importer = self._importer(session_factory, settings)
-        with session_factory() as db, db.begin():
-            importer._record_digest(db, "pools", importer.digest_of("pool-doc"))
-        with session_factory() as db:
-            assert importer._recorded_digest(db, "relays") is None
-            assert importer._recorded_digest(db, "pools") is not None
 
 
 class TestRebinding:
@@ -510,8 +428,6 @@ class TestRebinding:
         assert "Disable the pool" in message
 
     def test_a_relay_can_move_once_drained(self, session_factory, relays):
-        from datetime import datetime, timezone
-
         self._relay_with_lease(session_factory, relays)
         with session_factory() as db, db.begin():
             db.query(RelayPortLease).one().released_at = datetime.now(timezone.utc)
@@ -570,8 +486,6 @@ class TestRebinding:
         assert relays.rotate_token("site-a", "first-token").token_configured is True
 
     def test_a_token_can_be_rotated_once_drained(self, session_factory, relays):
-        from datetime import datetime, timezone
-
         self._relay_with_lease(session_factory, relays)
         with session_factory() as db, db.begin():
             db.query(RelayPortLease).one().released_at = datetime.now(timezone.utc)
@@ -637,9 +551,8 @@ class TestExecutionTimeTokenResolution:
         That needs the client's own configuration rewritten and the client
         restarted, which `vm-create.yml` does and `test_vm_management_contracts`
         pins; whether the restart behaves as intended against a real relay is
-        the live gate's business. An earlier name for this test claimed
-        rotation took effect "without a restart", which was true of the
-        variables and false of the host.
+        the live gate's business. A rotation takes effect without a restart in
+        the variables, and only after one on the host.
         """
         _make_relay(relays, token="original")
         params = VmJobParams(

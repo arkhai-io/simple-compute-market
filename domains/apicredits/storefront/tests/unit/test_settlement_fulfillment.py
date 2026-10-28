@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+from contextlib import ExitStack
 from dataclasses import replace
 from datetime import datetime
 from functools import partial
@@ -28,6 +29,7 @@ from arkhai_apicredits.settlement.credits_client import (
     CreditsServiceError,
 )
 from arkhai_apicredits.settlement.fulfillment import fulfill_api_credits_obligation
+from tests._settings_overrides import replaced_setting
 from tests.integration.credit_negotiation import FakeCapacity
 from tests.listing_bindings import upsert_bound_listing
 
@@ -497,7 +499,7 @@ async def test_payment_refusal_releases_hold_using_negotiation_not_transaction(
 
 
 @pytest.fixture
-async def settled_db(tmp_path, monkeypatch):
+async def settled_db(tmp_path, monkeypatch, request):
     """A DB with an accepted token negotiation, via the real sync flow."""
     import market_policy.negotiation_thread as thread_module
     from apicredits_storefront import negotiation_runtime as negotiation_module
@@ -539,14 +541,16 @@ async def settled_db(tmp_path, monkeypatch):
             }
         )
     )
-    monkeypatch.setitem(
-        config_module.CHAINS,
-        "anvil",
-        SimpleNamespace(
-            alkahest_address_config_path=str(address_config),
-            rpc_url="http://x",
-        ),
-    )
+    monkeypatch.setitem(config_module.CHAINS, "anvil", SimpleNamespace(rpc_url="http://x"))
+    settlement = config_module.settlement_config_mapping()
+    settlement["alkahest"] = {
+        **dict(settlement.get("alkahest") or {}),
+        "address_books": {"anvil": str(address_config)},
+    }
+    held = ExitStack()
+    # Released whatever the setup below does, so the setting never leaks.
+    request.addfinalizer(held.close)
+    held.enter_context(replaced_setting("settlement", settlement))
     client = SQLiteClient(db_path=str(tmp_path / "settle.db"))
     thread_module._thread_store = None
     get_thread_store(

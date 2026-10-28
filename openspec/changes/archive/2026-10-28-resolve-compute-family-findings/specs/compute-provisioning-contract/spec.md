@@ -7,7 +7,7 @@ When a lease's release completes and its capacity returns to the site, the provi
 #### Scenario: A reservation's capacity is released
 
 - **WHEN** a lease's release completes and its capacity returns to the site
-- **THEN** the owning storefront receives one capacity-released notification for the reservation, signed by the provisioner under the `service` role, without the provisioner depending on the full storefront client
+- **THEN** the owning storefront receives one capacity-released notification for the reservation, signed by the provisioner under the `service` role
 
 #### Scenario: The storefront's acknowledgement is lost
 

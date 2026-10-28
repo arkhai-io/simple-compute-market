@@ -47,13 +47,13 @@ def _concrete(template: str) -> str:
 def _contract_path(pattern: str) -> str:
     path = pattern.replace("(?P<trust_role>admin|seller)", "admin")
     path = re.sub(r"\(\?P<[^>]+>\[\^/\]\+\)", "resource-1", path)
-    return path.replace("/?", "").removesuffix("$")
+    return path.replace("/?", "")
 
 
 @pytest.mark.parametrize(("method", "template"), _mounted(), ids=lambda value: str(value))
 def test_every_mounted_route_resolves_to_exactly_one_contract(method, template):
-    # Resolution refuses a path two contributions claim, so a single answer is
-    # also proof that no other contribution claims it.
+    # Composing the table refuses two contributions that could claim one
+    # path, so the single answer is the only contract that claims it.
     contract, _resource = provisioning_route_table.resolve(method, _concrete(template), dict(_BODY))
 
     assert contract.method == method

@@ -20,7 +20,9 @@ class AlkahestChain:
 
     name: str
     rpc_url: str
-    address_config_path: str | None = None
+    #: The chain's Alkahest address book, as the storefront resolved it;
+    #: ``None`` for the SDK's built-in addresses.
+    address_book: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,10 +86,10 @@ def alkahest_client_constructor(
             prewarm_address_config,
             resolve_address_config,
         ) = _load_dependencies()
-        prewarm_address_config(chain.address_config_path)
+        prewarm_address_config(chain.address_book)
         address_config = resolve_address_config(
             get_network(chain.name),
-            config_path=chain.address_config_path,
+            config_path=chain.address_book,
         )
         return client_type(
             private_key=policy.private_key,

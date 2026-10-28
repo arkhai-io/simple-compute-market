@@ -103,8 +103,6 @@ async def test_the_lease_view_serializes_every_reachable_reservation_state():
     freshly registered lease, raw state ``"leased"``, reads as ``"active"``."""
     expected = {
         "reserved": LeaseState.PENDING,
-        "provisioning": LeaseState.PENDING,
-        "provisioning_failed": LeaseState.PROVISIONING_FAILED,
         "leased": LeaseState.ACTIVE,
         "releasing": LeaseState.RELEASING,
         "released": LeaseState.RELEASED,

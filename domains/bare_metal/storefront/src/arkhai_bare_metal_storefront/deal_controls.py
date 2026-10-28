@@ -87,7 +87,7 @@ def settlement_admin_routes(
                 alkahest_client=client,
                 chain_name=chain_name,
                 escrow_address=proposal.escrow_address,
-                alkahest_address_config_path=runtime.chain_config_paths.get(chain_name),
+                address_book=runtime.chain_config_paths.get(chain_name),
             )
         except Exception as exc:
             return {"valid": False, "reason": str(exc)}

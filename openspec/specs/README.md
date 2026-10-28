@@ -20,6 +20,7 @@ An architecture companion does not replace a normative requirement. When explana
 | Compute provisioning contract | [Spec](compute-provisioning-contract/spec.md) | — |
 | Deployment and state | [Spec](deployment-state/spec.md) | [Architecture](deployment-state/architecture.md) |
 | Fulfillment | [Spec](fulfillment/spec.md) | [Architecture](fulfillment/architecture.md) |
+| Introduction delivery | [Spec](introduction-delivery/spec.md) | [Architecture](introduction-delivery/architecture.md) |
 | Market composition | [Spec](market-composition/spec.md) | [Architecture](market-composition/architecture.md) |
 | Marketplace identity | [Spec](marketplace-identity/spec.md) | [Architecture](marketplace-identity/architecture.md) |
 | Negotiation protocol | [Spec](negotiation-protocol/spec.md) | [Architecture](negotiation-protocol/architecture.md) |

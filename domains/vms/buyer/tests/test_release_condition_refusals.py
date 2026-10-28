@@ -171,10 +171,9 @@ def test_escrow_create_refuses_a_run_log_holding_only_an_accepted_proposal(
     monkeypatch.setattr(
         common,
         "chain_by_name",
-        lambda _name: SimpleNamespace(
-            name="anvil", rpc_url="http://rpc", alkahest_address_config_path=None
-        ),
+        lambda _name: SimpleNamespace(name="anvil", rpc_url="http://rpc"),
     )
+    monkeypatch.setattr(escrow_cli, "chain_address_book", lambda _name: None)
     monkeypatch.setattr(
         common, "resolve_buyer_wallet", lambda **_kw: ("0x" + "66" * 20, "0x" + "77" * 32)
     )
@@ -245,10 +244,9 @@ def _create_from_recorded_conditions(monkeypatch, *, plan: dict, log: _Log, fund
     monkeypatch.setattr(
         common,
         "chain_by_name",
-        lambda _name: SimpleNamespace(
-            name="anvil", rpc_url="http://rpc", alkahest_address_config_path=_BOOK
-        ),
+        lambda _name: SimpleNamespace(name="anvil", rpc_url="http://rpc"),
     )
+    monkeypatch.setattr(escrow_cli, "chain_address_book", lambda _name: _BOOK)
     monkeypatch.setattr(
         common, "resolve_buyer_wallet", lambda **_kw: ("0x" + "66" * 20, "0x" + "77" * 32)
     )
@@ -335,7 +333,7 @@ def test_settle_refuses_a_run_log_holding_only_an_accepted_proposal(
         settle_cli, "make_deal_publisher_trust_resolver", lambda *_a, **_k: lambda: None
     )
     monkeypatch.setattr(settle_cli, "open_run_log", lambda *_a, **_k: log)
-    monkeypatch.setattr(settle_cli, "resolve_alkahest_address_config_path", lambda: None)
+    monkeypatch.setattr(settle_cli, "chain_address_book", lambda _chain: None)
     _no_escrow_is_created(monkeypatch)
 
     with pytest.raises(typer.Exit) as refused:
@@ -370,7 +368,7 @@ def test_settle_refuses_a_seller_plan_paying_another_recipient(monkeypatch):
         settle_cli, "make_deal_publisher_trust_resolver", lambda *_a, **_k: lambda: None
     )
     monkeypatch.setattr(settle_cli, "open_run_log", lambda *_a, **_k: log)
-    monkeypatch.setattr(settle_cli, "resolve_alkahest_address_config_path", lambda: _BOOK)
+    monkeypatch.setattr(settle_cli, "chain_address_book", lambda _chain: _BOOK)
     _no_escrow_is_created(monkeypatch)
 
     with pytest.raises(typer.Exit) as refused:
