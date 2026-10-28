@@ -6,8 +6,9 @@ a file on the provisioning service's own filesystem and not secret, or
 ``private_key``, key material submitted with the connection, which this codec
 protects with the service's Fernet key (scheme ``fernet-v1``) before anything is
 stored, and decrypts only to materialize the connection for one execution.
-``public_host`` is the address tenants use to reach what the host delivers when
-they reach it on a different network than the provisioner does.
+``public_host`` and ``public_port`` are the address and port tenants use to reach
+what the host delivers when they reach it on a different route than the
+provisioner does; each, when absent, is the connection's own.
 
 The codec is SSH's, not Ansible's: an executor consumes the materialized
 connection and holds no cryptography of its own.
@@ -34,11 +35,31 @@ class SshConnection(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    #: The address the provisioner connects to. Required; nothing falls back.
     ssh_host: str = Field(min_length=1)
+    #: The address tenants reach the host on; absent, it is ``ssh_host``.
     public_host: str | None = None
+    #: The port the provisioner connects to; absent, 22.
     ssh_port: int = Field(default=22, ge=1, le=65535)
+    #: The port tenants reach the host on; absent, it is ``ssh_port``.
+    public_port: int | None = Field(default=None, ge=1, le=65535)
+    #: The account the provisioner connects as; absent, ``root``.
     ssh_user: str = Field(default="root", min_length=1)
+    #: The key file on the service's filesystem; absent, the connection's
+    #: protected ``private_key`` names the key instead.
     key_path: str | None = None
+
+    def public_fields(self) -> dict[str, Any]:
+        """The fields an envelope stores.
+
+        A connection stating no ``public_port`` is stored without the key. A
+        reader that does not know the field refuses it, a stored null as surely
+        as a port, so only a host that states a port is unreadable to one.
+        """
+        fields = self.model_dump()
+        if fields["public_port"] is None:
+            del fields["public_port"]
+        return fields
 
     @field_validator("ssh_host", "ssh_user")
     @classmethod
@@ -95,7 +116,7 @@ class SshConnectionCodec:
             ConnectionEnvelope(
                 kind=self.kind,
                 version=self.version,
-                public=connection.model_dump(),
+                public=connection.public_fields(),
                 protected=protected,
             )
         )
@@ -124,7 +145,7 @@ class SshConnectionCodec:
         return ConnectionEnvelope(
             kind=self.kind,
             version=self.version,
-            public=connection.model_dump(),
+            public=connection.public_fields(),
             protected=dict(envelope.protected),
         )
 
@@ -156,6 +177,7 @@ def ssh_connection(
     ssh_user: str = "root",
     ssh_port: int = 22,
     public_host: str | None = None,
+    public_port: int | None = None,
     key_path: str | None = None,
     private_key: str | None = None,
 ) -> ConnectionSubmission:
@@ -169,8 +191,9 @@ def ssh_connection(
         ssh_user=ssh_user,
         ssh_port=ssh_port,
         public_host=public_host,
+        public_port=public_port,
         key_path=key_path,
-    ).model_dump()
+    ).public_fields()
     secrets = {PRIVATE_KEY: private_key} if private_key is not None else {}
     return ConnectionSubmission(
         kind=SSH_CONNECTION_KIND,

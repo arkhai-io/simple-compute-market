@@ -256,6 +256,7 @@ class InventoryTarget:
     ssh_user: str
     ssh_key_type: str
     ssh_key_value: str = field(repr=False)
+    public_port: int | None = None
 
 
 def inventory_target(host: ExecutionHost) -> InventoryTarget:
@@ -282,6 +283,7 @@ def inventory_target(host: ExecutionHost) -> InventoryTarget:
         ssh_user=ssh.ssh_user,
         ssh_key_type=key_type,
         ssh_key_value=key_value,
+        public_port=ssh.public_port,
     )
 
 
@@ -579,14 +581,17 @@ class AnsibleRunner:
                     )
                     key_ref = str(key_file)
 
-                # public_host is the tenant-facing address; emit it as a host
-                # var so the playbook can use it for the connection strings it
-                # returns.
+                # public_host and public_port are the tenant-facing route; emit
+                # each the connection states as a host var so a playbook can use
+                # it for the connection strings it returns. One it does not
+                # state is the connection's own ansible_host or ansible_port.
                 public_seg = (
                     f"  public_host={host.public_host}"
                     if getattr(host, "public_host", None)
                     else ""
                 )
+                if getattr(host, "public_port", None) is not None:
+                    public_seg += f"  public_port={host.public_port}"
                 # ansible_port is emitted for every host, including port 22:
                 # the registry always holds a port, and the inventory states it
                 # rather than leaving 22 implied by an absent variable.

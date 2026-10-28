@@ -14,12 +14,21 @@ Coverage:
 What is NOT covered here (unit test jurisdiction):
   - INI parsing edge cases
   - Fernet encryption/decryption correctness
-  - render_inventory_ini output format
+  - the rendered inventory's exact format (``AnsibleRunner.write_inventory``)
+
+A representative case does follow a host's connection fields from the API and
+the store into the inventory a job renders, reading the rendered line's fields
+rather than its layout.
 """
 
 from __future__ import annotations
+import shlex
+from types import SimpleNamespace
+
 from compute_provisioning.hosts.db import Host
 from compute_provisioning_ansible import ssh_connection
+from compute_provisioning_ansible.runner import AnsibleRunner
+from vm_provisioning_operator.models import CreateVmRequest
 
 from compute_provisioning_client import ComputeProvisioningError
 import pytest
@@ -493,3 +502,101 @@ class TestEmbeddedKey:
         assert stored["scheme"] == "fernet-v1"
         assert "fixture" not in stored["ciphertext"]
         assert decrypt_secret(stored["ciphertext"], TEST_CONNECTION_KEY) == self._PEM
+
+
+class TestTenantFacingRoute:
+    """A host's tenant-facing address and port survive the typed client, API,
+    service, and database, and reach the inventory a job runs against.
+
+    Job execution reaches the real runner's inventory rendering: the fixture's
+    runner mock hands ``write_inventory`` to a real ``AnsibleRunner``, while it
+    replaces playbook execution, so no command or subprocess is built. The routed
+    host's addresses are RFC 5737 documentation addresses, and the other host is
+    this module's sample; all are development fixture values that must never be
+    used on a public network.
+    """
+
+    @staticmethod
+    def _render_for_real(fake_ansible) -> list[str]:
+        """Render each job's inventory with the real runner, keeping its text."""
+        rendered: list[str] = []
+        renderer = AnsibleRunner(SimpleNamespace())
+
+        def write_inventory(hosts, *, group):
+            inventory = renderer.write_inventory(hosts, group=group)
+            rendered.append(inventory.path.read_text())
+            return inventory
+
+        fake_ansible.write_inventory.side_effect = write_inventory
+        return rendered
+
+    @staticmethod
+    def _host_vars(inventory: str, host_id: str) -> dict[str, str]:
+        """The variables ``inventory`` renders for ``host_id``, by name."""
+        (line,) = [entry for entry in inventory.splitlines() if entry.startswith(f"{host_id} ")]
+        return dict(token.split("=", 1) for token in shlex.split(line)[1:])
+
+    @staticmethod
+    async def _run_a_job(client, host_id: str) -> None:
+        submit = await client.vm.create_vm(host_id, CreateVmRequest(vm_target="tenant-route-vm"))
+        final = await client.family.poll_until_complete(
+            submit.job_id, timeout=5.0, poll_interval=0.05
+        )
+        assert final.status == "succeeded"
+
+    async def test_a_registered_route_reads_back_and_renders_into_a_jobs_inventory(
+        self, client_and_queue, fake_ansible, session_factory,
+    ):
+        client, _ = client_and_queue
+        rendered = self._render_for_real(fake_ansible)
+        await client.family.register_host(HostCreate(
+            host_id="routed",
+            connection=ssh_connection(
+                ssh_host="198.51.100.1", ssh_user="ubuntu", ssh_port=6000,
+                public_host="192.0.2.10", public_port=22,
+                key_path="/home/appuser/.ssh/id_ed25519",
+            ),
+        ))
+
+        public = (await client.family.get_host("routed")).connection.public
+        assert (public["ssh_port"], public["public_host"], public["public_port"]) == (6000, "192.0.2.10", 22)
+        with session_factory() as db:
+            assert db.get(Host, "routed").connection_public["public_port"] == 22
+
+        await self._run_a_job(client, "routed")
+
+        host_vars = self._host_vars(rendered[-1], "routed")
+        assert {key: host_vars[key] for key in ("ansible_host", "ansible_port", "public_host", "public_port")} == {
+            "ansible_host": "198.51.100.1",
+            "ansible_port": "6000",
+            "public_host": "192.0.2.10",
+            "public_port": "22",
+        }
+
+    async def test_a_host_stating_no_route_is_stored_and_rendered_as_before(
+        self, client_and_queue, fake_ansible, session_factory,
+    ):
+        """No ``public_port`` key is stored, not even a null, so a reader that
+        does not know the field still reads the record."""
+        client, _ = client_and_queue
+        rendered = self._render_for_real(fake_ansible)
+        await _register(client)
+
+        public = (await client.family.get_host("kvm1")).connection.public
+        assert public["public_host"] is None and "public_port" not in public
+        with session_factory() as db:
+            assert db.get(Host, "kvm1").connection_public == {
+                "ssh_host": "10.0.0.1",
+                "public_host": None,
+                "ssh_port": 22,
+                "ssh_user": "ubuntu",
+                "key_path": "/home/appuser/.ssh/id_ed25519",
+            }
+
+        await self._run_a_job(client, "kvm1")
+
+        host_vars = self._host_vars(rendered[-1], "kvm1")
+        assert "public_host" not in host_vars and "public_port" not in host_vars
+        assert (host_vars["ansible_host"], host_vars["ansible_port"], host_vars["ansible_user"]) == (
+            "10.0.0.1", "22", "ubuntu",
+        )

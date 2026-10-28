@@ -127,6 +127,23 @@ def test_only_ssh_connections_reach_an_inventory() -> None:
         inventory_target(host)
 
 
+def test_a_tenant_facing_route_is_carried_into_the_rendered_inventory() -> None:
+    """``public_host=`` and ``public_port=`` render as host variables when the
+    connection states them, and neither renders when it does not."""
+    public = {**_host().connection.public, "public_host": "192.0.2.10", "public_port": 2222}
+    routed = ExecutionHost("kvm1", "default", ConnectionEnvelope(kind="ssh", version=1, public=public))
+    runner = AnsibleRunner(SimpleNamespace())
+
+    target = inventory_target(routed)
+    with runner.write_inventory([target, inventory_target(_host())], group="nodes") as inventory:
+        routed_line, plain_line = inventory.path.read_text().splitlines()[1:]
+
+    assert (target.public_host, target.public_port) == ("192.0.2.10", 2222)
+    assert "  public_host=192.0.2.10  public_port=2222  ansible_port=2201" in routed_line
+    assert "public_host=" not in plain_line and "public_port=" not in plain_line
+    assert inventory_target(_host()).public_port is None
+
+
 def test_a_json_block_is_extracted_whole() -> None:
     text = 'noise "fact": {"a": {"b": "}"}, "c": 1} trailing'
 

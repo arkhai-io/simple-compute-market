@@ -96,3 +96,63 @@ def test_an_operator_submission_names_only_what_was_given() -> None:
     assert submission.kind == "ssh"
     assert submission.secrets == {"private_key": _PEM}
     assert _PEM not in repr(submission)
+
+
+# The public fields ``_PATH_KEY`` is stored with when it states no tenant-facing
+# port: the same mapping a reader that does not know ``public_port`` accepts,
+# since it refuses any key it does not know, a null one included. Addresses here
+# are development fixture values that must never be used on a public network.
+_STORED_WITHOUT_PUBLIC_PORT = {
+    "ssh_host": "10.0.0.1",
+    "public_host": None,
+    "ssh_port": 22,
+    "ssh_user": "root",
+    "key_path": "/keys/id_ed25519",
+}
+
+
+def test_a_connection_stating_no_public_port_is_stored_as_before() -> None:
+    codec = SshConnectionCodec(_KEY)
+    stored = ConnectionEnvelope(kind="ssh", version=1, public=_STORED_WITHOUT_PUBLIC_PORT)
+
+    assert dict(codec.build(_PATH_KEY, {}).public) == _STORED_WITHOUT_PUBLIC_PORT
+    assert dict(codec.validate(stored).public) == _STORED_WITHOUT_PUBLIC_PORT
+    assert "public_port" not in ssh_connection(**_PATH_KEY).public
+    assert SshConnectionCodec.parse(stored).public_port is None
+
+
+def test_a_null_public_port_is_stored_as_absent() -> None:
+    envelope = SshConnectionCodec(_KEY).build({**_PATH_KEY, "public_port": None}, {})
+
+    assert dict(envelope.public) == _STORED_WITHOUT_PUBLIC_PORT
+
+
+def test_a_public_port_is_kept_beside_the_public_host() -> None:
+    codec = SshConnectionCodec(_KEY)
+    submission = ssh_connection(**_PATH_KEY, public_host="192.0.2.10", public_port=2222)
+
+    envelope = codec.build(submission.public, submission.secrets)
+
+    assert submission.public["public_port"] == 2222
+    assert dict(envelope.public) == {
+        **_STORED_WITHOUT_PUBLIC_PORT,
+        "public_host": "192.0.2.10",
+        "public_port": 2222,
+    }
+    connection = SshConnectionCodec.parse(codec.validate(envelope))
+    assert (connection.public_host, connection.public_port) == ("192.0.2.10", 2222)
+
+
+def test_a_public_port_may_be_stated_without_a_public_host() -> None:
+    envelope = SshConnectionCodec(_KEY).build({**_PATH_KEY, "public_port": 2222}, {})
+
+    assert envelope.public["public_host"] is None
+    assert envelope.public["public_port"] == 2222
+
+
+@pytest.mark.parametrize("port", [0, 65536, -1, "22x"], ids=["zero", "too large", "negative", "not a number"])
+def test_a_malformed_public_port_is_refused(port) -> None:
+    with pytest.raises(ValueError, match="ssh connection"):
+        SshConnectionCodec(_KEY).build({**_PATH_KEY, "public_port": port}, {})
+    with pytest.raises(ValueError):
+        ssh_connection(**_PATH_KEY, public_port=port)

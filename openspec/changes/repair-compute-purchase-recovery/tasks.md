@@ -240,27 +240,207 @@ tenant-facing host address falls back to the connection address". Files:
 - their unit tests, including `provisioning/compute/ansible/tests/unit/test_inventory.py`
 - `provisioning/compute/service/tests/integration/test_hosts_api.py`
 
-- [ ] 3.1 `SshConnection` gains an optional `public_port`, validated as 1–65535 and
+- [x] 3.1 `SshConnection` gains an optional `public_port`, validated as 1–65535 and
       additive to version 1. `InventoryTarget` carries it. Rendering emits
       `public_port=` when set, as it emits `public_host=`. The INI format reads
       `public_port=`, and refuses a malformed port as it refuses a malformed
       `ansible_port`. Each connection field's comment states its fallback.
-- [ ] 3.2 Unit tests:
+
+      Done, in `connection.py`, `runner.py`, and `inventory.py`.
+      - **The stored form.** An envelope that states no `public_port` is stored
+        without the key: `SshConnection.public_fields()` drops a null
+        `public_port`, and `build`, `validate`, and `ssh_connection()` all store
+        through it. A `model_dump()` would write `public_port: null`, which a reader
+        that does not know the field refuses as surely as a port (see 3.3). So a host
+        stating no route is stored exactly as before, and only a host that states a
+        port needs D3's rollback step.
+      - `public_host` is still stored as `null` when absent, as before.
+      - **Rendering.** `InventoryTarget.public_port` is the last field, with default
+        `None`. A line gets `public_port=` after `public_host=`, only when set. The
+        rendering comment says an unstated value is the connection's own. No
+        playbook reads `public_port` yet; the bare-metal codec uses it in Section 4.
+      - **INI.** `public_port=` is parsed with the same rule as `ansible_port=`, by
+        one `_port` helper: an entry whose value is not an integer from 1 to 65535
+        is skipped with a warning naming the variable, and the other entries are
+        imported. The `ansible_port` warning keeps its wording.
+- [x] 3.2 Unit tests:
       - a connection with and without `public_port`;
       - a malformed port refused;
       - rendering;
       - an INI round trip, including a malformed entry rejected while the others
         are imported.
-- [ ] 3.3 Application integration: register a host through the typed host client
+
+      Done (unit). At the section's start the kit's suite passed 114. With the new
+      tests and no source change, the red run had 10 failed and 115 passed. Those
+      115 are the 114 and the round-trip case below, which passes vacuously then.
+      The ten failed on the missing field. Green: 125 passed.
+      - **Connection** (`test_ssh_connection.py`):
+        - no `public_port`, stored exactly as before, through `build`,
+          `validate` of a stored envelope, and `ssh_connection()`;
+        - a null `public_port`, stored as absent;
+        - a port beside `public_host`, and a port without one;
+        - 0, 65536, -1, and `22x`, each refused by the codec and by
+          `ssh_connection()`.
+      - **Rendering** (`test_runner.py`): `public_host=` and `public_port=`
+        render when set, and neither renders when not.
+      - **INI** (`test_inventory.py`): a port is read; the entries `ssh`, `0`, and
+        `70000` are skipped while the others are imported. The entries use RFC
+        5737 documentation addresses.
+      - **Round trip:** parsed hosts are stored through the codec, rendered by
+        the real runner, and parsed again, and read back equal. This case passed
+        in the red run too, since no port was parsed on either side then. It
+        fails now only if rendering or parsing drops the port.
+
+      New routed inputs use RFC 5737 documentation addresses. The tests that
+      extend an existing sample keep its address. All are development fixture
+      values that must never be used on a public network. Key paths are
+      placeholders.
+- [x] 3.3 Application integration: register a host through the typed host client
       with `public_host` and `public_port`. Read it back, and see both in the
       rendered execution inventory. A host without them reads unchanged.
-- [ ] 3.4 Verification:
+
+      Done (application integration), as `TestTenantFacingRoute` in
+      `test_hosts_api.py`, through the typed host and VM clients.
+      - **The routed host.** It is registered at `ssh_host` 198.51.100.1 over
+        `ssh_port` 6000, with `public_host` 192.0.2.10 and `public_port` 22. The
+        test reads it back, and checks the stored `connection_public` row. A VM
+        create job is then run on it.
+        - Job execution reaches the real runner's inventory rendering: the
+          fixture's runner mock hands `write_inventory` to a real `AnsibleRunner`,
+          so the job's actual inventory text is read.
+        - The mock still replaces playbook execution, so no command or subprocess
+          is built.
+        - The job's inventory line is
+          `ansible_host=198.51.100.1  public_host=192.0.2.10  public_port=22  ansible_port=6000`.
+      - **The plain host.** Its stored public mapping equals the pre-change form,
+        with no `public_port` key, and its rendered line carries neither field.
+      - **Red.** The service environment held the kit wheel built in Section 2,
+        without the field. There, the routed case failed with a `TypeError`:
+        `ssh_connection()` took no `public_port`. The plain case passed.
+        - This was the older installed kit's client-side helper refusing the
+          argument before any request was sent. It is not a proof that the
+          server or API refuses the field.
+        - The green run does exercise the typed client, the API, storage, and
+          the job's real inventory rendering.
+        - The service's floor rests on its own production edges, given under
+          3.4, not on this red.
+      - **The rollback rule.** Its reproducible basis is in the repository:
+        - The unit test `test_a_connection_stating_no_public_port_is_stored_as_before`
+          pins a connection stating no route to the pre-change stored mapping.
+          This module's plain-host case pins the stored row.
+        - The older reader's `SshConnection` is `extra="forbid"`, as the section's
+          base revision of `connection.py` shows. So it refuses any key it does
+          not know, a null `public_port` as surely as a port.
+        - A host stating no route therefore reads under the older reader, and only
+          one stating a port needs D3's rollback step.
+
+        A private experiment, kept out of the repository and not an automated
+        test, corroborated this against the 0.4.1 wheel the wheelhouse held,
+        built from the base revision. Its
+        `SshConnectionCodec.validate` read the envelopes the new codec stores:
+        - no route, and `public_host` alone: accepted;
+        - a stated `public_port`, and an explicit `public_port: null`: refused.
+- [x] 3.4 Verification:
       - `make -C provisioning/compute/ansible test` (unit);
       - `make -C provisioning/compute/service test` (application integration);
       - `make check-packaging`.
 
       End-to-end: no pipeline scenario registers a tenant-facing route. The live
       bare-metal lane is the system evidence.
+
+      Named checks passed on the final source:
+      - `make -C provisioning/compute/ansible test`: 125 passed (unit);
+      - `make -C provisioning/compute/service test`: 669 unit and 542 application
+        integration passed;
+      - `make check-packaging`: passed.
+
+      Consumers of the changed kit also passed:
+      - `make -C domains/bare_metal/provisioning/adapter test`: 57 passed (unit);
+      - `make -C domains/vms/provisioning/adapter test`: 37 passed (unit).
+
+      Left unchecked at first: the full `make test` and the section's
+      fresh-context compliance check were still owed.
+
+      **Final evidence**, after the tests', comments', and notes' corrections. No
+      production code changed in that round.
+      - `make -C provisioning/compute/ansible test`: 125 passed (unit).
+      - `tests/integration/test_hosts_api.py`: 44 passed, both
+        `TestTenantFacingRoute` cases included (application integration).
+      - `make check-packaging`: passed.
+      - **The wheels.** The kit's 0.5.0 wheel (11 files) and the service's 0.19.0
+        wheel (45 files) equal their source.
+      - `make test` on those final artifacts: passed, exit 0. The four skips are
+        the same ones in the core and VM storefronts as in Section 2's run.
+      - `make check-change` and `make check-comment-hygiene`: passed.
+
+      This task is checked on that evidence. The section's fresh-context
+      compliance check is still owed before the section commits.
+
+      **Corrections after the section's fresh-context compliance check.** The
+      check found no blocking defect.
+      - **The INI and rendering rules for `public_port` had no normative home.**
+        The `physical-provisioning` delta now modifies "Host registry records the
+        connection port". It keeps every existing `ansible_port` paragraph and
+        scenario, and adds:
+        - `public_port` preserved from the INI format;
+        - a malformed or out-of-range value rejecting its entry, with a warning,
+          while the others are imported;
+        - rendering when stated and omission when not;
+        - a record stating none stored with no field.
+
+        `design.md`'s D3 promotion row names this requirement beside the
+        fallback requirement. Both reach `openspec/specs/` by the archive.
+      - **`test_hosts_api.py`** declared the rendered format outside its scope,
+        and named a function that does not exist. Its docstring now names
+        `AnsibleRunner.write_inventory` and allows one representative case. The
+        two route cases read the rendered line's variables by name, with `shlex`,
+        instead of its exact layout, which stays the runner's unit tests'.
+      - **The rollback rule's basis** is restated in 3.3: the in-repository
+        tests and the older reader's `extra="forbid"`, with the private
+        experiment as corroboration.
+      - **The INI port's `int()` leniency** (`+22`, `2_2`) was left as it is.
+        `ansible_port` has the same rule, and a non-numeric or out-of-range
+        value still rejects its entry.
+
+      None of these edits touches production code, a dependency, or a lock; see
+      the evidence below. The full `make test` above ran on that unchanged
+      runtime. The edited tests and documents were checked afterwards with
+      focused runs:
+      - the `TestTenantFacingRoute` cases in `test_hosts_api.py`: passed
+        (application integration);
+      - `make check-packaging`, `make check-change` (strict OpenSpec validation
+        and citations included), `make check-comment-hygiene`, and
+        `make check-tasks`: passed;
+      - the 0.5.0 kit and 0.19.0 service wheels equal their source.
+
+      **Packaging.**
+      - **The kit** stays at 0.5.0. This change already bumped it once, and these
+        additions need no larger bump (`docs/development/RELEASING.md`,
+        "Versioning policy").
+      - **The provisioning service** runs the kit's code wherever a host route is
+        stored or used. A 0.4 kit's codec refuses `public_port`, and its renderer
+        emits none, so the service's floor rises to `>=0.5.0`. It takes this
+        change's one bump, from 0.18.0 to 0.19.0. The edges:
+        - `container.py` composes the kit's `SshConnectionCodec` into the host
+          authority, which builds and validates every stored connection, on the
+          host API and on import;
+        - `app_runtime.py` seeds hosts with the kit's `parse_inventory_ini`;
+        - jobs run through the kit's `AnsibleJobExecutor`, which renders each
+          job's inventory with `inventory_target` and `write_inventory`.
+      - **The adapters** keep `>=0.4.0`. Neither needs the new runtime behaviour
+        in this section. Section 4 raises the bare-metal adapter's floor when its
+        codec reads `public_port`.
+      - **Locks.** `make lock` changed only the service's lock, for its version
+        and floor. The 0.5.0 wheel's files equal their source.
+
+      **End-to-end, confirmed.** No scenario in `e2e-tests/` registers
+      `public_host` or `public_port`, so the pipeline does not exercise this
+      section. The live bare-metal lane remains the system evidence. Owed by
+      validation: none.
+
+      **Handoff to Section 4.** The endpoint reads `InventoryTarget.public_host or
+      ssh_host` and `public_port or ssh_port`. The bare-metal codec already
+      receives the `InventoryTarget`.
 
 ## 4. Bare-metal grants yield evidence linked to their job, on the buyer's route
 
