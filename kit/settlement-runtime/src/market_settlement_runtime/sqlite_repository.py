@@ -21,6 +21,9 @@ SETTLEMENT_PRINCIPAL_MIGRATION_ID = "20260811_003_settlement_principal_authoriza
 SETTLEMENT_MECHANISM_PARAMS_MIGRATION_ID = (
     "20260815_004_settlement_mechanism_materialization_params"
 )
+SETTLEMENT_AWAITING_DELIVERY_MIGRATION_ID = (
+    "20261028_005_settlement_operation_awaiting_delivery"
+)
 
 
 @dataclass(frozen=True)
@@ -268,6 +271,19 @@ def _extend_mechanism_params_schema(conn: sqlite3.Connection) -> None:
         )
 
 
+def _extend_awaiting_delivery_schema(conn: sqlite3.Connection) -> None:
+    # A flag beside the state, never a state of its own: a release that
+    # predates it selects the operation as an ordinary pending one, so a
+    # rollback degrades to the error backoff instead of stranding it.
+    if not _table_exists(conn, "settlement_operations"):
+        return
+    if "awaiting_delivery" not in _columns(conn, "settlement_operations"):
+        conn.execute(
+            "ALTER TABLE settlement_operations ADD COLUMN awaiting_delivery "
+            "INTEGER NOT NULL DEFAULT 0"
+        )
+
+
 def _migrate_legacy_claims(conn: sqlite3.Connection) -> None:
     if not _table_exists(conn, "settlement_claims"):
         return
@@ -483,6 +499,10 @@ def settlement_migrations() -> tuple[SettlementMigration, ...]:
             SETTLEMENT_MECHANISM_PARAMS_MIGRATION_ID,
             _extend_mechanism_params_schema,
         ),
+        SettlementMigration(
+            SETTLEMENT_AWAITING_DELIVERY_MIGRATION_ID,
+            _extend_awaiting_delivery_schema,
+        ),
     )
 
 
@@ -539,6 +559,7 @@ class SettlementSQLiteRepository:
         "lease_owner",
         "lease_until_unix",
         "next_attempt_unix",
+        "awaiting_delivery",
     )
 
     def __init__(
@@ -620,6 +641,7 @@ class SettlementSQLiteRepository:
     def _operation(self, row: tuple[Any, ...]) -> dict[str, Any]:
         value = dict(zip(self._OPERATION_COLUMNS, row))
         value["uncertain_acknowledgement"] = bool(value["uncertain_acknowledgement"])
+        value["awaiting_delivery"] = bool(value["awaiting_delivery"])
         value["receipt"] = json.loads(value["receipt"]) if value["receipt"] else None
         return value
 
@@ -1140,7 +1162,8 @@ class SettlementSQLiteRepository:
                     UPDATE settlement_operations
                     SET state='in_progress', attempts=attempts+1,
                         lease_owner=?, lease_until_unix=?,
-                        next_attempt_unix=NULL, updated_at=?
+                        next_attempt_unix=NULL, awaiting_delivery=0,
+                        updated_at=?
                     WHERE obligation_ref=? AND operation=?
                     """,
                     (lease_owner, lease_until_unix, now, obligation_ref, operation),
@@ -1579,6 +1602,43 @@ class SettlementSQLiteRepository:
 
         return await asyncio.to_thread(run)
 
+    async def mark_fulfillment_awaiting_delivery(
+        self,
+        *,
+        obligation_ref: str,
+        lease_owner: str,
+        now_unix: float,
+    ) -> bool:
+        """Release a held fulfillment whose delivery is not yet ready, in one write.
+
+        The attempt the lease counted is returned and the operation stays
+        ``pending``, due at ``now_unix`` and marked awaiting delivery, with no
+        error, since waiting is not a failure. Answers ``False``, writing
+        nothing, when the caller no longer holds the lease.
+        """
+
+        def run() -> bool:
+            conn = self._connect()
+            try:
+                changed = conn.execute(
+                    """
+                    UPDATE settlement_operations SET state='pending',
+                      attempts=MAX(attempts - 1, 0), awaiting_delivery=1,
+                      uncertain_acknowledgement=0, last_error=NULL,
+                      lease_owner=NULL, lease_until_unix=NULL,
+                      next_attempt_unix=?, updated_at=?
+                    WHERE obligation_ref=? AND operation='fulfill'
+                      AND state='in_progress' AND lease_owner=?
+                    """,
+                    (now_unix, self._now(), obligation_ref, lease_owner),
+                ).rowcount
+                conn.commit()
+                return changed == 1
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(run)
+
     async def list_due_settlement_obligations(
         self, *, now_unix: float, limit: int = 50
     ) -> list[dict[str, Any]]:
@@ -1695,10 +1755,13 @@ class SettlementSQLiteRepository:
         def run() -> None:
             conn = self._connect()
             try:
+                # A scheduled retry ends any wait on delivery: the worker
+                # honours a mark once, and the next ready step writes its own.
                 changed = conn.execute(
                     """
                     UPDATE settlement_operations SET next_attempt_unix=?,
-                      last_error=COALESCE(?, last_error), updated_at=?
+                      last_error=COALESCE(?, last_error), awaiting_delivery=0,
+                      updated_at=?
                     WHERE obligation_ref=? AND operation=? AND state='pending'
                     """,
                     (

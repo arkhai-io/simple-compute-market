@@ -606,6 +606,18 @@ async def test_fulfillment_lease_excludes_duplicate_vm_provisioning(repository) 
         local_principal=SELLER,
         worker_id="vm-a",
     )
+    deferred = await repository.load_settlement_operation(
+        record.obligation_ref, "fulfill"
+    )
+    assert (deferred["state"], deferred["attempts"]) == ("pending", 0)
+    assert deferred["awaiting_delivery"] is True
+    assert deferred["next_attempt_unix"] == 50
+    with pytest.raises(RuntimeError, match="lease was lost"):
+        await runtime.defer_fulfillment(
+            record.obligation_ref,
+            local_principal=SELLER,
+            worker_id="vm-a",
+        )
     resumed = await runtime.reserve_fulfillment(
         record.obligation_ref,
         local_principal=SELLER,

@@ -119,6 +119,96 @@ async def test_wait_reports_unknown_when_nothing_is_recorded() -> None:
     assert waited["status"] == "unknown"
 
 
+async def test_wait_polls_through_a_failed_status_read() -> None:
+    reads = [ConnectionError("site unreachable"), {"status": "ready"}]
+
+    async def settle_status(_uid):
+        read = reads.pop(0)
+        if isinstance(read, Exception):
+            raise read
+        return read
+
+    service = SettlementAdminRouteService(
+        settle_status=settle_status,
+        is_terminal=lambda status: status.get("status") == "ready",
+        poll_seconds=0.0,
+        clock=Clock(),
+    )
+
+    waited = await service.wait("uid-1", timeout=5)
+
+    assert waited["ready"] is True
+    assert waited["status"] == "ready"
+    assert "last_error" not in waited
+
+
+async def test_wait_reports_the_last_error_when_every_read_fails() -> None:
+    clock = Clock()
+    failures = iter(("first outage", "second outage"))
+
+    async def settle_status(_uid):
+        clock.now += 1.0
+        raise ConnectionError(next(failures))
+
+    service = SettlementAdminRouteService(
+        settle_status=settle_status,
+        is_terminal=lambda status: True,
+        poll_seconds=0.0,
+        clock=clock,
+    )
+
+    waited = await service.wait("uid-1", timeout=2)
+
+    assert waited["ready"] is False
+    assert waited["status"] == "unknown"
+    assert waited["last_error"] == "ConnectionError: second outage"
+
+
+@pytest.mark.parametrize(
+    "refusal",
+    [LookupError("settled negotiation not found"), SettlementAdminRouteError(404, "gone")],
+    ids=["lookup", "route-error"],
+)
+async def test_a_refusal_the_status_hook_raises_ends_the_wait(refusal) -> None:
+    async def settle_status(_uid):
+        raise refusal
+
+    service = SettlementAdminRouteService(
+        settle_status=settle_status,
+        is_terminal=lambda status: True,
+        poll_seconds=0.0,
+        clock=Clock(),
+    )
+
+    with pytest.raises(type(refusal)):
+        await service.wait("uid-1", timeout=5)
+
+
+async def test_a_read_that_recovers_clears_the_error_it_followed() -> None:
+    clock = Clock()
+    reads = [ConnectionError("site unreachable"), {"status": "provisioning"}]
+
+    async def settle_status(_uid):
+        clock.now += 1.0
+        read = reads.pop(0) if reads else {"status": "provisioning"}
+        if isinstance(read, Exception):
+            raise read
+        return read
+
+    service = SettlementAdminRouteService(
+        settle_status=settle_status,
+        is_terminal=lambda status: status.get("status") == "ready",
+        poll_seconds=0.0,
+        clock=clock,
+    )
+
+    waited = await service.wait("uid-1", timeout=3)
+
+    assert waited["ready"] is False
+    assert waited["status"] == "provisioning"
+    assert "last_error" not in waited
+
+
 async def test_a_storefront_without_dry_runs_refuses_them() -> None:
     async def settle_status(_uid):
         return None

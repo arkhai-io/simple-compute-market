@@ -184,7 +184,7 @@ requires-dist = [
     { name = "arkhai-kit-arkhai-payments", specifier = "==0.3.0" },
     { name = "arkhai-kit-contact-exchange", specifier = "==0.4.0" },
     { name = "arkhai-kit-identity", specifier = "==0.4.0" },
-    { name = "arkhai-kit-settlement-runtime", specifier = "==0.5.0" },
+    { name = "arkhai-kit-settlement-runtime", specifier = "==0.6.0" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "typer", specifier = ">=0.12" },
 ]
@@ -382,7 +382,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-settlement-runtime"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -390,7 +390,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_settlement_runtime-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_kit_settlement_runtime-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]

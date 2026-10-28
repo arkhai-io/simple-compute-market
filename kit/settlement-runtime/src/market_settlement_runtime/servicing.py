@@ -87,6 +87,14 @@ class SettlementServicingWorker:
             await self._service(record, now)
         except _ServicingStepError as exc:
             operation = exc.operation
+            # Logged whether or not a callback is composed, so a failing step
+            # is on record in every storefront.
+            logger.warning(
+                "settlement servicing will retry %s for %s after: %s",
+                operation,
+                record.obligation_ref,
+                exc,
+            )
             try:
                 await self._schedule(
                     record.obligation_ref,
@@ -239,7 +247,7 @@ class SettlementServicingWorker:
                 raise _ServicingStepError("fulfill", exc) from exc
             record = await self._reload(record.obligation_ref)
             if record.fulfillment_ref is None:
-                await self._schedule(record.obligation_ref, "fulfill", now)
+                await self._after_ready_step(record.obligation_ref, now)
                 return
         if record.condition_state == "pending":
             try:
@@ -321,6 +329,36 @@ class SettlementServicingWorker:
             "settlement_cleanup_complete",
             {"obligation_ref": record.obligation_ref},
         )
+
+    async def _after_ready_step(self, obligation_ref: str, now: float) -> None:
+        """Schedule a ready step that returned without starting fulfillment.
+
+        A step awaiting delivery left its operation due now, and it is
+        rechecked next cycle rather than backed off. Honouring the mark
+        consumes it, through a retry schedule at the due time the step wrote,
+        so a later step that neither starts nor waits takes the backoff
+        instead of reading a mark it did not write.
+        """
+        fulfill = await self._repository.load_settlement_operation(
+            obligation_ref, "fulfill"
+        )
+        if (
+            fulfill is not None
+            and fulfill.get("state") == "pending"
+            and fulfill.get("awaiting_delivery")
+        ):
+            await self._repository.schedule_settlement_retry(
+                obligation_ref=obligation_ref,
+                operation="fulfill",
+                next_attempt_unix=float(fulfill.get("next_attempt_unix") or now),
+            )
+            return
+        logger.warning(
+            "settlement servicing will retry fulfill for %s: its ready step "
+            "neither started fulfillment nor awaits delivery",
+            obligation_ref,
+        )
+        await self._schedule(obligation_ref, "fulfill", now)
 
     async def _reload(self, obligation_ref: str) -> SettlementObligationRecord:
         row = await self._repository.load_settlement_obligation(obligation_ref)

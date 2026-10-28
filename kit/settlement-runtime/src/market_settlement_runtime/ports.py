@@ -118,6 +118,13 @@ class SettlementRuntimeRepository(Protocol):
         condition_state: str | None = None,
         next_attempt_unix: float | None = None,
     ) -> bool: ...
+    async def mark_fulfillment_awaiting_delivery(
+        self,
+        *,
+        obligation_ref: str,
+        lease_owner: str,
+        now_unix: float,
+    ) -> bool: ...
     async def write_operation_receipt_field(
         self,
         *,

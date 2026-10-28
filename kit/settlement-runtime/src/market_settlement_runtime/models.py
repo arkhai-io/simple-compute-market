@@ -86,6 +86,10 @@ class SettlementOperationRecord(BaseModel):
     lease_owner: str | None = None
     lease_until_unix: float | None = None
     next_attempt_unix: float | None = None
+    #: A pending ``fulfill`` operation released because its delivery is not
+    #: yet ready: due at once, its attempt not counted. Cleared by the next
+    #: reservation.
+    awaiting_delivery: bool = False
 
 
 class SettlementObligationRecord(BaseModel):

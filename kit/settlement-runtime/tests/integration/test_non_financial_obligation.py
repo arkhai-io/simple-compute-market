@@ -12,7 +12,7 @@ from market_settlement_runtime import (
     derive_obligation_ref,
 )
 
-from test_runtime import BUYER, SELLER, Client
+from .test_runtime import BUYER, SELLER, Client
 
 
 def _introduction_obligation() -> dict[str, Any]:

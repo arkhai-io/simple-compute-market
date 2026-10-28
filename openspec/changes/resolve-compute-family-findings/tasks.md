@@ -1697,9 +1697,12 @@ Files in `kit/settlement-runtime/src/market_settlement_runtime/`:
 
 Tests: `kit/settlement-runtime/tests/unit/` (`test_runtime.py`, `test_servicing.py`,
 `test_sqlite_repository.py`, `test_admin_routes.py`) and
-`tests/integration/test_servicing.py`.
+`tests/integration/test_servicing.py`. (Corrected in implementation:
+`test_runtime.py`, `test_sqlite_repository.py`, and
+`test_non_financial_obligation.py` read a real database and moved to
+`tests/integration`; the kit's `Makefile` now runs both directories.)
 
-- [ ] 11.1 `defer_fulfillment` writes in one transaction (D8.2):
+- [x] 11.1 `defer_fulfillment` writes in one transaction (D8.2):
   - releases the fulfillment lease;
   - returns the attempt that `reserve_fulfillment` counted;
   - sets `awaiting_delivery`, leaving the state `pending`;
@@ -1716,7 +1719,52 @@ Tests: `kit/settlement-runtime/tests/unit/` (`test_runtime.py`, `test_servicing.
     select the operation as an ordinary pending one, which is what a release
     without the mark reads.
   - the migration's rerun changes nothing.
-- [ ] 11.2 The worker reads the operation after a ready hook returns without a
+
+  `defer_fulfillment` existed, releasing the lease as an ordinary pending
+  finish (attempt counted, no due time). It now calls the new repository
+  write `mark_fulfillment_awaiting_delivery` (on the
+  `SettlementRuntimeRepository` port and the SQLite repository; named for the
+  mark, since "deferred" is the domain outcome's word, D8): one `UPDATE` of
+  the `fulfill` row the caller holds, to `pending`, `attempts - 1` (floored
+  at 0), `awaiting_delivery = 1`, no error and no uncertain acknowledgement
+  (as the finish it replaces cleared them), lease cleared, `next_attempt_unix`
+  the runtime clock's now; a lost lease raises as every other finish does.
+  Migration `20261028_005_settlement_operation_awaiting_delivery`
+  (`SETTLEMENT_AWAITING_DELIVERY_MIGRATION_ID`, exported) adds the column
+  `INTEGER NOT NULL DEFAULT 0` when absent, and skips a journal with no
+  operations table (a legacy fixture has none).
+  `reserve_settlement_operation` and `schedule_settlement_retry` set it back
+  to 0; the operation row and `SettlementOperationRecord` carry it as a
+  bool. Bare metal's ready hook already called `defer_fulfillment`, so it
+  gains the cadence without an edit.
+  - Library integration (`tests/integration/test_servicing.py`): three
+    consecutive deferring cycles each leave the operation pending, unleased,
+    at 0 attempts, and due by the next cycle (the mark honoured and
+    consumed), and a completing hook then binds the fulfillment; after a
+    deferral with no worker, a second repository over the same file lists
+    the obligation due with its lease free and no attempt counted, and a
+    fresh worker completes it; a reservation after a deferral clears the mark
+    (in progress, 1 attempt); `schedule_settlement_retry` moves the marked
+    operation's due time and `wake_settlement_obligation` makes it due
+    again.
+  - Library integration (`tests/integration/test_sqlite_repository.py`): a
+    journal migrated through every earlier migration, holding a pending
+    `fulfill` row, gains the column unset; applying the migration again
+    leaves every column declaration and row of the table unchanged; the last
+    migration is the new one.
+  - Library integration (`tests/integration/test_runtime.py`, a real SQLite
+    journal): a deferral leaves 0 attempts, the mark, and the clock's now as
+    due time, and a second deferral without the lease raises.
+
+  Three suites read a real database from `tests/unit` and this section
+  touched them, so they moved to `tests/integration` (TESTING.md, "Library
+  packages"): `test_sqlite_repository.py`, `test_runtime.py`, and
+  `test_non_financial_obligation.py`, which imports `test_runtime`'s
+  fixtures (now relatively). The kit's `make test` ran only `tests/unit`,
+  although its `pyproject.toml` lists both directories and TESTING.md has a
+  kit's target run both; it now runs `pytest -q`, so the integration suite,
+  which no `make test` reached before, runs.
+- [x] 11.2 The worker reads the operation after a ready hook returns without a
   fulfillment reference (D8.2):
   - if it is awaiting delivery, it keeps its due time and takes no backoff;
   - if it is still pending without the mark, it takes the error backoff;
@@ -1727,19 +1775,81 @@ Tests: `kit/settlement-runtime/tests/unit/` (`test_runtime.py`, `test_servicing.
   attempts are not counted. A hook that returns without deferring backs off. A
   worker that ignores the flag backs the operation off as today (the delta's
   rollback scenario).
-- [ ] 11.3 The worker logs every retry it schedules at warning, naming the
+
+  `SettlementServicingWorker._after_ready_step` loads the `fulfill`
+  operation after the hook. A pending operation awaiting delivery is
+  rescheduled at the due time the step wrote, which keeps it due and
+  consumes the mark, so a later step that neither starts nor waits cannot
+  ride a mark it did not write; any other is logged (11.3) and takes the
+  error backoff.
+  - Unit (`tests/unit/test_servicing.py`, mocked runtime and repository): a
+    marked operation is rescheduled once at its own due time; an unmarked
+    pending one is scheduled at least 30 s out and logged; a raising hook is
+    scheduled for retry.
+  - Library integration: the consecutive-deferral case above; a hook that
+    reserves and releases through `retry_fulfillment` without the mark
+    leaves the operation 30 s or more out and not due; a step that does
+    nothing after a deferring cycle backs off 30 s; a worker reading the
+    journal through a repository that drops the mark (as a release
+    predating it reads) backs the deferred operation off 30 s, and the
+    obligation is due again at that time.
+- [x] 11.3 The worker logs every retry it schedules at warning, naming the
   obligation, the operation, and the error, whether or not an `on_event` is
   composed (D8.1). Unit: a failing step under a worker with no callback logs
   the retry.
-- [ ] 11.4 `SettlementAdminRouteService.wait` treats a failed status read as a
+
+  Logged at both places the worker schedules a retry: on every failing step,
+  before the retry is scheduled and the `settlement_retry` event emitted
+  ("settlement servicing will retry <operation> for <obligation> after:
+  <error>"), and when a ready step returned neither starting fulfillment nor
+  awaiting delivery ("… will retry fulfill for <obligation>: its ready step
+  neither started fulfillment nor awaits delivery", which has no error to
+  name). Unit (`test_servicing.py`): a ready hook raising
+  `RuntimeError("site unavailable")` under a worker with no `on_event` logs
+  one warning naming the obligation, `fulfill`, and the error; the unmarked
+  return logs one naming the obligation and `fulfill`.
+- [x] 11.4 `SettlementAdminRouteService.wait` treats a failed status read as a
   non-terminal poll and keeps polling until its deadline. At the deadline it
   returns `ready: false` with the last error (D8.3).
   Unit (`test_admin_routes.py`):
   - one failed read, then a terminal one: the wait reports ready;
   - every read fails: the wait reports `ready: false` with the last error.
-- [ ] 11.5 Bump `arkhai-kit-settlement-runtime` by a minor version, since its
+
+  A read raising anything but a refusal is recorded as `last_error` and
+  polled through, the last successful status kept; a successful read clears
+  it. A refusal, a `LookupError` (bare metal's hook raises one for a
+  settlement it does not know) or a `SettlementAdminRouteError`, is an
+  answer and ends the wait as it did before. An unready wait whose last
+  read failed carries `last_error`. Unit (`test_admin_routes.py`): a failed
+  then a ready read reports ready with no `last_error`; two failed reads to
+  the deadline report `ready: false`, status `unknown`, and the second
+  error; a failed read then non-terminal good reads report no `last_error`;
+  a hook raising `LookupError` or a 404 route error ends the wait with it.
+
+  Not carried to the wire yet: every storefront's wait route answers
+  `core_storefront`'s `SettleWaitResponse` (`ready`, `status`,
+  `provisioning_job_id`, `elapsed_ms`), and the core client's model reads the
+  same, so `last_error` stops at the route service, and the delta's "Every
+  read fails" holds there only. 18.2 is amended to carry it.
+- [x] 11.5 Bump `arkhai-kit-settlement-runtime` by a minor version, since its
   schema and worker behaviour change. Run `make lock`.
-- [ ] 11.6 **Verification checkpoint.**
+
+  `0.5.0` → `0.6.0`. Six packages pin it exactly, and the pins move with it:
+  `arkhai-core-buyer`, `arkhai-kit-config`, `arkhai-vms-buyer`,
+  `arkhai-kit-contact-exchange`, `arkhai-kit-arkhai-payments`, and
+  `arkhai-bare-metal-buyer`. **A judgement for triage:** none of them is
+  bumped for the pin alone. RELEASING.md does not say whether a pin move is
+  a change that takes a bump, and the precedent is mixed: when the runtime
+  last moved to `0.5.0` (`704ad0b7c`), `arkhai-kit-arkhai-payments` moved
+  its pin unbumped while `arkhai-kit-config` took a patch for it. Bumping
+  each would move the exact pins on those packages in turn
+  (`arkhai-kit-contact-exchange`, `arkhai-core-buyer`, and
+  `arkhai-kit-arkhai-payments` are pinned by both buyers and both compute
+  storefronts), each a version `dev` holds unreleased, for no change a
+  release would see. The owner may rule otherwise. No floor is raised here;
+  bare metal's, the one consumer that needs the cadence, rises in section
+  18 (18.3 amended). `make lock` moved every lock resolving it.
+- [x] 11.6 **Verification checkpoint.**
   - Unit and library integration: 11.1–11.4.
   - Run `make test` in `kit/settlement-runtime` and in the VM, bare-metal, and
     API-credit storefronts, which compose it.
@@ -1747,6 +1857,31 @@ Tests: `kit/settlement-runtime/tests/unit/` (`test_runtime.py`, `test_servicing.
 
   Application integration and end-to-end are section 18's, where the storefronts
   compose the reporting.
+
+  `make test` (full, before the fresh-context fixes) passes: the kit 172
+  (unit and library integration), the VM storefront 1138 unit and 475
+  integration, bare metal's storefront 502, the API-credit storefront 241,
+  and every project re-pinned. After the fixes: the kit 175, the VM
+  storefront 1138 and 475, the bare-metal suites (domain 182, storefront
+  502, buyer 16, adapter 57), and the API-credit storefront 241, all
+  passing, over wheels that also carried section 12's uncommitted contracts
+  edits. `make check-packaging` passes; `make check-change` passes its
+  comment-hygiene and other checks but for the closeout citation section 1
+  notes. End-to-end: none owed here, as above.
+
+  Handoff, from the fresh-context check: it found the unmarked backoff
+  unlogged (now logged), a mark an earlier step wrote able to spare a later
+  step its backoff (the mark is consumed when honoured), the wait polling a
+  `LookupError` for its whole timeout and keeping a stale error (both
+  fixed), the deferral no longer clearing an earlier error (fixed), the
+  port method named with D8's outcome word (renamed), a rerun test that
+  never reran the migration (it now does), two more real-database suites
+  under `tests/unit` (moved), and claims 11.6 left unrecorded (recorded
+  above). Declined: the unit tests of the post-hook read assert on the
+  repository calls; the plan asks for them at unit level, and the
+  integration tests carry the same outcomes over SQLite. Open for section
+  18: carry `last_error` on the wire and raise bare metal's floor to
+  `0.6.0`.
 
 ## 12. Route contracts follow a decidable grammar and compose without overlap
 
@@ -2105,7 +2240,20 @@ Files:
   - a failing step writes a stage event;
   - the administrator's settle wait, with one failed status read at the site,
     reports ready (D8.2, D8.3).
+
+  Amended by section 11 (11.4): the kit's wait returns `last_error` beside
+  `ready: false`, and no storefront's answer carries it, since
+  `core_storefront`'s `SettleWaitResponse` and the core client's model
+  name only `ready`, `status`, `provisioning_job_id`, and `elapsed_ms`. This
+  section adds an optional `last_error` to both, the three storefronts' wait
+  routes pass it through, and application integration shows a wait whose
+  every read fails answering `ready: false` with it. `arkhai-core-storefront`
+  and `arkhai-core-storefront-client` take their one bump over `dev` here.
 - [ ] 18.3 Bump the bare-metal and API-credit storefronts, and run `make lock`.
+
+  Amended by section 11 (11.5): bare metal's floor on
+  `arkhai-kit-settlement-runtime` rises to `0.6.0`, since its deals depend
+  on the awaiting-delivery cadence.
   **Verification checkpoint:**
   - 18.1–18.2;
   - `make test` in `domains/bare_metal/storefront` and
