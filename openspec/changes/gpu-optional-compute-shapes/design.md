@@ -149,6 +149,10 @@ claim vocabulary. Renaming `compute.gpu`, which is the right name for GPU capaci
   they do not define.
 - **INI.** `gpus=` and `gpu_model=` are no longer read; like every variable the parser does
   not read, they are ignored without a warning.
+- **The one non-production reader.** The e2e host harness
+  (`e2e-tests/tests/e2e/roles/scenarios/vms/host_registry.py`) decides whether to update an
+  existing host by comparing its GPU count and pool; with no GPU field to read, it compares
+  the pool alone.
 
 *Rationale.* Declarations already state every dimension a site sells, and every host
 with GPUs at upgrade received a declaration then. Refusal or warning code would stay
@@ -187,7 +191,9 @@ discriminating on `gpu_model`, so a GPU-less candidate, which carries neither
 `resource_type` nor `gpu_model`, reaches compute validation. `ComputeResource` refuses a
 mapping whose shape, flattened through the compute schema, is empty: the shape kit's
 refusal of an empty shape (D1), not a separate check. Stored VM listings all carry
-`gpu_model` and parse as before, so nothing migrates.
+`gpu_model` and parse as before, so nothing migrates. The buyer CLI's resource display
+(`arkhai_vms_listings/buyer_cli.py`, `format_resource`), which also recognises compute by a
+`gpu_model` key, follows the same rule.
 
 *Serialization (10 F2).* The resource's serializer omits an absent `gpu_count` and
 `gpu_model` as it already omits an absent `asking_rate`, so a GPU-less listing carries no
