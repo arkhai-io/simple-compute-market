@@ -2,8 +2,8 @@
 """Run a step of an OpenSpec change unattended, and keep the change's workflow log.
 
 The entry point of the `change_workflow` package beside this script, whose `cli`
-dispatches each command — `run`, `resume`, `review`, `log`, `note`, `watch`, and
-`denials` — to the module that does its work. The `Makefile`'s workflow targets,
+dispatches each command — `run`, `resume`, `review`, `record`, `convert`, `log`,
+`note`, `watch`, and `denials` — to the module that does its work. The `Makefile`'s workflow targets,
 the step table's rules, and the skills name this script, so it stays where they
 look.
 """

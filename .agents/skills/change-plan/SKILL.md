@@ -24,8 +24,10 @@ design.
 
 ## Running unattended
 
-Run interactively, as most runs are, this section does not apply, and nothing else
-in the skill changes. When this skill runs through `scripts/run_change_step.py` —
+Run interactively, as most runs are, this section does not apply but for the
+outcome it describes, which an interactive run records itself ("Running
+interactively"); nothing else in the skill changes.
+When this skill runs through `scripts/run_change_step.py` —
 `make plan UNATTENDED=1`, or the orchestrating session — nobody can answer in
 the session, and every turn ends with an outcome matching
 `.agents/change-outcome.schema.json`, whose `message` the owner reads as written:
@@ -59,12 +61,14 @@ the session, and every turn ends with an outcome matching
   <a checkout>`: `-C` names only a subdirectory a skill names.
 - **The end is an outcome.** Once the plan is written and checked, its report
   (section 6) written, and the status set and the plan committed and pushed
-  (section 7), end with `finished`, its `message` the report, `next` naming the
-  first round's implementation, and `rounds` the cadence's mapping onto the
-  sections (section 7). Planning asks no question.
+  (section 7), end with `finished`, its `message` the report, `next` the plan's
+  next round, `{"step": "round"}`, and `rounds` the cadence's mapping onto the
+  sections (section 7) — or, when the plan adds nothing to implement, `next` the
+  pre-closeout review, `{"step": "review", "kind": "pre-closeout"}`, and no
+  `rounds`. Planning asks no question.
 - **A return to design is proposed, not made.** When planning exposes a design
   question (section 3), or finds no cadence it can cut its sections to (section 4),
-  end with `returned`, `return_to` `design`, and `evidence`
+  end with `returned`, `next` `{"step": "design"}`, and `evidence`
   naming where you recorded what planning found; leave the status as it is. The
   owner confirms the return, and the design step then sets the status. Before
   ending, commit what planning has written — what `design.md` gained, the plan so
@@ -75,30 +79,47 @@ the session, and every turn ends with an outcome matching
   because a repository guard refused or `HEAD` moved leaves the checkout as it
   was.
 
+## Running interactively
+
+Run in an interactive session — `make plan` without `UNATTENDED=1`, or the slash
+command — no wrapper records the run, so its last act records the outcome it would
+end with unattended, as "Running unattended" gives it, `rounds` included:
+
+```text
+python3 scripts/run_change_step.py record <change> plan --outcome '<the outcome, as JSON>'
+```
+
+`record` checks the outcome against `.agents/change-outcome.schema.json` and
+appends it to the change's workflow log with the session's id, `HEAD`, and
+`interactive: true`, and the next-step computation routes on it as on an
+unattended run's. It reads the session's id from `CLAUDE_CODE_SESSION_ID`, which
+`printenv CLAUDE_CODE_SESSION_ID` shows; where the variable is unset it refuses,
+and `--session <id>` gives the id. Record the outcome the session ends with —
+`finished` or `returned` (sections 3 and 4) — never a stop, which the owner,
+present, settles in the session: a recorded stop would wait for a resume only the
+wrapper makes. When `record` refuses, correct what it names
+and run it again. A session closed before it records leaves planning in progress,
+even once the status says `ready for implementation`: only the plan's outcome
+carries its exit and its `rounds`, so the computation names planning again, to be
+resumed, or its outcome recorded with the command above.
+
 ## 1. Check that planning may start
 
-Read the evidence from the files, even if this session held the design discussion:
-the session's memory of a triage can be out of date, and reviews and triage may have
-happened elsewhere. Read the change's row in `openspec/changes/README.md` — status,
-`Depends on`, notes — and the change's latest design review and its triage in
-`reviews/`. Then confirm:
+Read the evidence from the files and the workflow log, even if this session held
+the design discussion: the session's memory of a triage can be out of date, and
+reviews and triage may have happened elsewhere. Read the change's row in
+`openspec/changes/README.md` — status, `Depends on`, notes. Then confirm:
 
-- The change's status is `ready for planning` or `in planning`, or the owner has
-  confirmed an implementation session's or a triage's return of the change to
-  planning, or the change is
-  `in design` with the orchestrating session's record of the owner's waiver below;
-  in the last two cases set it to `in planning`.
-- The latest design review's triage file has a `## Next` beginning `Advance` — a
-  file from before `## Next`, ending with a `## Gate` beginning `Passed`, reads the
-  same — or the owner's waiver of that review is recorded (section 3). Under
-  orchestration, a waiver of another design review for what the design step
-  settled after a confirmed return is recorded by the orchestrating session
-  instead, while the change is still `in design`: a decision line in the workflow
-  log — `orchestrator`, `by: owner`, `next: plan`, naming no run, after the design
-  run that followed the return — and a ledger line. `python3
-  scripts/run_change_step.py log <change>` shows the decision, and `python3
-  scripts/change_next_step.py <change>` names `plan` from it. Commit that ledger
-  line with the plan (section 7).
+- `python3 scripts/change_next_step.py <change>` names `plan`, whatever the status
+  says: the exit the design review's triage recorded, or the owner's direction to
+  planning — a confirmed return of the change to planning, or the waiver of another
+  design review for what the design step settled after a confirmed return to
+  design, which the orchestrating session records on the owner's word as a
+  direction naming no run, with a ledger line. `python3 scripts/run_change_step.py
+  log <change>` shows the line the computation's reason names. Commit a waiver's
+  ledger line with the plan (section 7). Whatever else the computation names — a
+  design review, a triage in progress, the owner — is the step that comes first,
+  and its reason says why.
 - No dependency in the row's `Depends on` gates `design` or `planning` and is
   unlanded. A dependency gating implementation does not stop planning; the plan
   notes it.
@@ -145,12 +166,23 @@ plan on an answer the design review did not cover.
 2. Settle the question as `change-design` settles a decision, and record it in
    `design.md`.
 3. Ask the owner whether the change needs another design review for it, or whether
-   they waive the review. A waiver is the owner's call. Record it in the latest
-   design triage's `## Next` and as a ledger entry with `"review": "plan"`, the decision
-   as `finding`, lens `readiness`, basis `judgement`, and a null severity, stating
-   what was waived and why.
-4. With the review passed or waived, set the status to `ready for planning` and
-   resume planning.
+   they waive the review. A waiver is the owner's call. Record it as a ledger entry
+   with `"review": "plan"`, the decision as `finding`, lens `readiness`, basis
+   `judgement`, and a null severity, stating what was waived and why; this session
+   goes on to plan, and its outcome names the plan's exit. When the owner wants the
+   review instead, commit what `design.md` gained, as section 7 commits the plan,
+   and end the session as a return: record `returned`, `next` `{"step":
+   "design"}`, `evidence` naming the decision in `design.md`, then the owner's
+   confirmation of it, directing the review of what this session settled rather
+   than design, the seq being the one `record` printed:
+
+   ```text
+   python3 scripts/run_change_step.py note <change> orchestrator --by owner --resolves <seq> --next review --kind design --decision "return confirmed: another design review of <the decision>" --reason "<the owner's words>"
+   ```
+
+   Planning starts afresh once that review's triage names it.
+4. With the review waived, set the status to `ready for planning` and resume
+   planning.
 
 ## 4. Write the plan
 
@@ -293,10 +325,9 @@ Map the cadence onto the sections: a list of rounds, each a list of the sessions
 that implement it, each a list of section ids in order —
 `[[[1, 2]], [[3], [4]]]` is a round of sections 1 and 2 in one session, then a
 round of 3 and 4 in a session each. Name every section before the closeout
-section. Run unattended, it is the `rounds` of your `finished` outcome, which the
-wrapper logs on the plan's line, where the next-step computation reads it.
-Interactively, give it in the report: with no plan line carrying it, the
-orchestrating session asks the owner for each round as it starts. An amended plan
+section. It is the `rounds` of your `finished` outcome, which the wrapper logs on
+the plan's line, or `record` does for an interactive run ("Running interactively"),
+where the next-step computation reads it; give it in the report too. An amended plan
 maps only its sections not yet complete, leaving the rounds already recorded as
 they are.
 

@@ -125,7 +125,7 @@ def test_the_denial_report_names_the_subagent_instead_of_listing_later_calls(tmp
         + "\n", "utf-8")
     entry = record_outcome(
         reviews / "workflow.jsonl", "triage",
-        {"outcome": "finished", "message": "done", "next": "x",
+        {"outcome": "finished", "message": "done", "next": {"step": "plan"},
          "denials": [{"tool_name": "Bash", "tool_use_id": "s-1",
                       "tool_input": {"command": "sleep 5"}, "reason": "mode",
                       "subagent": {"id": AGENT, "description": "Verify F3"}}]},

@@ -1,8 +1,24 @@
-"""Codex's plain output is condensed into a readable progress stream."""
+"""Codex's plain output is condensed into a readable progress stream, and a run on
+Claude is marked as the wrapper's in its environment."""
 
 from __future__ import annotations
 
-from change_workflow.harness import Progress
+import sys
+from pathlib import Path
+
+from change_workflow.harness import UNATTENDED_RUN, Progress, run_claude
+
+
+def test_the_process_a_claude_run_starts_sees_it_is_the_wrappers(tmp_path: Path) -> None:
+    # The run's process stands in for Claude Code, whose own commands inherit its
+    # environment.
+    said: list[str] = []
+    command = [sys.executable, "-c", f"import os; print(os.environ.get({UNATTENDED_RUN!r}))"]
+
+    status = run_claude(command, tmp_path, said.append)
+
+    assert (status, said) == (0, ["1\n"])
+
 
 CODEX_SESSION = """Reading additional input from stdin...
 OpenAI Codex v0.157.0

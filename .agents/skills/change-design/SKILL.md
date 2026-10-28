@@ -16,8 +16,10 @@ ledger, and a prerequisite's proposal and dependency (both in section 4).
 
 ## Running unattended
 
-Run interactively, as most runs are, this section does not apply, and nothing else
-in the skill changes. When this skill runs through `scripts/run_change_step.py` —
+Run interactively, as most runs are, this section does not apply but for the
+outcome it describes, which an interactive run records itself ("Running
+interactively"); nothing else in the skill changes.
+When this skill runs through `scripts/run_change_step.py` —
 `make design UNATTENDED=1`, or the orchestrating session — nobody can answer in
 the session, and every turn ends with an outcome matching
 `.agents/change-outcome.schema.json`, whose `message` the owner reads as written:
@@ -55,12 +57,35 @@ the session, and every turn ends with an outcome matching
   while you wait for the owner's answer or disposition. The orchestrating session
   shows the owner every message and resumes this session with each reply.
 - **The end is an outcome.** When the settled design is recorded, committed, and
-  pushed (section 6), end with `finished`, `next` naming the design review. A
+  pushed (section 6), end with `finished`, `next` naming design's one exit, the
+  design review, `{"step": "review", "kind": "design"}`. A
   design that cannot proceed without another change ends `blocked`, `blocked_on` the prerequisite's
   exact change name, at steps 3 and 4 of "When the design needs another change
   first" (section 4); telling the owner there is that outcome's `message`. Under
   orchestration the release of step 5 is proposed to the owner by the
   orchestrating session, which drops the dependency on their word.
+
+## Running interactively
+
+Run in an interactive session — `make design` without `UNATTENDED=1`, or the slash
+command — no wrapper records the run, so its last act records the outcome it would
+end with unattended, as "Running unattended" gives it:
+
+```text
+python3 scripts/run_change_step.py record <change> design --outcome '<the outcome, as JSON>'
+```
+
+`record` checks the outcome against `.agents/change-outcome.schema.json` and
+appends it to the change's workflow log with the session's id, `HEAD`, and
+`interactive: true`, and the next-step computation routes on it as on an
+unattended run's. It reads the session's id from `CLAUDE_CODE_SESSION_ID`, which
+`printenv CLAUDE_CODE_SESSION_ID` shows; where the variable is unset it refuses,
+and `--session <id>` gives the id. Record the outcome the session ends with —
+`finished` or `blocked` — never a question or a stop, which the owner, present,
+settles in the session: a recorded stop would wait for a resume only the wrapper
+makes. When `record` refuses, correct what it names and run it again. A session
+closed before it records leaves design in progress: the computation names it
+again, to be resumed, or its outcome recorded with the command above.
 
 ## 1. Load everything before saying anything
 
@@ -106,6 +131,16 @@ decision become this discussion's decisions, under their finding labels; do not
 restate them as separate corrections or questions with a second numbering. Open the
 discussion of section 3 only for what the reviews did not already raise, and
 continue the same numbering scheme rather than starting a parallel one.
+
+That triage records its outcome as `change-triage`'s "Running interactively" says,
+`finished`, `triaged` naming what it triaged, and its exit this discussion,
+`{"step": "design"}` — finished rather than returned, since this session is the
+design it leads to and nothing waits for a confirmation: the computation brings
+that exit to the owner until this session's own outcome, recorded at its end,
+names the design review. Unattended, nothing but the
+wrapper records an outcome, and it records only the design's, so a review brought
+to an unattended design is triaged as its own step first: ask the owner to run it
+(`make triage CHANGE=<change>`).
 
 ## 2. Mark the change as in design
 
@@ -325,7 +360,7 @@ once the design review's triage records that the change advances.
 ## 7. Hand off to design review
 
 The design phase ends with a design review, not with this skill. Tell the owner
-the design is ready for review and leave the status `in design`. Its triage records
-under `## Next` whether the change advances or another design review runs; when it
-advances, the triage sets `ready for planning`, and planning follows without
-another question to the owner.
+the design is ready for review and leave the status `in design`. Its triage names,
+as its exit, whether the change advances to planning or another design review runs;
+when it advances, the triage sets `ready for planning`, and planning follows
+without another question to the owner.
