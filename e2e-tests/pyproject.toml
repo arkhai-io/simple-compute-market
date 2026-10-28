@@ -10,7 +10,7 @@ description = "End-to-end integration tests for Arkhai deployed blockchain envir
 requires-python = ">=3.13,<3.14"
 dependencies = [
     "arkhai-compute-provisioning-contracts>=0.11.0",
-    "arkhai-compute-provisioning-client>=0.8.0",
+    "arkhai-compute-provisioning-client>=0.9.0",
     "arkhai-kit-resource-pools-client>=0.1.0",
     "arkhai-kit-resource-pools-contracts>=0.2.0",
     "pytest>=8.0",

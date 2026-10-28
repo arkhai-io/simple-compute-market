@@ -30,7 +30,10 @@ from compute_provisioning_client import (
     SyncComputeProvisioningClient,
 )
 from compute_provisioning_contracts import (
+    ConvergenceCycleResponse,
     HostUpdate,
+    LeaseCheckResponse,
+    PrincipalRotationResponse,
     resolve_provisioning_route,
 )
 
@@ -95,6 +98,7 @@ def _signed_transport(
     served_body=None,
     unsigned=False,
     seen=None,
+    answer=None,
 ):
     signer = authority if response_signer is None else response_signer
 
@@ -122,7 +126,7 @@ def _signed_transport(
         assert result.verified
         if seen is not None:
             seen.append(dict(request.headers))
-        signed_body = {"ok": True}
+        signed_body = {"ok": True} if answer is None else answer
         response_body = signed_body if served_body is None else served_body
         if unsigned:
             return httpx.Response(200, json=response_body)
@@ -512,13 +516,28 @@ async def test_rotation_is_the_administrator_s_and_a_seller_cannot_sign_it():
             admin,
             authority,
             expected_role="admin",
+            answer={
+                "role": "admin",
+                "generation": 2,
+                "current_valid_until": "2026-01-01T00:01:00+00:00",
+                "replacement": replacement.identity.model_dump(mode="json"),
+            },
         ),
     ) as client:
-        assert await client.rotate_trusted_principal(
+        rotated = await client.rotate_trusted_principal(
             "admin",
             rotation,
             request_id="rotate-1",
-        ) == {"ok": True}
+        )
+        assert rotated == PrincipalRotationResponse.model_validate(
+            {
+                "role": "admin",
+                "generation": 2,
+                "current_valid_until": "2026-01-01T00:01:00+00:00",
+                "replacement": replacement.identity.model_dump(mode="json"),
+            }
+        )
+        assert rotated.replacement == replacement.identity
     async with ComputeProvisioningClient(
         "http://provisioner",
         signer=admin,
@@ -534,6 +553,66 @@ async def test_rotation_is_the_administrator_s_and_a_seller_cannot_sign_it():
                 rotation,
                 request_id="wrong-role",
             )
+
+
+_DIAGNOSTICS = {
+    "per_state": {
+        "dispatch_pending": {
+            "total": 1,
+            "actively_claimed": 0,
+            "expired_claims": 0,
+            "oldest_row_age_seconds": 2.5,
+            "max_attempt_count": 1,
+        }
+    },
+    "failed_count": 0,
+    "teardown_failed_count": 0,
+}
+
+
+@pytest.mark.parametrize("variant", ("async", "sync"))
+@pytest.mark.parametrize(
+    ("call", "answer", "model"),
+    [
+        (
+            "check_leases",
+            {"checked": 1, "released": 0, "release_failed": 0, "skipped": 2},
+            LeaseCheckResponse,
+        ),
+        (
+            "run_fulfillment_convergence_cycle",
+            {"before": _DIAGNOSTICS, "after": _DIAGNOSTICS},
+            ConvergenceCycleResponse,
+        ),
+        (
+            "advance_fulfillment_convergence_cycle",
+            {"before": _DIAGNOSTICS, "after": _DIAGNOSTICS},
+            ConvergenceCycleResponse,
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_each_worker_control_answers_its_model(variant, call, answer, model):
+    admin = Ed25519Signer(b"\x11" * 32)
+    authority = Ed25519Signer(b"\x12" * 32)
+    client_type = (
+        ComputeProvisioningClient if variant == "async" else SyncComputeProvisioningClient
+    )
+    client = client_type(
+        "http://provisioner",
+        signer=admin,
+        caller_role="admin",
+        expected_authorities=TrustedIdentitySet(identities=(authority.identity,)),
+        transport=_signed_transport(admin, authority, expected_role="admin", answer=answer),
+    )
+    try:
+        result = getattr(client, call)()
+        if variant == "async":
+            result = await result
+    finally:
+        await _close(client)
+
+    assert result == model.model_validate(answer)
 
 
 _LEASE_GET = {

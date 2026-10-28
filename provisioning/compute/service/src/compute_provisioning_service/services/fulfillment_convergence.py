@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -33,6 +34,33 @@ _TERMINAL_RESERVATION_STATES = (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _diagnostics_text(
+    diagnostics: Mapping[str, Any], lease_targets: Mapping[str, Any] | None
+) -> str:
+    """The recovery counts as one line: failures, each state's rows, and the
+    lease-target sweep."""
+    parts = [
+        f"failed={diagnostics.get('failed_count')}",
+        f"teardown_failed={diagnostics.get('teardown_failed_count')}",
+    ]
+    for state, counts in sorted(dict(diagnostics.get("per_state") or {}).items()):
+        parts.append(
+            f"{state}=total:{counts.get('total')}"
+            f",claimed:{counts.get('actively_claimed')}"
+            f",expired:{counts.get('expired_claims')}"
+            f",max_attempts:{counts.get('max_attempt_count')}"
+            f",oldest_s:{counts.get('oldest_row_age_seconds')}"
+        )
+    if lease_targets is not None:
+        unrecordable = dict(lease_targets.get("unrecordable") or {})
+        parts.append(
+            f"lease_targets=repaired:{lease_targets.get('repaired')}"
+            f",different:{lease_targets.get('different_target_recorded')}"
+            f",unrecordable:{sum(int(value) for value in unrecordable.values())}"
+        )
+    return " ".join(parts)
 
 
 @dataclass(frozen=True)
@@ -316,7 +344,13 @@ class FulfillmentConvergenceWatchdog:
             }
             if lease_targets is not None:
                 extra["lease_targets"] = lease_targets
-            logger.info("[FULFILLMENT_CONVERGENCE] recovery diagnostics", extra=extra)
+            # The counts are in the message itself, as other workers' cycle
+            # lines carry theirs, since a plain log handler drops ``extra``.
+            logger.info(
+                "[FULFILLMENT_CONVERGENCE] recovery diagnostics: %s",
+                _diagnostics_text(diagnostics, lease_targets),
+                extra=extra,
+            )
         except Exception:  # noqa: BLE001
             # Observability must not make lifecycle progress appear to
             # fail: the four operational passes above already completed

@@ -410,7 +410,7 @@ requires-dist = [
     { name = "arkhai-apicredits-buyer", specifier = ">=0.5.0" },
     { name = "arkhai-bare-metal", specifier = ">=0.13.0" },
     { name = "arkhai-bare-metal-buyer", specifier = ">=0.6.0" },
-    { name = "arkhai-compute-provisioning-client", specifier = ">=0.8.0" },
+    { name = "arkhai-compute-provisioning-client", specifier = ">=0.9.0" },
     { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.11.0" },
     { name = "arkhai-core-buyer", specifier = ">=0.6.0" },
     { name = "arkhai-core-registry-client", specifier = ">=0.12.1" },

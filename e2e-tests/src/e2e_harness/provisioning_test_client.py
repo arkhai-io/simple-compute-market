@@ -307,14 +307,6 @@ class ProvisioningTestClient:
             )
         return body
 
-    def run_lease_cycle(self) -> dict:
-        """Run one production lease-lifecycle cycle."""
-        return self._post("/api/v1/system/check-leases")
-
-    def run_fulfillment_convergence_cycle(self) -> dict:
-        """Run one production fulfillment-convergence cycle."""
-        return self._post("/api/v1/system/fulfillment-convergence/run-cycle")
-
     # ------------------------------------------------------------------
     # Mock rule management
     # ------------------------------------------------------------------

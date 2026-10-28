@@ -352,7 +352,7 @@ provides-extras = ["adapters"]
 dev = [
     { name = "arkhai-bare-metal", specifier = ">=0.13.0" },
     { name = "arkhai-bare-metal-provisioning-adapter", specifier = ">=0.10.0" },
-    { name = "arkhai-compute-provisioning-client", specifier = ">=0.8.0" },
+    { name = "arkhai-compute-provisioning-client", specifier = ">=0.9.0" },
     { name = "arkhai-core-storefront", specifier = ">=0.14.0" },
     { name = "arkhai-kit-capacity-publication", specifier = "==0.11.0" },
     { name = "arkhai-kit-resource-pools-client", specifier = ">=0.1.0" },

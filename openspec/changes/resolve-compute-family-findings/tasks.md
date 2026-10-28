@@ -2594,18 +2594,71 @@ Files:
   `test_leases_api.py`, `test_lease_release_api.py`, and
   `test_bare_metal_mock_profile.py`.
 
-- [ ] 17.1 Each control answers a model from `system.py`. The client returns it,
+- [x] 17.1 Each control answers a model from `system.py`. The client returns it,
   in both variants, and the service's failures are answered as every
   provisioning route's are (D15).
   - Application integration (`test_system_api.py`, through the typed client):
     each control's typed answer.
   - Unit: sync/async parity.
-- [ ] 17.2 The e2e callers read the models' attributes (D15). Verify: `make -C
+
+  `system.py` gains `LeaseCheckResponse` (`checked`, `released`,
+  `release_failed`, `skipped`), `ConvergenceStateCounts` and
+  `ConvergenceDiagnostics` (the convergence counts and ages; named apart
+  from the fulfillment kit's own `RecoveryDiagnostics` dataclass), the
+  `ConvergenceCycleResponse` of `run-cycle` and `advance-cycle` (`before`,
+  `after`), and `PrincipalRotationResponse` (`role` `admin` or `seller`,
+  `generation`, `current_valid_until` as a datetime, `replacement` as an
+  `Identity`), all exported. The three system routes and the rotation route
+  in `main.py` declare and return them; their failures are unchanged (503
+  uncomposed, 409 an unpaused advance, 400 a refused rotation), and the
+  rotation route's `PrincipalRotationError` import moved to module level.
+  Both client variants return them from `check_leases`,
+  `run_fulfillment_convergence_cycle`,
+  `advance_fulfillment_convergence_cycle`, and `rotate_trusted_principal`.
+  The service's `dev` floor on the client rises to `0.9.0`, whose typed
+  answers its tests read.
+  - Application integration (`test_system_api.py`): `advance` and `run`
+    answer `ConvergenceCycleResponse` with no failed rows and empty states,
+    `check_leases` a `LeaseCheckResponse` of zeros, and a new
+    `TestIdentityRotation` rotates the seller principal (dual-proof
+    request) and is answered a `PrincipalRotationResponse` naming the
+    replacement and a generation.
+  - Unit (client `test_client.py`): each of the three controls, through the
+    async and the sync client, parses into its model; the rotation test
+    reads a `PrincipalRotationResponse`. The parity guardrail
+    (`test_provisioning_client_contract.py` in the service) compares the
+    variants' signatures, which changed together, and passes.
+  - Unit (service `test_fulfillment_convergence_wiring.py`): its fakes
+    return the real shapes, since the routes now validate them.
+- [x] 17.2 The e2e callers read the models' attributes (D15). Verify: `make -C
   e2e-tests test-unit` passes, including the stage-set check.
-- [ ] 17.3 The recovery-diagnostics line carries its counts in its message, and
+
+  `compute_deal_stages.py` and `test_full_deal_buyer_cli.py` read
+  `summary.checked` and `release_summary.released` in place of dictionary
+  keys; their check that the cycle answer had `before` and `after` keys went,
+  since parsing into the model now refuses an answer without them; the other
+  callers discard the answer. The harness's own `run_lease_cycle` and
+  `run_fulfillment_convergence_cycle`, untyped copies of two controls that
+  nothing called, were removed. `e2e-tests/pyproject.toml` raises its floor on the family client
+  to `0.9.0`, whose typed answers these reads need. `make -C e2e-tests
+  test-unit` passes (169), with the stage-set check; the reads themselves
+  run only in the lanes.
+- [x] 17.3 The recovery-diagnostics line carries its counts in its message, and
   keeps `extra` for the test that reads it (D19). Unit: the formatted message
   names each count.
-- [ ] 17.4 Bump the contracts, the client, and the service, unless sections 12,
+
+  The line reads "[FULFILLMENT_CONVERGENCE] recovery diagnostics: failed=…
+  teardown_failed=… <state>=total:…,claimed:…,expired:…,max_attempts:…,oldest_s:…
+  lease_targets=repaired:…,different:…,unrecordable:…", built by
+  `_diagnostics_text`, and keeps its `extra`. The lease-target sweep's three
+  unrecordable categories are summed in the text; their breakdown stays in
+  `extra`. Unit (new
+  `tests/unit/services/test_convergence_diagnostics_text.py`): the text
+  names every count (the unrecordable ones as their sum), and the logged
+  record's message is that text with its `event`, `recovery_diagnostics`,
+  and `lease_targets` extra intact; the integration tests reading `extra`
+  pass unchanged.
+- [x] 17.4 Bump the contracts, the client, and the service, unless sections 12,
   13, or 16 already did, and run `make lock`. **Verification checkpoint:**
   - 17.1–17.3;
   - `make test` in `provisioning/compute/contracts`,
@@ -2617,6 +2670,27 @@ Files:
   - the shared compute stages;
   - `e2e_deal_buyer_cli` and `e2e_non_erc20_settlement`;
   - `e2e_bare_metal_mock_deal`.
+
+  No bump: sections 12 and 13 already bumped the contracts (`0.11.0`), the
+  client (`0.9.0`), and the service (`0.19.0`) over `dev`. `make lock`
+  recorded the e2e and service floors. `make test` (full) passes before the
+  fresh-context fixes; after them, contracts 107, the client 74, the service
+  607 unit and 450 integration, and the e2e unit suite 169 pass. `make
+  check-packaging` passes; `make check-change` passes its comment-hygiene
+  and other checks but for the closeout citation section 1 notes. No lane
+  was run: the scenarios above, which read the typed answers, are
+  validation's evidence.
+
+  Handoff, from the fresh-context check: it found the service's client
+  floor unraised (raised), the harness's untyped copies of two controls
+  (removed), the checks unrecorded (recorded), the summed unrecordable
+  counts described as each named (corrected), assertions that could never
+  fail (removed), the rotation route's function-local import and a
+  misplaced test import (moved), stale comments in the contracts manifest
+  and the system test's docstring (updated), and loosely typed or
+  confusable model names (`ConvergenceDiagnostics`, a `Literal` role, a
+  datetime). Not changed: `TESTING.md`'s loop table names only the pause
+  answer's model; it is not wrong, and closeout owns that document.
 
 ## 18. Every storefront that services obligations reports its servicing events
 

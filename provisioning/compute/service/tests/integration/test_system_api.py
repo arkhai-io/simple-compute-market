@@ -8,8 +8,9 @@ Coverage:
   - GET /api/v1/system/status — operator status: storefront checks, watchdog
     state, the contract pin, execution, and the Ansible readiness component,
     composed from the harness's executors as production composes them
-  - the convergence and lease-watchdog controls, including the advance refused
-    while convergence runs
+  - the convergence and lease-watchdog controls, each answering its typed
+    model, including the advance refused while convergence runs
+  - the identity rotation route (``main.py``), answering its typed model
 
 What is NOT covered here (unit test jurisdiction):
   - the readiness component's playbook, key, and version rules
@@ -31,10 +32,14 @@ from compute_provisioning_client import ComputeProvisioningError
 from compute_provisioning_contracts import (
     COMPUTE_PROVISIONING_CONTRACT_VERSION,
     SUPPORTED_COMPUTE_PROVISIONING_MAJOR_VERSIONS,
+    ConvergenceCycleResponse,
     HealthResponse,
+    LeaseCheckResponse,
+    PrincipalRotationResponse,
     SystemStatusResponse,
     WorkerPauseResponse,
 )
+from market_identity import Ed25519Signer, RotationIntent, sign_rotation
 import pytest
 from vm_provisioning_adapter.services.mock_output import vm_mock_output
 
@@ -43,6 +48,8 @@ from compute_provisioning_service.services.system_status import (
     COMPONENT_FAILURE_KIND,
     StatusComponentProvider,
 )
+
+from .conftest import STOREFRONT_SIGNER
 
 
 class TestHealthEndpoint:
@@ -242,7 +249,11 @@ class TestWorkerControls:
         assert paused == WorkerPauseResponse(paused=True, at_gate=True)
         assert again == WorkerPauseResponse(paused=True, at_gate=True)
         assert resumed == WorkerPauseResponse(paused=False, at_gate=False)
-        assert isinstance(advanced, dict) and isinstance(ran, dict)
+        for cycle in (advanced, ran):
+            assert isinstance(cycle, ConvergenceCycleResponse)
+            assert cycle.after.failed_count == 0
+            assert cycle.after.teardown_failed_count == 0
+            assert all(counts.total == 0 for counts in cycle.after.per_state.values())
 
     async def test_a_paused_lease_watchdog_is_at_its_gate_and_still_checks(
         self, client_and_queue
@@ -259,7 +270,36 @@ class TestWorkerControls:
         assert paused == WorkerPauseResponse(paused=True, at_gate=True)
         assert again == WorkerPauseResponse(paused=True, at_gate=True)
         assert resumed == WorkerPauseResponse(paused=False, at_gate=False)
-        assert cycle["checked"] == 0
+        assert cycle == LeaseCheckResponse(checked=0, released=0, release_failed=0, skipped=0)
+
+
+class TestIdentityRotation:
+    """The rotation route answers its typed model through the family client."""
+
+    async def test_a_seller_rotation_answers_the_replacement_and_its_generation(
+        self, client_and_queue
+    ):
+        client, _ = client_and_queue
+        # A deterministic development key; never use it on a public network.
+        replacement = Ed25519Signer(b"\x77" * 32)
+        request = sign_rotation(
+            current_signer=STOREFRONT_SIGNER,
+            replacement_signer=replacement,
+            intent=RotationIntent(
+                current=STOREFRONT_SIGNER.identity,
+                replacement=replacement.identity,
+                subject="provisioning:storefront",
+                authority="provisioning",
+                nonce="rotate-seller-typed",
+                overlap_seconds=60,
+                expires_at=2_000_000_000,
+            ),
+        )
+
+        rotated = await client.family.rotate_trusted_principal("seller", request)
+
+        assert isinstance(rotated, PrincipalRotationResponse)
+        assert (rotated.role, rotated.replacement) == ("seller", replacement.identity)
 
 
 class TestMockedExecution:

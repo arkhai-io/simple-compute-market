@@ -8,11 +8,12 @@ other route is under ``/api/v1/system``:
   readiness components.
 - ``GET /system/version``: the service version and active profiles.
 - ``POST /system/check-leases``: one lease lifecycle cycle, run whether or not
-  the watchdog's timer is paused.
+  the watchdog's timer is paused, answering its counts.
 - ``POST /system/fulfillment-convergence/{run-cycle,advance-cycle,pause,resume}``
   and ``POST /system/lease-watchdog/{pause,resume}``: the workers' controls. A
-  pause or resume answers the worker's pause state: whether its timer is held,
-  and whether it is at its gate with no timer cycle running.
+  cycle answers the convergence diagnostics before and after it; a pause or
+  resume answers the worker's pause state: whether its timer is held, and
+  whether it is at its gate with no timer cycle running.
 
 Health and status answer 503 with their body when degraded. A worker control
 answers 503 while its worker is not composed, and 409 when the request
@@ -27,7 +28,9 @@ from typing import Any
 
 from compute_provisioning.route_errors import require_composed
 from compute_provisioning_contracts import (
+    ConvergenceCycleResponse,
     HealthResponse,
+    LeaseCheckResponse,
     SystemStatusResponse,
     VersionResponse,
     WorkerPauseResponse,
@@ -108,29 +111,34 @@ def make_system_routers(
 
     @system_router.post(
         "/check-leases",
+        response_model=LeaseCheckResponse,
         summary="Run one lease lifecycle cycle, paused or not (admin)",
     )
-    async def check_leases() -> dict:
+    async def check_leases() -> LeaseCheckResponse:
         """One cycle of the lease watchdog, run whether or not its timer is
         paused, so a test or an operator advances leases one step at a time."""
-        return await require(lease_lifecycle, "the lease lifecycle").force_check_leases()
+        return LeaseCheckResponse.model_validate(
+            await require(lease_lifecycle, "the lease lifecycle").force_check_leases()
+        )
 
     @system_router.post(
         "/fulfillment-convergence/run-cycle",
+        response_model=ConvergenceCycleResponse,
         summary="Run one fulfillment convergence cycle (admin)",
     )
-    async def run_fulfillment_convergence_cycle() -> dict:
+    async def run_fulfillment_convergence_cycle() -> ConvergenceCycleResponse:
         """The production cycle as it is. Its response holds bounded
         diagnostics, never prepared operations, provider payloads, or
         credentials."""
         watchdog = require(convergence_watchdog, "fulfillment convergence")
-        return await watchdog.run_cycle()
+        return ConvergenceCycleResponse.model_validate(await watchdog.run_cycle())
 
     @system_router.post(
         "/fulfillment-convergence/advance-cycle",
+        response_model=ConvergenceCycleResponse,
         summary="Advance fulfillment convergence by one cycle (admin)",
     )
-    async def advance_fulfillment_convergence_cycle() -> dict:
+    async def advance_fulfillment_convergence_cycle() -> ConvergenceCycleResponse:
         """One cycle that reaches this worker's own claimed rows.
 
         A pending provider poll keeps its row claimed so the claim lease
@@ -146,7 +154,7 @@ def make_system_routers(
                 status_code=409,
                 detail="pause fulfillment convergence before advancing it",
             )
-        return await watchdog.advance_cycle()
+        return ConvergenceCycleResponse.model_validate(await watchdog.advance_cycle())
 
     # The pause and resume routes are async so they run on the event loop's
     # thread: a worker's resume event is an ``asyncio.Event``, which is not

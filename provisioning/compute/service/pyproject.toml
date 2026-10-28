@@ -67,7 +67,7 @@ dev = [
     # its projected views against.
     "arkhai-bare-metal>=0.13.0",
     # The canonical typed clients the integration suite drives every route with.
-    "arkhai-compute-provisioning-client>=0.8.0",
+    "arkhai-compute-provisioning-client>=0.9.0",
     "arkhai-kit-resource-pools-client>=0.1.0",
     "arkhai-kit-site-client>=0.12.0",
     # The storefront-side projection state and the aggregate it reads sites

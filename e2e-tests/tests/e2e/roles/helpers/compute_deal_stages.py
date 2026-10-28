@@ -1306,7 +1306,7 @@ class Stage10b_LeaseCycleBeginsTeardown:
         require_state(deal_state, "_termination_requested", "deal_lease",
                       "reserved_resource_id")
         summary = provisioning_client.check_leases()
-        assert summary.get("checked", 0) >= 1, summary
+        assert summary.checked >= 1, summary
         lease = deal_state.deal_lease.refresh()
         assert lease.get("status") == "releasing", lease
         fulfillment_id = lease.get("fulfillment_id")
@@ -1328,8 +1328,7 @@ class Stage11a_TeardownDispatch:
         self, provisioning_client, storefront_admin_client, deal_state: ComputeDealState,
     ):
         require_state(deal_state, "teardown_fulfillment_id", "reserved_resource_id")
-        diagnostics = provisioning_client.advance_fulfillment_convergence_cycle()
-        assert "before" in diagnostics and "after" in diagnostics
+        provisioning_client.advance_fulfillment_convergence_cycle()
         fulfillment = provisioning_client.get_fulfillment_status(
             deal_state.teardown_fulfillment_id
         ).model_dump(mode="json")
@@ -1363,7 +1362,7 @@ class Stage11b_TeardownCompletion:
         )
 
         release_summary = provisioning_client.check_leases()
-        assert release_summary.get("released", 0) >= 1, release_summary
+        assert release_summary.released >= 1, release_summary
         lease = deal_state.deal_lease.refresh()
         assert lease.get("status") == "released", lease
 
