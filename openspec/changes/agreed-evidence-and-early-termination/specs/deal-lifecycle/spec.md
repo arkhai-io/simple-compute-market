@@ -172,7 +172,7 @@ Each payment adapter MUST derive holds under which each amount a part holds pays
 #### Scenario: A once deal's hold is derived
 
 - **WHEN** a hosted mandate is derived for a deal whose term ends at 13:00 with a one-day window
-- **THEN** its `once` hold ends no earlier than 13:00 the next day, later by however long approval is delayed
+- **THEN** its `once` part has `end` 13:00 and hold `{afterStop: P1D}`, so it pays out no earlier than 13:00 the next day, or one day after an earlier stop
 
 #### Scenario: A rate part stops early
 

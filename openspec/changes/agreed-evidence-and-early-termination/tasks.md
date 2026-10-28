@@ -3,13 +3,14 @@
 Planned 2026-10-27 from the design advanced by the eighth design round
 (`reviews/15-design.triage.md`, `reviews/16-design-external.triage.md`). Depends on no open
 change for design or planning. Implementation depends on two external contracts (design.md,
-"Dependencies on the hosted payments service"): the payments service's hold-extension contract
-(`hold-floor`, amended to per-extension refs) gates section 8, and the `arkhai.mediation.v1`
+"Dependencies on the hosted payments service"): the payments service's next contract revision
+(`hosted-dispute-lifecycle`: hold extensions, per-part start/stop and authorities with notice
+durations, per-part `end` and `afterStop` holds, one re-vendor) gates section 8, and the `arkhai.mediation.v1`
 contract gates live use of section 12's adapter but not its implementation against the test
 double.
 
 Sections follow the design's implementation cadence. Sections 1–7 are round 1 (foundation,
-wire and buyer side); section 8 joins round 1 only if the hold-extension contract is vendored
+wire and buyer side); section 8 joins round 1 only if that contract revision is vendored
 in `kit/arkhai-payments/schema/` when round 1 starts, and otherwise opens round 2; sections
 9–15 are round 2 (seller servicing and domain wiring); section 16 is the closeout.
 
@@ -270,7 +271,7 @@ lifecycle deal.
 
 ## 8. Hosted mandates, buyer mandate check and hosted option builders
 
-Gated: starts only once the payments service's hold-extension contract is vendored and
+Gated: starts only once the payments contract revision is vendored and
 identified in `kit/arkhai-payments/schema/SOURCE.md`; until then every derived hosted mandate
 fails the vendored schema. Delivers per-part authority and hold derivation from the terms, the
 buyer's mandate check, hosted option builders that emit lifecycle terms, and the API-credit
@@ -286,19 +287,20 @@ settle by negotiation". Files: `kit/arkhai-payments/schema/`, `src/market_arkhai
 `buyer.py`, `seller.py`, `test-vectors/`, the VM, bare-metal and API-credit storefronts'
 `settlement_composition.py`, and the API-credit buyer.
 
-- [ ] 8.1 Vendor the hold-extension contract (`extend` authorities key, `maxHoldExtension`,
-      per-extension refs) and refresh vectors. Verify: `test_receipt_fixture.py` and the
+- [ ] 8.1 Vendor the contract revision (`extend` authorities key, `maxHoldExtension`,
+      per-extension refs, per-part authorities with stop notice durations, `end`, `afterStop`
+      holds) and refresh vectors. Verify: `test_receipt_fixture.py` and the
       vector conformance tests pass against the new content hash.
-- [ ] 8.2 Derive each part's authorities and holds from the terms: `once` hold from the expected
-      approval time to the term end plus the window; `extend` authorities and `reverse` for the
+- [ ] 8.2 Derive each part's authorities and holds from the terms: each part's `end` at the term end
+      and hold `{afterStop: dispute_window}`; stop authorities with notice durations (seller:
+      `notice_seconds`, payer: `exposure_seconds` where the tail applies, dispute authority: 0); `extend` authorities and `reverse` for the
       agreement's dispute authority taken from the option; `maxHoldExtension` from
       `case_hold_max_seconds`. Verify: `test_mandates.py` cases for "A once deal's hold is
       derived", "A bounded case hold is derived", "An unbounded case hold is derived" and "A
       mandate's extend authorities are derived".
 - [ ] 8.3 Extend the buyer's mandate check to the derived authorities, holds and dispute
-      authority, and report a payments-service refusal of the authority. Verify:
-      `test_buyer.py` cases including "The payments service refuses the authority" and the
-      payee-as-stop-authority refusal.
+      authority,  Verify:
+      `test_buyer.py` cases including the payee-as-stop-authority refusal.
 - [ ] 8.4 Emit `adjudication` from the storefront's first offered authority advertising the
       option's mechanism (or one option per offered authority), publish nothing hosted with an
       empty list, and refuse incompatible authorities at publication, in the VM, bare-metal and

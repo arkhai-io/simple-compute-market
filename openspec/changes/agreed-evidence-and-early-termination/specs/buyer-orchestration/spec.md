@@ -14,11 +14,6 @@ The buyer MUST supply its Arkhai account as `payer_account`, verify that the man
 - **WHEN** a mandate lists the payee as a stop authority while the selected option entitles only the payer
 - **THEN** the buyer refuses to approve it
 
-#### Scenario: The payments service refuses the authority
-
-- **WHEN** the payments service refuses a mandate's approval because it does not admit the named dispute authority for unbounded holds
-- **THEN** the buyer reports the refusal naming the dispute authority, and sends no `commit`
-
 ### Requirement: The typed client settles Agreement deals apart from EVM deals
 
 The typed storefront client MUST settle an Agreement-settled deal with `settle_agreement(negotiation_id)` only where the domain has no buyer lifecycle route, which sends only the negotiation ID and the signer's principal; where the route exists the lifecycle client's `commit` replaces it. EVM settlement is the separate `settle_evm`, so EVM arguments never appear on the agreement path. Both settle calls use the settle route contract, and the storefront dispatches on the accepted Agreement's mechanism.
