@@ -7,12 +7,14 @@
 #   2. seller-provisioning   — runs ansible to create/destroy VMs on the
 #                              seller's KVM host (arkhai:compute-provisioning).
 #
-# This base file works in mock mode (no SSH key needed). For real KVM
-# provisioning add `-f compose/seller.live.yml` which mounts the SSH key
-# the ansible runner uses to reach the host. See docs/seller-quickstart.md §6.
+# Provisioning runs the real Ansible runner against the hosts in the
+# inventory baked into its image, over the SSH key mounted below. See
+# docs/seller-quickstart.md, "Prepare your KVM hosts".
 #
-# Operator-provided files (paths overridable via env):
+# Operator-provided files:
 #   ./config.seller.toml     — seller config; see docs/seller-quickstart.md.
+#   ./keys/id_ed25519        — private key authorized on every KVM host in the
+#                              provisioning inventory.
 #
 # Required images (run `make build-seller` from the repo root):
 #   arkhai:storefront
@@ -22,12 +24,14 @@
 # or point [registry] urls in the seller TOML at an external indexer.
 #
 # Usage:
-#   docker compose -f compose/seller.yml up -d                          # mock mode
-#   docker compose -f compose/seller.yml -f compose/seller.live.yml up -d   # live KVM
+#   docker compose -f compose/seller.yml up -d
 #   docker compose -f compose/seller.yml logs -f seller-storefront
 #
-# Environment overrides (all optional):
-#   SELLER_CONFIG_PATH       — path to seller TOML (default: ../config.seller.toml,
+# Environment:
+#   SELLER_SSH_PRIVKEY       — required: path to the KVM-host SSH private key.
+#                              Required rather than defaulted, since a missing
+#                              bind-mount source would be created as a directory.
+#   SELLER_CONFIG_PATH       — optional: path to seller TOML (default: ../config.seller.toml,
 #                              i.e. ./config.seller.toml relative to the project root)
 
 services:
@@ -90,6 +94,11 @@ services:
     command: ["sh", "-c", "compute-provisioning-migrate && exec compute-provisioning-api"]
     ports:
       - "8081:8081"
+    # Lets an inventory use `host.docker.internal` as `ansible_host` when the
+    # storefront box is itself the KVM host; multi-host inventories use real
+    # addresses and never need it.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       seller-provisioning-data-init:
         condition: service_completed_successfully
@@ -104,6 +113,7 @@ services:
       - 'PROVISIONING_ADMIN_IDENTITY__PRINCIPALS=[{"scheme":"${SELLER_PROVISIONING_ADMIN_IDENTITY_SCHEME:?set provisioning admin public identity scheme}","identifier":"${SELLER_PROVISIONING_ADMIN_IDENTITY_IDENTIFIER:?set provisioning admin public identity identifier}"}]'
     volumes:
       - seller-provisioning-data:/app/data
+      - ${SELLER_SSH_PRIVKEY:?set the path to the KVM-host SSH private key}:/home/appuser/.ssh/id_ed25519:ro
     restart: unless-stopped
 
 volumes:

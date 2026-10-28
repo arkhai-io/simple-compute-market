@@ -14,7 +14,7 @@ from collections.abc import Mapping
 
 from dynaconf import Dynaconf
 
-from apicredits_storefront.utils.config import settings
+from apicredits_storefront.utils.config import retired_address_book_problems, settings
 
 RETIRED_SETTINGS_HEADING = "the storefront states retired settings"
 
@@ -37,7 +37,8 @@ REMOVED_SETTINGS: Mapping[str, str] = {
 
 def retired_setting_problems(source: Dynaconf | None = None) -> list[str]:
     """Name each renamed or removed setting the configuration still states, in
-    any spelling, with the key that replaced it or why nothing does."""
+    any spelling, with the key that replaced it or why nothing does, the
+    retired Alkahest address-book keys among them."""
 
     active = settings if source is None else source
     return [
@@ -48,7 +49,7 @@ def retired_setting_problems(source: Dynaconf | None = None) -> list[str]:
         f"{retired} was removed: {reason}"
         for retired, reason in REMOVED_SETTINGS.items()
         if active.get(retired) is not None
-    ]
+    ] + retired_address_book_problems(active)
 
 
 __all__ = [

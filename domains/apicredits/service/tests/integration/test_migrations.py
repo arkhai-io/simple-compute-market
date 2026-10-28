@@ -70,6 +70,7 @@ class TestRunMigrationsFreshBootstrap:
             ("20260815_003_fulfillment_grants",),
             ("20260922_004_pool_advertisement_and_backing",),
             ("20261005_005_reservation_release_requested_at",),
+            ("20261028_006_retired_reservation_states",),
         ]
 
     def test_a_reservation_table_from_before_release_timing_gains_the_column(self):
@@ -110,7 +111,7 @@ class TestRunMigrationsIsIdempotent:
             count = connection.execute(
                 text("SELECT COUNT(*) FROM schema_migrations")
             ).scalar()
-        assert count == 5
+        assert count == 6
 
 
 class TestAdoptingAPreCreateAllOnlyDatabase:

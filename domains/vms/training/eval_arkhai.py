@@ -11,9 +11,6 @@ Usage (from core/):
     uv run python ../domains/vms/training/eval_arkhai.py \\
         --checkpoint ../domains/vms/negotiation/src/arkhai_vms_negotiation/rl/models/arkhai_negotiator_seller.pt \\
         --episodes 20
-
-Or via CLI:
-    market policy eval --episodes 20
 """
 from __future__ import annotations
 

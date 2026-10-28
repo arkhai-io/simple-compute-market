@@ -9,8 +9,8 @@ license = "MIT"
 description = "End-to-end integration tests for Arkhai deployed blockchain environments"
 requires-python = ">=3.13,<3.14"
 dependencies = [
-    "arkhai-compute-provisioning-contracts>=0.11.0",
-    "arkhai-compute-provisioning-client>=0.8.0",
+    "arkhai-compute-provisioning-contracts>=0.12.0",
+    "arkhai-compute-provisioning-client>=0.9.0",
     "arkhai-kit-resource-pools-client>=0.1.0",
     "arkhai-kit-resource-pools-contracts>=0.2.0",
     "pytest>=8.0",
@@ -35,11 +35,11 @@ dependencies = [
     "arkhai-kit-pool-overrides>=0.2.0",
     "arkhai-kit-config",
     "arkhai-core-registry-client>=0.12.1",
-    "arkhai-kit-alkahest>=0.7.0",
+    "arkhai-kit-alkahest>=0.11.0",
     "arkhai-kit-site-client>=0.9.0",
 	"arkhai-vms-storefront>=0.16.0",
-    "arkhai-vms-provisioning-operator-client>=0.9.0",
-    "arkhai-bare-metal>=0.11.0",
+    "arkhai-vms-provisioning-operator-client>=0.10.0",
+    "arkhai-bare-metal>=0.13.0",
     # Its settlement commands under `market bare-metal`, which the bare-metal
     # introduction scenarios run.
     "arkhai-bare-metal-buyer>=0.6.0",
@@ -49,11 +49,11 @@ dependencies = [
     # PATH inside arkhai:e2e-tests when the suite runs in-network.
     # arkhai-kit-policy is the buyer's sibling negotiation-strategy dep,
     # resolved from .dist alongside the other internal wheels.
-    "arkhai-vms-buyer>=0.7.0",
+    "arkhai-vms-buyer>=0.9.0",
     # The API-credits schema plugin, discovered by the same `market`
     # binary (one binary, many registry schemas); its verbs are
     # namespaced under `market credits …`.
-    "arkhai-apicredits-buyer>=0.5.0",
+    "arkhai-apicredits-buyer>=0.7.0",
     "arkhai-kit-arkhai-payments>=0.3.0",
     "arkhai-kit-policy>=0.4.0",
 ]

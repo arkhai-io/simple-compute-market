@@ -6,7 +6,7 @@ buyer/settlement flow:
 1. Declare one 4x GPU resource at the site.
 2. Create one live listing for each 1x, 2x, 3x, and 4x slice.
 3. Admin-reserve 2 GPUs and verify 3x/4x listings close.
-4. Mark usage started, then capacity released, and verify 3x/4x reopen.
+4. Release the capacity and verify 3x/4x reopen.
 """
 
 from __future__ import annotations
@@ -62,7 +62,6 @@ class DynamicListingState:
     listing_ids_by_gpu_count: dict[int, str] = field(default_factory=dict)
     capacity_reservation_id: str | None = None
     reserve_closed_listing_ids: list[str] = field(default_factory=list)
-    usage_started: bool = False
 
 
 @dataclass
@@ -302,34 +301,10 @@ class TestComputeDynamicListings:
         )
         log.info("[dynamic] reserved reservation %s; statuses=%s", result.capacity_reservation_id, statuses)
 
-    def test_03_usage_started_keeps_oversized_listings_closed(
-        self, storefront_admin_client, storefront_service_client, dynamic_state: DynamicListingState
-    ):
-        require_state(dynamic_state, "capacity_reservation_id")
-
-        result = storefront_service_client.notify_usage_started(
-            dynamic_state.capacity_reservation_id,
-            site_id=capacity_site_id(),
-            escrow_uid="e2e-dynamic-reserve-2x",
-        )
-
-        assert result["state"] == "leased"
-        statuses = _listing_statuses(
-            storefront_admin_client,
-            dynamic_state.listing_ids_by_gpu_count,
-        )
-        assert statuses == {
-            1: "open",
-            2: "open",
-            3: "closed",
-            4: "closed",
-        }
-        dynamic_state.usage_started = True
-
     def test_04_capacity_release_reopens_oversized_listings(
         self, storefront_admin_client, storefront_service_client, dynamic_state: DynamicListingState
     ):
-        require_state(dynamic_state, "capacity_reservation_id", "usage_started")
+        require_state(dynamic_state, "capacity_reservation_id")
 
         result = storefront_service_client.notify_capacity_released(
             dynamic_state.capacity_reservation_id,

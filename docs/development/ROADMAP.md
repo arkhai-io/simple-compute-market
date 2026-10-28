@@ -48,6 +48,16 @@ the scenario covers registry publication, buyer discovery, and negotiations.
 This establishes a working two-storefront topology. Multiple storefronts per
 site remain outside its scope.
 
+The provisioning service and the site authorities answer a request that matches
+no route by what failed to match — 404 for an unknown path, 405 naming the
+allowed methods, 400 for an unbindable body resource — and the provisioning
+service refuses overlapping route contributions when it composes its table. The
+compute family owns its mock mechanism's routes whole, with typed answers and one
+typed client, and the worker controls answer typed models. The compute
+provisioning contract is major 3: the schedule response names the scheduled
+resource's host, bare-metal begin reads the scheduled identity, and a provisioning
+service and the storefronts calling it upgrade together.
+
 | Open gap | Owned by |
 |---|---|
 | The relay path is implemented but unverified on a rented host: reload preservation of live sessions, the port window, teardown release, and relay deletion under live leases remain to be proved or decided | [`relay-vm-access-without-a-dashboard`](../../openspec/changes/relay-vm-access-without-a-dashboard/) |
@@ -59,7 +69,8 @@ site remain outside its scope.
 | Site admission and scheduling never read a host record's enabled flag, so a create can be admitted and placed on a disabled host and its dispatch retries until an operator re-enables it | Unowned — needs a new change |
 | No end-to-end lane runs a relay-backed pool, which is why a relay-backed VM's wrong delivered address went unnoticed | Unowned — needs a new change, beside [`relay-vm-access-without-a-dashboard`](../../openspec/changes/relay-vm-access-without-a-dashboard/) |
 | Every provisioning route admits the administrator; whether every other service should take the same stance has not been decided | Unowned — needs a repository-wide decision |
-| Small defects and dead surfaces in the compute family and the kits around it: unmatched routes answered with one undifferentiated 404, untyped mock-rule and worker-control responses, senderless VM fulfillment callbacks, reservation states nothing writes, a bare-metal delivery conflict answered 500, a deferred bare-metal delivery rechecked on an error backoff, an introduction's seller delivery lost after a failed first completion, an unchecked seller wallet address, and an Alkahest address book named twice | [`resolve-compute-family-findings`](../../openspec/changes/resolve-compute-family-findings/) |
+| Under a bare-metal delivery conflict — the site reporting a delivery other than the recorded result — the buyer's teardown answers the 409 `delivery_conflict` refusal instead of ending the lease, since it reads the fulfillment's status first. Whether teardown proceeds past a conflict is undecided | Unowned — needs a new change |
+| A concurrent dispatch retry for one owner can end as a false `RelayWindowExhaustedError`: `RelayPortAllocator.allocate_in_session` retries the next port on every `IntegrityError`, including the one an owner's own concurrent allocation raises. Whether it re-reads the owner's lease or refuses as a conflict is undecided | Unowned — needs a new change, with VM's provisioning owner, or whichever change next touches relay allocation |
 
 Dropping the frozen tables is deliberately excluded from the retirement and belongs to a later follow-up, once operators have had a deployment cycle to extract what they need from them.
 
@@ -288,6 +299,7 @@ Current limits: escrow claimant, expiration, and condition fields remain in exis
 | An API-credit listing's options are fixed at creation, so an unready mechanism's option stays advertised until the seller closes it | Unowned — needs a new change. Deals accepted on such a listing verify against their committed plan and settle as before; API credits has no re-deriving publication path |
 | Spot / interruptible deals on payment rate parts, with teardown on stop | [`spot-deals-through-arkhai-payments`](../../openspec/changes/spot-deals-through-arkhai-payments/) |
 | A seller cannot receive Alkahest settlement at an account other than its signing key, such as a multisig or treasury: the published recipient is the wallet address, the fulfillment attestation names the account that submits it, and refunds are sent from the signing account. Alkahest's model can express a separate recipient; the storefronts would need a payout setting, attestations naming it, and refunds from or gated on it | Unowned — needs a new change |
+| A wallet key `kit/alkahest` cannot parse is read as present: beside a configured address no mismatch is judged, and without one readiness reports the address missing rather than the key. No readiness blocker names an unreadable key | Unowned — needs a new change |
 | Isolate escrow carriers and the conditional-escrow port fully within Alkahest | [`move-escrow-into-alkahest`](../../openspec/changes/move-escrow-into-alkahest/) |
 | Escrow fields in listing, registry and storefront-client wire formats | [`drop-escrow-from-shared-wire`](../../openspec/changes/drop-escrow-from-shared-wire/) |
 | Recorded responses kept for exact retry — every introduction reveal and read included — are never bounded, so a revealed contact outlives the introduction retention window there. The disclosure is scoped to the introduction record accordingly | [`redesign-authenticated-requests`](../../openspec/changes/redesign-authenticated-requests/), which redesigns replay state for every authority; [`retain-authenticated-request-outcomes`](../../openspec/changes/retain-authenticated-request-outcomes/) is blocked on it |

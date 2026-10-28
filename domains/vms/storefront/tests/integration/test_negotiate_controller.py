@@ -35,6 +35,7 @@ import market_storefront.server  # noqa: F401  (import order, see above)
 from market_storefront import lifecycle, lifecycle_steps
 from market_storefront.controllers.admin_controller import router as admin_router
 from market_storefront.utils.config import site_projection_poll_interval
+import market_storefront.utils.config as _storefront_config
 import market_storefront.middleware.admin_identity as _admin_identity
 from market_storefront.controllers.negotiations_controller import (
     router as negotiations_router,
@@ -337,19 +338,10 @@ async def client(db, monkeypatch):
             "vm_host": "kvm1",
         },
     )
-    address_config_path = anvil_address_book_path()
-    monkeypatch.setattr(
-        _negotiation_runtime,
-        "CHAINS",
-        {
-            "anvil": ChainConfig(
-                name="anvil",
-                rpc_url="http://anvil.test",
-                chain_id=31337,
-                alkahest_address_config_path=str(address_config_path),
-            )
-        },
-    )
+    chains = {
+        "anvil": ChainConfig(name="anvil", rpc_url="http://anvil.test", chain_id=31337)
+    }
+    monkeypatch.setattr(_storefront_config, "CHAINS", chains)
 
     site_requests: list[str] = []
     original_handle = fake_site._handle
@@ -398,6 +390,8 @@ async def client(db, monkeypatch):
     with settings_overrides(
         **{
             "wallet.address": _RECIPIENT,
+            # The development chain's address book, which the kit installs.
+            "settlement.alkahest.address_books": {"anvil": str(anvil_address_book_path())},
         }
     ):
         async with StorefrontClient(

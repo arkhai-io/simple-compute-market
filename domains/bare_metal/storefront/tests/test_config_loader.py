@@ -210,6 +210,36 @@ def test_a_setting_that_cannot_be_read_is_refused_by_key(
         load_storefront_settings()
 
 
+@pytest.mark.parametrize(
+    ("document", "path"),
+    [
+        (
+            {"Chains": {"anvil": {"rpc_url": "ws://anvil:8545",
+                                  "alkahest_address_config_path": "/book.json"}}},
+            "[Chains.anvil].alkahest_address_config_path",
+        ),
+        (
+            {"Settlement": {"alkahest": {"enabled": True,
+                                         "address_config_path": "/book.json"}}},
+            "[Settlement.alkahest].address_config_path",
+        ),
+    ],
+    ids=["chain-key", "section-key"],
+)
+def test_a_retired_address_book_key_is_refused_naming_the_table(
+    monkeypatch, tmp_path, document, path
+):
+    """Spec scenario "A retired key is stated", for the bare-metal storefront."""
+    write_configuration(monkeypatch, tmp_path, document)
+
+    with pytest.raises(BareMetalConfigurationError) as refused:
+        load_storefront_settings()
+
+    assert f"{path} is retired" in str(refused.value)
+    assert "[Settlement.alkahest.address_books]" in str(refused.value)
+    assert "/book.json" not in str(refused.value)
+
+
 def test_the_confirmation_window_is_three_poll_intervals_unless_stated(
     monkeypatch, tmp_path
 ):

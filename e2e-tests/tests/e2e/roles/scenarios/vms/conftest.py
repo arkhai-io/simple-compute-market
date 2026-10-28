@@ -375,19 +375,18 @@ def storefront_admin_client():
 
 @pytest.fixture(scope="module")
 def storefront_service_client():
-    """Service-role storefront client: the provisioning peer's callbacks.
+    """Service-role storefront client: the provisioning peer's callback.
 
-    Fulfillment events -- usage started, capacity released, fulfillment failed
-    -- are delivered by the provisioning service, not by an operator. The
-    storefront authenticates them against its one configured service peer, so
-    this signs as the provisioning service's own principal rather than as the
-    administrator.
+    The capacity-released callback is delivered by the provisioning service,
+    not by an operator. The storefront authenticates it against its one
+    configured service peer, so this signs as the provisioning service's own
+    principal rather than as the administrator.
 
-    A scenario that needs to drive one of those events stands in for the peer,
-    and does it through the public typed methods. Reaching into the client's
-    private `_post` and `_admin_headers` instead — which is what these
-    scenarios used to do — bypasses the signed-request construction the client
-    exists to own, so the call keeps working while the real path is broken.
+    A scenario that needs to drive the callback stands in for the peer, and
+    does it through the public typed method. Reaching into the client's
+    private `_post` and `_admin_headers` instead bypasses the signed-request
+    construction the client exists to own, so the call keeps working while the
+    real path is broken.
     """
     from storefront_client import SyncStorefrontClient
 
@@ -522,7 +521,7 @@ def _ensure_provisioning_host_registered(provisioning_client):
     """Idempotently register the e2e ``kvm1`` host in the provisioning service.
 
     The scenario's seeded resource row declares ``attribute.vm_host=kvm1``,
-    so phase 08c's ``/test/evaluate-job`` lookup requires a matching row
+    so phase 08c's job evaluation (``vm_rules.evaluate_job``) requires a matching row
     in the provisioning ``hosts`` table. Compose-launched provisioning
     starts with an empty inventory (no ``inventory_ini``/``inventory_path``
     configured); production deployments seed the table via Helm secret

@@ -275,7 +275,8 @@ priority = []
 
 [Settlement.alkahest]
 enabled = false
-# address_config_path = "/path/to/alkahest.json"
+# Each chain's address book; a chain not named uses the SDK's built-in addresses.
+# address_books = { ethereum_sepolia = "/path/to/alkahest.json" }
 # oracle_gated = false
 # trusted_oracle_addresses = []
 # interruptible = false

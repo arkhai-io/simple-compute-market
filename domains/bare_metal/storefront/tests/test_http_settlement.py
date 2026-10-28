@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from types import SimpleNamespace
 import json
+import logging
 import sqlite3
 import time
 import uuid
@@ -47,6 +48,7 @@ from arkhai_bare_metal_storefront.settlement import build_bare_metal_settlement_
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
+from core_buyer.negotiation_client import AuthenticatedHTTPError
 from loopback import serving
 from market_alkahest.alkahest import get_recipient_arbiter
 from market_alkahest.dev_chain import anvil_address_book_path
@@ -581,25 +583,34 @@ class _CapacityClient:
 
 
 class _ProvisioningClient:
-    def __init__(self, *, torn_down: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        torn_down: bool = False,
+        scheduled_host_id: str | None = "machine-1",
+        scheduled_physical_host_id: str = "host-1",
+    ) -> None:
         self.begin_calls = []
         self.teardown_calls = []
         self.terminations = []
         self.torn_down = torn_down
+        self.scheduled_host_id = scheduled_host_id
+        self.scheduled_physical_host_id = scheduled_physical_host_id
+        # The account the site's delivery names; a test changes it to have the
+        # site report another delivery.
+        self.delivered_user = "tenant-a"
 
     async def schedule_resource(self, request):
+        """The resource as a major-3 schedule response names it: the host its
+        declaration names, and its machine among its top-level attributes,
+        with no copy of either in its publication settings."""
         return SimpleNamespace(
             settlement_resource_id="settlement-resource-a",
             pool_id="pool-a",
             resource_kind="compute.bare-metal",
             provider="bare_metal.ansible",
-            attributes={
-                "bare_metal_publication": {
-                    "enabled": True,
-                    "host_id": "machine-1",
-                    "physical_host_id": "host-1",
-                }
-            },
+            host_id=self.scheduled_host_id,
+            attributes={"physical_host_id": self.scheduled_physical_host_id},
         )
 
     async def begin_fulfillment(self, body):
@@ -636,7 +647,7 @@ class _ProvisioningClient:
                                 "protocol": "ssh",
                                 "host": "203.0.113.25",
                                 "port": 2222,
-                                "user": "tenant-a",
+                                "user": self.delivered_user,
                             }
                         ],
                         "credentials": [],
@@ -897,6 +908,93 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
         "provider_metadata",
     ):
         assert forbidden not in serialized_result
+
+
+async def test_a_delivery_other_than_the_recorded_result_is_a_conflict(
+    tmp_path,
+) -> None:
+    """The site reports a different delivery: the buyer's status, result, and
+    access reads answer 409 ``delivery_conflict``, and the recorded result
+    stands."""
+
+    async def verifier(**_kwargs):
+        return 1
+
+    runtime, negotiation_id = await _accepted_runtime(
+        str(tmp_path / "storefront.db"), verifier
+    )
+    provisioning = _ProvisioningClient()
+    runtime = replace(
+        runtime, capacity_client=_CapacityClient(), fulfillment_client=provisioning
+    )
+    with serving(_app(runtime)) as base_url:
+        async with StorefrontClient(
+            base_url,
+            signer=BUYER_SIGNER,
+            caller_role="buyer",
+            expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
+        ) as storefront:
+            await storefront.settle_evm(
+                ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
+            )
+        buyer = _fulfillment_client(base_url)
+        recorded = buyer.result(negotiation_id)["result"]
+        provisioning.delivered_user = "tenant-b"
+        refusals = []
+        for read in (buyer.status, buyer.result, buyer.access):
+            with pytest.raises(AuthenticatedHTTPError) as refused:
+                read(negotiation_id)
+            refusals.append(refused.value)
+
+    assert recorded["ssh_user"] == "tenant-a"
+    assert [refusal.status_code for refusal in refusals] == [409, 409, 409]
+    assert [refusal.body["detail"]["error"] for refusal in refusals] == [
+        "delivery_conflict"
+    ] * 3
+    stands = await runtime.db.load_bare_metal_result(negotiation_id=negotiation_id)
+    assert stands.model_dump(mode="json") == recorded
+
+
+@pytest.mark.parametrize(
+    ("host_id", "physical_host_id"),
+    [("machine-1", "another-machine"), (None, "host-1")],
+    ids=["another-machine", "no-host"],
+)
+async def test_a_scheduled_resource_the_terms_did_not_sell_is_reported_as_a_conflict(
+    tmp_path, caplog, host_id, physical_host_id
+) -> None:
+    """Settling schedules a resource whose identity is not the one sold: the
+    deal's servicing reports the conflict, and no fulfillment begins."""
+
+    async def verifier(**_kwargs):
+        return 1
+
+    runtime, negotiation_id = await _accepted_runtime(
+        str(tmp_path / "storefront.db"), verifier
+    )
+    provisioning = _ProvisioningClient(
+        scheduled_host_id=host_id, scheduled_physical_host_id=physical_host_id
+    )
+    runtime = replace(
+        runtime, capacity_client=_CapacityClient(), fulfillment_client=provisioning
+    )
+    with caplog.at_level(logging.INFO, logger="stage"), serving(_app(runtime)) as base_url:
+        async with StorefrontClient(
+            base_url,
+            signer=BUYER_SIGNER,
+            caller_role="buyer",
+            expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
+        ) as storefront:
+            settled = await storefront.settle_evm(
+                ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
+            )
+
+    events = [json.loads(r.getMessage()) for r in caplog.records if r.name == "stage"]
+    retries = [e for e in events if e["event"] == "settlement_retry"]
+    assert settled.status == "settlement_verified"
+    assert provisioning.begin_calls == []
+    assert [e["operation"] for e in retries] == ["fulfill"]
+    assert "conflicts with accepted bare-metal terms" in retries[0]["error"]
 
 
 async def test_verify_registers_exactly_the_committed_plan(tmp_path) -> None:

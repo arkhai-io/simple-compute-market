@@ -11,6 +11,7 @@ from core_storefront import (
     StorefrontThreadBinding,
     fulfill_domain,
 )
+from core_storefront.domain_registry import StorefrontDomainBindingError
 from arkhai_bare_metal import BareMetalListing, BareMetalTerms
 from market_core import VersionedEnvelope
 from market_identity import Ed25519Signer
@@ -39,6 +40,7 @@ class FakeDb:
         self.materialization = None
         self.receipt = None
         self.result = None
+        self.result_refusal: Exception | None = None
         self.capacity_backing = "backed"
         self.context = {
             "buyer_scheme": BUYER.scheme.value,
@@ -160,7 +162,16 @@ class FakeDb:
         self.receipt = receipt
 
     async def save_bare_metal_result(self, *, negotiation_id, result):
+        """Write-once, as the store's: another result is refused, and so is
+        any write while ``result_refusal`` stands for another mismatch."""
+        if self.result_refusal is not None:
+            raise self.result_refusal
+        if self.result is not None and self.result != result:
+            raise StorefrontDomainBindingError("result conflicts with durable state")
         self.result = result
+
+    async def load_bare_metal_result(self, *, negotiation_id):
+        return self.result
 
 
 class FakeSite:
@@ -213,28 +224,34 @@ class FakeCapacity:
 
 
 class FakeFulfillment:
-    def __init__(self, *, begin_failures: int = 0) -> None:
+    def __init__(
+        self,
+        *,
+        begin_failures: int = 0,
+        scheduled_host_id: str | None = "machine-a",
+        scheduled_physical_host_id: str = "host-a",
+    ) -> None:
         self.phase = "create"
         self.schedules = []
         self.begins = []
         self.teardowns = []
         self.terminations = []
         self.begin_failures = begin_failures
+        self.scheduled_host_id = scheduled_host_id
+        self.scheduled_physical_host_id = scheduled_physical_host_id
+        self.delivered_user = "tenant-a"
 
     async def schedule_resource(self, request):
+        """The scheduled resource as a major-3 schedule response names it: its
+        declaration's host, and its machine among its top-level attributes."""
         self.schedules.append(request)
         return SimpleNamespace(
             settlement_resource_id="settlement-resource-a",
             pool_id="pool-a",
             resource_kind="compute.bare-metal",
             provider="bare_metal.ansible",
-            attributes={
-                "bare_metal_publication": {
-                    "enabled": True,
-                    "host_id": "machine-a",
-                    "physical_host_id": "host-a",
-                }
-            },
+            host_id=self.scheduled_host_id,
+            attributes={"physical_host_id": self.scheduled_physical_host_id},
         )
 
     async def begin_fulfillment(self, body):
@@ -274,7 +291,7 @@ class FakeFulfillment:
                                 "protocol": "ssh",
                                 "host": "203.0.113.10",
                                 "port": 22,
-                                "user": "tenant-a",
+                                "user": self.delivered_user,
                             }
                         ],
                         "credentials": [],
@@ -392,6 +409,70 @@ async def test_selected_site_lifecycle_is_idempotent_and_ends_its_lease() -> Non
     assert fulfillment.teardowns == []
     assert torn_down["state"] == "torn_down"
     assert capacity.site_client.releases == []
+
+
+@pytest.mark.parametrize(
+    ("host_id", "physical_host_id"),
+    [(None, "host-a"), ("machine-b", "host-a"), ("machine-a", "host-b")],
+    ids=["no-host", "another-host", "another-machine"],
+)
+@pytest.mark.asyncio
+async def test_begin_refuses_a_scheduled_resource_the_terms_did_not_sell(
+    host_id, physical_host_id
+) -> None:
+    """Begin compares the schedule response's own host and machine with the
+    accepted terms, and refuses a resource naming no host or another one,
+    before beginning anything."""
+    db = FakeDb()
+    fulfillment = FakeFulfillment(
+        scheduled_host_id=host_id, scheduled_physical_host_id=physical_host_id
+    )
+    service = BareMetalFulfillmentService(
+        db=db,
+        capacity_client=FakeCapacity(),
+        fulfillment_client=fulfillment,
+        read_verified_evidence=db.verified_evidence,
+    )
+
+    with pytest.raises(BareMetalFulfillmentError, match="scheduled resource conflicts"):
+        await service.begin(
+            negotiation_id="neg-a", settlement_ref="escrow-a", buyer_principal=BUYER
+        )
+
+    assert len(fulfillment.schedules) == 1
+    assert fulfillment.begins == []
+
+
+@pytest.mark.asyncio
+async def test_a_delivery_conflict_is_named_only_when_the_recorded_result_differs() -> None:
+    """A reported delivery other than the recorded result is a delivery
+    conflict, and the recorded result stands; the store's refusal of the same
+    result for another reason is not."""
+    db = FakeDb()
+    fulfillment = FakeFulfillment()
+    service = BareMetalFulfillmentService(
+        db=db,
+        capacity_client=FakeCapacity(),
+        fulfillment_client=fulfillment,
+        read_verified_evidence=db.verified_evidence,
+    )
+    await service.begin(
+        negotiation_id="neg-a", settlement_ref="escrow-a", buyer_principal=BUYER
+    )
+    await service.status(negotiation_id="neg-a", buyer_principal=BUYER)
+    recorded = db.result
+
+    fulfillment.delivered_user = "tenant-b"
+    with pytest.raises(BareMetalFulfillmentError) as conflict:
+        await service.status(negotiation_id="neg-a", buyer_principal=BUYER)
+    assert conflict.value.error == "delivery_conflict"
+    assert db.result is recorded
+
+    fulfillment.delivered_user = "tenant-a"
+    db.result_refusal = StorefrontDomainBindingError("unbound domain")
+    with pytest.raises(StorefrontDomainBindingError, match="unbound domain"):
+        await service.status(negotiation_id="neg-a", buyer_principal=BUYER)
+    assert db.result is recorded
 
 
 @pytest.mark.asyncio

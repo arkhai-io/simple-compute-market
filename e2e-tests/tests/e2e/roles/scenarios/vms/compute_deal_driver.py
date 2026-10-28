@@ -15,6 +15,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from compute_provisioning_contracts import MockJobEvaluation, MockRuleCreate
+
 from tests.e2e.roles.helpers.compute_deal import (
     DealLease,
     SiteCapacity,
@@ -50,6 +52,14 @@ _CREATE_RESULT_STDOUT = (
     '{"external": "ssh vmuser@localhost", '
     '"internal": "ssh vmuser@10.0.0.1"}}}}\n}\n'
 )
+
+
+def vm_job_evaluation(
+    host: str, *, vm_action: str, vm_target: str = "eval-target"
+) -> dict[str, Any]:
+    """A VM job as VM's evaluate-job route reads it: a job's parameters are its
+    domain's, so ``vm_rules.evaluate_job`` takes them as VM describes them."""
+    return {"host": host, "vm_target": vm_target, "vm_action": vm_action}
 
 
 @dataclass
@@ -108,22 +118,24 @@ class VmComputeDealDriver:
         }
 
     def arm_create_gate(self) -> None:
-        delete_mock_rules_if_present(
-            self.provisioning_test_client, *_STALE_CREATE_RULES, PROV_RULE_ID,
-        )
-        self.provisioning_test_client.add_mock_rule(
-            rule_id=PROV_RULE_ID,
-            match={"vm_action": "create"},
-            pause_before_result=True,
-            result_stdout=_CREATE_RESULT_STDOUT,
-            fail_with=None,
+        rules = self.provisioning_test_client.vm_rules
+        delete_mock_rules_if_present(rules, *_STALE_CREATE_RULES, PROV_RULE_ID)
+        rules.add_rule(
+            MockRuleCreate(
+                rule_id=PROV_RULE_ID,
+                match={"vm_action": "create"},
+                pause_before_result=True,
+                result_stdout=_CREATE_RESULT_STDOUT,
+            )
         )
 
     def release_create_gate(self) -> None:
-        self.provisioning_test_client.resume_rule(PROV_RULE_ID)
+        self.provisioning_test_client.vm_rules.resume_rule(PROV_RULE_ID)
 
-    def evaluate_create_job(self, host_id: str) -> dict[str, Any]:
-        return self.provisioning_test_client.evaluate_job(host_id, vm_action="create")
+    def evaluate_create_job(self, host_id: str) -> MockJobEvaluation:
+        return self.provisioning_test_client.vm_rules.evaluate_job(
+            vm_job_evaluation(host_id, vm_action="create")
+        )
 
     def evaluate_settle_arguments(self) -> dict[str, Any]:
         return {
@@ -214,15 +226,18 @@ class VmComputeDealDriver:
         )
 
     def arm_teardown_gate(self) -> None:
-        delete_mock_rules_if_present(self.provisioning_test_client, REMOVE_RULE_ID)
-        self.provisioning_test_client.add_mock_rule(
-            rule_id=REMOVE_RULE_ID,
-            match={"vm_action": "vm_remove"},
-            pause_before_result=True,
+        rules = self.provisioning_test_client.vm_rules
+        delete_mock_rules_if_present(rules, REMOVE_RULE_ID)
+        rules.add_rule(
+            MockRuleCreate(
+                rule_id=REMOVE_RULE_ID,
+                match={"vm_action": "vm_remove"},
+                pause_before_result=True,
+            )
         )
 
     def release_teardown_gate(self) -> None:
-        self.provisioning_test_client.resume_rule(REMOVE_RULE_ID)
+        self.provisioning_test_client.vm_rules.resume_rule(REMOVE_RULE_ID)
 
     def reserve_released_capacity(
         self, storefront_admin_client: Any, *, listing_id: str, escrow_uid: str

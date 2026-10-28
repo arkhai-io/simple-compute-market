@@ -1255,7 +1255,8 @@ The playbooks use `vm_target` four ways, and a name must satisfy all of them:
 A fulfillment's guest is named by the provisioning service from its capacity
 reservation, `tenant-` and 24 hex characters, which satisfies all four by
 construction (`vm_provisioning_adapter.guest_names`). A name an operator chooses
-for a direct VM operation is not checked; it must satisfy the same rules.
+when creating a VM directly is checked against the same rules, and a name that
+fails them is refused with 422, naming the rule, before any job is submitted.
 
 **Available Actions**:
 - `create`: Create new VM with specified resources

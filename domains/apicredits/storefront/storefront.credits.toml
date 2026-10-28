@@ -44,10 +44,9 @@ priority = ["alkahest.v1"]
 
 [settlement.alkahest]
 enabled = true
-# The same address book `[chains.anvil]` below points at. Read separately:
-# this one by the settlement readiness preflight, that one per chain when
-# the chain probe builds the clients.
-address_config_path = "/app/alkahest_anvil_addresses.json"
+# Each chain's Alkahest address book: the same anvil book the VM storefront
+# uses (one anvil deployment), bind-mounted into this container.
+address_books = { anvil = "/app/alkahest_anvil_addresses.json" }
 oracle_gated = false
 trusted_oracle_addresses = []
 # `interruptible`/`interruptible_oracle_addresses` are deliberately absent.
@@ -65,9 +64,6 @@ api_key_env = "ARKHAI_PAYMENTS_API_KEY"
 [chains.anvil]
 rpc_url  = "ws://anvil:8545"
 chain_id = 31337
-# The same Alkahest address book the VM storefront uses (one anvil
-# deployment), bind-mounted into this container.
-alkahest_address_config_path = "/app/alkahest_anvil_addresses.json"
 
 [registry]
 # Only the api-credits registry: this seller's listings speak the

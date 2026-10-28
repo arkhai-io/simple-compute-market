@@ -8,6 +8,7 @@ import pytest
 from market_identity import Identity, IdentityScheme
 
 from market_settlement_runtime import (
+    SETTLEMENT_AWAITING_DELIVERY_MIGRATION_ID,
     SETTLEMENT_MIGRATION_ID,
     SETTLEMENT_MECHANISM_PARAMS_MIGRATION_ID,
     SETTLEMENT_PRINCIPAL_MIGRATION_ID,
@@ -374,7 +375,81 @@ async def test_legacy_migration_preserves_id_and_exact_state(tmp_path) -> None:
     assert SETTLEMENT_MIGRATION_ID in ids
     assert SETTLEMENT_PRINCIPAL_MIGRATION_ID in ids
     assert settlement_migrations()[0].id == SETTLEMENT_MIGRATION_ID
-    assert settlement_migrations()[-1].id == SETTLEMENT_MECHANISM_PARAMS_MIGRATION_ID
+    assert SETTLEMENT_MECHANISM_PARAMS_MIGRATION_ID in ids
+    assert settlement_migrations()[-1].id == SETTLEMENT_AWAITING_DELIVERY_MIGRATION_ID
+
+
+def test_the_awaiting_delivery_migration_adds_its_flag_once(tmp_path) -> None:
+    """A journal from before the flag gains it unset; a rerun changes nothing."""
+    path = tmp_path / "awaiting.db"
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            "CREATE TABLE schema_migrations (id TEXT PRIMARY KEY, applied_at TEXT)"
+        )
+        for migration in settlement_migrations()[:-1]:
+            migration.apply(conn)
+            conn.execute(
+                "INSERT INTO schema_migrations (id) VALUES (?)", (migration.id,)
+            )
+        now = datetime.now(timezone.utc).isoformat()
+        record = SettlementObligationRecord.from_obligation(
+            agreement_ref="agreement", obligation_index=0, obligation=obligation()
+        )
+        conn.execute(
+            "INSERT INTO settlement_obligations (obligation_ref, agreement_ref, "
+            "obligation_index, obligation_hash, obligation, payer_principal, "
+            "claimant_principal, created_at, updated_at) "
+            "VALUES (?, 'agreement', 0, ?, ?, ?, ?, ?, ?)",
+            (
+                record.obligation_ref,
+                record.obligation_hash,
+                json.dumps(obligation(), sort_keys=True, separators=(",", ":")),
+                json.dumps(BUYER.model_dump(mode="json"), sort_keys=True, separators=(",", ":")),
+                json.dumps(SELLER.model_dump(mode="json"), sort_keys=True, separators=(",", ":")),
+                now,
+                now,
+            ),
+        )
+        conn.execute(
+            "INSERT INTO settlement_operations (obligation_ref, operation, "
+            "request_hash, state, attempts, next_attempt_unix, created_at, "
+            "updated_at) VALUES (?, 'fulfill', 'hash', 'pending', 2, 40.0, ?, ?)",
+            (record.obligation_ref, now, now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    SettlementSQLiteRepository(str(path))
+    before = _operations_table(path)
+    conn = sqlite3.connect(path)
+    try:
+        settlement_migrations()[-1].apply(conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert _operations_table(path) == before
+    columns, rows = before
+    assert columns[-1] == ("awaiting_delivery", "INTEGER", 1, "0")
+    assert [row[:5] + row[-1:] for row in rows] == [
+        (record.obligation_ref, "fulfill", "hash", "pending", 2, 0)
+    ]
+
+
+def _operations_table(path) -> tuple[list[tuple], list[tuple]]:
+    """Every column's declaration and every row of the operations table."""
+    conn = sqlite3.connect(path)
+    try:
+        columns = [
+            (row[1], row[2], row[3], row[4])
+            for row in conn.execute("PRAGMA table_info(settlement_operations)")
+        ]
+        rows = conn.execute("SELECT * FROM settlement_operations").fetchall()
+        return columns, rows
+    finally:
+        conn.close()
 
 
 def test_legacy_conflict_rolls_back_whole_migration(tmp_path) -> None:

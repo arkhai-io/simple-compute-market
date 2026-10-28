@@ -17,6 +17,7 @@ from compute_provisioning.startup import (
     stop_compute_provisioning_runtime,
 )
 
+from compute_provisioning_contracts import PrincipalRotationResponse
 from market_identity import RotationRequest
 from compute_provisioning_service import app_runtime
 from compute_provisioning_service import container as _container_module
@@ -33,6 +34,9 @@ from compute_provisioning_service.controllers.capacity_definitions_controller im
 from compute_provisioning_service.controllers.pools_controller import PoolController
 from compute_provisioning_service.controllers.fulfillment_controller import FulfillmentController
 from compute_provisioning_service.controllers.system_controller import make_system_routers
+from compute_provisioning_service.services.principal_authority import (
+    PrincipalRotationError,
+)
 from compute_provisioning_service.services.system_status import SERVICE_VERSION
 from compute_provisioning_service.controllers import (
     host_import_controller,
@@ -296,21 +300,19 @@ app = build_compute_provisioning_app(
 )
 
 # Durable administrator-controlled caller-principal rotation.
-@app.post("/api/v1/identity/rotations/{role}")
+@app.post("/api/v1/identity/rotations/{role}", response_model=PrincipalRotationResponse)
 async def rotate_provisioning_principal(
     role: str,
     body: RotationRequest,
     request: Request,
-):
-    from compute_provisioning_service.services.principal_authority import (
-        PrincipalRotationError,
-    )
-
+) -> PrincipalRotationResponse:
     try:
-        return container.principal_authority().rotate(
-            role,
-            body,
-            actor=request.state.marketplace_principal,
+        return PrincipalRotationResponse.model_validate(
+            container.principal_authority().rotate(
+                role,
+                body,
+                actor=request.state.marketplace_principal,
+            )
         )
     except PrincipalRotationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

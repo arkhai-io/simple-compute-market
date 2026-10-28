@@ -296,6 +296,7 @@ class ContactExchangeComposition:
                 persist=persist,
                 load=self._store.load,
                 complete=complete,
+                claim_seller_dispatch=self._store.claim_seller_dispatch,
             ),
             resolve_seller_contact=self._resolve_seller_contact,
             deliver=self._deliver,

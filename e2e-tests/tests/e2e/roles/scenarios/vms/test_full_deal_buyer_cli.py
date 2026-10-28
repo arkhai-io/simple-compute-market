@@ -88,6 +88,7 @@ from datetime import datetime, timedelta, timezone
 from importlib import resources
 
 import pytest
+from compute_provisioning_contracts import MockRuleCreate
 from market_alkahest.dev_chain import anvil_address_book_path
 
 from market_alkahest.alkahest import (
@@ -415,8 +416,8 @@ class TestStage00g_AlkahestConfigured:
             f"Storefront alkahest client is not configured for anvil: "
             f"checks.alkahest={alkahest_check!r}\n"
             "The on-chain escrow phases (07, 07b) will fail without a working AlkahestClient.\n"
-            "Fix for docker-compose: ensure [chains.anvil] in config.bob.toml has "
-            "rpc_url + alkahest_address_config_path set."
+            "Fix for docker-compose: ensure storefront.bob.toml sets [Chains.anvil] "
+            "rpc_url and names anvil in [Settlement.alkahest.address_books]."
         )
         deal_state._alkahest_configured = True
         log.info("[00g] Alkahest configured: checks.alkahest=%s", alkahest_check)
@@ -888,27 +889,28 @@ class TestStage07_ArmProvisioningGate:
         )
 
         delete_mock_rules_if_present(
-            provisioning_test_client,
+            provisioning_test_client.vm_rules,
             "e2e-buy-create",
             PROV_RULE_ID,
         )
-        provisioning_test_client.add_mock_rule(
-            rule_id=PROV_RULE_ID,
-            match={"vm_action": "create"},
-            pause_before_result=True,
-            # The create fact the VM playbook prints, with the forwarded port and
-            # the time access became ready: a create reporting neither says
-            # nothing a buyer can use, and fails.
-            result_stdout=(
-                'ok: [kvm1] => {\n    "vm_creation_data": '
-                '{"action": "create", "vm_name": "e2e-test-vm", "tenant_user": "vmuser", '
-                '"external_ssh_port": "2222", "timestamp": "2030-01-01T00:00:01Z", '
-                '"tenant_ssh_key_path": "/tmp/e2e.key", "frp": {"enabled": false}, '
-                '"authentication": {"tenant": {"ssh_commands": '
-                '{"external": "ssh vmuser@localhost", '
-                '"internal": "ssh vmuser@10.0.0.1"}}}}\n}\n'
-            ),
-            fail_with=None,
+        provisioning_test_client.vm_rules.add_rule(
+            MockRuleCreate(
+                rule_id=PROV_RULE_ID,
+                match={"vm_action": "create"},
+                pause_before_result=True,
+                # The create fact the VM playbook prints, with the forwarded port
+                # and the time access became ready: a create reporting neither
+                # says nothing a buyer can use, and fails.
+                result_stdout=(
+                    'ok: [kvm1] => {\n    "vm_creation_data": '
+                    '{"action": "create", "vm_name": "e2e-test-vm", "tenant_user": "vmuser", '
+                    '"external_ssh_port": "2222", "timestamp": "2030-01-01T00:00:01Z", '
+                    '"tenant_ssh_key_path": "/tmp/e2e.key", "frp": {"enabled": false}, '
+                    '"authentication": {"tenant": {"ssh_commands": '
+                    '{"external": "ssh vmuser@localhost", '
+                    '"internal": "ssh vmuser@10.0.0.1"}}}}\n}\n'
+                ),
+            )
         )
         deal_state.provisioning_gate_armed = True
         log.info("[07] Provisioning gate armed with rule=%s", PROV_RULE_ID)
@@ -1010,8 +1012,8 @@ class TestStage07b_VerifyEscrow:
 # the real submit via `market settle`, the resource is reserved by the
 # time we could run them — and their narrow coverage is already exercised
 # by domains/vms/storefront/tests/integration/test_settle_controller.py
-# (evaluate_settle) and provisioning/compute/service/tests/unit/services/
-# test_programmable_mock.py (evaluate_job).
+# (evaluate_settle) and provisioning/compute/service/tests/integration/
+# test_system_api.py (evaluate_job).
 # ===========================================================================
 
 
@@ -1106,7 +1108,7 @@ class TestStage09a_ProvisioningCompletes:
         """
         require_state(deal_state, "fulfillment_id")
 
-        provisioning_test_client.resume_rule(PROV_RULE_ID)
+        provisioning_test_client.vm_rules.resume_rule(PROV_RULE_ID)
         provisioning_test_client.drain(timeout=30)
         provisioning_client.advance_fulfillment_convergence_cycle()
 
@@ -1407,11 +1409,13 @@ class TestStage10a_LeaseExpirySetup:
         require_state(deal_state, "lease_id", "real_escrow_uid",
                       "reserved_resource_id", "deal_lease")
         assert_lease_watchdog_held(provisioning_client)
-        delete_mock_rules_if_present(provisioning_test_client, REMOVE_RULE_ID)
-        provisioning_test_client.add_mock_rule(
-            rule_id=REMOVE_RULE_ID,
-            match={"vm_action": "vm_remove"},
-            pause_before_result=True,
+        delete_mock_rules_if_present(provisioning_test_client.vm_rules, REMOVE_RULE_ID)
+        provisioning_test_client.vm_rules.add_rule(
+            MockRuleCreate(
+                rule_id=REMOVE_RULE_ID,
+                match={"vm_action": "vm_remove"},
+                pause_before_result=True,
+            )
         )
         # Expire the lease rather than interrupting the deal. Expiry is what ends
         # a lease in production; interruption is an operator escape hatch for a
@@ -1441,7 +1445,7 @@ class TestStage10b_LeaseCycleBeginsTeardown:
     ):
         require_state(deal_state, "_termination_requested", "deal_lease", "reserved_resource_id")
         summary = provisioning_client.check_leases()
-        assert summary.get("checked", 0) >= 1, summary
+        assert summary.checked >= 1, summary
         lease = deal_state.deal_lease.refresh()
         assert lease.get("status") == "releasing", lease
         fulfillment_id = lease.get("fulfillment_id")
@@ -1468,8 +1472,7 @@ class TestStage11a_TeardownDispatch:
         deal_state: DealState,
     ):
         require_state(deal_state, "fulfillment_id", "reserved_resource_id")
-        diagnostics = provisioning_client.advance_fulfillment_convergence_cycle()
-        assert "before" in diagnostics and "after" in diagnostics
+        provisioning_client.advance_fulfillment_convergence_cycle()
         fulfillment = provisioning_client.get_fulfillment_status(deal_state.fulfillment_id).model_dump(mode="json")
         assert fulfillment.get("state") == "tearing_down", fulfillment
         assert deal_state.deal_lease.resource_consumed(
@@ -1492,7 +1495,7 @@ class TestStage11b_TeardownCompletion:
         existing = storefront_admin_client.get_events(limit=500, stage=sync_stage)
         since_id = max((ev.id for ev in existing.events), default=0)
 
-        provisioning_test_client.resume_rule(REMOVE_RULE_ID)
+        provisioning_test_client.vm_rules.resume_rule(REMOVE_RULE_ID)
         provisioning_test_client.drain(timeout=30)
         # Convergence-driven, not one-shot: `drain` returns when the provider
         # job is no longer gated, which is not the same instant its outcome is
@@ -1502,7 +1505,7 @@ class TestStage11b_TeardownCompletion:
         )
 
         release_summary = provisioning_client.check_leases()
-        assert release_summary.get("released", 0) >= 1, release_summary
+        assert release_summary.released >= 1, release_summary
         lease = deal_state.deal_lease.refresh()
         assert lease.get("status") == "released", lease
 

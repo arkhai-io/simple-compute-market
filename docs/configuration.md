@@ -113,11 +113,16 @@ broken `rl` setup at startup.
 
 ## Storefront: fulfillment failure policy
 
-The storefront failure policy is an explicit commercial/admin repair surface;
-it is not the physical release authority for durable fulfillments. Provisioning
+The storefront failure policy is the storefront's commercial response to a
+failed fulfillment; it is not the physical release authority for durable
+fulfillments. Provisioning
 provider failures retain capacity until fulfillment teardown succeeds or an
-operator performs explicit recovery. Legacy callback invocation may emit events
-or run configured commercial actions:
+operator performs explicit recovery. The VM storefront runs the policy on its
+pull path, when it reads a failed fulfillment: settlement's provisioning step
+when starting the fulfillment fails, and the fulfillment-resume loop when the
+provisioning service reports the fulfillment failed. No callback runs it; the
+provisioning service's only callback to the storefront is capacity-released.
+The policy may emit events or run configured commercial actions:
 
 ```toml
 [fulfillment.failure_policy]
@@ -130,7 +135,7 @@ Supported actions:
 
 | Action | Behavior |
 |---|---|
-| `release_capacity` | Explicit admin repair for a reservation proven safe outside the fulfillment lifecycle. Do not configure this as an automatic response to provider create/teardown failure; provisioning-owned teardown is authoritative. |
+| `release_capacity` | Ask the listing's recorded site to release the failed deal's reservation, recording the failure as its reason, and reopen the listings the release makes fit again. The site's release guard decides whether anything is freed: it frees the capacity only when the fulfillment has been torn down, or when nothing was dispatched for the reservation — no fulfillment aggregate, or one still `assigned` or `abandoned`, with no create handle and no job, as when starting the fulfillment failed before any create was sent. It refuses a fulfillment the provisioning service reports `failed`, whose create may have left a workload; that reservation stays held, reopening nothing, until an operator verifies the host and force-releases it. It is in the default list. Omit it to leave even an undispatched reservation held until the lease's own release frees it. |
 | `emit_event` | Write a `stage_events` row with `stage="fulfillment"` and `event="failed"`; this is visible through `/api/v1/system/events` and its SSE stream. |
 | `webhook` | POST the failure payload to `webhook_url`. Failures are logged and do not block the rest of the policy chain. |
 | `refund` | Attempt the explicit seller refund path: send already-claimed assets back to the buyer. Token escrows dispatch through the selected escrow codec, covering native token, ERC-20, ERC-721, ERC-1155, and token-bundle escrows. Rows without a stored escrow proposal are skipped rather than deriving refund details from listing defaults. |

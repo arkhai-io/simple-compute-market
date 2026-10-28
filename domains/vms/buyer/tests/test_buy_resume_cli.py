@@ -509,12 +509,7 @@ class TestBuyFrom:
 
         monkeypatch.setattr(
             "arkhai_vms_buyer.common.chain_by_name",
-            lambda name: ChainConfig(
-                name=name,
-                rpc_url="http://rpc",
-                chain_id=31337,
-                alkahest_address_config_path="/tmp/alkahest.json",
-            ),
+            lambda name: ChainConfig(name=name, rpc_url="http://rpc", chain_id=31337),
         )
         monkeypatch.setattr(
             "arkhai_vms_buyer.settlement_composition.load_user_config",

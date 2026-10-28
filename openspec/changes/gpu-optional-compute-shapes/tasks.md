@@ -401,6 +401,11 @@ and every fixture asserting a host's GPU field.
   `test_fulfillment_convergence_after_legacy_backfill.py`); the legacy-capacity test's
   "host rows unchanged" case now runs the chain to the entry before `20260921_004`, then that
   entry alone.
+  *Correction, at the merge of `dev`.* `dev` added `20261028_001_retired_reservation_states`
+  under the same date and sequence number, so the drop is now
+  `20261028_002_hosts_drop_gpu_columns`, ordered after it; the two touch different tables.
+  A database that recorded the drop under its earlier id runs it again under the new one and,
+  finding no GPU column, changes nothing.
 - [x] 4.5 The e2e host harness compares an existing host's pool alone when deciding to
   update it, and passes no GPU field (D5 "The one non-production reader"). Unit: `make
   test-e2e-unit` passes.
@@ -916,6 +921,20 @@ Files: `domains/vms/listings/src/arkhai_vms_listings/pricing.py` (`extract_compu
   into this branch before closeout, each of these bumps is rechecked against the merged
   `dev` version, and a package `dev` has since bumped is bumped again from it, its pins
   moving with it.
+  *Correction, at the merge of `dev`.* `dev` had bumped eight of these packages from the
+  same base, so each takes its bump again from `dev`'s version: minor for
+  `arkhai-bare-metal-storefront` 0.24.0 and `arkhai-vms-storefront` 0.24.0 (from 0.23.1),
+  `arkhai-vms-settlement` 0.5.0, `arkhai-core-storefront-client` 0.29.0,
+  `arkhai-compute-provisioning-contracts` 0.12.0, `arkhai-compute-provisioning` 0.22.0, and
+  `arkhai-compute-provisioning-service` 0.20.0; patch for
+  `arkhai-compute-provisioning-client` 0.9.1 (from 0.9.0). Bounds this change raised move
+  with them: contracts `>=0.12.0` in `arkhai-compute-provisioning`, the client, the
+  provisioning service, and the e2e suite; the service's `arkhai-compute-provisioning>=0.22.0`
+  and `arkhai-core-storefront-client==0.29.0`; the VM storefront's
+  `arkhai-bare-metal-storefront==0.24.0` and `arkhai-vms-settlement>=0.5.0`. Where `dev`
+  raised a bound for its own reason (the VM storefront's `arkhai-vms-negotiation>=0.6.0`,
+  the e2e suite's and the service's client `>=0.9.0`), `dev`'s bound stands. The other
+  seven packages bumped here `dev` left alone, so their bumps stand.
 
 ## 8. A GPU-less VM deal end to end
 

@@ -801,18 +801,16 @@ async def seller_auth_alkahest_ready_client(db):
     """The same app with Alkahest ready on the anvil chain, so a create derives
     the release conditions its published escrows advertise."""
     chains = {
-        "anvil": ChainConfig(
-            name="anvil",
-            rpc_url="http://anvil.test",
-            chain_id=31337,
-            alkahest_address_config_path=str(anvil_address_book_path()),
-        )
+        "anvil": ChainConfig(name="anvil", rpc_url="http://anvil.test", chain_id=31337)
     }
     ready = MechanismReadiness(
         mechanism="alkahest.v1", configured=True, enabled=True, ready=True
     )
     with patch.dict(storefront_config.CHAINS, chains, clear=True), settings_overrides(
-        **{"wallet.address": _SELLER_WALLET}
+        **{
+            "wallet.address": _SELLER_WALLET,
+            "settlement.alkahest.address_books": {"anvil": str(anvil_address_book_path())},
+        }
     ):
         async for client in _full_client(db, readiness=(ready,)):
             yield client

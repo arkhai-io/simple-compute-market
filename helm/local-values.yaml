@@ -34,7 +34,6 @@ storefront:
           anvil:
             rpc_url: http://arkhai-node-operator-dev-env:8545
             chain_id: 31337
-            alkahest_address_config_path: /etc/arkhai/alkahest/alkahest_anvil_addresses.json
         pricing:
           # The dev chain's deterministic test token, as the Compose lane sells.
           settlements:
@@ -52,7 +51,9 @@ storefront:
             - contact-exchange.v1
           alkahest:
             enabled: true
-            address_config_path: /etc/arkhai/alkahest/alkahest_anvil_addresses.json
+            # The dev-env chart's address book, mounted by alkahestAddressBook.
+            address_books:
+              anvil: /etc/arkhai/alkahest/alkahest_anvil_addresses.json
             oracle_gated: false
             trusted_oracle_addresses: []
             interruptible: false

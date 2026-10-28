@@ -65,6 +65,13 @@ Escrow is Alkahest's model, but it still sits in shared carriers. `SettlementObl
     `kit-owned-storefront-shell`'s design for which change lands the lifespan step.
   - `market_core.schemas`'s Alkahest-named escrow fields leave with
     `SettlementObligation`'s, which the first bullet above already moves.
+  - `kit/config`'s settlement migration (`market_config/settlement_migration.py`)
+    encodes the meaning of `[Settlement.alkahest.address_books]` — which chain a
+    retired address-book key served, and when that is ambiguous — while `kit/alkahest`
+    owns the table and refuses the retired keys. Handed over 2026-10-28 by
+    `resolve-compute-family-findings`' closeout: the design decides whether the
+    Alkahest half of the migration moves to `kit/alkahest`, leaving `kit/config` the
+    mechanism-neutral steps.
 - The VM listing and negotiation specializations stop importing `kit/alkahest`,
   since neither carries a mechanism in its name and so neither may know one
   (`ARCHITECTURE.md`, "Scope"):

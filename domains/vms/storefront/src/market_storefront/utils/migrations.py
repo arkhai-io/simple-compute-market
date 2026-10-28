@@ -23,6 +23,7 @@ from core_storefront.sqlite_migrations import (  # noqa: F401 — re-exported
 )
 
 from market_storefront.payment_repository import add_vm_settlement_records
+from market_storefront.utils.config import chain_address_books
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +46,6 @@ def synthesize_accepted_escrows_from_demand(
     demand_resource: Any,
 ) -> list[dict[str, Any]] | None:
     """Build ``accepted_escrows`` from a legacy ERC20 ``demand_resource``."""
-    from market_storefront.utils.config import CHAINS
-
     normalized = _normalize_to_dict(demand_resource)
     if not normalized:
         return None
@@ -71,11 +70,11 @@ def synthesize_accepted_escrows_from_demand(
     from market_alkahest.alkahest import get_erc20_escrow_obligation_default
 
     entries: list[dict[str, Any]] = []
-    for name, chain in CHAINS.items():
+    for name, address_book in chain_address_books().items():
         try:
             escrow_address = get_erc20_escrow_obligation_default(
                 name,
-                config_path=chain.alkahest_address_config_path,
+                config_path=address_book,
             )
         except Exception as exc:
             logger.debug(

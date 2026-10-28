@@ -183,7 +183,12 @@ class VmAlkahestSellerStage:
         }
 
     def verified_evidence(
-        self, *, raw: bytes, order: dict, source: dict, chain_configs: dict
+        self,
+        *,
+        raw: bytes,
+        order: dict,
+        source: dict,
+        chain_config_paths: Mapping[str, str | None],
     ) -> SettlementEvidence:
         agreement = json.loads(raw)
         selected = agreement["settlement"]
@@ -191,7 +196,7 @@ class VmAlkahestSellerStage:
             raise ValueError("Agreement does not select Alkahest")
         accepted = selected["params"]["accepted_escrow"]
         token = token_resource_from_accepted_escrow(
-            accepted, chain_configs=chain_configs
+            accepted, chain_config_paths=chain_config_paths
         )
         if token is None:
             raise ValueError("Alkahest VM lease requires an accepted token resource")
@@ -243,9 +248,7 @@ class VmAlkahestSellerStage:
             alkahest_client=client,
             chain_name=chain_name,
             escrow_address=proposal.escrow_address,
-            alkahest_address_config_path=config.CHAINS[
-                chain_name
-            ].alkahest_address_config_path,
+            address_book=config.chain_address_books()[chain_name],
         )
         if index != source["obligation_index"]:
             raise ValueError("Alkahest recovered obligation changed")

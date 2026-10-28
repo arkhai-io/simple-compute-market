@@ -1409,14 +1409,16 @@
                     "null"
                   ]
                 },
-                "^[aA][dD][dD][rR][eE][sS][sS]_[cC][oO][nN][fF][iI][gG]_[pP][aA][tT][hH]$": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
+                "^[aA][dD][dD][rR][eE][sS][sS]_[bB][oO][oO][kK][sS]$": {
+                  "additionalProperties": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "type": [
+                    "object",
+                    "null"
                   ]
                 },
                 "^[oO][rR][aA][cC][lL][eE]_[gG][aA][tT][eE][dD]$": {

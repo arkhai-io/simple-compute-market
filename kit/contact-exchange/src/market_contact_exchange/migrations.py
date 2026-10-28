@@ -6,7 +6,8 @@ introduction start. Deleting the payloads redacts that row in place rather
 than removing it, because the row is also the only record that the
 introduction was revealed: without it, a later start would reveal again. See
 openspec/specs/contact-exchange-settlement/spec.md, "Deleting contact payloads
-leaves a tombstone".
+leaves a tombstone". Beside it, one claim row per introduction records which
+start dispatches the seller-side delivery, so it is dispatched at most once.
 """
 
 from __future__ import annotations
@@ -22,6 +23,9 @@ from .introduction_routes import IntroductionPayloadsDeletedError, IntroductionR
 CONTACT_EXCHANGE_INTRODUCTIONS_MIGRATION_ID = "20260815_006_contact_introductions"
 CONTACT_EXCHANGE_TOMBSTONES_MIGRATION_ID = (
     "20261001_007_contact_introduction_tombstones"
+)
+CONTACT_EXCHANGE_SELLER_DISPATCH_CLAIMS_MIGRATION_ID = (
+    "20261027_008_contact_introduction_seller_dispatch_claims"
 )
 
 #: The text form of every timestamp in ``contact_introductions``: UTC, second
@@ -107,6 +111,25 @@ def _add_introduction_tombstones(conn: sqlite3.Connection) -> None:
     )
 
 
+def _add_seller_dispatch_claims(conn: sqlite3.Connection) -> None:
+    # One row per introduction whose seller-side delivery has been claimed by
+    # the start that completed its reveal. A table of its own, not a column on
+    # contact_introductions: that row's trigger admits no update but the
+    # one-way redaction, which is what keeps a revealed row from being
+    # rewritten. Created empty, which is correct only because no deployment
+    # holds an introduction revealed before the table exists: such an
+    # introduction would hold no claim, and the next start for it would
+    # announce it to its seller again.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS contact_introduction_seller_dispatches (
+            obligation_ref TEXT NOT NULL PRIMARY KEY,
+            claimed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+        )
+        """
+    )
+
+
 CONTACT_EXCHANGE_MIGRATIONS = (
     SettlementMigration(
         CONTACT_EXCHANGE_INTRODUCTIONS_MIGRATION_ID,
@@ -115,6 +138,10 @@ CONTACT_EXCHANGE_MIGRATIONS = (
     SettlementMigration(
         CONTACT_EXCHANGE_TOMBSTONES_MIGRATION_ID,
         _add_introduction_tombstones,
+    ),
+    SettlementMigration(
+        CONTACT_EXCHANGE_SELLER_DISPATCH_CLAIMS_MIGRATION_ID,
+        _add_seller_dispatch_claims,
     ),
 )
 
@@ -214,6 +241,22 @@ def delete_introduction_payloads(
     return cursor.rowcount > 0
 
 
+def claim_seller_dispatch(conn: sqlite3.Connection, obligation_ref: str) -> bool:
+    """Claim one introduction's seller-side delivery; ``True`` for the one winner.
+
+    The primary key makes the insert succeed for exactly one caller, however
+    many starts complete the same reveal, concurrently or later. The claim
+    holds only once the caller commits.
+    """
+
+    cursor = conn.execute(
+        "INSERT OR IGNORE INTO contact_introduction_seller_dispatches "
+        "(obligation_ref) VALUES (?)",
+        (obligation_ref,),
+    )
+    return cursor.rowcount == 1
+
+
 def select_expired_introductions(
     conn: sqlite3.Connection,
     *,
@@ -242,7 +285,9 @@ def select_expired_introductions(
 __all__ = [
     "CONTACT_EXCHANGE_INTRODUCTIONS_MIGRATION_ID",
     "CONTACT_EXCHANGE_MIGRATIONS",
+    "CONTACT_EXCHANGE_SELLER_DISPATCH_CLAIMS_MIGRATION_ID",
     "CONTACT_EXCHANGE_TOMBSTONES_MIGRATION_ID",
+    "claim_seller_dispatch",
     "delete_introduction_payloads",
     "format_introduction_timestamp",
     "insert_introduction",

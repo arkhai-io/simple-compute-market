@@ -32,23 +32,314 @@ def _accept_typed_candidate(_document: object, role: object) -> None:
     assert role in {"buyer", "seller"}
 
 
-def test_incompatible_per_chain_address_books_are_a_conflict(tmp_path: Path) -> None:
-    path = tmp_path / "storefront.toml"
-    original = _write(
+def _migrated(path: Path, text: str, role: str = "seller") -> dict:
+    _write(path, text)
+    migrate_settlement_config(
         path,
-        """[Chains.one]
+        role=role,
+        write=True,
+        backup=True,
+        validator=_accept_typed_candidate,
+        installed=_ALKAHEST_ONLY,
+    )
+    return tomllib.loads(path.read_text())
+
+
+_CURRENT = """[Settlement]
+schema_version = 1
+priority = ["alkahest.v1"]
+
+[Settlement.alkahest]
+enabled = true
+"""
+
+
+def test_each_per_chain_address_book_moves_to_its_own_chain(tmp_path: Path) -> None:
+    document = _migrated(
+        tmp_path / "storefront.toml",
+        _CURRENT
+        + """
+[Chains.one]
+rpc_url = "https://one.invalid"
 alkahest_address_config_path = "/one.json"
 
 [Chains.two]
+rpc_url = "https://two.invalid"
 alkahest_address_config_path = "/two.json"
 """,
     )
 
-    with pytest.raises(SettlementMigrationConflict):
-        migrate_settlement_config(path, role="seller", write=True, backup=True, installed=_ALKAHEST_ONLY)
+    assert document["Settlement"]["alkahest"]["address_books"] == {
+        "one": "/one.json",
+        "two": "/two.json",
+    }
+    assert document["Chains"] == {
+        "one": {"rpc_url": "https://one.invalid"},
+        "two": {"rpc_url": "https://two.invalid"},
+    }
 
+
+def test_the_section_key_moves_to_the_one_configured_chain(tmp_path: Path) -> None:
+    document = _migrated(
+        tmp_path / "storefront.toml",
+        _CURRENT
+        + """address_config_path = "/book.json"
+
+[Chains.anvil]
+rpc_url = "http://anvil.invalid"
+""",
+    )
+
+    alkahest = document["Settlement"]["alkahest"]
+    assert alkahest["address_books"] == {"anvil": "/book.json"}
+    assert "address_config_path" not in alkahest
+
+
+def test_the_section_key_moves_to_the_chains_whose_own_keys_name_its_book(
+    tmp_path: Path,
+) -> None:
+    """The section key served every chain's claims, so where several are
+    configured it moves to those whose own keys name the same book; the others
+    keep the book every other reader used, and the check names each of them,
+    by path only, before anything is written."""
+    path = tmp_path / "storefront.toml"
+    text = (
+        _CURRENT
+        + """address_config_path = "/shared.json"
+
+[Chains.one]
+rpc_url = "https://one.invalid"
+alkahest_address_config_path = "/shared.json"
+
+[Chains.two]
+rpc_url = "https://two.invalid"
+alkahest_address_config_path = "/two.json"
+
+[Chains.three]
+rpc_url = "https://three.invalid"
+"""
+    )
+    _write(path, text)
+
+    checked = migrate_settlement_config(
+        path, role="seller", check=True, installed=_ALKAHEST_ONLY
+    )
+
+    assert checked.notices == (
+        "Settlement.alkahest.address_config_path no longer applies to chain two: "
+        "its claims are serviced against Settlement.alkahest.address_books.two",
+        "Settlement.alkahest.address_config_path no longer applies to chain three: "
+        "its claims are serviced against the SDK's built-in addresses",
+    )
+    report = migration.format_migration_result(checked)
+    assert [line for line in report if line.startswith("note: ")] == [
+        f"note: {notice}" for notice in checked.notices
+    ]
+    assert ".json" not in "\n".join(report)
+
+    document = _migrated(path, text)
+
+    assert document["Settlement"]["alkahest"]["address_books"] == {
+        "one": "/shared.json",
+        "two": "/two.json",
+    }
+
+
+def test_a_chain_the_table_already_names_is_noted_as_using_its_entry(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "storefront.toml"
+    _write(
+        path,
+        _CURRENT
+        + """address_config_path = "/shared.json"
+
+[Settlement.alkahest.address_books]
+two = "/two.json"
+
+[Chains.one]
+rpc_url = "https://one.invalid"
+alkahest_address_config_path = "/shared.json"
+
+[Chains.two]
+rpc_url = "https://two.invalid"
+""",
+    )
+
+    checked = migrate_settlement_config(
+        path, role="seller", check=True, installed=_ALKAHEST_ONLY
+    )
+
+    assert checked.notices == (
+        "Settlement.alkahest.address_config_path no longer applies to chain two: "
+        "its claims are serviced against Settlement.alkahest.address_books.two",
+    )
+
+
+def test_a_buyers_migration_names_no_chain_the_section_key_leaves(
+    tmp_path: Path,
+) -> None:
+    """No buyer serviced claims against the section key, so nothing changes
+    for the chains it does not move to."""
+    path = tmp_path / "buyer.toml"
+    _write(
+        path,
+        _CURRENT
+        + """address_config_path = "/shared.json"
+
+[Chains.one]
+rpc_url = "https://one.invalid"
+alkahest_address_config_path = "/shared.json"
+
+[Chains.two]
+rpc_url = "https://two.invalid"
+""",
+    )
+
+    checked = migrate_settlement_config(
+        path, role="buyer", check=True, installed=_ALKAHEST_ONLY
+    )
+
+    assert checked.notices == ()
+
+
+def test_a_section_key_carried_to_every_chain_is_not_noted(tmp_path: Path) -> None:
+    path = tmp_path / "storefront.toml"
+    _write(
+        path,
+        _CURRENT
+        + """address_config_path = "/book.json"
+
+[Chains.anvil]
+rpc_url = "http://anvil.invalid"
+""",
+    )
+
+    checked = migrate_settlement_config(
+        path, role="seller", check=True, installed=_ALKAHEST_ONLY
+    )
+
+    assert checked.notices == ()
+
+
+def test_a_section_key_whose_chains_cannot_be_told_is_refused_naming_both_keys(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "storefront.toml"
+    original = _write(
+        path,
+        _CURRENT
+        + """address_config_path = "/book.json"
+
+[Chains.one]
+rpc_url = "https://one.invalid"
+
+[Chains.two]
+rpc_url = "https://two.invalid"
+""",
+    )
+
+    with pytest.raises(SettlementMigrationError) as refused:
+        migrate_settlement_config(
+            path, role="seller", write=True, backup=True, installed=_ALKAHEST_ONLY
+        )
+
+    assert "Settlement.alkahest.address_config_path" in str(refused.value)
+    assert "Settlement.alkahest.address_books" in str(refused.value)
+    assert "/book.json" not in str(refused.value)
     assert path.read_bytes() == original
     assert not path.with_name("storefront.toml.bak").exists()
+
+
+def test_two_different_books_for_one_chain_are_a_conflict(tmp_path: Path) -> None:
+    path = tmp_path / "storefront.toml"
+    original = _write(
+        path,
+        _CURRENT
+        + """
+[Settlement.alkahest.address_books]
+anvil = "/stated.json"
+
+[Chains.anvil]
+rpc_url = "http://anvil.invalid"
+alkahest_address_config_path = "/other.json"
+""",
+    )
+
+    with pytest.raises(SettlementMigrationConflict):
+        migrate_settlement_config(
+            path, role="seller", write=True, backup=True, installed=_ALKAHEST_ONLY
+        )
+
+    assert path.read_bytes() == original
+
+
+def test_a_chain_key_and_the_section_key_naming_two_books_are_a_conflict(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "storefront.toml"
+    original = _write(
+        path,
+        _CURRENT
+        + """address_config_path = "/section.json"
+
+[Chains.anvil]
+rpc_url = "http://anvil.invalid"
+alkahest_address_config_path = "/chain.json"
+""",
+    )
+
+    with pytest.raises(SettlementMigrationConflict):
+        migrate_settlement_config(
+            path, role="seller", write=True, backup=True, installed=_ALKAHEST_ONLY
+        )
+
+    assert path.read_bytes() == original
+
+
+def test_a_moved_book_is_trimmed_as_the_table_requires(tmp_path: Path) -> None:
+    document = _migrated(
+        tmp_path / "storefront.toml",
+        _CURRENT
+        + """
+[Chains.anvil]
+rpc_url = "http://anvil.invalid"
+alkahest_address_config_path = " /book.json "
+""",
+    )
+
+    assert document["Settlement"]["alkahest"]["address_books"] == {"anvil": "/book.json"}
+
+
+def test_a_completed_address_book_migration_reruns_as_a_no_op(tmp_path: Path) -> None:
+    path = tmp_path / "buyer.toml"
+    _migrated(
+        path,
+        _CURRENT
+        + """address_config_path = "/book.json"
+
+[Chains.anvil]
+rpc_url = "http://anvil.invalid"
+alkahest_address_config_path = "/book.json"
+""",
+        role="buyer",
+    )
+    migrated = path.read_bytes()
+
+    again = migrate_settlement_config(
+        path,
+        role="buyer",
+        write=True,
+        backup=True,
+        validator=_accept_typed_candidate,
+        installed=_ALKAHEST_ONLY,
+    )
+
+    assert again.changed is False
+    assert path.read_bytes() == migrated
+    assert tomllib.loads(migrated.decode())["Settlement"]["alkahest"]["address_books"] == {
+        "anvil": "/book.json"
+    }
 
 
 def test_candidate_validator_failure_rolls_back_without_backup(tmp_path: Path) -> None:
@@ -282,10 +573,9 @@ answer = 42
         "alkahest.v1",
     ]
     assert document["Settlement"]["alkahest"]["enabled"] is True
-    assert (
-        document["Settlement"]["alkahest"]["address_config_path"]
-        == "/run/alkahest.json"
-    )
+    assert document["Settlement"]["alkahest"]["address_books"] == {
+        "anvil": "/run/alkahest.json"
+    }
     assert "alkahest_address_config_path" not in document["Chains"]["anvil"]
     assert document["Identity"]["identifier"] == "public-only"
     assert document["Wallet"]["private_key"] == "secret-wallet-value"
@@ -347,7 +637,10 @@ keep = "yes" # unrelated comment
     assert alkahest["trusted_oracle_addresses"] == ["0x111"]
     assert alkahest["interruptible"] is False
     assert alkahest["interruptible_oracle_addresses"] == []
-    assert alkahest["address_config_path"] == "/etc/alkahest.json"
+    assert alkahest["address_books"] == {
+        "one": "/etc/alkahest.json",
+        "two": "/etc/alkahest.json",
+    }
 
     assert "settlement" not in document
     assert document["Identity"]["identifier"] == "seller-public"
@@ -394,6 +687,7 @@ def test_environment_mapping_renames_only_marketplace_consumer_aliases() -> None
         "oracle_gated_listings",
         "trusted_oracle_address",
         "Chains.anvil.alkahest_address_config_path",
+        "Settlement.alkahest.address_config_path",
     ],
 )
 def test_legacy_config_edit_paths_are_rejected_with_exact_command(path: str) -> None:
@@ -409,7 +703,7 @@ def test_legacy_config_edit_paths_are_rejected_with_exact_command(path: str) -> 
 def test_new_settlement_paths_are_not_treated_as_legacy() -> None:
     for path in (
         "Settlement.priority",
-        "Settlement.alkahest.address_config_path",
+        "Settlement.alkahest.address_books.anvil",
         "Identity.identifier",
         "Wallet.private_key",
         "Chains.anvil.rpc_url",

@@ -226,18 +226,15 @@ class Provisioning:
     """Schedules the reserved machine and accepts its fulfillment."""
 
     async def schedule_resource(self, request):
+        """The reserved machine as a schedule response names it: its
+        declaration's host, and its machine among its top-level attributes."""
         return SimpleNamespace(
             settlement_resource_id="settlement-resource-a",
             pool_id=POOL,
             resource_kind="compute.bare-metal",
             provider="bare_metal.ansible",
-            attributes={
-                "bare_metal_publication": {
-                    "enabled": True,
-                    "host_id": HOST,
-                    "physical_host_id": PHYSICAL_HOST,
-                }
-            },
+            host_id=HOST,
+            attributes={"physical_host_id": PHYSICAL_HOST},
         )
 
     async def begin_fulfillment(self, body):

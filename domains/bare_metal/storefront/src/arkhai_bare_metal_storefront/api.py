@@ -995,6 +995,17 @@ async def _fulfillment_identity(
     return identity
 
 
+def _fulfillment_error(exc: BareMetalFulfillmentError) -> HTTPException:
+    """The refusal as the fulfillment routes answer it, its code beside its reason."""
+
+    if exc.error is None:
+        return HTTPException(status_code=exc.status_code, detail=exc.detail)
+    return HTTPException(
+        status_code=exc.status_code,
+        detail={"error": exc.error, "reason": exc.detail},
+    )
+
+
 @router.get(
     "/api/v1/fulfillments/{negotiation_id}/status",
     response_model=BareMetalFulfillmentResponse,
@@ -1024,10 +1035,7 @@ async def fulfillment_status(
             }
         )
     except BareMetalFulfillmentError as exc:
-        raise HTTPException(
-            status_code=exc.status_code,
-            detail=exc.detail,
-        ) from exc
+        raise _fulfillment_error(exc) from exc
 
 
 async def _evidence_attestation(
@@ -1073,10 +1081,7 @@ async def fulfillment_access(
         )
         return BareMetalAccessDeliveryResponse.model_validate(access)
     except BareMetalFulfillmentError as exc:
-        raise HTTPException(
-            status_code=exc.status_code,
-            detail=exc.detail,
-        ) from exc
+        raise _fulfillment_error(exc) from exc
 
 
 @router.get(
@@ -1126,10 +1131,7 @@ async def fulfillment_result(
             result=result,
         )
     except BareMetalFulfillmentError as exc:
-        raise HTTPException(
-            status_code=exc.status_code,
-            detail=exc.detail,
-        ) from exc
+        raise _fulfillment_error(exc) from exc
 
 
 @router.post(
@@ -1156,10 +1158,7 @@ async def teardown_fulfillment(
             {**lifecycle, "escrow_uid": lifecycle["settlement_ref"]}
         )
     except BareMetalFulfillmentError as exc:
-        raise HTTPException(
-            status_code=exc.status_code,
-            detail=exc.detail,
-        ) from exc
+        raise _fulfillment_error(exc) from exc
 
 
 def _evidence_route_service(runtime: BareMetalStorefrontRuntime) -> Any:
@@ -1346,7 +1345,12 @@ async def admin_settle_wait(
         operation="admin_settle_wait",
         resource=f"{escrow_uid}?timeout={raw_timeout}",
     )
-    waited = await settlement_admin_routes(runtime).wait(escrow_uid, timeout=timeout)
+    try:
+        waited = await settlement_admin_routes(runtime).wait(
+            escrow_uid, timeout=timeout
+        )
+    except SettlementAdminRouteError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     return BareMetalSettleWaitResponse.model_validate(waited)
 
 

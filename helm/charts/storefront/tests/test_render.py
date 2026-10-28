@@ -260,11 +260,19 @@ def test_stated_values_are_rendered_as_stated() -> None:
     assert config["base_url"] == "https://bob.example/"
     assert config["db_path"] == "/var/lib/arkhai/custom.db"
     assert config["registry"] == agent["config"]["registry"]
-    assert config["provisioning"] == {"mode": "mock", "service_url": "http://provisioning.example:8081"}
+    assert config["provisioning"] == {"service_url": "http://provisioning.example:8081"}
     assert config["capacity"] == {
         "source_confirmation_seconds": 3600,
         "sites": {"west": "http://provisioning.example:8081"},
     }
+
+
+def test_a_stated_provisioning_mode_renders_beside_the_derived_service_url() -> None:
+    """The storefront reads no provisioning mode, and the schema does not
+    refuse one: an overlay stating it renders, the mode inert."""
+    config = _config(_ok(_render(agent=_with_config(provisioning={"mode": "real"}))))
+    assert config["provisioning"]["mode"] == "real"
+    assert config["provisioning"]["service_url"]
 
 
 def test_a_stated_port_equal_to_the_agents_is_accepted() -> None:
@@ -855,16 +863,10 @@ def test_a_refused_key_stays_refused_as_null() -> None:
 
 
 def _address_paths(config: dict) -> list[str]:
-    """Every Alkahest address-book path ``config`` names."""
-    paths = [
-        chain["alkahest_address_config_path"]
-        for chain in (config.get("Chains") or {}).values()
-        if chain.get("alkahest_address_config_path")
-    ]
+    """Every Alkahest address-book path ``config`` names, which only
+    ``[Settlement.alkahest.address_books]`` does."""
     alkahest = (config.get("Settlement") or {}).get("alkahest") or {}
-    if alkahest.get("address_config_path"):
-        paths.append(alkahest["address_config_path"])
-    return paths
+    return [path for path in (alkahest.get("address_books") or {}).values() if path]
 
 
 def _mounted_address_book(manifest: str) -> tuple[str, dict]:

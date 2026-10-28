@@ -22,7 +22,6 @@ Schema (storefront and buyer share wallet/chains/registry tables):
     [chains.ethereum_sepolia]
     rpc_url = "https://..."
     chain_id = 11155111
-    # alkahest_address_config_path = "/etc/arkhai/alkahest.json"  # anvil only
 
     [chains.base_sepolia]
     rpc_url = "https://..."
@@ -77,7 +76,6 @@ class ChainConfig:
     name: str
     rpc_url: str
     chain_id: int
-    alkahest_address_config_path: Optional[str] = None
 
 
 def user_config_dir() -> Path:
@@ -542,17 +540,7 @@ def chains_from_config(
         if not chain_id:
             chain_id = KNOWN_CHAIN_IDS.get(name, 0)
 
-        alkahest_path = (
-            str(sub.get("alkahest_address_config_path", "") or "").strip()
-            or None
-        )
-
-        out[name] = ChainConfig(
-            name=name,
-            rpc_url=rpc_url,
-            chain_id=chain_id,
-            alkahest_address_config_path=alkahest_path,
-        )
+        out[name] = ChainConfig(name=name, rpc_url=rpc_url, chain_id=chain_id)
     return out
 
 

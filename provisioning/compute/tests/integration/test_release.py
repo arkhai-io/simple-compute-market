@@ -258,7 +258,7 @@ def test_a_failed_fulfillment_keeps_what_it_holds_until_an_operator_forces_relea
     assert ledger.release(capacity_reservation_id=reservation_id) is None
     assert calls == []
 
-    ledger.release(capacity_reservation_id=reservation_id, state="force_released")
+    ledger.release(capacity_reservation_id=reservation_id, forced=True)
     assert calls == ["force_released"]
 
 

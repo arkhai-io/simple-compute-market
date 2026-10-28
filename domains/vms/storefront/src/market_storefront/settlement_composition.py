@@ -319,7 +319,7 @@ async def prepare_vm_settlement(
         alkahest_client=mechanism_client.chain_client(accepted_chain),
         chain_name=accepted_chain,
         escrow_address=proposal.escrow_address,
-        alkahest_address_config_path=chain.alkahest_address_config_path,
+        address_book=storefront_config.chain_address_book(accepted_chain),
     )
     if not isinstance(obligation_index, int):
         raise ValueError("escrow verification did not identify an exact obligation")
@@ -337,7 +337,7 @@ async def prepare_vm_settlement(
     evidence = stage.verified_evidence(
         raw=raw,
         order=dict(order),
-        chain_configs=storefront_config.CHAINS,
+        chain_config_paths=storefront_config.chain_address_books(),
         source={
             "escrow_uid": escrow_uid,
             "chain_name": accepted_chain,

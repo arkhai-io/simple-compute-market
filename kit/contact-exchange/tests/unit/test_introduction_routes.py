@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 from market_contact_exchange import (
+    INTRODUCTION_COMPLETION_UNAVAILABLE,
     AuthorizedIntroductionRequest,
     IntroductionAgreement,
     IntroductionPayloadsDeletedError,
@@ -36,6 +37,9 @@ class Harness:
         self.accepted = accepted
         self.records: dict[str, IntroductionRecord] = {}
         self.completions: list[str] = []
+        self.claims: set[str] = set()
+        #: What every authorization answers, once set, instead of a fresh request.
+        self.replay: AuthorizedIntroductionRequest | None = None
         self.agreement = IntroductionAgreement(
             agreement_ref="neg-1",
             obligation_ref=_OBLIGATION_REF,
@@ -62,6 +66,8 @@ class Harness:
         caller = request_context["principal"]
         if caller not in allowed_principals:
             raise IntroductionRouteError(403, "caller is not an introduction party")
+        if self.replay is not None:
+            return self.replay
         return AuthorizedIntroductionRequest(principal=caller)
 
     async def persist(
@@ -95,6 +101,12 @@ class Harness:
     async def complete(self, agreement: IntroductionAgreement) -> None:
         self.completions.append(agreement.obligation_ref)
 
+    async def claim_seller_dispatch(self, obligation_ref: str) -> bool:
+        if obligation_ref in self.claims:
+            return False
+        self.claims.add(obligation_ref)
+        return True
+
     def redact(self, deleted_at: str = "2026-10-01T12:00:00Z") -> None:
         record = self.records[_OBLIGATION_REF]
         self.records[_OBLIGATION_REF] = record.model_copy(
@@ -121,6 +133,7 @@ class Harness:
                 persist=self.persist,
                 load=self.load,
                 complete=self.complete,
+                claim_seller_dispatch=self.claim_seller_dispatch,
             ),
             resolve_seller_contact=resolve,
             deliver=deliver,
@@ -446,3 +459,183 @@ async def test_a_deletion_committing_during_a_first_reveal_does_not_recall_it() 
             await attempt
         assert caught.value.status_code == 410
     assert delivered == [_OBLIGATION_REF]
+
+
+def _recording(delivered: list[str]):
+    return lambda projection, agreement: delivered.append(projection["obligation_ref"])
+
+
+def _failing_once(harness: Harness) -> None:
+    """Make the harness's next completion fail, and every later one succeed."""
+    original = harness.complete
+    failed: list[bool] = []
+
+    async def complete(agreement: IntroductionAgreement) -> None:
+        if not failed:
+            failed.append(True)
+            raise RuntimeError("settlement store unavailable")
+        await original(agreement)
+
+    harness.complete = complete  # type: ignore[method-assign]
+
+
+async def test_an_exact_replay_of_a_completed_start_delivers_nothing_more() -> None:
+    harness = Harness()
+    delivered: list[str] = []
+    service = harness.service(deliver=_recording(delivered))
+    first = await service.start({"principal": BUYER}, _start())
+    harness.completions.clear()
+
+    harness.replay = AuthorizedIntroductionRequest(
+        principal=BUYER, exact_retry=True, recorded_outcome=(200, first)
+    )
+    assert await service.start({"principal": BUYER}, _start()) == first
+
+    assert delivered == [_OBLIGATION_REF]
+    assert harness.completions == []
+
+
+async def test_a_new_start_completes_a_reveal_whose_first_completion_failed() -> None:
+    harness = Harness()
+    delivered: list[str] = []
+    _failing_once(harness)
+    service = harness.service(deliver=_recording(delivered))
+
+    with pytest.raises(IntroductionRouteError) as caught:
+        await service.start({"principal": BUYER}, _start())
+    assert caught.value.status_code == 503
+    assert caught.value.detail == INTRODUCTION_COMPLETION_UNAVAILABLE
+    assert "starting the introduction again completes it" in caught.value.detail
+    # The first start persisted the record and dispatched nothing.
+    assert _OBLIGATION_REF in harness.records
+    assert delivered == []
+    assert harness.claims == set()
+
+    revealed = await service.start({"principal": BUYER}, _start())
+    assert revealed["revealed"] is True
+    assert delivered == [_OBLIGATION_REF]
+
+    await service.start({"principal": BUYER}, _start())
+    assert delivered == [_OBLIGATION_REF]
+
+
+async def test_an_exact_replay_of_a_failed_start_answers_its_503_and_completes_nothing() -> None:
+    harness = Harness()
+    delivered: list[str] = []
+    _failing_once(harness)
+    service = harness.service(deliver=_recording(delivered))
+    with pytest.raises(IntroductionRouteError) as failed:
+        await service.start({"principal": BUYER}, _start())
+    harness.completions.clear()
+
+    harness.replay = AuthorizedIntroductionRequest(
+        principal=BUYER,
+        exact_retry=True,
+        recorded_outcome=(failed.value.status_code, failed.value.detail),
+    )
+    with pytest.raises(IntroductionRouteError) as replayed:
+        await service.start({"principal": BUYER}, _start())
+
+    assert replayed.value.status_code == 503
+    assert replayed.value.detail == INTRODUCTION_COMPLETION_UNAVAILABLE
+    assert harness.completions == []
+    assert harness.claims == set()
+    assert delivered == []
+
+
+async def test_of_two_concurrent_completing_starts_exactly_one_dispatches() -> None:
+    harness = Harness()
+    delivered: list[str] = []
+    both_completing = asyncio.Event()
+    release = asyncio.Event()
+    original_complete = harness.complete
+    completing: list[str] = []
+
+    async def held_complete(agreement: IntroductionAgreement) -> None:
+        completing.append(agreement.obligation_ref)
+        if len(completing) == 2:
+            both_completing.set()
+        await release.wait()
+        await original_complete(agreement)
+
+    harness.complete = held_complete  # type: ignore[method-assign]
+    service = harness.service(deliver=_recording(delivered))
+    starts = [
+        asyncio.create_task(service.start({"principal": BUYER}, _start()))
+        for _ in range(2)
+    ]
+    await asyncio.wait_for(both_completing.wait(), timeout=5)
+    release.set()
+    first, second = await asyncio.gather(*starts)
+
+    assert first == second
+    assert harness.completions == [_OBLIGATION_REF, _OBLIGATION_REF]
+    assert delivered == [_OBLIGATION_REF]
+
+
+async def test_repeated_starts_after_a_completed_reveal_contact_no_seller_sink() -> None:
+    harness = Harness()
+    delivered: list[str] = []
+    service = harness.service(deliver=_recording(delivered))
+    first = await service.start({"principal": BUYER}, _start())
+
+    for _ in range(3):
+        assert await service.start({"principal": BUYER}, _start()) == first
+
+    assert delivered == [_OBLIGATION_REF]
+
+
+async def test_a_failed_claim_answers_503_and_the_next_start_claims_and_dispatches() -> None:
+    harness = Harness()
+    delivered: list[str] = []
+    original_claim = harness.claim_seller_dispatch
+    attempts: list[str] = []
+
+    async def claim_failing_once(obligation_ref: str) -> bool:
+        attempts.append(obligation_ref)
+        if len(attempts) == 1:
+            raise RuntimeError("database is locked")
+        return await original_claim(obligation_ref)
+
+    harness.claim_seller_dispatch = claim_failing_once  # type: ignore[method-assign]
+    service = harness.service(deliver=_recording(delivered))
+
+    with pytest.raises(IntroductionRouteError) as caught:
+        await service.start({"principal": BUYER}, _start())
+    assert caught.value.status_code == 503
+    assert caught.value.detail == INTRODUCTION_COMPLETION_UNAVAILABLE
+    assert delivered == []
+
+    await service.start({"principal": BUYER}, _start())
+    assert delivered == [_OBLIGATION_REF]
+
+
+async def test_a_deletion_committing_before_the_claim_leaves_the_start_its_dispatch() -> None:
+    """The start completed its reveal before the deletion, so the dispatch it
+    claims is its own, sent from the payloads it read."""
+    harness = Harness()
+    delivered: list[tuple[str, dict[str, str]]] = []
+    original_claim = harness.claim_seller_dispatch
+
+    async def claim_after_deletion(obligation_ref: str) -> bool:
+        harness.redact()
+        return await original_claim(obligation_ref)
+
+    harness.claim_seller_dispatch = claim_after_deletion  # type: ignore[method-assign]
+    service = harness.service(
+        deliver=lambda projection, agreement: delivered.append(
+            (projection["obligation_ref"], projection["counterparty_contact"])
+        )
+    )
+
+    revealed = await service.start({"principal": BUYER}, _start())
+
+    assert revealed["revealed"] is True
+    assert delivered == [(_OBLIGATION_REF, {"email": "buyer@example.com"})]
+    harness.claim_seller_dispatch = original_claim  # type: ignore[method-assign]
+    with pytest.raises(IntroductionRouteError) as caught:
+        await harness.service(deliver=lambda p, a: delivered.append(("again", {}))).start(
+            {"principal": BUYER}, _start()
+        )
+    assert caught.value.status_code == 410
+    assert len(delivered) == 1

@@ -19,7 +19,7 @@ from compute_provisioning_service.db.migrations import (
     apply_schema_migrations,
 )
 
-_MIGRATION_ID = "20261028_001_hosts_drop_gpu_columns"
+_MIGRATION_ID = "20261028_002_hosts_drop_gpu_columns"
 _GPU_COLUMNS = {"gpu_count", "gpu_model"}
 
 # The schema a database had after the migrations through 20260911_001, when

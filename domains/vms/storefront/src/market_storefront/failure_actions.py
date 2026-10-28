@@ -34,6 +34,7 @@ from market_storefront.services.capacity_client import (
 )
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.utils.config import (
+    chain_address_book,
     get_evm_wallet_private_key,
     settings,
 )
@@ -235,7 +236,7 @@ async def _refund_from_escrow_proposal(
         codec = get_escrow_codec_for(
             chain_name,
             escrow_address,
-            config_path=chain_cfg.alkahest_address_config_path,
+            config_path=chain_address_book(chain_name),
         )
     except Exception as exc:
         return {

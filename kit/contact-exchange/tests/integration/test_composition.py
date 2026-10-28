@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from collections.abc import Mapping
 from pathlib import Path
@@ -18,6 +19,7 @@ from market_contact_exchange import (
     IntroductionRouteError,
     IntroductionStart,
     SQLiteIntroductionStore,
+    claim_seller_dispatch,
     contact_accepted_obligation_builder,
 )
 from market_core.schemas import SettlementPlan, derive_settlement_option_id
@@ -100,16 +102,20 @@ class Runtime:
 
 
 @pytest.fixture
-def store(tmp_path: Path) -> SQLiteIntroductionStore:
-    path = tmp_path / "storefront.db"
-    conn = sqlite3.connect(path)
+def db_path(tmp_path: Path) -> Path:
+    return tmp_path / "storefront.db"
+
+
+@pytest.fixture
+def store(db_path: Path) -> SQLiteIntroductionStore:
+    conn = sqlite3.connect(db_path)
     try:
         for migration in CONTACT_EXCHANGE_MIGRATIONS:
             migration.apply(conn)
         conn.commit()
     finally:
         conn.close()
-    return SQLiteIntroductionStore(path)
+    return SQLiteIntroductionStore(db_path)
 
 
 def _composition(
@@ -306,3 +312,95 @@ def test_disabled_contact_exchange_offers_nothing(store) -> None:
 def test_disclosures_state_the_retention_window(store) -> None:
     composition, _, _ = _composition(store, config=_config(retention_seconds=3600))
     assert composition.disclosures()["introduction_retention"]["window_seconds"] == 3600
+
+
+def test_of_two_independent_sessions_exactly_one_claims_the_seller_dispatch(
+    store, db_path
+) -> None:
+    """One session's uncommitted claim blocks the other's; once it commits,
+    the other finds the introduction claimed. A rolled-back claim leaves it
+    claimable."""
+    ref = "ab" * 32
+    first = sqlite3.connect(db_path, timeout=0)
+    second = sqlite3.connect(db_path, timeout=0)
+    try:
+        first.execute("BEGIN IMMEDIATE")
+        assert claim_seller_dispatch(first, ref) is True
+        with pytest.raises(sqlite3.OperationalError, match="locked"):
+            claim_seller_dispatch(second, ref)
+        second.rollback()
+        first.commit()
+        assert claim_seller_dispatch(second, ref) is False
+        second.commit()
+
+        other = "cd" * 32
+        first.execute("BEGIN IMMEDIATE")
+        assert claim_seller_dispatch(first, other) is True
+        first.rollback()
+        assert claim_seller_dispatch(second, other) is True
+        second.commit()
+        assert claim_seller_dispatch(first, other) is False
+    finally:
+        first.close()
+        second.close()
+
+
+async def test_concurrent_store_claims_have_one_winner(store) -> None:
+    ref = "ab" * 32
+    results = await asyncio.gather(
+        *(store.claim_seller_dispatch(ref) for _ in range(4))
+    )
+    assert sorted(results) == [False, False, False, True]
+    assert await store.claim_seller_dispatch(ref) is False
+
+
+async def test_a_claimed_introduction_keeps_the_redaction_only_rule(store, db_path) -> None:
+    composition, _, ref = _composition(store)
+    await composition.reveal_service(_authorize).start(BUYER, _start(ref))
+    conn = sqlite3.connect(db_path)
+    try:
+        assert conn.execute(
+            "SELECT obligation_ref FROM contact_introduction_seller_dispatches"
+        ).fetchall() == [(ref,)]
+        for statement in (
+            "UPDATE contact_introductions SET agreement_ref='other'",
+            "UPDATE contact_introductions SET buyer_contact='{\"email\": \"x@x.example\"}'",
+        ):
+            with pytest.raises(sqlite3.IntegrityError, match="one-way payload redaction"):
+                conn.execute(statement)
+        conn.rollback()
+    finally:
+        conn.close()
+    retention = composition.retention()
+    assert retention is not None
+    await retention.delete_one(ref)
+    record = await store.load(ref)
+    assert record is not None and record.payloads_deleted_at is not None
+
+
+async def test_a_reveal_whose_first_completion_failed_dispatches_once_on_the_next_start(
+    store,
+) -> None:
+    delivered: list[tuple[Mapping[str, Any], IntroductionAgreement]] = []
+    composition, runtime, ref = _composition(store, delivered=delivered)
+    collect = runtime.collect
+    failures: list[bool] = []
+
+    async def collect_failing_once(**kwargs: Any) -> None:
+        if not failures:
+            failures.append(True)
+            raise RuntimeError("settlement store unavailable")
+        await collect(**kwargs)
+
+    runtime.collect = collect_failing_once  # type: ignore[method-assign]
+    service = composition.reveal_service(_authorize)
+
+    with pytest.raises(IntroductionRouteError) as caught:
+        await service.start(BUYER, _start(ref))
+    assert caught.value.status_code == 503
+    assert await store.load(ref) is not None
+    assert delivered == []
+
+    await service.start(BUYER, _start(ref))
+    await service.start(BUYER, _start(ref))
+    assert len(delivered) == 1

@@ -253,7 +253,9 @@ def test_releasing_cross_mode_reservation_keeps_sibling_capacity_blocked(
         deal_ref={"escrow_uid": "0xbm"},
     )
 
-    ledger.update_reservation_state(bare_metal["capacity_reservation_id"], state="releasing")
+    assert ledger.begin_releasing(
+        bare_metal["capacity_reservation_id"], release_job_id="teardown-1"
+    )["state"] == "releasing"
 
     by_id = {row["resource_id"]: row for row in ledger.snapshot()}
     assert by_id["compute-host-1"]["available_units"] == 0
@@ -778,9 +780,9 @@ def test_entering_releasing_records_when_the_release_began(seeded: CapacityLedge
 
     first = seeded.begin_releasing(reservation_id, release_job_id="f-1")
     again = seeded.begin_releasing(reservation_id, release_job_id="f-1")
-    seeded.update_reservation_state(
-        reservation_id, state="release_failed", failure_reason="teardown_failed"
-    )
+    assert seeded.record_release_failed(
+        reservation_id, reason="teardown_failed", release_job_id="f-1"
+    )["state"] == "release_failed"
     retried = seeded.begin_releasing(reservation_id, release_job_id="f-1")
 
     assert first["release_requested_at"] is not None
@@ -851,33 +853,17 @@ def test_event_feed_is_versioned_and_anonymous(seeded: CapacityLedgerService):
     assert latest_again == latest
 
 
-def test_find_active_lease_by_vm_target_matches_via_executor_ref(seeded: CapacityLedgerService):
-    """host_id is matched through executor_ref's JSON payload
-    (func.json_extract) and vm_target through executor_target -- neither
-    is a dedicated column."""
-    reserved = seeded.reserve(claim={"offering_mode": "vm", **{"gpu_count": 1}}, deal_ref={"escrow_uid": "0xm"})
-    seeded.commit(
-        capacity_reservation_id=reserved["capacity_reservation_id"],
-        lease_end_utc="2099-01-01 00:00",
-    )
-    with seeded._session_factory() as db:
-        reservation = db.get(CapacityReservation, reserved["capacity_reservation_id"])
-        reservation.executor_ref = {"host_id": "kvm1"}
-        db.commit()
-    _record_target(seeded, reserved["capacity_reservation_id"], "tenant-find-me")
+def test_a_vm_reservation_names_its_target_once(seeded: CapacityLedgerService):
+    """A VM reservation's recorded target is ``executor_target``, with no
+    VM-named copy on the payload."""
+    reservation_id = _committed(seeded, "0xm")
+    _record_target(seeded, reservation_id, "tenant-named-once")
 
-    found = seeded.find_active_lease_by_vm_target("kvm1", "tenant-find-me")
-    assert found is not None
-    assert found["capacity_reservation_id"] == reserved["capacity_reservation_id"]
+    payload = seeded.get_reservation(reservation_id)
 
-    # A different host_id must not match, even with the same vm_target --
-    # proves the filter actually discriminates on the JSON value rather
-    # than matching any row with a non-null executor_ref.
-    assert seeded.find_active_lease_by_vm_target("kvm-wrong-host", "tenant-find-me") is None
-    # A different vm_target must not match either.
-    assert seeded.find_active_lease_by_vm_target("kvm1", "tenant-someone-else") is None
-    seeded.release(capacity_reservation_id=reserved["capacity_reservation_id"])
-    assert seeded.find_active_lease_by_vm_target("kvm1", "tenant-find-me") is None
+    assert payload["offering_mode"] == "vm"
+    assert payload["executor_target"] == "tenant-named-once"
+    assert "vm_target" not in payload
 
 
 def test_a_vm_release_handle_has_one_name(seeded: CapacityLedgerService):
@@ -942,11 +928,9 @@ def test_release_failed_still_holds_capacity(seeded: CapacityLedgerService):
         lease_start_utc="2020-01-01T00:00:00Z",
         lease_end_utc="2020-01-01 00:00",
     )
-    seeded.update_reservation_state(
-        reserved["capacity_reservation_id"],
-        state="release_failed",
-        failure_reason="vm_remove_failed",
-    )
+    assert seeded.record_release_failed(
+        reserved["capacity_reservation_id"], reason="vm_remove_failed"
+    )["state"] == "release_failed"
     assert seeded.snapshot()[0]["available_units"] == 6
 
 
@@ -1060,11 +1044,9 @@ def test_released_shared_host_reservation_restores_cross_mode_availability():
 def test_release_failed_shared_host_reservation_blocks_cross_mode_claims():
     ledger = _shared_host_ledger()
     vm = ledger.reserve(claim={"offering_mode": "vm", **{"allocation_mode": ALLOCATION_MODE_SHAREABLE, "gpu_count": 2}}, deal_ref={"escrow_uid": "0xvm"},)
-    ledger.update_reservation_state(
-        vm["capacity_reservation_id"],
-        state="release_failed",
-        failure_reason="release_submit_failed",
-    )
+    assert ledger.record_release_failed(
+        vm["capacity_reservation_id"], reason="release_submit_failed"
+    )["state"] == "release_failed"
 
     assert ledger.reserve(
         claim={
@@ -1081,7 +1063,7 @@ def test_release_failed_shared_host_reservation_blocks_cross_mode_claims():
 def test_release_can_mark_force_released(seeded: CapacityLedgerService):
     reserved = seeded.reserve(claim={"offering_mode": "vm", **{}}, deal_ref={})
     seeded.begin_releasing(reserved["capacity_reservation_id"])
-    forced = seeded.release(capacity_reservation_id=reserved["capacity_reservation_id"], state="force_released")
+    forced = seeded.release(capacity_reservation_id=reserved["capacity_reservation_id"], forced=True)
     assert forced["state"] == "force_released"
     assert seeded.snapshot()[0]["available_units"] == 8
 
@@ -1628,7 +1610,7 @@ def test_a_forced_release_is_the_operator_s_override_and_is_not_guarded():
         claim={"offering_mode": "vm", "gpu_count": 1}, deal_ref={"market": "vms"}
     )["capacity_reservation_id"]
 
-    forced = ledger.release(capacity_reservation_id=reservation_id, state="force_released")
+    forced = ledger.release(capacity_reservation_id=reservation_id, forced=True)
 
     assert forced["state"] == "force_released"
     assert guard.asked == []
@@ -2091,7 +2073,7 @@ def test_a_stale_begin_cannot_take_back_a_lease_an_operator_took_over(
 def test_a_stale_failure_cannot_undo_a_force_release(seeded: CapacityLedgerService):
     reservation_id = _committed(seeded, "0xstale-failure")
     seeded.begin_releasing(reservation_id, release_job_id="f-1")
-    seeded.release(capacity_reservation_id=reservation_id, state="force_released")
+    seeded.release(capacity_reservation_id=reservation_id, forced=True)
     capacity_after_force_release = seeded.snapshot()
 
     refused = seeded.record_release_failed(
@@ -2111,7 +2093,7 @@ def test_only_a_force_release_frees_a_lease_an_operator_took_over(
 
     assert seeded.release(capacity_reservation_id=reservation_id) is None
     assert seeded.get_reservation(reservation_id)["state"] == "unmanaged"
-    forced = seeded.release(capacity_reservation_id=reservation_id, state="force_released")
+    forced = seeded.release(capacity_reservation_id=reservation_id, forced=True)
     assert forced["state"] == "force_released"
 
 
@@ -2205,7 +2187,7 @@ def test_a_forced_release_runs_the_effect_though_the_guard_would_refuse():
     its capacity: the only way a refused reservation's effects ever run."""
     ledger, effect, reservation_id = _with_effect(permit=False)
 
-    ledger.release(capacity_reservation_id=reservation_id, state="force_released")
+    ledger.release(capacity_reservation_id=reservation_id, forced=True)
 
     assert effect.ran == [(reservation_id, "force_released")]
 

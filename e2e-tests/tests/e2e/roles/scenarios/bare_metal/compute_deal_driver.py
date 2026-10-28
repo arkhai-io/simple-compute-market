@@ -19,13 +19,19 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTION
-from compute_provisioning_contracts import ConnectionSubmission, HostCreate
+from compute_provisioning_contracts import (
+    ConnectionSubmission,
+    HostCreate,
+    MockJobEvaluation,
+    MockRuleCreate,
+)
 from market_resource_pools_contracts import PoolCreate
 
 from tests.e2e.roles.helpers.compute_deal import (
     DealLease,
     SiteCapacity,
     advance_storefront,
+    delete_mock_rules_if_present,
 )
 from tests.e2e.roles.helpers.compute_deal_stages import DURATION_HOURS
 
@@ -89,9 +95,9 @@ class BareMetalComputeDealDriver:
 
         The host record is what dispatch renders the job's inventory from; the
         declaration, a bare-metal resource, is what admission, publication,
-        scheduling, and the seller's inventory guard read. The machine's
-        publication view names its host and physical machine, as the storefront
-        checks a scheduled resource against the accepted terms.
+        scheduling, and the seller's inventory guard read. The declaration names
+        its host and physical machine once, and the storefront checks the
+        scheduled resource's own host and machine against the accepted terms.
         """
         held_before = self._held_generation()
         self.site_operator.create_pool(
@@ -136,11 +142,11 @@ class BareMetalComputeDealDriver:
                     "gpu_model": GPU_MODEL,
                     "physical_host_id": self.physical_host_id,
                     "allocation_mode": "exclusive",
+                    # The publication settings repeat neither the host nor the
+                    # machine named above.
                     "bare_metal_publication": {
                         "enabled": True,
                         "access_methods": ["ssh"],
-                        "host_id": self.host_id,
-                        "physical_host_id": self.physical_host_id,
                     },
                 },
             )
@@ -177,43 +183,47 @@ class BareMetalComputeDealDriver:
     # -- mock rules ---------------------------------------------------------
 
     def _arm(self, rule_id: str, action: str) -> None:
-        try:
-            self.provisioning_test_client.delete_bare_metal_mock_rule(rule_id)
-        except Exception:
-            pass
+        rules = self.provisioning_test_client.bare_metal_rules
+        delete_mock_rules_if_present(rules, rule_id)
         # Matched on this deal's host, so no other scenario's job is held.
-        self.provisioning_test_client.add_bare_metal_mock_rule(
-            rule_id=rule_id,
-            match={"action": action, "host_id": self.host_id},
-            pause_before_result=True,
+        rules.add_rule(
+            MockRuleCreate(
+                rule_id=rule_id,
+                match={"action": action, "host_id": self.host_id},
+                pause_before_result=True,
+            )
         )
 
     def arm_create_gate(self) -> None:
         self._arm(self.create_rule_id, NODE_GRANT_ACCESS_ACTION)
 
     def release_create_gate(self) -> None:
-        self.provisioning_test_client.resume_bare_metal_rule(self.create_rule_id)
+        self.provisioning_test_client.bare_metal_rules.resume_rule(self.create_rule_id)
 
-    def evaluate_create_job(self, host_id: str) -> dict[str, Any]:
-        return self.provisioning_test_client.evaluate_bare_metal_job(
-            host_id,
-            action=NODE_GRANT_ACCESS_ACTION,
-            physical_host_id=self.physical_host_id,
+    def evaluate_create_job(self, host_id: str) -> MockJobEvaluation:
+        # A job's parameters are bare metal's: the access action, and the
+        # machine it grants.
+        return self.provisioning_test_client.bare_metal_rules.evaluate_job(
+            {
+                "host": host_id,
+                "action": NODE_GRANT_ACCESS_ACTION,
+                "physical_host_id": self.physical_host_id,
+            }
         )
 
     def arm_teardown_gate(self) -> None:
         self._arm(self.teardown_rule_id, NODE_RECLAIM_ACCESS_ACTION)
 
     def release_teardown_gate(self) -> None:
-        self.provisioning_test_client.resume_bare_metal_rule(self.teardown_rule_id)
+        self.provisioning_test_client.bare_metal_rules.resume_rule(self.teardown_rule_id)
 
     def disarm_gates(self) -> None:
         """Remove both rules, so a later deal's jobs run ungated."""
-        for rule_id in (self.create_rule_id, self.teardown_rule_id):
-            try:
-                self.provisioning_test_client.delete_bare_metal_mock_rule(rule_id)
-            except Exception:
-                pass
+        delete_mock_rules_if_present(
+            self.provisioning_test_client.bare_metal_rules,
+            self.create_rule_id,
+            self.teardown_rule_id,
+        )
 
     # -- settlement and delivery -------------------------------------------
 

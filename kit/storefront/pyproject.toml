@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-kit-storefront"
-version = "0.9.0"
+version = "0.10.0"
 license = "MIT"
 description = "Domain-neutral storefront application, lifecycle, route, and reusable service composition."
 requires-python = ">=3.12,<3.14"

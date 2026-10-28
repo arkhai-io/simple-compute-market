@@ -72,6 +72,7 @@ from market_storefront.negotiation_runtime import build_vm_negotiation_runtime
 from market_storefront.utils.config import (
     AGENT_ID,
     CHAINS,
+    chain_address_books,
     get_evm_wallet_address,
     get_evm_wallet_private_key,
     get_service_peer_configs,
@@ -94,7 +95,10 @@ from market_storefront.services.publication_terms import (
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.settlement_composition import require_coherent_release_model
 from market_storefront.settlement_registry import build_storefront_settlement_registry
-from market_storefront.startup_refusal import require_publishable_storefront
+from market_storefront.startup_refusal import (
+    refuse_retired_address_book_keys,
+    require_publishable_storefront,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +135,7 @@ def _alkahest_client_policy() -> AlkahestClientPolicy | None:
     private_key = get_evm_wallet_private_key()
     if not private_key:
         missing.append("wallet.private_key")
+    books = chain_address_books()
     return AlkahestClientPolicy(
         private_key=private_key,
         chains=(
@@ -140,7 +145,7 @@ def _alkahest_client_policy() -> AlkahestClientPolicy | None:
                 AlkahestChain(
                     name=name,
                     rpc_url=chain.rpc_url,
-                    address_config_path=chain.alkahest_address_config_path,
+                    address_book=books[name],
                 )
                 for name, chain in CHAINS.items()
             )
@@ -178,8 +183,12 @@ def _build_alkahest_chain_probe(
     if section is None:
         return None
     policy = _alkahest_client_policy()
+    books = chain_address_books()
     return AlkahestChainProbe(
-        [ProbedChain.from_config(name, chain) for name, chain in CHAINS.items()],
+        [
+            ProbedChain.from_config(name, chain, address_book=books[name])
+            for name, chain in CHAINS.items()
+        ],
         build_client=(constructor(policy) if policy is not None else None),
         clients=alkahest_clients,
         interval_seconds=section.probe_interval_seconds,
@@ -342,8 +351,11 @@ def _build_vm_services(
     # cannot read, a contradictory Alkahest release model, or a configuration
     # under which it could never publish stops startup rather than running
     # without it. An Alkahest section that is coherent but cannot settle makes
-    # Alkahest unready instead.
+    # Alkahest unready instead. A retired address-book key is refused before
+    # the release model resolves the section, which would refuse it only as
+    # an unknown key.
     admissibility_default = parse_configured_admissibility_default()
+    refuse_retired_address_book_keys()
     require_coherent_release_model()
     seams.startup_refusal()
     sqlite_client = get_sqlite_client(registry=registry)
@@ -525,6 +537,9 @@ async def _run_startup_tasks(
 
 # Controller imports after lifespan exists, before app construction.
 from market_storefront.controllers.admin_controller import (  # noqa: E402
+    pool_overrides_router,
+)
+from market_storefront.controllers.admin_controller import (  # noqa: E402
     router as admin_router,
 )
 from market_storefront.controllers.deals_controller import (  # noqa: E402
@@ -604,6 +619,7 @@ def build_vm_storefront_app(
                 routers=(
                     system_router,
                     admin_router,
+                    pool_overrides_router,
                     listings_router,
                     admin_listings_router,
                     negotiations_router,

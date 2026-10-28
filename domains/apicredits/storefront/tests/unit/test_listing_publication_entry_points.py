@@ -31,6 +31,7 @@ from apicredits_storefront.listing_publication import (
 )
 from apicredits_storefront.utils import config as storefront_config
 from apicredits_storefront.utils import sqlite_client as sqlite_module
+from tests._settings_overrides import replaced_setting
 
 SELLER = Ed25519Signer(b"\x22" * 32)
 
@@ -177,3 +178,48 @@ def test_a_refused_create_fails_with_the_storefronts_reason(monkeypatch):
 
     assert result.exit_code == 1
     assert "refused: settlement mechanism alkahest.v1 cannot be reached yet" in result.output
+
+
+def test_publishing_an_alkahest_rate_refuses_a_retired_address_book_key(monkeypatch):
+    """Spec scenario "A retired key is stated", through a command run without
+    the server's startup refusal: the chain's escrow is not resolved from the
+    built-in addresses, and the key and the table are named."""
+    storefront = _Storefront()
+    runner = _cli(monkeypatch, storefront)
+    monkeypatch.setattr(storefront_config, "CHAINS", {"anvil": object()})
+    monkeypatch.setattr(
+        cli,
+        "get_erc20_escrow_obligation_default",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("an escrow was resolved")
+        ),
+    )
+
+    with replaced_setting(
+        "chains",
+        {"anvil": {"rpc_url": "http://anvil.test", "alkahest_address_config_path": "/book.json"}},
+    ):
+        result = runner.invoke(
+            cli.app,
+            [
+                "publish",
+                "--resource-id",
+                "svc-quota",
+                "--service-name",
+                "Acme",
+                "--price-per-token",
+                "1",
+                "--token",
+                "0x0000000000000000000000000000000000000001",
+                "--chain",
+                "anvil",
+                "-a",
+                "http://seller.test",
+            ],
+        )
+
+    assert result.exit_code == 2
+    assert "[Chains.anvil].alkahest_address_config_path is retired" in result.output
+    assert "[Settlement.alkahest.address_books]" in result.output
+    assert "/book.json" not in result.output
+    assert storefront.requests == []

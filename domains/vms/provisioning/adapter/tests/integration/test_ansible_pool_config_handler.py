@@ -1,21 +1,15 @@
-"""Unit tests for AnsiblePoolConfigHandler.
+"""AnsiblePoolConfigHandler over VM's tables in a real embedded database.
 
-External boundary: SQLAlchemy with an in-memory SQLite DB (not mocked),
-matching test_host_service.py's rationale -- a deterministic dependency
-with no network I/O.
+External boundary: SQLAlchemy with file-backed SQLite (not mocked), a
+deterministic dependency with no network I/O.
 """
 
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.orm import Session, sessionmaker
 
-from compute_provisioning_service.db.database import create_session_factory
-from compute_provisioning_service.db.models import Base
 from market_resource_pools import ResourcePool
-from vm_provisioning_adapter.db import Base as VmBase
 from vm_provisioning_adapter.services.ansible_pool_config_handler import (
     AnsiblePoolConfigHandler,
 )
@@ -26,29 +20,19 @@ from vm_provisioning_adapter.services.ansible_pool_config_handler import (
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def db_engine():
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    # resource_pools must exist before VM's ansible_pool_configs FK resolves.
-    from market_resource_pools.db import Base as PoolsBase
-    PoolsBase.metadata.create_all(bind=engine)
-    VmBase.metadata.create_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
-    with Session(engine) as session:
+def db_engine(vm_engine):
+    with Session(vm_engine) as session:
         session.add(ResourcePool(
             id="pool-a", label="Pool A", provider="vm.ansible",
             enabled=True, policy_tags={},
         ))
         session.commit()
-    return engine
+    return vm_engine
 
 
 @pytest.fixture
 def session_factory(db_engine):
-    return create_session_factory(db_engine)
+    return sessionmaker(bind=db_engine)
 
 
 @pytest.fixture

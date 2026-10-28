@@ -27,7 +27,7 @@ from core_storefront.stage_log import stage_event
 from apicredits_storefront.listing_binding import api_credit_listing_binding
 from apicredits_storefront.services.capacity_client import build_capacity_runtime
 from apicredits_storefront.services.issuance_evidence import ApiCreditPrivateResultRepository
-from apicredits_storefront.utils.config import CHAINS, settings
+from apicredits_storefront.utils.config import CHAINS, chain_address_books, settings
 from arkhai_apicredits.domain_runtime import market_domain
 from arkhai_apicredits.negotiation.terms import ApiCreditsProvisionTerms, provision_quantity
 from arkhai_apicredits.schema import ApiCreditsListing
@@ -207,7 +207,7 @@ def build_api_credit_accepted_artifacts(
         agreed_amount=agreed_amount,
         duration_seconds=duration_seconds,
         uses_scalar_amount=uses_scalar_amount,
-        chain_config_paths={name: chain.alkahest_address_config_path for name, chain in CHAINS.items()},
+        chain_config_paths=chain_address_books(),
         heartbeat_interval_seconds=None,
     )
     plan = artifacts.get("settlement_plan")
@@ -342,7 +342,7 @@ async def _prepare_alkahest_settlement(
         alkahest_client=mechanism_client,
         chain_name=chain_name,
         escrow_address=proposal.escrow_address,
-        alkahest_address_config_path=chain.alkahest_address_config_path,
+        address_book=chain_address_books().get(chain_name),
     )
     if not isinstance(matched_index, int) or not 0 <= matched_index < len(obligations):
         raise ValueError(
@@ -547,9 +547,11 @@ class AlkahestSellerStage:
         return {"accepted_escrows": [{"chain_name": chain} for chain in chains]} if chains else {}
 
     def client(self, resources: Mapping[str, Any]) -> Any:
+        # Claims on each chain are serviced against that chain's own book.
+        books = chain_address_books()
         return AlkahestConditionalEscrowClient(
             get_client=resources["get_client"],
-            chain_config_paths={name: chain.alkahest_address_config_path for name, chain in resources["chains"].items()},
+            chain_config_paths={name: books.get(name) for name in resources["chains"]},
             default_chain=resources["default_chain"],
         )
 

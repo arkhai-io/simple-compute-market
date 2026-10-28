@@ -136,7 +136,7 @@ class FakeSite:
         available = self._capacity(rid)
         for reservation in self.reservations.values():
             if reservation["resource_id"] != rid or reservation["state"] not in (
-                "reserved", "provisioning", "leased", "releasing"
+                "reserved", "leased", "releasing"
             ):
                 continue
             held = reservation.get("dimensions") or {"gpu_count": reservation["units"]}

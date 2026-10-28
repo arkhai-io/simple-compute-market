@@ -13,14 +13,17 @@ from typing import Any
 from core_storefront.auth import AuthError
 from core_storefront.identity_authority import IdentityAuthorityError
 from core_storefront.service_peers import ServicePeerTrust, seed_service_peers
+from core_storefront.stage_log import stage_event
 from market_alkahest import (
     ALKAHEST_CONFIG_KEY,
     AlkahestChainProbe,
     JsonRpcCall,
     ProbedChain,
     ReleaseModelError,
+    alkahest_address_book,
     create_alkahest_registration,
     json_rpc_call,
+    wallet_account_address,
 )
 from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
 from market_capacity_publication import (
@@ -116,6 +119,13 @@ def _status_check_healthy(name: str, value: str) -> bool:
     if name == "alkahest":
         return bool(value) and not value.startswith(("unknown:", "error:"))
     return False
+
+
+def record_servicing_event(event: str, fields: dict[str, Any]) -> None:
+    """Record a servicing worker's event as a ``claims`` stage event, as every
+    storefront composing the worker does, so a failing step is on the deal's
+    record."""
+    stage_event("claims", event, **fields)
 
 
 def _utc_now() -> datetime:
@@ -366,6 +376,7 @@ class BareMetalStorefrontRuntime:
                 self.settlement_repository,
                 worker_id=f"bare-metal-storefront:{self.seller_principal.identifier}",
                 interval_seconds=self.settlement_servicing_interval_seconds,
+                on_event=record_servicing_event,
                 on_ready=on_ready,
                 on_terminal=on_terminal,
             ),
@@ -700,14 +711,18 @@ class BareMetalStorefrontRuntime:
 
 
 def _alkahest_client_policy(
-    chains: Mapping[str, ChainSettings], *, private_key: str
+    chains: Mapping[str, ChainSettings],
+    *,
+    address_books: Mapping[str, str | None],
+    private_key: str,
 ) -> AlkahestClientPolicy:
-    """What the Alkahest chain clients for ``[Chains]`` are built from."""
+    """What the Alkahest chain clients for ``[Chains]`` are built from, each
+    over the address book ``address_books`` resolves for its chain."""
     alkahest_chains = tuple(
         AlkahestChain(
             name=name,
             rpc_url=chain.rpc_url,
-            address_config_path=chain.alkahest_address_config_path or None,
+            address_book=address_books.get(name),
         )
         for name, chain in chains.items()
     )
@@ -803,24 +818,30 @@ def build_runtime_from_configuration(
     except (TypeError, ValueError) as exc:
         raise RuntimeError("[Settlement] must be strict shared settlement config") from exc
     # A configured Alkahest section, enabled or not, owns the obligations
-    # accepted under it. One that lacks its address, chains, or key cannot
-    # settle, which Alkahest readiness reports by name while the storefront's
-    # other mechanisms run; with no section, those inputs would be a second,
-    # stale statement of what the settlement root says, which is incoherent.
+    # accepted under it. One that lacks its chains or key, or whose address
+    # names another account than its key, cannot settle, which Alkahest
+    # readiness reports by name while the storefront's other mechanisms run;
+    # with no section, those inputs would be a second, stale statement of what
+    # the settlement root says, which is incoherent.
     alkahest_configured = section_check.configures(ALKAHEST_MECHANISM)
-    seller_evm_address = active.wallet.address.strip()
     private_key = active.wallet.private_key.strip()
+    # An omitted address is the account the key signs as.
+    seller_evm_address = wallet_account_address(
+        {"address": active.wallet.address, "private_key": private_key}
+    )
     supplied = {
-        "[Wallet].address": bool(seller_evm_address),
+        "[Wallet].address": bool(active.wallet.address.strip()),
         "[Chains]": bool(active.chains),
         "[Wallet].private_key": bool(private_key),
     }
     if alkahest_configured:
-        chain_config_paths = {
-            name: chain.alkahest_address_config_path or None
-            for name, chain in active.chains.items()
-        }
         alkahest_section = section_check.config.mechanism_config(ALKAHEST_CONFIG_KEY)
+        # Each chain's book, resolved once through the Alkahest kit and handed
+        # to everything that reads one: client construction, the probe,
+        # negotiation's plans, and escrow verification.
+        chain_config_paths = {
+            name: alkahest_address_book(alkahest_section, name) for name in active.chains
+        }
         # The map starts empty and the probe owns it: its first step constructs
         # each chain's client, bounded, since a websocket client connects while
         # it is built and composition must not wait on a chain. The composition
@@ -829,11 +850,17 @@ def build_runtime_from_configuration(
         chain_clients: dict[str, Any] = {}
         chain_probe: AlkahestChainProbe | None = AlkahestChainProbe(
             [
-                ProbedChain.from_config(name, chain)
+                ProbedChain.from_config(
+                    name, chain, address_book=chain_config_paths[name]
+                )
                 for name, chain in active.chains.items()
             ],
             build_client=build_chain_client(
-                _alkahest_client_policy(active.chains, private_key=private_key)
+                _alkahest_client_policy(
+                    active.chains,
+                    address_books=chain_config_paths,
+                    private_key=private_key,
+                )
             ),
             clients=chain_clients,
             interval_seconds=alkahest_section.probe_interval_seconds,

@@ -106,7 +106,6 @@ def credits_buyer_cli(buyer_cli_binary, tmp_path_factory) -> BuyerCli:
             "",
             "[chains.anvil]",
             f"rpc_url = {_toml_quote(rpc_url)}",
-            f"alkahest_address_config_path = {_toml_quote(alkahest_path)}",
             "",
             # Same reason as the VM buyer's section: a mechanism the buyer
             # has installed is not one it will use, `enabled` defaults to
@@ -122,9 +121,9 @@ def credits_buyer_cli(buyer_cli_binary, tmp_path_factory) -> BuyerCli:
             "",
             "[Settlement.alkahest]",
             "enabled = true",
-            # Alkahest resolves contract addresses through the mechanism
-            # section, not through the chain entry, so both name the file.
-            f"address_config_path = {_toml_quote(alkahest_path)}",
+            # The anvil chain's address book, which every Alkahest read on
+            # that chain resolves through this table.
+            f"address_books = {{ anvil = {_toml_quote(alkahest_path)} }}",
             "oracle_gated = false",
             "trusted_oracle_addresses = []",
             "interruptible = false",

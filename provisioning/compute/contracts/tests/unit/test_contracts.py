@@ -18,16 +18,58 @@ def _termination(**overrides):
     return LeaseTermination(**overrides)
 
 
-def test_contract_rejects_the_retired_major_version():
-    """A 1.x caller carries the retired offering-mode spelling, so the
-    contract refuses it rather than coercing it."""
-    with pytest.raises(ValidationError, match="supported majors: 2"):
-        _termination(contract_version="1.0")
+@pytest.mark.parametrize("version", ["1.0", "2.0", "2.1", "4.0"])
+def test_a_model_of_another_major_is_refused_naming_the_supported_one(version):
+    """A 2.x model names no scheduled host and carries a retired lease state,
+    and a 1.x one the retired offering-mode spelling: each is refused by its
+    version, naming the major this contract supports, never coerced."""
+    with pytest.raises(ValidationError, match="supported majors: 3"):
+        _termination(contract_version=version)
 
 
-def test_contract_rejects_an_unsupported_future_major_version():
-    with pytest.raises(ValidationError, match="supported majors: 2"):
-        _termination(contract_version="3.0")
+def test_a_model_of_the_supported_major_is_accepted():
+    assert _termination().contract_version == "3.0"
+    assert _termination(contract_version="3.1").contract_version == "3.1"
+
+
+def _schedule(**overrides):
+    return contracts.FulfillmentScheduleResponse(
+        settlement_resource_id="resource-1",
+        pool_id="pool-1",
+        resource_kind="compute.gpu",
+        provider="bare_metal.ansible",
+        **overrides,
+    )
+
+
+def test_a_schedule_response_names_its_host_and_keeps_the_machine_in_its_attributes():
+    response = _schedule(host_id="bm-host-1", attributes={"physical_host_id": "machine-1"})
+
+    wire = response.model_dump(mode="json")
+    assert wire["host_id"] == "bm-host-1"
+    assert wire["attributes"]["physical_host_id"] == "machine-1"
+    assert contracts.FulfillmentScheduleResponse.model_validate(wire) == response
+
+
+def test_a_schedule_response_for_a_hostless_resource_omits_the_host():
+    response = _schedule()
+
+    wire = response.model_dump(mode="json")
+    assert "host_id" not in wire
+    assert contracts.FulfillmentScheduleResponse.model_validate(wire).host_id is None
+
+
+def test_the_schedule_response_schema_still_names_the_host():
+    """Omitting an absent host leaves the published schema whole."""
+    schema = contracts.FulfillmentScheduleResponse.model_json_schema(mode="serialization")
+    assert {"settlement_resource_id", "host_id", "attributes"} <= set(schema["properties"])
+
+
+def test_the_lease_state_has_no_provisioning_failure():
+    assert "provisioning_failed" not in {state.value for state in contracts.LeaseState}
+    for retired in ("provisioning", "provisioning_failed"):
+        with pytest.raises(ValueError, match="unsupported reservation state"):
+            contracts.lease_state_for_reservation_state(retired)
 
 
 @pytest.mark.parametrize(
@@ -48,7 +90,7 @@ def test_every_bound_mutation_contract_is_reachable(contract):
     path = path.replace("(?P<trust_role>admin|seller)", "admin").replace(
         "/?",
         "",
-    ).removesuffix("$")
+    )
     body = (
         {contract.body_resource: "resource-1"}
         if contract.body_resource is not None

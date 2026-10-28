@@ -1680,14 +1680,8 @@ def anvil_alkahest(signer, *, section=None, chain_probe=None):
         signer,
         wallet=SELLER_WALLET,
         chain_clients={"anvil": object()},
-        section={"address_config_path": None, **(section or {})},
-        chains={
-            "anvil": {
-                "rpc_url": "http://anvil.test",
-                "chain_id": DEAL_CHAIN_ID,
-                "alkahest_address_config_path": ALKAHEST_ADDRESS_BOOK,
-            }
-        },
+        section={"address_books": {"anvil": ALKAHEST_ADDRESS_BOOK}, **(section or {})},
+        chains={"anvil": {"rpc_url": "http://anvil.test", "chain_id": DEAL_CHAIN_ID}},
         chain_probe=chain_probe,
     )
 
@@ -1882,7 +1876,6 @@ async def test_a_listing_whose_mechanism_is_disabled_closes_as_vms_does(
         wallet=SELLER_WALLET,
         chain_clients={"anvil": object()},
         enabled=False,
-        section={"address_config_path": None},
     )
     storefront.terms = publication_payload_builder(_settling_runtime(db, signer, disabled))
 
@@ -1925,7 +1918,6 @@ async def test_an_override_clause_that_cannot_be_read_never_closes_its_listing(
         wallet=SELLER_WALLET,
         chain_clients={"anvil": object()},
         enabled=False,
-        section={"address_config_path": None},
     )
     storefront.terms = publication_payload_builder(_settling_runtime(db, signer, disabled))
 
@@ -2010,7 +2002,10 @@ def _alkahest_and_contact(signer, *, chain_probe=None, contact=CONTACT_ELSEWHERE
         {
             "schema_version": 1,
             "priority": ["alkahest.v1", "contact-exchange.v1"],
-            "alkahest": {**ALKAHEST_SECTION, "address_config_path": None},
+            "alkahest": {
+                **ALKAHEST_SECTION,
+                "address_books": {"anvil": ALKAHEST_ADDRESS_BOOK},
+            },
             "contact": contact,
         },
         resources={
@@ -2018,13 +2013,7 @@ def _alkahest_and_contact(signer, *, chain_probe=None, contact=CONTACT_ELSEWHERE
             "claimant_principal": signer.identity,
             "wallet": SELLER_WALLET,
             "clients": {"anvil": object()},
-            "chains": {
-                "anvil": {
-                    "rpc_url": "http://anvil.test",
-                    "chain_id": DEAL_CHAIN_ID,
-                    "alkahest_address_config_path": ALKAHEST_ADDRESS_BOOK,
-                }
-            },
+            "chains": {"anvil": {"rpc_url": "http://anvil.test", "chain_id": DEAL_CHAIN_ID}},
             **({"chain_probe": chain_probe} if chain_probe is not None else {}),
         },
     )

@@ -5,7 +5,7 @@ license = "MIT"
 description = "Schema-opaque capacity projection and storefront publication lifecycle."
 requires-python = ">=3.12,<3.14"
 dependencies = [
-    "arkhai-core-storefront==0.16.0",
+    "arkhai-core-storefront==0.17.1",
     "arkhai-kit-resource-pools-contracts>=0.2.0",
     "arkhai-kit-site-client>=0.9.0",
 ]

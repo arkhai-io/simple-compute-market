@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import tomllib
 
 import pytest
 
@@ -234,6 +235,22 @@ def test_config_init_user_new_file(monkeypatch, tmp_path, runner, app):
     assert "# settlements = [" in cfg.read_text()
 
 
+def test_config_init_user_states_no_provisioning_mode(monkeypatch, tmp_path, runner, app):
+    """Nothing reads a provisioning mode: whether delivery is mocked is the
+    provisioning service's to decide, so the template offers none."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+
+    result = runner.invoke(app, ["config", "init-user"])
+
+    assert result.exit_code == 0
+    written = (tmp_path / "arkhai" / "storefront.toml").read_text()
+    section = written.split("\n[provisioning]\n", 1)[1].split("\n[", 1)[0]
+    assert "service_url" in section
+    assert not [
+        line for line in section.splitlines() if line.lstrip("# ").startswith("mode")
+    ]
+
+
 def test_config_set_rejects_legacy_path_with_exact_migration_command(
     monkeypatch, runner, app
 ):
@@ -370,6 +387,50 @@ def test_settlement_migration_accepts_the_installed_payments_mechanism(
 
     assert result.exit_code == 0, result.output
     assert cfg.read_text() == _PAYMENTS_SETTLEMENT
+
+
+_RETIRED_BOOKS = """[Settlement]
+schema_version = 1
+priority = ["alkahest.v1"]
+
+[Settlement.alkahest]
+enabled = true
+address_config_path = "/etc/arkhai/alkahest/anvil.json"
+
+[Chains.anvil]
+rpc_url = "ws://anvil:8545"
+alkahest_address_config_path = "/etc/arkhai/alkahest/anvil.json"
+"""
+
+
+def test_settlement_migration_moves_the_retired_address_book_keys(
+    monkeypatch, tmp_path, runner, app
+):
+    """Spec scenario "A configuration is migrated", through the storefront's
+    `config migrate`: the check reports the moves and writes nothing, and the
+    write moves both keys into the table, keeping a backup."""
+    import market_storefront.groups.config as config_group
+
+    cfg = tmp_path / "storefront.toml"
+    cfg.write_text(_RETIRED_BOOKS)
+    monkeypatch.setattr(config_group, "storefront_config_file", lambda: cfg)
+
+    checked = runner.invoke(app, ["config", "migrate", "--scope", "settlement", "--check"])
+    assert checked.exit_code == 0, checked.output
+    assert "Settlement.alkahest.address_books.anvil" in checked.output
+    assert cfg.read_text() == _RETIRED_BOOKS
+
+    written = runner.invoke(
+        app, ["config", "migrate", "--scope", "settlement", "--write", "--backup"]
+    )
+    assert written.exit_code == 0, written.output
+    document = tomllib.loads(cfg.read_text())
+    assert document["Settlement"]["alkahest"]["address_books"] == {
+        "anvil": "/etc/arkhai/alkahest/anvil.json"
+    }
+    assert "address_config_path" not in document["Settlement"]["alkahest"]
+    assert document["Chains"]["anvil"] == {"rpc_url": "ws://anvil:8545"}
+    assert cfg.with_name("storefront.toml.bak").read_text() == _RETIRED_BOOKS
 
 
 def test_settlement_migration_refuses_stripe_with_its_removal(monkeypatch, tmp_path, runner, app):

@@ -17,12 +17,18 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from . import common
 from .common import resolve_config_value
 from .escrow_client import make_create_escrow_fn
 from .settlement_stages import derive_resumed_escrow_terms
 
 
 escrow_app = typer.Typer(no_args_is_help=True)
+
+
+def chain_address_book(chain_name: str) -> str | None:
+    """The Alkahest address book the buyer names for ``chain_name``."""
+    return common.chain_address_book(chain_name)
 
 
 def _resolve_escrow_uid_from_run(run_id: str) -> Optional[str]:
@@ -260,7 +266,7 @@ def reclaim_cmd(
                 private_key=pk,
                 rpc_url=chain_cfg.rpc_url,
                 chain_name=chain_cfg.name,
-                addr_config_path=chain_cfg.alkahest_address_config_path,
+                addr_config_path=chain_address_book(chain_cfg.name),
                 escrow_uid=escrow_uid,
                 escrow_address=escrow_address,
             )
@@ -423,7 +429,7 @@ def create_cmd(
             buyer_private_key=resolved_private_key,
             rpc_url=chain_cfg.rpc_url,
             chain_name=chain_cfg.name,
-            alkahest_addr_config=chain_cfg.alkahest_address_config_path,
+            alkahest_addr_config=chain_address_book(chain_cfg.name),
             token_contract=effective_token or "",
             token_decimals=effective_token_decimals,
         )
@@ -630,10 +636,11 @@ def show_cmd(
     from alkahest_py import AlkahestClient
 
     try:
-        prewarm_alkahest_address_config_cache(chain_cfg.alkahest_address_config_path)
+        address_book = chain_address_book(chain_cfg.name)
+        prewarm_alkahest_address_config_cache(address_book)
         address_config = resolve_alkahest_address_config(
             get_alkahest_network(chain_cfg.name),
-            config_path=chain_cfg.alkahest_address_config_path,
+            config_path=address_book,
         )
     except Exception as exc:
         typer.secho(str(exc), err=True, fg=typer.colors.RED)
@@ -651,7 +658,7 @@ def show_cmd(
                 client,
                 escrow_uid,
                 chain_name=chain_cfg.name,
-                config_path=chain_cfg.alkahest_address_config_path,
+                config_path=address_book,
                 escrow_address=escrow_address,
             )
         )

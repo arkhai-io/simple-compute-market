@@ -307,7 +307,7 @@ async def test_prepare_pins_the_exact_verified_obligation(tmp_path, monkeypatch)
     )
     monkeypatch.setattr(
         "market_storefront.utils.config.CHAINS",
-        {"anvil": SimpleNamespace(alkahest_address_config_path="/addresses.json")},
+        {"anvil": SimpleNamespace(name="anvil")},
     )
 
     # A bare `object()` here would pass whatever it was given straight to a
