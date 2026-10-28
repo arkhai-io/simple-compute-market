@@ -172,6 +172,15 @@ waiting runs distinct. Never advance with a
 process still running or bypass a guard that refuses. A failed review has no
 published result; an earlier record does not count.
 
+Start every step run as its own background command of the harness, one run per
+call, so the harness tracks the run and tells you when it exits. Never detach a
+run inside an ordinary command — `( make … & )`, `nohup`, `setsid`, or a trailing
+`&` — to run something else in the same call, such as starting validation and
+opening the round view together: the call returns at once, the harness has
+nothing left to track, and a run that finishes is never reported, so the change
+waits on a step that ended long ago. Run the round view, and each of a pair of
+side-by-side runs, in calls of their own.
+
 For `round`, record the round the computation names, as it names it, just before
 starting its first session — copying the list is routing, not a reading of the
 plan — with its `by`: `plan` for the plan's next round, `triage` or `owner` for
