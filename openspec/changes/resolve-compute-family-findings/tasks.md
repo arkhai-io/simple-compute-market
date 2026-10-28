@@ -3020,19 +3020,85 @@ Files:
 - `docs/seller-quickstart.md`: each line stating `mode`, or saying that it
   selects mock or live.
 
-- [ ] 20.1 Remove `mode` from the settings, the template, and the umbrella
+- [x] 20.1 Remove `mode` from the settings, the template, and the umbrella
   values, and the render test's expectation of it (D22).
   - Unit (`domains/vms/storefront/tests/unit/cli/test_config.py`): the generated
     template has no `mode`, and a settings file that states it still loads.
   - Chart render: `make -C helm test-render`.
-- [ ] 20.2 Remove `mode` from the runbook and the seller quickstart, which say
+
+  `mode` is gone from `settings.toml`'s `[provisioning]`, from the
+  `config init` template's commented section, and from the umbrella's
+  `storefront.agents.arkhai.config`. That `provisioning:` block held only
+  `mode`, so it is removed whole. The chart still derives `service_url`
+  without it. The render test's stated-values case now expects
+  `{"service_url": …}` alone.
+
+  Unit:
+  - `test_config.py`, `test_config_init_user_states_no_provisioning_mode`:
+    `config init-user`, writing under a temporary `XDG_CONFIG_HOME`, produces a
+    `[provisioning]` section that names `service_url` and has no `mode` line,
+    stated or commented.
+  - `test_config_loader.py`,
+    `test_a_stated_provisioning_mode_loads_beside_the_section_it_sits_in`: a
+    `storefront.toml` stating `mode = "mock"` loads through the layered
+    loader, with its `service_url` read.
+  - `test_startup_refusal.py`,
+    `test_a_provisioning_mode_the_storefront_never_read_is_ignored`: a
+    publishable configuration stating the mode gets no
+    `retired_setting_problems`, and `require_publishable_storefront` does not
+    refuse it.
+
+  These show the configuration loads and passes the startup checks. They do
+  not show the app starting.
+
+  Chart render (`test_render.py`,
+  `test_a_stated_provisioning_mode_renders_beside_the_derived_service_url`):
+  an agent overlay stating `provisioning.mode` passes the values schema and
+  renders beside the derived `service_url`.
+
+  Results:
+  - The VM storefront's suite before the fresh-context fixes: unit 1140
+    passed and 1 skipped, integration 475 passed.
+  - `make -C helm test-render` passes, with its storefront loader checks run
+    rather than skipped.
+
+  `retired_settings.py`'s module docstring now says that a key the
+  storefront never read, `[provisioning] mode` among them, is ignored rather
+  than refused, so the catalogue is not later "completed" with it. The
+  storefront chart's ConfigMap comment no longer lists "provisioning mode"
+  among its non-sensitive settings.
+
+  `kit/config`'s loader test keeps a `{"provisioning": {"mode": "mock"}}`
+  fixture. It is the generic loader's input data, and no storefront reads
+  it.
+- [x] 20.2 Remove `mode` from the runbook and the seller quickstart, which say
   it selects mock or live provisioning (D22).
-- [ ] 20.3 Bump the VM storefront, unless already bumped since the merge.
+
+  `VALIDATION_RUNBOOK.md`'s real-provisioning cutover drops its `--set
+  storefront.agents.arkhai.config.provisioning.mode=real`. The provisioning
+  chart's `provisioning.mockMode=false` stays: it is what selects the
+  service's profile.
+
+  `seller-quickstart.md` loses three things:
+  - the `mode` line from its example TOML;
+  - the sentence saying it selects mock or live, replaced by one saying
+    that the storefront has no provisioning mode and the provisioning service
+    decides;
+  - live provisioning's first step, which set it. The remaining steps are
+    renumbered 1–5.
+- [x] 20.3 Bump the VM storefront, unless already bumped since the merge.
   **Verification checkpoint:**
   - 20.1;
   - `make test` in `domains/vms/storefront`;
   - `make -C helm test-render`;
   - `make check-comment-hygiene`.
+
+  No bump: `arkhai-vms-storefront` is already `0.23.0` over `dev`'s
+  `0.22.0`. Results:
+  - `make test` in `domains/vms/storefront` passes (20.1).
+  - `make -C helm test-render` passes.
+  - `make check-comment-hygiene` passes.
+  - `make check-packaging` passes.
 
   Owed by validation: `tests.yml`, job `release · deployment contracts`, where
   `make -C helm test-render` passes with `mode` gone from the umbrella's values
@@ -3041,6 +3107,41 @@ Files:
   End-to-end: the VM lane's storefronts boot without the key. No scenario is
   owed.
 
+  Correction: that sentence is not new evidence. The lane's storefront
+  configurations never stated the key. The only deployment the section
+  changes is the umbrella Helm release's storefront, and the render alone
+  covers it, here and in the owed job. Validation's Helm release boots it.
+
+  Results after the fresh-context fixes:
+  - Full `make test` passes (run before the fixes).
+  - The VM storefront's suite: unit 1141 passed and 1 skipped, integration
+    475 passed.
+  - `make -C helm test-render` passes again.
+
+  Handoff, from the fresh-context check.
+
+  Fixed:
+  - The loader test, in the CLI module and importing locally, moved to the
+    loader's and the startup refusal's modules. The startup case now also
+    passes `require_publishable_storefront`.
+  - The template test patched imported names. It now sets `XDG_CONFIG_HOME`.
+  - The test wording measured against the change. Restated as current
+    behaviour.
+  - No render case showed a stated mode passing the values schema. Added.
+  - The ConfigMap comment and the "ignored, not refused" rationale. The
+    rationale is now stated in `retired_settings.py`.
+  - The end-to-end claim. Corrected above.
+
+  Declined:
+  - Rewording the quickstart's "mock mode" sections. The base seller stack
+    runs provisioning's `seller` profile, which may not be the mock one, so
+    those sections may describe a mode the stack does not run. That is a
+    question about the compose stack, not about the storefront key D22
+    removes, and it is left for triage.
+  - Dropping the runbook's storefront restart in the cutover. Restarting the
+    storefront after its site's provisioning service restarts is harmless,
+    and whether a later section relies on it is not this section's to
+    decide.
 ## 21. The e2e harness calls the family's mock-rule client
 
 Waits for `unbacked-bare-metal-listings` (D2). Delivers the e2e callers' move

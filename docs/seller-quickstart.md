@@ -63,7 +63,6 @@ identifier = "<unpadded-base64url-public-key>"
 
 [provisioning]
 service_url = "http://seller-provisioning:8081"
-mode = "http"                            # "mock" for a dry run
 
 [capacity.sites]
 # Each site the storefront sells from, by stable ID, and its authority's origin.
@@ -269,7 +268,8 @@ docker compose -f compose/seller.yml logs -f seller-storefront
 
 Keep `admin_api_key`, `ARKHAI_IDENTITY_CREDENTIAL`, and any Alkahest wallet
 private key in the deployment's secret boundary rather than a committed
-configuration. `[provisioning].mode` selects mock versus live behavior.
+configuration. The storefront has no provisioning mode: whether a deal's
+delivery is mocked or live is the provisioning service's to decide.
 
 There is no publisher preregistration step. Every publication is signed by the
 configured canonical marketplace principal, and the registry creates the
@@ -335,10 +335,7 @@ and, in mock mode, receive simulated VM credentials.
 Mock mode validates the storefront ↔ chain ↔ registry surface without
 touching libvirt. To create real VMs:
 
-1. Set `[provisioning].mode = "http"` in the TOML (the default for fresh
-   configs).
-
-2. Generate an SSH keypair the provisioning container will use to reach
+1. Generate an SSH keypair the provisioning container will use to reach
    your KVM hosts, install the pubkey on each host, and put the privkey
    at `./keys/id_ed25519`:
 
@@ -348,7 +345,7 @@ touching libvirt. To create real VMs:
    chmod 600 ./keys/id_ed25519
    ```
 
-3. List the execution hosts the service registers:
+2. List the execution hosts the service registers:
 
    ```bash
    cd domains/vms/provisioning/iac/ansible/inventory
@@ -400,7 +397,7 @@ touching libvirt. To create real VMs:
    make build-seller
    ```
 
-4. Bring the stack up with the live overlay — adds the SSH-key
+3. Bring the stack up with the live overlay — adds the SSH-key
    bind-mount that mock mode doesn't need:
 
    ```bash
@@ -410,12 +407,12 @@ touching libvirt. To create real VMs:
      up -d --force-recreate seller-provisioning
    ```
 
-5. KVM host prerequisites: ansible user has passwordless sudo
+4. KVM host prerequisites: ansible user has passwordless sudo
    (`sudo -n true && echo ok`), is in the `libvirt` group, and
    `libvirtd` is running. The playbook handles cloud-init, virt-install,
    and SSH port-forward NAT.
 
-6. Smoke-test reachability:
+5. Smoke-test reachability:
 
    ```bash
    docker compose -f compose/seller.yml -f compose/seller.live.yml exec \

@@ -405,7 +405,6 @@ _INIT_USER_TEMPLATE = """\
 
 [provisioning]
 # service_url = "http://localhost:8085"
-# mode = ""                                    # "mock" for dry runs | "" (= http) for real KVM/libvirt
 # timeout = 3600
 # poll_interval = 15
 

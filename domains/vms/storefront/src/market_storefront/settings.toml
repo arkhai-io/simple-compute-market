@@ -169,7 +169,6 @@ publication_interval_seconds = 30
 
 [provisioning]
 service_url            = "http://localhost:8085"
-mode                   = ""        # "mock" | "" — selects mock vs real ansible/kvm path
 timeout                = 3600
 poll_interval          = 15
 

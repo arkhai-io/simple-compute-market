@@ -260,11 +260,19 @@ def test_stated_values_are_rendered_as_stated() -> None:
     assert config["base_url"] == "https://bob.example/"
     assert config["db_path"] == "/var/lib/arkhai/custom.db"
     assert config["registry"] == agent["config"]["registry"]
-    assert config["provisioning"] == {"mode": "mock", "service_url": "http://provisioning.example:8081"}
+    assert config["provisioning"] == {"service_url": "http://provisioning.example:8081"}
     assert config["capacity"] == {
         "source_confirmation_seconds": 3600,
         "sites": {"west": "http://provisioning.example:8081"},
     }
+
+
+def test_a_stated_provisioning_mode_renders_beside_the_derived_service_url() -> None:
+    """The storefront reads no provisioning mode, and the schema does not
+    refuse one: an overlay stating it renders, the mode inert."""
+    config = _config(_ok(_render(agent=_with_config(provisioning={"mode": "real"}))))
+    assert config["provisioning"]["mode"] == "real"
+    assert config["provisioning"]["service_url"]
 
 
 def test_a_stated_port_equal_to_the_agents_is_accepted() -> None:

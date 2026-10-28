@@ -119,6 +119,14 @@ def test_the_removed_provisioning_trust_set_is_refused() -> None:
     assert publication_startup_problems(source) == []
 
 
+def test_a_provisioning_mode_the_storefront_never_read_is_ignored() -> None:
+    """A key no storefront ever read is not a retired setting: a configuration
+    stating `[provisioning] mode` starts, its mode inert."""
+    source = _source(provisioning={"service_url": "http://home:8081", "mode": "mock"})
+    assert retired_setting_problems(source) == []
+    require_publishable_storefront(source)
+
+
 @pytest.mark.parametrize(
     ("stated", "key"),
     [

@@ -377,6 +377,23 @@ def test_chains_dict_empty_when_no_chains_section(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+def test_a_stated_provisioning_mode_loads_beside_the_section_it_sits_in(
+    tmp_path, monkeypatch
+):
+    """`[provisioning]` is untyped, and the storefront reads no mode from it:
+    a file stating one loads, its service URL read as stated."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    config_dir = tmp_path / "arkhai"
+    config_dir.mkdir()
+    (config_dir / "storefront.toml").write_text(
+        '[provisioning]\nservice_url = "http://provisioning.example:8081"\nmode = "mock"\n'
+    )
+
+    s = agent_config._build_settings()
+
+    assert s.get("provisioning.service_url") == "http://provisioning.example:8081"
+
+
 def test_build_settings_reads_a_rendered_json_layer_under_the_overlay(
     tmp_path, monkeypatch
 ):

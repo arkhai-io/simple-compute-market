@@ -234,6 +234,22 @@ def test_config_init_user_new_file(monkeypatch, tmp_path, runner, app):
     assert "# settlements = [" in cfg.read_text()
 
 
+def test_config_init_user_states_no_provisioning_mode(monkeypatch, tmp_path, runner, app):
+    """Nothing reads a provisioning mode: whether delivery is mocked is the
+    provisioning service's to decide, so the template offers none."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+
+    result = runner.invoke(app, ["config", "init-user"])
+
+    assert result.exit_code == 0
+    written = (tmp_path / "arkhai" / "storefront.toml").read_text()
+    section = written.split("\n[provisioning]\n", 1)[1].split("\n[", 1)[0]
+    assert "service_url" in section
+    assert not [
+        line for line in section.splitlines() if line.lstrip("# ").startswith("mode")
+    ]
+
+
 def test_config_set_rejects_legacy_path_with_exact_migration_command(
     monkeypatch, runner, app
 ):
