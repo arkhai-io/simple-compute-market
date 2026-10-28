@@ -578,6 +578,18 @@
                     }
                   ]
                 },
+                "^[aA][dD][dD][rR][eE][sS][sS]_[bB][oO][oO][kK][sS]$": {
+                  "additionalProperties": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
                 "^[oO][rR][aA][cC][lL][eE]_[gG][aA][tT][eE][dD]$": {
                   "type": [
                     "boolean",

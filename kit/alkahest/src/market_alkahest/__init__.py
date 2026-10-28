@@ -34,6 +34,7 @@ from .settlement_config import (
     ALKAHEST_CONFIG_KEY,
     ALKAHEST_MECHANISM_ID,
     AlkahestSettlementConfig,
+    alkahest_address_book,
     create_alkahest_registration,
     wallet_account_address,
 )
@@ -57,6 +58,7 @@ __all__ = [
     "RECIPIENT_RELEASE",
     "RELEASE_MODELS",
     "ReleaseModelError",
+    "alkahest_address_book",
     "configured_release_model",
     "create_alkahest_registration",
     "escrow_release_conditions",

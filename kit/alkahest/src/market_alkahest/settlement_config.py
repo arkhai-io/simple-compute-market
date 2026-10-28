@@ -80,6 +80,9 @@ class AlkahestSettlementConfig(BaseModel):
 
     enabled: bool = False
     address_config_path: str | None = None
+    #: Each configured chain's address book, by chain name; a chain's book is
+    #: resolved through :func:`alkahest_address_book`.
+    address_books: dict[str, str] = Field(default_factory=dict)
     oracle_gated: bool = False
     trusted_oracle_addresses: tuple[str, ...] = ()
     interruptible: bool = False
@@ -100,6 +103,24 @@ class AlkahestSettlementConfig(BaseModel):
             return None
         if not value or value != value.strip():
             raise ValueError("address_config_path must be non-empty and trimmed")
+        return value
+
+    @field_validator("address_books", mode="before")
+    @classmethod
+    def accept_configuration_tables(cls, value: Any) -> Any:
+        # A layered loader may hand the table over as its own mapping type.
+        return dict(value) if isinstance(value, Mapping) else value
+
+    @field_validator("address_books")
+    @classmethod
+    def validate_address_books(cls, value: dict[str, str]) -> dict[str, str]:
+        for chain_name, path in value.items():
+            if not chain_name or chain_name != chain_name.strip():
+                raise ValueError("address_books keys must be non-empty, trimmed chain names")
+            if not path or path != path.strip():
+                raise ValueError(
+                    f"address_books.{chain_name} must be a non-empty, trimmed path"
+                )
         return value
 
     @field_validator(
@@ -164,6 +185,25 @@ def configured_release_model(config: AlkahestSettlementConfig | None) -> str:
     if config.interruptible:
         return INTERRUPTIBLE_RELEASE
     return RECIPIENT_RELEASE
+
+
+def alkahest_address_book(
+    section: AlkahestSettlementConfig | Mapping[str, Any] | None, chain_name: str
+) -> str | None:
+    """The address book Alkahest uses on ``chain_name``.
+
+    ``section`` is the role's ``[Settlement.alkahest]``, parsed or not, or
+    ``None`` where the role configures none. Answers ``None`` for a chain the
+    section names no book for.
+    """
+    if section is None:
+        return None
+    config = (
+        section
+        if isinstance(section, AlkahestSettlementConfig)
+        else AlkahestSettlementConfig.model_validate(section)
+    )
+    return config.address_books.get(chain_name)
 
 
 def _value(source: Any, name: str, default: Any = None) -> Any:
@@ -411,18 +451,39 @@ def _chains_missing_blocker() -> ReadinessBlocker:
 
 
 def _address_config_blockers(
-    config: AlkahestSettlementConfig,
+    config: AlkahestSettlementConfig, chains: Any
 ) -> tuple[ReadinessBlocker, ...]:
-    if config.address_config_path and not _validate_address_file(
-        config.address_config_path
-    ):
-        return (
+    """A book that names no configured chain, and a book that cannot be loaded.
+
+    A book under a name no chain carries would be read by nothing, so the
+    chain it was meant for would silently go without it. Where the
+    composition passes no chains mapping there is nothing to compare with.
+    """
+    blockers: list[ReadinessBlocker] = []
+    unknown = (
+        [name for name in config.address_books if name not in chains]
+        if isinstance(chains, Mapping)
+        else []
+    )
+    if unknown:
+        # One blocker per code, naming every such key.
+        blockers.append(
+            _configuration_blocker(
+                "alkahest.address_book_chain_unknown",
+                "Settlement.alkahest.address_books names "
+                + ", ".join(repr(name) for name in sorted(unknown))
+                + ", which is not a configured settlement chain",
+            )
+        )
+    paths = (config.address_config_path, *config.address_books.values())
+    if any(path and not _validate_address_file(path) for path in paths):
+        blockers.append(
             _configuration_blocker(
                 "alkahest.address_config_invalid",
                 "the Alkahest address configuration cannot be loaded",
-            ),
+            )
         )
-    return ()
+    return tuple(blockers)
 
 
 async def alkahest_preflight(
@@ -484,7 +545,7 @@ async def alkahest_preflight(
                 (
                     *_wallet_blockers(wallet, role=role, signs=signs),
                     *((_chains_missing_blocker(),) if chains_missing else ()),
-                    *_address_config_blockers(config),
+                    *_address_config_blockers(config, chains),
                     *_release_model_blockers(
                         config,
                         role=role,
@@ -534,7 +595,7 @@ async def alkahest_preflight(
                 )
         blockers.extend(_chain_probe_blockers(resources.get("chain_probe"), chain_names))
 
-    blockers.extend(_address_config_blockers(config))
+    blockers.extend(_address_config_blockers(config, chains))
 
     if resources.get("require_asset") and not resources.get("asset"):
         blockers.append(
@@ -870,6 +931,7 @@ __all__ = [
     "validate_alkahest_publication_input",
     "ALKAHEST_MECHANISM_ID",
     "AlkahestSettlementConfig",
+    "alkahest_address_book",
     "alkahest_buyer_compatibility",
     "alkahest_client_factory",
     "alkahest_option_builder",

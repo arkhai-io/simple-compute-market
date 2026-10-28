@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timezone
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 
 import pytest
 from market_alkahest import (
@@ -15,6 +15,7 @@ from market_alkahest import (
     verify_escrow_against_plan,
     wallet_account_address,
 )
+from market_alkahest.dev_chain import anvil_address_book_path
 from market_alkahest.settlement_config import alkahest_preflight
 from market_core.schemas import SettlementOption
 from market_settlement_runtime import (
@@ -349,6 +350,111 @@ async def test_each_chain_and_input_blocker_states_its_kind(
     config = AlkahestSettlementConfig.model_validate({"enabled": True, **policy})
 
     assert expected in await _blockers(config, _seller_resources(**resources))
+
+
+def test_the_address_books_parse_as_a_table_of_chain_to_book() -> None:
+    config = AlkahestSettlementConfig.model_validate(
+        {"address_books": {"anvil": "/etc/arkhai/alkahest/anvil.json"}}
+    )
+
+    assert config.address_books == {"anvil": "/etc/arkhai/alkahest/anvil.json"}
+    assert AlkahestSettlementConfig().address_books == {}
+    # A layered loader's own mapping type is a table too.
+    assert AlkahestSettlementConfig.model_validate(
+        {"address_books": MappingProxyType({"anvil": "/book.json"})}
+    ).address_books == {"anvil": "/book.json"}
+
+
+@pytest.mark.parametrize(
+    "books",
+    [
+        {" anvil": "/book.json"},
+        {"": "/book.json"},
+        {"anvil": ""},
+        {"anvil": " /book.json"},
+        {"anvil": 7},
+        ["anvil"],
+    ],
+    ids=["untrimmed-chain", "empty-chain", "empty-book", "untrimmed-book", "not-a-path", "a-list"],
+)
+def test_an_address_book_entry_that_is_not_a_chain_and_a_path_is_refused(books) -> None:
+    with pytest.raises(ValidationError) as refused:
+        AlkahestSettlementConfig.model_validate({"address_books": books})
+
+    assert refused.value.errors()[0]["loc"][0] == "address_books"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enabled", [True, False], ids=["enabled", "disabled"])
+async def test_an_address_book_naming_no_configured_chain_is_a_blocker_naming_it(
+    enabled: bool,
+) -> None:
+    book = str(anvil_address_book_path())
+    config = AlkahestSettlementConfig(
+        enabled=enabled, address_books={"anvil": book, "anvill": book}
+    )
+
+    status = await alkahest_preflight(config, _seller_resources(), "seller")
+
+    (blocker,) = status.blockers
+    assert (blocker.code, blocker.kind) == (
+        "alkahest.address_book_chain_unknown",
+        "configuration",
+    )
+    assert "'anvill'" in blocker.message
+    assert "'anvil'," not in blocker.message
+
+
+@pytest.mark.asyncio
+async def test_a_buyers_address_book_naming_no_configured_chain_is_a_blocker() -> None:
+    status = await alkahest_preflight(
+        AlkahestSettlementConfig(
+            enabled=True, address_books={"anvill": str(anvil_address_book_path())}
+        ),
+        {
+            "wallet": {"address": WALLET},
+            "chains": {"anvil": {"rpc_url": "http://anvil.test"}},
+            "default_chain": "anvil",
+        },
+        "buyer",
+    )
+
+    assert [blocker.code for blocker in status.blockers] == [
+        "alkahest.address_book_chain_unknown"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_address_book_keys_are_not_judged_without_a_chains_mapping() -> None:
+    config = AlkahestSettlementConfig(
+        enabled=True, address_books={"anvil": str(anvil_address_book_path())}
+    )
+
+    status = await alkahest_preflight(config, {"wallet": {"address": WALLET}}, "buyer")
+
+    assert "alkahest.address_book_chain_unknown" not in {
+        blocker.code for blocker in status.blockers
+    }
+
+
+@pytest.mark.asyncio
+async def test_an_address_book_on_a_configured_chain_raises_no_blocker() -> None:
+    config = AlkahestSettlementConfig(
+        enabled=True, address_books={"anvil": str(anvil_address_book_path())}
+    )
+
+    assert await _blockers(config, _seller_resources()) == set()
+
+
+@pytest.mark.asyncio
+async def test_an_address_book_that_cannot_be_loaded_is_a_blocker() -> None:
+    config = AlkahestSettlementConfig(
+        enabled=True, address_books={"anvil": "/nonexistent/alkahest-addresses.json"}
+    )
+
+    assert await _blockers(config, _seller_resources()) == {
+        ("alkahest.address_config_invalid", "configuration")
+    }
 
 
 @pytest.mark.asyncio

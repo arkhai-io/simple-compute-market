@@ -3435,21 +3435,111 @@ Files:
 - `kit/alkahest/tests/unit/test_settlement_config.py`, and a resolver unit
   suite.
 
-- [ ] 23.1 Add the map from configured chain name to book. A key naming no
+- [x] 23.1 Add the map from configured chain name to book. A key naming no
   configured chain makes Alkahest unready (D11).
   Unit:
   - the map parses;
   - an unknown chain key is a blocker naming the key.
-- [ ] 23.2 Add the resolver operation. It answers a chain's book, and nothing
+
+  `AlkahestSettlementConfig.address_books: dict[str, str]`, empty by default,
+  beside `address_config_path`, which section 26 retires. Each key must be a
+  non-empty, trimmed chain name and each value a non-empty, trimmed path. A
+  layered loader's own mapping type is accepted as a table.
+
+  Readiness reports one `alkahest.address_book_chain_unknown` configuration
+  blocker naming every key that is not a configured chain: for every role
+  while the section is enabled, and for a seller while it is disabled, as its
+  other address-configuration blockers are. It judges keys only when the
+  composition passes a chains mapping, since otherwise there is nothing to
+  compare with; an empty mapping makes every key unknown. A book that cannot
+  be loaded raises the existing `alkahest.address_config_invalid`, as the
+  section key's does.
+
+  Unit (`kit/alkahest/tests/unit/test_settlement_config.py`):
+  - the table parses, from a plain dict and from another mapping type, and is
+    empty by default;
+  - six malformed entries are refused at `address_books`;
+  - a seller's unknown key is one blocker naming it, not the configured key,
+    enabled and disabled;
+  - a buyer's unknown key is the same blocker;
+  - with no chains mapping, keys are not judged;
+  - a book on a configured chain raises nothing;
+  - a book that cannot be loaded is `alkahest.address_config_invalid`.
+
+  `AlkahestSettlementConfig` is frozen, and the dict field makes `hash()` of
+  it raise, as `[Settlement.contact]`'s dict fields already do for theirs. No
+  caller hashes either.
+
+  The new field changes the definition each storefront chart's values schema
+  carries, so the drift tests would fail. `make helm-values-schema`, and the
+  `uv run` it makes, were denied in this session (no rule allows them). The
+  entry was written by hand instead, with the Edit tool, in the three files
+  the generators write: `helm/charts/storefront/values.schema.json`,
+  `helm/charts/bare-metal-storefront/values.schema.json`, and
+  `helm/values.schema.json`. It has the shape the generator gives
+  `contact_payload`, also `dict[str, str]`, in field order. The VM and
+  bare-metal drift tests
+  (`test_committed_values_schemas_carry_the_generated_definition`,
+  `test_the_committed_values_schema_carries_the_generated_definition`) passed
+  against it in the suite runs below, after `make check-packaging` rebuilt
+  the wheelhouse with this kit. They compare parsed JSON, so they show the
+  entry equal to the generator's, not byte-identical: a run of `make
+  helm-values-schema` where it is allowed confirms that, as 24.3 calls for.
+
+  Until section 24, a configuration stating only the table passes readiness
+  while no reader resolves a book through it, so the chain goes without its
+  book. No deployment states the table before 24.3, and section 24 moves
+  every reader in the same commit as the configurations.
+- [x] 23.2 Add the resolver operation. It answers a chain's book, and nothing
   for a chain using the SDK's built-in addresses. No caller reads the map
   itself (D11).
   Unit: "A seller trades on two chains" at the resolver: `anvil` is named, and
   `base_sepolia` resolves to nothing.
-- [ ] 23.3 Bump `arkhai-kit-alkahest`, unless section 22 already did.
+
+  `market_alkahest.alkahest_address_book(section, chain_name)` takes the
+  parsed or unparsed `[Settlement.alkahest]`, or `None` for a role with none,
+  and answers the chain's book or `None`.
+
+  Unit (`kit/alkahest/tests/unit/test_address_books.py`, new):
+  - `test_a_seller_trading_on_two_chains_resolves_only_the_named_chains_book`;
+  - an unparsed section resolves as its parsed form;
+  - no section resolves no book.
+
+  Nothing reads a book through it yet. The kit's own readers still read
+  `[Chains.<name>].alkahest_address_config_path` from the chains a
+  composition passes (`release_conditions`, the option builder,
+  `ProbedChain.from_config`), and its client factory still applies
+  `address_config_path` to every chain. Each moves to the resolver with its
+  storefront in section 24, since moving a kit reader alone would leave the
+  storefronts' configurations, which state the old keys until 24.3, reading
+  the built-in addresses.
+- [x] 23.3 Bump `arkhai-kit-alkahest`, unless section 22 already did.
   **Verification checkpoint:**
   - 23.1–23.2;
   - `make test` in `kit/alkahest`;
   - `make check-packaging` and `make check-comment-hygiene`.
+
+  Section 22 bumped it to 0.11.0, so no bump. Results:
+  - `make test` in `kit/alkahest`: 440 passed, after the fresh-context
+    check's tests;
+  - the VM and bare-metal storefront suites, with their drift tests:
+    1142 + 475 and 513 passed;
+  - full `make test`: passes;
+  - `make check-packaging` and `make check-comment-hygiene`: pass;
+  - `make check-change`: only the closeout citation, as at section 22.
+
+  Fixed from the fresh-context check: the field comment and the resolver's
+  docstring had described section 24's system (every reader resolving here,
+  an unnamed chain on built-in addresses). They now describe what holds. The
+  unknown-key message said no `[Chains]` table configured the chain, though
+  VM and API credits drop a table with no `rpc_url`; it now says the chain is
+  not a configured settlement chain. Section 24's file list now names the
+  kit's own readers, and D11's promotion row names `DEPLOYMENT_AND_CONFIG.md`'s
+  "Storefront agents: pass-through configuration", which names both retired
+  keys as the mounted book's readers.
+
+  End-to-end: none. No configuration the pipeline deploys states the table
+  until 24.3.
 
 ## 24. Storefronts resolve address books and the seller account through Alkahest
 
@@ -3495,6 +3585,12 @@ Files:
   - `helm/{values.schema.json,local-values.yaml,bare-metal-release-values.yaml,fixtures/eip191-evm-values.yaml,tests/test_release_topology.py}`;
 - `scripts/tests/test_settlement_deployment_surfaces.py`;
 - the storefronts' tests that state the old keys.
+- Amended at section 23: `kit/alkahest`'s own readers of a chain's book, which
+  move to `alkahest_address_book` with the storefronts that call them:
+  - `settlement_config.py`'s client factory, which applies
+    `address_config_path` to every chain, and its option builder;
+  - `release_conditions.py`;
+  - `chain_probe.py`'s `ProbedChain.from_config`.
 
 - [ ] 24.1 Each storefront resolves a chain's book through the `kit/alkahest`
   operation, and passes the mapping to the packages it composes. It adds no
@@ -3811,7 +3907,7 @@ column at closeout (27.9).
 | D8: why the mark is a flag, not a state (rollback); how it differs from the deferred outcome | `openspec/specs/settlement-servicing/architecture.md`, "Servicing lifecycle" | |
 | D9: one dispatch claimed by the completing start; no counterparty-triggered re-send | `openspec/specs/introduction-delivery/spec.md`, "Delivery fires once per reveal and re-delivery is explicit", through the archive | |
 | D9: the buyer-retry limit; why a new start, not a replay, completes a reveal; why the claim is its own table | `openspec/specs/introduction-delivery/architecture.md` (new), and its row in `openspec/specs/README.md` | |
-| D10 and D11: one seller account; address books per chain | `openspec/specs/settlement-configuration/spec.md`, through the archive; `openspec/specs/settlement-configuration/architecture.md`, where it lists an empty wallet address among the blockers (added at section 22); `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Settlement consumer configuration and cutover" and "Bare-metal role configuration"; `docs/seller-quickstart.md`, `docs/bare-metal-seller-quickstart.md`, `docs/buyer-quickstart.md`, and `docs/cookbooks/vllm-apicredits-seller.md`, wherever each names a book or the seller's address | |
+| D10 and D11: one seller account; address books per chain | `openspec/specs/settlement-configuration/spec.md`, through the archive; `openspec/specs/settlement-configuration/architecture.md`, where it lists an empty wallet address among the blockers (added at section 22); `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Settlement consumer configuration and cutover", "Bare-metal role configuration", and "Storefront agents: pass-through configuration", whose `alkahestAddressBook` paragraph names the retired keys (added at section 23); `docs/seller-quickstart.md`, `docs/bare-metal-seller-quickstart.md`, `docs/buyer-quickstart.md`, and `docs/cookbooks/vllm-apicredits-seller.md`, wherever each names a book or the seller's address | |
 | D12 and D13: the bare-metal delivery conflict, and begin | `openspec/specs/storefront-publication/spec.md`, through the archive | |
 | D17: operator guest names | `openspec/specs/physical-provisioning/spec.md`, through the archive | |
 | Pre-1.0 incompatible changes; versioned contracts are versioned, not changed in place; neither applies at or above 1.0.0 | `docs/development/RELEASING.md`, "Versioning policy"; a pointer in `docs/development/ARCHITECTURE.md`, "Operators"; the owner's one sentence in `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Profile-based configuration" | |
