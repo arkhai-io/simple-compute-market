@@ -104,9 +104,9 @@ def test_a_malformed_outcome_is_logged_stopped(tmp_path: Path) -> None:
 def test_a_turn_after_the_report_keeps_the_report_as_earlier(tmp_path: Path) -> None:
     # A wake-up the step scheduled fires after it reported, and its turn ends the run.
     report = {"outcome": "finished", "message": "The section is committed; make test passed.",
-              "next": "The next section."}
+              "next": {"step": "triage", "kind": "implementation"}}
     woke = {"outcome": "finished", "message": "Nothing left to wait for.",
-            "next": "The next section."}
+            "next": {"step": "triage", "kind": "implementation"}}
     claude = FakeClaude((event_lines(report) + event_lines(woke), 0))
 
     line = make_wrapper(tmp_path, claude).run("implement", CHANGE)

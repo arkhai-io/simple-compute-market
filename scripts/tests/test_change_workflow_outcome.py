@@ -14,7 +14,7 @@ from change_workflow_fixtures import COMMIT, VALID, clock, log_file
 # Step outcomes as a workflow log carries them, without the fields the wrapper adds
 # around them.
 EXAMPLE_OUTCOMES = [
-    {"outcome": "returned", "return_to": "design",
+    {"outcome": "returned", "next": {"step": "design"},
      "message": "The patch has no provider field; refusing it needs a decision the "
                 "design does not make.",
      "evidence": "the section's notes"},
@@ -24,7 +24,7 @@ EXAMPLE_OUTCOMES = [
      "awaiting": "environmental remedy"},
 ]
 REQUIRED = {"finished": ["next"], "question": ["awaiting"],
-            "returned": ["evidence"], "blocked": ["blocked_on"],
+            "returned": ["next", "evidence"], "blocked": ["blocked_on"],
             "stopped": ["reason", "denials"]}
 
 
@@ -60,11 +60,11 @@ def test_a_field_the_schema_does_not_define_is_rejected() -> None:
         "outcome has verdict, which the schema does not define"]
 
 
-def test_a_return_to_a_phase_that_is_not_earlier_is_rejected() -> None:
-    outcome = {**VALID["returned"], "return_to": "closeout"}
+def test_a_return_names_no_phase_beside_its_target() -> None:
+    outcome = {**VALID["returned"], "return_to": "design"}
 
     assert outcome_problems(outcome) == [
-        "outcome.return_to is 'closeout', not one of design, planning, implementation"]
+        "outcome has return_to, which the schema does not define"]
 
 
 def test_a_schema_keyword_the_check_cannot_enforce_fails_loudly() -> None:
@@ -117,8 +117,10 @@ def test_an_object_next_naming_a_node_is_accepted(target: dict) -> None:
     assert outcome_problems({**VALID["finished"], "next": target}) == []
 
 
-def test_a_finished_step_may_say_what_comes_next_as_a_string() -> None:
-    assert outcome_problems({**VALID["finished"], "next": "the plan's next round"}) == []
+def test_a_finished_step_saying_what_comes_next_in_words_is_refused() -> None:
+    # What follows, in words, is the message's: `next` is only ever a target.
+    assert outcome_problems({**VALID["finished"], "next": "the plan's next round"}) == [
+        "outcome.next is not of type object"]
 
 
 @pytest.mark.parametrize("target,problem", [
@@ -153,16 +155,14 @@ def test_a_return_names_the_step_it_returns_to() -> None:
                 "evidence": "the section's notes", "next": {"step": "design"}}
 
     assert outcome_problems(returned) == []
-    # A return names its target as a node, never as words, whatever else it gives.
-    for given in ({}, {"return_to": "design"}):
-        assert "outcome.next is not of type object" in outcome_problems(
-            {**returned, **given, "next": "back to design"})
-    # Or the phase it returns to.
-    assert outcome_problems({**VALID["returned"]}) == []
+    # A return names its target as a node, never as words.
+    assert outcome_problems({**returned, "next": "back to design"}) == [
+        "outcome.next is not of type object"]
     assert outcome_problems({key: value for key, value in returned.items()
-                             if key != "next"}) == [
-        "outcome matches none of its allowed forms: outcome has no next; or outcome has "
-        "no return_to"]
+                             if key != "next"}) == ["outcome has no next"]
+    # A phase is not a step: a return to planning names the plan.
+    problems = outcome_problems({**returned, "next": {"step": "planning"}})
+    assert len(problems) == 1 and problems[0].startswith("outcome.next names no node")
 
 
 def test_a_triage_names_the_records_it_triaged_as_strings() -> None:

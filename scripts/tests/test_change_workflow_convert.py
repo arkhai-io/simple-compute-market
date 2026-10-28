@@ -598,7 +598,7 @@ def test_an_older_line_is_rewritten_in_place() -> None:
                 "message": "Back.", "return_to": "implementation", "evidence": "e"}
     finished = {"seq": 2, "at": "t", "step": "plan", "outcome": "finished", "next": "Round 1."}
     marked = {"seq": 5, "at": "t", "format": FORMAT, "step": "design", "outcome": "finished",
-              "message": "m", "next": "prose the schema still admits"}
+              "message": "m", "next": "prose the writer refuses"}
 
     assert rewritten(decision) == {"seq": 4, "at": "t", "format": FORMAT,
                                    "step": "orchestrator", "outcome": "orchestrator",

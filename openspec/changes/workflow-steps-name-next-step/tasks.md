@@ -940,7 +940,7 @@ the step table's rule in 9.3. Touches every skill under `.agents/skills/change-*
 `.agents/change-outcome.schema.json`, `scripts/change_workflow/outcome.py`, and
 `scripts/tests/`.
 
-- [ ] 8.1 Each leaf skill's unattended ending names its exit as a target in `next`,
+- [x] 8.1 Each leaf skill's unattended ending names its exit as a target in `next`,
       its prose moving into `message`: design names the design review; planning
       `{"step": "round"}` beside `rounds`, or the pre-closeout review when the plan
       adds nothing to implement; implementation the round's triage of kind
@@ -949,31 +949,126 @@ the step table's rule in 9.3. Touches every skill under `.agents/skills/change-*
       closeout the closeout review; archive cleanup `{"step": "done"}`. A return
       names its target as a step. The review skill describes the exit its run
       records (section 3's `review.py`).
-- [ ] 8.2 `change-triage`: the triage chooses its exit among its node's exits, on the
+      Returns: implementation, planning, and triage name `{"step": "design"}` or
+      `{"step": "plan"}`; closeout, whose code-needing part returns the change to
+      implementation (the spec's phase requirement), names `{"step": "round"}`, the
+      owner's confirmation directing the implementation that makes the edit, since
+      every section before closeout is checked. Validation records its target in its
+      step 1, from whatever result carries one: `validate`, `validate-and-review`,
+      or the owner after a failed or inconclusive validation of it, so a rerun names
+      the exit whose guard it remedies; with none (a validation started outside the
+      route) it names the round's triage, the join's target. Beyond the plan's
+      words: a merge-resolving implementation run names `{"step": "round"}`, an exit
+      implementation does not declare, so the computation brings it to the owner
+      (D4), its message saying where the change stood. The design does not consider
+      merge runs; naming implementation's one exit instead sends a merge between
+      rounds into a triaged round's join, which the computation reports as
+      unclassified, and copying the computation's result is not always a target (a
+      round result carries `by`, an implementation result flat sections). Flagged
+      for the implementation review: D3's "a step with one exit names it" read
+      against the run being the owner's intervention.
+- [x] 8.2 `change-triage`: the triage chooses its exit among its node's exits, on the
       owner's disposition, as a target with `triaged`; `## Next` is prose — the
       target and the owner's words — which nothing routes on; the "Advance, or
       another round" step and its routing paragraph rewritten to the exits; the
       validation, owner, and orchestrator triage files keep their evidence line.
-- [ ] 8.3 Each leaf skill gains a "Running interactively" ending: its last act runs
+      Step 6 is "Choose the exit", with a table of each triage node's advancing,
+      another-round, and return exits, read against `graph._STEPS`, and an
+      implementation triage's out-of-order `implement` sections. Step 4 defines
+      `triaged` (every record the triage wrote a triage file beside, at least one a
+      review). A validation record triaged alone names the earlier round's review
+      again in `triaged`, as D3 allows, since a triage names a review; the
+      computation brings a failed one to the owner and a direction to its triage is
+      refused (no review awaits), so it is run by hand.
+- [x] 8.3 Each leaf skill gains a "Running interactively" ending: its last act runs
       `python3 scripts/run_change_step.py record <change> <step> --outcome '<the
       outcome>'`, with `printenv CLAUDE_CODE_SESSION_ID` named as the way to read the
       session's id when the skill needs to show it (D11).
-- [ ] 8.4 Entry checks (D3, D5): `change-plan`, `change-closeout`, and
+      Design, planning, implementation, triage, validation, closeout, and archive
+      cleanup, each after "Running unattended", whose opening now says its outcome
+      is the one an interactive run records. Each records `finished`, `returned`, or
+      (design) `blocked` — never a question, answered in the session, nor a stop,
+      which would wait for a resume only the wrapper makes — and says what the
+      computation does with a session closed before recording, read from the code:
+      named again for design, planning, triage, closeout, and a directed
+      validation; for implementation, and a validation in a round's join or as a
+      guard's remedy, the computation reads the task list and records, so only the
+      report is lost; for archive cleanup, `done` once the row is `archived`.
+      Implementation interactively records the round line as the computation names
+      it, since the round's join reads it. Correction to the plan: `change-review`
+      records nothing interactively — it changes no file and publishes no record,
+      and a review run's outcome names the record it published — so its "Running
+      interactively" says the owner pastes the review into a triage, saved as an
+      external review. Planning that needs another design review interactively ends
+      as a return (`returned`, `{"step": "design"}`) with the owner's confirmation
+      directing the design review, `--resolves` the seq `record` printed; a
+      waiver is a ledger line, the session planning on. Design's embedded triage of
+      a waiting review records `finished` naming `{"step": "design"}`, superseded
+      by the design's own outcome; unattended, it asks the owner to run the triage
+      first, since only the wrapper records there.
+- [x] 8.4 Entry checks (D3, D5): `change-plan`, `change-closeout`, and
       `change-archive-cleanup` ask `python3 scripts/change_next_step.py <change>`
       and proceed when it names their step, in place of reading `## Next` or
       `## Gate`; planning's check of the owner's waiver becomes that question too.
       `change-archive-cleanup` still writes the waiver's ledger line when the owner's
       direction to it is in the log.
-- [ ] 8.5 `.agents/change-outcome.schema.json` and `outcome.py`: `next` an object
+      Each check says the computation names the step "whatever the status says",
+      the step setting its own status (D5). Archive cleanup's Route check passes a
+      validation of `HEAD`, or the owner, carrying archive cleanup as `target` on to
+      its Validated check, which takes a direction named in the computation's reason
+      (`the owner directed archive-cleanup at seq <n>`) as the waiver, or, asked
+      interactively, records the owner's waiver as their direction with `note`.
+      Closeout's "Where it stopped" records the outcome an earlier session left
+      unrecorded once the archive is committed.
+- [x] 8.5 `.agents/change-outcome.schema.json` and `outcome.py`: `next` an object
       only, now that every skill writes one (D3, the cadence's ordering note); tests
       updated.
-- [ ] 8.6 Verification: `make check-agent-skills`; `test_change_workflow_outcome.py`,
+      The schema's `next` is the object alone; `returned` requires `next` and
+      `evidence`; `return_to` is gone from the schema. `outcome.py` needed no
+      change. Section 6's handoff: `change_next_step.py`'s `_RETURN_STEP` and its
+      reading in `_exit_of` deleted, and `route_of`'s tolerance for a finished run
+      naming no exit inside the round's join with it — such a run now names the
+      owner wherever it is. `convert.py`'s `_RETURN_STEP` stays: it reads older
+      lines. The shared fixtures' outcomes name targets.
+- [x] 8.6 Verification: `make check-agent-skills`; `test_change_workflow_outcome.py`,
       unit, a string `next` refused; every `scripts/tests/test_change_*`, unit;
       `make test`; `make check-change CHANGE=workflow-steps-name-next-step`; each
       skill's ending read against the delta's requirements. The skills are
       instructions to an agent: that a session follows them is shown by this
       change's own runs after this section, its validation and review's outcomes
       among them. End-to-end: none, and none is owed.
+      `make check-agent-skills`: passed. `test_change_workflow_outcome.py`, unit,
+      calling `outcome_problems`: a string `next` refused, on a finished and on a
+      returned outcome; a return without `next` refused; `return_to` refused as a
+      field the schema does not define; a phase as a step naming no node. In
+      `test_change_next_step.py`, unit, calling `compute` over marked lines written
+      past the writer: a finished implementation run naming no exit inside the
+      round's join names the owner, and a return giving only `return_to` waits for
+      the owner with no target, each failing on the code before 8.5; and an
+      implementation naming `{"step": "round"}` names the owner with its choice and
+      exits, the merge ending's claim. `scripts/tests`: 1788 passed. `make test`:
+      passed, before the two fresh-context checks' fixes, which touched the skills,
+      the schema's descriptions, and tests under `scripts/`, rerun above. `make
+      check-packaging`: passed. `make check-change`: every check passes. Each
+      skill's ending was read against the
+      delta's requirements by the two fresh-context checks, whose findings the
+      notes above answer. End-to-end: none, confirmed; no `Owed by validation:`
+      line.
+
+Handoff from section 8: from this commit the wrapper refuses a string `next`, so
+every run's outcome names a target; this session's own outcome names
+`{"step": "triage", "kind": "implementation"}`. Open for the implementation review
+and closeout: the merge run's undeclared exit (8.1); `change-review`'s interactive
+exception (8.3); and the delta's MODIFIED scenario "The owner waives archive
+cleanup's validation under orchestration", which still says archive cleanup's own
+check "asks the owner", where the ADDED "by a direction" scenario and 8.4 have it
+find the direction and record the waiver — the skill follows the latter; the delta
+is the design's to reconcile before the archive merges it. Section 9's
+`change-orchestrate` rewrite relays a merge run's choice to the owner for their
+direction, and drops "its free-text `next` is not a routing command". The 9.3 rule,
+`printenv CLAUDE_CODE_SESSION_ID` for every step, was committed on the owner's word
+before this section (0d4535448), so this section's commit carries no `.claude/`
+edit.
 
 ## 9. The orchestrate skill, the contributor guide, and the step table
 

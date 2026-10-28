@@ -373,6 +373,51 @@ def test_an_implementation_returning_to_design_waits_for_the_owner(tmp_path: Pat
     assert (result["step"], result["target"]) == ("owner", {"step": "design"})
 
 
+def test_an_implementation_naming_another_round_as_its_exit_goes_to_the_owner(
+        tmp_path: Path) -> None:
+    # As a run concluding a merge does: where the change goes after it is the owner's.
+    root = _repository(tmp_path, "in implementation")
+    run = _log(root, "implement", _done(_to("round")))
+
+    result = _next(root)
+
+    assert (result["step"], result["choice"], result["exits"]) == (
+        "owner", {"step": "round"}, ["triage:implementation"])
+    assert f"seq {run['seq']}" in result["reason"]
+
+
+def _written_raw(root: Path, line: dict) -> None:
+    """A marked line written past the log's writer, in a shape the writer refuses."""
+    _unmarked(root, {"seq": len(read_log(log_path(root, CHANGE))) + 1,
+                     "at": "2026-10-20T10:00:00Z", "format": 2, **line})
+
+
+def test_a_session_of_the_round_naming_no_exit_goes_to_the_owner(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _round(root, [[2], [3]])
+    _check(root, SECOND_DONE)
+    _written_raw(root, {"step": "implement", "sections": [2], "outcome": "finished",
+                           "message": "Done.", "next": "the next section"})
+
+    result = _next(root)
+
+    # Inside the round's join as anywhere: only a target says where the change goes.
+    assert result["step"] == "owner" and "finished naming no exit" in result["reason"]
+
+
+def test_a_return_naming_only_its_phase_waits_for_the_owner_with_no_target(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _round(root, [[2]])
+    _written_raw(root, {"step": "implement", "sections": [2], "outcome": "returned",
+                           "message": "Back.", "return_to": "design", "evidence": "e"})
+
+    result = _next(root)
+
+    assert (result["step"], result["target"]) == ("owner", None)
+    assert "proposes returning to no step it names" in result["reason"]
+
+
 def test_a_committed_round_is_read_by_the_owner_first(tmp_path: Path) -> None:
     root = _repository(tmp_path, "in implementation")
     _round(root, [[2]])

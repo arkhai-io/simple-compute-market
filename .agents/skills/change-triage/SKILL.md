@@ -1,6 +1,6 @@
 ---
 name: change-triage
-description: Triage a review of an OpenSpec change with the repository owner — check every finding against the files, state your own position on each, present all of them, record the owner's dispositions and the ledger, ask whether the accepted fixes merit another review round, carry accepted outcomes into the change, and record in `## Next` whether the change advances. For an implementation round, triage the reviews, the validation record, and the owner's own notes together, then fix what the owner accepts and commit it. Use after a review lands in a change's reviews/ directory, when the owner pastes a review or notes, when the owner says "triage the review of <change>", or when `make triage` invokes you.
+description: Triage a review of an OpenSpec change with the repository owner — check every finding against the files, state your own position on each, present all of them, record the owner's dispositions and the ledger, ask whether the accepted fixes merit another review round, carry accepted outcomes into the change, and name the exit the owner's answer chooses — the change advances, another review round runs, or it returns — with the records it triaged. For an implementation round, triage the reviews, the validation record, and the owner's own notes together, then fix what the owner accepts and commit it. Use after a review lands in a change's reviews/ directory, when the owner pastes a review or notes, when the owner says "triage the review of <change>", or when `make triage` invokes you.
 ---
 
 # Triaging a review
@@ -34,8 +34,8 @@ would squash the round into it; ask the owner to run `make round-done` first.
 
 The round is the commits from its base — the `commit` on the change's latest
 `round` line, which `python3 scripts/run_change_step.py log <change>` prints — to
-`HEAD`. A repeat pass, after a triage of the round recorded Another round and
-committed a fix, is the fix alone: its base is the commit that triage's review
+`HEAD`. A repeat pass, after a triage of the round named another implementation
+review as its exit and committed a fix, is the fix alone: its base is the commit that triage's review
 read, and the owner reads it as they read the round, so its notes are an owner
 record saved after that triage finished. Record `HEAD` as the round's head. For a change worked in its own clone —
 this checkout's `.git/config` names a `[remote "workspace"]` — the owner read the
@@ -51,8 +51,10 @@ Record `HEAD` after the pull: it is the base the fixes are made against.
 
 ## Running unattended
 
-Run interactively, as most runs are, this section does not apply, and nothing else
-in the skill changes. When this skill runs through `scripts/run_change_step.py` —
+Run interactively, as most runs are, this section does not apply but for the
+outcome it describes, which an interactive run records itself ("Running
+interactively"); nothing else in the skill changes.
+When this skill runs through `scripts/run_change_step.py` —
 `make triage UNATTENDED=1`, or the orchestrating session — nobody can answer in
 the session, and every turn ends with an outcome matching
 `.agents/change-outcome.schema.json`, whose `message` the owner reads as written:
@@ -103,7 +105,8 @@ the session, and every turn ends with an outcome matching
   whether another round is merited (step 6) is a `question`. When the dispositions
   are recorded, the accepted fixes and every tracked edit committed and pushed, and
   `## Next` written,
-  end with `finished`, `next` naming what `## Next` leads to. A triage with
+  end with `finished`, `next` the exit the triage chose (step 6), and `triaged`
+  the records it triaged (step 4). A triage with
   nothing to dispose of asks nothing and ends `finished` (step 6). At a closeout triage, a
   finding whose fix needs code is a `question` naming the correction it needs
   (step 5): the change is archived, so no step takes it back to implementation,
@@ -111,17 +114,44 @@ the session, and every turn ends with an outcome matching
 - **A return commits its partial work; a stop does not.** When an accepted fix
   shows the plan or the design wrong, as `change-implement`'s step 4 finds it,
   record why in the notes of the section it concerns, write `## Next` in each
-  review's triage file as `Returned to design` or `Returned to planning`, then why
+  review's triage file saying the change returns to design or planning, and why
   (step 4), commit what the triage has —
   the fixes so far and the tracked edits its dispositions made, the ledger
   included — as one work-in-progress commit
   naming the change and why it returns, checking no task for it, push it with
-  `make push-branch`, and end with `returned`, `return_to` `design` or
-  `planning`, and `evidence` naming those notes; the owner confirms the return. No
+  `make push-branch`, and end with `returned`, `next` the step it returns to,
+  `{"step": "design"}` or `{"step": "plan"}`, `triaged` the records it triaged,
+  and `evidence` naming those notes; the owner confirms the return. No
   session is left to commit the work, and a dirty checkout blocks every later
   step's guarded push. A stop commits nothing: its work waits uncommitted for the
   resumed session, and one stopped because a repository guard refused or `HEAD`
   moved leaves the checkout as it was.
+
+## Running interactively
+
+Run in an interactive session — `make triage` without `UNATTENDED=1`, or the slash
+command — no wrapper records the run, so its last act, once `## Next` is written,
+records the outcome it would end with unattended, as "Running unattended" gives it,
+`triaged` included:
+
+```text
+python3 scripts/run_change_step.py record <change> triage --outcome '<the outcome, as JSON>'
+```
+
+`record` checks the outcome against `.agents/change-outcome.schema.json`, and its
+`triaged` as the wrapper checks an unattended triage's (step 4), and appends it to
+the change's workflow log with the session's id, `HEAD`, and `interactive: true`;
+the next-step computation routes on it as on an unattended run's. It reads the
+session's id from `CLAUDE_CODE_SESSION_ID`, which `printenv
+CLAUDE_CODE_SESSION_ID` shows; where the variable is unset it refuses, and
+`--session <id>` gives the id. Record the outcome the session ends with —
+`finished` or `returned` — never a question or a stop, which the owner, present,
+settles in the session: a recorded stop would wait for a resume only the wrapper
+makes. A closeout triage stopping for a code correction (step 5) records
+nothing until the correction the owner directs is done. When `record` refuses,
+correct what it names and run it again. A session closed before it records leaves
+the triage in progress, whatever its files say: the computation names it again,
+to be resumed, or its outcome recorded with the command above.
 
 ## 1. Find the review and load the context
 
@@ -178,11 +208,16 @@ For an implementation round, also take:
   reason as the disposition). Without a waiver, stop: the reviewed commit is
   validated, or the validated commit reviewed, before the round is triaged.
   A validation record alone — the re-validation of an earlier round's fix commit —
-  is triaged only for its `V<n>` failures, each like any finding; a `passed` or
-  `inconclusive` one is not routed to triage at all. No round view preceded it, so
+  is triaged only for its `V<n>` failures, each like any finding. No validation
+  record alone is routed to triage: the computation brings a failed or
+  inconclusive one to the owner, who may run this triage by hand for its failures,
+  and a passed one clears the guard it remedies. No round view preceded it, so
   no owner's notes are asked for. Its triage file ends "Evidence for the round
-  triaged in `<NN-review>.triage.md`.", naming the earlier round's review, and the
-  `## Next` that review's triage recorded still stands.
+  triaged in `<NN-review>.triage.md`.", naming the earlier round's review. A
+  triage names at least one review among what it triaged, so its outcome names
+  that review again in `triaged`, beside the validation, and its exit is the one
+  that review's triage chose unless the owner's dispositions change it: the later
+  outcome governs.
 - **The owner's notes.** The owner reads the round with `make round-view
   CHANGE=<change>`, which shows it as uncommitted changes until `make round-done`:
   for a change worked in its own clone, in the owner's workspace while validation
@@ -338,22 +373,30 @@ record and the owner's notes included — in this form:
 
 ## Next
 
-<Advance | Another round | Returned to <design | planning>> — <the owner's words, and any condition>
+<the exit, in words> (`<its target>`) — <the owner's words, and any condition>
 ```
 
 `## Next` is the triage's last edit, written once step 6 is answered and the
 accepted fixes are committed (step 5) — or, on a return, before its
-work-in-progress commit, with no step 6: `scripts/change_next_step.py` routes the
-change on its first words alone, one of three fixed tokens — `Advance`, `Another
-round`, or, for a triage that returns the change to an earlier phase, `Returned`
-(`Returned to design` or `Returned to planning`, then why) — and reads a review's
-triage file without `## Next` as a triage still in progress, so the change does
-not move on while its fixes are uncommitted. When two
+work-in-progress commit, with no step 6. It is prose, for whoever reads the
+history: the exit the triage chose, in words and as its target, and the owner's
+words, such as Planning (`{"step": "plan"}`) — the owner: "Advance." Nothing
+routes on it: the triage's outcome names its exit in `next` and the records it
+triaged in `triaged`, and `scripts/change_next_step.py` reads a review whose triage
+file no recorded outcome names as a triage still in progress, whatever the file
+says, so the change does not move on while its fixes are uncommitted. When two
 reviews are triaged together, write the same `## Next` in each review's triage
 file. Only a review's triage file has `## Next`. The triage file of a validation
 record, of the owner's notes, or of the orchestrating session's observations ends
 instead with the line "Evidence for the round triaged in
-`<NN-review>.triage.md`.", and is not routed on.
+`<NN-review>.triage.md`.".
+
+`triaged` names every record this triage wrote a triage file beside, each as its
+file is named without `.md` — `52-implementation`, `53-validation`,
+`54-implementation-owner`, `55-orchestrator` — at least one of them a review,
+`-external` included. A triage outcome that names none, a record with no triage
+file beside it, or no review is refused: the wrapper records the run as stopped,
+and `record` refuses it.
 
 Append a line to the change's tracked `interventions.jsonl` only for a disposition
 by which the owner corrects course: deciding otherwise than you proposed — another
@@ -436,9 +479,9 @@ an active change with `openspec validate <change> --strict`, and an archived one
 a closeout triage — with `openspec validate --specs --strict`, since its deltas are
 merged and the permanent specifications are what its fixes touched.
 
-## 6. Advance, or another round
+## 6. Choose the exit
 
-A review is not a gate: the change advances on what the triage records, and the
+A review is not a gate: the change moves on the exit the triage names, and the
 owner is asked only what needs their judgement. Once every finding and every point
 of the owner's notes has a disposition, and before any fix is made, ask the owner
 whether the accepted fixes merit another review round of the same kind.
@@ -446,33 +489,49 @@ Recommend, from what the fixes will change: another round when the dispositions
 changed a central decision — the representation, an authority boundary, an
 interface's operations, or the change's scope — so the reviews just triaged no
 longer describe the change, naming the decisions that changed; advancing when the
-fixes are corrections the reviewer would only confirm. Record the answer under
-`## Next` (step 4) once the fixes are committed: `Advance`, or `Another round`,
-followed by the owner's words.
+fixes are corrections the reviewer would only confirm. The answer chooses the
+triage's exit among those its node declares:
+
+| Triage of | Advancing | Another round | A return |
+|---|---|---|---|
+| a design review | `{"step": "plan"}` | `{"step": "review", "kind": "design"}` | `{"step": "design"}` |
+| an implementation round | the plan's next round, `{"step": "round"}`; once every section before closeout is checked, `{"step": "review", "kind": "pre-closeout"}` | `{"step": "review", "kind": "implementation"}` | `{"step": "plan"}` or `{"step": "design"}` |
+| a pre-closeout review | `{"step": "closeout"}` | `{"step": "review", "kind": "pre-closeout"}` | `{"step": "plan"}` or `{"step": "design"}` |
+| a closeout review | `{"step": "archive-cleanup"}` | `{"step": "review", "kind": "closeout"}` | none: an archived change has no earlier phase |
+
+An implementation round's triage may instead name sections out of the plan's order,
+`{"step": "implement", "sections": [["5"]]}`, sessions as `rounds` lists them,
+when the owner's dispositions send the change to them next; the computation records
+them as a round as it starts. Name the exit under `## Next` (step 4) once the fixes
+are committed, with the owner's words, and as the outcome's `next`. An exit the
+node does not declare is brought to the owner rather than taken.
 
 A triage with no finding to present and no point of the owner's notes to dispose of
-asks nothing: write `## Next` as `Advance — nothing to dispose of`, and finish.
+asks nothing: its exit is the advancing one, `## Next` saying there was nothing to
+dispose of, and it finishes.
 
-What follows is the computation's, from that token
-(`scripts/change_next_step.py`): after a design review, planning; after an
+What follows is the computation's, from that exit
+(`scripts/change_next_step.py`), which checks the guards on it and names the step
+that satisfies one not yet met: after a design review, planning; after an
 implementation round, validation of the fix commit, then the next planned round or
 the pre-closeout review, once that validation passed; after a pre-closeout review,
 closeout once a validation clears `HEAD`, which one of an ancestor does when
 `HEAD` changes only paths under `openspec/` and `docs/` since it; after a closeout
 review, archive cleanup, after a validation of `HEAD` when a path outside
-`openspec/` and `docs/` changed since the commit it reviewed. `Another round` leads
-to the review of the same kind again, after the fix commit's validation for an
-implementation or pre-closeout review — for a pre-closeout one, only when the fix
-changed a path outside `openspec/` and `docs/`. `Returned` waits for the owner to
-confirm the return; once they do, the returned review no longer governs, and what
+`openspec/` and `docs/` changed since the commit it reviewed. Another review of the
+same kind follows the fix commit's validation for an implementation or
+pre-closeout review — for a pre-closeout one, only when the fix changed a path
+outside `openspec/` and `docs/`; for an implementation one, once the owner has read
+the fix too. A validation that failed, or was inconclusive, brings the exit to the
+owner. A return waits for the owner to
+confirm it; once they do, the returned review no longer governs, and what
 the design or plan makes of it is a round of its own, read, validated, and
 reviewed afresh, even where it reworks a section the returned round implemented —
 after a pre-closeout triage, a validation of `HEAD` and a new pre-closeout review
 when the plan adds nothing to implement. A return the owner declines leaves the
-owner to decide what the triage records, and an archived change has no earlier
-phase to return to.
+owner to decide where the change goes.
 
-When the triage of a phase-closing review records `Advance`, set the change's
+When the triage of a phase-closing review takes its advancing exit, set the change's
 `Status` in `openspec/changes/README.md`, and rewrite the row's `Notes` in the same
 edit so nothing in it still describes the phase being left — a row whose notes
 contradict its status misleads every agent that reads the index — then run
@@ -485,7 +544,7 @@ contradict its status misleads every agent that reads the index — then run
 | `pre-closeout` | `ready for closeout` — only once the latest validation is `passed` and names `HEAD`, or an ancestor from which `HEAD` changes only paths under `openspec/` and `docs/`, unless the owner overrides it |
 | `closeout` | unchanged — `in closeout` until archive cleanup writes `archived` |
 
-Whichever `## Next` records, a triage of any kind then commits what it changed
+Whichever exit it names, a triage of any kind then commits what it changed
 and no fix commit (step 5) already holds — the change's documents its
 dispositions edited, `interventions.jsonl`, the index row, and any other tracked
 file an `edit` changed — as one commit naming the change and the review, and
@@ -497,5 +556,6 @@ only changes' ledgers and reviews.
 
 A closeout triage that advances ends triage. Do not release dependents, set the row
 to `archived`, or draft the merge yourself: that is archive cleanup's, in a fresh
-session. Tell the owner archive cleanup is next, and end — unattended, `finished`. With `Another round`,
-leave the status, and say what the next review of the same kind reads.
+session. Tell the owner archive cleanup is next, and end `finished`. With another
+review of the same kind as its exit, leave the status, and say what that review
+reads.

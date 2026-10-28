@@ -21,10 +21,11 @@ HEAD = "0123456789abcdef0123456789abcdef01234567"
 SESSION = "9c07d1e2-0000-4000-8000-000000000000"
 
 VALID = {
-    "finished": {"outcome": "finished", "message": "The sections are committed.", "next": "triage"},
+    "finished": {"outcome": "finished", "message": "The sections are committed.",
+                 "next": {"step": "triage", "kind": "implementation"}},
     "question": {"outcome": "question", "message": "Delete the volume?", "awaiting": "remedy"},
-    "returned": {"outcome": "returned", "message": "Needs a decision.", "return_to": "design",
-                 "evidence": "the section's notes"},
+    "returned": {"outcome": "returned", "message": "Needs a decision.",
+                 "next": {"step": "design"}, "evidence": "the section's notes"},
     "blocked": {"outcome": "blocked", "message": "Waits on its prerequisite.",
                 "blocked_on": "split-pools"},
     "stopped": {"outcome": "stopped", "message": "Denied make lock.", "reason": "denied",

@@ -27,8 +27,10 @@ images, and nothing else should be building in your checkout while you run.
 
 ## Running unattended
 
-Run interactively, as most runs are, this section does not apply, and nothing else
-in the skill changes. When this skill runs through `scripts/run_change_step.py` —
+Run interactively, as most runs are, this section does not apply but for the
+outcome it describes, which an interactive run records itself ("Running
+interactively"); nothing else in the skill changes.
+When this skill runs through `scripts/run_change_step.py` —
 `make validate UNATTENDED=1`, or the orchestrating session — nobody can answer in
 the session, and every turn ends with an outcome matching
 `.agents/change-outcome.schema.json`, whose `message` the owner reads as written:
@@ -65,11 +67,38 @@ the session, and every turn ends with an outcome matching
 - **The end is an outcome.** An environmental failure (section 5) is a
   `question` naming the evidence and the remedy, awaiting the owner's word; once
   answered, take only the action the answer names, and rerun the part. When the
-  record is written, end with `finished`, `next` naming triage when the record has
-  a `V<n>` or the round's review awaits triage, the implementation review when it
-  has not landed, and otherwise what follows a passing validation of this commit —
-  the next round, the pre-closeout review, closeout, or archive cleanup, as the
-  next-step computation names it. `next` is the owner's to read, never a route.
+  record is written, end with `finished`, `next` the target the computation gave
+  this validation (step 1), whatever the record's result: the computation checks
+  that target's guards again from the record. In a round's join the target is the
+  round's triage, which triages the record's failures with the round; as a guard's
+  remedy, or after the owner's direction, a passed validation leads to its target
+  and a failed or inconclusive one to the owner. Say in `message` what the record
+  found and what it leaves for triage.
+
+## Running interactively
+
+Run in an interactive session — `make validate` without `UNATTENDED=1`, or the
+slash command — no wrapper records the run, so its last act records the outcome
+it would end with unattended, as "Running unattended" gives it, its `next` the
+target step 1 read:
+
+```text
+python3 scripts/run_change_step.py record <change> validate --outcome '<the outcome, as JSON>'
+```
+
+`record` checks the outcome against `.agents/change-outcome.schema.json` and
+appends it to the change's workflow log with the session's id, `HEAD`, and
+`interactive: true`, and the next-step computation routes on it as on an
+unattended run's. It reads the session's id from `CLAUDE_CODE_SESSION_ID`, which
+`printenv CLAUDE_CODE_SESSION_ID` shows; where the variable is unset it refuses,
+and `--session <id>` gives the id. Record the outcome the session ends with —
+`finished` — never a question or a stop, which the owner, present, settles in the
+session: a recorded stop would wait for a resume only the wrapper makes. When
+`record` refuses, correct what it names and run it again. In a
+round's join, and as a guard's remedy, the computation reads the validation record
+itself, so a session closed after writing it and before recording loses only its
+report; a validation the owner directed waits for its outcome, and the computation
+names it again, saying to resume the session or record its outcome.
 
 ## 1. Check that this commit may be validated
 
@@ -97,6 +126,17 @@ moves nothing here, and validation runs beside it.
 - **Commit.** Record `git rev-parse HEAD` and the branch. Every part below describes
   that commit; if `HEAD` moves while you work, stop: the evidence no longer belongs
   to one commit.
+- **Target.** Run `python3 scripts/change_next_step.py <change>` and record the
+  `target` its result carries: the round's triage, `{"step": "triage", "kind":
+  "implementation"}`, when it names `validate` or `validate-and-review` in a
+  round's join; the exit whose guard this validation remedies, such as `{"step":
+  "closeout"}`, when it names `validate`, or the owner after a failed or
+  inconclusive validation of it; or the target the owner's direction to validation
+  names. It is this run's exit, under orchestration and interactively alike, read
+  now, before the run waits on anything. When the result carries no `target` — a
+  validation started by hand outside the route — record that, and name the round's
+  triage: in a round's join that is the target the computation gives, and anywhere
+  else the computation brings it to the owner as a target it did not give.
 - **Instructions.** If the invocation says `HELM_ALL_SCENARIOS=1`, the Helm part
   runs every pipeline scenario and the served list together, to find which the
   charts serve now (step 3).

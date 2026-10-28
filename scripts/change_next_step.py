@@ -124,9 +124,6 @@ _TASK = re.compile(r"^\s*- \[(?P<done>[ xX])\] "
 _STEP_PHASE = {"design": "design", "plan": "planning", "implement": "implementation",
                "validate": "implementation", "triage": None, "review": None,
                "closeout": "closeout", "archive-cleanup": "closeout"}
-# The step a returned outcome's `return_to` names, for an outcome that gives the
-# phase it returns to rather than its target.
-_RETURN_STEP = {"design": "design", "planning": "plan", "implementation": ROUND.step}
 # The records a member of a round's join supplies, besides the round's sections.
 _SUPPLIES = {ROUND_VIEW: "implementation-owner", VALIDATE: "validation",
              IMPLEMENTATION_REVIEW: "implementation"}
@@ -421,16 +418,11 @@ def _run_node(entry: Mapping[str, Any]) -> Node | None:
 
 def _exit_of(entry: Mapping[str, Any]) -> Mapping[str, Any] | None:
     """The exit a run's outcome names: its target `next` when it finished or
-    returned; a return that gives only the phase it returns to names that phase's
-    step. None for a run that took no exit."""
+    returned. None for a run that took no exit."""
     if entry.get("outcome") not in ("finished", "returned"):
         return None
     target = entry.get("next")
-    if isinstance(target, Mapping):
-        return target
-    if entry.get("outcome") == "returned" and entry.get("return_to") in _RETURN_STEP:
-        return {"step": _RETURN_STEP[entry["return_to"]]}
-    return None
+    return target if isinstance(target, Mapping) else None
 
 
 def _same(one: Mapping[str, Any], other: Mapping[str, Any]) -> bool:
@@ -496,9 +488,8 @@ def route_of(log: Sequence[Entry], join: Join = ROUND_JOIN) -> Route | None:
 
     A round's line records it starting. A run that took no exit — a question, a
     block, a stop — leaves the route where it was, so its step is named again once
-    the owner answers or resolves it. A run of a member of the round's join that
-    names no exit leaves the round where it was too, since the round's records say
-    how far it got; any other finished run naming none is the owner's. A validation
+    the owner answers or resolves it. A finished run naming none is the owner's,
+    since nothing says where the change goes after it. A validation
     naming the target it was given leaves the route where it was, so the guards it
     remedied are checked again; one directed by the owner leads to its target once
     it passed. The conversion line names no exit, and routes nothing.
@@ -522,8 +513,7 @@ def route_of(log: Sequence[Entry], join: Join = ROUND_JOIN) -> Route | None:
         joined = _in_join(route, join)
         exit_ = _exit_of(entry)
         if exit_ is None:
-            if entry.get("outcome") == "finished" and not (
-                    joined and step in {graph.NODES[m].runs for m in _members(join)}):
+            if entry.get("outcome") == "finished":
                 route = Route(NO_EXIT, entry)
             continue
         source = _run_node(entry)
@@ -567,7 +557,7 @@ def _waiting(entry: dict[str, Any], read: bool = True) -> Result | None:
     if outcome == "returned":
         target = _exit_of(entry)
         return _owner(f"the {step} step proposes returning to "
-                      f"{target_label(target) if target else entry.get('return_to')}: "
+                      f"{target_label(target) if target else 'no step it names'}: "
                       f"{entry.get('message', '')}", target=target)
     if outcome == "blocked":
         return _owner(f"the {step} step is blocked on {entry.get('blocked_on')}: "
