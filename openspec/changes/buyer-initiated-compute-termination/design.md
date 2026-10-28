@@ -2,9 +2,10 @@
 
 The decisions below were settled at goal level with the owner on 2026-10-28 for
 [`ROADMAP.md`, Goal 8](../../../docs/development/ROADMAP.md#goal-8--sell-compute-by-the-period-until-either-party-stops),
-and revised the same day against three independent design reviews of the goal. This
-change's own design review may reopen any of them with a finding; its design session
-verifies them against the code and adds the spec deltas.
+revised the same day against three independent design reviews of the goal, and again
+against a second review of the revision. This change's own design review may reopen
+any of them with a finding; its design session verifies them against the code and
+adds the spec deltas.
 
 ## Context
 
@@ -125,14 +126,27 @@ administrator, through the override below; the storefront itself, on a verified
 funding end), the cause, the requested effective instant, and the evidence the request
 rests on. Nothing in the log is updated or deleted on the path.
 
-The **decision** is a deterministic fold over the log: the request with the earliest
-lawful effective instant is the effective end; a later request with an earlier
-instant replaces the decision, and the earlier request stays in the log as
-superseded. Ties break deterministically — buyer, then seller, then site, then
-administrator, then arrival order. A decision whose effective instant has passed, or
-whose physical convergence has begun, is final: no later request replaces it, so no
-lease is resurrected. The replacement is one compare-and-set transaction, as the
-refund-versus-delivery ordering already is in each domain's tables.
+The **decision** is a deterministic fold over the log, and it carries two instants
+with different rules, because they bound different things:
+
+- The **physical end** — when the lease was or will be terminated. The request with
+  the earliest lawful effective instant sets it; a later request with an earlier
+  instant replaces it, and the earlier request stays in the log as superseded. Ties
+  break deterministically — buyer, then seller, then site, then administrator, then
+  arrival order. Once its instant has passed, or physical convergence has begun, it
+  is final: no later request replaces it, so no lease is resurrected and no executed
+  action is rescheduled.
+- The **financial effective end** — the instant billing is corrected to. It starts
+  equal to the physical end and may move only *earlier*, and only on authenticated
+  evidence of an earlier end: a signed site event that arrives late, a stop in a
+  verified snapshot seen late, an administrator's override with its reason. Each move
+  re-runs the financial convergence from the new instant, idempotently by the
+  decision and the evidence; it never moves later, so no evidence can take money back
+  from the buyer, and it is never affected by physical finality.
+
+Both are compare-and-set transactions, as the refund-versus-delivery ordering already
+is in each domain's tables. Physical state is monotonic toward "ended"; financial
+state is monotonic toward "the buyer pays less".
 
 Financial and physical convergence hang off the decision and are tracked
 independently, each idempotent across retries and restarts. Every external call a
@@ -152,7 +166,11 @@ at 15:00 and a buyer's cancel at 14:30. *Rejected:* one mutable intent amended i
 place — the audit trail is whatever the last writer kept, and a scheduled action
 holding the old key cannot tell it is stale. *Rejected:* first request wins — it
 charges a buyer for time they asked to end, and the buyer's own stop at the payments
-service then makes the ledger and the storefront disagree.
+service then makes the ledger and the storefront disagree. *Rejected:* one instant
+with one finality rule — a site event proving the lease ended at 12:00 that arrives
+after an administrator's 12:10 override would then be unable to correct the buyer's
+charges, and holding the override open until every authority reports would block the
+one lever meant to work without them.
 
 ### D5. The administrative override is a request kind with its own authority and audit
 

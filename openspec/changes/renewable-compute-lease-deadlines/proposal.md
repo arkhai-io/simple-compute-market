@@ -19,28 +19,35 @@ with no storefront, and existing fixed-term leases behave exactly as they do tod
 
 In `kit/site` and the compute provisioning service that composes it:
 
-- A nullable `renew_by_utc` on the reservation beside the agreed `lease_end_utc`,
-  which keeps its meaning and is still moved only by truncation. A lease not renewed
-  by its deadline expires early, exactly as it expires at its end: the watchdog's due
-  query reads the earlier of the two. Null for a prepaid deal, which is unchanged.
-- A **renew** transition: only from `leased`, only to a later instant, never past
-  `lease_end_utc`; refused from `releasing`. Truncating the end truncates the deadline
-  with it.
-- **Expiry claims the lease against the deadline it read**: the release transition is
-  conditioned on the state *and* on the deadline value the due query returned, so a
-  renewal that lands between the read and the claim makes the claim fail and nothing
-  is written. A deadline that has elapsed but is not yet claimed may still be renewed:
-  the deadline is enforced by the claim, not by the clock. Admission's overlap check
+- A nullable `renew_by_utc` and a `renewal_phase` on the reservation beside the agreed
+  `lease_end_utc`, which keeps its meaning and is still moved only by truncation. A
+  lease not renewed by its deadline expires early, exactly as it expires at its end:
+  the watchdog's due query reads the earlier of the two. Null for a lease committed
+  before this change, which is unchanged.
+- Two transitions. **Activation**, once, from phase `provisioning`: replaces the
+  deadline with the instant the storefront names, earlier or later, capped by the end
+  — a reserved deal activates to its agreed end, a per-period deal to its funded
+  horizon. **Renewal**, in phase `active`: only from `leased`, only to a later
+  instant, never past `lease_end_utc`; refused from `releasing`. Truncating the end
+  truncates the deadline with it.
+- **Expiry claims the lease against the deadline and phase it read**: the release
+  transition is conditioned on the state *and* on the deadline and phase the due query
+  returned, so an activation or renewal that lands between the read and the claim
+  makes the claim fail and nothing is written. A deadline that has elapsed but is not
+  yet claimed may still be renewed or activated: the deadline is enforced by the
+  claim, not by the clock. Admission's overlap check
   keeps reading `lease_end_utc`: the capacity is committed through the agreed end
   whatever the deadline says, or a forward reservation could be admitted into a window
   a running deal then renews into.
 - A **provisioning budget**, a Resource Pool policy tag the site reads itself at
-  commit: `renew_by_utc = commit + budget` for a per-period deal, so a storefront that
-  dies before delivery still leaves a lease that expires, and a slow provision has the
-  time the pool's operator gave it rather than the running lease's renewal allowance.
-  Provisioning time is non-billable by construction and accounted separately: the
-  site already records the instant a fulfillment becomes active, so provisioning time
-  is that instant less the commit, readable per lease.
+  commit: *every* commit records `renew_by_utc = commit + budget` in phase
+  `provisioning`, with no flag and no request field — the site classifies no lease.
+  A storefront that dies before delivery leaves a lease that expires, reserved or
+  per-period alike, and a slow provision has the time the pool's operator gave it
+  rather than the running lease's renewal allowance. Provisioning time is non-billable
+  by construction and accounted separately: the site stamps the active instant it
+  already records at activation, so provisioning time is that instant less the
+  commit, readable per lease.
 - A **renewal-lapse policy**, a pool policy tag with a site-wide default, for a lease
   whose deadline passed unrenewed: `reclaim` (expire at the deadline; the default, and
   today's expiry), `grace <seconds>` (expire that much later, bounded and reported),
@@ -48,8 +55,8 @@ In `kit/site` and the compute provisioning service that composes it:
   exhausted buyer may run on while the storefront is unreachable). The site never
   learns why a renewal lapsed.
 - The `lease_ended` event `buyer-initiated-compute-termination` adds gains the cause
-  `renewal_lapsed`, and the lease view exposes the deadline and the lapse policy that
-  applied.
+  `renewal_lapsed`, and the lease view exposes the deadline, its phase, and the lapse
+  policy that applied.
 
 ## Capabilities
 
@@ -84,7 +91,7 @@ None expected.
 
 ## Impact
 
-`kit/site`'s models, migration, ledger, router, and client; `kit/site-client`;
+`kit/site`'s models, migration, ledger, router, and client; `kit/site-client`; both compute storefronts' delivery paths, which activate every lease after delivery;
 `kit/resource-pools-contracts`' hints; the provisioning service's lease lifecycle and
 watchdog; the site's integration suite (two-session renewal-versus-expiry races, a
 deadline lapsing under each policy, a prepaid lease untouched). One compute
@@ -103,8 +110,9 @@ which closeout records as a stated gap.
 
 ### Knowledge to promote
 
-- A lease is kept alive by renewal within its agreed end, and the site decides alone
-  what an unrenewed lease does — `site-capacity` spec and architecture companion;
+- Every lease is armed at commit, activated once after delivery, and kept alive by
+  renewal within its agreed end; the site classifies no lease and decides alone what
+  an unrenewed one does — `site-capacity` spec and architecture companion;
   `ARCHITECTURE.md`, "Capacity reservation".
 - Expiry claims against the deadline it read; the deadline is enforced by the claim —
   `site-capacity` spec.

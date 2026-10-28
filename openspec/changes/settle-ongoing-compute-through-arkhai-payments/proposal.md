@@ -30,14 +30,17 @@ between the classes is settled in
 In `kit/arkhai-payments`, and nowhere domain-specific:
 
 - `PaymentsOptionParams` gains `period` and `reserve_ahead`, both ISO durations, and
-  an optional `minimum_charge`. An option stating a period is billed per period;
+  an optional `minimum_spend`. An option stating a period is billed per period;
   `derive_mandate` derives one `rate` part for it — `amount` the per-period charge,
   `floor(hourly amount × period / 3600)` in minor units, both sides re-deriving it from
   the Agreement's unchanged hourly `amount`; `period` and `reserveAhead` from the
-  params; `hold: {until: stop}` — plus one `once` part for the minimum charge where
-  stated, the enforceable minimum cost of a lease that a buyer's stop cannot recover;
-  and keeps deriving one `once` part for an option without a period. `reserve_ahead`
-  and `period` are published as clause fields beside `window`.
+  params; `hold: {until: stop}` — and keeps deriving one `once` part for an option
+  without a period. `minimum_spend` is a true minimum — the buyer pays
+  `max(minimum, usage)`, with a committed buyer-visible refund rule — which needs the
+  payments service to draw usage down against a prepaid part; it is a required
+  capability in the request to the service, and until it lands per-period options
+  state no minimum. `reserve_ahead` and `period` are published as clause fields beside
+  `window`.
 - The mandate's stop authorities stay `[payer, payee]` for both classes: the payee's
   stop is the honest way to end billing when the seller must, and a routine on-demand
   preemption is a breach remedied through `reverse` and dispute, not by removing the
@@ -57,11 +60,12 @@ In `kit/arkhai-payments`, and nowhere domain-specific:
   `reverse`, each keyed by the caller's durable decision rather than the transaction,
   and a read of the transaction's events so a caller checks what was already sent.
   The stop command carries no effective time, so a stop learned late is corrected
-  inside the contract: the periods earned after the effective end are reversed on the
-  rate part, whose charges stay held until its stop, and then the stop is issued —
-  charges after a deal's effective end are reversed before they are collected. A
-  future-effective stop is scheduled durably by the caller and issued immediately
-  when due.
+  inside the contract: the stop is issued first, which freezes the amount, and the
+  periods started after the effective end — a pure function of the stopped snapshot
+  and the recorded end — are then reversed on the rate part, whose charges stay held
+  until collection; charges after a deal's effective end are reversed before they are
+  collected, the straddling started period excepted and disclosed. A future-effective
+  stop is scheduled durably by the caller and issued immediately when due.
 - Confirmation against the service's conformance vectors that the period clock runs
   from the `start` event — the mandate has no start time, and approval only reserves
   the first batch — since that is what lets billing begin at delivery.
@@ -87,11 +91,11 @@ per-transaction event sequence numbers; a rate part's charges held until its sto
 earlier proposal's note that payee stops may be backdated is not in the vendored
 schema, and the design does not rely on it.
 
-Confirmations owed to the service's published vectors before planning, each a blocker
-if unpublished: the snapshot proof's frame; a partial reverse of a running rate part
-before its stop, and whether after it; the period clock from `start`; a mandate
-mixing `once` and `rate` parts; whether `latestEventSequence` is strictly monotonic. A
-payee stop carrying its own effective time is recorded as unowned work outside this
+The requests to the service — one confirmation that gates the correction (a partial
+reverse of a stopped rate part while held), one capability the minimum spend needs,
+two simplifications (an effective time on a payee stop; a prorated final period), and
+the vectors the design verifies against — are listed in `design.md`, "Requests to the
+payments service"; the effective-time stop is recorded as unowned work outside this
 repository in `ROADMAP.md`, Goal 8.
 
 ## Capabilities

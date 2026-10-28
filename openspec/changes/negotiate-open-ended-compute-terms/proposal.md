@@ -28,8 +28,9 @@ never stored**, from two terms that have homes of their own:
   per period until stopped; one without is prepaid, as today. The Agreement's `amount`
   keeps its unit — the option's hourly rate, for both kinds — and the per-period charge
   is derived from it once, in the mandate, by exact floored arithmetic both sides
-  re-derive. A per-period option may state a `minimum_charge`, the enforceable minimum
-  cost of a lease, derived as a prepaid part beside the rate part. The option params
+  re-derive. A per-period option may state a `minimum_spend`, a true minimum with a
+  committed refund rule, published once the payments service can draw usage down
+  against a prepaid part; until then no minimum is stated. The option params
   themselves are
   [`settle-ongoing-compute-through-arkhai-payments`](../settle-ongoing-compute-through-arkhai-payments/)'s;
   this change makes the rest of the system read them.
@@ -74,8 +75,9 @@ billing kind stays a buyer-side settlement clause (`arkhai_payments.period`) eva
 locally after the registry query, as `arkhai_payments.window` is. A
 `--class reserved|on_demand|spot` on both buyer CLIs is sugar expanding to the registry
 filter plus the local clause; the buyer's duration flag becomes optional, and before
-approving a per-period selection the buyer sees the recurring charge, the minimum, the
-initial reserve, and the maximum horizon as distinct numbers.
+approving a per-period selection the buyer sees the recurring charge, the minimum
+spend and its refund rule, the initial reserve, and the maximum horizon as distinct
+numbers.
 
 Publication: a per-period option publishes only where the storefront's composition
 declares the per-period continuation, so no per-period listing exists until
@@ -158,8 +160,9 @@ promise.
   the site's physical right to withdraw a resource unconditional and separate —
   `ARCHITECTURE.md`, "Deciding which party is authoritative"; `storefront-publication`
   architecture companion.
-- `amount` keeps its hourly unit; the per-period charge and the minimum are derived
-  once in the mandate — `settlement-servicing` spec.
+- `amount` keeps its hourly unit; the per-period charge is derived once in the
+  mandate, and a minimum spend is a true minimum with a committed refund rule —
+  `settlement-servicing` spec.
 - A per-period option publishes only where the composition declares servicing —
   `storefront-publication` and `settlement-configuration` specs.
 - The two seller bounds, their meanings, and how a per-period horizon defaults —

@@ -25,32 +25,38 @@ storefront for the deal — converged on one effective end.
 In the storefront, built once in the payments mechanism kit with each compute domain
 contributing only its delivery predicate, lease handle, and teardown hook:
 
-- A **continuation** over every approved, non-terminal per-period deal — not only
-  delivered ones — as a storefront lifecycle loop on the kit loop controller. Each
-  cycle, per deal: verify the current snapshot under the kit's rules (bound, fresh,
-  sequence not regressed) before interpreting anything; if it carries a stop, or its
-  `fundedThrough` is not ahead, record the cause as a request in the deal's log and
-  terminate the lease at once; otherwise renew the lease to `fundedThrough`, capped by
-  the agreed end. A snapshot that cannot be fetched or verified renews nothing and
-  terminates nothing; the site's lapse policy decides. On restart, every deal's state
-  is recomputed from its verified snapshot and its decision log, and nothing already
-  in the events is issued twice.
-- A **delivery authorization gate**: before any protected effect — hold commit,
-  dispatch, and again immediately before credentials become readable — the current
-  verified snapshot must show no stop and funding ahead, and `start` is issued only
-  inside the gate, after delivery is verified and before credentials are exposed, so
-  every accepted `start` corresponds to a durable delivery authorization and no access
-  is ever granted after an authoritative stop. A deal found stopped before delivery
-  takes the undelivered path: refuse access, release the hold or terminate, `stop` and
-  `reverse` the reserved batch, the minimum charge at the seller's discretion.
+- A per-deal **continuation state record** from approval — transaction, evidence of
+  approval, phase, `start` issued, last verified event sequence, trusted horizon, last
+  delivery authorization — and a **continuation** over every approved, non-terminal
+  per-period deal, as a storefront lifecycle loop on the kit loop controller. Each
+  cycle, per deal: verify the current snapshot under the kit's rules before
+  interpreting anything; a stop, or an active deal's `fundedThrough` not ahead, is a
+  verified end, recorded as a request and terminated at once; otherwise an active
+  deal's lease is renewed to `fundedThrough`, capped by the agreed end. A snapshot that
+  cannot be fetched or verified renews nothing and terminates nothing; the site's lapse
+  policy decides. On restart, every deal is recomputed from its record, its verified
+  snapshot, and its decision log, and nothing already in the events is issued twice.
+- One **compute-family delivery path** both domains compose — commit, dispatch,
+  disclosure, and the activation of every lease after delivery — in place of each
+  domain's own, calling one kit-owned **delivery authorization** before each
+  transition: before `start`, no stop and the reserved first batch verified; at
+  disclosure, the same, then `start`, so every accepted `start` corresponds to a
+  recorded authorization and no access is ever granted after an authoritative stop.
+  The credential read enforces the recorded decision, never a live snapshot. A deal
+  found stopped before delivery takes the undelivered path: refuse access, release the
+  hold or terminate, `stop` and `reverse` the reserved batch, the minimum spend under
+  its committed refund rule. The rest of the compute fulfillment unification stays
+  with `kit-owned-listing-and-fulfillment-lifecycles`.
 - The **payee stop at every lease's end**, from the site's `lease_ended` event —
-  expiry at the agreed end, lapse, termination, force-release — corrected inside the
-  contract when learned late: the periods earned after the site's effective instant
-  are reversed on the rate part, then the stop is issued; charges after a deal's
-  effective end are reversed before they are collected.
-- The buyer's cancel issues the **payer stop first**, directly at the payments
-  service, then calls the end-deal route; the payer stop is authoritative whatever the
-  storefront does, and the continuation discovers a stop the buyer never reported.
+  expiry at the agreed end, lapse, termination, force-release — and the correction of
+  a stop learned late inside the contract: stop first, then reverse the periods
+  started after the decision's financial effective end, computed from the stopped
+  snapshot; re-run when that end later moves earlier on authenticated evidence;
+  charges after a deal's effective end are reversed before they are collected.
+- The buyer's cancel attempts the **payer stop first**, directly at the payments
+  service, then calls the end-deal route whether or not it succeeded; the request is
+  recorded and the lease terminated while the payments service is unreachable, and
+  the storefront's convergence issues the stop when it can.
 - An **operator stop command** over the storefront's stored state — the mandate and
   transaction ID in `negotiation_threads.settlement_data`, the operator's credential —
   that works with the storefront process down, so the seller of record can always end
@@ -67,13 +73,16 @@ contributing only its delivery predicate, lease handle, and teardown hook:
   re-anchored, and only stragglers are drained.
 - End-to-end, in both lanes against the double: on-demand VM and bare-metal deals
   where continued funding does not end a lease merely because a polling interval or
-  period passed; buyer cancel before provisioning, during it, and after delivery;
-  a payer stop between approval and delivery refused access; exhaustion ending the
-  lease within the funded horizon; a storefront restart resuming the continuation;
-  the seller's bound ending lease and billing; a stale, wrong-transaction, and
-  regressed snapshot each renewing nothing; a site expiry while the storefront is
-  down followed by the reversal; a crash between `start` and credentials, and between
-  reversal and stop; a rotation window with a deal running across it.
+  period passed; buyer cancel before provisioning, during it, and after delivery,
+  with and without the payments service reachable; a payer stop between approval and
+  delivery refused access; exhaustion ending the lease within the funded horizon; a
+  provision that overruns the pool's budget; a storefront restart resuming the
+  continuation; the seller's bound ending lease and billing; a stale,
+  wrong-transaction, and regressed snapshot each renewing nothing; a site expiry
+  while the storefront is down followed by the correction, and a site event arriving
+  after a local termination moving the financial end earlier; a crash between `start`
+  and credentials, and between stop and reversal; a rotation window with a deal
+  running across it.
 
 ## Capabilities
 
@@ -103,7 +112,10 @@ None expected.
   route, the `lease_ended` event), `negotiate-open-ended-compute-terms` (per-period
   deals exist), `settle-ongoing-compute-through-arkhai-payments` (rate parts,
   verified snapshots, `start`/`stop`/partial `reverse`, the double), and
-  `renewable-compute-lease-deadlines` (the renewal transition).
+  `renewable-compute-lease-deadlines` (activation and renewal).
+- Takes the narrow part of the compute fulfillment unification
+  `kit-owned-listing-and-fulfillment-lifecycles` proposes — the three protected
+  transitions and the access rule — and leaves it the rest.
 - `redesign-storefront-stage-events` decides the event vocabulary the continuation
   emits into; the decision log is authoritative regardless.
 - `redesign-authenticated-requests` changes the request envelope the new routes and
@@ -111,10 +123,12 @@ None expected.
 
 ## Impact
 
-`kit/arkhai-payments`' seller stage; both compute storefronts' payment coordinators,
-settlement compositions, loop registrations, delivery paths, and operator CLIs;
-`core/buyer`'s and both buyers' settle paths; the compute deal stages and the new
-per-period scenarios in both lanes.
+`kit/arkhai-payments`' seller stage; a compute-family delivery path (its home decided
+in design: the family kit, or `kit/fulfillment` if it proves family-neutral) that both
+compute storefronts compose in place of their own commit, dispatch, and disclosure
+code; both storefronts' payment coordinators, settlement compositions, loop
+registrations, and operator CLIs; `core/buyer`'s and both buyers' settle paths; the
+compute deal stages and the new per-period scenarios in both lanes.
 
 ## Permanent documentation impact
 
@@ -129,7 +143,8 @@ per-period scenarios in both lanes.
 ### Knowledge to promote
 
 - No access is granted after an authoritative stop, and every `start` corresponds to
-  a durable delivery authorization — `settlement-servicing` spec.
+  a durable delivery authorization, enforced at the compute family's one delivery path
+  — `settlement-servicing` spec; `fulfillment` spec.
 - Stopping payment first is always safe for the buyer, reclaiming first is always safe
   for the seller's hardware, and the storefront reconciles whichever came first —
   `ARCHITECTURE.md`, "Deciding which party is authoritative"; `settlement-servicing`

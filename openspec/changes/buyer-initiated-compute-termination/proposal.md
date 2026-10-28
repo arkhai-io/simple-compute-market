@@ -31,9 +31,10 @@ payment"), and a per-period part, once one exists, stops at the effective time.
 - An **append-only log of requests to end a deal** and one **effective decision** per
   deal, keyed by negotiation ID: every request — buyer, seller, site, administrator,
   the storefront on a verified funding end — is appended with its principal, cause,
-  requested instant, and evidence; the decision is a deterministic fold (earliest
-  lawful effective instant wins, deterministic ties, final once passed or physically
-  begun), with its financial and physical convergence tracked independently and every
+  requested instant, and evidence; the decision is a deterministic fold carrying a
+  physical end (earliest lawful effective instant wins, deterministic ties, final once
+  passed or physically begun) and a financial effective end that may move only earlier
+  on authenticated evidence, with the two convergences tracked independently and every
   external call keyed by the decision. The log is retained for a seller-configured
   window at least the dispute horizon. This change records the buyer, site, and
   administrator request kinds and the physical convergence; the later changes add the

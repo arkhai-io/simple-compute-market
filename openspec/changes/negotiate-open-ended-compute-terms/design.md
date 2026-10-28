@@ -2,9 +2,10 @@
 
 The decisions below were settled at goal level with the owner on 2026-10-28 for
 [`ROADMAP.md`, Goal 8](../../../docs/development/ROADMAP.md#goal-8--sell-compute-by-the-period-until-either-party-stops),
-and revised the same day against three independent design reviews of the goal. This
-change's own design review may reopen any of them with a finding; its design session
-verifies them against the code and adds the spec deltas.
+revised the same day against three independent design reviews of the goal, and again
+against a second review of the revision. This change's own design review may reopen
+any of them with a finding; its design session verifies them against the code and
+adds the spec deltas.
 
 ## Context
 
@@ -99,15 +100,22 @@ check. Worked, at $2.50/h = 2,500,000 `USD/6`: `PT15M` → 625,000; `PT1M` → 4
 (0.0016% in the buyer's favour per period); `PT1H` → 2,500,000. No Agreement field
 says "until stopped".
 
-A per-period option may also state a `minimum_charge` — an amount, or a count of
-periods at the rate — which the mandate derives as a `once` part beside the `rate`
-part, debited at approval, held for the option's window, and reversible only by the
-payee and the dispute authority. It is the enforceable minimum cost of a lease: a
-buyer who stops before delivery forfeits it unless the seller reverses it on the
-undelivered path, so repeated provisioning costs the buyer the minimum each time,
-which is the principle Goal 5 records — price the abused resource rather than limit
-identity, which is free to mint. A seller who wants no minimum states none and
-bears the churn.
+A per-period option may also state a `minimum_spend` — an amount, or a count of
+periods at the rate — under which the buyer pays `max(minimum, usage)`: the
+enforceable minimum cost of a lease, which a buyer's stop cannot recover, so repeated
+provisioning costs the buyer the minimum each time — the principle Goal 5 records,
+price the abused resource rather than limit identity, which is free to mint. Its
+refund rule is a committed, buyer-visible term of the option: reversed when delivery
+fails for the seller's reasons or the buyer stops before the create is dispatched,
+kept after. A seller who wants no minimum states none and bears the churn. A true
+minimum needs the payments service to draw usage down against a prepaid part, which
+the published contract cannot express, so the term is published only once that
+capability lands (`settle-ongoing-compute-through-arkhai-payments`); until then
+per-period options state no minimum and the churn vector is an accepted interim risk.
+
+*Rejected:* a `once` part beside the `rate` part under a minimum's name — it is an
+additional fee ($5.00 for the first hour at $2.50/h with one period stated), and an
+honestly named `initial_fee` is a different product from the one buyers recognise.
 
 *Rejected:* `amount` as the per-period charge — it changes `amount`'s meaning by
 option kind, breaks the shared `rate × duration` paths, and makes the asking rate and
@@ -270,8 +278,8 @@ metal's is.
 ### D12. What the buyer sees before approving
 
 For a per-period selection both buyer CLIs show, as distinct numbers: the recurring
-charge per period (D2), the minimum charge if any, the initial reserve the service
-will hold (`reserve_ahead` at the rate, plus the minimum), and the maximum horizon
+charge per period (D2), the minimum spend if any with its refund rule, the initial
+reserve the service will hold (`reserve_ahead` at the rate), and the maximum horizon
 (D6). The hourly rate is shown as the listing states it.
 
 ## Open questions
@@ -283,7 +291,7 @@ will hold (`reserve_ahead` at the rate, plus the minimum), and the maximum horiz
 - Where the per-period candidate dimension sits in the derivation key, so a listing
   keeps its identity across refreshes and reopens. Settled in design against
   `kit/capacity-publication`'s binding.
-- The option-param shape (`period`, `reserve_ahead`, `minimum_charge`) is frozen in
+- The option-param shape (`period`, `reserve_ahead`, `minimum_spend`) is frozen in
   `settle-ongoing-compute-through-arkhai-payments`' design session before this one;
   this design reads it and does not restate it.
 
