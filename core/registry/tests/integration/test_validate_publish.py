@@ -21,6 +21,7 @@ from market_identity import (
     canonical_body_hash,
     sign_request,
 )
+from registry_client.models import ValidatePublishRequest
 
 from core_registry.main import app
 
@@ -146,18 +147,35 @@ async def test_mechanism_option_passes_without_alkahest_choice() -> None:
 
 
 @pytest.mark.asyncio
-async def test_missing_listing_resource_rejected() -> None:
-    payload = _valid_payload()
-    del payload["listing_resource"]["gpu_model"]
-    del payload["listing_resource"]["region"]
-    async with _client() as c:
-        resp = await c.post("/api/v1/listings/validate-publish", json=payload)
-    body = resp.json()
-    assert body["valid"] is False
-    # Schema requires gpu_model AND region on listing_resource.
-    joined = " ".join(body["errors"])
-    assert "gpu_model" in joined
+async def test_a_listing_without_gpus_is_valid(registry_client) -> None:
+    """A machine without GPUs states neither GPU field; through the canonical
+    client, its dry run is valid."""
+    result = await registry_client.validate_publish_listing(
+        ValidatePublishRequest(
+            **_valid_payload(
+                listing_resource={"region": "us-west", "vcpu_count": 16, "ram_gb": 64}
+            )
+        )
+    )
+
+    assert result.valid, result.errors
+    assert result.errors == []
+
+
+@pytest.mark.asyncio
+async def test_a_listing_without_a_region_is_invalid(registry_client) -> None:
+    """The schema requires only ``region`` of the listing resource, so a GPU
+    field's absence is never among the reasons."""
+    result = await registry_client.validate_publish_listing(
+        ValidatePublishRequest(
+            **_valid_payload(listing_resource={"vcpu_count": 16, "ram_gb": 64})
+        )
+    )
+
+    assert not result.valid
+    joined = " ".join(result.errors)
     assert "region" in joined
+    assert "gpu_model" not in joined
 
 
 @pytest.mark.asyncio

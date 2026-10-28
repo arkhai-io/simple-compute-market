@@ -218,24 +218,45 @@ Files: `core/registry/filter-spec.yaml`; tests
 `core/registry/tests/unit/test_filter_spec.py`,
 `core/registry/tests/integration/{test_validate_publish.py,test_filter_spec.py}`.
 
-- [ ] 3.1 Set `version: 7`, keep `schema: {id: compute.market, version: 2}`, and make
+- [x] 3.1 Set `version: 7`, keep `schema: {id: compute.market, version: 2}`, and make
   `listing_resource.required` `[region]`, with a `v7` comment beside the existing version
   notes saying a listing may omit `gpu_model` and `gpu_count` (D3). Unit
   (`test_filter_spec.py`): the loaded spec reports version 7, the unchanged schema identity,
   and `required == ["region"]`.
-- [ ] 3.2 Application integration (`test_validate_publish.py`): a dry run of a compute
+  *Done.* Unit (`tests/unit/test_filter_spec.py`): version 7, `compute.market`/2,
+  `required == ["region"]`, and `on_missing: fail` on `gpu_model` and `gpu_count_min`.
+  Nothing else in the repository pins the spec's version.
+- [x] 3.2 Application integration (`test_validate_publish.py`): a dry run of a compute
   listing carrying `region`, `vcpu_count`, and `ram_gb` and no GPU field is valid; one
   missing `region` is not (delta scenario "A listing without GPUs is validated").
-- [ ] 3.3 Application integration (`test_filter_spec.py`, the listings query): with a
+  *Done.* Application integration: both cases go through the canonical
+  `RegistryClient.validate_publish_listing` against the in-process app. The invalid case
+  replaces the module's raw-HTTP test that asserted `gpu_model` was required; it now
+  asserts `region` is named and `gpu_model` is not.
+- [x] 3.3 Application integration (`test_filter_spec.py`, the listings query): with a
   GPU-less and a GPU listing published, `gpu_count>=1` and `gpu_model=H100` return only the
   GPU listing, and `vcpu_count>=16` returns both where both state sixteen vCPUs (delta
   scenarios "A buyer bounds a GPU field" and "A buyer bounds only CPU and memory").
-- [ ] 3.4 **Verification checkpoint.** Unit 3.1; application integration 3.2–3.3. Run
+  *Done.* Application integration (`tests/integration/test_filter_spec.py`): both listings
+  published and queried through the canonical `RegistryClient` against the in-process app
+  under the shipped spec.
+- [x] 3.4 **Verification checkpoint.** Unit 3.1; application integration 3.2–3.3. Run
   `make test` in `core/registry`, `make -C helm test-render` (it reads the spec's identity,
   which is unchanged), and `make check-comment-hygiene`.
   End-to-end: `e2e_deal` and `e2e_deal_buyer_cli` dry-run their listings through
   `validate-publish` against version 7; section 8's scenario publishes and filters a
   GPU-less VM listing. No scenario is owed here.
+  *Done.* `make test-registry`: 129 unit and 128 integration passed; `make
+  test-registry-client`: 25 passed; `make -C helm test-render` passed; `make
+  check-comment-hygiene` and `make check-change` pass; root `make test` passed over
+  sections 1–3. End-to-end confirmed: `e2e_deal` (`test_full_deal.py`) and
+  `e2e_deal_buyer_cli` (`test_full_deal_buyer_cli.py`) call `validate-publish`; section 2's
+  stage 05e also queries the bare-metal lane's registry at version 7 by `vcpu_count` and
+  `gpu_count`.
+
+  *Handoff.* The registry's publish route still enforces no listing schema (design D3, "The
+  publish requirement"), so version 7 changes only the dry run and the advertised spec;
+  buyers holding a version-6 ETag refetch.
 
 ## 4. The host GPU fields are retired
 
