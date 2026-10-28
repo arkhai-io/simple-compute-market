@@ -10,8 +10,8 @@ contract gates live use of section 12's adapter but not its implementation again
 double.
 
 Sections follow the design's implementation cadence. Sections 1–7 are round 1 (foundation,
-wire and buyer side); section 8 joins round 1 only if that contract revision is vendored
-in `kit/arkhai-payments/schema/` when round 1 starts, and otherwise opens round 2; sections
+wire and buyer side); section 8 joins round 1, since that contract revision is available at `arkhai-payments`
+`7712a5e0` to vendor into `kit/arkhai-payments/schema/`; sections
 9–15 are round 2 (seller servicing and domain wiring); section 16 is the closeout.
 
 Wire and persistence breaks, all forward-only (design.md, D5 and "Rollout"): options carrying
@@ -271,7 +271,8 @@ lifecycle deal.
 
 ## 8. Hosted mandates, buyer mandate check and hosted option builders
 
-Gated: starts only once the payments contract revision is vendored and
+Gated: starts once the payments contract revision is vendored, from `arkhai-payments`
+`7712a5e0892e155e3e181a330ef39b08d63e8bae` (schema and vectors together), and
 identified in `kit/arkhai-payments/schema/SOURCE.md`; until then every derived hosted mandate
 fails the vendored schema. Delivers per-part authority and hold derivation from the terms, the
 buyer's mandate check, hosted option builders that emit lifecycle terms, and the API-credit
