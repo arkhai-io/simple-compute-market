@@ -655,6 +655,72 @@ Rejected:
   strands the change.
 - *Files for interactive runs*: a machine-read `## Next` again, contradicting D3.
 
+### Decisions taken in implementation
+
+Moved here from the task notes at closeout; each is what the code does.
+
+- **The table's shape** (section 1). `round` is one node, its in-progress result
+  `implement`. `round-view` and `validate` are nodes, since they are guards' remedies
+  and the round's join suppliers; their exits are derived from the table — the
+  join's exit, and each exit whose guard they remedy. The bootstrap's remedy is
+  `wait`, which no step runs. Each exit carries what it is taken on (`advance`,
+  `another round`, `a return`, sections out of the plan's order); two exits to one
+  target, as the implementation triage's to the round, are told apart by the
+  target's sections. The dependency gates and the clone's bootstrap are *held*
+  guards: the computation holds a stretch of the workflow on them rather than
+  checking them as an exit is taken, and a dependency gating closeout is held on
+  the exit into closeout. A checked guard reads the computation's readings through
+  `graph.Readings`, a protocol no type checker holds, since none covers `scripts/`.
+- **The round's join is read from the table** (52 F1). The join's members decide
+  what it still waits for, so a changed join changes routing, not the diagram alone.
+- **A first pass is read before triage wherever the change is worked** (68 F2): in
+  the owner's checkout a validation or review record no longer stands in for the
+  owner's reading; there the round view is named once validation and review are in,
+  since the view moves the branch under them.
+- **The route** (section 6). A direction stands until a run of its node takes an
+  exit (`log.ran`); a run taking no exit — a question, a block, a stop — leaves the
+  route where it was, so its step is named again once answered. The pre-closeout
+  review's override reads a direction the same way. The route names its step
+  whatever the status says. With no exit or direction logged, a design status names
+  design and any later one the owner, rather than a step inferred from the phase. A
+  direction to `round-view`, which logs no run, reads the round's join. A finished
+  run naming no exit names the owner.
+- **Validation's target** (section 8). Validation takes its target from whatever
+  result carries one — `validate`, `validate-and-review`, or the owner after a
+  failed or inconclusive validation of it — so a rerun names the exit whose guard
+  it remedies; with none, started outside the route, it names the round's triage.
+- **Interactive endings** (section 8). Each records `finished`, `returned`, or, for
+  design, `blocked` — never a question, which is answered in the session, nor a
+  stop, which would wait for a resume only the wrapper makes. Planning that needs
+  another design review ends interactively as a return to design. Design's embedded
+  triage of a waiting review records `finished` naming design, which the design's
+  own outcome supersedes.
+- **The orchestrating session never records for a closed step** (section 9): "MUST
+  NOT … record a step's exit on its behalf" has no exception, and its line would
+  read as the step's own, so it gives the owner the `record` command, naming the
+  closed session with `--session`, and starts nothing for the step.
+- **The conversion** (section 7). A marked triage outcome's exit takes precedence
+  over its file's token, since under the current triage skill `## Next` is prose
+  whose first word may be "Advance". Nothing is proposed while a review numbered
+  after the latest triaged one awaits its triage, nor for a remedy no direction can
+  name — the owner, or a repeat pass's `round-view`. `--confirm --decline` writes the
+  conversion with no direction where the proposal confirms a pending return, since a
+  declined return needs the conversion written. A direction is checked against the
+  converted lines held in memory (`log.decision_line`), since the log cannot be read
+  by name while its replacement holds the lock; `--confirm` computes the conversion
+  again under the lock, so a line appended after the preview is written though the
+  owner was not shown it, and nothing further guards that interval, the command
+  being run between steps. `convert` imports `change_next_step`, the package's only
+  module to, so its proposal's guards are the computation's own.
+- **An object `next` is printed as it is** (section 3): the log printer and the
+  cost report render no display string for it, which would replace the target with
+  words nothing routes on.
+- **A Codex review is not marked unattended** (section 3): its read-only sandbox
+  cannot run `record`.
+- **A resume that found no conversation records no dollars** (69 O3): a session's
+  running total only grows, so a total below the one last logged records no `usd`
+  and no `session_usd`, rather than a negative figure that understated the change.
+
 ### The implementation cadence
 
 Two rounds:
@@ -714,3 +780,27 @@ within round 2.
 ## Open Questions
 
 None.
+
+## Design promotion record
+
+| Accepted decision | Permanent location |
+|---|---|
+| The workflow graph is one table in code, its nodes qualified by review kind, with exits, joins, exit guards and their remedies, and entry guards (D1) | `openspec/specs/change-workflow/spec.md#requirement-the-workflow-graph-is-declared-in-code`; rationale `openspec/specs/change-workflow/architecture.md#routing-is-code-with-the-model-as-backstop` |
+| The diagram is a hand-laid draw.io source with an SVG export, held to the table structurally, its visible drawing not compared; `make change-graph` reports its departures (D1, 69 O1, 82 O1, 83 F2) | `openspec/specs/change-workflow/spec.md#requirement-the-workflow-graph-is-declared-in-code`; `openspec/specs/change-workflow/architecture.md#routing-is-code-with-the-model-as-backstop`; `docs/agents/change-workflow.md#the-change-workflow` |
+| A durable change to the workflow is an OpenSpec change; an intervention is the owner's direction, not an edit of the table (D1, D5) | `openspec/specs/change-workflow/architecture.md#routing-is-code-with-the-model-as-backstop`, `#the-owner-is-interrupted-only-for-judgement` |
+| Entry guards on nodes, unwaivable or waivable, beside exit guards on edges; held guards (D1, D5, implementation) | `openspec/specs/change-workflow/spec.md#requirement-the-workflow-graph-is-declared-in-code`; rationale `openspec/specs/change-workflow/architecture.md#routing-is-code-with-the-model-as-backstop` |
+| A target is an object naming a node; a string form is drawn, never parsed (D2) | `openspec/specs/change-workflow/spec.md#requirement-unattended-step-runs-end-with-a-structured-outcome`; `openspec/specs/change-workflow/architecture.md#routing-is-code-with-the-model-as-backstop` |
+| Every outcome names its exit; a triage names its exit and `triaged`; `## Next` is prose nothing routes on (D3) | `openspec/specs/change-workflow/spec.md#requirement-unattended-step-runs-end-with-a-structured-outcome`, `#requirement-the-next-step-is-computed-from-the-files`, `#requirement-phases-and-owner-touchpoints`; `openspec/specs/change-workflow/architecture.md#the-owner-is-interrupted-only-for-judgement` |
+| The files hold a change's state and the log the transitions chosen on it (D3, D8) | `openspec/specs/change-workflow/spec.md#requirement-unattended-step-runs-end-with-a-structured-outcome`; `openspec/specs/change-workflow/architecture.md#steps-run-headless-and-resume-with-the-owners-answers` |
+| An unmet guard names its remedy, the exit kept as `target`; an undeclared exit, or one whose target's entry guard is unmet, names the owner; a merge run's undeclared exit (D4) | `openspec/specs/change-workflow/spec.md#requirement-the-next-step-is-computed-from-the-files`; `openspec/specs/change-workflow/architecture.md#routing-is-code-with-the-model-as-backstop` |
+| The owner directs any node, past its exit guards, within its entry guards; the archive is the boundary no direction crosses; every direction is the owner's (D5) | `openspec/specs/change-workflow/spec.md#requirement-the-owner-directs-a-changes-next-step`; `openspec/specs/change-workflow/architecture.md#the-owner-is-interrupted-only-for-judgement`; `docs/agents/change-workflow.md#orchestrating-a-change`; `.agents/skills/change-orchestrate/SKILL.md` |
+| Decision lines carry the same target; `note orchestrator`'s `--next`, `--kind`, `--sections`, `--target` (D6) | `openspec/specs/change-workflow/spec.md#requirement-unattended-step-runs-end-with-a-structured-outcome`; `docs/agents/change-workflow.md#orchestrating-a-change` |
+| The log's format marker, detection of a change not yet converted, and the `convert` command, with the readers' and appenders' inode check (D7) | `openspec/specs/change-workflow/spec.md#requirement-the-next-step-is-computed-from-the-files`; `openspec/specs/change-workflow/architecture.md#steps-run-headless-and-resume-with-the-owners-answers`; `docs/agents/change-workflow.md#orchestrating-a-change`; the command's removal: `openspec/changes/remove-workflow-log-conversion/proposal.md` |
+| Recovery: an unrecorded step named in progress; a status set back followed, one ahead reported (D8) | `openspec/specs/change-workflow/spec.md#requirement-interactive-step-runs-record-their-outcome`, `#requirement-the-next-step-is-computed-from-the-files` |
+| An interactive run records its own outcome through `record`; the review is the exception (D11) | `openspec/specs/change-workflow/spec.md#requirement-interactive-step-runs-record-their-outcome`; `openspec/specs/change-workflow/architecture.md#steps-run-headless-and-resume-with-the-owners-answers`; `docs/agents/change-workflow.md#skills` |
+| An archived change is not returned to an earlier phase; `convert` stays until every change not yet cleaned up has taken the new code (D5, D7) | `openspec/specs/change-workflow/architecture.md#current-limits` |
+| The decisions taken in implementation | Behaviour in `openspec/specs/change-workflow/spec.md`'s scenarios; held guards and the merge run's exit in `openspec/specs/change-workflow/architecture.md#routing-is-code-with-the-model-as-backstop`; the rest is the code's and stays here |
+| The implementation cadence, and the conversion of this change's own records | History; stays here |
+| Roadmap currency | No goal in `docs/development/ROADMAP.md` covers contributor workflow; no edit |
+| Campaign index currency | `openspec/changes/README.md`, "Independent active changes": this change's row, and `remove-workflow-log-conversion`'s, added `ready for design` |
+| Evidence | `openspec/specs/change-workflow/spec.md#evidence` gains the graph, its diagram and `make change-graph`, `record`, and `convert` |

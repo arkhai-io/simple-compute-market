@@ -407,8 +407,9 @@ change-clone-remove CHANGE=<change>` in your workspace. It refuses at once while
 run is in progress in the clone or its bootstrap is still running. Otherwise it
 copies the history again first, then deletes the clone only when every file of that
 history is in your workspace with the clone's contents, the branch is merged into
-`origin`'s `dev`, and the clone holds no commit `origin` lacks, no uncommitted
-change, and no stash; otherwise it names each problem and deletes nothing. Archive
+`origin`'s `dev` — a squash or rebase merge counts when merging the branch again
+would apply cleanly and change nothing — and the clone holds no commit `origin`
+lacks, no uncommitted change, and no stash; otherwise it names each problem and deletes nothing. Archive
 cleanup never removes the clone, since the pull request may need another round.
 
 **A change worked in the workspace.** A change can still be worked in your

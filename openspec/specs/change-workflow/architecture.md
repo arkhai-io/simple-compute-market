@@ -112,8 +112,9 @@ decision or finding per turn: batched turns gave thinner answers, and an earlier
 decision can change a later question. Planning resumes the design session, which is
 usually still warm and holds the design's context.
 
-Every run ends with an outcome — finished, a question, a proposed return to an
-earlier phase, blocked on a prerequisite, or stopped — and the wrapper writes a
+Every run ends with an outcome — finished, naming the exit it takes, a question, a
+proposed return naming the step it returns to, blocked on a prerequisite, or
+stopped — and the wrapper writes a
 `stopped` line itself for a run that crashed or ended without one, since a step
 writing its own outcome file writes nothing when it fails. A session can take more
 turns after it has reported: a background command finishing, or a wake-up it
@@ -123,11 +124,60 @@ so routing reads what the session ended on, and keeps each earlier turn's outcom
 beside it, which the orchestrating session shows the owner first; choosing the
 "substantive" outcome would be a guess that hides the later turn. The prompt every
 unattended run is given says a background command wakes the session when it ends,
-so a step never schedules a wake-up to wait for one. The log is the wrapper's
-alone and holds only what the files cannot: session ids, rounds, decisions, the last
-outcome of each run, and its cost. Where the log and the change's files disagree,
-the files win. A proposed return does not move the status: the owner confirms it as
-a decision line, and the step it directs sets its phase's status as it always has.
+so a step never schedules a wake-up to wait for one.
+
+The files hold a change's state — its index row, records, and task list — and the
+log holds the transitions chosen on that state: the exit each run took and the
+owner's decisions, beside what the files cannot hold, session ids, rounds, and each
+run's cost. Each prevails in its own domain. A status set back by hand changes the
+state, and the computation follows it to where its phase starts; a status ahead of
+the log is a step that set it and closed before it recorded, so that step is named
+as in progress rather than skipped, since only its outcome carries its exit — a
+plan's carries its rounds too. A proposed return does not move the status: the owner
+confirms it as a decision line, and the step it directs sets its phase's status.
+
+An interactive run records its own outcome as its last act, through `python3
+scripts/run_change_step.py record`, which appends it with the session's id, read
+from the harness's environment (`CLAUDE_CODE_SESSION_ID`), `HEAD`, and
+`interactive: true`. Interactive steps so stay plain sessions under the owner's own
+permissions; wrapping them too, to record an outcome file when the session exits,
+was rejected once the session's id was available to a command the session runs. The
+variable is undocumented, so `record` refuses to write a line without a session id
+unless given one, failing loudly should the harness stop exporting it, and it
+refuses inside an unattended run, which the wrapper marks in its run's environment,
+so no outcome is written twice. Nothing records an interactive run's start: only the
+owner runs one and knows whether it is open, so a session closed before it recorded
+leaves its step named as in progress, to be resumed or recorded by hand; where the
+files say what it did — a round's checked sections, a validation's record — only the
+session's report is lost. The review is the exception: run interactively it
+publishes no record, its text pasted into a triage as an external review, so it has
+nothing to record.
+
+The log is written through one module, `scripts/change_workflow/log.py`, by four
+writers — the wrapper, `record`, the decision writer (`note`), and `convert` — and
+every line carries the log's format marker, `"format": 2`. The computation reads
+only that format: a log holding a line without the marker, or numbered records and
+no log, is brought to the owner with `python3 scripts/run_change_step.py convert
+<change>` and read as nothing else. A change worked on another branch runs that
+branch's tooling until it merges the code that reads the format, so its records are
+converted at the one point safe for it, when its branch first carries that code. A
+reader of both formats would have kept the older routing — triage tokens and file
+times — inside the code that replaced it, and detection by an older line's shapes
+missed an older return, which carries no `next`, and records with no log. The
+conversion rewrites the older lines in place, each keeping its seq, so every
+decision still names the run it named; appends one line naming every triaged review;
+and appends the owner's direction to where the change stands, which it proposes from
+the latest routing decision and the owner confirms or replaces, attesting each
+triage no marked outcome names, since an interactive triage closed before it
+recorded cannot be told from a finished older one. Where the change stands is the
+owner's assertion, so it is recorded as a direction rather than rebuilt as one
+triage line per older triage, which would have landed after the runs those triages
+already led to. All of it is one replacement of the log under the log's lock, so an
+interrupted conversion leaves the older log whole. A lock is held on a file, not on
+its name, so every reader and appender, once it holds the lock, compares the file it
+locked with the one the log's name holds, by inode, and opens the log again when
+they differ; the older tooling makes no such check, so the command is run between
+steps.
 
 The wrapper writes each run's event stream to a transcript under `reviews/` and a
 progress file of one line per tool call, so whether a long step is stuck can be
@@ -146,7 +196,51 @@ only as reliable as the model on a given turn, and least reliable late in a long
 session; a transition table written into a skill would still be read by a model, and
 untestable.
 
-The workflow's graph, as the table in `scripts/change_workflow/graph.py` declares it:
+The workflow's graph is one table in code, `scripts/change_workflow/graph.py`, which
+the computation interprets: each node a step, qualified by its review kind — a
+review by its kind, a triage by the kind of review it triages, since each kind has
+other exits — with the exits its step may take, the records a join waits for, the
+guards on each exit with the step that satisfies each, and its entry guards. Each
+step names the exit it takes, as a target (`{"step": "review", "kind":
+"pre-closeout"}`), and the computation checks that exit against the table rather
+than inferring it from the phase. The step that finishes knows where the change
+goes; inference had to be taught each new path as a token or a special case, and a
+path it did not know went through the owner by hand. A target's string form,
+`review:pre-closeout`, is drawn in diagrams and documents and never parsed: every
+reader would parse it, and the outcome schema's checker could not.
+
+A guard is of one of two kinds. An *exit guard* sits on an edge, a condition on a
+step's chosen exit — `HEAD` validated before closeout, a fix committed since a
+review, the round's join. One that is not met names its remedy, the step that
+satisfies it, carrying the chosen exit as its `target`, so a fix commit's
+validation runs without interrupting the owner; one no step can satisfy — a
+validation that failed or was inconclusive, an unconfirmed return — names the
+owner. An *entry guard* sits on a node: a condition without which its step cannot,
+or should not, carry out its work, such as the archive for archive cleanup, checked
+on every entry, by a step's exit or a direction. An exit its node does not declare,
+or one whose target's entry guard is not met, comes to the owner: a step naming an
+exit it does not have is a skill's defect or an intervention, and an intervention
+is the owner's. A run resolving a merge's conflicts names `{"step": "round"}`, an
+exit implementation does not declare, on purpose: the merge was the owner's
+intervention, so where the change goes after it is theirs. The dependency gates and
+a clone's bootstrap are *held* rather than checked: the computation holds a whole
+stretch of the workflow on them, before it reads where the change stands.
+
+Validation is always named with the target it is for — the round's triage in a
+round's join, the exit whose guard it remedies, or what the owner's direction
+named — and names that target as its exit, whose guards are checked again, so a
+passed validation clears the guard and a failed one names the owner. The target's
+entry guards are checked on validation's exit rather than its entry: a round's
+validation starts beside the review its target triages, before that review is
+published.
+
+A durable change to the workflow is an OpenSpec change, so the table is code,
+reviewed as code; a data file of nodes and named guards would trade a code edit for
+a data edit and a loader and schema check to keep, with the change reviewed as an
+OpenSpec change either way. An intervention in one change's path is the owner's
+direction ("The owner is interrupted only for judgement"), not an edit of the table.
+
+The diagram of the graph, as the table declares it:
 each box a node with its entry guards, each edge an exit labelled with what it is
 taken on and its guards, numbered in the legend, and the round's join a hexagon.
 
@@ -261,27 +355,52 @@ Reviews are not gates. A gate at each review would ask the owner a question whos
 answer does not vary, and asking it leaves the owner's window idle while their
 attention is elsewhere; a routing question at each review would be the same
 interruption under another name. A
-review's triage records, under `## Next`, whether the change advances or another
-round runs, its first word a fixed token the computation reads alone, since routing
-on free text is a model's reading again. A triage that returns the change to design
-or planning records `Returned`, so its file says the triage ended rather than
-reading as one still running; once the owner confirms the return, that review no
-longer governs, and what the return leads to is a round of its own, read,
-validated, and reviewed afresh — even a rework of the returned round's own
-sections, which under the returned round would reach the next round unread and
-unreviewed. A declined return is the owner's to settle, since the triage it ended
-no longer says what follows. A triage run's log line does not name the review it
-triaged, so a confirmation counts for a review only when it was recorded after that
-review's triage file was last written, which a triage file, never rewritten after
-`## Next`, makes the time of the return. Only a decision the log attributes to the
-owner confirms a return, as with the owner's other decisions — a branch decision, a
-waiver — so a confirmation the orchestrating session records without the owner's
-name is refused when written and confirms nothing when read. A triage with nothing
-to dispose of advances without the owner. An implementation or pre-closeout round advances only on a
+review's triage chooses its exit among those its node declares — the step that
+advances the change, another review of the same kind, or, before the archive, a
+return to design or planning — on the owner's disposition, and names it in its
+outcome with the records it triaged (`triaged`). Its file's `## Next` keeps the
+choice in prose for whoever reads the history, and nothing routes on it, since
+routing on free text is a model's reading again. Because the outcome names the
+reviews it governs, the log alone says which triage governs a review and which run
+a return's confirmation resolves; a fixed token in the file needed files' times to
+say either. A triage file no triage outcome names is a triage in progress, whatever
+its words. Once the owner confirms a return, that review no longer governs, and what
+the return leads to is a round of its own, read, validated, and reviewed afresh —
+even a rework of the returned round's own sections, which under the returned round
+would reach the next round unread and unreviewed. A declined return is the owner's
+to settle, since the triage it ended no longer says what follows. A triage with
+nothing to dispose of advances without the owner. An implementation or pre-closeout round advances only on a
 `passed` validation of its final commit, and after a closeout review a correction
 outside `openspec/` and `docs/` is validated before archive cleanup, so a code
 correction reaches the merge validated unless the owner waives it. The owner's own look at the pull request before merging is outside
 the workflow.
+
+An intervention — another review, a validation before a step, a step past a guard,
+a confirmed return — is a deliberate, per-change, irregular transition, and the
+owner's alone. The owner directs any node of the graph by a decision line `by:
+owner` naming its target as an outcome names an exit, with a reason that says what
+it skips, and the computation names the directed step until a run of it takes an
+exit. A direction checks no exit guard: an exit guard conditions a step's choice,
+and a transition the owner made deliberately is not refused by one; a problem it
+causes is corrected by another direction. Its target's entry guards are checked,
+and the log's writer refuses it, naming the guard, while an unwaivable one of any
+node it names is not met — the target nested in a direction to validation
+included — so a direction no step could carry out is refused while the owner is
+present rather than failing later as a stopped run. A waivable entry guard, the
+pre-closeout review's validation, takes the direction as its override, and the
+waivers of another design review and of archive cleanup's validation are plain
+directions. Interventions declared as owner-only edges of the table were rejected:
+each new kind would need an OpenSpec change before it could be used once, and an
+intervention is the transition the workflow did not plan for. Only a decision the
+log attributes to the owner directs a step or confirms a return, as with the
+owner's other decisions — a branch decision, a waiver — so the orchestrating session
+directs nothing of its own accord, and never records a step's exit on its behalf.
+
+The archive is the boundary no direction crosses. An archived change's deltas are
+already merged into `openspec/specs/`, so design, planning, and implementation
+refuse it; the closeout review, its triage, and archive cleanup need the archive,
+and archive cleanup would otherwise mark `archived` a change whose deltas were never
+merged.
 
 ## The orchestrator relays and routes
 
@@ -693,8 +812,9 @@ lose it, and refusing would keep a clone forever over evidence held nowhere.
 ## Phases, triage, and archival
 
 A change moves through design, planning, implementation, and closeout, and a phase
-ending in a review is finished only when that review's triage records that the
-change advances. Planning starts only after the design review's triage advances it,
+ending in a review is finished only when that review's triage names a step of the
+next phase as its exit, or the owner directs one. Planning starts only after the
+design review's triage advances it,
 so a review that redirects the design never discards a plan; a design question
 planning exposes returns the change to design.
 
@@ -781,3 +901,18 @@ rows are recent history and may be pruned at any time.
   `make change-watch` in another terminal.
 - Review and step transcripts persist only in the untracked `reviews/` directory
   until an export flow exists.
+- An archived change is not returned to an earlier phase: no direction crosses the
+  archive, and a step reverting the archive commit is not built, since it raises
+  questions of its own — which commit to revert once later commits touched the same
+  specifications, what becomes of the closeout review's records. A closeout triage
+  that needs a code correction stops for the owner.
+- A direction may name a node that makes no sense from where the change stands;
+  only its unwaivable entry guards and the owner hold it.
+- `python3 scripts/run_change_step.py convert` and the computation's detection of a
+  change not yet converted stay until every change not yet cleaned up has taken the
+  code that reads the log's format;
+  [`remove-workflow-log-conversion`](../../changes/remove-workflow-log-conversion/proposal.md)
+  removes them, and the format marker stays.
+- `record` reads the session's id from `CLAUDE_CODE_SESSION_ID`, which the harness
+  exports and does not document; if a release drops it, `record` refuses until it is
+  given `--session`.
