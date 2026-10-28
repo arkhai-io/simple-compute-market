@@ -537,6 +537,20 @@ def test_a_constraint_removing_a_required_field_is_a_base_shape_problem(raw):
     assert problem.tier == "hint"
 
 
+def test_a_shape_omitting_the_family_with_required_fields_splits_and_resolves():
+    split = split_listing_shape(
+        {"space": {"units": {"offer": 8, "min": 8, "max": 16}}, "power": {"watts": 32}},
+        tier="hint",
+        schema=SCHEMA,
+    )
+
+    assert split.problems == ()
+    assert split.base_shape == {"power": {"watts": 32}, "space": {"units": 8}}
+    policy = resolve([split.declaration], SCHEMA).policy
+    values = policy.admissible_values("space.units", {"power": {"watts": 32}})
+    assert (values.minimum, values.maximum) == (8, 16)
+
+
 @pytest.mark.parametrize(
     "raw",
     [None, [], {}, {"power": {"watts": {"max": 4}}}, {"widget": {}}, {"widget": {"count": [1]}}],

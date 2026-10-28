@@ -82,10 +82,24 @@ def test_an_optional_family_may_be_omitted():
     assert dict(flat.quantities) == {"widget_count": 1}
 
 
+def test_a_family_whose_fields_are_required_may_be_omitted():
+    shape = {"space": {"units": 9}}
+
+    assert shape_problems(shape, SCHEMA) == ()
+    flat = flatten_shape(shape, SCHEMA)
+    assert dict(flat.quantities) == {"space_units": 9}
+    assert dict(flat.attributes) == {}
+
+
 def test_a_missing_required_field_is_named():
     with pytest.raises(CapabilityShapeError) as refused:
         flatten_shape({"widget": {"count": 1}}, SCHEMA)
     assert _paths(refused.value.problems) == {"widget.colour"}
+
+
+def test_a_named_family_is_checked_for_each_required_field_alongside_other_families():
+    problems = shape_problems({"widget": {"colour": "red"}, "space": {"units": 9}}, SCHEMA)
+    assert _paths(problems) == {"widget.count"}
 
 
 @pytest.mark.parametrize(
@@ -225,3 +239,21 @@ def test_unflatten_refuses_what_flattening_would_refuse():
         unflatten_shape({"widget_count": 0}, {}, SCHEMA)
 
     assert _paths(refused.value.problems) == {"widget.count", "widget.colour"}
+
+
+def test_unflatten_refuses_a_named_family_missing_a_required_field():
+    with pytest.raises(CapabilityShapeError) as refused:
+        unflatten_shape({"widget_count": 1, "space_units": 2}, {}, SCHEMA)
+
+    assert _paths(refused.value.problems) == {"widget.colour"}
+
+
+def test_unflatten_accepts_flat_values_that_name_no_required_family():
+    assert unflatten_shape({"space_units": 2}, {}, SCHEMA) == {"space": {"units": 2}}
+
+
+def test_unflatten_of_nothing_is_refused_as_an_empty_shape():
+    with pytest.raises(CapabilityShapeError) as refused:
+        unflatten_shape({}, {}, SCHEMA)
+
+    assert _paths(refused.value.problems) == {""}

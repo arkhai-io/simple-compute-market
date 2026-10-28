@@ -38,27 +38,46 @@ Files: `kit/capability-shape/src/market_capability_shape/__init__.py` and
 and `domains/compute/tests/test_capability_schema.py`;
 `kit/capability-admissibility/tests/unit/test_admissibility.py`.
 
-- [ ] 1.1 In `shape_problems`, check a field marked `required` only when the shape names
+- [x] 1.1 In `shape_problems`, check a field marked `required` only when the shape names
   its family, and say so in `ShapeField`'s, `shape_problems`', and `flatten_shape`'s
   docstrings and the module docstring (D1). `unflatten_shape` inherits the rule through
   `shape_problems`. Unit (`test_capability_shape.py`): a shape omitting a family whose
   fields are required is accepted and flattens to nothing for it; a shape naming that
   family without one required field is refused naming `family.field`; `unflatten_shape`
   refuses the same; existing refusals (undefined field, wrong kind, structure) unchanged.
-- [ ] 1.2 Rewrite the compute schema's comment ("Only ``gpu`` is required…") to state that
+  *Done.* Unit, `kit/capability-shape` `make test`: 42 passed. New cases: a family whose
+  fields are required omitted (accepted, flattens to nothing for it); a named family
+  missing one required field beside another family (refused naming it); `unflatten_shape`
+  refusing a named family missing a required field, accepting flat values naming no
+  required family, and refusing empty flat values as an empty shape. Existing refusals
+  unchanged.
+- [x] 1.2 Rewrite the compute schema's comment ("Only ``gpu`` is required…") to state that
   no family is required and that `gpu.count` and `gpu.model` are required together (D1).
   Unit (`test_capability_schema.py`): replace `test_only_the_gpu_family_is_required` with
   the delta's four scenarios — `{cpu: {count: 8}, memory: {gib: 32}}` accepted and
   flattening to `vcpu_count`/`ram_gb` with no attribute; `{gpu: {model: H100}, cpu:
   {count: 8}}` refused naming `gpu.count`; `{gpu: {count: 2}}` refused naming
   `gpu.model`; the existing two-domain flattening unchanged.
-- [ ] 1.3 Prove the admissibility kit keeps D1's refusals and admits GPU-less shapes, with
+  *Done.* Unit, `domains/compute` `make test`: 7 passed; the two-domain flattening is the
+  existing round-trip test. Outside the plan's file list: the VM domain's
+  `test_compute_requirements.py` carried a test of the same name, now false, renamed
+  `test_gpu_count_and_model_are_the_only_required_fields` (assertion unchanged).
+- [x] 1.3 Prove the admissibility kit keeps D1's refusals and admits GPU-less shapes, with
   no change to its code (D1 rationale). Unit (`test_admissibility.py`): a stated shape
   `{gpu: {count: {min: 2, max: 8}, model: H100}}` still has an unreadable base shape naming
   `gpu.count`; a stated `{cpu: {count: {offer: 8, max: 16}}, memory: {gib: 32}}` splits into
   a readable base shape and a policy whose `admissible_values("cpu.count", …)` answers 8
   through 16.
-- [ ] 1.4 **Verification checkpoint.** Unit: 1.1–1.3. Run `make test` in
+  *Done, with two corrections.* Unit, `kit/capability-admissibility` `make test`: 111
+  passed. The kit's suite names no compute vocabulary and the kit imports only the shape
+  kit, so the cases use its local schema, where `widget` (count and colour both required)
+  stands for `gpu`. The first case is the existing
+  `test_a_constraint_removing_a_required_field_is_a_base_shape_problem`, which still
+  refuses `{widget: {count: {min: 2}, colour: red}}` as a malformed base shape; no new test
+  was added for it. The second is new: `{space: {units: {offer: 8, min: 8, max: 16}},
+  power: {watts: 32}}` splits into a readable base shape and answers 8 through 16. The
+  plan's `{offer: 8, max: 16}` answers 1 through 16: an offer sets no minimum.
+- [x] 1.4 **Verification checkpoint.** Unit: 1.1–1.3. Run `make test` in
   `kit/capability-shape`, `kit/capability-admissibility`, and `domains/compute`, and
   `make check-comment-hygiene`. Bare-metal suites asserting that a declaration without a
   GPU count is unresolvable change in section 2, in the same session; no VM suite states a
@@ -66,6 +85,17 @@ and `domains/compute/tests/test_capability_schema.py`;
   End-to-end: every compute lane flattens through the kit (`e2e_listing_shapes`,
   `e2e_bare_metal_publication`, `e2e_deal`), proving existing GPU shapes are unchanged;
   sections 2 and 8 add the GPU-less scenarios. No scenario is owed here.
+  *Done.* The three suites pass as above; `make check-comment-hygiene` and `make
+  check-change` pass. Root `make test` passed (exit 0) over the tree holding sections 1–3
+  together, after `make dist`; no VM, pool, or override suite asserted that a shape naming
+  no `gpu` family is refused. End-to-end scenarios confirmed as planned:
+  `e2e_listing_shapes`, `e2e_bare_metal_publication`, and `e2e_deal` exercise the kit with
+  GPU shapes; none states a GPU-less shape for this section.
+
+  *Handoff.* Between sections 1 and 5 the shape kit accepts a VM pool hint or override
+  stating a GPU-less shape, which the VM reconciler cannot yet publish (as `design.md`'s
+  cadence states). A dependent's tests see the new rule only once its wheel is rebuilt
+  (`make dist`, or the kit's own `make build`); a reinit alone installs the stale wheel.
 
 ## 2. Bare-metal machines without GPUs
 

@@ -28,8 +28,11 @@ GPU_MODEL_ATTRIBUTE = "gpu_model"
 # The flat names are the published listing fields, the capacity-claim
 # dimensions, and the site's declared capacity keys, so they are the existing
 # wire names rather than family-prefixed ones: ``memory.gib`` flattens to
-# ``ram_gb`` and ``storage.gib`` to ``disk_gb``. Both are GiB. Only ``gpu`` is
-# required; a family a shape omits states nothing about it.
+# ``ram_gb`` and ``storage.gib`` to ``disk_gb``. Both are GiB. No family is
+# required: a family a shape omits states nothing about it, so a machine without
+# GPUs states no ``gpu`` family. ``gpu.count`` and ``gpu.model`` are required
+# together, because a GPU commitment always names how many and which model: a
+# shape states both or neither.
 COMPUTE_CAPABILITY_SCHEMA = CapabilitySchema(
     fields=(
         ShapeField("gpu", "count", FieldKind.QUANTITY, GPU_COUNT_DIMENSION, required=True),

@@ -7,8 +7,10 @@ A capability shape groups what is offered by family, and each family by field:
 This module knows no family or field name. A domain supplies a
 ``CapabilitySchema`` saying, for each family field, whether it is a quantity or
 an attribute, whether it is required, and the flat name it takes once
-flattened. Kits that only need to know a value is a well-formed shape use
-``shape_structure_problems``, which needs no schema.
+flattened. A required field is required only in a shape that names its family:
+a shape that omits a family states nothing about it, so no family is ever
+required as a whole. Kits that only need to know a value is a well-formed shape
+use ``shape_structure_problems``, which needs no schema.
 
 The digest is taken over the family-grouped form, never the flat names, so a
 schema that renames a flat field changes no shape's digest.
@@ -45,7 +47,11 @@ class FieldKind(str, Enum):
 
 @dataclass(frozen=True)
 class ShapeField:
-    """One family field a domain defines."""
+    """One family field a domain defines.
+
+    ``required`` means required whenever a shape names this field's family; a
+    shape omitting the family is not refused for it.
+    """
 
     family: str
     field: str
@@ -169,7 +175,11 @@ def _require_structure(shape: Any) -> None:
 
 
 def shape_problems(shape: Any, schema: CapabilitySchema) -> tuple[ShapeProblem, ...]:
-    """Every problem with ``shape`` under ``schema``; empty when it flattens."""
+    """Every problem with ``shape`` under ``schema``; empty when it flattens.
+
+    A field the schema marks required is checked only in a family the shape
+    names.
+    """
     structural = shape_structure_problems(shape)
     if structural:
         return structural
@@ -186,7 +196,11 @@ def shape_problems(shape: Any, schema: CapabilitySchema) -> tuple[ShapeProblem, 
             elif not isinstance(value, str) or not value.strip():
                 problems.append(ShapeProblem(path, f"must be a non-empty string, not {value!r}"))
     for definition in schema.fields:
-        if definition.required and definition.field not in (shape.get(definition.family) or {}):
+        if (
+            definition.required
+            and definition.family in shape
+            and definition.field not in shape[definition.family]
+        ):
             problems.append(ShapeProblem(definition.path, "is required"))
     return tuple(problems)
 
@@ -196,7 +210,8 @@ def flatten_shape(shape: Any, schema: CapabilitySchema) -> FlatShape:
 
     Raises ``CapabilityShapeError`` naming every offending ``family.field``
     path when the shape is malformed, names a family or field the schema does
-    not define, omits a required field, or carries a value of the wrong kind.
+    not define, names a family without one of its required fields, or carries
+    a value of the wrong kind. A family the shape omits flattens to nothing.
     """
     problems = shape_problems(shape, schema)
     if problems:
