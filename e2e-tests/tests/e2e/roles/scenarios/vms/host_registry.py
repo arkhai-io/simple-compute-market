@@ -7,7 +7,7 @@ in three different stores:
   `listing_mode` policy tag deciding whether the storefront publishes one listing
   per member (`specific_resource`) or one aggregated listing per pool (`fungible`).
 - An **executor host** is how the provisioner reaches a machine. It carries pool
-  membership, and no sellable capacity any claim consults.
+  membership, and nothing about the machine's hardware or sellable capacity.
 - A **capacity declaration** in the site ledger is what `probe` and `reserve` match
   against. `register_resource` is the only thing that creates one, and nothing
   derives one from a host.
@@ -20,7 +20,7 @@ several stages downstream of the missing setup.
 
 One declaration per executor, and one executor per scenario. A second declaration on
 one machine sells the same hardware twice, which the provisioner's inventory loader
-refuses outright — and on a shared executor one scenario's GPU count would change
+refuses outright — and on a shared executor one scenario's declaration would change
 what another can reserve. A fungible pool is therefore several executors with one
 declaration each, never several declarations on one.
 
@@ -51,17 +51,6 @@ from market_resource_pools_contracts import PoolCreate, PoolUpdate
 from compute_provisioning_client import ComputeProvisioningError
 from market_resource_pools_client import SyncResourcePoolClient
 from compute_provisioning_contracts import ConnectionSubmission, HostCreate, HostUpdate
-
-#: GPUs physically present on an executor host. Must cover the largest single
-#: slice any scenario reserves — 4, in the dynamic-listings cases.
-#:
-#: Deliberately not the same number as a declaration's sellable units. A host says
-#: what hardware exists; a declaration says how much of it is for sale, and the
-#: listing-reopen decision reads the declaration. Declaring four units for a
-#: scenario whose listing sells one leaves three available after the reserve, so
-#: the listing never closes: a declaration states what its listing sells, never
-#: this count.
-E2E_HOST_GPU_COUNT = 4
 
 #: One executor per scenario, so no scenario's declaration changes what another can
 #: reserve, as one declaration per executor requires.
@@ -191,7 +180,6 @@ def register_e2e_host(
     *,
     name: str,
     pool_id: str,
-    gpu_count: int = E2E_HOST_GPU_COUNT,
 ) -> Any:
     """Register one executor host into `pool_id`, idempotently.
 
@@ -200,8 +188,9 @@ def register_e2e_host(
     mode — and the host exists to be an executor identity, not to be reached.
 
     Reconciles rather than accepting what is there. A host may survive an earlier
-    run against the same stack with a different GPU count or pool, and the contract
-    is that it exists *with what this scenario needs*.
+    run against the same stack in a different pool, and the contract is that it
+    exists *in the pool this scenario needs*. What the machine sells is its
+    declaration's, never the host's.
     """
     try:
         existing = provisioning_client.get_host(name)
@@ -215,13 +204,10 @@ def register_e2e_host(
                 kind="ssh",
                 public={"ssh_host": "127.0.0.1", "ssh_user": "e2e", "key_path": "/dev/null"},
             ),
-            gpu_count=gpu_count,
             pool_id=pool_id,
         ))
-    elif (existing.gpu_count or 0) < gpu_count or existing.pool_id != pool_id:
-        provisioning_client.update_host(
-            name, HostUpdate(gpu_count=gpu_count, pool_id=pool_id),
-        )
+    elif existing.pool_id != pool_id:
+        provisioning_client.update_host(name, HostUpdate(pool_id=pool_id))
 
     host = provisioning_client.get_host(name)
     assert host is not None, f"host {name!r} absent after registration"
@@ -302,7 +288,6 @@ def provision_e2e_executor(
     sellable_units: int,
     listing_mode: str = "specific_resource",
     deliverable_modes: tuple[str, ...] = ("vm",),
-    host_gpu_count: int = E2E_HOST_GPU_COUNT,
     listing_shapes: dict[str, list[dict[str, Any]]] | None = None,
     capacity: dict[str, int] | None = None,
     pricing: dict[str, Any] | None = None,
@@ -314,8 +299,8 @@ def provision_e2e_executor(
     and the declaration; see `register_e2e_pool` and `declare_e2e_capacity`.
 
     `sellable_units` is what the declaration offers and must match the scenario's
-    seeded resource; `host_gpu_count` is the hardware the executor has. They are
-    separate numbers, and conflating them keeps slice listings open.
+    seeded resource: declaring more than its listing sells leaves units
+    available after the reserve, so a slice listing never closes.
 
     The pool must exist before a host can join it, and the host before a
     declaration correlates to it. Most scenarios want exactly this sequence once,
@@ -330,9 +315,7 @@ def provision_e2e_executor(
         pricing=pricing,
         region=region,
     )
-    host_row = register_e2e_host(
-        provisioning_client, name=host, pool_id=pool_id, gpu_count=host_gpu_count,
-    )
+    host_row = register_e2e_host(provisioning_client, name=host, pool_id=pool_id)
     declare_e2e_capacity(
         site_admin_client,
         resource_id=resource_id,

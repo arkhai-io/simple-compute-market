@@ -98,7 +98,6 @@ from e2e_harness.settings import settings
 from tests.e2e.roles.scenarios.vms.host_registry import (
     E2E_DEAL_CLI_HOST,
     E2E_DEAL_CLI_POOL_ID,
-    E2E_HOST_GPU_COUNT,
     provision_e2e_executor,
     refresh_storefront_projections,
 )
@@ -392,17 +391,13 @@ class TestStage00f1_ExecutorHostRegistry:
             },
         )
         assert host.host_id == E2E_DEAL_CLI_HOST
-        assert (host.gpu_count or 0) >= E2E_HOST_GPU_COUNT, (
-            f"executor host {E2E_DEAL_CLI_HOST} reports {host.gpu_count} GPU(s); "
-            f"scenarios reserve up to {E2E_HOST_GPU_COUNT}"
-        )
 
         sites = refresh_storefront_projections(storefront_admin_client)
 
         deal_state._executor_host_registered = True
         log.info(
-            "[00f1] Executor host %s registered (gpus=%s); projections confirmed for %s",
-            E2E_DEAL_CLI_HOST, host.gpu_count, sorted(sites),
+            "[00f1] Executor host %s registered; projections confirmed for %s",
+            E2E_DEAL_CLI_HOST, sorted(sites),
         )
 
 

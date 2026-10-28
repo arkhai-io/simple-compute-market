@@ -1302,8 +1302,12 @@ def _migrate_hosts_gpu_model(engine: Engine) -> None:
     NULL on an existing row means the operator hasn't recorded a model
     yet, matching pre-migration behavior exactly -- it is not treated as
     "no GPU", which is what ``gpu_count`` already reports independently.
+
+    A table with no ``gpu_count``, as a fresh database creates it from a model
+    that describes no hardware, gains no GPU column.
     """
-    _add_column_if_missing(engine, "hosts", "gpu_model", "VARCHAR")
+    if _column_exists(engine, "hosts", "gpu_count"):
+        _add_column_if_missing(engine, "hosts", "gpu_model", "VARCHAR")
 def _migrate_provisioning_replay_reservations(engine: Engine) -> None:
     """Create the durable request reservation and exact-outcome store."""
 
@@ -2429,9 +2433,14 @@ def _migrate_legacy_host_capacity_declarations(engine: Engine) -> None:
     writes. It is the only derivation of capacity from hosts: no host write
     declares capacity.
 
-    Every row is planned before the first write.
+    Every row is planned before the first write. A ``hosts`` table with no
+    ``gpu_count``, as a fresh database creates it, holds no legacy count to
+    derive from.
     """
-    if not (_table_exists(engine, "hosts") and _table_exists(engine, "capacity_buckets")):
+    if not (
+        _column_exists(engine, "hosts", "gpu_count")
+        and _table_exists(engine, "capacity_buckets")
+    ):
         return
     with engine.begin() as connection:
         hosts = connection.execute(text(
@@ -3381,12 +3390,14 @@ def _migrate_hosts_pool_optional(engine: Engine) -> None:
 
     A host written without a pool belongs to none, and nothing supplies one: a
     default would place the host in a pool nobody named. Existing hosts keep
-    their pools and every other value.
+    their pools and every other value the model defines.
 
     SQLite cannot relax a column in place, so the table is rebuilt from the
-    model's current definition by the procedure
-    ``_migrate_capacity_declaration_contract`` follows. A table already in that
-    shape, as a fresh database creates it, is left alone.
+    model's current definition (``_rebuild_hosts_from_model``), which also drops
+    any column the model no longer defines, such as the GPU columns
+    ``_migrate_hosts_drop_gpu_columns`` drops from a table already past this
+    step. A table already in that shape, as a fresh database creates it, is
+    left alone.
     """
     if not _table_exists(engine, "hosts"):
         return
@@ -3394,7 +3405,44 @@ def _migrate_hosts_pool_optional(engine: Engine) -> None:
     pool = columns.get("pool_id")
     if pool is None or (pool["nullable"] and pool["default"] is None):
         return
+    _rebuild_hosts_from_model(engine, set(columns))
 
+
+def _migrate_hosts_drop_gpu_columns(engine: Engine) -> None:
+    """Drop ``hosts.gpu_count`` and ``hosts.gpu_model``: a host describes no hardware.
+
+    A machine's hardware is stated only by its capacity declaration. The one
+    derivation of capacity from these columns,
+    ``_migrate_legacy_host_capacity_declarations``, runs earlier in the chain,
+    so dropping them changes nothing a site sells, and the values are discarded
+    without a log line per host.
+
+    The upgrade is fail-forward. An older provisioner maps both columns and
+    cannot read the rebuilt table, and this migration is recorded as applied,
+    so rolling the service back past it means restoring the database backup
+    taken before the upgrade.
+
+    The table is rebuilt from the model's current definition
+    (``_rebuild_hosts_from_model``), keeping every other column of every row. A
+    table with neither column, as a fresh database creates it, is left alone.
+    """
+    if not _table_exists(engine, "hosts"):
+        return
+    columns = {c["name"] for c in inspect(engine).get_columns("hosts")}
+    if not columns & {"gpu_count", "gpu_model"}:
+        return
+    _rebuild_hosts_from_model(engine, columns)
+
+
+def _rebuild_hosts_from_model(engine: Engine, stored_columns: set[str]) -> None:
+    """Rebuild ``hosts`` as the model defines it, copying the columns both share.
+
+    SQLite can neither relax nor drop a constrained column in place, so the
+    table is recreated from the model and its rows copied, by the procedure
+    ``_migrate_capacity_declaration_contract`` follows; a stored column the
+    model no longer defines is dropped with the old table. Foreign keys are off
+    for the swap and the whole rebuild is one transaction.
+    """
     model = Host.__table__
     rebuild_name = "hosts__rebuild"
     # The table its foreign key names rides along, so its DDL can render it;
@@ -3404,7 +3452,7 @@ def _migrate_hosts_pool_optional(engine: Engine) -> None:
     rebuild = model.to_metadata(metadata, name=rebuild_name)
     for index in list(rebuild.indexes):
         rebuild.indexes.discard(index)
-    shared = [c.name for c in model.columns if c.name in columns]
+    shared = [c.name for c in model.columns if c.name in stored_columns]
     column_list = ", ".join(_validate_sql_identifier(name) for name in shared)
 
     with _schema_transaction(engine, foreign_keys_off=True) as connection:
@@ -3547,4 +3595,5 @@ MIGRATIONS: tuple[Migration, ...] = (
         "20261027_001_vm_fulfillment_request_carries_no_connectivity",
         _migrate_vm_fulfillment_request_carries_no_connectivity,
     ),
+    Migration("20261028_001_hosts_drop_gpu_columns", _migrate_hosts_drop_gpu_columns),
 )

@@ -12,8 +12,9 @@
 # target when run against this directory (`-i inventory/`).
 #
 # Each line's first token is the host's `host_id`, which a capacity
-# declaration names to say which host it is delivered through. What sells is
-# the capacity declared for a host, never the host entry itself. A host's
+# declaration names to say which host it is delivered through. A line says how
+# to reach a machine and nothing about its hardware: what it has, and sells, is
+# the capacity declared for it, never the host entry itself. A host's
 # Resource Pool is optional: `pool_id=<pool>` places it, an empty `pool_id=`
 # unplaces it, and a line with no `pool_id` leaves an existing host's pool as it
 # is and registers a new host in no pool.
@@ -21,11 +22,9 @@
 # =============================================================================
 
 [kvm_hosts]
-# host1 ansible_host=<IP> ansible_user=<user> gpus=<count> ansible_ssh_private_key_file=~/.ssh/id_ed25519
+# host1 ansible_host=<IP> ansible_user=<user> ansible_ssh_private_key_file=~/.ssh/id_ed25519
 #
 # Optional per-host args:
 #   ansible_port=<port>     — if SSH isn't on 22
 #   public_host=<IP/DNS>    — address buyers should use if different from ansible_host
-#   gpus=<count>            — the host's GPU count, as description; it declares no capacity
-#   gpu_model=<model>       — the host's GPU model, as description
 #   pool_id=<pool>          — the Resource Pool to place the host in; empty unplaces it

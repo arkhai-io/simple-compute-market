@@ -278,12 +278,19 @@ Files: `provisioning/compute/contracts/src/compute_provisioning_contracts/hosts.
 a new `provisioning/compute/service/tests/integration/test_host_gpu_columns_drop_migration.py`,
 and every fixture asserting a host's GPU field.
 
-- [ ] 4.1 Remove `gpu_count` and `gpu_model` from `HostCreate`, `HostUpdate`, and
+- [x] 4.1 Remove `gpu_count` and `gpu_model` from `HostCreate`, `HostUpdate`, and
   `HostResponse`, leaving the models' handling of undefined fields as it is, so a request
   carrying them is accepted with them ignored (D5 "API"). Unit (`test_contracts.py`): each
   model parses a body carrying both fields and exposes neither; `HostResponse` serializes
   no GPU key.
-- [ ] 4.2 Remove both columns from the `Host` model and both fields from `InventoryHost`,
+  *Done.* Unit, `provisioning/compute/contracts` `make test`: 63 passed. Each of the three
+  models parses a body carrying both fields equal to one without them, defines neither,
+  and dumps no GPU key; an update naming only the GPU fields sets no field. The module
+  docstring states that a host describes no hardware and that the request models ignore
+  an undefined field. This is the only evidence that a response carries no GPU key: the
+  typed client parses every response through `HostResponse`, so no integration test
+  through it can see a GPU key the server sent.
+- [x] 4.2 Remove both columns from the `Host` model and both fields from `InventoryHost`,
   its serialization, and the host authority's create, update, and inventory apply (D5).
   Library integration (`test_host_authority.py`) and unit (`test_host_route_service.py`):
   create, update, and apply record and return no GPU field. Application integration
@@ -293,7 +300,23 @@ and every fixture asserting a host's GPU field.
   cases drop their GPU inputs and still declare nothing (deltas "Host writes declare no
   capacity", scenarios "Deployment configured only through host inventory" and "A host is
   created through the individual host API").
-- [ ] 4.3 Stop reading `gpus=` and `gpu_model=` in `_parse_entries`: remove the mapping
+  *Done.* Library integration, `provisioning/compute` `make test`: 243 passed.
+  `test_host_authority.py`'s new `test_no_write_records_a_gpu_field` creates and updates
+  from requests parsed from bodies carrying both fields (the models drop them before the
+  authority sees them) and imports an entry, which cannot carry them; the rows the three
+  writes leave, read by SQL, hold the expected hosts and enabled states and no GPU column.
+  Its GPU-reading cases now assert pool, connection, and enabled state.
+  `test_host_route_service.py` (unit, in the same 243) only swapped its update body for
+  `enabled`: the route service passes the parsed models through and holds no GPU handling.
+  Application integration, `provisioning/compute/service` (544 integration passed):
+  `test_hosts_api.py` sends `gpu_count` and `gpu_model` on create and update through the
+  typed client — a test subclass of each request model declares them, so the client
+  serializes them onto the wire — and the host is created, the update applied, and the
+  application database's stored row, read by SQL, has no GPU column. That responses carry
+  no GPU key rests on 4.1's unit test, since the client parses responses through
+  `HostResponse`. `test_host_writes_declare_no_capacity_api.py`'s INI, startup-seed, and
+  API cases carry no GPU input and still declare and project nothing.
+- [x] 4.3 Stop reading `gpus=` and `gpu_model=` in `_parse_entries`: remove the mapping
   lines from its docstring, the malformed-`gpus=` comment, and the two dict keys, so they
   fall under "All other variables → ignored" with no warning (D5 "INI"). Unit
   (`test_inventory.py`): a line carrying `gpus=8 gpu_model=H200` parses to the same
@@ -302,7 +325,16 @@ and every fixture asserting a host's GPU field.
   Application integration (`test_host_writes_declare_no_capacity_api.py`): an INI import
   with those variables registers the host and records nothing for them (delta scenario "An
   inventory line carries GPU variables").
-- [ ] 4.4 Append a migration after `20261027_001` that rebuilds `hosts` from the model
+  *Done.* Unit, `provisioning/compute/ansible` `make test`: 94 passed; the new case parses
+  a line with `gpus=8 gpu_model=H200`, and one with `gpus=x`, to the same host as the bare
+  line, logging nothing. The malformed-`gpus=` half of the port comment is gone; the
+  `ansible_port=` rationale stays. The example inventory's template line and option list
+  carry no GPU variable, and its header says a line describes reaching a machine, not its
+  hardware. Application integration: `test_an_inventory_line_carrying_gpu_variables_records_nothing_for_them`
+  imports such a line through the typed import client; the host is registered with its
+  connection and pool, its stored row has no GPU column, and nothing is declared or
+  projected.
+- [x] 4.4 Append a migration after `20261027_001` that rebuilds `hosts` from the model
   without the two columns, following `_migrate_hosts_pool_optional` (`20261023_002`), a
   no-op on a table already in that shape, and logging nothing per host (D5 "Storage"). Its
   docstring states the upgrade is fail-forward: an older provisioner cannot read the
@@ -313,14 +345,62 @@ and every fixture asserting a host's GPU field.
   and a repeated run are no-ops; `foreign_key_check` passes (delta scenarios "An existing
   database is upgraded", "Host record carries a legacy capacity column", "Operator
   declaration and legacy host value disagree").
-- [ ] 4.5 The e2e host harness compares an existing host's pool alone when deciding to
+  *Done, with two changes the plan did not name.* `20261028_001_hosts_drop_gpu_columns`
+  rebuilds `hosts` through `_rebuild_hosts_from_model`, the rebuild body extracted from
+  `_migrate_hosts_pool_optional`, which now calls it too. A fresh database creates `hosts`
+  from the model and then runs the whole chain, so two earlier entries had to tolerate a
+  table with no GPU column: `20260804_001` adds `gpu_model` only where `gpu_count` exists,
+  and `20260921_004` returns when `hosts` has no `gpu_count`, since such a table holds no
+  legacy count. On a database that has not yet applied `20261023_002`, that rebuild copies
+  only the model's columns and so drops the GPU columns itself; the new entry then finds
+  neither and does nothing. Persistence integration (`test_host_gpu_columns_drop_migration.py`,
+  in the service's 544): the "before" state runs the chain from the `20260911_001`
+  fixture, restores both columns with `ALTER TABLE` and each host's values, and deletes the
+  drop's record — a reconstruction, not a schema captured from the previous release. Every
+  other column of every host (identity, connection, the protected key's ciphertext, pool,
+  enabled, timestamps) survives, the foreign key to `resource_pools` holds and
+  `foreign_key_check` is empty, and no log record names a host; a declaration an operator
+  changed after the upgrade derived it is unchanged; a fresh database has no GPU column and
+  the entry leaves its table's page alone; a repeated run changes nothing. Of the delta
+  scenario "Host record carries a legacy capacity column", this test proves only that the
+  migrations drop the values; that projection reads no host is the existing projection
+  tests' (`test_capacity_api.py`, "publishes declarations, not hosts"). Existing migration tests that wrote `gpu_count`
+  into a table created from the model, or asserted the GPU columns after the chain,
+  changed with it (`test_host_pool_optional_migration.py`, `test_database.py`,
+  `test_legacy_host_capacity_migration.py`, `test_legacy_vm_lease_migration.py`,
+  `test_legacy_backfill_teardown.py`, `test_vm_provider_identity_migration.py`,
+  `test_fulfillment_convergence_after_legacy_backfill.py`); the legacy-capacity test's
+  "host rows unchanged" case now runs the chain to the entry before `20260921_004`, then that
+  entry alone.
+- [x] 4.5 The e2e host harness compares an existing host's pool alone when deciding to
   update it, and passes no GPU field (D5 "The one non-production reader"). Unit: `make
   test-e2e-unit` passes.
-- [ ] 4.6 Remove the GPU fields from every test fixture and assertion that reads a host's
+  *Done; the harness was not the only reader.* `register_e2e_host` reconciles on pool
+  alone and passes no GPU field; `E2E_HOST_GPU_COUNT` and `provision_e2e_executor`'s
+  `host_gpu_count` are gone. Five more scenario modules asserted or logged an executor
+  host's `gpu_count` (VM `compute_deal_driver.py`, `test_full_deal_buyer_cli.py`,
+  `test_buy_oneshot_buyer_cli.py`, `test_compute_dynamic_listings.py`,
+  `test_multi_registry.py`) and would have failed on the new `HostResponse`; the GPU
+  assertion and log argument are gone, and `test_compute_dynamic_listings.py` and
+  `test_multi_registry.py` assert the host's id in their place (the other three already
+  did). Two passed GPU fields to `HostCreate` (the VM lane's
+  `conftest.py` stub host and bare metal's `compute_deal_driver.py`). `make
+  test-e2e-unit`: 169 passed; it does not import the scenario modules, and collecting them
+  locally was not run in this session, so their first import is the lanes' at validation.
+- [x] 4.6 Remove the GPU fields from every test fixture and assertion that reads a host's
   GPU field across `provisioning/compute` and its service; fixtures passing GPU values only
   as declaration capacity are unaffected. A repository search for `HostCreate(`/`HostUpdate(`
   with a GPU argument, and for `.gpu_count`/`.gpu_model` on a host, finds none (D5).
-- [ ] 4.7 **Verification checkpoint.** Unit 4.1, 4.3, 4.5; library integration 4.2;
+  *Done.* Fixtures changed beyond 4.2–4.4's: `test_capacity_api.py` (an INI line, two
+  `HostCreate` calls, and three host rows carrying GPU values; a docstring and a comment
+  that described host GPUs),
+  `test_pool_seed_api.py`, `test_provisioning_client_endpoint_coverage.py`,
+  `test_test_controller.py`; and, outside the plan's file list, the issue-discovery tool's
+  local host registration body (`tools/issue-discovery/config/phases/local.yaml`). The
+  search finds only the deliberate retired-field inputs of 4.1–4.3's tests, declaration
+  capacity and attributes, and the test-only `schema_through_20260911_001.sql` fixture and
+  `test_host_connection_migration.py`, which build legacy tables of their own.
+- [x] 4.7 **Verification checkpoint.** Unit 4.1, 4.3, 4.5; library integration 4.2;
   application integration 4.2–4.3; persistence integration 4.4. Run `make test` in
   `provisioning/compute/contracts`, `provisioning/compute`, `provisioning/compute/ansible`,
   and `provisioning/compute/service`, `make test-e2e-unit`, `make check-packaging`, and
@@ -329,6 +409,40 @@ and every fixture asserting a host's GPU field.
   provisioning service migrates its database through the new step, so the lanes prove
   nothing read the retired fields. No scenario is owed: the field handling is a model and
   API behaviour application integration owns.
+  *Done.* After `make dist`: contracts 63 passed; `provisioning/compute` 243; ansible 94;
+  service 669 unit and 544 integration; `provisioning/compute/client` 58; `make
+  test-e2e-unit` 169. `make check-packaging` (no dependency or lock changed),
+  `make check-comment-hygiene`, and `make check-change` pass; root `make test` exited 0
+  over the tree holding sections 1–4, before the fresh-context check's fixes (tests and
+  two docstrings), after which the contracts, `provisioning/compute`, service, and
+  e2e-unit suites were rerun and pass.
+  End-to-end, confirmed: the lanes' provisioning services start on fresh databases, so the
+  chain they run includes the guarded `20260804_001` and `20260921_004` and the new entry
+  as a no-op; no lane upgrades a database holding GPU columns, so the drop's rebuild is
+  proven only at persistence integration. Scenarios exercising the changed host harness and
+  host reads: `e2e_deal`, `e2e_deal_buyer_cli`, `e2e_buy`, `e2e_compute_dynamic_listings`,
+  `e2e_listing_shapes`, and `multi_registry` (VM), and `e2e_bare_metal_mock_deal` (bare
+  metal's driver registers its host with no GPU field). None asserts the absence of a GPU
+  field: that a stored host has none is application integration's evidence, and that a
+  response has none is 4.1's unit test.
+
+  A fresh-context check of the section's diff found no layering, import, packaging, or
+  placement problem. It found that the first version of the integration tests asserted
+  GPU-key absence on typed-client responses, which cannot fail; they now read the stored
+  rows, and the notes above say what each level proves. Declined: rewording
+  `_migrate_hosts_gpu_model`'s first paragraph, which describes what that historical step
+  does at its point in the chain; and moving the service's chain-running migration tests
+  out of `tests/unit`, an existing pattern this section did not introduce.
+
+  *Handoff.* The design called the e2e harness the one non-production reader of the host
+  GPU fields; five more scenario modules read them (4.5). They were changed by inspection
+  and have not been imported locally, so a lane failure on import or on a removed name in
+  a scenario is this section's to fix. The column drop is fail-forward; its operator note
+  in `DEPLOYMENT_AND_CONFIG.md` ("Migrations at startup") and the rewrite of the "`gpus=`
+  and `gpu_model=` are descriptive" sentence are closeout's (9.9), as are
+  `VALIDATION_RUNBOOK.md`'s host body and inventory line and both quickstarts' inventory
+  text. The `hollow-pre-floor-provisioning-migrations` change will meet the two guards
+  this section added to `20260804_001` and `20260921_004`.
 
 ## 5. VM listing models, dispatch, and serialization
 

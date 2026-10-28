@@ -68,7 +68,7 @@ def test_an_unknown_host_is_not_found_on_every_read_and_write():
 
     for call in (
         lambda: service.get_host("node-1"),
-        lambda: service.update_host("node-1", HostUpdate(gpu_count=1)),
+        lambda: service.update_host("node-1", HostUpdate(enabled=True)),
         lambda: service.set_enabled("node-1", True),
         lambda: service.set_enabled("node-1", False),
     ):

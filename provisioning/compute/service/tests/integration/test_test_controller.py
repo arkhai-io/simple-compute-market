@@ -147,7 +147,6 @@ async def client_and_queue(
     host_authority.register_host(HostCreate(
         host_id=HOST,
         connection=ssh_connection(ssh_host="10.0.0.1", ssh_user="root", key_path="~/.ssh/id_ed25519"),
-        gpu_count=0,
     ))
 
     job_engine = JobEngine(
