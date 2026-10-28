@@ -35,8 +35,11 @@ payment"), and a per-period part, once one exists, stops at the effective time.
   physical end (earliest lawful effective instant wins, deterministic ties, final once
   passed or physically begun) and a financial effective end that may move only earlier
   on authenticated evidence, with the two convergences tracked independently and every
-  external call keyed by the decision. The log is retained for a seller-configured
-  window at least the dispute horizon. This change records the buyer, site, and
+  external call an operation the deal's journal records under its own identity. The
+  log lives in core's common schema as market state and is retained under one rule
+  for every record of a deal's end: a floor fixed in core that configuration may
+  raise and never lower, the clock starting once the deal has converged physically
+  and financially. This change records the buyer, site, and
   administrator request kinds and the physical convergence; the later changes add the
   seller's and the storefront's, and the financial half.
 - An **administrative override**, a request kind with its own authority and audit,
@@ -45,8 +48,9 @@ payment"), and a per-period part, once one exists, stops at the effective time.
   effective instant, cause, source state — written in the same transaction as every
   transition that ends a lease, delivered through an outbox keyed by event identity,
   signed with the site's service identity, received idempotently by both compute
-  storefronts and kept as evidence, with the lease read as the pull recovery path.
-  Today the site sends only `capacity_released`, after teardown is proven, from an
+  storefronts and kept as evidence, with the lease read as the pull recovery path,
+  and returned verbatim to the buyer by the deal's status read so the buyer's record
+  of when the lease ended does not depend on the storefront. Today the site sends only `capacity_released`, after teardown is proven, from an
   outbox keyed by reservation; that callback stays as it is. This is its own
   acceptance boundary within the change.
 - The canonical storefront client gains the end-deal method, and both buyer CLIs a
@@ -86,9 +90,11 @@ None expected.
 - Depends on nothing. The site's terminate route and release path exist
   (`openspec/specs/physical-provisioning/spec.md`, early termination uses the
   expiry release path).
-- First of the goal's six changes; `converge-ongoing-compute-leases` builds on its
-  stop intent and lease-ended report, and `publish-and-preempt-spot-compute` on its
-  route shape.
+- First of the goal's changes; `unify-compute-delivery-path` and
+  `converge-ongoing-compute-leases` build on its request log and lease-ended report,
+  and `publish-and-preempt-spot-compute` on its route shape.
+- `kit-owned-storefront-auth-and-persistence` will state the persistence boundary the
+  log is placed under; this change places it there now and does not wait.
 - The lease-ended event's outbox is the shape `replace-polling-with-authenticated-push`
   plans for every site event; that change adopts it rather than building a second.
   Should it be designed first, this change depends on it for the transport.
@@ -121,8 +127,10 @@ a buyer-cancel stage).
 - The buyer may end any compute deal; the consequence is the selected mechanism's —
   `settlement-servicing` architecture companion.
 - A deal's end is an append-only log of requests folded into one effective decision,
-  with independent financial and physical convergence keyed by the decision —
-  `ARCHITECTURE.md`, "Release".
+  with independent financial and physical convergence, every external call a
+  journaled operation — `ARCHITECTURE.md`, "Release".
+- Every record of a deal's end is kept under one retention rule with a floor the
+  seller cannot lower — `settlement-servicing` spec.
 - The site records a lease's end as a durable event with the ending transition and
   reports it to the storefront only — `physical-provisioning` and `site-capacity`
   specs, `ARCHITECTURE.md`.

@@ -2,8 +2,9 @@
 
 The decisions below were settled at goal level with the owner on 2026-10-28 for
 [`ROADMAP.md`, Goal 8](../../../docs/development/ROADMAP.md#goal-8--sell-compute-by-the-period-until-either-party-stops),
-and revised the same day against three rounds of independent design review of the
-goal, the first of which proposed this split. This change's own design review may reopen any of them
+and revised the same day against four rounds of independent design review of the
+goal, the first of which proposed this split and the fourth of which moved its
+activation callers into `unify-compute-delivery-path`. This change's own design review may reopen any of them
 with a finding; its design session verifies them against the code and adds the spec
 deltas.
 
@@ -33,6 +34,13 @@ Verified against the tree on 2026-10-28; re-verify before planning.
   instant is already a site fact.
 - API credits commits with `lease_end_utc=None` for quota holds; this change does
   not touch that path.
+- `resolve-compute-family-findings` D5 removes `ReservationState.provisioning` and
+  `provisioning_failed`, which nothing writes, under a migration that converts any
+  stored row; the word leaves the site's state vocabulary, and this change's phase
+  value must not bring it back.
+- `inject-site-pool-authority` (in design) settles the port through which the site
+  ledger reads pool facts; the index rules that it should land before any new site
+  read of pool state, and this change adds two.
 
 ## Goals / Non-Goals
 
@@ -57,9 +65,9 @@ capacity is committed through the end even while the horizon sits earlier.
 
 The deadline has two phases, because it bounds two different things:
 
-- **`provisioning`**, set at commit (D3): the **provisioning deadline**, which
+- **`awaiting_activation`**, set at commit (D3): the **activation deadline**, which
   bounds delivery. The first renewal after delivery — *activation* — is one
-  conditional transition, `leased AND renewal_phase == provisioning`, that *replaces*
+  conditional transition, `leased AND renewal_phase == awaiting_activation`, that *replaces*
   the deadline with the instant the storefront names, earlier or later, capped by
   the end, and flips the phase. A reserved deal activates to its agreed end, the
   horizon it fully funded; a per-period deal to its verified funded horizon.
@@ -71,7 +79,11 @@ The deadline has two phases, because it bounds two different things:
   resurrect a claimed lease nor shorten a funded one.
 
 A lease committed before this change has a null deadline and no phase, and behaves
-exactly as today: null means unarmed, not reserved. The site is told when the lease
+exactly as today: null means no deadline, not reserved. The phase is named for the
+transition that ends it, the site's own word for what happens; `provisioning` was
+rejected because `resolve-compute-family-findings` is migrating that word out of
+the same table as a legacy state, and the next reader of the literal could not
+tell which concept it named. The site is told when the lease
 must be renewed by, never why; the field is a lease concept, and nothing commercial
 crosses the boundary.
 
@@ -104,15 +116,15 @@ deadline — it turns the poll interval into a buyer-facing timeout. Revisit tri
 deployment running two watchdog instances, which would need a worker identity and a
 row lease as the fulfillment convergence passes use.
 
-### D3. Commit records a provisioning deadline from the pool's provisioning allowance
+### D3. Commit records an activation deadline from the pool's provisioning allowance
 
 Vocabulary: a **commit** is the existing site operation that turns a reserved hold
 into a lease once settlement is verified; the **provisioning allowance**,
 `provisioning_allowance_seconds`, is a Resource Pool policy tag stating the time the
 pool's operator allows between a lease beginning and the resource becoming available
 — time, not money, and distinct from the minimum spend, which prices a buyer's
-repeated behaviour; the **provisioning deadline** is the lease's `renew_by_utc` in
-its `provisioning` phase. The allowance's purpose is to bound the site's exposure to
+repeated behaviour; the **activation deadline** is the lease's `renew_by_utc` in
+its `awaiting_activation` phase. The allowance's purpose is to bound the site's exposure to
 a storefront that goes silent between commit and delivery, and to enforce the
 operator's own delivery time against a storefront that is alive and failing to
 deliver; it is not a buyer-facing promise, which would be a listing term the
@@ -128,28 +140,37 @@ modes are, and the packaged seed pools carry the provider defaults. The commit
 resolves the pool's value, else the provider's default; a pool whose provider
 declares none resolves none.
 
-*Every commit records a provisioning deadline when the reservation's pool resolves an
+*Every commit records an activation deadline when the reservation's pool resolves an
 allowance, and leaves the lease without one when it resolves none.* A lease with no
 deadline expires only at its end, as every lease does today; so every compute lease
-gets a provisioning deadline and API credits' quota holds get none, by the same rule
+gets an activation deadline and API credits' quota holds get none, by the same rule
 and with no exemption written anywhere. The storefront passes nothing, the site
-learns nothing about how the deal is billed, and the pool facts are read through the
-port `inject-site-pool-authority` settles, so no new site read of pool state is added
-outside it.
+learns nothing about how the deal is billed, and the two pool facts this change
+reads — the allowance and the lapse policy (D4) — are read through the port
+`inject-site-pool-authority` settles, which is why that change lands before this
+one's implementation: two more reads through the import it removes would widen the
+divergence it exists to close. This change's design proceeds against the decided
+port.
 
 After delivery the storefront activates every compute lease through the same call —
-a reserved deal to its agreed end, a per-period deal to its funded horizon
+a reserved deal to its agreed end, a per-period deal to its vouched horizon
 (`converge-ongoing-compute-leases`) — and a reserved deal never calls again. This is
-a change to reserved deals, stated as one: every compute commit caller — VM's
-`_commit_capacity_hold` and `_commit_fresh_reservation`, its resume path, bare
-metal's `fulfillment_service`, and the Alkahest delivery paths — becomes an
-activation caller, in this change's plan, through the delivery path
-`converge-ongoing-compute-leases` creates where that has landed and directly where it
-has not. A provision that overruns the allowance expires as an unfunded lease would,
-and a reserved deal whose storefront dies between commit and delivery now expires
-too, instead of holding capacity to its agreed end. Provisioning time is non-billable
-by construction and accounted apart: the site stamps the active instant it already
-records at activation.
+a change to reserved deals, stated as one, and the callers are not this change's:
+every compute commit caller — VM's `_commit_capacity_hold` and
+`_commit_fresh_reservation`, its resume path, bare metal's `fulfillment_service`,
+and the Alkahest delivery paths — becomes an activation caller once, in
+[`unify-compute-delivery-path`](../unify-compute-delivery-path/), which depends on
+this change and wires activation into the one delivery path both domains compose. A
+provision that overruns the allowance expires as an unfunded lease would, and a
+reserved deal whose storefront dies between commit and delivery now expires too,
+instead of holding capacity to its agreed end; what that costs the buyer of a prepaid
+deal is the delivery path's committed refund, triggered by this change's
+`renewal_lapsed` event in the awaiting-activation phase. For a per-period deal
+provisioning time is non-billable by construction, since the period clock starts at
+`start`, and the site accounts it apart by stamping the active instant it already
+records at activation; for a prepaid deal the term runs from the agreed start, and a
+prorated refund of provisioning time is a recommendation left to
+`negotiate-open-ended-compute-terms`' session.
 
 *Rejected:* a `requires_renewal` or per-period flag on the commit — a bit whose only
 meaning is "the caller will call back", or a commercial classification at the site.
@@ -158,8 +179,10 @@ provisioning differs by an order of magnitude. *Rejected:* a storefront term for
 allowance; reusing `max_reservation_hold_seconds` or `hold_ttl_seconds`; no deadline
 until `start`. Revisit triggers: `billable-capacity-reservations` landing, when the
 provisioning window becomes a candidate for the same pricing machinery, noted there;
-`inject-site-pool-authority` not having settled its port by this change's design,
-which would make a request-carried flag the way to avoid a new pool read.
+`inject-site-pool-authority` stalling past the point where this change is otherwise
+ready, in which case the allowance and lapse policy can be carried on the commit
+request instead and the site reads no pool state — a storefront passing a number it
+does not understand, which is the thing to revisit, not the dependency.
 
 ### D4. What an unrenewed lease does is the site's policy
 
@@ -188,8 +211,9 @@ appetite about their hardware, and the site is where expiry already runs.
 ### D5. The event and the view
 
 The `lease_ended` event gains cause `renewal_lapsed`, carrying the deadline that
-lapsed, its phase, and the policy that applied. The lease view exposes
-`renew_by_utc`, `renewal_phase`, the active instant, and the lapse policy.
+lapsed, its phase, and the policy that applied; a storefront reads the phase to tell
+an undelivered deal from an unrenewed one. The lease view exposes `renew_by_utc`,
+`renewal_phase`, the active instant, and the lapse policy.
 
 ## Open questions
 
@@ -201,14 +225,15 @@ lapsed, its phase, and the policy that applied. The lease view exposes
 
 ## Implementation cadence (recommended)
 
-Two rounds. Round 1: the site — the two columns and migration, the activation and
-renew transitions, the claim rule, the provider declarations and the two policy tags
-with their reads, the due query, the event cause, the view, and the site's
-integration suite with its two-session races (activation against expiry, renewal
-against expiry, a replayed earlier horizon refused in `active`, repeat activation).
-Round 2: every compute activation caller, and the lanes proving a reserved deal runs
-past the pool's allowance after activation, a crash before activation expires at the
-allowance, and an API-credit purchase is unchanged. One session per round.
+One round, the site alone: the two columns and migration, the activation and renew
+transitions, the claim rule, the provider declarations and the two policy tags with
+their reads through the port, the due query, the event cause, the view, and the
+site's integration suite with its two-session races (activation against expiry,
+renewal against expiry, a replayed earlier horizon refused in `active`, repeat
+activation, a lease committed before the change untouched). The activation callers
+and the lane evidence — a reserved deal running past the pool's allowance after
+activation, a crash before activation expiring at it, an API-credit purchase
+unchanged — are `unify-compute-delivery-path`'s. One session.
 
 ## Permanent documentation destinations
 

@@ -200,7 +200,7 @@ deployment boundary.
 
 ## Related decision recorded by Goal 8
 
-`renewable-compute-lease-deadlines` (Goal 8) gives a per-period lease an initial renewal
+`renewable-compute-lease-deadlines` (Goal 8) gives every compute lease an activation
 deadline equal to the commit plus a per-pool provisioning allowance the site reads itself, so
 provisioning time is bounded and accounted apart from billable time but is not priced.
 Once held time is priced here, the provisioning window is a candidate for the same

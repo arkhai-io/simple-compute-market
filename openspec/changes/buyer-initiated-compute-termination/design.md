@@ -2,7 +2,7 @@
 
 The decisions below were settled at goal level with the owner on 2026-10-28 for
 [`ROADMAP.md`, Goal 8](../../../docs/development/ROADMAP.md#goal-8--sell-compute-by-the-period-until-either-party-stops),
-and revised the same day against three rounds of independent design review of the
+and revised the same day against four rounds of independent design review of the
 goal. This change's own design review may reopen any of them with a finding; its
 design session verifies them against the code and adds the spec deltas.
 
@@ -156,11 +156,36 @@ resends the same operation and a superseded decision's scheduled action, if it f
 is refused as stale rather than executed. Stage events
 are emitted from the decision for observability and are not its authority.
 
-**Retention.** The log is dispute evidence, so its window is at least the payments
-service's dispute horizon. A seller-configured window, following contact exchange's
-`retention_seconds` shape and default, prunes a deal's requests only once its
-decision is final and both convergences are complete; the decision row stays with the
-deal. `redesign-authenticated-requests` bounds replay state the same way.
+**Where the log lives.** The log and the decision are market state, so they live
+under the persistence boundary `kit-owned-storefront-auth-and-persistence` proposes —
+core owns market state, a domain's client holds only its own tables — in core's
+common schema, one table for every domain. That change has not designed, and this
+one does not wait for it: the placement is the current direction and the kit's
+existing pattern, recorded here as the contract, so that if the persistence change
+later overturns the boundary, one table moves with it and nothing else.
+
+**Retention.** The log is dispute evidence against the seller as much as for it, so
+the seller cannot be the one who decides how short it is kept. One retention rule
+covers the whole family of records — this log and decision, the continuation record
+and its journal (`converge-ongoing-compute-leases` D2), the signed `lease_ended`
+events (D6), and the buyer's own evidence (`settle-ongoing-compute-through-arkhai-payments`
+D11): a **floor fixed in core** beside the log's definition, which configuration may
+raise and never lower — a configured window below it is refused at startup — with
+the configured window following contact exchange's `retention_seconds` shape. The
+clock starts at the later of the deal's two completion facts, physical and financial
+(`converge-ongoing-compute-leases` D2), so an unconverged deal is never pruned; the
+decision row stays with the deal. The floor's value is this change's design session
+to set and justify, under one constraint: it must exceed any dispute window the
+payments service publishes, and when the vendored contract states one, the effective
+floor becomes the larger of the two at vendoring, through the payments kit. The floor
+is shown to the buyer before approval (`negotiate-open-ended-compute-terms` D12), and
+the buyer's client keeps its own copy under the same rule, so neither side's evidence
+depends on the other's honesty. `redesign-authenticated-requests` bounds replay state
+the same way.
+
+*Rejected:* retention as a listing term the buyer filters on — an invariant turned
+into a negotiation, under which a seller may advertise a day. *Rejected:*
+configuration only, as the precedent — the finding's problem unchanged.
 
 *Rejected:* one immutable intent per deal — it cannot hold a seller's notice pending
 at 15:00 and a buyer's cancel at 14:30. *Rejected:* one mutable intent amended in
@@ -187,8 +212,8 @@ from the mechanism's event record and the accepted policy.
 
 The ledger writes a `lease_ended` event — stable event identity, reservation, site,
 the effective instant, the cause (`expired`, `renewal_lapsed`, `terminated` with the
-caller's reason, `force_released`, `release_failed` with its reason), and the state
-it came from — in the same transaction as the transition that ends the lease, on
+caller's reason, `force_released`, `release_failed` with its reason), the state it
+came from, and the renewal phase where one exists (`renewable-compute-lease-deadlines`) — in the same transaction as the transition that ends the lease, on
 every path `_request_release` and force-release take, including the direct-release
 and failure outcomes that never enter `releasing`. The event is written when the
 site forms the intent, before any teardown.
@@ -199,8 +224,15 @@ the stored payload, signed by the site's service identity like every callback; b
 compute storefronts authenticate it against the reservation's accepted site, receive
 it idempotently by event identity, record it as a request in the deal's log with the
 site's effective instant, and keep the signed body as evidence behind an
-authenticated read. The pull path is the lease read the storefront already has: a
-lost notification costs one polling interval, never the deal. The capacity-released
+authenticated read. **The buyer gets a copy:** the deal's status read, which the
+buyer already polls, returns the site's signed bytes verbatim once the storefront
+has them, beside the storefront's own decision record, so the buyer's record of
+when the lease ended does not depend on the party the event constrains; whether the
+buyer can verify the site's signature depends on its having the site's identity
+independently, which is the identity work's question, and the bytes are kept either
+way since a dispute authority may have it. The pull path is the lease read the
+storefront already has: a lost notification costs one polling interval, never the
+deal. The capacity-released
 callback after proven teardown is unchanged and is still what reopens listings.
 
 The report goes to the storefront only. The site knows no settlement mechanism,
@@ -234,11 +266,8 @@ to the log and finds the final decision rather than refusing.
 
 ## Open questions
 
-- Whether the request log and decision live in `core/storefront`'s common schema
-  (one table for every domain) or in each domain's persistence. The decision falls
-  to the `kit-owned-storefront-auth-and-persistence` boundary (core owns market
-  state, a domain's client only its own tables) and is settled in this change's
-  design session once that change's contracts carve-out has or has not landed.
+- The retention floor's value (D4); settled in this change's design session with its
+  reason, above any dispute window the service has published by then.
 - Whether `replace-polling-with-authenticated-push` is designed before this change
   is; if so, its outbox carries the `lease_ended` event and this change depends on it
   for the transport, keeping only the event's definition. It is `ready for design`
@@ -260,6 +289,6 @@ the end-to-end stages. One session per round.
 | D1 | `openspec/specs/settlement-servicing/architecture.md` |
 | D2 | `openspec/specs/site-capacity/architecture.md` |
 | D3 | the storefront capability's spec that owns the shared route; `vm-storefront-fulfillment` spec |
-| D4, D5 | `docs/development/ARCHITECTURE.md`, "Release"; the owning storefront spec |
+| D4, D5 | `docs/development/ARCHITECTURE.md`, "Release"; the owning storefront spec; `settlement-servicing` spec (the retention rule and its floor) |
 | D6 | `openspec/specs/physical-provisioning/spec.md`; `site-capacity` spec; `ARCHITECTURE.md`, "Fulfillment status and results" |
 | D7 | `openspec/specs/buyer-orchestration/spec.md` |

@@ -24,9 +24,9 @@ In `kit/site` and the compute provisioning service that composes it:
   lease not renewed by its deadline expires early, exactly as it expires at its end:
   the watchdog's due query reads the earlier of the two. Null for a lease committed
   before this change, which is unchanged.
-- Two transitions. **Activation**, once, from phase `provisioning`: replaces the
-  deadline with the instant the storefront names, earlier or later, capped by the end
-  — a reserved deal activates to its agreed end, a per-period deal to its funded
+- Two transitions. **Activation**, once, from phase `awaiting_activation`: replaces
+  the deadline with the instant the storefront names, earlier or later, capped by the
+  end — a reserved deal activates to its agreed end, a per-period deal to its vouched
   horizon. **Renewal**, in phase `active`: only from `leased`, only to a later
   instant, never past `lease_end_utc`; refused from `releasing`. Truncating the end
   truncates the deadline with it.
@@ -41,16 +41,17 @@ In `kit/site` and the compute provisioning service that composes it:
   a running deal then renews into.
 - A **provisioning allowance**, a Resource Pool policy tag each *provider* declares
   with its default and a pool may override, validated at pool write: a commit records
-  a provisioning deadline, `renew_by_utc = commit + allowance`, when the reservation's
+  an activation deadline, `renew_by_utc = commit + allowance`, when the reservation's
   pool resolves an allowance, and leaves the lease without one when it resolves none
   — no flag, no request field, the site classifies no lease. The compute providers
   declare one, so every compute lease gets a deadline; the API-credits provider
   declares none, so quota holds get none, by the same rule. A storefront that dies
   before delivery leaves a lease that expires, reserved or per-period alike, and a
-  slow provision has the time the pool's operator gave it. Provisioning time is
-  non-billable by construction and accounted separately: the site stamps the active
-  instant it already records at activation. This changes reserved deals: every
-  compute commit caller becomes an activation caller, in this change's plan.
+  slow provision has the time the pool's operator gave it. The two pool facts are
+  read through the port `inject-site-pool-authority` settles, which lands first. This
+  changes reserved deals: every compute commit caller becomes an activation caller,
+  once, in [`unify-compute-delivery-path`](../unify-compute-delivery-path/), which
+  also owns the committed refund of a prepaid deal the site reclaims before delivery.
 - A **renewal-lapse policy**, a pool policy tag with a site-wide default, for a lease
   whose deadline passed unrenewed: `reclaim` (expire at the deadline; the default, and
   today's expiry), `grace <seconds>` (expire that much later, bounded and reported),
@@ -87,24 +88,29 @@ None expected.
 ## Dependencies and Related Changes
 
 - Depends on `buyer-initiated-compute-termination` for the `lease_ended` event it
-  extends with a cause; nothing else.
+  extends with a cause, and on `inject-site-pool-authority` landing before its
+  implementation: the two policy tags are new site reads of pool state, which the
+  index rules must go through that change's port. Its design proceeds against the
+  decided port.
 - `capacity-reservation-lifecycle-hardening` indexes *hold* expiry and prunes terminal
   rows on the same table; the deadline's due query is this change's own, and the two
   coordinate on the migration only.
-- `inject-site-pool-authority` touches how the site reads pool facts; the two policy
-  tags are read through whatever port it settles.
+- `resolve-compute-family-findings` removes the `provisioning` reservation state; the
+  phase here is named `awaiting_activation` so the word does not return to the table.
+- `unify-compute-delivery-path` depends on this change and makes every compute commit
+  caller an activation caller.
 
 ## Impact
 
-`kit/site`'s models, migration, ledger, router, and client; `kit/site-client`; the compute provisioning composition's provider declarations; every compute commit caller in both storefronts, which activate every lease after delivery;
+`kit/site`'s models, migration, ledger, router, and client; `kit/site-client`; the
+compute provisioning composition's provider declarations;
 `kit/resource-pools-contracts`' hints; the provisioning service's lease lifecycle and
 watchdog; the site's integration suite (two-session races, a deadline lapsing under each
 policy, repeat activation, a lease committed before the change untouched). One compute
-provisioning migration adds the columns; the tags need none. Pipeline evidence: both
-lanes prove a reserved deal activated and running past the pool's allowance, a crash
-before activation expiring at it, and an API-credit purchase unchanged; the
-per-period renewal end to end is the convergence change's, which closeout records as
-a stated gap.
+provisioning migration adds the columns; the tags need none. Pipeline evidence is
+"existing lanes unchanged": the activation callers and the lane scenarios are
+`unify-compute-delivery-path`'s, and the per-period renewal end to end is the
+convergence change's, which this change's closeout records as a stated gap.
 
 ## Permanent documentation impact
 
@@ -117,7 +123,7 @@ a stated gap.
 
 ### Knowledge to promote
 
-- A compute lease gets a provisioning deadline at commit, is activated once after
+- A compute lease gets an activation deadline at commit, is activated once after
   delivery, and is kept alive by renewal within its agreed end; the site classifies
   no lease and decides alone what an unrenewed one does — `site-capacity` spec and
   architecture companion; `ARCHITECTURE.md`, "Capacity reservation".

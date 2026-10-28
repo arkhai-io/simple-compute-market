@@ -2,7 +2,7 @@
 
 The decisions below were settled at goal level with the owner on 2026-10-28 for
 [`ROADMAP.md`, Goal 8](../../../docs/development/ROADMAP.md#goal-8--sell-compute-by-the-period-until-either-party-stops),
-and revised the same day against three rounds of independent design review of the
+and revised the same day against four rounds of independent design review of the
 goal. This change's own design review may reopen any of them with a finding; its
 design session verifies them against the code and the service's vectors and adds the
 spec deltas.
@@ -34,8 +34,10 @@ Verified against the tree on 2026-10-28; re-verify before planning.
   + window`, authorities `start` and `stop` `[payer, payee]`, `reverse` `[payee,
   dispute_authority]`, nonce `arkhai.payments.v1`; `MandatePolicy` requires
   `duration_seconds` and a fixed `amount`; `PaymentsOptionParams` is
-  `{payee_account, asset, window, deposit_agreement}`. The asset is the Agreement's,
-  which must equal the option's; `USD/2` survives in the README, examples, and tests.
+  `{payee_account, asset, window, deposit_agreement}` with `extra="forbid"`. The
+  asset is the Agreement's, which must equal the option's — the kit checks the two
+  copies agree (`mandates.py`, `settlement_config.py`), a pre-existing duplication
+  this change leaves as it is; `USD/2` survives in the README, examples, and tests.
 - `receipts.py`: `verify_receipt` checks the Ed25519 signature over the receipt
   frame, `livemode`, the transaction ID against the mandate, the deal hash, and the
   parties — not parts, amounts, holds, or rate. Nothing verifies
@@ -52,20 +54,28 @@ Verified against the tree on 2026-10-28; re-verify before planning.
   has no `stop`. `test-vectors/payments.json` has mandates (three `once`, one `rate`
   that is only hash-checked; none mixed), a receipt, attachments, approvals; no
   snapshot and no lifecycle event. `e2e-tests/settings.toml`'s `[payments]` target is
-  blank by default, and every payment scenario skips without one.
+  blank by default, and every payment scenario skips without one. The double that
+  replaces the fake is [`add-arkhai-payments-lane-double`](../add-arkhai-payments-lane-double/)'s.
 - The mandate carries no start time; `Receipt.approvedAt` is the approval. The
   earlier proposal's contract notes say periods count from `start`, the first batch
   including any `once` parts is reserved at approval, and a payee stop may be
   backdated — the last of which is not in the vendored schema.
+- `negotiation-driven-capacity-resize` §2, in implementation, makes the negotiated
+  scalar a basis-point multiplier wherever an offering carries a resolvable rate
+  structure, the quote `ceil(evaluate(rates, shape, duration) × bps / 10 000)`
+  derived by each side; `negotiate-open-ended-compute-terms` D2 builds on it and
+  supplies the one accessor this change prices from.
 
 ## Goals / Non-Goals
 
-**Goals:** the kit can derive, verify, start, stop, correct, and prove a per-period
-transaction, and the pipeline can drive one to exhaustion.
+**Goals:** the kit can derive, verify, start, keep alive, stop, correct, and prove a
+per-period transaction; what the storefront vouches for is the most a buyer can be
+charged.
 
-**Non-Goals:** any storefront or buyer behaviour; the listing terms; live
-qualification, which stays with the payments service's own tests; a contract change
-to the service, which is recorded as unowned work outside this repository.
+**Non-Goals:** any storefront or buyer behaviour; the listing terms; the in-lane
+double, which is its own change; live qualification, which stays with the payments
+service's own tests; a contract change to the service, which is recorded as this
+repository's requirement and carried to the service's maintainers through the owner.
 
 ## Decisions
 
@@ -79,16 +89,13 @@ publication blocker. `MandatePolicy` stops requiring a duration for a per-period
 option. The buyer's `check` re-derives under its own policy as now, so an option the
 buyer did not select cannot be billed per period.
 
-The unit of the Agreement's `amount` is set by the selected option's kind
-(`negotiate-open-ended-compute-terms` D2): for a prepaid option it is the total, as
-today, and the `once` part charges it directly; for a per-period option it is the
-hourly rate the option's `rates` state, and the per-period charge is derived from it
-as `floor(amount × period_seconds / 3600)` in minor units, exact integer arithmetic,
-refused at publication when it floors to zero, and re-derived identically by the
-buyer. `MandatePolicy` reads the kind from the option and the amount accordingly.
-Worked, at $2.50/h = 2,500,000 `USD/6`: `PT15M` → 625,000; `PT1M` → 41,666; `PT1H`
-→ 2,500,000; and a two-hour prepaid deal at the same rate carries `amount` 5,000,000,
-unchanged.
+The per-period charge is not read from `Agreement.amount`. It is the agreed price the
+one accessor `negotiate-open-ended-compute-terms` D2 defines returns, with its unit:
+for a per-period option the quote for one `period`, rounded upward as
+`negotiation-driven-capacity-resize` requires; for a prepaid option the total for the
+term, charged by the `once` part as today. The mandate derivation and the buyer's
+check both call the accessor and nothing else, so a reader that would have to know
+whether `amount` is a multiplier or a total never exists in this kit.
 
 A per-period option may also state a **`minimum_spend`** — an amount in the option's
 asset, or a count of periods at the rate — under which the buyer pays
@@ -100,15 +107,15 @@ the seller's reasons or the buyer stops before the create is dispatched, kept af
 Deriving it needs the payments service to draw the rate part's usage down against a
 prepaid part, which the published contract cannot express — a `once` part beside the
 `rate` part is an *additional* fee, not a minimum — so `minimum_spend` is a required
-capability in the request to the payments service, and until it lands a per-period
-option states no minimum and the churn vector is an accepted interim risk, recorded in
-the roadmap's current state.
+capability in the requests below, and until it lands a per-period option states no
+minimum and the churn vector is an accepted risk on VM; bare metal's per-period
+options require it (`negotiate-open-ended-compute-terms` D13).
 
-Example option params and derived part:
+Example option params and derived part, at a per-hour quote of 2,500,000 `USD/6`:
 
 ```json
-{"payee_account": "…", "asset": "USD/6", "window": "P7D", "period": "PT1H", "reserve_ahead": "PT10M"}
-{"kind": "rate", "asset": "USD/6", "amount": "2500000", "period": "PT1H", "reserveAhead": "PT10M", "hold": {"until": "stop"}}
+{"payee_account": "acct_seller_example", "asset": "USD/6", "window": "PT15M", "period": "PT1H", "reserve_ahead": "PT2H"}
+{"kind": "rate", "asset": "USD/6", "amount": "2500000", "period": "PT1H", "reserveAhead": "PT2H", "hold": {"until": "stop"}}
 ```
 
 *Rejected:* a separate per-period mechanism ID. *Rejected:* `amount` as the
@@ -116,25 +123,47 @@ per-period charge, and `PT1H` only (`negotiate-open-ended-compute-terms` D2).
 *Rejected:* a `once` part beside the `rate` part named as a minimum — at $2.50/h with
 one period stated it charges $5.00 for the first hour, an additional fee under a
 minimum's name; an honestly named `initial_fee` was considered and set aside in
-favour of the true minimum, which is what buyers recognise.
+favour of the true minimum, which is what buyers recognise. *Withdrawn:* the earlier
+floored derivation from an hourly `amount`; the resize change's upward rounding and
+multiplier replace it.
 
-### D2. Stop authorities are the same for on-demand and spot
+### D2. `start` is the payee's; `stop` is both parties'
 
-`stop` stays `[payer, payee]` whatever the interruption policy. The payee's stop is
-the honest way to end billing when the seller must (a withdrawn resource, a lease's
-end), and removing it from an on-demand mandate would remove only that. "Won't
-preempt" is a promise in the Agreement's `interruption_policy`, remedied through
+On a rate part the mandate authorizes `start` for `[payee]` and `stop` for `[payer,
+payee]`, whatever the interruption policy; `reverse` stays `[payee, dispute
+authority]`. One issuer of `start` means one instant at which billing can begin and
+one party accountable for it: the storefront's `start` carries the delivery evidence
+that made it lawful (D5), and the buyer's client records the instant it first
+obtained the credentials and the instant the resource first answered, beside the
+`start` event as read from the signed snapshot, as its evidence against a `start`
+issued early (`converge-ongoing-compute-leases`, the buyer's record). The payee's stop
+is the honest way to end billing when the seller must (a withdrawn resource, a
+lease's end), and removing it from an on-demand mandate would remove only that.
+"Won't preempt" is a promise in the Agreement's interruption terms, remedied through
 `reverse` and dispute. A buyer who wants `stop: [payer]` written into the mandate may
 ask for it as an option param in a later change; nothing here precludes it.
 
-### D3. `reserve_ahead` must cover polling plus teardown
+*Rejected:* `start` for both parties, a payer's `start` accepted as the deal's —
+a buyer's client that starts at approval is billed before any resource exists, and
+the delivery state machine would have two issuers to reconcile. *Rejected:* `start`
+for the payer only, disclosure waiting for it — the buyer's consent as the start is
+the strongest property for the buyer, but a provisioned resource then sits idle and
+unbilled until the buyer acts or the activation deadline reclaims it, every buyer
+client gains a protocol step, and the "resource does not work" case is a dispute
+under either model. Revisit trigger: the service exposes no dispute path a
+marketplace buyer can use, which would make evidence worth nothing and consent the
+buyer's only protection.
+
+### D3. `reserve_ahead` must cover polling plus teardown, and bounds the horizon
 
 The reserved horizon is the only funds a seller can rely on between an exhaustion
 and noticing it, so the kit refuses to publish an option whose `reserve_ahead` is
 shorter than a floor the composing storefront passes it, and the floor is each
 storefront's, derived from its real provisioning and teardown latency plus polling,
 transport, and clock tolerance — never from the mock profile
-(`converge-ongoing-compute-leases`).
+(`converge-ongoing-compute-leases`). The same number bounds how far ahead the
+storefront vouches for billing (D5), so it is the one buyer-visible bound on what a
+dead storefront can cost: the option's `reserve_ahead` is shown as that bound.
 
 ### D4. A snapshot is evidence only once verified, bound, and ordered
 
@@ -142,7 +171,9 @@ One `verify_snapshot` beside `verify_receipt`, applied before any reader interpr
 snapshot, checks in order:
 
 1. the proof against the pinned service identity over the snapshot's canonical
-   frame, and `livemode` against the expectation;
+   frame, and `livemode` against the expectation — a `livemode: true` snapshot is
+   refused outright when the composition's servicing declaration names the proposed
+   contract (D10), whatever the expectation says;
 2. the snapshot's `transaction` against the expected transaction ID, and its
    embedded receipt's deal hash and parties against the persisted mandate and
    Agreement, as `verify_receipt` does for a bare receipt;
@@ -185,75 +216,111 @@ rotation (D7).
 from is exactly the replayed one. *Rejected:* trusting only the event stream and
 renewing to a fixed lead — it gives up `fundedThrough` as the renewal input.
 
-### D5. `start`, `stop`, and a partial `reverse`, keyed by the caller's journaled operation
+### D5. The billing horizon, and the operations the kit exposes
 
-`start(transaction, operation)`, `stop(transaction, operation)`, and
-`reverse(transaction, operation, part=, amount=)` post `EventCommand{kind, part?,
-amount?}` with idempotency keys `{kind}-{operation}`, where the operation is the
-identity of an entry in the caller's financial operation journal
+**The horizon.** A rate part carries a `vouchedThrough` instant that only the payee
+advances, with a `vouch {part, through}` event: monotonic, never past the
+transaction's `fundedThrough`, refused on a stopped transaction. A period may begin
+only while the current instant is before `vouchedThrough`; when the instant passes it
+unadvanced, the service stops the transaction itself with cause `terms`, settled to
+that instant. The storefront advances it each cycle to the earliest of now plus the
+option's `reserve_ahead`, `fundedThrough`, and the agreed end, and renews the site's
+lease to the same instant in the same cycle (`converge-ongoing-compute-leases` D2),
+so billing and the physical lease lapse together, within one cycle, whatever happens
+to the storefront. Nothing accrues that the storefront did not vouch for while alive.
+This is the one capability the published contract lacks that the goal's guarantee
+needs (the requests below); until it is vendored, per-period servicing is declared
+only under the lane profile against the proposed contract (D10), and the double
+implements the extension (`add-arkhai-payments-lane-double`).
+
+**The guarantee it keeps.** *Charges after a deal's effective end are reversed
+before they are collected*, with one bounded residual stated on every buyer-facing
+surface: a buyer may be charged for at most `reserve_ahead` past an end the
+storefront did not observe — the time between a site's withdrawal and the horizon
+lapsing while the storefront is dead. With an effective-time payee stop (welcome, not
+required) even that case needs no correction where the storefront knows the instant.
+
+**The operations.** `start(transaction, operation, evidence)`, `vouch(transaction,
+part, through)`, `stop(transaction, operation)`, `reverse(transaction, operation,
+part, amount)`, and `refund(transaction, operation, part, amount)` post the
+corresponding `EventCommand` with idempotency keys `{kind}-{operation}`, where the
+operation is the identity of an entry in the caller's financial operation journal
 (`converge-ongoing-compute-leases` D5): immutable once written, with its amount and
 part, so a retry resends the same command under the same key and a later correction
-is a different operation with its own. The existing whole-transaction `reverse` keeps
-its `reverse-{txid}` key for refunds. A `transaction_events(transaction)` read returns
-the verified snapshot's events so a caller resolves what it already sent.
+is a different operation with its own. `vouch` is not journaled per cycle: it is
+idempotent and monotonic, and the caller records the last instant it vouched in its
+continuation state before the call. A `start` is refused by the kit unless the
+caller supplies the delivery evidence that made it lawful — the commit acknowledged
+and the dispatch begun — which is stored with the operation. The existing
+whole-transaction `reverse` keeps its `reverse-{txid}` key for refunds of prepaid
+deals. A `transaction_events(transaction)` read returns the verified snapshot's
+events so a caller resolves what it already sent.
 
-**The guarantee, and the contract it needs.** The goal promises *charges after a
-deal's effective end are reversed before they are collected.* `EventCommand` carries
-no effective time, so a stop takes effect at receipt; a rate part's hold is
-`{until: stop}`, so the stop releases its earned periods toward the payee's balance
-(`PartState` `held → released`, `PayoutBalance.withdrawable`); `reverse` reaches held
-funds only; and `PartSnapshot.refunded` has no command behind it. Neither order of
-stop and reversal keeps the promise: reverse-then-stop leaves an unbounded excess
-across a crash, and stop-then-reverse cannot exclude collection in the gap or correct
-evidence that arrives later. The promise therefore rests on two service capabilities,
-**required** (see "Requests to the payments service"): an effective-time payee stop,
-with `settled` computed to the stated instant, which removes the correction for the
-common late case; and a correction entitlement after a stop — a refund of released,
-unwithdrawn funds up to `settled` within a stated horizon — for evidence that arrives
-later. Until both are vendored, per-period servicing is not declared
-(`converge-ongoing-compute-leases` D1): the mechanism is built, the double is built
-to the published contract — it releases on stop — and the hostile collection
-scenario fails as it should. Meanwhile the kit does what the contract allows: stop
-at once, reverse what is still held, and report the shortfall for the journal.
+**Reverse before stop, always.** On learning of an end the caller reverses the
+excess — every charged period whose start is at or after the effective end — while
+the funds are held, and stops only once the reverse is acknowledged. The horizon is
+what makes this order safe: a crash between the two no longer leaves an unbounded
+tail, because the service stops at `vouchedThrough` on its own. A correction that
+becomes due *after* the stop — the dead-storefront case above, where the site's
+`lease_ended` arrives on resume after the periods were released — is journaled as a
+`refund` and carries the outcome `unsupported` while the service has no such command:
+retryable on every cycle, never terminal, so it drains the day the capability lands
+and the record shows what is owed meanwhile.
+
+**Refusals, classified.** From the service's codes: `hold_matured` means the funds
+left `held`, so the `reverse` is closed as superseded and re-journaled as a `refund`
+of the same amount; `insufficient_held_funds` is a partial acknowledgement for the
+amount the snapshot shows reversed, the remainder re-journaled; `hold_not_reversible`
+and `request_id_reused` with a different payload are permanent, surfaced to the
+operator; `transaction_stopped` on a `stop` is an acknowledgement, on a `start` the
+undelivered path; transport failures and server errors are retries.
 
 A future-effective stop needs no service support: the caller durably schedules it
 and issues an ordinary immediate `stop` at the instant. The arithmetic of an excess —
 half-open interval, a period charged iff it starts before the end, the started
-period charged in full — is the caller's (`converge-ongoing-compute-leases` D5).
+period charged in full for a buyer-caused end and reversed for a seller-caused one —
+is the caller's (`converge-ongoing-compute-leases` D5).
 
 *Rejected:* keying by the decision — a second correction under the same key is a
 replay or a conflict, and a fresh key carrying a recomputed total over-refunds.
-*Rejected:* shipping under a narrowed guarantee, blocking the whole convergence change,
-or keeping the strong wording over the weak mechanism (`converge-ongoing-compute-leases`
-D1). *Rejected:* assuming payee backdating, or an effective time in `payload`.
+*Rejected:* two required capabilities, an effective-time payee stop and a post-stop
+refund entitlement — the second cannot reach funds the payee has withdrawn through
+the service's own surface, so the guarantee would still have needed a settlement
+hold or a narrowed scope; the horizon makes the storefront's silence end billing
+instead of prolonging it. *Rejected:* no post-stop correction at all — it would make
+the welcome refund capability unusable if it lands. *Rejected:* never stopping until
+the site's report is reconciled — it cannot cover the dead storefront, which is the
+only case left. *Rejected:* assuming payee backdating, or an effective time in
+`payload`.
 
 ### D6. The period clock runs from the `start` event
 
 The mandate has no start time; approval reserves the first batch; the first period
-begins at the `start` event, which either authority may issue. This is what lets a
-storefront begin billing at verified delivery and not at approval, and what the
-reconciliation of an approved-but-undelivered deal relies on: no period started, so a
-`stop` and `reverse` return the reserved batch, the minimum spend excepted under its
-committed refund rule (D1). The service refuses `start` on a stopped transaction
-(`transaction_stopped`), which the caller's delivery gate treats as the final check.
-Confirmed against the service's conformance vectors in design; the double implements
-the same.
+begins at the `start` event, which the payee issues. This is what lets a storefront
+begin billing at verified delivery and not at approval, and what the reconciliation
+of an approved-but-undelivered deal relies on: no period started, so a `stop` returns
+the reserved batch, the minimum spend excepted under its committed refund rule (D1).
+The service refuses `start` on a stopped transaction (`transaction_stopped`), which
+the caller's delivery gate treats as the final check. Confirmed against the service's
+conformance vectors in design; the double implements the same.
 
 ### D7. Identity rotation re-anchors running deals rather than draining them
 
-The configuration may list a retiring service identity beside the current one with
-its retirement date, the shape `service-identity-signing` uses for marketplace
-principals. During the overlap a stored receipt signed by the retiring key still
-re-verifies and a fresh snapshot signed by the new key verifies. A running deal
-re-anchors on the first snapshot it verifies under the new key: that snapshot,
-stored as the deal's evidence of approval in place of the bare receipt, vouches for
-the embedded receipt (D4), and the deal needs the retiring key for nothing after
-that. System status reports deals not yet re-anchored; when none remain the
-retiring identity is removed, and only stragglers are drained. `livemode` cannot be
-re-anchored — a test-mode deal cannot become a live one — so a mode change stays the
-drain the runbook describes. Seller credentials need no design: they are read at
-each call, and an unavailable one is a transient the caller treats as "cannot
-verify".
+This change is the one owner of rotation; `converge-ongoing-compute-leases` composes
+it and adds nothing. The configuration may list a retiring service identity beside
+the current one with its retirement date, the shape `service-identity-signing` uses
+for marketplace principals. During the overlap a stored receipt signed by the
+retiring key still re-verifies and a fresh snapshot signed by the new key verifies.
+A running deal re-anchors on the first snapshot it verifies under the new key: that
+snapshot, stored as the deal's evidence of approval in place of the bare receipt,
+vouches for the embedded receipt (D4), and the deal needs the retiring key for
+nothing after that. System status reports deals not yet re-anchored; when none
+remain the retiring identity is removed, and only stragglers are drained. `livemode`
+cannot be re-anchored — a test-mode deal cannot become a live one — so a mode change
+stays the drain the runbook describes. Seller credentials need no design: they are
+read at each call, and an unavailable one is a transient the caller treats as
+"cannot verify". The acceptance scenario is one deal running across a rotation
+window in the double.
 
 *Rejected:* pinning the accepting identity per deal, which trusts a revoked key for
 as long as the deal runs.
@@ -263,84 +330,107 @@ as long as the deal runs.
 Examples, README, and fixtures move to `USD/6`. No production code names an asset;
 the mandate's asset is the Agreement's.
 
-### D9. The fake becomes an in-lane HTTP double, with hostile fixtures
+### D9. The double is its own change
 
-`FakePaymentsClient` grows into an HTTP service the lane stacks can run, built on the
-kit's models and signers, with a development signing key that is a well-known fixture
-value and says so, trusted by no production configuration: approve, `GET
-/transactions/{id}` with a verifiable proof and `fundedThrough`, `stop`, and the
-event sequence, `start`, `stop`, partial and whole `reverse`, attachments, and test
-controls that exhaust a payer's funds at a chosen instant, serve a stale or
-wrong-transaction snapshot, regress a sequence, and rotate the signing identity.
-`e2e-tests`' `[payments]` target points at it under the lane profiles, so the
-payment scenarios run in the pipeline and stop skipping. It proves the marketplace's
-use of the contract; live qualification stays the payments service's.
+The in-lane HTTP double of the service — the published contract and the proposed
+horizon extension, with hostile controls — is
+[`add-arkhai-payments-lane-double`](../add-arkhai-payments-lane-double/), which this
+change depends on so that every operation here is tested against it from the first
+round. The double implements the snapshot frame this change verifies; the two are
+reconciled against the service's published vector in this change's design session.
 
-*Rejected:* keeping payment evidence as owner-run live qualification only. Exhaustion
-and hostile snapshots cannot be produced against the live service.
-
-### D10. The composition declares per-period servicing
+### D10. The composition declares servicing, naming the contract it is built against
 
 The registration gains a capability, declared by the composition, that it runs the
-per-period continuation; `negotiate-open-ended-compute-terms` D9 publishes per-period
-options only where it is declared.
+per-period continuation, carrying the contract it services: `published`, which no
+composition may declare until the horizon is vendored
+(`activate-per-period-compute-servicing`), or `proposed`, which is accepted only when
+the configured payments endpoint is the double and is refused by startup in any
+other configuration; under `proposed`, D4 refuses every `livemode: true` snapshot.
+`negotiate-open-ended-compute-terms` D9 publishes and accepts per-period options only
+where servicing is declared; this change adds the third door: **settlement
+materialization refuses to derive a rate-part mandate for a composition that does
+not declare servicing**, which can be reached only by a deal accepted under a
+declaration since withdrawn, and which the startup rule
+(`converge-ongoing-compute-leases` D9) already makes a refusal to start. The three
+checks are one invariant with two outcomes: a per-period selection is serviced, or
+refused at the first door it reaches.
+
+Evidence produced under `proposed` is recorded as *qualification against a proposed
+contract*, a named evidence class distinct from live evidence, which only the
+activation follow-on produces.
+
+### D11. What the buyer's client keeps
+
+Beside the snapshot verification the buyer already does, `core/buyer` records for a
+per-period deal: the instant it first obtained the credentials, the instant the
+resource first answered, the `start` event and its sequence as read from the signed
+snapshot, and the signed `lease_ended` the storefront's status read returns once it
+has it (`buyer-initiated-compute-termination` D6). The gap between delivery and
+`start` is the buyer's dispute evidence; the site's event is its evidence of when the
+lease ended. All of it is kept under the retention rule `buyer-initiated-compute-termination`
+D4 sets, by the buyer's own client, so neither side's evidence depends on the
+other's honesty.
 
 ## Requests to the payments service
 
-Recorded here as this repository's needs, in the order they matter to it; the owner
-forwards them. The first two are required for the goal's billing guarantee and gate
-the servicing declaration, not this change's design.
+Recorded here as this repository's requirements, in the order they matter to it.
+They reach the service's maintainers through the owner, as part of the reconciliation
+between this goal's design and the service's own in-flight contract revision, rather
+than as a standalone request.
 
-1. *Required capability:* an effective time on a payee stop — at or before receipt,
-   never after; ignored or refused for the payer; `TransactionStop.effectiveAt` the
-   stated instant and `settled` computed to it; one error code for a refused time;
-   a vector.
-2. *Required capability:* a correction entitlement after a stop — a refund of a
-   stopped rate part's released, unwithdrawn funds to the payer, up to `settled`,
-   within a stated horizon, idempotent by request identity; ideally cumulative
-   ("settle this transaction as of this instant"), which collapses the journal to one
-   operation per evidence instant; a vector.
-3. *Capability, required for `minimum_spend` (D1):* a prepaid part that usage on a
-   rate part draws down, so the payer pays `max(minimum, usage)`.
-4. *Confirmation and vector:* the pre-start snapshot's shape — whether
+1. *Required capability:* the billing horizon (D5) — `vouchedThrough` on a rate
+   part, a payee-only `vouch {part, through}` that is monotonic and never past
+   `fundedThrough`, periods beginning only inside it, and a lapse that stops the
+   transaction with cause `terms` settled to the lapsed instant; a vector of a
+   running rate part vouched, lapsed, and stopped by the service. The first question
+   for the maintainers: whether a lapsed payee-supplied horizon can stop a
+   transaction without a payee-issued event under the service's billing model; if
+   not, the effective-time stop below with a settlement hold is the fallback.
+2. *Required for one feature:* a true minimum spend (D1) — a prepaid part that usage
+   on a rate part draws down, so the payer pays `max(minimum, usage)`.
+3. *Confirmation and vector:* the pre-start snapshot's shape — whether
    `fundedThrough` is populated from the reserved batch before `start` (which would
    collapse D4's pre-start branch), and what the receipt's reserved parts carry.
-5. *Confirmations and vectors:* the snapshot proof's frame (D4); the period clock
+4. *Confirmations and vectors:* the snapshot proof's frame (D4); the period clock
    from `start` and `start` refused on a stopped transaction (D6); a mandate mixing
    `once` and `rate` parts.
-6. *Capability, a simplification:* a prorated final period on a rate part, removing
-   the one started period a buyer pays past an end.
-7. *Capability, unowned here:* periodic collection of a running rate part's earned
-   periods by the payee, since under `{until: stop}` a months-long deal pays the seller
-   at its end.
+5. *Questions:* how a payer raises a dispute on a rate part's `start`, and what
+   evidence the service expects (D2, D11); the service's dispute horizon as a
+   published value, which the retention floor must exceed
+   (`buyer-initiated-compute-termination` D4).
+6. *Welcome:* an effective time on a payee stop, at or before receipt, which removes
+   the residual of D5 wherever the storefront knows the instant; a refund of a
+   stopped rate part's released funds to the payer, idempotent by request identity,
+   which is what the `refund` journal kind drains into; a prorated final period on a
+   rate part; periodic collection of a running rate part's earned periods by the
+   payee.
 
 ## Open questions
-- Whether the double lives under `kit/arkhai-payments/fixtures`, as the fake does, or
-  as a tooling project the lanes build; settled in design against
-  `BUILD_AND_PACKAGING.md`'s image rules.
+
+- Whether the kit's `vouch` and the site's renewal are issued from one cycle step
+  with one recorded instant, or two steps with two; settled in
+  `converge-ongoing-compute-leases`' design, the former preferred.
 - The option-param shape (D1) is frozen in this change's design session before
   `negotiate-open-ended-compute-terms`' runs; `minimum_spend` is in it, inactive until
   the service capability lands.
-- `negotiation-driven-capacity-resize` reinterprets the negotiated quantity as a
-  basis-point multiplier; if it lands first, the unit of `amount` by option kind is
-  absorbed into its structure and this change's session reads its design first.
 
 ## Implementation cadence (recommended)
 
-Two rounds. Round 1: the kit — option params, rate-part derivation,
-snapshot verification with vector and fixture, `start`/`stop`/partial `reverse` and
-the events read, the servicing capability, `USD/6`. Round 2: the double with its
-hostile controls and the lane wiring, with the existing bare-metal and credits
-payment scenarios running against it. One session per round.
+Two rounds. Round 1: option params, rate-part derivation through the accessor,
+authorities, snapshot verification with vector and fixture, the servicing capability
+with its contract value and the materialization rule, `USD/6`. Round 2: `start` with
+its evidence, `vouch`, `stop`, `reverse`, `refund`, the refusal table, the events
+read, and rotation, each proven against the double's controls. One session per round.
 
 ## Permanent documentation destinations
 
 | Decision | Destination |
 |---|---|
 | D1, D2, D6 | `openspec/specs/settlement-servicing/spec.md` |
-| D5 | `settlement-servicing` spec and architecture companion (the guarantee and its dependency) |
-| D3, D10 | `openspec/specs/settlement-configuration/spec.md` |
+| D5 | `settlement-servicing` spec and architecture companion (the horizon, the guarantee and its residual, the ordering rule, the refusal table) |
+| D3, D10 | `openspec/specs/settlement-configuration/spec.md`; `test-compatibility` spec (the evidence class) |
 | D4 | `settlement-servicing` architecture companion (replacing its snapshot paragraph) and spec |
 | D7 | `settlement-servicing` spec; `DEPLOYMENT_AND_CONFIG.md`, "Settlement consumer configuration and cutover" |
 | D8 | kit README; `DEPLOYMENT_AND_CONFIG.md` |
-| D9 | `openspec/specs/test-compatibility/spec.md`; `docs/development/TESTING.md`, "Payment Receipts in Tests" |
+| D11 | `buyer-orchestration` spec |

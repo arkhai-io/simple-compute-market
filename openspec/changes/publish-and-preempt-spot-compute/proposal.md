@@ -20,23 +20,25 @@ this change lets the seller end it under the policy the buyer accepted.
 
 - A seller-authenticated **preemption route** in both compute storefronts, keyed by the
   negotiation ID and declared in the shared route contracts beside the buyer's end-deal
-  route: it reads the accepted deal's `interruption_policy` from its Agreement — never
+  route: it reads the accepted option's `interruption` from its Agreement — never
   the current listing — refuses a deal whose policy does not permit the seller to
   interrupt, fixes the effective time as now plus `notice_seconds`, appends a request
-  with cause `seller_preemption` to the deal's decision log, durably schedules the
-  payee stop at that instant — the contract carries no future-effective stop, so it is
-  issued immediately when due and corrected if late — and terminates the lease at the
-  site then. A buyer's earlier cancel supersedes it and the scheduled stop never
+  with cause `seller_preemption` to the deal's decision log, durably schedules the end
+  at that instant — the contract carries no future-effective stop, so when due the
+  started period is reversed and the payee stop issued, and a storefront that is down
+  then is covered by the horizon lapsing — and terminates the lease at the site then. A buyer's earlier cancel supersedes it and the scheduled stop never
   executes. A pending end is observable through the deal's status within the notice
   window; the buyer is not promised to be told. The canonical client gains the method
   and the storefront operator CLI a verb.
 - The administrative override is `buyer-initiated-compute-termination`'s request kind;
   this change adds only the contractual route over it.
 - Spot publication end to end: a pool offering a per-period option with
-  `seller_may_interrupt: true` publishes its spot listing beside its on-demand one at
-  its own rate; `--class spot` finds it; the deal settles, runs, and is preempted with
-  notice in both lanes against the in-lane double, with billing ending at the effective
-  time and capacity returned.
+  `seller_may_interrupt: true` publishes its spot option beside its on-demand one at
+  its own rate; the deal settles, runs, and is preempted with notice in both lanes
+  against the in-lane double under the lane profile's `proposed` declaration, with
+  the started period reversed, billing ending at the effective time, and capacity
+  returned. Finding it by `--class spot` is
+  [`discover-open-ended-compute-listings`](../discover-open-ended-compute-listings/)'.
 - The Alkahest-only interrupt route is left as it is, with its `escrow_uid` lookup
   defect and its unsubmitted splitter declaration recorded as Alkahest's, under
   `automate-seller-spot`'s lesser goal.
@@ -67,8 +69,10 @@ None expected.
 ## Dependencies and Related Changes
 
 - Depends on `negotiate-open-ended-compute-terms` (the policy in the Agreement, spot
-  listings) and `converge-ongoing-compute-leases` (the decision log's financial
-  convergence, the late-stop correction, the double-backed scenarios).
+  options) and `converge-ongoing-compute-leases` (the decision log's financial
+  convergence, the seller-caused end's rule, the double-backed scenarios).
+- `activate-per-period-compute-servicing` depends on this change; its live evidence
+  includes the preemption scenario.
 - Builds on `buyer-initiated-compute-termination`'s route shape, which lands with
   `converge-ongoing-compute-leases`' dependency on it.
 

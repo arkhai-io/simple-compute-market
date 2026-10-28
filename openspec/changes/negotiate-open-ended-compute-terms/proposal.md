@@ -11,38 +11,41 @@ on the understanding the seller may take it back — spot — cannot be served, 
 two are the bulk of compute demand outside committed offtake.
 
 Nothing in the listing can express either. Bare metal holds any pool without a positive
-maximum duration (`pool_lease_bound_missing`); the registry stores
-`max_duration_seconds` but cannot filter on it and knows nothing of interruptibility,
-billing period, or when the seller's offer ends; and the one interruption term,
-`listing_resource.interruptible` with `settlement_model: splitter_refund`, is set only
-from the Alkahest splitter release model and passes through the registry as an
-undeclared field.
+maximum duration (`pool_lease_bound_missing`); no option says how a deal is billed or
+whether the seller may take it back; and the one interruption term,
+`listing_resource.interruptible` with `settlement_model: splitter_refund`, is a
+listing-level projection of the Alkahest splitter release model, set only from that
+mechanism's configuration.
 
 ## What Changes
 
 The commercial classes a buyer thinks in — reserved, on-demand, spot — are **derived,
-never stored**, from two terms that have homes of their own:
+never stored**, from two terms of the selected settlement option:
 
-- **How the deal is billed** is a settlement term carried by the selected option. A
+- **How the deal is billed** is a settlement term carried by the option's params. A
   payments option whose params state a billing `period` (and `reserve_ahead`) is billed
-  per period until stopped; one without is prepaid, as today. The selected option's
-  kind sets the unit of the Agreement's `amount`: a prepaid option's total, as today;
-  a per-period option's hourly rate, from which the per-period charge is derived once,
-  in the mandate, by exact floored arithmetic both sides re-derive. Every reader of
-  `amount` branches on the kind. A per-period option may state a `minimum_spend`, a true minimum with a
-  committed refund rule, published once the payments service can draw usage down
-  against a prepaid part; until then no minimum is stated. The option params
-  themselves are
+  per period until stopped; one without is prepaid, as today. What `Agreement.amount`
+  is follows `negotiation-driven-capacity-resize`, which lands first — a basis-point
+  multiplier where the offering carries a rate structure, an absolute amount where it
+  does not — and the billing kind decides only what the quote is for: the whole term,
+  or one period. One accessor in core derives the agreed price from the Agreement,
+  the option, and the listing's rate structure and returns it with its unit, and a
+  repository check refuses a read of `Agreement.amount` outside it. A per-period
+  option may state a `minimum_spend`, a true minimum with a committed refund rule,
+  published once the payments service can draw usage down against a prepaid part;
+  until then no minimum is stated on VM, and bare metal's per-period options require
+  one. The option params themselves are
   [`settle-ongoing-compute-through-arkhai-payments`](../settle-ongoing-compute-through-arkhai-payments/)'s;
   this change makes the rest of the system read them.
-- **Whether the seller may interrupt** is a listing term, `interruption_policy`:
-  `seller_may_interrupt`, `notice_seconds`, and `compensation` (`none` or
-  `refund_unused`). It is published explicitly on every compute listing, resolved as
-  every term of sale is — storefront override, else pool hint, else the storefront's
-  configured default, shipped as `{false, 0, none}`, the promise reserved deals carry
-  today — and reaches the Agreement through `provision_terms`. It retires
-  `listing_resource.interruptible` and `settlement_model`; an Alkahest splitter clause
-  requires a policy stating `seller_may_interrupt` with `refund_unused`.
+- **Whether the seller may interrupt** is a mechanism-neutral field of the settlement
+  option beside `params`, `interruption`: `seller_may_interrupt`, `notice_seconds`,
+  and `compensation` (`none` or `refund_unused`). It is present on every compute
+  option, resolved as every term of sale is — storefront override, else pool hint,
+  else the storefront's configured default, shipped as `{false, 0, none}`, the promise
+  reserved deals carry today — covered by the option ID when present, and carried into
+  the Agreement by the accepted option. It retires `listing_resource.interruptible`
+  and `settlement_model`; an Alkahest splitter option carries the same object with
+  `seller_may_interrupt` and `refund_unused`.
 
 So reserved is a prepaid option with `seller_may_interrupt: false`, on-demand a
 per-period option with `false`, spot a per-period option with `true`, and a prepaid
@@ -52,52 +55,49 @@ disagree with anything.
 The seller's bounds on a deal:
 
 - `max_duration_seconds` keeps its meaning — the longest any one deal may run from its
-  start — and gains a registry filter.
+  start.
 - A new `available_until_utc` — when the seller stops offering the resource, the date
-  a seller means by "I have this machine until March" — with the same three tiers and a
-  registry filter. A reserved deal must also end by it, which nothing checks today.
+  a seller means by "I have this machine until March" — with the same three tiers. A
+  reserved deal must also end by it, which nothing checks today. Both stay on the
+  listing: they are facts about the capacity.
 - `duration_seconds` keeps its shape: a reserved buyer asks for it; a per-period buyer
   usually names none, and it defaults to the distance from `start_utc` to the earliest
   seller bound. It is always finite and ≤ both bounds. A pool whose per-period candidate
-  resolves no finite bound yields no per-period listing, reported in the derivation
-  log, while its reserved candidate publishes as today.
+  resolves no finite bound yields no per-period option, reported in the derivation
+  log, while its reserved option publishes as today.
 
-Publication: a per-period option is a candidate dimension beside offering mode, so a
-pool offering both spot and on-demand publishes one listing per interruption shape and
-billing kind it offers, each with its own asking rate, keyed in pool hints and
-overrides as `listing_shapes` and `asking_rates` are keyed today.
-
-Discovery: `interruption_policy` and `available_until_utc` become declared registry
-fields with filters (`in` on `seller_may_interrupt`, minimum bounds on `notice_seconds`
-and `available_until_utc`, and on `max_duration_seconds`), carried on the model
-`store-registry-listings-as-published` produces — the registry today discards any
-top-level field outside its fixed carrier set, so this change depends on that one; the
-billing kind stays a buyer-side settlement clause (`arkhai_payments.period`) evaluated
-locally after the registry query, as `arkhai_payments.window` is. A
-`--class reserved|on_demand|spot` on both buyer CLIs is sugar expanding to the registry
-filter plus the local clause; the buyer's duration flag becomes optional, and before
-approving a per-period selection the buyer sees the recurring charge, the minimum
-spend and its refund rule, the initial reserve, and the maximum horizon as distinct
-numbers.
-
-Publication: a per-period option publishes only where the storefront's composition
-declares the per-period continuation, so no per-period listing exists until
-[`converge-ongoing-compute-leases`](../converge-ongoing-compute-leases/) composes it.
+Publication: a pool offering reserved, on-demand, and spot capacity publishes one
+listing with one option per combination, each at its own rate. A per-period option
+publishes **and is accepted** only where the storefront's composition declares the
+per-period continuation, and settlement materialization refuses a rate-part mandate
+where it does not: three doors reading one declaration, never the listing, so a
+buyer holding a cached option is refused rather than served without a continuation
+behind it.
 
 Seller policy: both domains' duration checks read both bounds; a per-period selection
 with no buyer horizon is accepted at the seller's bound; the VM round-zero duration
-fallback is retired.
+fallback is retired here and its two resume fallbacks by
+[`unify-compute-delivery-path`](../unify-compute-delivery-path/). Before approving a
+per-period selection the buyer sees the recurring charge, the minimum spend and its
+refund rule, the initial reserve, the maximum horizon, the policy, and the plain
+statements of what billing begins at, what a started period costs, the bounded
+residual, and how long the seller's record is kept.
+
+Discovery — the registry filters, the buyer clause fields on the option's policy and
+billing period, and `--class` — is
+[`discover-open-ended-compute-listings`](../discover-open-ended-compute-listings/)',
+so the registry's carrier policy gates the switch-on, not this change.
 
 ## Capabilities
 
 ### Modified Capabilities
 
-Expected: `storefront-publication` (terms, tiers, candidate dimension, the held/closed
-rule for an unbounded per-period candidate), `negotiation-protocol` (Agreement
-semantics for a per-period selection), `registry-discovery` (fields and filters),
-`resource-pool-management` (the hints), `buyer-orchestration` (`--class`, optional
-duration), `cli-query-language` (the clause field). `.openspec.yaml` sets `skip_specs`
-until design adds the deltas.
+Expected: `storefront-publication` (terms, tiers, the option per shape, the
+held/closed rule for an unbounded per-period candidate, the three doors),
+`negotiation-protocol` (the option field and its hash rule, the accessor, Agreement
+semantics for a per-period selection, the acceptance gate), `resource-pool-management`
+(the hints), `buyer-orchestration` (optional duration, the display). `.openspec.yaml`
+sets `skip_specs` until design adds the deltas.
 
 ### New Capabilities
 
@@ -109,10 +109,11 @@ None expected.
   `settle-ongoing-compute-through-arkhai-payments`.
 - Any lease-side change (`renew_by_utc`, the renewal-lapse policy):
   `renewable-compute-lease-deadlines`; the window derivation at commit:
-  `converge-ongoing-compute-leases`.
+  `unify-compute-delivery-path`.
 - The seller's preemption route and spot's end-to-end evidence:
   `publish-and-preempt-spot-compute`. This change publishes the policy; that one acts
   on it.
+- Discovery: `discover-open-ended-compute-listings`.
 - A stored commercial class on the listing or the Agreement (rejected; `design.md`).
 - A storefront deny list of payer accounts, the one identity with a cost behind it;
   unowned, recorded in the goal. Rate limits and principal blacklists are rejected for
@@ -123,25 +124,28 @@ None expected.
 
 ## Dependencies and Related Changes
 
-- Depends on `store-registry-listings-as-published`, gating design: its carrier policy
-  decides how this change's two registry fields are stored and served. That change
-  depends on `add-database-migration-commands`, so both precede this one.
+- Depends on nothing in this index. `negotiation-driven-capacity-resize` §2 is a
+  design-time contract: its "Rate-multiplier negotiation" requirement is what the
+  accessor builds on, and this change's design session re-verifies against §2 as
+  landed.
 - Reads the option params `settle-ongoing-compute-through-arkhai-payments` adds, whose
-  shape that change's design session freezes first; the two are then worked in
+  shape that change's design session freezes first; this change freezes the accessor's
+  unit contract before that change derives from it; the two are then worked in
   parallel and the index records no dependency.
-- `publish-shape-bounds` also touches the registry's filter spec; coordinate.
+- `drop-escrow-from-shared-wire` is the direction the retired listing fields were
+  leaving in; this change retires them and adds nothing shared.
 - `settle-capacity-claim-vocabulary` touches the provision-term carriers.
 
 ## Impact
 
-`core/registry`'s filter spec, schema, and carrier model as its dependency leaves it, `core/src/market_core/schemas.py` only if the
-Agreement needs to carry anything new (expected: nothing), both compute domains'
-listing and term models, `kit/resource-pools-contracts`' hints, both storefronts'
-publication terms, pool overrides, seller policies, and negotiation runtimes,
-`kit/alkahest`'s splitter clause requirement, both buyer CLIs, and the listing-shape
-and discovery end-to-end scenarios. The registry wire format gains fields and the VM
-listing loses `interruptible` and `settlement_model`; pre-1.0, no compatibility
-promise.
+`core/src/market_core/schemas.py` (the option field, the hash rule, the accessor),
+a repository check in `scripts/`, both compute domains' listing and term models,
+`kit/resource-pools-contracts`' hints, both storefronts' publication terms, pool
+overrides, seller policies, and negotiation runtimes, `kit/alkahest`'s splitter
+option, both buyer CLIs, and the listing-shape end-to-end scenarios. The listing wire
+format gains an option field and the VM listing loses `interruptible` and
+`settlement_model`; pre-1.0, no compatibility promise; options without the field keep
+their IDs.
 
 ## Permanent documentation impact
 
@@ -149,8 +153,7 @@ promise.
   classes; "Authority boundaries" gains the interruption policy's row; "Omission
   states no commitment" gains the explicit-policy exception and why
 - [x] Existing subsystem specification: `storefront-publication`,
-  `negotiation-protocol`, `registry-discovery`, `resource-pool-management`,
-  `buyer-orchestration`, `cli-query-language`
+  `negotiation-protocol`, `resource-pool-management`, `buyer-orchestration`
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
@@ -158,16 +161,16 @@ promise.
 
 - The commercial class is derived from the billing kind and the interruption policy,
   never stored — `ARCHITECTURE.md`, "One name per concept".
-- `interruption_policy` is a storefront term of sale, final at the storefront, with
-  the site's physical right to withdraw a resource unconditional and separate —
-  `ARCHITECTURE.md`, "Deciding which party is authoritative"; `storefront-publication`
-  architecture companion.
-- `amount` keeps its hourly unit; the per-period charge is derived once in the
-  mandate, and a minimum spend is a true minimum with a committed refund rule —
-  `settlement-servicing` spec.
-- A per-period option publishes only where the composition declares servicing —
-  `storefront-publication` and `settlement-configuration` specs.
+- `interruption` is a mechanism-neutral field of the settlement option, final at the
+  storefront, with the site's physical right to withdraw a resource unconditional and
+  separate — `ARCHITECTURE.md`, "Deciding which party is authoritative";
+  `storefront-publication` architecture companion; `negotiation-protocol` spec.
+- One accessor prices an Agreement and returns the unit; nothing reads `amount`
+  directly — `negotiation-protocol` spec.
+- A per-period option publishes, is accepted, and materializes only where the
+  composition declares servicing — `storefront-publication`, `negotiation-protocol`,
+  and `settlement-configuration` specs.
 - The two seller bounds, their meanings, and how a per-period horizon defaults —
   `storefront-publication` spec and architecture companion.
-- Why the policy is explicit on every listing rather than omitted — `ARCHITECTURE.md`,
+- Why the policy is explicit on every option rather than omitted — `ARCHITECTURE.md`,
   "Omission states no commitment".

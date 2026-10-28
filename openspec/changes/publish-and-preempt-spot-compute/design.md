@@ -2,8 +2,9 @@
 
 The decisions below were settled at goal level with the owner on 2026-10-28 for
 [`ROADMAP.md`, Goal 8](../../../docs/development/ROADMAP.md#goal-8--sell-compute-by-the-period-until-either-party-stops),
-and revised the same day against three rounds of independent design review of the
-goal, none of which raised anything structural here. This
+and revised the same day against four rounds of independent design review of the
+goal, the fourth of which moved the policy onto the settlement option and added the
+started-period rule for seller-caused ends. This
 change's own design review may reopen any of them with a finding; its design session
 verifies them against the code as its dependencies left it and adds the spec deltas.
 
@@ -48,9 +49,10 @@ preemption; spot is proven in the pipeline.
 
 The route is declared in the shared route contracts beside the buyer's end-deal route,
 authenticated by the seller's signature as the refund route is, keyed by negotiation
-ID, and mechanism-neutral. It reads `interruption_policy` from the accepted
-Agreement's `provision_terms` and refuses, with a distinct reason, a deal whose policy
-has `seller_may_interrupt: false`. It never reads the listing as currently stored,
+ID, and mechanism-neutral. It reads `interruption` from the accepted option the
+Agreement carries verbatim, `agreement.settlement.interruption`
+(`negotiate-open-ended-compute-terms` D3), and refuses, with a distinct reason, a
+deal whose policy has `seller_may_interrupt: false`. It never reads the listing as currently stored,
 so a seller changing its policy after acceptance changes nothing for the deal, as
 `settlement-servicing` already requires of every other accepted term.
 
@@ -63,13 +65,15 @@ The route fixes `effective_at = now + notice_seconds` and appends a request with
 `seller_preemption` and that instant to the deal's log; the decision fold makes it the
 effective end unless an earlier lawful request exists or arrives. The payments
 contract cannot carry a future-effective stop, so the storefront durably schedules
-the stop at the instant and issues an ordinary immediate `stop`, keyed by the
-decision, when it arrives — and terminates the lease at the site then, through the
-terminate route. If the storefront is down when the instant passes, the stop is late
-and is corrected as any late stop is (`converge-ongoing-compute-leases` D4). A
-scheduled stop whose decision was superseded — a buyer who cancels during the notice
-window ends the deal at their own earlier instant — is refused as stale by its key
-and never executes. Until the instant, a pending end and its effective time are
+the end at the instant and, when it arrives, runs the seller-caused end as the
+journal defines it — the started period reversed first, then an ordinary immediate
+`stop`, each a journaled operation under its own identity
+(`converge-ongoing-compute-leases` D5) — and terminates the lease at the site then,
+through the terminate route. If the storefront is down when the instant passes, the
+horizon lapses and the service stops billing at the last vouched instant; the
+storefront corrects on resume as it corrects any late end. A scheduled end whose
+decision was superseded — a buyer who cancels during the notice window ends the deal
+at their own earlier instant — is refused as stale by its key and never executes. Until the instant, a pending end and its effective time are
 observable through the deal's status; the design does not promise the buyer is told,
 and a push notice is deferred. A repeat returns the same decision.
 
@@ -91,11 +95,12 @@ effective instant, with the remedy following the policy and the dispute authorit
 
 ### D4. Spot and on-demand differ only in the policy and the rate
 
-No code path branches on a class. A spot listing is a per-period option with
+No code path branches on a class. A spot option is a per-period option with
 `seller_may_interrupt: true` at its own asking rate, published beside the on-demand
-listing from the same pool; settlement, the continuation, renewal, the lease, and the
-buyer's cancel are the on-demand ones. The only spot-specific behaviour in the
-repository is that the preemption route admits it.
+option on the same listing (`negotiate-open-ended-compute-terms` D8); settlement, the
+continuation, renewal, the lease, and the buyer's cancel are the on-demand ones. The
+only spot-specific behaviour in the repository is that the preemption route admits
+it, and that a seller-caused end never charges the started period.
 
 ### D5. The Alkahest interrupt route is left to Alkahest's owners
 
@@ -109,7 +114,8 @@ is a financial convergence the stop intent can carry.
 
 - Whether the pending end during the notice window is served by the existing status
   reads or needs a field of its own; settled in design against the status models
-  `buyer-initiated-compute-termination` left.
+  `buyer-initiated-compute-termination` left, which already return the signed site
+  event to the buyer.
 - Where the durable schedule lives — a due instant on the decision row the
   continuation's cycle reads, or a loop of its own; settled in design, the former
   preferred since the continuation already runs per deal.
@@ -119,8 +125,9 @@ is a financial convergence the stop intent can carry.
 ## Implementation cadence (recommended)
 
 One round: the route in both domains over the override `buyer-initiated-compute-termination`
-provides, the client method and CLI verb, the scheduled stop in the continuation, and
-the spot scenarios in both lanes. One session.
+provides, the client method and CLI verb, the scheduled end in the continuation, and
+the spot scenarios in both lanes under the lane profile's `proposed` declaration,
+recorded as qualification against a proposed contract. One session.
 
 ## Permanent documentation destinations
 

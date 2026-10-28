@@ -141,10 +141,11 @@ recorded below as input to this design; none of it is decided here yet.
 
 ## Related decision recorded by Goal 8
 
-`converge-ongoing-compute-leases` (Goal 8) takes the narrow part of the unified
-fulfillment path this change proposes: one compute-family delivery path for the three
-protected transitions — commit, dispatch, disclosure — and the access rule, calling a
-kit-owned delivery authorization before each, which the per-period billing gate needs
-and which removes a divergence between VM and bare metal. The rest of the unification
-— one start path, the layered evidence envelope, the verification contract — stays
-here; design this change against the path that one leaves.
+`unify-compute-delivery-path` (Goal 8) takes the narrow part of the unified
+fulfillment path this change proposes: one compute-family delivery path for the
+protected transitions — commit, dispatch, disclosure — plus activation and the
+undelivered path, and the access rule, calling a kit-owned delivery authorization
+hook before each transition, which the per-period billing gate needs and which
+removes a divergence between VM and bare metal. The rest of the unification — one
+start path, the layered evidence envelope, the verification contract — stays here;
+design this change against the path that one leaves.
