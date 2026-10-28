@@ -1,16 +1,23 @@
 """The provisioning route table: the family's routes plus contributed declarations.
 
-A domain declares the routes it mounts as plain data; assembly refuses an
-ambiguous table, and resolution refuses a path two contributions both claim.
+A domain declares the routes it mounts as plain data in the route grammar;
+assembly refuses an ambiguous table, two contributions that can claim one
+request among it, and resolution names why a request matches no route.
 """
 
 from __future__ import annotations
+
+import re
 
 import pytest
 
 from compute_provisioning_contracts import (
     PROVISIONING_ROUTE_CONTRACTS,
     PROVISIONING_ROUTE_TABLE,
+    ProvisioningRouteContract,
+    ProvisioningRouteMethodNotAllowed,
+    ProvisioningRouteNotFound,
+    ProvisioningRouteResourceUnbound,
     ProvisioningRouteTable,
     assemble_provisioning_route_table,
     route_contract_from_declaration,
@@ -85,6 +92,8 @@ def test_an_assembled_table_resolves_a_declared_route_with_its_roles() -> None:
 
 
 def test_order_decides_within_one_contribution() -> None:
+    """A literal before a capture in one contribution composes: overlap there
+    is its owner's to order, not refused."""
     export = {
         "method": "GET",
         "path": r"/api/v1/example/leases/export",
@@ -95,20 +104,129 @@ def test_order_decides_within_one_contribution() -> None:
 
     contract, _ = table.resolve("GET", "/api/v1/example/leases/export")
     assert contract.operation == "provisioning_example_lease_export"
+    contract, resource = table.resolve("GET", "/api/v1/example/leases/l-1")
+    assert (contract.operation, resource) == ("provisioning_example_lease_get", "l-1")
 
 
-def test_a_path_two_contributions_claim_is_refused() -> None:
-    shadow = {
-        "method": "GET",
-        "path": r"/api/v1/example/leases/(?P<other>[^/]+)",
-        "operation": "provisioning_shadow_get",
-        "roles": ("admin",),
-        "path_resource": "other",
-    }
-    table = ProvisioningRouteTable((_LEASE_GET,), (shadow,))
+def _route(method: str, path: str, operation: str) -> dict:
+    return {"method": method, "path": path, "operation": operation, "roles": ("admin",)}
 
-    with pytest.raises(ValueError, match="more than one route"):
-        table.resolve("GET", "/api/v1/example/leases/lease-1")
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        (r"/api/v1/example/leases/(?P<lease_id>[^/]+)", r"/api/v1/example/leases/(?P<other>[^/]+)"),
+        (r"/api/v1/example/leases/(?P<lease_id>[^/]+)", r"/api/v1/example/leases/export"),
+        (r"/api/v1/example/(?P<kind>leases|holds)/x", r"/api/v1/example/holds/(?P<id>[^/]+)"),
+        (r"/api/v1/example/(?P<kind>leases|holds)", r"/api/v1/example/(?P<id>[^/]+)"),
+        (r"/api/v1/example/leases/?", r"/api/v1/example/leases"),
+        (r"/api/v1/example/leases", r"/api/v1/example/(?P<kind>leases|holds)/?"),
+    ],
+    ids=[
+        "capture-capture",
+        "capture-literal",
+        "alternation-literal",
+        "alternation-capture",
+        "slash-forms",
+        "alternation-slash",
+    ],
+)
+def test_two_contributions_that_can_claim_one_request_are_refused(first, second) -> None:
+    with pytest.raises(ValueError, match="different contributions"):
+        ProvisioningRouteTable(
+            (_route("GET", first, "provisioning_first"),),
+            (_route("GET", second, "provisioning_second"),),
+        )
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        (("GET", r"/api/v1/example/leases/(?P<id>[^/]+)"), ("POST", r"/api/v1/example/leases/(?P<id>[^/]+)")),
+        (("GET", r"/api/v1/example/leases/export"), ("GET", r"/api/v1/example/leases/import")),
+        (("GET", r"/api/v1/example/(?P<kind>leases|holds)"), ("GET", r"/api/v1/example/pools")),
+        (("GET", r"/api/v1/example/leases/?"), ("GET", r"/api/v1/example/leases/(?P<id>[^/]+)")),
+        (("GET", r"/api/v1/example/leases"), ("GET", r"/api/v1/example/leases/(?P<id>[^/]+)/logs")),
+    ],
+    ids=["method", "literal", "alternation", "slash-against-capture", "length"],
+)
+def test_contributions_no_request_can_join_compose(first, second) -> None:
+    table = ProvisioningRouteTable(
+        (_route(*first, "provisioning_first"),),
+        (_route(*second, "provisioning_second"),),
+    )
+    assert len(table.contracts) == 2
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        r"/api/v1/example",
+        r"/api/v1/example/(?P<id>[^/]+)",
+        r"/api/v1/identity/rotations/(?P<trust_role>admin|seller)",
+        r"/api/v1/example/(?:leases|holds)/x",
+        r"/api/v1/example/leases/?",
+        r"/test/bare-metal/mock-rules/(?P<rule_id>[^/]+)/resume",
+    ],
+    ids=["literal", "capture", "named-alternation", "alternation", "optional-slash", "hyphens"],
+)
+def test_the_route_grammar_accepts_its_constructs(path) -> None:
+    contract = route_contract_from_declaration(_route("GET", path, "provisioning_example"))
+    assert contract.pattern.pattern == path
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        r"/api/v1/files/(?P<rest>.*)",
+        r"/api/v1/files/.*",
+        r"/api/v1/jobs/(?P<job_id>\d+)",
+        r"/api/v1/relays/?$",
+        r"/api/v1/hosts/?/vms",
+        r"api/v1/example",
+        r"/api/v1/example.json",
+    ],
+    ids=["tail-capture", "wildcard", "typed-segment", "terminal-dollar", "mid-optional", "relative", "dot"],
+)
+def test_a_pattern_outside_the_grammar_is_refused_by_route_name(path) -> None:
+    with pytest.raises(ValueError, match="'provisioning_example' pattern .* is outside the route grammar"):
+        route_contract_from_declaration(_route("GET", path, "provisioning_example"))
+
+
+def test_a_pattern_compiled_with_flags_is_refused() -> None:
+    """A flag changes what the pattern matches beyond its text, which the
+    overlap comparison reads."""
+    contract = ProvisioningRouteContract(
+        "GET",
+        re.compile(r"/api/v1/JOBS", re.IGNORECASE),
+        "provisioning_example",
+        roles=("admin",),
+    )
+    with pytest.raises(ValueError, match="compiled with flags"):
+        route_contract_from_declaration(contract)
+
+
+def test_resolution_names_an_unknown_path() -> None:
+    with pytest.raises(ProvisioningRouteNotFound) as refused:
+        PROVISIONING_ROUTE_TABLE.resolve("GET", "/api/v1/nowhere")
+    assert refused.value.status_code == 404
+    assert refused.value.headers == {}
+
+
+def test_resolution_names_the_methods_a_known_path_serves() -> None:
+    with pytest.raises(ProvisioningRouteMethodNotAllowed) as refused:
+        PROVISIONING_ROUTE_TABLE.resolve("DELETE", "/api/v1/hosts/")
+    assert refused.value.status_code == 405
+    assert refused.value.allowed_methods == ("GET", "POST")
+    assert refused.value.headers == {"Allow": "GET, POST"}
+
+
+@pytest.mark.parametrize("body", [{}, {"capacity_reservation_id": 7}, ["r-1"]])
+def test_resolution_names_the_body_field_it_cannot_bind(body) -> None:
+    with pytest.raises(ProvisioningRouteResourceUnbound) as refused:
+        PROVISIONING_ROUTE_TABLE.resolve("POST", "/api/v1/fulfillment/schedule", body)
+    assert refused.value.status_code == 400
+    assert refused.value.field == "capacity_reservation_id"
 
 
 @pytest.mark.parametrize(

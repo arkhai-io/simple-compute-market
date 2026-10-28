@@ -90,11 +90,10 @@ VM_PROVISIONING_ROUTES = (
         "path_resource": ("host", "vm_name"),
     },
     # Relay administration, the administrator's alone: relays are operator
-    # infrastructure, and no storefront administers them. Ordered so the
-    # token, enable, and disable sub-resources match before the bare relay id
-    # pattern, which would otherwise swallow them and authenticate a rotation
-    # as an ordinary read.
-    {"method": "GET", "path": r"/api/v1/relays/?$", "operation": "provisioning_relays_list", "roles": ("admin",)},
+    # infrastructure, and no storefront administers them. A pattern matches
+    # the whole path and a capture no slash, so the bare relay id never
+    # matches a token, enable, or disable path.
+    {"method": "GET", "path": r"/api/v1/relays/?", "operation": "provisioning_relays_list", "roles": ("admin",)},
     {
         "method": "POST",
         "path": r"/api/v1/relays/(?P<relay_id>[^/]+)/token",
@@ -123,7 +122,7 @@ VM_PROVISIONING_ROUTES = (
         "roles": ("admin",),
         "path_resource": "relay_id",
     },
-    {"method": "POST", "path": r"/api/v1/relays/?$", "operation": "provisioning_relay_create", "roles": ("admin",)},
+    {"method": "POST", "path": r"/api/v1/relays/?", "operation": "provisioning_relay_create", "roles": ("admin",)},
     {
         "method": "PATCH",
         "path": r"/api/v1/relays/(?P<relay_id>[^/]+)",

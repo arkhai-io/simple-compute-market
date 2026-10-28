@@ -1907,7 +1907,7 @@ Files:
 - `provisioning/compute/contracts/tests/unit/test_route_table.py`;
 - `provisioning/compute/service/tests/unit/test_route_table_composition.py`.
 
-- [ ] 12.1 Building a contract accepts only these constructs (D3):
+- [x] 12.1 Building a contract accepts only these constructs (D3):
   - literal segments;
   - `[^/]+` named captures;
   - finite alternations of literal segments;
@@ -1919,7 +1919,26 @@ Files:
   **Gate:** a route in the tree that this grammar cannot express is not handled
   by extending the grammar. Per D3, the contracts would adopt an established
   path-template grammar and its matcher, which returns the change to design.
-- [ ] 12.2 Composing the table compares the contracts of different contributions
+
+  `route_contract_from_declaration`, through which every contract in a
+  table passes (the family's, the site's translated ones, and every
+  declaration), parses its pattern into segments: a literal of
+  `[A-Za-z0-9_~-]`, a `(?P<name>[^/]+)` capture, or a named or
+  non-capturing alternation of two or more such literals, each after a `/`,
+  with an optional terminal `/?`; anything else is refused as "route
+  '<operation>' pattern '<pattern>' is outside the route grammar …". A
+  pattern compiled with flags is refused too, since a flag such as ignoring
+  case matches paths its text does not say. An alternation of one literal is
+  refused (a plain literal says the same). The gate held: every route the
+  service composes fits once VM's relays drop `$` (12.3), shown by building
+  the production table (12.5); the e2e harness assembles the same
+  declarations, and its unit suite passes; no route uses a dot, so a literal
+  admits none. Unit (`test_route_table.py`): a literal, a capture, a named
+  and a non-capturing alternation, a terminal `/?`, and hyphenated literals
+  are accepted; a tail capture, `.*`, a `\d+` typed segment, a terminal
+  `$`, a mid-pattern `/?`, a relative path, a dotted literal, and a pattern
+  compiled with `re.IGNORECASE` are each refused naming the route. Pass.
+- [x] 12.2 Composing the table compares the contracts of different contributions
   segment by segment, a pattern ending in `/?` in both its forms. It refuses two
   that can match one method and path before the service accepts traffic. Within
   one contribution, the owner's order decides, first match (D3).
@@ -1927,18 +1946,65 @@ Files:
   - two overlapping contributions are refused;
   - a literal route before a capture route in one contribution composes, and
     the literal path resolves to the literal route.
-- [ ] 12.3 VM's two relay declarations drop their terminal `$`, which full
+
+  `ProvisioningRouteTable` compares each contribution's contracts with every
+  earlier contribution's: same method, a path form of each (a `/?` pattern
+  has two, the slashed one ending in an empty segment) of equal length, and
+  every segment pair able to take one value (a capture takes any non-empty
+  one). An overlap is refused naming both operations and patterns. With
+  overlap refused at composition, resolution is plain first match over the
+  table's contracts, held as one tuple, and the per-request "claimed by more
+  than one route" refusal went. Unit: capture against capture, capture
+  against literal, an alternation against a literal (with a capture beside
+  it), an alternation against a capture, `/?` against the unslashed literal,
+  and a literal against a slashed alternation are refused; different
+  methods, different literals, a disjoint alternation and literal, `/?`
+  against a capture, and different lengths compose; a literal before a
+  capture in one contribution composes and each path resolves to its own
+  route (`test_order_decides_within_one_contribution`, extended). The test
+  that a path two contributions claim is refused at resolution became the
+  composition refusal. Pass.
+- [x] 12.3 VM's two relay declarations drop their terminal `$`, which full
   matching makes redundant (D3). Unit: VM's relay paths resolve as before.
-- [ ] 12.4 Resolution reports an unknown path, a known path under another method
+
+  Done; the relay block's comment, which said the bare relay id would
+  otherwise swallow its sub-resources, now says why it cannot (a capture
+  takes no slash and patterns match the whole path). Unit, in the service:
+  `test_route_table_composition.py`'s
+  `test_every_assembled_route_resolves_to_itself` resolves each relay
+  contract's own path to that contract, and 12.5's slash test resolves `GET`
+  and `POST /api/v1/relays` with and without the slash to one route. Pass.
+- [x] 12.4 Resolution reports an unknown path, a known path under another method
   (with the allowed methods), and an unbindable body resource through a typed
   error that names its case, in place of `ValueError` (D3). Unit: each case.
-- [ ] 12.5 Unit (`test_route_table_composition.py`): the composition root builds
+
+  `ProvisioningRouteResolutionError` (a `ValueError`, so existing catches
+  still read it) and its cases `ProvisioningRouteNotFound` (404),
+  `ProvisioningRouteMethodNotAllowed` (405, `allowed_methods` and `Allow`),
+  and `ProvisioningRouteResourceUnbound` (400, `field`), exported from the
+  contracts, mirroring `kit/site`'s (section 10), since a contracts package
+  may not import the site kit. Unit: `GET /api/v1/nowhere` is not found with
+  404 and no headers; `DELETE /api/v1/hosts/` names `GET, POST`; the
+  schedule route with an empty, a numeric, or a list body names
+  `capacity_reservation_id` with 400. Pass.
+- [x] 12.5 Unit (`test_route_table_composition.py`): the composition root builds
   the complete table under the grammar and the overlap check:
   - the family's routes, and every contribution the service ships: VM, bare
     metal, resource pools, Ansible host import, and capacity definitions;
   - the slashed and unslashed forms of `jobs/?`, `hosts/?`, `vms/?`,
     `relays/?`, and `pools/?` resolve to the same route.
-- [ ] 12.6 Bump the contracts and the VM operator client, and run `make lock`.
+
+  Over `main.provisioning_route_table`, the table the production
+  composition builds: every operation of the family's routes, the site's
+  capacity and capacity-definition contracts, the resource pools', the
+  Ansible host import's, VM's, and bare metal's is in it, so building it
+  passed the grammar and the overlap check; and `GET /api/v1/jobs`, `GET`
+  and `POST /api/v1/hosts`, `GET` and `POST /api/v1/hosts/kvm1/vms`, `GET`
+  and `POST /api/v1/relays`, and `GET` and `POST /api/v1/pools` resolve to
+  the same contract with and without the trailing slash. The module's own
+  `_concrete_path` no longer strips a `$`. Pass (`provisioning/compute/service`
+  593 unit).
+- [x] 12.6 Bump the contracts and the VM operator client, and run `make lock`.
   **Verification checkpoint:**
   - unit, 12.1–12.5;
   - `make test` in `provisioning/compute/contracts`,
@@ -1948,6 +2014,39 @@ Files:
   End-to-end: every lane's provisioning requests resolve through the composed
   table, so a passing pipeline shows that no served route was refused at
   composition. No scenario is owed.
+
+  `arkhai-compute-provisioning-contracts` `0.10.0` → `0.11.0` (`dev` held
+  `0.10.0`); no exact pin names it. The VM operator client already stands at
+  `0.10.0` over `dev`'s `0.9.1` (section 3), so it is not bumped again, and
+  the VM adapter's floor on it is already `0.10.0`, so the grammar's
+  refusal of a `$` never meets an older declaration through the adapter. No
+  floor on the contracts is raised here: the service's rises in section 13,
+  whose middleware reads the typed errors. `make lock` moved every lock
+  resolving the contracts.
+
+  The e2e harness assembles `VM_PROVISIONING_ROUTES` at import and depends
+  on the operator client without the adapter, so `e2e-tests/pyproject.toml`
+  raises its floor on `arkhai-vms-provisioning-operator-client` to `0.10.0`:
+  `dev`'s `0.9.1` still ends its relays in `$`, which the grammar refuses.
+
+  `make test` (full, before the fresh-context fixes) passes. After them:
+  contracts 100; the service 593 unit and 438 integration; the e2e unit
+  suite 169; earlier, the VM adapter 256. `domains/vms/provisioning/client`
+  has no test suite or `Makefile`; its declarations are exercised through
+  the VM adapter, the service's binding and composition tests, and the e2e
+  harness. `make check-packaging` passes; `make check-change` passes its
+  comment-hygiene and other checks but for the closeout citation section 1
+  notes. The contracts package has no type-check target, so the grammar
+  code's typing was not checked by a tool.
+
+  Handoff, from the fresh-context check: it found the e2e floor (raised),
+  a binding-test comment still describing resolution's refusal (rewritten),
+  two dead `$` strips in tests (removed), an unnarrowed `Optional` in the
+  segment comparison (narrowed), flags unread by the grammar (refused), a
+  tuple rebuilt per request (held once), evidence naming the wrong test or
+  a case the test did not hold (corrected, the alternation-against-capture
+  case added), the checks unrecorded (recorded), and a duplicated order test
+  (merged). It confirmed the overlap comparison exact for the grammar.
 
 ## 13. The provisioning service answers an unroutable request by cause, and the family client names an unauthenticated answer
 

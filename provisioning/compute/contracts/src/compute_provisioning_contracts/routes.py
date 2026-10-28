@@ -27,6 +27,145 @@ TIMESTAMP_HEADER = "X-Market-Timestamp"
 SIGNATURE_HEADER = "X-Market-Signature"
 
 
+class ProvisioningRouteResolutionError(ValueError):
+    """A request resolved to no route contract, naming the case that failed.
+
+    Each case carries the status and headers of its answer. The answer is
+    unsigned: a response proof binds an operation and resource the client
+    verifies against its own, and the server knows no operation for an
+    unknown path or a refused method, and no resource for an unbound body.
+    """
+
+    status_code: int = 400
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+
+    @property
+    def headers(self) -> dict[str, str]:
+        return {}
+
+
+class ProvisioningRouteNotFound(ProvisioningRouteResolutionError):
+    """No contract names the request's path."""
+
+    status_code = 404
+
+
+class ProvisioningRouteMethodNotAllowed(ProvisioningRouteResolutionError):
+    """A contract names the path, under other methods only."""
+
+    status_code = 405
+
+    def __init__(self, detail: str, *, allowed_methods: tuple[str, ...]) -> None:
+        super().__init__(detail)
+        self.allowed_methods = allowed_methods
+
+    @property
+    def headers(self) -> dict[str, str]:
+        return {"Allow": ", ".join(self.allowed_methods)}
+
+
+class ProvisioningRouteResourceUnbound(ProvisioningRouteResolutionError):
+    """The route matches, but its body does not name the resource it binds."""
+
+    status_code = 400
+
+    def __init__(self, detail: str, *, field: str) -> None:
+        super().__init__(detail)
+        self.field = field
+
+
+# A route pattern is a sequence of path segments, each a literal, a ``[^/]+``
+# named capture, or a finite alternation of literals, optionally ended by
+# ``/?``. Kept this small so two contracts can be compared for overlap segment
+# by segment; a route that needs more is a reason to adopt an established
+# path-template grammar and its matcher, not to widen this one.
+_LITERAL = r"[A-Za-z0-9_~-]+"
+_SEGMENT = re.compile(
+    r"/(?:"
+    r"(?P<capture>\(\?P<[A-Za-z_][A-Za-z0-9_]*>\[\^/\]\+\))"
+    rf"|(?P<alternation>\((?:\?P<[A-Za-z_][A-Za-z0-9_]*>|\?:)"
+    rf"(?P<options>{_LITERAL}(?:\|{_LITERAL})+)\))"
+    rf"|(?P<literal>{_LITERAL})"
+    r")"
+)
+_OPTIONAL_SLASH = "/?"
+# A pattern compiled with a flag, such as ignoring case, matches paths its
+# text does not say, so the comparison over that text would miss an overlap.
+_DEFAULT_FLAGS = re.compile("").flags
+
+
+@dataclass(frozen=True, slots=True)
+class _Segment:
+    """One path segment a pattern matches: its literals, or ``None`` for any
+    non-empty value, as a ``[^/]+`` capture matches."""
+
+    literals: frozenset[str] | None = None
+
+    def meets(self, other: _Segment) -> bool:
+        """Whether one value can match both segments."""
+        mine, theirs = self.literals, other.literals
+        if mine is None:
+            return theirs is None or any(theirs)
+        if theirs is None:
+            return any(mine)
+        return not mine.isdisjoint(theirs)
+
+
+_TRAILING_SLASH = _Segment(frozenset({""}))
+
+
+def _path_forms(operation: str, pattern: str) -> tuple[tuple[_Segment, ...], ...]:
+    """The segment sequences a pattern matches, refusing one outside the grammar.
+
+    A pattern ending in ``/?`` matches two: without the slash, and with it as an
+    empty last segment.
+    """
+
+    optional = pattern.endswith(_OPTIONAL_SLASH)
+    body = pattern[: -len(_OPTIONAL_SLASH)] if optional else pattern
+    segments: list[_Segment] = []
+    position = 0
+    while position < len(body):
+        matched = _SEGMENT.match(body, position)
+        if matched is None:
+            raise ValueError(
+                f"route {operation!r} pattern {pattern!r} is outside the route "
+                "grammar: literal segments, [^/]+ named captures, finite "
+                "alternations of literals, and a terminal /?"
+            )
+        if matched.group("capture") is not None:
+            segments.append(_Segment())
+        elif matched.group("alternation") is not None:
+            segments.append(_Segment(frozenset(matched.group("options").split("|"))))
+        else:
+            segments.append(_Segment(frozenset({matched.group("literal")})))
+        position = matched.end()
+    if not segments:
+        raise ValueError(f"route {operation!r} pattern {pattern!r} names no path")
+    forms = (tuple(segments),)
+    if optional:
+        forms += (tuple(segments) + (_TRAILING_SLASH,),)
+    return forms
+
+
+def _overlap(
+    first: ProvisioningRouteContract, second: ProvisioningRouteContract
+) -> bool:
+    """Whether one method and path can match both contracts."""
+
+    if first.method != second.method:
+        return False
+    return any(
+        len(left) == len(right)
+        and all(a.meets(b) for a, b in zip(left, right))
+        for left in _path_forms(first.operation, first.pattern.pattern)
+        for right in _path_forms(second.operation, second.pattern.pattern)
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ProvisioningRouteContract:
     method: str
@@ -41,6 +180,12 @@ class ProvisioningRouteContract:
     roles: tuple[str, ...] = ()
 
     def match(self, method: str, path: str, body: Any) -> str | None:
+        """The bound resource, or ``None`` when the method or path differs.
+
+        Raises :class:`ProvisioningRouteResourceUnbound` when the route matches
+        but its body names no resource: the route is this one, so no later
+        contract is tried.
+        """
         if method.upper() != self.method:
             return None
         matched = self.pattern.fullmatch(path)
@@ -48,15 +193,18 @@ class ProvisioningRouteContract:
             return None
         if self.body_resource is not None:
             if not isinstance(body, dict):
-                raise ValueError(
-                    f"{self.operation} requires a JSON object request body"
+                raise ProvisioningRouteResourceUnbound(
+                    f"{self.operation} requires a JSON object request body "
+                    f"naming body.{self.body_resource}",
+                    field=self.body_resource,
                 )
             resource = body.get(self.body_resource)
             if resource is None and self.optional_body_resource:
                 return ""
             if not isinstance(resource, str) or not resource:
-                raise ValueError(
-                    f"{self.operation} requires body.{self.body_resource}"
+                raise ProvisioningRouteResourceUnbound(
+                    f"{self.operation} requires body.{self.body_resource}",
+                    field=self.body_resource,
                 )
             return resource
         if isinstance(self.path_resource, tuple):
@@ -265,12 +413,16 @@ def route_contract_from_declaration(
     """Build a route contract from a domain's plain-data declaration.
 
     A contribution declares its routes as mappings, so its package needs no
-    more of this one than this function's input: ``method``, ``path`` (a regular expression the
-    whole path must match), ``operation``, ``roles``, and optionally
-    ``path_resource`` (a group name, or a list of them joined with ``/``),
-    ``body_resource``, and ``optional_body_resource``. A declaration must name
-    its roles, because the family's operation sets know no domain's routes,
-    and every route the provisioning service serves admits the administrator.
+    more of this one than this function's input: ``method``, ``path``,
+    ``operation``, ``roles``, and optionally ``path_resource`` (a group name,
+    or a list of them joined with ``/``), ``body_resource``, and
+    ``optional_body_resource``. ``path`` is matched against the whole path and
+    is written in the route grammar: ``/``-separated literal segments,
+    ``(?P<name>[^/]+)`` captures, finite alternations of literal segments such
+    as ``(?P<name>admin|seller)``, and optionally a terminal ``/?``. A pattern
+    outside it is refused, naming the route. A declaration must name its
+    roles, because the family's operation sets know no domain's routes, and
+    every route the provisioning service serves admits the administrator.
     """
 
     if isinstance(declaration, ProvisioningRouteContract):
@@ -293,6 +445,12 @@ def route_contract_from_declaration(
             path_resource=path_resource,
             roles=tuple(declaration.get("roles") or ()),
         )
+    if contract.pattern.flags != _DEFAULT_FLAGS:
+        raise ValueError(
+            f"route {contract.operation!r} pattern {contract.pattern.pattern!r} "
+            "is outside the route grammar: it is compiled with flags"
+        )
+    _path_forms(contract.operation, contract.pattern.pattern)
     roles = contract.roles
     if (
         not roles
@@ -317,8 +475,10 @@ class ProvisioningRouteTable:
     Assembled from the family's routes and each contribution's declarations. Every
     operation and every ``(method, path)`` route appears once. Within one
     contribution the first matching contract decides, as its owner ordered
-    them; a path matched by contracts of two contributions is refused, because
-    neither owner can say which signature it means.
+    them. Two contracts of different contributions that one method and path
+    could both match are refused when the table is composed, before the
+    service accepts traffic, because neither owner can say which signature
+    such a request means; so no request is claimed by two contributions.
     """
 
     def __init__(
@@ -338,31 +498,49 @@ class ProvisioningRouteTable:
                     raise ValueError(f"duplicate route {route[0]} {route[1]}")
                 operations.add(contract.operation)
                 routes.add(route)
+            for earlier in groups:
+                for contract in group:
+                    for claimed in earlier:
+                        if _overlap(contract, claimed):
+                            raise ValueError(
+                                f"routes {claimed.operation!r} and "
+                                f"{contract.operation!r} of different "
+                                f"contributions both match {contract.method} "
+                                f"{claimed.pattern.pattern} and "
+                                f"{contract.pattern.pattern}"
+                            )
             groups.append(group)
-        self._groups = tuple(groups)
+        self._contracts = tuple(contract for group in groups for contract in group)
 
     @property
     def contracts(self) -> tuple[ProvisioningRouteContract, ...]:
-        return tuple(contract for group in self._groups for contract in group)
+        return self._contracts
 
     def resolve(
         self, method: str, path: str, body: Any = EMPTY_BODY
     ) -> tuple[ProvisioningRouteContract, str]:
-        """Return the exact authenticated route contract and bound resource."""
+        """Return the exact authenticated route contract and bound resource.
 
-        found: list[tuple[ProvisioningRouteContract, str]] = []
-        for group in self._groups:
-            for contract in group:
-                resource = contract.match(method, path, body)
-                if resource is not None:
-                    found.append((contract, resource))
-                    break
-        if not found:
-            raise ValueError(f"no authenticated provisioning contract for {method} {path}")
-        if len(found) > 1:
-            names = ", ".join(repr(contract.operation) for contract, _ in found)
-            raise ValueError(f"{method} {path} is claimed by more than one route: {names}")
-        return found[0]
+        Raises the :class:`ProvisioningRouteResolutionError` naming why a
+        request resolves to no contract: an unknown path, a path served only
+        under other methods, or a body that does not name the route's resource.
+        """
+
+        allowed: set[str] = set()
+        for contract in self.contracts:
+            resource = contract.match(method, path, body)
+            if resource is not None:
+                return contract, resource
+            if contract.pattern.fullmatch(path) is not None:
+                allowed.add(contract.method)
+        if allowed:
+            raise ProvisioningRouteMethodNotAllowed(
+                f"{method.upper()} is not served at {path}",
+                allowed_methods=tuple(sorted(allowed)),
+            )
+        raise ProvisioningRouteNotFound(
+            f"no authenticated provisioning contract for {method} {path}"
+        )
 
 
 PROVISIONING_ROUTE_TABLE = ProvisioningRouteTable(PROVISIONING_ROUTE_CONTRACTS)
