@@ -65,7 +65,8 @@ only when it decides no finding, answers no design question, changes no status,
 and directs no step; record the decision and evidence through `note`. Otherwise
 bring the evidence and the options to the owner in prose and wait. Never silently
 replace the computation with your own transition table: the workflow's graph is
-the table in `scripts/change_workflow/graph.py`, which `make change-graph` draws.
+the table in `scripts/change_workflow/graph.py`, which the `change-workflow`
+architecture's diagram draws.
 
 ### A change not yet converted
 

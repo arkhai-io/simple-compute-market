@@ -121,8 +121,10 @@ satisfies each, and the entry guards without which a step cannot do its work.
 The `change-workflow` architecture shows it as a diagram laid out by hand,
 `docs/development/diagrams/change-workflow-graph.drawio` and its SVG export, and a
 test fails when the source, or the copy of it the export embeds, draws a box or an
-edge the table does not, or misses one; a change to the table redraws both, and
-`make change-graph` prints the table as a Mermaid flowchart to redraw from.
+edge the table does not, or misses one. A change to the table redraws the source in
+draw.io, from what `make change-graph` reports — each box and edge to add, change,
+or remove — and exports the SVG again with the source embedded; the SVG is never
+edited by hand.
 `scripts/change_next_step.py` routes on the exit the last step named, and on your
 latest direction, checking each against the table, as the `change-workflow`
 specification's "The next step is computed from the files" requires: an unmet

@@ -16,10 +16,11 @@ implementer's.
 
 The table is drawn in `docs/development/diagrams/change-workflow-graph.drawio` and
 its SVG export, which `openspec/specs/change-workflow/architecture.md` shows, and a
-test holds the drawing to the table: a section that changes the table redraws both
-in the same commit, from what `make change-graph` prints. (Until the round-3 triage,
-69 O1, the drawing was a Mermaid block in the architecture; see the note under
-section 9.)
+test holds the drawing to the table: a section that changes the table redraws the
+source in the same commit, from what `make change-graph` reports, and exports the
+SVG again. (Until the round-3 triage, 69 O1, the drawing was a Mermaid block in the
+architecture, and until the round-4 triage, 82 O1, `make change-graph` printed the
+table as Mermaid; see the notes under section 2.)
 
 ## 1. The workflow graph as a table, interpreted with today's routing
 
@@ -225,6 +226,26 @@ written by this triage's session as draw.io XML and its SVG by hand, with no dra
 here to render it: the owner adjusts it in draw.io, re-exporting the SVG with its
 source embedded, and the test checks structure only. A table change now redraws
 both files, from what `make change-graph` prints.
+
+Fixes from the round-4 triage, 82 O1 and 83 F2. 82 O1 (the owner asked why the
+Mermaid rendering was kept at all, and chose to replace it): `make change-graph`
+now runs `python3 -m change_workflow.diagram`, a new module holding what the test
+held — `drawn`, `expected`, and `drift`, which now returns the list of departures —
+and prints "… draws the table." and succeeds, or each box and edge to add, change,
+or remove and fails; `graph.mermaid()` and `graph.main()` are gone, `drawing()`
+stays. The tests: the Mermaid test became one on `drawing()` itself (a box per node
+and join, holding its label and entry guards, an edge per exit plus one per join,
+each with its pieces); the label-escaping test, which only Mermaid needed, went;
+`diagram.main` on a table with an added exit prints the departure and returns 1;
+and `make change-graph`, in a subprocess, prints that the diagram draws the table.
+83 F2 (the owner chose C, no check of the SVG's visible drawing: "This is
+overengineering"): the architecture companion and the guide now say the SVG is
+exported from the source in draw.io with it embedded and never edited by hand, and
+that its visible drawing is not compared; the delta's requirement says the same in
+place of "renderable as a diagram", and its scenario "The graph is drawn" became
+"The diagram's departures are reported". `design.md` D1 records both under their
+labels; the guide, the orchestrate skill, the proposal, the `Makefile` help line,
+and the package docstring follow. Evidence: see the note under section 9.
 
 ## 3. Targets, the outcome's exit and `triaged`, and the log's format
 
@@ -1131,6 +1152,12 @@ orchestration" now has archive cleanup find the owner's direction and record the
 waiver without asking again, as the ADDED scenario and both skills do (the owner:
 "Certainly would prefer it to find my direction and record the waiver").
 
+Settled at the round-4 triage, documents only: 83 F1 — the delta's requirement
+"Interactive step runs record their outcome" now names the review as its exception,
+which records nothing, its text saved as an external review by the triage it is
+pasted into, and gains the scenario "An interactive review is pasted into a triage";
+D11 already said so (69 O5).
+
 Handoff from section 8: from this commit the wrapper refuses a string `next`, so
 every run's outcome names a target; this session's own outcome names
 `{"step": "triage", "kind": "implementation"}`. Open for the implementation review
@@ -1260,6 +1287,26 @@ to failed validations only — a passed one already routes on its own, and the
 direction is the owner's. End-to-end: none, and none is owed; no `Owed by
 validation:` line.
 
+The round-4 triage (reviews 81-validation, 82-implementation-owner,
+83-implementation; the repeat pass `b902d8866`..`860cfa125`) settled 83 F1 under
+section 8's note and fixed 82 O1 and 83 F2 under section 2's.
+
+Evidence for the round-4 fixes: `test_change_workflow_graph.py`, unit (the `make
+change-graph` test crossing a process boundary): 64 passed. `scripts/tests`, unit:
+1797 passed, before the fresh-context check's follow-ups and again after them.
+`make test`: passed, every suite, before the follow-ups, which touched only
+`diagram.py`'s report wording and docstring, the graph tests, and the delta. `make
+check-packaging`: passed. `make check-change CHANGE=workflow-steps-name-next-step`:
+every check passes. The fresh-context check of the diff against `860cfa125` found no
+defect; `make change-graph`, which it ran, printed that the diagram draws the
+table. Its optional points taken: `diagram.main` names the file it read rather than
+the default's; an unused fixture dropped; the report test given two departures, as
+its name says; a docstring's "what the table holds" reversed to "what is held to the
+table"; the delta's scenario "An interactive session ends without recording"
+narrowed to any step but a review; a long line reflowed. Not taken: the test's own
+`drift` wrapper, which builds the failure message a failing test shows its reader.
+End-to-end: none, and none is owed; no `Owed by validation:` line.
+
 ## 10. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`, in its order.
@@ -1298,7 +1345,8 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
         their outcome", and "The owner directs a change's next step" added; "Phases
         and owner touchpoints", "Unattended step runs end with a structured
         outcome", and "The next step is computed from the files" modified. By hand:
-        "Evidence" gains `scripts/change_workflow/graph.py` (`make change-graph`),
+        "Evidence" gains `scripts/change_workflow/graph.py`,
+        `scripts/change_workflow/diagram.py` (`make change-graph`),
         `run_change_step.py record`, and `run_change_step.py convert`
         (`scripts/change_workflow/convert.py`).
       - `openspec/specs/change-workflow/architecture.md` — "Routing is code, with the

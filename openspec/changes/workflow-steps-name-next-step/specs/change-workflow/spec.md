@@ -23,15 +23,17 @@ validation's exit, not on its entry. Archive
 cleanup's exit MUST be the terminal node `done`, which has no
 exits and no step, and which no direction reaches. A change to the table MUST be
 made as an OpenSpec change.
-The table MUST be renderable as a diagram, and the diagram the `change-workflow`
-architecture shows MUST be checked against the table's nodes, exits, joins, and
-guards, whatever its layout.
+The source of the diagram the `change-workflow` architecture shows, and the copy of
+it its export embeds, MUST be checked against the table's nodes, exits, joins, and
+guards, whatever its layout; the export's visible drawing, which draw.io renders
+from the source it embeds, is not compared.
 
-#### Scenario: The graph is drawn
+#### Scenario: The diagram's departures are reported
 
-- **WHEN** the owner runs `make change-graph`
-- **THEN** it prints the table as a diagram of every node, exit, join, and guard
-  with its remedy
+- **WHEN** the owner runs `make change-graph` after a change to the table
+- **THEN** it names each box and edge the diagram's source draws otherwise than the
+  table, with the text the table gives it, and fails; and once the source draws the
+  table, it says so and succeeds
 
 #### Scenario: The documented diagram drifts
 
@@ -86,10 +88,12 @@ guards, whatever its layout.
 
 An interactive run of a step MUST behave as it does without the wrapper, unrestricted
 by the step table, except that it MUST end by recording its outcome through the
-workflow tooling's record command. The command MUST check the outcome against the
-outcome schema, MUST record it with the session's id — read from the harness's
-environment, or given explicitly — the commit at `HEAD`, and that the run was
-interactive, and MUST refuse to record without a session id, and inside an
+workflow tooling's record command. A review is the exception and MUST record
+nothing: an interactive review publishes no record, and its text is saved as an
+external review by the triage it is pasted into. The command MUST check the outcome
+against the outcome schema, MUST record it with the session's id — read from the
+harness's environment, or given explicitly — the commit at `HEAD`, and that the run
+was interactive, and MUST refuse to record without a session id, and inside an
 unattended run, whose outcome the wrapper records. Every step's permissions MUST
 allow it to print the session's id.
 
@@ -100,10 +104,18 @@ allow it to print the session's id.
 - **THEN** the workflow log holds that outcome with the session's id, `HEAD`, and
   `interactive`, and the computation routes on it
 
+#### Scenario: An interactive review is pasted into a triage
+
+- **WHEN** the owner asks for a review in an interactive session and pastes it into
+  a triage
+- **THEN** the review's session records no outcome, the triage saves the review as
+  the change's next `NN-<kind>-external.md`, and the triage's outcome names it in
+  `triaged`
+
 #### Scenario: An interactive session ends without recording
 
-- **WHEN** the owner closes an interactive session of any step before it recorded its
-  outcome, and the last exit or direction names that step
+- **WHEN** the owner closes an interactive session of any step but a review before it
+  recorded its outcome, and the last exit or direction names that step
 - **THEN** the computation names the step as in progress, its reason saying that if
   no session of it is open, an interactive session ended without recording, to be
   resumed or recorded by hand

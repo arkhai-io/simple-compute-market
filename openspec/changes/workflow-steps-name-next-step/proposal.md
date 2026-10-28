@@ -30,7 +30,8 @@ step rather than inferring one.
   its work. Archive cleanup exits to a terminal `done`. The computation interprets
   the table in place of its per-phase rules. The `change-workflow` architecture
   shows it as a draw.io diagram laid out by hand, which a test holds to the table's
-  nodes and edges, and `make change-graph` prints the table to redraw it from.
+  nodes and edges, and `make change-graph` reports where it departs from the table,
+  to redraw it from.
 - Every step's outcome names the exit it takes as a structured target in `next` —
   `{"step": "review", "kind": "pre-closeout"}`, `{"step": "round"}`,
   `{"step": "plan"}` — and a triage's outcome names the records it triaged. A

@@ -1,86 +1,37 @@
 """The workflow's graph is one table: every exit and remedy names a node of it, and
-every node is reached from design and leads on until the change is done. Its
-Mermaid rendering draws every node, exit, join, and guard, and the hand-laid diagram
-the change-workflow architecture shows, with the source its export embeds, draws
-the table's boxes and edges."""
+every node is reached from design and leads on until the change is done. The
+hand-laid diagram the change-workflow architecture shows, with the source its export
+embeds, draws the table's boxes and edges, and `make change-graph` reports where it
+does not."""
 
 from __future__ import annotations
 
-import collections
 import dataclasses
 import os
-import re
 import subprocess
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
 
-from change_workflow import graph
+from change_workflow import diagram, graph
 from change_workflow.common import STEPS
+from change_workflow.diagram import DIAGRAMS, EXPORT, SOURCE, drawn
 from change_workflow.graph import (ARCHIVE_CLEANUP, CLOSEOUT_TRIAGE, DESIGN, NODES, OWNER,
                                    TABLE, WAIT, Node)
 
 ROOT = Path(__file__).resolve().parents[2]
 ARCHITECTURE = Path("openspec/specs/change-workflow/architecture.md")
-DIAGRAMS = Path("docs/development/diagrams")
-SOURCE = DIAGRAMS / "change-workflow-graph.drawio"
-EXPORT = DIAGRAMS / "change-workflow-graph.svg"
-# The legend of guards, which an edge names by number, `G6` or `G7 · G8`.
-_LEGEND = "guards"
-_GUARD = re.compile(r"^G(\d+): (.*)$")
-_GUARDS = re.compile(r"^G\d+(?: · G\d+)*$")
 
 EXITS = [(declaration.node, exit_) for declaration in TABLE for exit_ in declaration.exits]
 
-Drawn = tuple[dict[str, tuple[str, ...]], collections.Counter]
-
-
-def _lines(value: str) -> tuple[str, ...]:
-    return tuple(re.sub(r"</?b>", "", line).strip() for line in value.split("<br>"))
-
-
-def drawn(source: str) -> Drawn:
-    """What a draw.io file draws: its boxes by id, each the lines of its text, and
-    its edges, each its source, target, and label, the legend's guards written out
-    for their numbers."""
-    cells = ET.fromstring(source).iter("mxCell")
-    vertices, edges = {}, []
-    for cell in cells:
-        if cell.get("vertex") == "1":
-            vertices[cell.get("id")] = _lines(cell.get("value", ""))
-        elif cell.get("edge") == "1":
-            edges.append((cell.get("source"), cell.get("target"), cell.get("value", "")))
-    legend = {match[1]: match[2] for line in vertices.pop(_LEGEND, ())
-              if (match := _GUARD.match(line))}
-    drawn_edges: collections.Counter = collections.Counter()
-    for source_, target, value in edges:
-        pieces: list[str] = []
-        for line in (_lines(value) if value else ()):
-            pieces += ([legend.get(number[1:], number) for number in line.split(" · ")]
-                       if _GUARDS.match(line) else [line])
-        drawn_edges[(source_, target, tuple(pieces))] += 1
-    return vertices, drawn_edges
-
-
-def expected(table=TABLE) -> Drawn:
-    boxes, edges = graph.drawing(table)
-    return boxes, collections.Counter((e.source, e.target, e.pieces) for e in edges)
-
 
 def drift(source: str, table=TABLE) -> str | None:
-    """How the diagram drawn in `source` departs from the table: each box or edge
-    one draws and the other does not."""
-    (boxes, edges), (want_boxes, want_edges) = drawn(source), expected(table)
-    problems = [f"box {id_} reads {boxes.get(id_)!r} where the table has {text!r}"
-                for id_, text in want_boxes.items() if boxes.get(id_) != text]
-    problems += [f"box {id_} is no node of the table" for id_ in boxes.keys() - want_boxes]
-    problems += [f"no edge draws {edge}" for edge in want_edges - edges]
-    problems += [f"the edge {edge} is not the table's" for edge in edges - want_edges]
+    problems = diagram.drift(source, table)
     if not problems:
         return None
     return (f"{SOURCE} departs from the table: " + "; ".join(problems) + "; redraw it, "
-            f"with `make change-graph` printing the table, and export {EXPORT} from it")
+            f"as `make change-graph` reports, and export {EXPORT} from it")
 
 
 def test_each_node_is_declared_once() -> None:
@@ -237,43 +188,28 @@ def _node_id(node: Node) -> str:
     return node.label.replace(":", "_").replace("-", "_")
 
 
-def test_the_diagram_draws_every_node_exit_join_and_guard() -> None:
-    rendering = graph.mermaid()
-    edges = [line.strip() for line in rendering.splitlines() if "-->" in line]
+def test_the_drawing_has_a_box_for_every_node_and_join_and_an_edge_for_every_exit() -> None:
+    boxes, edges = graph.drawing()
     joins = {exit_.join for _, exit_ in EXITS if exit_.join}
 
-    boxes = {line.split("[", 1)[0].strip(): line for line in rendering.splitlines()
-             if line.endswith('"]')}
+    assert len({_node_id(node) for node in NODES}) == len(NODES)
     for node, declaration in NODES.items():
-        box = boxes[_node_id(node)]
-        assert box.startswith(f'    {_node_id(node)}["{node.label}')
-        assert all(f"<br/>entry: {guard.condition}" + (" (waivable)" if guard.waivable else "")
-                   in box for guard in declaration.entry)
-    assert rendering.count('{{"join"}}') == len(joins)
+        assert boxes[_node_id(node)] == (node.label, *(
+            f"entry: {guard.condition}" + (" (waivable)" if guard.waivable else "")
+            for guard in declaration.entry))
+    assert len(boxes) == len(NODES) + len(joins)
     assert len(edges) == len(EXITS) + len(joins)
     for source, exit_ in EXITS:
         target = f"join_{_node_id(exit_.target)}" if exit_.join else _node_id(exit_.target)
-        supplied = [what for what, node in exit_.join.waits_for
-                    if node == source] if exit_.join else []
-        held = [" (held)" for guard in exit_.guards if guard.held]
-        pieces = [*supplied, *([exit_.when] if exit_.when else []), *held,
+        supplied = tuple(what for what, node in exit_.join.waits_for
+                         if node == source) if exit_.join else ()
+        pieces = (*supplied, *([exit_.when] if exit_.when else []),
                   *(f"{guard.condition} ⇒ {getattr(guard.remedy, 'label', guard.remedy)}"
                     + (f", {guard.otherwise}" if guard.otherwise else "")
-                    for guard in exit_.guards)]
-        assert any(edge.startswith(f"{_node_id(source)} -->") and edge.endswith(f" {target}")
-                   and all(piece in edge for piece in pieces) for edge in edges), (
+                    + (" (held)" if guard.held else "") for guard in exit_.guards))
+        assert any((edge.source, edge.target, edge.pieces) == (_node_id(source), target, pieces)
+                   for edge in edges), (
             f"no edge draws {source.label} → {exit_.target.label} with {pieces}")
-
-
-def test_the_diagrams_ids_are_distinct_and_its_labels_need_no_escaping() -> None:
-    labels = [node.label for node in NODES] + [
-        guard.condition for declaration in TABLE for guard in declaration.entry] + [
-        text for _, exit_ in EXITS
-        for text in [exit_.when or "", *(guard.condition for guard in exit_.guards),
-                     *(guard.otherwise or "" for guard in exit_.guards)]]
-
-    assert len({_node_id(node) for node in NODES}) == len(NODES)
-    assert not [label for label in labels if '"' in label or "|" in label]
 
 
 def test_the_documented_diagram_draws_the_table() -> None:
@@ -326,7 +262,21 @@ def test_a_drift_names_each_box_and_edge_that_differs() -> None:
     assert "no edge draws ('design', 'review_design', ())" in problem
 
 
-def test_make_change_graph_prints_the_rendering() -> None:
+def test_the_report_lists_each_departure_and_fails(capsys) -> None:
+    table = [dataclasses.replace(d, exits=d.exits + (graph.Exit(DESIGN, when=graph.RETURN),))
+             if d.node in (CLOSEOUT_TRIAGE, ARCHIVE_CLEANUP) else d for d in TABLE]
+
+    status = diagram.main(ROOT / SOURCE, table)
+
+    assert status == 1
+    assert capsys.readouterr().out == (
+        f"{SOURCE} departs from the table; redraw it, and export its SVG from it with the "
+        "source embedded:\n"
+        "- no edge draws ('triage_closeout', 'design', ('a return',))\n"
+        "- no edge draws ('archive_cleanup', 'design', ('a return',))\n")
+
+
+def test_make_change_graph_reports_that_the_diagram_draws_the_table() -> None:
     # A make that runs these tests passes its flags down through MAKEFLAGS; none
     # may reach the target run here.
     environment = {key: value for key, value in os.environ.items()
@@ -334,4 +284,4 @@ def test_make_change_graph_prints_the_rendering() -> None:
     printed = subprocess.run(["make", "-s", "--no-print-directory", "change-graph"], cwd=ROOT,
                              env=environment, capture_output=True, text=True, check=True)
 
-    assert printed.stdout == graph.mermaid()
+    assert printed.stdout == f"{SOURCE} draws the table.\n"

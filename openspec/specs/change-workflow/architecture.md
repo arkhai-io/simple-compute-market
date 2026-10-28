@@ -154,10 +154,13 @@ taken on and its guards, numbered in the legend, and the round's join a hexagon.
 
 The diagram is laid out by hand. Its source is
 [`change-workflow-graph.drawio`](../../../docs/development/diagrams/change-workflow-graph.drawio);
-the SVG beside it is the export and also opens in draw.io. A test holds the source,
-and the copy of it the export embeds, to the table's boxes and edges, whatever their
-layout, so a change to the table redraws them; `make change-graph` prints the table
-as a Mermaid flowchart for that.
+the SVG beside it is exported from it in draw.io with the source embedded, so it also
+opens in draw.io, and is never edited by hand. A test holds the source to the table's
+boxes and edges, whatever their layout, and the copy the export embeds to the
+source, so a change to the table redraws the source and exports it again; `make
+change-graph` reports each box and edge the source draws otherwise than the table.
+The SVG's visible drawing is draw.io's rendering of its embedded source and is not
+compared itself.
 
 The orchestrating session holds no state of its own. On every start and after
 compaction it runs the computation and reads the log's last lines, so any session

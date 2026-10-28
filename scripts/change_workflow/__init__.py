@@ -3,7 +3,9 @@
 Each module holds one concern, on the standard library alone:
 
 - `graph` — the workflow's graph: its nodes, their exits, joins, and guards, which
-  the next-step computation interprets, and its diagram (`make change-graph`);
+  the next-step computation interprets;
+- `diagram` — the architecture's hand-laid diagram of the graph, held to the table
+  (`make change-graph`);
 - `outcome` — the outcome a step ends with, checked against its schema;
 - `log` — the change's workflow log, the orchestrating session's notes, and the
   owner's branch decisions; it is the log's only writer;

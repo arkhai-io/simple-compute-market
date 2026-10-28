@@ -68,14 +68,29 @@ that satisfies it (D4), and its entry guards. The computation interprets the tab
 in place of the per-phase methods. The diagram `openspec/specs/change-workflow/architecture.md`
 shows is laid out by hand, as the repository's other diagrams are: a draw.io source,
 `docs/development/diagrams/change-workflow-graph.drawio`, and its SVG export beside
-it, which embeds the source. A test holds both to the table's boxes and edges,
+it, which embeds the source. A test holds the source to the table's boxes and edges,
 whatever their layout — every node with its entry guards, every exit with what it is
-taken on and its guards, written out through the drawing's numbered legend — so the
-documentation cannot drift from the code; `make change-graph` prints the table as a
-Mermaid flowchart to redraw from (69 O1). A generated drawing was rejected: its
-layout could not be controlled enough to be presentable, which is the diagram's
-point; and an inline Mermaid block breaks the repository's convention of draw.io
-diagrams with an SVG render.
+taken on and its guards, written out through the drawing's numbered legend — and the
+copy the export embeds to the source, so the documentation cannot drift from the
+code (69 O1); `make change-graph` reports each box and edge the source draws
+otherwise than the table, which is what a redraw needs (82 O1). A generated drawing
+was rejected: its layout could not be controlled enough to be presentable, which is
+the diagram's point; and an inline Mermaid block breaks the repository's convention
+of draw.io diagrams with an SVG render.
+
+The SVG's visible drawing is not compared (83 F2): draw.io renders it from the
+source it embeds, so an export cannot drift from its source, and one not redone
+after the source changed fails the embedded copy's check; the SVG is never edited by
+hand. Checking the visible text, or its wiring too, was rejected as more proof than
+the diagram needs — the owner: "This is overengineering." A comparison of the two
+files' modification times was considered and cannot work, since Git does not keep
+them.
+
+`make change-graph` printed the table as a Mermaid flowchart until 82 O1. Nothing
+consumed it but a person redrawing after the table changed, when the draw.io source
+is the stale side and what is needed is the difference, which the drift check
+already computed; the check moved from the test into `change_workflow.diagram`,
+where the target and the test share it, and the Mermaid rendering was removed.
 
 A guard is of one of two kinds (21 F1):
 

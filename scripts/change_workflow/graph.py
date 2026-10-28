@@ -35,9 +35,8 @@ refuses every entry while it is not met (`entry_refusal`); a waivable one takes 
 owner's direction as its override.
 
 The change-workflow architecture shows the table as a diagram laid out by hand,
-held to the table's boxes and edges (`drawing`); `make change-graph` prints it as a
-Mermaid flowchart (`mermaid`) for whoever redraws it. A durable change to the
-workflow is a change to this table, made as an OpenSpec change. See
+held to the boxes and edges the table draws (`drawing`; see `diagram`). A durable
+change to the workflow is a change to this table, made as an OpenSpec change. See
 openspec/specs/change-workflow/architecture.md, "Routing is code, with the model as
 backstop".
 """
@@ -525,10 +524,8 @@ def review_phase(kind: str) -> str | None:
 
 
 # The diagram. The change-workflow architecture shows a drawing laid out by hand,
-# `docs/development/diagrams/change-workflow-graph.drawio` with its SVG export,
-# which a test holds to the table's boxes and edges (`drawing`), whatever its
-# layout. `make change-graph` prints the table as a Mermaid flowchart (`mermaid`),
-# for whoever redraws it.
+# which `change_workflow.diagram` holds to the boxes and edges the table draws
+# (`drawing`), whatever its layout.
 
 def _id(node: Node) -> str:
     return node.label.replace(":", "_").replace("-", "_")
@@ -580,29 +577,3 @@ def drawing(table: Sequence[Declaration] = TABLE) -> tuple[dict[str, tuple[str, 
     edges += [Edge(f"join_{_id(target)}", _id(target), (), None, ())
               for target in joins.values()]
     return boxes, edges
-
-
-def mermaid(table: Sequence[Declaration] = TABLE) -> str:
-    """The table as a Mermaid flowchart: a box for each node with its entry guards,
-    an edge for each exit labelled with what it is taken on and each guard with its
-    remedy, and a hexagon for each join, which the exits waiting on it enter,
-    labelled with the record their node supplies. The same table always renders the
-    same text."""
-    boxes, edges = drawing(table)
-    lines = ["flowchart TD"]
-    lines += [f'    {id_}{{{{"join"}}}}' if id_.startswith("join_")
-              else f'    {id_}["{"<br/>".join(text)}"]' for id_, text in boxes.items()]
-    for edge in edges:
-        label = "<br/>".join(edge.pieces)
-        arrow = f'-->|"{label}"|' if label else "-->"
-        lines.append(f"    {edge.source} {arrow} {edge.target}")
-    return "\n".join(lines) + "\n"
-
-
-def main() -> int:
-    print(mermaid(), end="")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
