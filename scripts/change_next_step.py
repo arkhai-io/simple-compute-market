@@ -103,8 +103,8 @@ from change_workflow.graph import (CLOSEOUT, CLOSEOUT_REVIEW, DESIGN, DONE,  # n
                                    ROUND, ROUND_JOIN, ROUND_VIEW, VALIDATE, Join, Node,
                                    Standing, TargetError, entry_refusal, node_of)
 from change_workflow.graph import owner as _owner  # noqa: E402
-from change_workflow.log import (FORMAT, LOG, branch_decisions, log_path,  # noqa: E402
-                                 ran, read_log, standing)
+from change_workflow.log import (LOG, branch_decisions, log_path, ran,  # noqa: E402
+                                 read_log, standing, unmarked)
 from change_workflow.records import (ChangedSince, changed_since,  # noqa: E402
                                      is_documentation, is_record, latest_validation,
                                      validation_problem, validation_result)
@@ -445,14 +445,14 @@ def _same(one: Mapping[str, Any], other: Mapping[str, Any]) -> bool:
     return node != VALIDATE or _same(one["target"], other["target"])
 
 
-def _label(target: Mapping[str, Any]) -> str:
+def target_label(target: Mapping[str, Any]) -> str:
     """A target as a reason writes it, `review:pre-closeout`; never parsed."""
     try:
         node = node_of(target)
     except TargetError:
         return json.dumps(target, ensure_ascii=False, default=str)
     if node == VALIDATE:
-        return f"{node.label} for {_label(target['target'])}"
+        return f"{node.label} for {target_label(target['target'])}"
     if target.get("sections"):
         return f"{target['step']} {json.dumps(target['sections'])}"
     return node.label
@@ -567,7 +567,7 @@ def _waiting(entry: dict[str, Any], read: bool = True) -> Result | None:
     if outcome == "returned":
         target = _exit_of(entry)
         return _owner(f"the {step} step proposes returning to "
-                      f"{_label(target) if target else entry.get('return_to')}: "
+                      f"{target_label(target) if target else entry.get('return_to')}: "
                       f"{entry.get('message', '')}", target=target)
     if outcome == "blocked":
         return _owner(f"the {step} step is blocked on {entry.get('blocked_on')}: "
@@ -612,12 +612,9 @@ class Computation:
                           "concluded before the change is routed", merging=True)
         state.view = self._view(self.root)
         try:
-            state.directory = change_directory(self.root, state.change)
+            self.read()
         except ChangeNotFound as exc:
             return self.unclassified(str(exc))
-        state.row = next((row for row in index_rows(self.root) if row.name == state.change),
-                         None)
-        state.log = read_log(log_path(self.root, state.change))
         if is_archived(self.root, state.directory) and (
                 state.row is None or state.row.status == "archived"):
             return {"step": "done", "reason": "archived" if state.row else
@@ -631,12 +628,6 @@ class Computation:
                 f"a round view of {state.view.change} is open: save the owner's notes on "
                 "the round as the next NN-implementation-owner.md, then run "
                 "`make round-done`", round_view=state.view.change)
-        state.notes = state.row.notes if state.row else ""
-        state.records = read_records(state.directory / "reviews")
-        tasks = state.directory / TASKS_FILE
-        state.tasks = tasks.read_text("utf-8") if tasks.is_file() else ""
-        state.sections = read_sections(tasks)
-        state.head = self._head(self.root)
         if state.row is None:
             return self.unclassified(f"{INDEX} has no row for {state.change}")
         if unconverted := self.unconverted():
@@ -652,6 +643,22 @@ class Computation:
                 result["disagreement"] = disagreement
         return result
 
+    def read(self) -> None:
+        """Read the change's files and log into the state: its directory, index row,
+        log, records, task list, and `HEAD`. `ChangeNotFound` when it has no
+        directory."""
+        state = self.state
+        state.directory = change_directory(self.root, state.change)
+        state.row = next((row for row in index_rows(self.root) if row.name == state.change),
+                         None)
+        state.log = read_log(log_path(self.root, state.change))
+        state.notes = state.row.notes if state.row else ""
+        state.records = read_records(state.directory / "reviews")
+        tasks = state.directory / TASKS_FILE
+        state.tasks = tasks.read_text("utf-8") if tasks.is_file() else ""
+        state.sections = read_sections(tasks)
+        state.head = self._head(self.root)
+
     def unclassified(self, reason: str) -> Result:
         return {"step": "unclassified", "reason": reason, "read": self.state.summary()}
 
@@ -663,10 +670,9 @@ class Computation:
         a return with no target, triage tokens in files — would be read as the new
         format's."""
         state = self.state
-        if any(entry.get("format") != FORMAT for entry in state.log):
-            unmarked = next(entry for entry in state.log if entry.get("format") != FORMAT)
+        if (first := unmarked(state.log)) is not None:
             why = f"its workflow log holds lines without the log's format, from seq " \
-                  f"{unmarked['seq']}"
+                  f"{first['seq']}"
         elif not state.log and state.records:
             why = "it has numbered records under reviews/ and no workflow log"
         else:
@@ -871,7 +877,7 @@ class Computation:
                         if (e.when == graph.OUT_OF_ORDER) == out_of_order] or declared
         if not declared:
             exits = [e.target.label for e in graph.NODES[source].exits]
-            return _owner(f"{run} names {_label(target)} as its exit, which {source.label} "
+            return _owner(f"{run} names {target_label(target)} as its exit, which {source.label} "
                           f"does not declare; its exits are {', '.join(exits) or 'none'}",
                           choice=target, exits=exits)
         exit_ = declared[0]
@@ -879,11 +885,11 @@ class Computation:
             return self.round_join(route)
         context = self.context(route)
         if isinstance(context, str):
-            return _owner(f"{run} chose {_label(target)}, but {context}", choice=target)
+            return _owner(f"{run} chose {target_label(target)}, but {context}", choice=target)
         if guarded := self.guarded(exit_, target, context):
             result = guarded
         else:
-            result = self.entered(node, target, f"{run} chose {_label(target)}", line,
+            result = self.entered(node, target, f"{run} chose {target_label(target)}", line,
                                   by=source.step)
             if result.get("step") == node.step and (missing := self.passed_by_status(node)):
                 result["disagreement"] = missing
@@ -975,7 +981,7 @@ class Computation:
         stands."""
         line, target = route.line, route.target
         assert target is not None
-        why = f"the owner directed {_label(target)} at seq {line['seq']}: " \
+        why = f"the owner directed {target_label(target)} at seq {line['seq']}: " \
               f"{line.get('decision', '')}"
         try:
             node = node_of(target)
@@ -996,7 +1002,7 @@ class Computation:
         failed or was inconclusive."""
         target, line = route.target, route.line
         assert target is not None
-        why = f"the owner directed a validation before {_label(target)}, which ran at seq " \
+        why = f"the owner directed a validation before {target_label(target)}, which ran at seq " \
               f"{line['seq']}"
         if result := self.validated(why):
             return {**result, "target": dict(target)}
@@ -1004,9 +1010,9 @@ class Computation:
 
     def elsewhere(self, route: Route) -> Result:
         """A validation that named another exit than the target it was given."""
-        given = _label(route.given) if route.given else "no target the log records"
+        given = target_label(route.given) if route.given else "no target the log records"
         return _owner(f"the validation at seq {route.line['seq']} names "
-                      f"{_label(route.target or {})} as its exit, but it was given {given}: "
+                      f"{target_label(route.target or {})} as its exit, but it was given {given}: "
                       "the owner decides where it leads", choice=route.target,
                       given=route.given)
 

@@ -5,9 +5,11 @@ module that does its work.
 one run with `--allow`; `run --session` continues a named implementation session; `review` runs a review, `log` and `note` read and write the
 workflow log, `watch` follows the steps as they run, and `denials` reports a run's
 denials. `record` is a step's own last act when the owner runs it interactively:
-it records the step's outcome, which the wrapper records for an unattended run. A
-command that runs a step prints the line it logged on stdout, its progress going to
-stderr, and exits non-zero when that line is `stopped`.
+it records the step's outcome, which the wrapper records for an unattended run.
+`convert` brings a change's records into the log's format, shown first and written
+on the owner's `--confirm`. A command that runs a step prints the line it logged on
+stdout, its progress going to stderr, and exits non-zero when that line is
+`stopped`.
 """
 
 from __future__ import annotations
@@ -20,9 +22,11 @@ from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
 from change_workflow.common import KINDS, ORCHESTRATOR, ROOT, StepError
+from change_workflow.convert import convert_change
 from change_workflow.harness import UNATTENDED_RUN
-from change_workflow.log import (branch_decisions, history_log_path, last_entries, log_path,
-                                 note_orchestrator, note_round, read_log, record_interactive)
+from change_workflow.log import (branch_decisions, direction, history_log_path, last_entries,
+                                 log_path, note_orchestrator, note_round, read_log,
+                                 record_interactive)
 from change_workflow.records import git_head
 from change_workflow.review import DEFAULT_BASE, review_and_log
 from change_workflow.watch import denial_report, watch
@@ -140,6 +144,30 @@ def _parser() -> argparse.ArgumentParser:
                         help="the step's outcome as JSON, matching the outcome schema")
     record.add_argument("--session", default=None,
                         help=f"the session's id, where {SESSION_ID} is not set")
+    convert = commands.add_parser(
+        "convert", help="convert the change's records to the workflow log's format: shown, "
+                        "and written on the owner's --confirm")
+    convert.add_argument("change")
+    convert.add_argument("--confirm", action="store_true",
+                         help="write the conversion and its direction: the owner's "
+                              "confirmation, attesting that each triage it flags finished")
+    convert.add_argument("--decline", action="store_true",
+                         help="write no direction, declining the return the conversion "
+                              "proposes to confirm, which then waits for the owner")
+    convert.add_argument("--next", dest="next_step", default=None,
+                         help="the owner's direction in the proposal's place: the step the "
+                              "change stands at")
+    convert.add_argument("--kind", default=None,
+                         help="the kind of review --next is, or triages; with --target, the "
+                              "target's")
+    convert.add_argument("--sections", default=None,
+                         help="with --next implement, its sections, as `note round` takes "
+                              "them; with --target, the target's")
+    convert.add_argument("--target", default=None,
+                         help="with --next validate, the step the validation is for")
+    convert.add_argument("--reason", default=None,
+                         help="the direction's reason, in place of the one the conversion "
+                              "gives")
     log = commands.add_parser("log", help="print the last lines of the change's workflow log")
     log.add_argument("change")
     log.add_argument("--last", type=int, default=10)
@@ -203,6 +231,19 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
             line = interactive_outcome(args.change, args.step, args.outcome, args.session,
                                        environ, wrapper.root, wrapper.head)
             print(json.dumps(line, ensure_ascii=False))
+            return 0
+        if args.command == "convert":
+            if args.next_step is None and (args.kind, args.sections, args.target) != (
+                    None, None, None):
+                raise StepError("--kind, --sections, and --target qualify --next")
+            given = (direction(args.next_step, args.kind,
+                               parse_sections(args.sections) if args.sections is not None
+                               else None, args.target)
+                     if args.next_step is not None else None)
+            for shown in convert_change(wrapper.root, args.change, confirm=args.confirm,
+                                        decline=args.decline, given=given,
+                                        reason=args.reason, head=wrapper.head):
+                print(shown)
             return 0
         if args.command == "run":
             sections = expand_sections(args.sections)

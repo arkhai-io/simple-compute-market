@@ -19,6 +19,8 @@ Each module holds one concern, on the standard library alone:
 - `wrapper` — running a step unattended, and resuming a waiting run;
 - `review` — a review run read-only and published as a numbered record;
 - `watch` — following the steps as they run, and a run's denials report;
+- `convert` — a change's records brought into the workflow log's format, on the
+  owner's confirmation, with the direction to where the change stands;
 - `cli` — the command line, which `scripts/run_change_step.py` runs.
 
 Contract: openspec/specs/change-workflow/spec.md, "Unattended step runs end with a

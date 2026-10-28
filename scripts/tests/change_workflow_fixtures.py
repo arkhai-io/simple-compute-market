@@ -67,6 +67,18 @@ def log_file(tmp_path: Path) -> Path:
     return directory / "reviews" / "workflow.jsonl"
 
 
+def descriptors_of(path: Path) -> int:
+    """How many of this process's open descriptors name `path` as it is now: a
+    thread's opening of the log is observed as one more, through `/proc`."""
+    named = 0
+    for descriptor in Path("/proc/self/fd").iterdir():
+        try:
+            named += os.readlink(descriptor) == str(path)
+        except OSError:
+            continue
+    return named
+
+
 # Running a step: the wrapper's command, its stream, and the outcome it logs.
 
 def event_lines(outcome: dict | None = None, *, denials: list | None = None,

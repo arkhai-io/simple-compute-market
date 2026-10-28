@@ -14,9 +14,11 @@ import pytest
 from change_workflow.cli import main
 from change_workflow.common import StepError
 from change_workflow.log import (LogError, append_entry, branch_decisions, last_entries,
-                                 note_orchestrator, note_round, read_log, record_interactive,
-                                 record_outcome, unused_direction)
-from change_workflow_fixtures import CHANGE, COMMIT, DENIALS, VALID, clock, log_file
+                                 note_orchestrator, note_round, numbered, read_log,
+                                 record_interactive, record_outcome, replace_log, unmarked,
+                                 unused_direction)
+from change_workflow_fixtures import (CHANGE, COMMIT, DENIALS, VALID, clock, descriptors_of,
+                                      log_file)
 
 
 def test_the_owners_branch_decision_is_recorded_and_found(
@@ -450,17 +452,6 @@ def test_an_interactive_outcome_names_its_session_and_commit(
     assert (line["interactive"], line["session"], line["commit"]) == (True, "s", COMMIT)
 
 
-def _descriptors_of(path: Path) -> int:
-    """How many of this process's open descriptors name `path` as it is now."""
-    named = 0
-    for descriptor in Path("/proc/self/fd").iterdir():
-        try:
-            named += os.readlink(descriptor) == str(path)
-        except OSError:
-            continue
-    return named
-
-
 def _while_replaced(log: Path, call) -> tuple[list, str]:
     """Run `call` in a second thread that opens the log while this one holds its
     lock, then rename a new log over the name and release the lock: what `call`
@@ -485,7 +476,7 @@ def _while_replaced(log: Path, call) -> tuple[list, str]:
         caller = threading.Thread(target=run)
         caller.start()
         deadline = time.monotonic() + 10
-        while _descriptors_of(log) < 2:
+        while descriptors_of(log) < 2:
             assert time.monotonic() < deadline, "the call never opened the log"
             time.sleep(0.01)
         os.replace(replacement, log)
@@ -514,6 +505,76 @@ def test_an_append_waiting_on_a_replacement_lands_in_the_new_log(tmp_path: Path)
     assert read_log(log)[-1] == line
     # The replaced file was never written: the line went where readers look.
     assert replaced == old
+
+
+def test_a_replaced_log_holds_the_new_lines_with_the_old_ones_permissions(
+        tmp_path: Path) -> None:
+    log = log_file(tmp_path)
+    first = note_orchestrator(log, "old", "r", clock=clock)
+    log.chmod(0o640)
+
+    lines = replace_log(log, lambda entries: [*entries, numbered(entries, {"step": "x"}, clock)])
+
+    assert read_log(log) == lines == [first, {"seq": 2, "at": first["at"], "format": 2,
+                                              "step": "x"}]
+    assert log.stat().st_mode & 0o777 == 0o640
+    assert sorted(path.name for path in log.parent.iterdir()) == [log.name]
+
+
+@pytest.mark.parametrize("logged", [True, False])
+def test_a_replacement_refused_or_interrupted_writes_nothing(tmp_path: Path,
+                                                             logged: bool) -> None:
+    log = log_file(tmp_path)
+    log.parent.mkdir(parents=True)
+    if logged:
+        note_orchestrator(log, "old", "r", clock=clock)
+    before = log.read_bytes() if logged else None
+
+    def refused(entries: list) -> list:
+        raise StepError("refused")
+
+    def interrupted(new: Path, old: Path) -> None:
+        raise OSError("interrupted")
+
+    with pytest.raises(StepError, match="refused"):
+        replace_log(log, refused)
+    with pytest.raises(OSError, match="interrupted"):
+        replace_log(log, lambda entries: [*entries, numbered(entries, {"step": "x"}, clock)],
+                    replace=interrupted)
+
+    # Neither leaves a log that was not there, nor a temporary file beside it.
+    assert (log.read_bytes() if log.exists() else None) == before
+    assert sorted(path.name for path in log.parent.iterdir()) == ([log.name] if logged else [])
+
+
+def test_a_replacement_failing_after_its_rename_keeps_the_new_log(tmp_path: Path) -> None:
+    log = log_file(tmp_path)
+
+    def renamed_then_failed(new: Path, old: Path) -> None:
+        os.replace(new, old)
+        raise OSError("failed after the rename")
+
+    with pytest.raises(OSError, match="after the rename"):
+        replace_log(log, lambda entries: [numbered(entries, {"step": "x"}, clock)],
+                    replace=renamed_then_failed)
+
+    assert [entry["step"] for entry in read_log(log)] == ["x"]
+
+
+def test_a_replacement_of_a_missing_log_creates_it(tmp_path: Path) -> None:
+    log = log_file(tmp_path)
+
+    replace_log(log, lambda entries: [numbered(entries, {"step": "x"}, clock)])
+
+    assert [entry["seq"] for entry in read_log(log)] == [1]
+
+
+def test_a_line_without_the_format_is_found() -> None:
+    marked = {"seq": 1, "format": 2}
+    older = {"seq": 2}
+
+    assert unmarked([marked, older, {"seq": 3}]) == older
+    assert unmarked([marked]) is None
 
 
 @pytest.mark.skipif(not Path("/proc/self/fd").is_dir(),

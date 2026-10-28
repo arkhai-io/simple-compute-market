@@ -20,9 +20,10 @@ win. It lives in the change's untracked `reviews/` directory and moves with the
 change when it is archived.
 
 Every line this module appends carries the log's format, `"format": 2`, so a line
-another writer appended without it is told apart. A log may be replaced whole, a new
-file renamed over its name, so every reader and appender checks, once it holds the
-lock, that the file it locked is still the one the name holds.
+another writer appended without it is told apart (`unmarked`). A log may be replaced
+whole, a new file renamed over its name (`replace_log`), so every reader and
+appender checks, once it holds the lock, that the file it locked is still the one
+the name holds.
 """
 
 from __future__ import annotations
@@ -30,9 +31,10 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import tempfile
 from datetime import timezone
 from pathlib import Path
-from typing import IO, Any, Sequence
+from typing import IO, Any, Callable, Sequence
 
 from change_workflow.common import KINDS, ORCHESTRATOR, STEPS, Clock, Entry, StepError, utc_now
 from change_workflow.graph import (NODES, ROUND, Node, Standing, TargetError, entry_refusal,
@@ -142,6 +144,38 @@ def last_entries(path: Path, count: int) -> list[Entry]:
     return entries[-count:] if count > 0 else []
 
 
+def unmarked(entries: Sequence[Entry]) -> Entry | None:
+    """The first line without the log's format, which a writer of an older format
+    appended; None when every line carries it."""
+    return next((entry for entry in entries if entry.get("format") != FORMAT), None)
+
+
+def _refuse_reserved(entry: Entry) -> None:
+    if reserved := {"seq", "at", "format"} & entry.keys():
+        raise StepError(f"a log line may not set {', '.join(sorted(reserved))}, which "
+                        "the log assigns")
+
+
+def numbered(entries: Sequence[Entry], entry: Entry, clock: Clock = utc_now) -> Entry:
+    """`entry` as the line that follows `entries`: the next `seq`, the time, and the
+    log's format, which no writer sets itself."""
+    _refuse_reserved(entry)
+    return {"seq": max((e["seq"] for e in entries), default=0) + 1,
+            "at": clock().astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "format": FORMAT, **entry}
+
+
+def _locked_for_writing(path: Path) -> IO[str]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Opened to append, so a log that does not exist yet is created; only a
+    # directory that has gone since cannot be opened.
+    stream = _locked(path, "a+", fcntl.LOCK_EX)
+    if stream is None:
+        raise StepError(f"{path.parent} is gone; the change was moved while its log was "
+                        "written")
+    return stream
+
+
 def append_entry(path: Path, entry: Entry, clock: Clock = utc_now) -> Entry:
     """Append `entry` to the log with the next `seq`, the time, and the log's format,
     and return the line.
@@ -150,29 +184,74 @@ def append_entry(path: Path, entry: Entry, clock: Clock = utc_now) -> Entry:
     locked from reading the last `seq` to writing the new line; without the lock
     both could take the same number.
     """
-    if reserved := {"seq", "at", "format"} & entry.keys():
-        raise StepError(f"a log line may not set {', '.join(sorted(reserved))}, which "
-                        "the log assigns")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # Opened to append, so a log that does not exist yet is created; only a
-    # directory that has gone since cannot be opened.
-    stream = _locked(path, "a+", fcntl.LOCK_EX)
-    if stream is None:
-        raise StepError(f"{path.parent} is gone; the change was moved while its log was "
-                        "written")
-    with stream:
+    _refuse_reserved(entry)
+    with _locked_for_writing(path) as stream:
         stream.seek(0)
         text = stream.read()
         entries = _parse(path, text)
-        line = {"seq": max((e["seq"] for e in entries), default=0) + 1,
-                "at": clock().astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "format": FORMAT, **entry}
+        line = numbered(entries, entry, clock)
         stream.seek(0, 2)
         # A last line saved without its newline would otherwise be joined to this one.
         separator = "\n" if text and not text.endswith("\n") else ""
         stream.write(separator + json.dumps(line, ensure_ascii=False) + "\n")
         stream.flush()
     return line
+
+
+def replace_log(path: Path, rewrite: Callable[[list[Entry]], list[Entry]], *,
+                replace: Callable[[Path, Path], Any] = os.replace) -> list[Entry]:
+    """Replace the log whole with what `rewrite` makes of its lines, and return the
+    lines written; a log that does not exist yet is created.
+
+    The log's lock is held from the read until the new log has been written to a
+    file beside it and renamed over its name, so no line is appended in between,
+    and a replacement that fails leaves either the log as it was or the new one
+    whole, never part of either; a process killed before the rename may leave its
+    temporary file, a dotfile beside the log that nothing reads. A refusal `rewrite`
+    raises writes no log. Nothing `rewrite` calls may read the log by its name:
+    that read would wait on the lock held here.
+    """
+    existed = path.exists()
+    with _locked_for_writing(path) as stream:
+        try:
+            stream.seek(0)
+            lines = rewrite(_parse(path, stream.read()))
+            _write_over(path, lines, os.fstat(stream.fileno()).st_mode & 0o777, replace)
+        except BaseException:
+            # A log the lock's opening created is removed again while the name
+            # still holds it, empty, so nothing is left of a replacement that did
+            # not happen; once the rename has happened the name holds the new log,
+            # which is kept. An appender that opened the created log meanwhile
+            # finds its name gone once it holds the lock, and opens the log again.
+            locked = os.fstat(stream.fileno())
+            try:
+                named = path.stat()
+            except FileNotFoundError:
+                named = None
+            if not existed and locked.st_size == 0 and named is not None and (
+                    named.st_dev, named.st_ino) == (locked.st_dev, locked.st_ino):
+                path.unlink()
+            raise
+    return lines
+
+
+def _write_over(path: Path, lines: Sequence[Entry], mode: int,
+                replace: Callable[[Path, Path], Any]) -> None:
+    descriptor, name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp",
+                                        dir=path.parent)
+    written = Path(name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as new:
+            # The new log keeps the old one's permissions, not the private ones a
+            # temporary file is created with.
+            os.fchmod(new.fileno(), mode)
+            new.writelines(json.dumps(line, ensure_ascii=False) + "\n" for line in lines)
+            new.flush()
+            os.fsync(new.fileno())
+        replace(written, path)
+    finally:
+        # Gone once renamed; left only by a replacement that did not happen.
+        written.unlink(missing_ok=True)
 
 
 def record_outcome(path: Path, step: str, outcome: Entry, *, session: str | None,
@@ -325,6 +404,21 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
     `branch` though the branch is not its own, which each step's branch check
     accepts in place of asking (`branch_decisions`); only the owner gives it.
     """
+    if next_step is None and (kind, sections, target) != (None, None, None):
+        raise StepError("a kind, sections, or target qualify the step a decision directs")
+    directed = direction(next_step, kind, sections, target) if next_step is not None else None
+    line = decision_line(path, read_log(path), decision, reason, by=by, resolves=resolves,
+                         reads=reads, directs=directed, branch=branch, change=change)
+    return append_entry(path, line, clock)
+
+
+def decision_line(path: Path, entries: Sequence[Entry], decision: str, reason: str, *,
+                  by: str, resolves: int | None = None, reads: int | None = None,
+                  directs: Entry | None = None, branch: str | None = None,
+                  change: str | None = None) -> Entry:
+    """The decision `note_orchestrator` records, checked against `entries`, the lines
+    of the log at `path` it would follow, and not yet numbered: `directs` is the
+    target of the owner's direction. A line that breaks a rule raises, naming it."""
     if not decision or not reason:
         raise StepError("an orchestrator line names its decision and its reason")
     if not by:
@@ -337,7 +431,6 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
         if by != "owner":
             raise StepError("a branch decision is the owner's")
         line.update(branch=branch, change=change)
-    entries = read_log(path)
     runs = {entry["seq"]: entry for entry in entries if entry.get("step") in STEPS}
     if resolves is not None:
         if resolves not in runs:
@@ -352,21 +445,18 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
             raise StepError(f"the run at seq {reads} recorded no denial; a decision reads "
                             "a run's denials")
         line["reads"] = reads
-    if next_step is None and (kind, sections, target) != (None, None, None):
-        raise StepError("a kind, sections, or target qualify the step a decision directs")
-    if next_step is not None:
+    if directs is not None:
         if by != "owner":
             raise StepError("a decision directing a step is the owner's; the orchestrating "
                             "session directs none")
-        directed = direction(next_step, kind, sections, target)
         try:
-            refusal = entry_refusal(directed, standing(path, entries), directed=True)
+            refusal = entry_refusal(directs, standing(path, entries), directed=True)
         except TargetError as exc:
             raise StepError(f"the direction names no node: {exc}") from exc
         if refusal:
             raise StepError(f"the direction is refused: {refusal}")
-        line["next"] = directed
-    return append_entry(path, line, clock)
+        line["next"] = directs
+    return line
 
 
 def ran(node: Node, entry: Entry) -> bool:

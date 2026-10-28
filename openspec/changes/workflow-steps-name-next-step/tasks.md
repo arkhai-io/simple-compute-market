@@ -743,17 +743,31 @@ next step is computed from the files", its conversion clauses). Touches
 and `scripts/tests/`. The command and the older reading it alone holds are
 temporary, removed by the change closeout opens (10.9).
 
-- [ ] 7.1 Refusals, writing nothing: a change already converted; a triage in
+- [x] 7.1 Refusals, writing nothing: a change already converted; a triage in
       progress by the older reading — a triage file with neither `## Next` nor
       `## Gate` that no marked triage outcome names — naming the review and the two
       ways to finish it (36 F4).
-- [ ] 7.2 The log's lines rewritten in place, each keeping its seq: a decision's
+      `convert.conversion` refuses both with `StepError`, before anything is built.
+      "Already converted" is the computation's detection inverted — no unmarked
+      line, and a log or no numbered records — through `log.unmarked`, which
+      `Computation.unconverted` now calls too. A conversion line counts as naming a
+      triage as a marked triage outcome does, so a rerun's earlier conversion
+      attests what the owner attested before.
+- [x] 7.2 The log's lines rewritten in place, each keeping its seq: a decision's
       string `next` and `kind` become the target object; a `returned` outcome's
       `return_to` gains its target in `next`; an outcome's prose `next` moves into
       its `message`; every line gains the format marker. One conversion line
       appended, `step` `convert`, `outcome` `converted`, naming as `triaged` every
       review with a triage file, and no exit.
-- [ ] 7.3 The proposal of the owner's direction to where the change stands, from the
+      `convert.rewritten(entry)`: only unmarked lines change, the marker placed after
+      `at` as `append_entry` writes it; prose joins the message as `\n\nNext: …`;
+      `return_to` is kept beside the new `next` (`design`→`design`,
+      `planning`→`plan`, `implementation`→`round`, the computation's transitional
+      `_RETURN_STEP` copied, since 8.5 deletes that one). A review line's older
+      `next: "triage"` is prose like any other. `triaged` names review records only
+      (`-external` included), not the validation and owner records triaged beside
+      them, as D7 says; it may be empty.
+- [x] 7.3 The proposal of the owner's direction to where the change stands, from the
       latest routing decision after the latest triage (43 F3): a later decision
       carrying `next` whose target has not run, converted — a confirmed return among
       them — unless an unwaivable entry guard of a node it names is no longer met,
@@ -764,19 +778,74 @@ temporary, removed by the change closeout opens (10.9).
       target; nothing where a step's run follows the latest triage's, naming those
       runs; for a return not yet confirmed, the direction to its target resolving
       that run's seq. The older reading of tokens lives only here.
-- [ ] 7.4 The owner's confirmation: the command shows the proposal, or why there is
+      `convert._propose`, in this order: the latest decision carrying `next` after
+      the latest triage's run whose node no run has taken since (`log.ran`), by the
+      owner or, as older repeat-review decisions were, the orchestrating session;
+      nothing while a review numbered after the latest triaged one awaits its
+      triage; nothing while any step's run follows the latest triage's; else its
+      exit. The latest triage is the highest-numbered review with a triage file;
+      its run (`_anchor`) is the latest marked triage outcome naming it, else the
+      latest triage line after the review run that published it (`record`), else
+      that run, else, for a review no run published, the latest triage line. The
+      exit is the one that marked outcome names where there is one, else the token
+      (`read_triage`, the deleted `next_token` reading with its `## Next: …` form):
+      `Advance` the table's `advance` exit — for an implementation triage the
+      pre-closeout review once every section before closeout is checked — `Another
+      round` the table's `another round` exit, other words nothing, `Returned` the
+      returned run's rewritten `next`, resolving it, or nothing once a decision
+      resolved it without directing. The guards are the computation's own:
+      `Computation.context` and `Computation.guarded` on the edge, the triage's run
+      read as naming the review; a validation remedy becomes `{"step": "validate",
+      "target": <the exit>}`, and a remedy no direction can name — the owner, or a
+      repeat pass's `round-view` — proposes nothing, saying why. Every proposal is
+      checked by `entry_refusal(..., directed=True)` on the converted log. Beyond
+      the plan's words: the marked outcome's exit taking precedence over the token,
+      since under the current skill `## Next` is prose whose first word may be
+      "Advance"; the awaiting-review rule; and declining a remedy that is not a
+      validation.
+- [x] 7.4 The owner's confirmation: the command shows the proposal, or why there is
       none, and every review the conversion line will name, each with the first line
       of the `## Next` or `## Gate` it read, flagging those no marked triage outcome
       names; it writes only when the owner confirms, which attests the flagged
       triages finished, or gives `--next` in the proposal's place (43 F1). The
       direction is written through `note_orchestrator`'s checks (section 5), `by:
       owner`; declining writes nothing.
-- [ ] 7.5 The replacement (D7, 36 F3, 43 F2): the log's exclusive lock taken before
+      `run_change_step.py convert <change>` shows, writing nothing; `--confirm`
+      writes; `--next`, qualified by `--kind`, `--sections`, `--target` as `note
+      orchestrator` takes them, gives the direction in the proposal's place, shown or
+      written; `--reason` replaces the direction's reason. Correction to the plan:
+      `--decline`, with `--confirm`, writes the conversion with no direction, only
+      where the proposal confirms a pending return — the spec's "had the owner
+      declined it, no direction would be written, and the computation would name the
+      owner for seq 50" needs the conversion written while the return is declined.
+      `note_orchestrator`'s checks are `log.decision_line`, split out of it, which
+      checks a direction against the converted lines held in memory, since the log
+      cannot be read by name while its replacement holds the lock.
+- [x] 7.5 The replacement (D7, 36 F3, 43 F2): the log's exclusive lock taken before
       the log is read and held until the converted log — the rewritten lines, the
       conversion line, and the direction — is written to a temporary file beside the
       log and renamed over it; a change with records and no log gains its log the
       same way.
-- [ ] 7.6 Verification, unit, with real files in a temporary directory: the spec's
+      `log.replace_log(path, rewrite, replace=os.replace)`, in `log.py` so it stays
+      the log's only writer: locked through `_locked` (the inode check), the file
+      `.workflow.jsonl.<random>.tmp` beside it, fsynced, given the old log's
+      permissions, renamed, and removed if the rename did not happen. A change with no
+      log gains one by the same open, `a+` creating it; a refused or failed
+      replacement removes a log that open created while the name still holds it,
+      empty, and keeps the new log once the rename has happened. An appender that
+      opened the created log meanwhile reopens it by `_locked`'s check, which finds
+      the name gone — read from the code, not tested. A process killed before the
+      rename may leave an empty log, still detected, and its temporary dotfile, which
+      nothing reads; a refusal may leave `reviews/` created. `append_entry`
+      and `replace_log` share `log.numbered`, the line with its seq, time, and
+      marker. The computation's files are read before the lock is taken
+      (`Computation.read`, split out of `run`), since a read of the log by name under
+      the lock would wait on it. `--confirm` computes the conversion again under the
+      lock and prints what it wrote, so a line appended between the preview and the
+      confirmation is in what is written though the owner was not shown it; the
+      command is run between steps, when no step appends (D7), and nothing further
+      guards that interval.
+- [x] 7.6 Verification, unit, with real files in a temporary directory: the spec's
       "A change is converted", "A pending return is converted, then confirmed", "A
       confirmed return is converted", "A conversion proposes a guard's remedy", "A
       conversion after later runs", "A conversion follows a later direction", "A
@@ -787,6 +856,77 @@ temporary, removed by the change closeout opens (10.9).
       conversion landing in the converted log; a converted log routed by the
       computation to the direction it ends with; `make test`; `make check-change
       CHANGE=workflow-steps-name-next-step`. End-to-end: none, and none is owed.
+      A new `scripts/tests/test_change_workflow_convert.py`, 36 passed: each test
+      calls `convert_change`, `rewritten`, or `read_triage`, or `main` for the
+      command, with the computation's seams over a real index, task list, records,
+      and logs in a temporary directory, and `change_next_step.compute` for where a
+      converted log routes. By `TESTING.md` these are unit only loosely: a test
+      drives the conversion, the log's replacement, and the computation together over
+      real files, as section 3's and 6's tests do; the append test adds a thread.
+      Each named scenario has a test of its name or close to it; "A conversion's
+      triage is not attested" also records an outcome whose exit differs from its
+      file's token, and the proposal follows the outcome. Also: a change with records
+      and no log; a refused and an interrupted conversion of one, which leave no log;
+      the already-converted refusal; a triage a recorded outcome names; a later
+      direction naming no node, and one that can no longer be entered; a review
+      awaiting its triage; the last round's advance, proposing the pre-closeout
+      review's validation; a failed validation of `HEAD`, which no direction
+      remedies; other words; `Returned` with no returned run; a return a decision
+      declined; a declined proposal; `--decline` with no return; the rerun's
+      attestation of the first conversion's reviews; the command's show and write,
+      and `--target` and `--sections` building the direction; the token reading; and
+      the rewrite of each line shape, its keys' order included. The routing tests
+      whose conversion is written assert the step `compute` then names; the
+      refusal, append, and command tests assert the lines written instead, and the
+      preview-only tests the proposal shown. The interruption test's `replace` raises
+      before the rename: the log is byte-for-byte unchanged, no temporary file is
+      left, the computation still names `convert`, and a second run converts. The
+      append test reuses section 3's method — a thread runs `record_outcome` once the
+      conversion holds the lock, observed through `/proc/self/fd`, then the rename —
+      and the line lands after the direction; with `_locked`'s inode comparison
+      disabled it fails, the line lost to the replaced file, which was tried and
+      reverted. `test_change_workflow_log.py`, unit: `replace_log` — the new lines
+      with the old log's permissions and no file left beside it; a refusal and a
+      replacement interrupted before its rename, of lines it would have changed,
+      each leaving the log's bytes as they were, or no log where there was none; a
+      failure after the rename keeping the new log of a change that had none,
+      which an earlier cleanup deleted; a missing log created — and `unmarked`;
+      `descriptors_of` moved from it to `change_workflow_fixtures.py`.
+      `test_change_next_step.py` and `test_run_change_step.py`: unchanged, passing.
+      `scripts/tests`: 1784 passed. `make test`: passed, every suite
+      (`scripts/tests`: 1770), before the two fresh-context checks' fixes, which
+      touched only `scripts/`, rerun above. `make
+      check-packaging`: passed. `make check-change`: every check passes, the
+      documentation citations included now that `convert.py` exists. No table change,
+      so no diagram redrawn. End-to-end: none, confirmed; no `Owed by validation:`
+      line.
+
+Handoff from section 7: before section 8, the orchestrating session runs `python3
+scripts/run_change_step.py convert workflow-steps-name-next-step` on the owner's
+word, which shows first and writes only with `--confirm`. On this change's log as it
+stood at this section's start, nothing should be proposed: the latest triaged review
+is 52-implementation, and runs follow its triage (validate at seq 70, implement at
+72, 74, 75, and this section's), so the owner gives `--next`. Read from the code, untested on this log: `--next
+round-view` reads the current round's join, whose round line (seq 71) names the
+sessions `[3, 4, 5, 6, 7]` and `[8, 9]`, and so should name `implement` of 8 and 9;
+`--next round` would have the plan's next round recorded again as a new round line.
+Not run here:
+the implement step may not run the command, and the conversion is the owner's. The
+conversion reads the computation's files without locating the change (`locate`
+is not run), so in a clone a repeat pass's reading is judged as a workspace change's
+would be: the proposal may name the `round-view` remedy as nothing proposed where the
+computation, in the clone, would run the reading beside the validation. `convert`
+imports `change_next_step` for `Computation`, `Route`, `Record`, and
+`target_label` (renamed from `_label` to be shared): the package's first module to
+import the computation, which imports none of `cli` or `convert`, so there is no
+cycle; since `cli` imports `convert` at module level, every command of
+`run_change_step.py` now loads the computation and its standard-library imports,
+which the fresh-context check raised and was left, a function-local import being no
+lighter an edge. `test_change_workflow_convert.py` imports `change_next_step` by name, where
+`test_change_next_step.py` loads a second copy of it; neither compares the other's
+classes. For section 8's skills and section 9's guide: the conversion's preview is
+text for the owner to read, and its write prints the conversion line and the
+direction as JSON lines.
 
 ## 8. Every skill names its exit, and records it when interactive
 
