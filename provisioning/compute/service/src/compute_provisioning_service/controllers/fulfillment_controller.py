@@ -82,6 +82,7 @@ class FulfillmentController:
             pool_id=resource.pool_id,
             resource_kind=resource.resource_kind,
             provider=resource.provider,
+            host_id=resource.host_id,
             attributes=resource.attributes,
         )
 

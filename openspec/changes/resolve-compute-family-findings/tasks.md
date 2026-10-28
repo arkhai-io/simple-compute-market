@@ -2432,7 +2432,7 @@ Files:
     `test_fulfillment_api.py`, and `test_scheduling_composition.py`;
   - `domains/vms/storefront/tests/unit/services/test_aggregate_fulfillment_client.py`.
 
-- [ ] 16.1 The contract is major 3, and every party accepts only major 3.
+- [x] 16.1 The contract is major 3, and every party accepts only major 3.
   `FulfillmentScheduleResponse` gains an optional `host_id`.
   `LeaseState.PROVISIONING_FAILED` and its mapping entry are removed
   (D13, D5).
@@ -2445,7 +2445,24 @@ Files:
   loses both retired keys, `provisioning` (to `PENDING`) as well as
   `provisioning_failed`, since neither is a reservation state any longer
   (D5's "the mapping entries").
-- [ ] 16.2 The schedule route sets `host_id` from the scheduled resource's
+
+  `COMPUTE_PROVISIONING_CONTRACT_VERSION` is `"3.0"` and
+  `SUPPORTED_COMPUTE_PROVISIONING_MAJOR_VERSIONS` `{3}`, the comment above
+  them saying why a party of another major is refused by version.
+  `FulfillmentScheduleResponse` gains `host_id: str | None`, excluded from
+  its serialization when absent (`Field(exclude_if=…)`, which keeps the
+  model's published schema whole, unlike a model serializer), as the delta's
+  "MUST omit it" asks; the contracts' pydantic floor rises to `2.11`, the
+  release that offers it. `LeaseState` loses `PROVISIONING_FAILED` and the
+  mapping both retired keys. Unit (`test_contracts.py`): `1.0`, `2.0`,
+  `2.1`, and `4.0` are each refused naming "supported majors: 3", and `3.0`
+  and `3.1` accepted; a schedule response with `host_id` and a
+  `physical_host_id` attribute serializes and validates back, one without
+  serializes with no `host_id` key and validates to `None`, and the
+  serialization schema still lists `host_id`; `LeaseState` has no
+  `provisioning_failed` and the projection refuses both retired states.
+  Pass.
+- [x] 16.2 The schedule route sets `host_id` from the scheduled resource's
   declaration, and omits it when the declaration names none. The resource's
   `physical_host_id` stays in its top-level attributes (D13).
   Application integration, through the typed family client:
@@ -2456,10 +2473,44 @@ Files:
   - An idempotent repeat returns the same assignment.
   - "Old client calls new service": a major-2 request is refused with the
     supported version range, and nothing is done.
-- [ ] 16.3 "A storefront calls a service that has not been upgraded". Unit, in
+
+  The route sets `host_id=resource.host_id`, the scheduler's
+  `SettlementResource` carrying the declaration's host. Application
+  integration (`test_fulfillment_api.py`, `TestScheduleEndpoint`, the typed
+  family client): bare metal's whole host (`bare_metal_deal`'s declaration
+  and committed reservation) schedules with `host_id` `bm-node-1` and
+  attribute `physical_host_id` `host-physical-1`; the existing VM
+  idempotent-repeat test now also asserts the repeat carries its `host_id`
+  (`kvm-fulfillment-1`); and, on the rejection path (raw, status only), a
+  request stating `contract_version` `2.0` is refused 422 with no
+  settlement record written (the refusal's "supported majors: 3" text is
+  the contracts unit test's).
+
+  Plan correction: "A resource with no host is scheduled" cannot happen
+  through this service. Every provider it composes (`vm.ansible`,
+  `bare_metal.ansible`) needs a host, and a pool naming any other provider
+  is refused at creation ("no pool config handler registered"), so the first
+  attempt failed. The case is proven where such a provider can be composed:
+  library integration in `kit/fulfillment`
+  (`test_scheduler_host_requirement.py`, new
+  `test_a_provider_needing_no_host_places_and_returns_a_hostless_assignment`)
+  places a declaration naming no host under a provider the requirement says
+  needs none, with no host on the assignment, and returns it unchanged on a
+  repeat. That the route omits an absent host is read, not tested: it
+  answers through the model's `response_model` serialization, which honours
+  the field's exclusion the contracts unit test shows.
+- [x] 16.3 "A storefront calls a service that has not been upgraded". Unit, in
   the family client or VM's aggregate fulfillment client: a major-2 schedule
   answer is refused, naming the supported major, and nothing is begun.
-- [ ] 16.4 Bump the contracts, the client, the family kit, and the service,
+
+  Unit, family client (`test_fulfillment_client_opacity.py`): a signed
+  schedule answer stating `contract_version` `2.0` raises a validation error
+  naming "supported majors: 3" from `schedule_resource`. "Nothing is begun"
+  is the caller's and is not tested: a storefront begins only after a
+  schedule returns, which here it never does; the test's single-request
+  assertion shows only that the client sent nothing more itself. Pass
+  (client 68).
+- [x] 16.4 Bump the contracts, the client, the family kit, and the service,
   and raise every consumer's floor on the contracts to major 3's release. Run
   `make lock`. **Verification checkpoint:**
   - 16.1–16.3;
@@ -2474,6 +2525,45 @@ Files:
   `e2e_listing_shapes`, `e2e_non_erc20_settlement`, and
   `e2e_bare_metal_mock_deal`. A passing pipeline is the evidence that both sides
   speak major 3.
+
+  No bump here: the contracts (section 12, `0.11.0`), the client (13,
+  `0.9.0`), the family kit (14, `0.21.0`), and the service (13, `0.19.0`)
+  each already stand one bump over `dev`, and major 3 ships in those
+  versions. Every consumer's floor on the contracts rises to `0.11.0`: the
+  family kit, the client, the Ansible implementation, the VM operator
+  client, both provisioning adapters, both compute storefronts, and the e2e
+  harness (the service's rose in section 13). Both provisioning adapters
+  changed in sections 2–5 and stood at `dev`'s versions, their round-1
+  bumps having coincided with the merged branch's, so each takes its one
+  bump over `dev` here: `arkhai-vms-provisioning-adapter` `0.14.0` →
+  `0.15.0`, `arkhai-bare-metal-provisioning-adapter` `0.10.0` → `0.11.0`
+  (no exact pin names either). The bare-metal storefront's floor edit waits
+  on its bump in section 18. The Ansible implementation's floor-only edit
+  follows section 11's judgement for triage: no bump for a dependency line
+  alone on a version `dev` holds unreleased. `make lock` moved the locks.
+
+  `make test` (full) passes before and after the fresh-context fixes: after
+  them, contracts 107, the client 68, `kit/fulfillment` 172, the family kit
+  243, the service 605 unit and 449 integration, both storefronts and the
+  rest unchanged in count. `make check-packaging` passes; `make
+  check-change` passes its comment-hygiene and other checks but for the
+  closeout citation section 1 notes.
+
+  Handoff, from the fresh-context check: it found the checkpoint evidence
+  unrecorded (recorded), the versioning note wrong about the adapters
+  (both bumped) and silent on the bare-metal storefront (noted), the
+  schedule response's model serializer erasing its published schema
+  (replaced by a field exclusion, schema asserted), "nothing is begun"
+  claimed from an assertion that cannot fail (restated as untested), the
+  route's omission claimed as tested (restated as read), the contract
+  version comment telling history and leaning on section 19's begin
+  (rewritten as the current invariant), a test named for acceptance that
+  asserts refusal (renamed), a kit test docstring naming the compute wire
+  (trimmed), the repeat's evidence attributed to the wrong test (corrected),
+  and no operator-facing destination for the lockstep upgrade the delta
+  requires (D13's promotion row now names
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`). All provisioning parties
+  were confirmed to accept only major 3.
 
 ## 17. Worker controls are typed, and convergence counts reach the log text
 
@@ -3122,6 +3212,7 @@ column at closeout (27.9).
 | D3: the service refuses overlapping contributions when it composes its table | `docs/development/ARCHITECTURE.md`, "Route contracts and their HTTP binding", the paragraph beginning "A domain that contributes routes" | |
 | D4: the one lifecycle event provisioning pushes | `openspec/specs/compute-provisioning-contract/spec.md`, "Deal-scoped lifecycle events", through the archive | |
 | D13 and D5: the schedule response's host and machine; contract major 3 | `openspec/specs/compute-provisioning-contract/spec.md`, "A schedule response names the scheduled resource's host and machine" and "Explicit contract incompatibility", through the archive | |
+| D13: a provisioning service and the storefronts and clients that call it upgrade, and roll back, together across major 3 | `docs/development/DEPLOYMENT_AND_CONFIG.md`, beside its statement that sites and storefronts are upgraded together (added by section 16's review) | |
 | D14 and D15: the family's mock-route template, models, and client; the typed worker controls | `openspec/specs/physical-provisioning/spec.md`, "Compute-owned caller contract"; `openspec/specs/market-composition/spec.md`, "Compute mock executors share one compute-family mechanism"; both through the archive | |
 | D14: the mock mechanism as a worked instance of the five-piece route pattern | `openspec/specs/physical-provisioning/architecture.md`, "Compute composition"; `docs/development/ARCHITECTURE.md`, "Family kits", the paragraph beginning "Executor selection is one table", whose list names the rule route service | |
 | D5: the remaining reservation states and the upgrade conversion | `openspec/specs/site-capacity/spec.md`, "Reservation lifecycle", "The lease lifecycle's writes are conditional transitions", "Lease truncation neither resurrects nor extends a lease", "A reservation's lease tail is written once", and "A stored reservation in a retired state is converted at upgrade", through the archive | |

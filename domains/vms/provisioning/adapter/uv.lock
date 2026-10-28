@@ -254,7 +254,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-provisioning-adapter"
-version = "0.14.0"
+version = "0.15.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-compute-provisioning" },
@@ -286,7 +286,7 @@ dev = [
 requires-dist = [
     { name = "arkhai-compute-provisioning", specifier = ">=0.20.0" },
     { name = "arkhai-compute-provisioning-ansible", specifier = ">=0.4.0" },
-    { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.10.0" },
+    { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.11.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-fulfillment", specifier = ">=0.5.0" },

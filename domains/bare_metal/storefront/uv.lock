@@ -216,7 +216,7 @@ dev = [
 requires-dist = [
     { name = "arkhai-bare-metal", specifier = ">=0.13.0" },
     { name = "arkhai-compute-provisioning-client", specifier = ">=0.7.0" },
-    { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.9.0" },
+    { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.11.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
     { name = "arkhai-core-registry-client", specifier = ">=0.12.1" },
     { name = "arkhai-core-storefront", specifier = ">=0.16.0" },

@@ -38,6 +38,7 @@ from compute_provisioning_ansible import ssh_connection
 import uuid
 from typing import Any
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport
@@ -55,6 +56,7 @@ from compute_provisioning_contracts import (
     FulfillmentStatusResponse,
 )
 from compute_provisioning_service.main import app
+from . import bare_metal_deal
 from .conftest import SERVICE_AUTHORITIES, STOREFRONT_SIGNER
 from market_fulfillment import (
     FulfillmentOrchestrator,
@@ -849,6 +851,47 @@ class TestScheduleEndpoint:
         first = await fulfillment.schedule(capacity_reservation_id, "vms")
         second = await fulfillment.schedule(capacity_reservation_id, "vms")
         assert first == second
+        assert second.host_id == "kvm-fulfillment-1"
+
+    async def test_a_whole_host_is_scheduled_with_its_host_and_machine(
+        self, client_and_queue
+    ):
+        """The schedule response names the declaration's host, and the machine
+        is the resource's top-level ``physical_host_id``."""
+        clients, _ = client_and_queue
+        await bare_metal_deal.bare_metal_capacity(clients)
+        capacity_reservation_id = bare_metal_deal.committed_reservation("0xwhole-host")
+
+        scheduled = await clients.family.schedule_resource(
+            FulfillmentScheduleRequest(
+                capacity_reservation_id=capacity_reservation_id,
+                market="bare_metal",
+                requirements={"resource_kind": "compute.bare-metal"},
+            )
+        )
+
+        assert scheduled.host_id == bare_metal_deal.HOST_ID
+        assert scheduled.attributes["physical_host_id"] == bare_metal_deal.PHYSICAL_HOST_ID
+
+    async def test_a_request_of_another_contract_major_is_refused_and_nothing_scheduled(
+        self, client_and_queue
+    ):
+        """Rejection path: the typed client sends only major 3, so a major-2
+        request is built by hand and signed for its route. Status only."""
+        capacity_reservation_id = await _reserved_capacity("pool-schedule-major-2")
+        body = {
+            "contract_version": "2.0",
+            "capacity_reservation_id": capacity_reservation_id,
+            "market": "vms",
+        }
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as raw:
+            refused = await raw.post("/api/v1/fulfillment/schedule", json=body)
+
+        assert refused.status_code == 422
+        with _container_module.resolved_session_factory() as db:
+            assert db.get(SettlementRecord, capacity_reservation_id) is None
 
     async def test_schedule_unknown_reservation_is_404(
         self, fulfillment: FulfillmentApi

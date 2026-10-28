@@ -8,7 +8,7 @@ dependencies = [
     # The family's wire contract, for the job responses VM's operations return
     # and the mock-route template VM mounts. The transport is the family
     # client, which a caller supplies.
-    "arkhai-compute-provisioning-contracts>=0.10.0",
+    "arkhai-compute-provisioning-contracts>=0.11.0",
     "pydantic>=2.7",
 ]
 

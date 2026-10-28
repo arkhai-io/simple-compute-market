@@ -11,7 +11,8 @@ dependencies = [
     "arkhai-core>=0.4.0",
     # The empty-body sentinel the route contracts canonicalize with.
     "arkhai-kit-identity==0.4.0",
-    "pydantic>=2",
+    # Field(exclude_if=...), with which a schedule response omits an absent host.
+    "pydantic>=2.11",
 ]
 
 [build-system]

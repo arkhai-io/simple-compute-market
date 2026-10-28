@@ -172,7 +172,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal-provisioning-adapter"
-version = "0.10.0"
+version = "0.11.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-bare-metal" },
@@ -186,7 +186,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal_provisioning_adapter-0.10.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal_provisioning_adapter-0.11.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -607,7 +607,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-provisioning-adapter"
-version = "0.14.0"
+version = "0.15.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning" },
@@ -629,7 +629,7 @@ dependencies = [
     { name = "typing-inspect" },
 ]
 wheels = [
-    { path = "arkhai_vms_provisioning_adapter-0.14.0-py3-none-any.whl" },
+    { path = "arkhai_vms_provisioning_adapter-0.15.0-py3-none-any.whl" },
 ]
 
 [[package]]
