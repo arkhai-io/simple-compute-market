@@ -1463,20 +1463,69 @@ the branch merged, editing `publication_app.py`'s router list beside
 `server.py`'s. Its shared-file notes above were derived before the merge and
 are re-checked then.
 
-- [ ] 9.1 Move the pool-override routes to a router with no prefix, declared at
+**Re-checked with the branch merged** (`590adbf72`, which merged `dev` after
+`unbacked-bare-metal-listings` landed). The branch is on `dev`, so nothing is
+shared any longer and the notes above are history. Two of them were wrong:
+- the version line: section 8 bumped nothing (decision A, section 6's notes);
+  `arkhai-vms-storefront` stands at `0.22.0` from the merged branch, and
+  section 10 confirms it against the last release;
+- the files: the section also edits `domains/vms/storefront/tests/publication_app.py`
+  (decision B) and adds `domains/vms/storefront/tests/unit/test_pool_override_routes.py`.
+
+- [x] 9.1 Move the pool-override routes to a router with no prefix, declared at
   `POOL_OVERRIDES_PATH`, and mount it in the routers tuple (D16).
   Verify:
   - Application integration: `test_pool_overrides_api.py`, through the typed
     `SyncPoolOverrideClient`, passes unchanged.
   - Unit: the mounted path equals `POOL_OVERRIDES_PATH`, and the
     administrator-identity middleware's contract for it is unchanged.
-- [ ] 9.2 **Verification checkpoint.**
+
+  `admin_controller.py` declares `pool_overrides_router`, an unprefixed
+  `APIRouter`, and a `PoolOverrideController` (`@cbv`, `require_admin_key` in
+  its `__init__`, as the admin controller's) whose three routes, moved
+  unchanged from `AdminController`, are declared at `POOL_OVERRIDES_PATH`.
+  `server.py` imports it with the other controllers and lists it after
+  `admin_router` in `StorefrontRouteHooks.routers`; `tests/publication_app.py`
+  lists it in the same place. The administrator middleware is untouched.
+  - Application integration (`test_pool_overrides_api.py`, unchanged, against
+    `tests/publication_app.py`'s app): passes. Correction to the verify line:
+    the file uses the async `PoolOverrideClient`, not the sync one, which only
+    the e2e lanes and the operator CLI call.
+  - Unit (new `test_pool_override_routes.py`): `server.app`, the production
+    composition, mounts PUT, GET, and DELETE once each at `POOL_OVERRIDES_PATH`,
+    and no other route ending `/pool-overrides`, so the admin router no longer
+    serves a duplicate. With the router dropped from `server.py`'s tuple the
+    test fails, and passes with it restored.
+  - Unit, the middleware's contract: `test_identity_dispatch.py`'s three
+    pool-override tests, unchanged, pin each method's operation and resource at
+    the literal path, and pass. No new test restates them.
+- [x] 9.2 **Verification checkpoint.**
   - Application integration: 9.1.
   - Run `make test` in `domains/vms/storefront` and `make check-comment-hygiene`.
 
   End-to-end: `e2e_compute_dynamic_listings` and `e2e_listing_shapes` write pool
   overrides through the typed client. A passing lane is the evidence that the
   path is unchanged.
+
+  `make -C domains/vms/storefront test`: 1138 unit and 475 integration pass.
+  `make test` (full) passes; `make check-comment-hygiene` and
+  `make check-packaging` pass; `make check-change` passes but for the
+  closeout citation section 1 notes. No dependency changed, so no lock.
+
+  End-to-end, confirmed and widened: `e2e_compute_dynamic_listings` (a
+  `put_pool_override`), `e2e_listing_shapes` (put, delete, list, and override
+  status), and `e2e_vm_introduction`, whose `IntroductionDriver` puts an
+  override, all write through `SyncPoolOverrideClient` in the VM lane. No lane
+  was run in this session; they are validation's evidence. Owed by
+  validation: nothing beyond the pipeline.
+
+  Handoff: the fresh-context check found the production mount untested below
+  end-to-end (fixed: the unit test reads `server.app`, as
+  `test_server_app_composition.py`'s settlement-route test does), the first
+  draft's middleware test a restatement of `test_identity_dispatch.py`'s
+  (dropped), a docstring narrower than `require_admin_key`, which also admits
+  a service peer (reworded), and the stale notes corrected above. Not rerun
+  after those fixes, which changed one test and one docstring.
 
 ## 10. A site authority answers an unroutable request by what failed to match
 

@@ -525,6 +525,9 @@ async def _run_startup_tasks(
 
 # Controller imports after lifespan exists, before app construction.
 from market_storefront.controllers.admin_controller import (  # noqa: E402
+    pool_overrides_router,
+)
+from market_storefront.controllers.admin_controller import (  # noqa: E402
     router as admin_router,
 )
 from market_storefront.controllers.deals_controller import (  # noqa: E402
@@ -604,6 +607,7 @@ def build_vm_storefront_app(
                 routers=(
                     system_router,
                     admin_router,
+                    pool_overrides_router,
                     listings_router,
                     admin_listings_router,
                     negotiations_router,

@@ -63,6 +63,7 @@ from market_storefront.services.publication_terms import (
 )
 import market_storefront.negotiation_runtime as negotiation_runtime
 from market_storefront.contact_exchange import build_vm_contact_exchange
+from market_storefront.controllers.admin_controller import pool_overrides_router
 from market_storefront.controllers.admin_controller import router as admin_router
 from market_storefront.controllers.introductions_controller import (
     router as introductions_router,
@@ -772,6 +773,7 @@ async def publication_app(
             for router in (
                 system_router,
                 admin_router,
+                pool_overrides_router,
                 listings_router,
                 listings_admin_router,
                 *routers,

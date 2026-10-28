@@ -64,6 +64,7 @@ from market_storefront_kit import (
     TradingPauseRouteService,
 )
 from market_pool_overrides import (
+    POOL_OVERRIDES_PATH,
     PoolOverrideDeleteResponse,
     PoolOverrideListResponse,
     PoolOverrideRecord,
@@ -93,6 +94,11 @@ _INTERRUPTIBLE_HELD_STATES = frozenset(
 )
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
+
+# Unprefixed: its routes are declared at the pool-override kit's
+# `POOL_OVERRIDES_PATH`, the path the kit's client signs and the administrator
+# middleware binds, so the three name one path by construction.
+pool_overrides_router = APIRouter(tags=["admin"])
 
 
 #: Route alias -> the loop's registered name. Aliases are hyphenated where loop
@@ -495,76 +501,6 @@ class AdminController:
             },
         )
         return {"sites": summary}
-
-    # -- storefront pool overrides ------------------------------------------
-    # Site and pool IDs are operator-chosen strings with no character
-    # restriction, so they travel in the body or query, never the path.
-
-    @staticmethod
-    def _pool_overrides() -> PoolOverrideRouteService:
-        return PoolOverrideRouteService(_container.resolved_pool_override_service)
-
-    @staticmethod
-    def _http(exc: PoolOverrideRouteError) -> HTTPException:
-        return HTTPException(status_code=exc.status_code, detail=exc.detail)
-
-    @router.put(
-        "/pool-overrides",
-        response_model=PoolOverrideWriteResponse,
-        summary="Replace one pool override, checked against the live site (admin)",
-    )
-    async def put_pool_override(
-        self, record: PoolOverrideRecord
-    ) -> PoolOverrideWriteResponse:
-        """Replace the whole override at the record's site, pool, and offering mode.
-
-        Refused with 422 for an unconfigured site, a mode no market serves, or
-        vocabulary or clauses that do not validate; 503 (retryable) when the site
-        cannot answer usably; and 404 when its live projection lacks the pool. A
-        shape no member is feasible for is reported, not refused.
-        """
-        try:
-            return await self._pool_overrides().replace(record)
-        except PoolOverrideRouteError as exc:
-            raise self._http(exc) from exc
-
-    @router.get(
-        "/pool-overrides",
-        response_model=PoolOverrideResponse | PoolOverrideListResponse,
-        summary="Read one pool override, or list them (admin)",
-    )
-    async def get_pool_overrides(
-        self,
-        site_id: str | None = Query(default=None),  # noqa: B008
-        pool_id: str | None = Query(default=None),  # noqa: B008
-        offering_mode: str | None = Query(default=None),  # noqa: B008
-    ) -> PoolOverrideResponse | PoolOverrideListResponse:
-        """With a site, pool, and offering mode, one override; otherwise a list,
-        optionally narrowed to a site or to one site's pool."""
-        try:
-            return await self._pool_overrides().read(
-                site_id=site_id, pool_id=pool_id, offering_mode=offering_mode
-            )
-        except PoolOverrideRouteError as exc:
-            raise self._http(exc) from exc
-
-    @router.delete(
-        "/pool-overrides",
-        response_model=PoolOverrideDeleteResponse,
-        summary="Delete one pool override; idempotent (admin)",
-    )
-    async def delete_pool_override(
-        self,
-        site_id: str = Query(),  # noqa: B008
-        pool_id: str = Query(),  # noqa: B008
-        offering_mode: str = Query(),  # noqa: B008
-    ) -> PoolOverrideDeleteResponse:
-        try:
-            return await self._pool_overrides().delete(
-                site_id=site_id, pool_id=pool_id, offering_mode=offering_mode
-            )
-        except PoolOverrideRouteError as exc:
-            raise self._http(exc) from exc
 
     @staticmethod
     def _json_object(value: Any) -> dict[str, Any]:
@@ -1015,3 +951,81 @@ class AdminController:
                 exc,
             )
         return released
+
+
+# -- storefront pool overrides ------------------------------------------------
+# Site and pool IDs are operator-chosen strings with no character restriction,
+# so they travel in the body or query, never the path.
+
+
+@cbv(pool_overrides_router)
+class PoolOverrideController:
+    def __init__(self, _key: None = Depends(require_admin_key)) -> None:
+        """Refuse a request no authenticating middleware admitted, as every
+        admin route does."""
+
+    @staticmethod
+    def _pool_overrides() -> PoolOverrideRouteService:
+        return PoolOverrideRouteService(_container.resolved_pool_override_service)
+
+    @staticmethod
+    def _http(exc: PoolOverrideRouteError) -> HTTPException:
+        return HTTPException(status_code=exc.status_code, detail=exc.detail)
+
+    @pool_overrides_router.put(
+        POOL_OVERRIDES_PATH,
+        response_model=PoolOverrideWriteResponse,
+        summary="Replace one pool override, checked against the live site (admin)",
+    )
+    async def put_pool_override(
+        self, record: PoolOverrideRecord
+    ) -> PoolOverrideWriteResponse:
+        """Replace the whole override at the record's site, pool, and offering mode.
+
+        Refused with 422 for an unconfigured site, a mode no market serves, or
+        vocabulary or clauses that do not validate; 503 (retryable) when the site
+        cannot answer usably; and 404 when its live projection lacks the pool. A
+        shape no member is feasible for is reported, not refused.
+        """
+        try:
+            return await self._pool_overrides().replace(record)
+        except PoolOverrideRouteError as exc:
+            raise self._http(exc) from exc
+
+    @pool_overrides_router.get(
+        POOL_OVERRIDES_PATH,
+        response_model=PoolOverrideResponse | PoolOverrideListResponse,
+        summary="Read one pool override, or list them (admin)",
+    )
+    async def get_pool_overrides(
+        self,
+        site_id: str | None = Query(default=None),  # noqa: B008
+        pool_id: str | None = Query(default=None),  # noqa: B008
+        offering_mode: str | None = Query(default=None),  # noqa: B008
+    ) -> PoolOverrideResponse | PoolOverrideListResponse:
+        """With a site, pool, and offering mode, one override; otherwise a list,
+        optionally narrowed to a site or to one site's pool."""
+        try:
+            return await self._pool_overrides().read(
+                site_id=site_id, pool_id=pool_id, offering_mode=offering_mode
+            )
+        except PoolOverrideRouteError as exc:
+            raise self._http(exc) from exc
+
+    @pool_overrides_router.delete(
+        POOL_OVERRIDES_PATH,
+        response_model=PoolOverrideDeleteResponse,
+        summary="Delete one pool override; idempotent (admin)",
+    )
+    async def delete_pool_override(
+        self,
+        site_id: str = Query(),  # noqa: B008
+        pool_id: str = Query(),  # noqa: B008
+        offering_mode: str = Query(),  # noqa: B008
+    ) -> PoolOverrideDeleteResponse:
+        try:
+            return await self._pool_overrides().delete(
+                site_id=site_id, pool_id=pool_id, offering_mode=offering_mode
+            )
+        except PoolOverrideRouteError as exc:
+            raise self._http(exc) from exc
