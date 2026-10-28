@@ -201,8 +201,13 @@ def publish_cmd(
             if chain not in CHAINS:
                 typer.echo(f"chain {chain!r} is not configured", err=True)
                 raise typer.Exit(code=2)
+            try:
+                address_book = chain_address_books()[chain]
+            except ValueError as exc:
+                typer.echo(str(exc), err=True)
+                raise typer.Exit(code=2) from exc
             resolved_escrow = get_erc20_escrow_obligation_default(
-                chain, config_path=chain_address_books()[chain]
+                chain, config_path=address_book
             )
         accepted_escrows = [
             {

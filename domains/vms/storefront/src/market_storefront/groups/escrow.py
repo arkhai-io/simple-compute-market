@@ -381,8 +381,8 @@ def show_cmd(
         )
         raise typer.Exit(2)
 
-    address_book = chain_address_book(chain.name)
     try:
+        address_book = chain_address_book(chain.name)
         prewarm_alkahest_address_config_cache(address_book)
         address_config = resolve_alkahest_address_config(
             get_alkahest_network(chain.name),

@@ -126,6 +126,8 @@ class SettlementMigrationResult:
     actions: tuple[MigrationAction, ...]
     backup_path: Path | None = None
     environment_renames: tuple[EnvironmentRename, ...] = ()
+    #: What the migrated file changes beyond its moves, naming paths only.
+    notices: tuple[str, ...] = ()
 
 
 def _address_list(value: Any) -> list[str]:
@@ -270,6 +272,7 @@ class _Planner:
         self.role = role
         self.installed = installed
         self.actions: list[MigrationAction] = []
+        self.notices: list[str] = []
         self.alkahest_seen = False
         self.legacy_priority: list[str] | None = None
         self.legacy_priority_item: Any | None = None
@@ -338,6 +341,14 @@ class _Planner:
         chains it served, the operator must, and migration refuses. A chain
         named two different books is refused too. An empty key names nothing
         and is removed.
+
+        A seller serviced every chain's claims against the section key's book,
+        and read the chain's own key for publication, verification, and
+        refunds. On a configured chain the section key does not move to, its
+        claims change to that chain's book in the table, or to the SDK's
+        built-in addresses where it has none; migration names each such chain,
+        so the change is seen before it is written. No buyer read the section
+        key, so a buyer's migration names none.
         """
         configured: list[str] = []
         chain_books: dict[str, tuple[tuple[str, ...], Any]] = {}
@@ -388,6 +399,9 @@ class _Planner:
                     f"name each chain's book under {_path_text(_ADDRESS_BOOKS)}"
                 )
             moves.extend((section_source, name, section_item) for name in served)
+            unreached = [name for name in configured if name not in served]
+        else:
+            unreached = []
 
         books = _lookup(self.document, _ADDRESS_BOOKS)
         planned: dict[str, tuple[tuple[str, ...], Any]] = {}
@@ -402,6 +416,21 @@ class _Planner:
                     _path_text(planned[name][0]), _path_text(source)
                 )
             planned.setdefault(name, (source, item))
+
+        if self.role == "seller":
+            for name in unreached:
+                has_book = name in planned or (
+                    isinstance(books, Mapping) and books.get(name) is not None
+                )
+                now = (
+                    _path_text((*_ADDRESS_BOOKS, name))
+                    if has_book
+                    else "the SDK's built-in addresses"
+                )
+                self.notices.append(
+                    f"{_path_text(section_source)} no longer applies to chain "
+                    f"{name}: its claims are serviced against {now}"
+                )
 
         if planned:
             table = _ensure_table(self.document, _ADDRESS_BOOKS)
@@ -870,7 +899,9 @@ def migrate_settlement_config(
         ) from exc
 
     planned = copy.deepcopy(document)
-    actions = _Planner(planned, role, installed).run()
+    planner = _Planner(planned, role, installed)
+    actions = planner.run()
+    notices = tuple(planner.notices)
     candidate_text = tomlkit.dumps(planned)
     _validate_candidate(
         candidate_text, role=role, validator=validator, installed=installed
@@ -886,6 +917,7 @@ def migrate_settlement_config(
             written=False,
             actions=actions,
             environment_renames=renames,
+            notices=notices,
         )
     if validator is None:
         raise SettlementMigrationValidationError(
@@ -905,6 +937,7 @@ def migrate_settlement_config(
         actions=actions,
         backup_path=backup_path,
         environment_renames=renames,
+        notices=notices,
     )
 
 
@@ -923,6 +956,7 @@ def format_migration_result(result: SettlementMigrationResult) -> tuple[str, ...
         lines.append(
             f"rename environment {rename.source} -> {rename.destination} (value redacted)"
         )
+    lines.extend(f"note: {notice}" for notice in result.notices)
     if not result.changed:
         lines.append("No settlement configuration migration changes.")
     elif result.written:

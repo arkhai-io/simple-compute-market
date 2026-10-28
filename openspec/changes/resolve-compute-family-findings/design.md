@@ -420,7 +420,12 @@ dependency of that shape is added while they stand. `kit/config`'s `ChainSetting
 refused with a diagnostic naming the map, and the migration tool moves either into it: a
 per-chain key to its chain, and the section key to the one configured chain, or to the
 chains whose per-chain keys name the same book; where it cannot tell which chains it
-served, migration refuses and names both keys.
+served, migration refuses and names both keys. Of a seller's readers, only claim servicing
+and readiness read the section key, so on another configured chain claims move to the book
+the chain's own readers already used, its own or the built-in addresses; a seller's
+migration names each such chain in its report, before anything is written (86 F1). Refusing instead would refuse the common
+configuration of a local chain with a book beside a public chain without one; carrying the
+section book to every chain would put a local deployment's addresses on a public chain.
 `[Settlement]` is strict, so a release that predates the map refuses it; under the
 pre-1.0 policy the change is a minor bump of each package that reads it.
 

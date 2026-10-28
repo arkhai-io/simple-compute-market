@@ -4228,6 +4228,60 @@ Files:
   - Sections 25 and 26 must ship together: section 25's buyers ignore the
     retired keys, and this section refuses them.
 
+  Round 2's triage fixes (review 86):
+  - 86 F1, decision A, recorded in D11. A seller's migration now names each
+    configured chain the section key does not move to, and the book its
+    claims will use: the chain's `Settlement.alkahest.address_books` entry, or
+    the SDK's built-in addresses. The names are paths only, carried on
+    `SettlementMigrationResult.notices` and rendered by
+    `format_migration_result` as `note:` lines, so both roles' migration
+    commands print them. A buyer's migration names none, because no buyer read
+    the section key. The delta adds the scenario "The section key does not
+    reach every chain".
+  - 86 F2. The VM and API-credit storefronts refuse the retired keys inside
+    `chain_address_books()`, which every book reader passes through, with a
+    `ValueError` naming each key and the table. VM `escrow show` and
+    API-credit `publish --chain` report it and exit 2. The problem
+    collection moved to each storefront's
+    `utils.config.retired_address_book_problems`, so the startup refusal and
+    the seam share one check. The bare-metal storefront already refused in its
+    configuration model.
+
+  Tests:
+  - Unit, `kit/config/tests/unit/test_settlement_migration.py`:
+    - the section-key test now asserts the check's notices and their `note:`
+      lines, and that no value is printed;
+    - new: a chain the table already names is noted with its entry;
+    - new: a buyer's migration names no chain;
+    - new: a section key carried to every chain is not noted.
+  - Unit, command module (Typer's runner):
+    - VM storefront: `test_escrow_show_refuses_a_retired_address_book_key`;
+    - API-credit storefront:
+      `test_publishing_an_alkahest_rate_refuses_a_retired_address_book_key`.
+
+  Results:
+  - `kit/config`: 267 passed;
+  - VM storefront: unit 1148 passed and 1 skipped, integration 476 passed;
+  - API-credit storefront: 248 passed;
+  - `make check-packaging`: passes;
+  - full `make test`: passes, at the final diff.
+
+  The fresh-context check found no blocking defect. Fixed from it:
+  - the notice now names the chain's table entry, not the retired per-chain
+    key the same run removes, and it covers a chain the table already named;
+  - the notice is given only for a seller;
+  - the API-credit `retired_setting_problems` docstring now says it includes
+    the address-book keys.
+
+  Declined:
+  - The VM storefront's legacy-database synthesis (`utils/migrations.py`)
+    resolves books outside a handler. On a database needing synthesis, under a
+    configuration stating a retired key, the command stops with a raw
+    `ValueError` rather than a formatted refusal. It still refuses, and the
+    case is rare.
+  - The two command tests patch an imported name, as these files' existing
+    tests do. `TESTING.md` records that gap for these CLIs.
+
 ## 27. Closeout
 
 Confirm and promote the verified design, then archive last. This covers D1–D23

@@ -26,7 +26,6 @@ from __future__ import annotations
 from dynaconf import Dynaconf
 
 from core_storefront.service_peers import require_one_service_peer_per_site
-from market_alkahest import retired_address_book_keys, retired_address_book_refusal
 
 from market_storefront.retired_settings import (
     REMOVED_SETTINGS,
@@ -38,6 +37,7 @@ from market_storefront.utils.config import (
     configured_capacity_sites,
     get_registry_authorities,
     get_service_peer_configs,
+    retired_address_book_problems,
     settings,
     settlement_config_mapping,
 )
@@ -61,27 +61,15 @@ def retired_setting_problems(source: Dynaconf | None = None) -> list[str]:
         retired_setting_explanation(key)
         for key in (*RENAMED_SETTINGS, *REMOVED_SETTINGS)
         if active.get(key) is not None
-    ] + _retired_address_book_problems(active)
+    ] + retired_address_book_problems(active)
 
 
 def refuse_retired_address_book_keys(source: Dynaconf | None = None) -> None:
     """Refuse a retired Alkahest address-book key by name, under the retired
     settings heading, before anything resolves the settlement section."""
-    problems = _retired_address_book_problems(settings if source is None else source)
+    problems = retired_address_book_problems(settings if source is None else source)
     if problems:
         raise StorefrontStartupError(f"{RETIRED_SETTINGS_HEADING}: " + "; ".join(problems))
-
-
-def _retired_address_book_problems(source: Dynaconf) -> list[str]:
-    try:
-        settlement = settlement_config_mapping(source)
-    except ValueError:
-        # A [Settlement] that is not a table is reported as unresolvable.
-        settlement = {}
-    return [
-        retired_address_book_refusal(path)
-        for path in retired_address_book_keys(settlement, source.get("chains"))
-    ]
 
 
 def _registry_problems(source: Dynaconf) -> list[str]:

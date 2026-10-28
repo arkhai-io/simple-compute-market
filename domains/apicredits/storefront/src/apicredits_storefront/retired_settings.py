@@ -13,9 +13,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from dynaconf import Dynaconf
-from market_alkahest import retired_address_book_keys, retired_address_book_refusal
 
-from apicredits_storefront.utils.config import settings, settlement_config_mapping
+from apicredits_storefront.utils.config import retired_address_book_problems, settings
 
 RETIRED_SETTINGS_HEADING = "the storefront states retired settings"
 
@@ -38,7 +37,8 @@ REMOVED_SETTINGS: Mapping[str, str] = {
 
 def retired_setting_problems(source: Dynaconf | None = None) -> list[str]:
     """Name each renamed or removed setting the configuration still states, in
-    any spelling, with the key that replaced it or why nothing does."""
+    any spelling, with the key that replaced it or why nothing does, the
+    retired Alkahest address-book keys among them."""
 
     active = settings if source is None else source
     return [
@@ -49,21 +49,7 @@ def retired_setting_problems(source: Dynaconf | None = None) -> list[str]:
         f"{retired} was removed: {reason}"
         for retired, reason in REMOVED_SETTINGS.items()
         if active.get(retired) is not None
-    ] + [
-        # Nothing reads the retired Alkahest address-book keys any more.
-        retired_address_book_refusal(path)
-        for path in retired_address_book_keys(
-            _settlement_table(active), active.get("chains")
-        )
-    ]
-
-
-def _settlement_table(source: Dynaconf) -> dict:
-    try:
-        return settlement_config_mapping(source)
-    except ValueError:
-        # A [Settlement] that is not a table is refused when it is resolved.
-        return {}
+    ] + retired_address_book_problems(active)
 
 
 __all__ = [

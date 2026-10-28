@@ -25,6 +25,8 @@ from dynaconf import Dynaconf
 from market_alkahest import (
     AlkahestSettlementConfig,
     alkahest_address_book,
+    retired_address_book_keys,
+    retired_address_book_refusal,
     wallet_account_address,
 )
 from market_config.config_loader import (  # type: ignore[import-not-found]
@@ -222,12 +224,35 @@ def chain_address_books() -> dict[str, str | None]:
     kit, ``None`` for a chain the table names no book for, which uses the
     SDK's built-in addresses. The storefront hands this mapping to the
     packages it composes; none of them reads the table itself.
+
+    Raises ``ValueError`` naming each retired address-book key the
+    configuration states. Nothing reads those keys, so a command run without
+    the server, which refuses them at startup, would otherwise resolve a chain
+    the operator gave a book to as using the built-in addresses.
     """
+    problems = retired_address_book_problems()
+    if problems:
+        raise ValueError("; ".join(problems))
     raw = settlement_config_mapping().get("alkahest")
     section = (
         AlkahestSettlementConfig.model_validate(raw) if isinstance(raw, dict) else None
     )
     return {name: alkahest_address_book(section, name) for name in CHAINS}
+
+
+def retired_address_book_problems(source: Dynaconf | None = None) -> list[str]:
+    """Each retired Alkahest address-book key the configuration states, as the
+    refusal naming what replaces it."""
+    active = settings if source is None else source
+    try:
+        settlement = settlement_config_mapping(active)
+    except ValueError:
+        # A [Settlement] that is not a table is reported as unresolvable.
+        settlement = {}
+    return [
+        retired_address_book_refusal(path)
+        for path in retired_address_book_keys(settlement, active.get("chains"))
+    ]
 
 
 def chain_address_book(chain_name: str) -> str | None:

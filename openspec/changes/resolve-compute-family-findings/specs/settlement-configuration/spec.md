@@ -49,6 +49,14 @@ table, and migration MUST move either into it.
 - **THEN** the book is named under `[Settlement.alkahest.address_books]` for its chain, and
   migration refuses two different books for one chain
 
+#### Scenario: The section key does not reach every chain
+
+- **WHEN** an operator checks the migration of a seller configuration whose
+  `[Settlement.alkahest].address_config_path` moves to some of several configured chains
+- **THEN** migration names each other configured chain, whose claims will be serviced
+  against its entry in `[Settlement.alkahest.address_books]` or, where it has none, the
+  SDK's built-in addresses, before anything is written
+
 ## MODIFIED Requirements
 
 ### Requirement: An Alkahest section that cannot settle makes Alkahest unready
