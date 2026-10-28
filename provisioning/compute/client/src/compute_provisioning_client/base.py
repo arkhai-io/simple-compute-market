@@ -43,7 +43,11 @@ from market_identity import (
     verify_response,
 )
 
-from .errors import ComputeProvisioningAuthenticationError, ComputeProvisioningError
+from .errors import (
+    ComputeProvisioningAuthenticationError,
+    ComputeProvisioningError,
+    ComputeProvisioningUnauthenticatedResponseError,
+)
 
 CALLER_ROLES = frozenset({"seller", "admin"})
 
@@ -242,6 +246,12 @@ class SigningBase:
         return authorities
 
     def _verify(self, response: httpx.Response, signed: Signed, body: Any) -> None:
+        if SIGNATURE_HEADER not in response.headers:
+            raise ComputeProvisioningUnauthenticatedResponseError(
+                f"provisioning service answered HTTP {response.status_code} "
+                "without response authentication",
+                status_code=response.status_code,
+            )
         try:
             principal = Identity(
                 scheme=response.headers[IDENTITY_SCHEME_HEADER],

@@ -1,11 +1,11 @@
 [project]
 name = "arkhai-compute-provisioning-service"
-version = "0.18.0"
+version = "0.19.0"
 license = "MIT"
 description = "Deployable cross-domain compute provisioning service"
 requires-python = ">=3.12"
 dependencies = [
-    "arkhai-compute-provisioning-contracts>=0.10.0",
+    "arkhai-compute-provisioning-contracts>=0.11.0",
     "arkhai-kit-resource-pools-contracts>=0.2.0",
     "arkhai-core>=0.4.0",
     "arkhai-kit-config",

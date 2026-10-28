@@ -2065,7 +2065,7 @@ Files:
 - a rejection-path module in `provisioning/compute/service/tests/integration`;
 - `provisioning/compute/client/tests/unit/test_client.py`.
 
-- [ ] 13.1 The middleware maps section 12's typed error to an unsigned answer:
+- [x] 13.1 The middleware maps section 12's typed error to an unsigned answer:
   404, 405 with `Allow`, or 400 naming the field (D3).
   - Unit (`test_auth.py`): each case, unsigned.
   - Application integration, rejection path, asserting status and `Allow` only:
@@ -2077,14 +2077,59 @@ Files:
   Amended by section 10's plan correction (10.3): the 405 cases include a
   known site path under another method, since the service authenticates the
   site's routes through this middleware.
-- [ ] 13.2 The family client reports an answer with no response authentication
+
+  `ProvisioningAuthMiddleware.dispatch` answers a
+  `ProvisioningRouteResolutionError` with `_rejection(detail, status,
+  headers=…)`, unsigned, before authentication. As in `kit/site` (section
+  10), a request whose body or query cannot be read is answered by its route
+  first (`_route_by_path`): 404 or 405 when unroutable, the body's 400 only
+  when a contract serves it.
+  - Unit (`tests/unit/middleware/test_auth.py`, the real middleware over a
+    stand-in app and in-memory SQLite, for both signature schemes): an
+    unknown path 404; `DELETE /api/v1/fulfillment/schedule` 405 with
+    `Allow: POST`; `DELETE /api/v1/capacity/snapshot`, a site route, 405
+    with `Allow: GET`; the schedule route with an empty body or a numeric
+    reservation id 400, its detail naming `capacity_reservation_id`. Each
+    answer carries none of the seven authentication headers, neither the
+    request's signature nor its principal appears in its body or headers,
+    and no handler ran. A JSON body that does not parse answers 404 at an
+    unknown path, 405 with `Allow: GET` at the snapshot path under `DELETE`,
+    and the body's own 400 (not the missing-resource one) at the schedule
+    route. (This service hashes a non-JSON body rather than refusing it, so
+    only unparseable JSON or an unreadable query reaches that branch.)
+  - Application integration, rejection path (new
+    `tests/integration/test_unroutable_requests.py`, raw requests against
+    the composed `main.app`, status and `Allow` only): `GET /api/v1/nowhere`
+    404; `DELETE` on `/api/v1/fulfillment/schedule` 405 `Allow: POST`, on
+    `/api/v1/hosts/` 405 `Allow: GET, POST`, and on
+    `/api/v1/capacity/snapshot` 405 `Allow: GET`; the schedule route with an
+    empty body 400. Each request carries a placeholder signature header so
+    the harness's signing transport, which signs only routable requests,
+    passes it through.
+- [x] 13.2 The family client reports an answer with no response authentication
   as unauthenticated, with its status, and still refuses it. A malformed or
   other-principal signature is reported as today. The report contains no body,
   header value, or credential (D3).
   Unit (`test_client.py`): an unsigned 405 is refused and reported as an
   unauthenticated 405 (the scenario "The client and service route tables
   differ").
-- [ ] 13.3 Bump the service and the client, and run `make lock`. **Verification
+
+  `ComputeProvisioningUnauthenticatedResponseError`, a subclass of
+  `ComputeProvisioningAuthenticationError` so every catch still refuses it,
+  exported from `compute_provisioning_client`. `_verify`, shared by both
+  variants, reports an answer without `X-Market-Signature` as "provisioning
+  service answered HTTP <status> without response authentication" with its
+  `status_code`; a present but unreadable proof keeps "missing or malformed
+  …" and a failed verification its code. Unit (`test_client.py`): through
+  both the async and the sync client, an unsigned 405 carrying a canary body
+  and `Allow` header is refused with the new error and status 405, its
+  report naming neither canary nor the request's signature; through both, a
+  response carrying every authentication header with a proof over another
+  resource is refused as "authentication failed" and not as the new error;
+  the existing refusal cases now also assert that only the unsigned answer
+  is the new error and that another principal's answer reports
+  `wrong_principal`. Pass (67).
+- [x] 13.3 Bump the service and the client, and run `make lock`. **Verification
   checkpoint:**
   - 13.1–13.2;
   - `make test` in `provisioning/compute/service` and
@@ -2093,6 +2138,30 @@ Files:
 
   End-to-end: the provisioning smoke hook's `provisioning_security` check is
   unchanged. No scenario sends an unroutable request, and none is owed.
+
+  Over `dev`: `arkhai-compute-provisioning-service` `0.18.0` → `0.19.0` and
+  `arkhai-compute-provisioning-client` `0.8.0` → `0.9.0`; no exact pin names
+  either. The service's floor on the contracts rises to `0.11.0`, whose
+  typed errors its middleware reads; the client's does not, since it only
+  catches what it already caught. `make lock` moved every lock resolving
+  them.
+
+  `make test` (full, before the fresh-context fixes) passes. After them: the
+  service 605 unit and 443 integration, the client 67. `make
+  check-packaging` passes; `make check-change` passes its comment-hygiene
+  and other checks but for the closeout citation section 1 notes. No type
+  checker runs on either project.
+
+  Handoff, from the fresh-context check: it found the unreadable-body test
+  never reaching its branch, since this middleware hashes a non-JSON body
+  (now sent as unparseable JSON), the 400's field unasserted at the
+  middleware (asserted), a "malformed proof" test that failed on missing
+  headers (replaced by a full set with a bad proof, both variants), the
+  other-principal report unasserted (asserted), and the checks unrecorded
+  (recorded). Declined: the rejection-path module asserts `Allow` beside the
+  status, as the plan asked, a header and not a body field; its three 405
+  cases are kept, one each for a single-method family route, a two-method
+  one, and a site route.
 
 ## 14. Retired reservation states are converted at upgrade, and no reader names them
 

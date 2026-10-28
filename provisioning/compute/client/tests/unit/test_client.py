@@ -26,6 +26,7 @@ from market_identity import (
 from compute_provisioning_client import (
     ComputeProvisioningClient,
     ComputeProvisioningAuthenticationError,
+    ComputeProvisioningUnauthenticatedResponseError,
     SyncComputeProvisioningClient,
 )
 from compute_provisioning_contracts import (
@@ -230,13 +231,20 @@ async def test_client_rejects_wrong_authority_role_body_and_unsigned_response(
             unsigned=unsigned,
         ),
     ) as client:
-        with pytest.raises(ComputeProvisioningAuthenticationError):
+        with pytest.raises(ComputeProvisioningAuthenticationError) as refused:
             await client.authenticated_request(
                 "POST",
                 "/api/v1/fulfillment/begin",
                 {"capacity_reservation_id": "reservation-1"},
                 request_id="request-1",
             )
+    # Only the answer with no proof at all is reported as unauthenticated; one
+    # from another principal, role, or body keeps its verification result.
+    assert isinstance(
+        refused.value, ComputeProvisioningUnauthenticatedResponseError
+    ) is unsigned
+    if response_signer is not None:
+        assert "wrong_principal" in str(refused.value)
 
 
 @pytest.mark.parametrize(
@@ -285,6 +293,81 @@ async def test_client_exact_retry_fresh_signs_and_changed_reuse_fails_closed(
 
     assert seen[0]["x-market-timestamp"] != seen[1]["x-market-timestamp"]
     assert seen[0]["x-market-signature"] != seen[1]["x-market-signature"]
+
+
+@pytest.mark.parametrize("variant", ("async", "sync"))
+@pytest.mark.asyncio
+async def test_an_unsigned_405_is_refused_and_reported_as_unauthenticated(variant):
+    """The client and service route tables differ: the service answers an
+    unsigned 405, and the report names its status and nothing it said."""
+    caller = Ed25519Signer(b"\x11" * 32)
+    authority = Ed25519Signer(b"\x12" * 32)
+    sent: list[httpx.Request] = []
+
+    def unsigned(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(
+            405, json={"detail": "body-canary"}, headers={"Allow": "header-canary"}
+        )
+
+    client = _client(
+        variant,
+        caller=caller,
+        expected_authorities=TrustedIdentitySet(identities=(authority.identity,)),
+        transport=httpx.MockTransport(unsigned),
+    )
+    try:
+        with pytest.raises(ComputeProvisioningUnauthenticatedResponseError) as refused:
+            await _call(client, "table-drift")
+    finally:
+        await _close(client)
+
+    report = str(refused.value)
+    assert refused.value.status_code == 405
+    assert "HTTP 405" in report and "without response authentication" in report
+    for leaked in ("body-canary", "header-canary", sent[0].headers["X-Market-Signature"]):
+        assert leaked not in report
+
+
+@pytest.mark.parametrize("variant", ("async", "sync"))
+@pytest.mark.asyncio
+async def test_a_bad_response_proof_is_not_reported_as_unauthenticated(variant):
+    """Every authentication header present, its proof one the authority never
+    made: refused for the proof, as before, not as an unauthenticated answer."""
+    caller = Ed25519Signer(b"\x11" * 32)
+    authority = Ed25519Signer(b"\x12" * 32)
+
+    def forged(request: httpx.Request) -> httpx.Response:
+        signed = sign_response(
+            signer=authority,
+            envelope=ResponseEnvelope(
+                role="service",
+                principal=authority.identity,
+                method=request.method,
+                operation="provisioning_lease_get",
+                resource="another-reservation",
+                request_id=request.headers["X-Market-Request-ID"],
+                timestamp=int(time.time()),
+                status=200,
+                body_hash=canonical_body_hash({}),
+            ),
+        )
+        return httpx.Response(200, json={}, headers=_identity_headers(signed))
+
+    client = _client(
+        variant,
+        caller=caller,
+        expected_authorities=TrustedIdentitySet(identities=(authority.identity,)),
+        transport=httpx.MockTransport(forged),
+    )
+    try:
+        with pytest.raises(ComputeProvisioningAuthenticationError) as refused:
+            await _call(client, "forged")
+    finally:
+        await _close(client)
+
+    assert not isinstance(refused.value, ComputeProvisioningUnauthenticatedResponseError)
+    assert "authentication failed" in str(refused.value)
 
 
 async def _call(client, request_id):
