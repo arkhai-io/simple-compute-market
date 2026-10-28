@@ -24,7 +24,9 @@ lands.
 
 **Dependency gating implementation.** Sections 10–26 wait for
 `unbacked-bare-metal-listings` to land on `dev`, and start from `dev` with it
-merged (design D2). Sections 1–9 do not wait. Each of them names every file it
+merged (design D2). Sections 1–9 do not wait. (Amended: by the owner's
+decision B in section 9's notes, section 9 waits too, since its test harness
+is a file the branch edits.) Each of them names every file it
 shares with that change's branch, and why the file merges mechanically. The
 partition was derived from the branch at `c6e2108`, compared against its merge
 base with `dev`, `73d3760`, and checked against `dev` at `1e5ba29`, after
@@ -1411,6 +1413,30 @@ Shared with the branch:
 - **`test_pool_overrides_api.py`.** The branch edits two assertions in it. This
   section does not change that file.
 - **Version line:** the VM storefront's, already bumped by section 8.
+
+**Stopped before implementation, for the owner (D2's rule).** A router with no
+prefix is mounted only where an app lists it, and the VM storefront's
+integration harness, `domains/vms/storefront/tests/publication_app.py`, builds
+its app from an explicit router list (`admin_router`, `listings_admin_router`,
+and the rest, base lines 701–707) and imports `admin_router` at line 60.
+`test_pool_overrides_api.py` and every introduction test (through
+`tests/introduction_deals.py`'s `offer_introduction`) write pool overrides
+through that app, so without the new router in its list they answer 404. The
+plan does not name `publication_app.py`, and the branch at `c6e2108` edits it:
+its hunks are at base lines 31–45 (imports), 105–283
+(`SettlementCompositionDouble`), 341, and 615–634 (container names and the
+system service). This section's two edits, the import at line 60 and the
+router list at 701–707, are separated from all of them by unchanged lines, so
+they would merge mechanically (D2's third kind). No other harness needs the
+router: `test_admin_api.py`, `test_site_trust.py`, and
+`test_negotiate_controller.py` mount `admin_router` but write no override.
+Nothing of section 9 was written when this was found.
+
+**The owner's decision (B).** Section 9 waits for `unbacked-bare-metal-listings`
+to land, as sections 10–26 do, and is implemented in round 2 from `dev` with
+the branch merged, editing `publication_app.py`'s router list beside
+`server.py`'s. Its shared-file notes above were derived before the merge and
+are re-checked then.
 
 - [ ] 9.1 Move the pool-override routes to a router with no prefix, declared at
   `POOL_OVERRIDES_PATH`, and mount it in the routers tuple (D16).
