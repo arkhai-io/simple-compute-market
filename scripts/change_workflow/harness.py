@@ -13,6 +13,7 @@ passed over.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -54,6 +55,11 @@ UNATTENDED = (
     "read; name the substitute in your message. Never ask about a denial as a question. Never "
     "end your turn, schedule a wake-up, or start a monitor to wait for a background command or "
     "subagent: run a subagent in the foreground, and wait for a command as your skill says. A turn that starts after you have reported ends the run in your report's place.")
+
+# Set in the environment of every run the wrapper starts on Claude, so a command
+# the run starts can tell it is inside one: the wrapper records that run's outcome,
+# and a step's own recording of it would write it twice.
+UNATTENDED_RUN = "CHANGE_WORKFLOW_UNATTENDED"
 
 # The retries a run is given after a network error, on the same model: a network
 # error says nothing of the model's availability, so it never falls to the next.
@@ -129,8 +135,11 @@ def unreachable(text: str) -> Reached:
 
 
 def run_claude(command: Sequence[str], cwd: Path, feed: Callable[[str], None]) -> int:
+    """Run a headless Claude Code turn, every command it starts seeing in its
+    environment that the run is the wrapper's (`UNATTENDED_RUN`)."""
     process = subprocess.Popen(list(command), cwd=cwd, stdin=subprocess.DEVNULL,
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                               env={**os.environ, UNATTENDED_RUN: "1"},
                                text=True, encoding="utf-8", errors="replace")
     assert process.stdout is not None
     try:

@@ -27,13 +27,23 @@ let it read the repository and its history and edit nothing. Nothing in this
 skill changes for either: your final message is the review, and nothing else —
 on Claude too, where no outcome schema is given. It carries no structured
 outcome; `scripts/run_change_step.py` checks it, publishes it, and logs an outcome
-from the record it publishes, or a stopped one when your message is not a review.
+from the record it publishes, naming as its exit a review's one successor, the
+triage of its kind (`{"step": "triage", "kind": "<kind>"}`), or a stopped one when
+your message is not a review.
 Nobody can answer a question in the session; where this skill would ask, say so
 in the review instead. Run one command per Bash call: on Claude, a chained command
 runs only when every command in it is allowed. Run Git in the current checkout,
 never with `-C`: the review already runs in the checkout it reads, and no rule
 allows `git -C`, since a wildcard after `-C` would also span a push. Run Make here
 too, never `make -C <a checkout>`: `-C` names only a subdirectory a skill names.
+
+## Running interactively
+
+A review asked for in an interactive session, outside `make review`, records
+nothing, unlike every other step: it changes no file, so it publishes no record,
+and a review run's outcome names the record its run published. Your final message
+is still the review alone. The owner pastes it into a triage, which saves it as the
+change's next `NN-<kind>-external.md` and triages it like any other review.
 
 ## 1. Load everything first
 

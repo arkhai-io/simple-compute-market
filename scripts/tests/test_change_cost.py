@@ -28,7 +28,7 @@ cost = _load("change_cost")
 
 CHANGE = "shape-bounds"
 COMMIT = "7f3c6e90"
-FINISHED = {"outcome": "finished", "message": "Done.", "next": "next", "denials": []}
+FINISHED = {"outcome": "finished", "message": "Done.", "next": {"step": "plan"}, "denials": []}
 
 
 def _clock() -> datetime:

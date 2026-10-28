@@ -31,6 +31,139 @@ def test_the_command_line_records_a_branch_decision(
     assert [(entry["branch"], entry["change"]) for entry in shown] == [("feat/x", CHANGE)]
 
 
+# `record`: a step the owner runs interactively records its own outcome.
+
+def _committed(root: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """`root` made a Git repository with one commit, whose id is returned."""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    for command in (["init", "-q"], ["-c", "user.name=t", "-c", "user.email=t@example.invalid",
+                                     "commit", "-q", "--allow-empty", "-m", "start"]):
+        subprocess.run(["git", *command], cwd=root, check=True, capture_output=True)
+    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+
+def _triaged(log: Path, *names: str) -> None:
+    log.parent.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        (log.parent / name).with_suffix(".md").write_text("A record.\n", "utf-8")
+        (log.parent / name).with_suffix(".triage.md").write_text("Its triage.\n", "utf-8")
+
+
+TRIAGED = {"outcome": "finished", "message": "Advance to planning.",
+           "triaged": ["13-design"], "next": {"step": "plan"}}
+INTERACTIVE = {"CLAUDE_CODE_SESSION_ID": "5e55-1011"}
+
+
+def test_an_interactive_triage_records_its_outcome(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    head = _committed(tmp_path, monkeypatch)
+    log = log_file(tmp_path)
+    _triaged(log, "13-design")
+
+    assert main(["record", CHANGE, "triage", "--outcome", json.dumps(TRIAGED)], root=tmp_path,
+                environ=INTERACTIVE) == 0
+
+    (line,) = read_log(log)
+    assert {key: line[key] for key in TRIAGED} == TRIAGED
+    assert (line["step"], line["session"], line["commit"], line["interactive"],
+            line["format"]) == ("triage", "5e55-1011", head, True, 2)
+    assert json.loads(capsys.readouterr().out) == line
+
+
+DESIGNED = {**VALID["finished"], "next": {"step": "review", "kind": "design"}}
+
+
+def _record(tmp_path: Path, step: str, outcome: dict | str, environ: dict, *more: str,
+            head: str | None = COMMIT) -> int:
+    """`record` run with `HEAD` given, through the wrapper's seam."""
+    wrapper = make_wrapper(tmp_path, FakeClaude())
+    wrapper.head = lambda _: head
+    text = outcome if isinstance(outcome, str) else json.dumps(outcome)
+    return main(["record", CHANGE, step, "--outcome", text, *more], root=tmp_path,
+                wrapper=wrapper, environ=environ)
+
+
+@pytest.mark.parametrize("environ", [{}, INTERACTIVE])
+def test_a_session_given_is_recorded_whatever_the_harness_exports(
+        tmp_path: Path, environ: dict) -> None:
+    log = log_file(tmp_path)
+
+    assert _record(tmp_path, "design", DESIGNED, environ, "--session", "given") == 0
+
+    assert read_log(log)[-1]["session"] == "given"
+
+
+@pytest.mark.parametrize("step,outcome,environ,more,named", [
+    ("design", DESIGNED, {}, (), "CLAUDE_CODE_SESSION_ID is not set"),
+    ("design", DESIGNED, {**INTERACTIVE, "CHANGE_WORKFLOW_UNATTENDED": "1"}, (),
+     "the wrapper records its outcome"),
+    # A session given does not make a wrapper's run interactive.
+    ("design", DESIGNED, {"CHANGE_WORKFLOW_UNATTENDED": "1"}, ("--session", "given"),
+     "the wrapper records its outcome"),
+    ("deploy", DESIGNED, INTERACTIVE, (), "unknown step 'deploy'"),
+    ("design", {"outcome": "finished", "message": "Done."}, INTERACTIVE, (),
+     "outcome has no next"),
+    ("design", {**VALID["finished"], "next": {"step": "review"}}, INTERACTIVE, (),
+     "names no node"),
+    ("triage", {**TRIAGED, "triaged": ["31-design"]}, INTERACTIVE, (),
+     "31-design is no record in reviews/"),
+    ("triage", {**TRIAGED, "triaged": []}, INTERACTIVE, (), "not a non-empty list"),
+    ("design", "finished", INTERACTIVE, (), "--outcome is not JSON"),
+])
+def test_a_record_refused_writes_nothing_and_says_why(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str], step: str, outcome,
+        environ: dict, more: tuple, named: str) -> None:
+    log = log_file(tmp_path)
+    _triaged(log, "13-design")
+
+    assert _record(tmp_path, step, outcome, environ, *more) == 1
+
+    assert named in capsys.readouterr().err
+    assert not log.exists()
+
+
+def test_a_record_without_head_is_refused(tmp_path: Path,
+                                          capsys: pytest.CaptureFixture[str]) -> None:
+    log = log_file(tmp_path)
+
+    assert _record(tmp_path, "design", DESIGNED, INTERACTIVE, head=None) == 1
+
+    assert "the commit at HEAD" in capsys.readouterr().err
+    assert not log.exists()
+
+
+@pytest.mark.parametrize("flags,target", [
+    (["--next", "validate", "--target", "implement", "--sections", "5;6"],
+     {"step": "validate", "target": {"step": "implement", "sections": [[5], [6]]}}),
+    (["--next", "validate", "--target", "review", "--kind", "implementation"],
+     {"step": "validate", "target": {"step": "review", "kind": "implementation"}}),
+    (["--next", "implement", "--sections", "5"], {"step": "implement", "sections": [[5]]}),
+])
+def test_the_command_line_builds_the_owners_direction(tmp_path: Path, flags: list[str],
+                                                       target: dict) -> None:
+    log = log_file(tmp_path)
+
+    assert main(["note", CHANGE, "orchestrator", "--decision", "d", "--reason", "r",
+                 "--by", "owner", *flags], root=tmp_path) == 0
+
+    assert read_log(log)[-1]["next"] == target
+
+
+def test_the_command_line_refuses_a_direction_naming_no_node(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    log = log_file(tmp_path)
+
+    assert main(["note", CHANGE, "orchestrator", "--decision", "d", "--reason", "r",
+                 "--by", "owner", "--next", "validate"], root=tmp_path) == 1
+
+    assert ("validate's entry guard (it carries a target that is a node) is not met"
+            in capsys.readouterr().err)
+    assert not log.exists()
+
+
 def test_sections_parse_by_session(tmp_path: Path) -> None:
     assert parse_sections("1,2; 3 ;5B") == [[1, 2], [3], ["5B"]]
 
@@ -44,7 +177,7 @@ def test_the_command_line_notes_a_round_and_prints_the_log(
     assert main(["note", CHANGE, "round", "--sections", "1;2,3", "--after", "4"],
                 root=tmp_path) == 0
     assert main(["note", CHANGE, "orchestrator", "--decision", "d", "--reason", "r",
-                 "--by", "owner", "--next", "review", "--kind", "closeout"],
+                 "--by", "owner", "--next", "review", "--kind", "pre-closeout"],
                 root=tmp_path) == 0
     assert main(["note", CHANGE, "orchestrator", "--decision", "gap", "--reason", "r",
                  "--reads", "1"], root=tmp_path) == 0
@@ -57,22 +190,16 @@ def test_the_command_line_notes_a_round_and_prints_the_log(
     assert (entries[0]["sections"], entries[0]["after"]) == ([[1], [2, 3]], 4)
     # A round recorded after the fact started at a commit that is no longer HEAD.
     assert "commit" not in entries[0]
-    assert (entries[1]["by"], entries[1]["next"], entries[1]["kind"]) == (
-        "owner", "review", "closeout")
+    assert (entries[1]["by"], entries[1]["next"]) == (
+        "owner", {"step": "review", "kind": "pre-closeout"})
     assert entries[2]["reads"] == 1
     assert [entry["seq"] for entry in printed] == [4]
 
 
 def test_a_round_noted_as_it_starts_records_head(tmp_path: Path,
                                                  monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
-    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     log = log_file(tmp_path)
-    for command in (["init", "-q"], ["-c", "user.name=t", "-c", "user.email=t@example.invalid",
-                                     "commit", "-q", "--allow-empty", "-m", "start"]):
-        subprocess.run(["git", *command], cwd=tmp_path, check=True, capture_output=True)
-    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_path, check=True,
-                          capture_output=True, text=True).stdout.strip()
+    head = _committed(tmp_path, monkeypatch)
 
     assert main(["note", CHANGE, "round", "--sections", "2", "--by", "plan"],
                 root=tmp_path) == 0

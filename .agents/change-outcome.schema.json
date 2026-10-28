@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Change step outcome",
-  "description": "The structured outcome an unattended step of an OpenSpec change ends its turn with. Contract: openspec/specs/change-workflow/spec.md.",
+  "description": "The structured outcome a step of an OpenSpec change ends with: an unattended run's last turn, or what an interactive run records through run_change_step.py record. Contract: openspec/specs/change-workflow/spec.md.",
   "type": "object",
   "properties": {
     "outcome": {
@@ -14,18 +14,34 @@
       "minLength": 1
     },
     "next": {
-      "description": "finished: what the step says comes next.",
-      "type": "string",
-      "minLength": 1
+      "description": "finished and returned: the exit the step takes, as a target naming a node of the workflow graph — its step; kind for a review, and for a triage the kind of review it triages; sections for an implementation out of the plan's order, as rounds names them; for a validation the target it is for; {\"step\": \"done\"} once archive cleanup has run. A return names the step it returns to: {\"step\": \"design\"}, {\"step\": \"plan\"}, or, from closeout, implementation's {\"step\": \"round\"}. What the step says of what follows goes in message.",
+      "type": "object",
+      "properties": {
+        "step": {"type": "string", "minLength": 1},
+        "kind": {"type": "string", "minLength": 1},
+        "sections": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"anyOf": [{"type": "integer"}, {"type": "string", "minLength": 1}]}
+          }
+        },
+        "target": {"type": "object"}
+      },
+      "required": ["step"],
+      "additionalProperties": false
+    },
+    "triaged": {
+      "description": "triage, finished or returned: the records the triage triaged, each named as its file is without .md, NN-<kind> — the reviews, and any validation, owner's notes, or orchestrator's observations triaged with them; each has its triage file beside it, and at least one is a review.",
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
     },
     "awaiting": {
       "description": "question: what the step waits for from the owner.",
       "type": "string",
       "minLength": 1
-    },
-    "return_to": {
-      "description": "returned: the phase the step proposes returning to.",
-      "enum": ["design", "planning", "implementation"]
     },
     "evidence": {
       "description": "returned: where the evidence for the return is recorded.",
@@ -70,7 +86,7 @@
     {"if": {"properties": {"outcome": {"const": "question"}}},
      "then": {"required": ["awaiting"]}},
     {"if": {"properties": {"outcome": {"const": "returned"}}},
-     "then": {"required": ["return_to", "evidence"]}},
+     "then": {"required": ["next", "evidence"]}},
     {"if": {"properties": {"outcome": {"const": "blocked"}}},
      "then": {"required": ["blocked_on"]}},
     {"if": {"properties": {"outcome": {"const": "stopped"}}},
