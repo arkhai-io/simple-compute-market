@@ -576,7 +576,8 @@ tests `domains/vms/domain/tests/test_schema.py`,
   `vm_listing_resource_shape`, since every lock pins the tree's 0.7.0 wheel and versions
   are not bumped per change. *Correction (section 7):* versions are bumped once per change
   under `RELEASING.md`'s policy, and this change has bumped none; the bound moves with that
-  bump, which section 7's handoff leaves to the owner.
+  bump, which section 7's handoff leaves to the owner. The round-2 triage fix (31 F1,
+  under 7.5) raised it to `arkhai-vms>=0.8.0`.
 
   *Handoff.* `DEPLOYMENT_AND_CONFIG.md` ("Storefront listing shapes and pool overrides",
   the constraint bullet) still says "`gpu.count` and `gpu.model` are required, so
@@ -871,6 +872,50 @@ Files: `domains/vms/listings/src/arkhai_vms_listings/pricing.py` (`extract_compu
   and they move exact pins and need `make lock`, so they are the owner's to place: a fix
   round before closeout, or a plan amendment. Section 5's note declining a raised bound
   "since versions are not bumped per change" was wrong on that point (see its correction).
+
+  *Round-2 triage fix (31 F1).* Every published package whose wheel this change alters
+  takes one minor bump against its version on `dev`, as `RELEASING.md`'s versioning policy
+  sets for a change below 1.0: `arkhai-kit-capability-shape` 0.3.0, `arkhai-compute` 0.2.0,
+  `arkhai-bare-metal` 0.14.0, `arkhai-bare-metal-storefront` 0.23.0, `arkhai-vms` 0.8.0,
+  `arkhai-vms-listings` 0.8.0, `arkhai-vms-settlement` 0.4.0, `arkhai-vms-storefront`
+  0.23.0, `arkhai-core-storefront-client` 0.28.0, `arkhai-compute-provisioning-contracts`
+  0.11.0, `arkhai-compute-provisioning` 0.21.0, `arkhai-compute-provisioning-ansible`
+  0.5.0, and `arkhai-compute-provisioning-service` 0.19.0. `arkhai-core-registry` is not
+  bumped: `filter-spec.yaml` is copied into its image, not built into its wheel. Lower
+  bounds rise where a consumer needs the new behaviour: `arkhai-compute`, `arkhai-vms`, and
+  `arkhai-bare-metal` on `arkhai-kit-capability-shape>=0.3.0` (a required field only in a
+  named family) and the two domains on `arkhai-compute>=0.2.0`; `arkhai-vms-listings` on
+  `arkhai-vms>=0.8.0` (`vm_listing_resource_shape`); `arkhai-bare-metal-storefront` on
+  `arkhai-bare-metal>=0.14.0`; `arkhai-vms-storefront` on `arkhai-vms>=0.8.0`,
+  `arkhai-vms-listings>=0.8.0`, and `arkhai-vms-settlement>=0.4.0` (lease terms without
+  GPU keys); `arkhai-compute-provisioning` on contracts `>=0.11.0`, since it builds a
+  `HostResponse` without the GPU fields contracts 0.10.0 requires; the provisioning
+  service on contracts `>=0.11.0`, `arkhai-compute-provisioning>=0.21.0`, and
+  `arkhai-compute-provisioning-ansible>=0.5.0`, since an `InventoryHost` without GPU
+  fields refuses the older parser's entries. Two packages whose source this change leaves
+  alone take a patch bump for a raised bound: `arkhai-compute-provisioning-client` 0.8.1 on
+  contracts `>=0.11.0`, since it parses a `HostResponse` a 0.11.0 service sends without
+  GPU fields, and `arkhai-kit-capability-admissibility` 0.1.1 on
+  `arkhai-kit-capability-shape>=0.3.0`, since it splits a shape omitting the GPU family
+  only under 0.3.0. The unpublished e2e suite parses host responses too, so it requires
+  contracts `>=0.11.0`. Exact pins moved: the VM storefront's
+  `arkhai-bare-metal-storefront==0.23.0` and the provisioning service's
+  `arkhai-core-storefront-client==0.28.0`. Consumers whose own code works with either
+  version keep their bounds: the buyers, which on older listing and domain packages still
+  run but cannot read a GPU-less listing, and the provisioning adapters, which use no host
+  GPU field.
+  `make lock` refreshed every lock; it changed only internal package versions.
+  Checks: `make check-packaging` passes (lock, image-install, and architecture rules); root
+  `make test`, every unit and integration suite, exited 0 on the final manifests and locks;
+  `make check-change` passes. Fresh-context check: every changed published package bumped
+  once, by a minor, and no stale exact pin; it found the provisioning client's and the
+  admissibility kit's bounds still admitting a version that misbehaves, and the e2e
+  sentence false (the suite parses host responses), all three now fixed; it noted the VM
+  storefront's direct `arkhai-bare-metal>=0.10.0`, which its `==0.23.0` pin on the
+  bare-metal storefront already lifts to 0.14.0, left as it is. When `dev` is merged
+  into this branch before closeout, each of these bumps is rechecked against the merged
+  `dev` version, and a package `dev` has since bumped is bumped again from it, its pins
+  moving with it.
 
 ## 8. A GPU-less VM deal end to end
 

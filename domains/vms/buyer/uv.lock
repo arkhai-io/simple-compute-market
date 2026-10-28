@@ -110,13 +110,13 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-capability-shape" },
 ]
 wheels = [
-    { path = "arkhai_compute-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_compute-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -195,13 +195,13 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-capability-admissibility"
-version = "0.1.0"
+version = "0.1.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-capability-shape" },
 ]
 wheels = [
-    { path = "arkhai_kit_capability_admissibility-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_capability_admissibility-0.1.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -217,10 +217,10 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-capability-shape"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../../.dist" }
 wheels = [
-    { path = "arkhai_kit_capability_shape-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_capability_shape-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -322,7 +322,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms"
-version = "0.7.0"
+version = "0.8.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-compute" },
@@ -333,7 +333,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms-0.7.0-py3-none-any.whl" },
+    { path = "arkhai_vms-0.8.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -407,7 +407,7 @@ dev = [
 
 [[package]]
 name = "arkhai-vms-listings"
-version = "0.7.0"
+version = "0.8.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-alkahest" },
@@ -418,7 +418,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms_listings-0.7.0-py3-none-any.whl" },
+    { path = "arkhai_vms_listings-0.8.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -436,14 +436,14 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-settlement"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-vms-listings" },
 ]
 wheels = [
-    { path = "arkhai_vms_settlement-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_vms_settlement-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]

@@ -4,7 +4,7 @@ requires-python = ">=3.12, <3.14"
 
 [[package]]
 name = "arkhai-kit-capability-admissibility"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-kit-capability-shape" },
@@ -16,17 +16,17 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "arkhai-kit-capability-shape", specifier = ">=0.2.0" }]
+requires-dist = [{ name = "arkhai-kit-capability-shape", specifier = ">=0.3.0" }]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
 
 [[package]]
 name = "arkhai-kit-capability-shape"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../.dist" }
 wheels = [
-    { path = "arkhai_kit_capability_shape-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_capability_shape-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
