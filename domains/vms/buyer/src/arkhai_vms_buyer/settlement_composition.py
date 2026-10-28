@@ -174,12 +174,3 @@ def alkahest_entry_from_selection(
     return buyer_stage(selected.selection.mechanism).accepted_entry(selected)
 
 
-def resolve_alkahest_address_config_path(
-    config: Mapping[str, Any] | None = None,
-) -> str | None:
-    """Resolve Alkahest's public address book without enabling new admission."""
-
-    policy = resolve_buyer_settlement_policy(config)
-    section = policy.config.mechanism_config("alkahest")
-    value = getattr(section, "address_config_path", None)
-    return value if isinstance(value, str) and value else None

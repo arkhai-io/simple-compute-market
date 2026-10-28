@@ -114,7 +114,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-apicredits-buyer"
-version = "0.6.0"
+version = "0.7.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "alkahest-py" },
@@ -132,7 +132,7 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_apicredits_buyer-0.6.0-py3-none-any.whl" },
+    { path = "arkhai_apicredits_buyer-0.7.0-py3-none-any.whl" },
 ]
 
 [[package]]

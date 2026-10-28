@@ -3880,15 +3880,89 @@ Files:
   - `e2e-tests/tests/e2e/roles/scenarios/apicredits/test_credits_deal_buyer_cli.py`;
 - the buyers' tests that state the old keys.
 
-- [ ] 25.1 Each buyer CLI resolves a chain's book through the operation, and
+- [x] 25.1 Each buyer CLI resolves a chain's book through the operation, and
   passes the mapping to the codec and negotiation packages it calls. Buyers keep
   their tolerance of a wallet mismatch (D11, D10).
   Unit, in each buyer's suite:
   - a buyer configuration with the map resolves `anvil`'s book;
   - a chain the map does not name uses the built-in addresses.
-- [ ] 25.2 The e2e harness writes buyer configurations with the map (D11).
+
+  Each buyer's `common.py` gains `chain_address_book(chain, config=None)`
+  and `chain_address_books(config=None)`. They read the buyer's
+  `[Settlement.alkahest]` and resolve through `alkahest_address_book`.
+  `common` sits below `settlement_composition`, which imports the CLI
+  modules, so every reader can import it without a cycle.
+
+  VM buyer readers:
+  - `load_buyer_chain`'s `chain_config_paths` default;
+  - the plan validator, which read the chain table's key;
+  - the settle path's escrow terms and creation, which read the section key
+    for every chain and now read the chain's own book;
+  - resume, whose `BuyerResumeContext.resolve_address_book` now takes the
+    chain, called once the chain is known;
+  - `resolve_chain_settings`;
+  - `escrow_cli`'s create, reclaim, and inspect;
+  - `chain_cli`'s probe;
+  - `config init`'s template, which names the table.
+
+  `resolve_alkahest_address_config_path` is removed. `settle_cli` and
+  `escrow_cli` each define a module-level `chain_address_book` as their seam,
+  per TESTING.md's command-module convention, and their tests replace it.
+
+  API-credit buyer readers: `load_buyer_chain`, `settle_cli`'s resume, and
+  `buy_cli`'s escrow resolution. `settle_cli` and `buy_cli` each define a
+  module-level `chain_address_book` seam too, and the settle tests replace
+  `settle_cli.chain_address_book`.
+
+  Every import of `chain_address_book(s)` the section added is at module
+  level (`buyer_client.py` in both buyers, and VM's `chain_cli.py` and
+  `deal_helpers.py`). The suites pass with them there, so none has a cycle.
+
+  The bare-metal buyer states no book and is unchanged. Buyers' wallet
+  tolerance is unchanged: readiness judges a mismatch for the seller role
+  alone (section 22).
+
+  Unit, `tests/test_address_books.py` in each buyer's suite, new:
+  - `test_a_buyer_configuration_with_the_table_resolves_anvils_book`;
+  - `test_a_chain_the_table_does_not_name_uses_the_built_in_addresses`, which
+    shows the resolver answers `None` for the unnamed chain; that `None`
+    reaches the SDK's addresses is the kit's (section 24's
+    `test_a_chain_the_table_names_no_book_for_uses_the_sdks_addresses`);
+  - VM's suite adds a buyer with no Alkahest section naming no book.
+
+  These test the resolver. The readers that call it are covered only where
+  existing command tests run them, with the seam replaced by a function
+  that ignores the chain, so the chain each reader passes is not checked:
+  - VM's `settle_cli` resume and `escrow_cli` create;
+  - API credits' `settle_cli` resume.
+
+  `load_buyer_chain`'s default, `chain check`, `escrow show`, and API
+  credits' `buy_cli` resolution have no test. The VM storefront's
+  `test_buyer_selection_negotiation.py` runs VM's plan validator over a
+  `buyer.toml` stating the table: 476 passed in that suite.
+
+  `escrow show` resolves the book inside its `try`, as `reclaim` does, so an
+  invalid Alkahest section is reported, not raised.
+
+  Results: VM buyer 210 passed, API-credit buyer 33 passed.
+- [x] 25.2 The e2e harness writes buyer configurations with the map (D11).
   Verify: `make -C e2e-tests test-unit`.
-- [ ] 25.3 Bump the VM, API-credit, and bare-metal buyers as changed, and run
+
+  `buyer_cli.py`'s VM buyer and `test_credits_deal_buyer_cli.py`'s API-credit
+  buyer now name `anvil`'s book in `[Settlement.alkahest].address_books`,
+  and neither retired key. `compute_deal_stages.py` and
+  `test_full_deal_buyer_cli.py` write no buyer book; section 24 corrected
+  their storefront diagnostics. The VM storefront's
+  `test_buyer_selection_negotiation.py`, whose buyer reads `buyer.toml`,
+  states the table too. `e2e-tests`' floors are `arkhai-vms-buyer>=0.9.0`
+  and `arkhai-apicredits-buyer>=0.7.0`, and the VM storefront's dev floor
+  on its buyer is `>=0.9.0`.
+
+  `make -C e2e-tests test-unit`: 172 passed. No unit test reads the
+  configurations the harness writes, so that run shows the harness still
+  imports and its checks hold, not the configurations; the lanes are their
+  evidence. A search of `e2e-tests` finds neither retired key.
+- [x] 25.3 Bump the VM, API-credit, and bare-metal buyers as changed, and run
   `make lock`. **Verification checkpoint:**
   - 25.1–25.2;
   - `make test` in `domains/vms/buyer`, `domains/apicredits/buyer`, and
@@ -3898,6 +3972,27 @@ Files:
   End-to-end: `e2e_deal_buyer_cli`, `e2e_buy`, and `e2e_credits_deal` fund
   escrows with the buyer's `anvil` book from the map, which is the evidence for
   this section.
+
+  Bumps:
+  - `arkhai-vms-buyer` 0.8.0 → 0.9.0;
+  - `arkhai-apicredits-buyer` 0.6.0 → 0.7.0;
+  - each raises its `arkhai-kit-alkahest` floor to `>=0.11.0`;
+  - the bare-metal buyer is unchanged and unbumped.
+
+  `make lock` moved both in every lock installing them. Results:
+  - VM buyer 210 and API-credit buyer 33 passed;
+  - the bare-metal buyer passes within full `make test`;
+  - full `make test`, `make check-packaging`, and `make check-comment-hygiene`
+    (within `make check-change`): pass;
+  - `make check-change`: only the closeout citation.
+
+  Handoff: until section 26, the buyers, like the storefronts, ignore a
+  retired key without refusing it, so sections 25 and 26 must reach a
+  release together. `kit/alkahest`'s `anvil` diagnostic still names the
+  chain key; section 26 names the table. No test covers a buyer whose
+  address is not its key's account: section 22 judges the mismatch for the
+  seller role alone, and `test_a_buyer_whose_address_is_not_its_keys_is_not_refused`
+  covers it at the kit.
 
 ## 26. The retired address-book keys are refused and migrated
 

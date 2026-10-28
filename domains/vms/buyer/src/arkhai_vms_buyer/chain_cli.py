@@ -17,6 +17,8 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from .common import buyer_chains, chain_address_book
+
 chain_app = typer.Typer(no_args_is_help=True)
 
 
@@ -38,8 +40,6 @@ def chain_check(
 
     Exits 0 on full match, 4 if any address has no bytecode.
     """
-    from .common import buyer_chains
-
     chains = buyer_chains()
     if not chains:
         typer.secho(
@@ -71,7 +71,7 @@ def chain_check(
         try:
             cfg = resolve_alkahest_address_config(
                 name,
-                config_path=chain.alkahest_address_config_path,
+                config_path=chain_address_book(name),
             )
         except Exception as exc:
             typer.secho(

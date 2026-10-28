@@ -143,9 +143,9 @@ def fake_chain_config(monkeypatch):
         name="anvil",
         rpc_url="http://anvil:8545",
         chain_id=31337,
-        alkahest_address_config_path=None,
     )
     monkeypatch.setattr(common, "chain_by_name", lambda name: chain)
+    monkeypatch.setattr(settle_cli, "chain_address_book", lambda _name: None)
     monkeypatch.setattr(
         common,
         "resolve_buyer_wallet",
@@ -422,9 +422,9 @@ def _settle_recorded_run(tmp_path, monkeypatch, *, plan: dict) -> tuple[int, lis
         "chain_by_name",
         lambda _name: SimpleNamespace(
             name="anvil", rpc_url="http://anvil:8545", chain_id=31337,
-            alkahest_address_config_path=_BOOK,
         ),
     )
+    monkeypatch.setattr(settle_cli, "chain_address_book", lambda _name: _BOOK)
     funded: list = []
 
     def _record(**_kwargs):

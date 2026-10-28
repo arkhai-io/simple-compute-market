@@ -30,6 +30,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from . import common
 from .deal_helpers import load_deal_context
 from .escrow_client import (
     looks_like_propagation_lag,
@@ -37,6 +38,11 @@ from .escrow_client import (
 )
 from .payments import configured_payer_account, settle_api_credit_payment
 from .settlement_composition import buyer_stage, resolve_buyer_settlement_policy
+
+
+def chain_address_book(chain_name: str) -> str | None:
+    """The Alkahest address book the buyer names for ``chain_name``."""
+    return common.chain_address_book(chain_name)
 
 
 def _chain_name_from_run_log(run_id: str, *, signer: Signer) -> Optional[str]:
@@ -283,7 +289,7 @@ def run_settle_from_log(
             buyer_private_key=resolved_evm_private_key,
             rpc_url=chain_cfg.rpc_url,
             chain_name=chain_cfg.name,
-            alkahest_addr_config=chain_cfg.alkahest_address_config_path,
+            alkahest_addr_config=chain_address_book(chain_cfg.name),
         )
         log = open_run_log(run_id, signer=signer, profile_id=identity.profile_id)
         log.event("settle_resumed")

@@ -9,13 +9,14 @@ from __future__ import annotations
 import json
 
 import typer
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from core_buyer.orchestrator import fetch_listing_dict
 from core_buyer.run_log import read_run
+from market_alkahest import alkahest_address_book
 from market_identity import Signer, TrustedIdentitySet
-from market_config.config_loader import ChainConfig, chains_from_config
+from market_config.config_loader import ChainConfig, chains_from_config, load_user_config
 
 
 from core_buyer.buyer_config import (  # noqa: F401 — re-exports
@@ -46,6 +47,32 @@ APICREDITS_SCHEMA_ID = "api_credits"
 def buyer_chains() -> dict[str, "ChainConfig"]:
     """Return the API-credit buyer's configured chain tables."""
     return chains_from_config()
+
+
+def chain_address_book(
+    chain_name: str, config: Mapping[str, Any] | None = None
+) -> str | None:
+    """The Alkahest address book the buyer names for ``chain_name``.
+
+    Read from ``[Settlement.alkahest.address_books]`` through the Alkahest kit;
+    ``None`` for a chain the table names no book for, which uses the SDK's
+    built-in addresses.
+    """
+    document = load_user_config() if config is None else config
+    settlement = document.get("Settlement")
+    section = settlement.get("alkahest") if isinstance(settlement, Mapping) else None
+    return alkahest_address_book(
+        section if isinstance(section, Mapping) else None, chain_name
+    )
+
+
+def chain_address_books(config: Mapping[str, Any] | None = None) -> dict[str, str | None]:
+    """:func:`chain_address_book` for every configured chain, by chain name."""
+    document = load_user_config() if config is None else config
+    return {
+        name: chain_address_book(name, document)
+        for name in chains_from_config(dict(document))
+    }
 
 
 def select_chain_for_listing(
