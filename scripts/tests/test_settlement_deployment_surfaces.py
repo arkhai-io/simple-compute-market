@@ -26,6 +26,7 @@ def test_alkahest_profiles_keep_policy_outside_chains() -> None:
     for relative_path in (
         "domains/vms/storefront/storefront.bob.toml",
         "domains/vms/storefront/storefront.alice.toml",
+        "domains/bare_metal/storefront/storefront.dev.toml",
     ):
         config = _toml(relative_path)
         settlement = config["Settlement"]
@@ -34,14 +35,12 @@ def test_alkahest_profiles_keep_policy_outside_chains() -> None:
         # contact exchange); what matters here is that Alkahest is configured.
         assert "alkahest.v1" in settlement["priority"]
         assert settlement["alkahest"]["enabled"] is True
-        assert "address_config_path" in settlement["alkahest"]
-        # Each chain names the address book its Alkahest client is built from;
-        # Alkahest policy itself stays in `Settlement.alkahest`.
-        assert all(
-            field == "alkahest_address_config_path"
-            for chain in config["Chains"].values()
-            for field in chain
-            if "alkahest" in field
+        # Each chain's address book is named per chain in the Alkahest section,
+        # and a chain table holds only chain resources.
+        assert set(settlement["alkahest"]["address_books"]) == set(config["Chains"])
+        assert "address_config_path" not in settlement["alkahest"]
+        assert not any(
+            "alkahest" in field for chain in config["Chains"].values() for field in chain
         )
 
 

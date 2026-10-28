@@ -45,20 +45,13 @@ from .settlement_config import (
     RELEASE_MODELS,
     AlkahestSettlementConfig,
     ReleaseModelError,
+    alkahest_address_book,
     configured_release_model,
 )
 
 
 def _first(addresses: tuple[str, ...]) -> str:
     return addresses[0] if addresses else ""
-
-
-def _address_config_path(chain: Any) -> str | None:
-    if isinstance(chain, Mapping):
-        value = chain.get("alkahest_address_config_path")
-    else:
-        value = getattr(chain, "alkahest_address_config_path", None)
-    return str(value) if value else None
 
 
 def release_conditions(
@@ -70,10 +63,11 @@ def release_conditions(
 ) -> list[dict[str, Any]]:
     """One release condition per named chain, ordered by chain name.
 
-    ``chains`` maps each configured chain's name to its configuration, a mapping
-    or an object, whose ``alkahest_address_config_path`` locates the chain's
-    address book (the SDK's own addresses are used where it names none).
-    ``wallet_address`` is the seller wallet the escrow pays.
+    ``chains`` maps each configured chain's name to its configuration. Each
+    chain's arbiter is read from the address book ``config`` names for it
+    (:func:`~market_alkahest.settlement_config.alkahest_address_book`), or the
+    SDK's own addresses where it names none. ``wallet_address`` is the seller
+    wallet the escrow pays.
 
     Raises ``ValueError`` for a chain ``chains`` does not configure, and for an
     oracle-gated or interruptible model with no oracle of its own or whose
@@ -121,7 +115,7 @@ def release_conditions(
         {
             "chain_name": name,
             "arbiter": arbiter_for(
-                name, config_path=_address_config_path(chains[name])
+                name, config_path=alkahest_address_book(config, name)
             ).lower(),
             "demand_data": dict(demand_data),
         }

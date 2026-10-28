@@ -22,7 +22,11 @@ from typing import Any
 from core_storefront.identity_config import IdentityConfig, resolve_storefront_signer
 from core_storefront.multi_registry_client import RegistryAuthorityTrust
 from dynaconf import Dynaconf
-from market_alkahest import wallet_account_address
+from market_alkahest import (
+    AlkahestSettlementConfig,
+    alkahest_address_book,
+    wallet_account_address,
+)
 from market_config.config_loader import (  # type: ignore[import-not-found]
     ChainConfig,
     chains_from_config,
@@ -209,6 +213,26 @@ def _build_chains(s: Dynaconf) -> dict[str, ChainConfig]:
 
 settings: Dynaconf = _build_settings()
 CHAINS: dict[str, ChainConfig] = _build_chains(settings)
+
+
+def chain_address_books() -> dict[str, str | None]:
+    """Each configured chain's Alkahest address book, by chain name.
+
+    Resolved from `[Settlement.alkahest.address_books]` through the Alkahest
+    kit, ``None`` for a chain the table names no book for, which uses the
+    SDK's built-in addresses. The storefront hands this mapping to the
+    packages it composes; none of them reads the table itself.
+    """
+    raw = settlement_config_mapping().get("alkahest")
+    section = (
+        AlkahestSettlementConfig.model_validate(raw) if isinstance(raw, dict) else None
+    )
+    return {name: alkahest_address_book(section, name) for name in CHAINS}
+
+
+def chain_address_book(chain_name: str) -> str | None:
+    """The Alkahest address book of one chain, as :func:`chain_address_books`."""
+    return chain_address_books().get(chain_name)
 
 
 def get_evm_wallet_address(source: Dynaconf | None = None) -> str:

@@ -863,16 +863,10 @@ def test_a_refused_key_stays_refused_as_null() -> None:
 
 
 def _address_paths(config: dict) -> list[str]:
-    """Every Alkahest address-book path ``config`` names."""
-    paths = [
-        chain["alkahest_address_config_path"]
-        for chain in (config.get("Chains") or {}).values()
-        if chain.get("alkahest_address_config_path")
-    ]
+    """Every Alkahest address-book path ``config`` names, which only
+    ``[Settlement.alkahest.address_books]`` does."""
     alkahest = (config.get("Settlement") or {}).get("alkahest") or {}
-    if alkahest.get("address_config_path"):
-        paths.append(alkahest["address_config_path"])
-    return paths
+    return [path for path in (alkahest.get("address_books") or {}).values() if path]
 
 
 def _mounted_address_book(manifest: str) -> tuple[str, dict]:

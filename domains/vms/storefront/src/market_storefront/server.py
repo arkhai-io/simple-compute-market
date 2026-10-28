@@ -72,6 +72,7 @@ from market_storefront.negotiation_runtime import build_vm_negotiation_runtime
 from market_storefront.utils.config import (
     AGENT_ID,
     CHAINS,
+    chain_address_books,
     get_evm_wallet_address,
     get_evm_wallet_private_key,
     get_service_peer_configs,
@@ -131,6 +132,7 @@ def _alkahest_client_policy() -> AlkahestClientPolicy | None:
     private_key = get_evm_wallet_private_key()
     if not private_key:
         missing.append("wallet.private_key")
+    books = chain_address_books()
     return AlkahestClientPolicy(
         private_key=private_key,
         chains=(
@@ -140,7 +142,7 @@ def _alkahest_client_policy() -> AlkahestClientPolicy | None:
                 AlkahestChain(
                     name=name,
                     rpc_url=chain.rpc_url,
-                    address_config_path=chain.alkahest_address_config_path,
+                    address_config_path=books[name],
                 )
                 for name, chain in CHAINS.items()
             )
@@ -178,8 +180,12 @@ def _build_alkahest_chain_probe(
     if section is None:
         return None
     policy = _alkahest_client_policy()
+    books = chain_address_books()
     return AlkahestChainProbe(
-        [ProbedChain.from_config(name, chain) for name, chain in CHAINS.items()],
+        [
+            ProbedChain.from_config(name, chain, address_book=books[name])
+            for name, chain in CHAINS.items()
+        ],
         build_client=(constructor(policy) if policy is not None else None),
         clients=alkahest_clients,
         interval_seconds=section.probe_interval_seconds,

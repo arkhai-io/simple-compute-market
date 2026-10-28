@@ -65,7 +65,14 @@ _CONFIGURATION = {
         # Replaced whole, so the packaged empty write-token table is restated.
         "auth": {},
     },
-    "settlement": {"schema_version": 1, "priority": ["alkahest.v1"], "alkahest": {"enabled": True}},
+    "settlement": {
+        "schema_version": 1,
+        "priority": ["alkahest.v1"],
+        "alkahest": {
+            "enabled": True,
+            "address_books": {"anvil": str(anvil_address_book_path())},
+        },
+    },
     # Anvil's first published development account, a key and the address it
     # signs as; never use it on a public network.
     "wallet": {
@@ -86,14 +93,7 @@ _CONFIGURATION = {
         },
     },
 }
-_CHAINS = {
-    "anvil": ChainConfig(
-        name="anvil",
-        rpc_url=_REFUSED,
-        chain_id=31337,
-        alkahest_address_config_path=str(anvil_address_book_path()),
-    )
-}
+_CHAINS = {"anvil": ChainConfig(name="anvil", rpc_url=_REFUSED, chain_id=31337)}
 
 
 class _Chain:
@@ -255,7 +255,10 @@ async def test_the_storefront_starts_while_a_chain_client_never_finishes_buildin
         **_CONFIGURATION,
         "settlement": {
             **_CONFIGURATION["settlement"],
-            "alkahest": {"enabled": True, "rpc_timeout_seconds": 0.2},
+            "alkahest": {
+                **_CONFIGURATION["settlement"]["alkahest"],
+                "rpc_timeout_seconds": 0.2,
+            },
         },
         "db_path": str(tmp_path / "storefront.db"),
     }

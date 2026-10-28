@@ -3592,7 +3592,7 @@ Files:
   - `release_conditions.py`;
   - `chain_probe.py`'s `ProbedChain.from_config`.
 
-- [ ] 24.1 Each storefront resolves a chain's book through the `kit/alkahest`
+- [x] 24.1 Each storefront resolves a chain's book through the `kit/alkahest`
   operation, and passes the mapping to the packages it composes. It adds no
   dependency on `kit/alkahest` to `arkhai-kit-policy`,
   `arkhai-vms-negotiation`, or `arkhai-kit-storefront` while
@@ -3606,7 +3606,105 @@ Files:
     - escrow verification;
     - claim servicing.
   - Unit: the bare-metal and API-credit compositions hand the mapping on.
-- [ ] 24.2 The seller's wallet (D10):
+
+  The kit's own readers resolve through `alkahest_address_book`:
+  - the client factory gives each chain its own book, where it gave every
+    chain `address_config_path`;
+  - the option builder and `release_conditions` read the section's book, not
+    the chain table's;
+  - `ProbedChain.from_config` takes the book as a required `address_book`
+    argument, since a chain table names none.
+
+  Each storefront resolves the mapping in one place and hands it on:
+  - VM: `utils/config.py`'s `chain_address_books()` and `chain_address_book()`.
+    The client policy, the probe, negotiation's `chain_config_paths`, escrow
+    verification (settle, admin settle, recovery), the refund's codec, the
+    escrow CLI, and legacy escrow synthesis read it. Release conditions go
+    through the section.
+  - Bare metal: `runtime.py` resolves `chain_config_paths` once. The client
+    policy, the probe, and, as before, negotiation and verification read it.
+  - API credits: `utils/config.py`'s `chain_address_books()`. The client
+    policy, the probe, negotiation, plan materialization, verification, the
+    claims client, the CLI's escrow resolution, and the listing seed read it.
+
+  Three domain packages outside the plan's files read the book from the
+  chain tables the storefronts handed them. The fresh-context check found
+  them. Each now takes the resolved mapping as data, as D11 says the
+  packages a storefront composes do:
+  - `arkhai-vms-negotiation`'s `storefront_round.py`: `chains` became
+    `chain_config_paths` on `default_seller_round_hook` and
+    `_load_storefront_chain`, for the escrow-kind dispatch;
+  - `arkhai-apicredits-domain`'s `negotiation/storefront_round.py`: the same;
+  - `arkhai-vms-settlement`'s `token_resource_from_accepted_escrow`:
+    `chain_configs` became `chain_config_paths`. Without it, a native-token
+    escrow on `anvil` was no longer read as native, and its settlement would
+    have been refused.
+
+  The VM storefront's Alkahest `verified_evidence` and both storefronts'
+  negotiation runtimes pass `chain_address_books()`. Their unused
+  `_chain_settings` helpers are removed.
+
+  Each package is bumped, and the storefronts' floors follow:
+  - `arkhai-vms-negotiation` 0.5.0 → 0.6.0;
+  - `arkhai-apicredits-domain` 0.7.0 → 0.8.0;
+  - `arkhai-vms-settlement` 0.3.0 → 0.4.0.
+
+  Unit (VM storefront, `tests/unit/test_compute_lease_token.py`, new): a
+  native escrow on `anvil` reads as native through its book, and not without
+  one.
+
+  No dependency was added to `arkhai-kit-policy`, `arkhai-vms-negotiation`,
+  or `arkhai-kit-storefront`. `kit/storefront` already took each chain's
+  book as data (`AlkahestChain.address_config_path`), so it is unchanged.
+
+  The two touched local imports of `utils.config`, in `admin_settle_service.py`
+  and `utils/migrations.py`, moved to module level. The suites pass with
+  them there, so neither has a cycle. The CLI's touched local imports stay
+  local, with their reason beside them: a command module imports the
+  storefront's settings only once the root `--config` option has run.
+
+  Results:
+  - Application integration (VM, `tests/integration/test_alkahest_address_books.py`,
+    new): the real app and lifespan, with the client constructor and JSON-RPC
+    injected through `VmCompositionSeams`. The constructor's policy gives
+    `anvil` its book and `base_sepolia` none: that assertion is what tells
+    the chains apart. A stepped probe then reaches both, and Alkahest is
+    ready. The probe's JSON-RPC double answers code at any address, so the
+    probe's own reading of each book is not distinguished here.
+    - Covers client construction.
+    - Publication's release conditions, escrow verification, and claim
+      servicing are not exercised by this test. Each is shown below at the
+      level that reads the book.
+  - Unit (kit):
+    - `test_release_conditions.py`'s
+      `test_a_chain_the_table_names_no_book_for_uses_the_sdks_addresses`:
+      release conditions on both chains;
+    - `test_address_books.py`'s
+      `test_claims_on_each_chain_are_serviced_against_that_chains_book`:
+      the per-chain books the registration's conditional-escrow client is
+      built over. It services no claim, and reads the client's private
+      `_config_paths`, since the client exposes no other view of them. API
+      credits builds its own claims client over `chain_address_books()`,
+      which no test drives with books.
+  - Escrow verification has no two-chain test. Each storefront passes
+    `chain_address_book(chain)` or its mapping's entry, and the VM settle
+    tests (`test_settle_controller.py`, through the admin client) verify an
+    escrow against the book the section names for `anvil`.
+  - Unit, the mapping handed on:
+    - bare metal's
+      `test_a_configured_alkahest_section_composes_its_client_and_worker`,
+      `runtime.chain_config_paths` and the client policy;
+    - API credits'
+      `test_api_credit_chain_values_are_contributed_to_shared_factory`, two
+      chains, `anvil` named and `base_sepolia` not.
+
+  Tests that stated a book on a chain table, or the section key, now state
+  it in the table, so section 26 can refuse both. This covers the
+  VM, bare-metal, and API-credit suites, and the kit's
+  `test_release_conditions.py`. API credits' tests gained a
+  `replaced_setting` helper: `settings_overrides` restores a key by setting
+  its old value, and would leave `address_books = None` behind.
+- [x] 24.2 The seller's wallet (D10):
   - API credits passes its wallet to readiness;
   - `resolve_evm_wallet` is removed;
   - a seller configuration may omit `[Wallet].address`.
@@ -3625,7 +3723,25 @@ Files:
   Bare metal's `WalletSettings.address` already defaults to empty. What
   remains here is `resolve_evm_wallet`'s removal and the application tests
   above.
-- [ ] 24.3 Move the repository's storefront configurations and charts to
+
+  `resolve_evm_wallet` is removed, with the `derive_wallet_address` import
+  only it used.
+
+  Results:
+  - Application integration (API credits,
+    `test_alkahest_release_conditions.py`, the started app through its typed
+    clients):
+    - `test_an_address_naming_another_account_leaves_alkahest_unready`: the
+      storefront starts, the administrator's status reports Alkahest unready
+      with `alkahest.wallet_address_mismatch`, and a create supplying escrows
+      is refused, 400, naming it, so no Alkahest option publishes;
+    - `test_a_seller_stating_only_a_key_publishes_the_keys_account_as_recipient`
+      (section 22): the omitted address.
+  - "The storefront's other mechanisms ready": API credits' test configures
+    Alkahest alone. Bare metal's composition-root unit test
+    `test_an_address_naming_another_account_leaves_only_alkahest_unready`
+    shows contact exchange ready beside the mismatch.
+- [x] 24.3 Move the repository's storefront configurations and charts to
   `[Settlement.alkahest.address_books]`, and regenerate the values schemas with
   `make helm-values-schema`. The drift tests pass (D11).
   Chart render:
@@ -3633,7 +3749,48 @@ Files:
   - the storefront render tests' loader checks, run locally with
     `STOREFRONT_PYTHON` and `BARE_METAL_STOREFRONT_PYTHON` set (TESTING.md,
     "Chart Render Tests").
-- [ ] 24.4 Bump the three storefronts and `arkhai-kit-storefront`, and run
+
+  Moved to `address_books`, each chain table and section dropping its key:
+  - `storefront.bob.toml`, `storefront.alice.toml`, `storefront.dev.toml`, and
+    `storefront.credits.toml`, as inline tables;
+  - `helm/local-values.yaml`, `helm/bare-metal-release-values.yaml`, and
+    `helm/fixtures/eip191-evm-values.yaml`.
+
+  Also:
+  - each storefront's `settings.toml` comments, VM's `config init` template,
+    and both charts' `alkahestAddressBook` comments now name the table;
+  - `helm/tests/test_release_topology.py` asserts release two's book is
+    named in the table and in neither retired key;
+  - the storefront chart's `_address_paths` reads only the table;
+  - `scripts/tests/test_settlement_deployment_surfaces.py` holds Bob's,
+    Alice's, and the bare-metal lane's configurations to a book per
+    configured chain in the table and no Alkahest key on a chain table.
+
+  The e2e suite also changed outside the plan's storefront files:
+  - `test_alkahest_trusted_oracle.py` called the kit's `release_conditions`
+    with the book on the chain table, which no longer reads it. It now
+    states the book in the section, and `e2e-tests`' floor on the kit is
+    `>=0.11.0`;
+  - the 00g diagnostic in `compute_deal_stages.py` and
+    `test_full_deal_buyer_cli.py` named the chain key for the storefront.
+    It now names the table.
+
+  `_helpers.tpl` needed no change: it derives the mount, not a key.
+
+  No values schema needed regenerating: section 23 added `address_books` to
+  the generated definition, and this section changes no model. The drift
+  tests pass within the storefront suites. `make helm-values-schema` was
+  denied in this session, as at section 23.
+
+  Results:
+  - `make -C helm test-render` passes. Its loader checks ran rather than
+    skipped, since both storefront environments exist:
+    - `test_the_rendered_document_loads_with_the_storefront_loader` and
+      `test_rendered_document_loads_with_the_storefront_loader`, for the VM
+      and bare-metal charts;
+    - `test_release_twos_document_loads_with_the_storefront_loader`.
+  - `scripts/tests`, within `make test`: 1585 passed.
+- [x] 24.4 Bump the three storefronts and `arkhai-kit-storefront`, and run
   `make lock`. **Verification checkpoint:**
   - 24.1–24.3;
   - `make test` in `kit/storefront`, `domains/vms/storefront`,
@@ -3652,6 +3809,53 @@ Files:
   - `e2e_credits_deal`.
 
   This is the evidence for 24.1 and 24.3.
+
+  `e2e_alkahest_trusted_oracle` exercises the kit's `release_conditions` over
+  the section's book, not a storefront. `e2e_non_erc20_settlement`'s
+  native-token case, once the lanes run it, is the evidence that the VM
+  settle path hands `token_resource_from_accepted_escrow` the books
+  (`settlement_composition.py`): nothing below end-to-end drives that path
+  with a native-token escrow. The escrow-kind dispatch's mapping, in both
+  negotiation packages, is exercised by no test at any level, since nothing
+  configures a per-kind `[negotiation.policies]` table.
+
+  Bumps:
+  - each storefront was already bumped in this change;
+  - `arkhai-kit-storefront` is unchanged;
+  - `arkhai-vms-negotiation`, `arkhai-apicredits-domain`, and
+    `arkhai-vms-settlement` are bumped above.
+
+  Results:
+  - `make test` in `kit/alkahest`: 441 passed;
+  - VM storefront: 1144 + 476 passed;
+  - bare-metal storefront: 514 passed;
+  - API-credit storefront: 245 passed;
+  - `kit/storefront`: unchanged, and passes within full `make test`;
+  - full `make test`: passes;
+  - `make -C helm test-render`, `make check-packaging`, and
+    `make check-comment-hygiene`: pass;
+  - `make check-change`: only the closeout citation.
+
+  The buyer configurations the e2e harness writes still state the retired
+  keys: section 25 moves them. Until then the buyers read them as before, so
+  the lanes' buyers are unaffected.
+
+  Handoff:
+  - Until section 26, a storefront configuration still stating either
+    retired key is not refused, and the storefront no longer reads it: a
+    chain with no entry in the table goes without its book.
+  - `kit/alkahest`'s `alkahest.py` diagnostics for an `anvil` chain with no
+    book still name `alkahest_address_config_path`. Buyers read that key
+    until section 25. Section 26, which refuses the key, should name the
+    table there.
+  - Declined from the fresh-context check:
+    - VM and API credits each define `chain_address_books()`. Each storefront
+      owns its configuration module, as with `seller_wallet_address`.
+    - The VM application test imports `_CONFIGURATION` and helpers from
+      `test_degraded_startup.py` rather than repeating them.
+  - Section 23's byte-for-byte check of the hand-written schema entries is
+    still owed: `make helm-values-schema` was denied here too. The drift
+    tests compare parsed JSON and pass.
 
 ## 25. Buyers resolve address books through Alkahest
 

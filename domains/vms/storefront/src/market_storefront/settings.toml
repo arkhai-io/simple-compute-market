@@ -96,7 +96,9 @@ priority = []
 # Private wallet material belongs only in storefront.secrets.toml. Alkahest
 # requires Wallet.private_key plus a selected Chains entry with rpc_url and
 # chain_id; Wallet.address, when stated, must be the account the key signs as,
-# and when omitted is that account.
+# and when omitted is that account. A chain on a deployment's own Alkahest
+# contracts names its address book in [Settlement.alkahest.address_books]; a
+# chain it does not name uses the SDK's built-in addresses.
 
 [registry]
 # Leave empty by default. Any user-supplied list at a higher overlay

@@ -657,9 +657,12 @@ def alkahest_client_factory(
             return clients.get(chain or "")
 
     chains = resources.get("chains")
+    # Claims on each chain are serviced against that chain's own book.
     chain_config_paths: dict[str, str | None] = {}
     if isinstance(chains, Mapping):
-        chain_config_paths = dict.fromkeys(chains, config.address_config_path)
+        chain_config_paths = {
+            name: alkahest_address_book(config, name) for name in chains
+        }
     return AlkahestConditionalEscrowClient(
         get_client=get_client,
         chain_config_paths=chain_config_paths,
@@ -677,6 +680,7 @@ def _resource_value(value: Any, name: str) -> Any:
 
 
 def _alkahest_escrow_from_clause(
+    config: AlkahestSettlementConfig,
     clause: SettlementPublicationClause,
     resources: Mapping[str, Any],
 ) -> dict[str, Any]:
@@ -693,7 +697,7 @@ def _alkahest_escrow_from_clause(
         )
     rpc_url = _resource_value(chain, "rpc_url")
     chain_id = _resource_value(chain, "chain_id")
-    address_config_path = _resource_value(chain, "alkahest_address_config_path")
+    address_config_path = alkahest_address_book(config, publication.chain)
     # Registration and clause validation remain dependency-light. Load the
     # chain client and token resolver only when materializing a public option.
     from .alkahest import get_erc20_escrow_obligation_default
@@ -752,7 +756,7 @@ def alkahest_option_builder(
         clause = SettlementPublicationClause.model_validate(raw_clause)
         if clause.mechanism != ALKAHEST_MECHANISM_ID:
             raise ValueError("publication clause does not select Alkahest")
-        escrow_wires = [_alkahest_escrow_from_clause(clause, resources)]
+        escrow_wires = [_alkahest_escrow_from_clause(config, clause, resources)]
     else:
         accepted = resources.get("accepted_escrows")
         if not isinstance(accepted, (list, tuple)) or not accepted:

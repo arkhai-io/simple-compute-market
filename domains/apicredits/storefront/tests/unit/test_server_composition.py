@@ -26,7 +26,7 @@ from apicredits_storefront.listing_seed import ListingSeed
 from apicredits_storefront.retired_settings import retired_setting_problems
 from apicredits_storefront.services.capacity_client import capacity_poll_interval
 from apicredits_storefront.startup_refusal import StorefrontStartupError
-from tests._settings_overrides import settings_overrides
+from tests._settings_overrides import replaced_setting, settings_overrides
 
 
 def test_api_credit_routes_use_shared_storefront_shell():
@@ -73,19 +73,30 @@ async def test_api_credit_lifespan_carries_exact_domain_container(monkeypatch):
 
 
 def test_api_credit_chain_values_are_contributed_to_shared_factory(monkeypatch):
-    chain = SimpleNamespace(
-        rpc_url="http://rpc",
-        alkahest_address_config_path="addresses.json",
-    )
-    monkeypatch.setattr(server, "CHAINS", {"anvil": chain})
+    """Each chain's book comes from the Alkahest section: ``anvil``'s is named,
+    and ``base_sepolia``, which the table does not name, has none."""
+    chains = {
+        "anvil": SimpleNamespace(rpc_url="http://rpc"),
+        "base_sepolia": SimpleNamespace(rpc_url="http://base"),
+    }
+    monkeypatch.setattr(server, "CHAINS", chains)
+    monkeypatch.setattr(storefront_config, "CHAINS", chains)
 
-    with settings_overrides(**{"wallet.private_key": "secret"}):
+    with settings_overrides(**{"wallet.private_key": "secret"}), replaced_setting(
+        "settlement",
+        {
+            "schema_version": 1,
+            "priority": [],
+            "alkahest": {"address_books": {"anvil": "addresses.json"}},
+        },
+    ):
         policy = server._alkahest_client_policy()
 
     assert policy.private_key == "secret"
     assert policy.missing_requirements == ()
     assert [(c.name, c.rpc_url, c.address_config_path) for c in policy.chains] == [
-        ("anvil", "http://rpc", "addresses.json")
+        ("anvil", "http://rpc", "addresses.json"),
+        ("base_sepolia", "http://base", None),
     ]
 
 

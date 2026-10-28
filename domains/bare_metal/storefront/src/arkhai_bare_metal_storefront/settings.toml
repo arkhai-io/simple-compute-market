@@ -60,12 +60,16 @@ priority = []
 # [Wallet] and [Chains.<name>] are the Alkahest mechanism's inputs, stated
 # together with an Alkahest section and never without one:
 # [Wallet]
-# address = "0x..."            # the seller's address
+# address = "0x..."            # optional; the account the key signs as
 # private_key belongs only in storefront.secrets.toml.
 #
 # [Chains.<name>]
 # rpc_url = "..."
-# alkahest_address_config_path = "/path/to/address-book.json"
+#
+# A chain on a deployment's own Alkahest contracts names its address book in
+# the Alkahest section; one it does not name uses the SDK's built-in addresses:
+# [Settlement.alkahest.address_books]
+# <name> = "/path/to/address-book.json"
 
 # Seller-side delivery of each revealed introduction ([Delivery], as every
 # storefront states it); sink credentials belong in storefront.secrets.toml.

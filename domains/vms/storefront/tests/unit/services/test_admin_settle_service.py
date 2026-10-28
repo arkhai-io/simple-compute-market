@@ -26,11 +26,13 @@ def db():
 
 @pytest.fixture(autouse=True)
 def _stub_chains(monkeypatch):
-    """Inject a synthetic [chains.anvil] entry so verify_escrow_dry_run's
-    CHAINS lookup resolves and the chain-aware code path can run.
+    """Inject a synthetic [chains.anvil] entry, and its address book in the
+    Alkahest section, so verify_escrow_dry_run's chain lookup resolves and the
+    chain-aware code path can run.
     """
     from market_config.config_loader import ChainConfig
     from market_storefront.utils import config as agent_config
+    from tests._settings_overrides import replaced_setting
 
     monkeypatch.setattr(
         agent_config,
@@ -40,11 +42,22 @@ def _stub_chains(monkeypatch):
                 name="anvil",
                 rpc_url="http://anvil:8545",
                 chain_id=31337,
-                alkahest_address_config_path="/fake/alkahest.json",
             ),
         },
         raising=False,
     )
+    with replaced_setting(
+        "settlement",
+        {
+            "schema_version": 1,
+            "priority": ["alkahest.v1"],
+            "alkahest": {
+                "enabled": True,
+                "address_books": {"anvil": "/fake/alkahest.json"},
+            },
+        },
+    ):
+        yield
 
 
 @pytest.fixture

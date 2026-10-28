@@ -49,7 +49,7 @@ from market_site_client import (
 
 from apicredits_storefront.services.capacity_client import configured_sites
 from apicredits_storefront.services.listing_service import SettlementMechanismUnreachable
-from apicredits_storefront.utils.config import CHAINS, settings
+from apicredits_storefront.utils.config import CHAINS, chain_address_books, settings
 
 logger = logging.getLogger(__name__)
 
@@ -189,11 +189,10 @@ async def _listing_for(db: Any, resource_id: str) -> str | None:
 def _seed_escrows(seed: Mapping[str, Any]) -> list[dict[str, Any]]:
     """The Alkahest escrow the seed offers, on its configured chain."""
     chain = str(seed.get("chain", "anvil"))
-    chain_cfg = CHAINS.get(chain)
-    if chain_cfg is None:
+    if chain not in CHAINS:
         raise RuntimeError(f"seed chain {chain!r} is not configured")
     escrow_address = seed.get("escrow_address") or get_erc20_escrow_obligation_default(
-        chain, config_path=chain_cfg.alkahest_address_config_path
+        chain, config_path=chain_address_books()[chain]
     )
     return [
         {

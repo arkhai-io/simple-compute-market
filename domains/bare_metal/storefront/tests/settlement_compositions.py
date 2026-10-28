@@ -30,7 +30,6 @@ from arkhai_bare_metal_storefront.settlement_composition import (
 
 ALKAHEST_SECTION = {
     "enabled": True,
-    "address_config_path": "/app/alkahest_anvil_addresses.json",
     "oracle_gated": False,
     "trusted_oracle_addresses": [],
     "interruptible": False,

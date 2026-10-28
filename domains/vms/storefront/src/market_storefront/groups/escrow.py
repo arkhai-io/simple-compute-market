@@ -339,7 +339,9 @@ def show_cmd(
         resolve_alkahest_address_config,
     )
 
-    from ..utils.config import CHAINS, get_evm_wallet_private_key
+    # Imported when the command runs, after the root `--config` option: the
+    # storefront's settings resolve when its config module is first imported.
+    from ..utils.config import CHAINS, chain_address_book, get_evm_wallet_private_key
 
     if not CHAINS:
         typer.secho(
@@ -379,11 +381,12 @@ def show_cmd(
         )
         raise typer.Exit(2)
 
+    address_book = chain_address_book(chain.name)
     try:
-        prewarm_alkahest_address_config_cache(chain.alkahest_address_config_path)
+        prewarm_alkahest_address_config_cache(address_book)
         address_config = resolve_alkahest_address_config(
             get_alkahest_network(chain.name),
-            config_path=chain.alkahest_address_config_path,
+            config_path=address_book,
         )
     except Exception as exc:
         typer.secho(str(exc), err=True, fg=typer.colors.RED)
@@ -401,7 +404,7 @@ def show_cmd(
                 client,
                 escrow_uid,
                 chain_name=chain.name,
-                config_path=chain.alkahest_address_config_path,
+                config_path=address_book,
                 escrow_address=escrow_address,
             )
         )

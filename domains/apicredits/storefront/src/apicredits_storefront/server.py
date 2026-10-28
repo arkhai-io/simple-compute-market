@@ -73,6 +73,7 @@ from apicredits_storefront.utils.config import (
     AGENT_ID,
     BASE_URL_OVERRIDE,
     CHAINS,
+    chain_address_books,
     resolve_admin_identities,
     resolve_identity_signer,
     resolve_registry_authorities,
@@ -140,13 +141,14 @@ class ApiCreditsStorefrontServices:
 def _alkahest_client_policy() -> AlkahestClientPolicy:
     private_key = (settings.wallet.private_key or "").strip()
     missing = () if private_key else ("wallet.private_key",)
+    books = chain_address_books()
     return AlkahestClientPolicy(
         private_key=private_key,
         chains=tuple(
             AlkahestChain(
                 name=name,
                 rpc_url=chain.rpc_url,
-                address_config_path=chain.alkahest_address_config_path,
+                address_config_path=books[name],
             )
             for name, chain in CHAINS.items()
         ),
@@ -166,8 +168,12 @@ def _build_alkahest_chain_probe(
     ``constructor`` and ``json_rpc`` are its two boundaries, the SDK and the
     chain's JSON-RPC endpoint.
     """
+    books = chain_address_books()
     return AlkahestChainProbe(
-        [ProbedChain.from_config(name, chain) for name, chain in CHAINS.items()],
+        [
+            ProbedChain.from_config(name, chain, address_book=books[name])
+            for name, chain in CHAINS.items()
+        ],
         build_client=constructor(_alkahest_client_policy()),
         clients=alkahest_clients,
         interval_seconds=section.probe_interval_seconds,

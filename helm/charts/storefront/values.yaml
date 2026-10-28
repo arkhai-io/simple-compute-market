@@ -73,9 +73,8 @@ image:
 #         # real token; inject via --set at render/deploy time.
 #         registryAuthToken: ""
 #       # An existing ConfigMap holding an Alkahest address book, mounted
-#       # read-only at mountPath; an empty name mounts nothing. A chain's
-#       # alkahest_address_config_path and [Settlement.alkahest]'s
-#       # address_config_path name <mountPath>/<key>.
+#       # read-only at mountPath; an empty name mounts nothing. The chain's
+#       # entry in [Settlement.alkahest.address_books] names <mountPath>/<key>.
 #       alkahestAddressBook:
 #         configMapName: ""
 #         key: alkahest_addresses.json

@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 from market_alkahest import ALKAHEST_MECHANISM_ID  # noqa: E402
 from market_core.schemas import EscrowProposal  # noqa: E402
 from market_storefront.settlement_stages import accepted_alkahest_proposal  # noqa: E402
+from market_storefront.utils.config import chain_address_books  # noqa: E402
 from market_storefront.utils.escrow_verification import (  # noqa: E402
     EscrowVerificationError,
     verify_escrow_against_plan,
@@ -96,10 +97,8 @@ class AdminSettleService:
                 "reason": f"chain {chain_name!r} not configured on this storefront",
             }
 
-        from market_storefront.utils.config import CHAINS
-
-        chain_cfg = CHAINS.get(chain_name)
-        if chain_cfg is None:
+        address_books = chain_address_books()
+        if chain_name not in address_books:
             return {
                 "valid": False,
                 "escrow_uid": escrow_uid,
@@ -113,7 +112,7 @@ class AdminSettleService:
                 alkahest_client=alkahest,
                 chain_name=chain_name,
                 escrow_address=proposal.escrow_address,
-                alkahest_address_config_path=chain_cfg.alkahest_address_config_path,
+                alkahest_address_config_path=address_books[chain_name],
             )
         except EscrowVerificationError as exc:
             return {"valid": False, "escrow_uid": escrow_uid, "reason": str(exc)}

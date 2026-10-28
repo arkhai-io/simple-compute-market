@@ -170,7 +170,11 @@ def publish_cmd(
     """
     # Imported only once ``--config`` has run: the storefront's settings
     # resolve when its config module is first imported.
-    from apicredits_storefront.utils.config import CHAINS, resolve_identity_signer
+    from apicredits_storefront.utils.config import (
+        CHAINS,
+        chain_address_books,
+        resolve_identity_signer,
+    )
 
     legacy_requested = any(
         value is not None for value in (price_per_token, token, chain)
@@ -194,12 +198,11 @@ def publish_cmd(
 
         resolved_escrow = escrow_address
         if not resolved_escrow:
-            chain_cfg = CHAINS.get(chain)
-            if chain_cfg is None:
+            if chain not in CHAINS:
                 typer.echo(f"chain {chain!r} is not configured", err=True)
                 raise typer.Exit(code=2)
             resolved_escrow = get_erc20_escrow_obligation_default(
-                chain, config_path=chain_cfg.alkahest_address_config_path
+                chain, config_path=chain_address_books()[chain]
             )
         accepted_escrows = [
             {

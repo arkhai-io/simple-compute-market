@@ -589,8 +589,8 @@ class Stage00g_AlkahestConfigured:
             f"Storefront alkahest client is not configured for anvil: "
             f"checks.alkahest={alkahest_check!r}\n"
             "The on-chain escrow phases (07, 07b) will fail without a working AlkahestClient.\n"
-            "Fix: configure the anvil chain's rpc_url and "
-            "alkahest_address_config_path for the storefront."
+            "Fix: configure the anvil chain's rpc_url, and its book under "
+            "[Settlement.alkahest.address_books], for the storefront."
         )
         deal_state._alkahest_configured = True
         log.info("[00g] Alkahest configured: checks.alkahest=%s", alkahest_check)

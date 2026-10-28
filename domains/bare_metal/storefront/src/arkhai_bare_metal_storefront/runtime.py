@@ -20,6 +20,7 @@ from market_alkahest import (
     JsonRpcCall,
     ProbedChain,
     ReleaseModelError,
+    alkahest_address_book,
     create_alkahest_registration,
     json_rpc_call,
     wallet_account_address,
@@ -710,14 +711,18 @@ class BareMetalStorefrontRuntime:
 
 
 def _alkahest_client_policy(
-    chains: Mapping[str, ChainSettings], *, private_key: str
+    chains: Mapping[str, ChainSettings],
+    *,
+    address_books: Mapping[str, str | None],
+    private_key: str,
 ) -> AlkahestClientPolicy:
-    """What the Alkahest chain clients for ``[Chains]`` are built from."""
+    """What the Alkahest chain clients for ``[Chains]`` are built from, each
+    over the address book ``address_books`` resolves for its chain."""
     alkahest_chains = tuple(
         AlkahestChain(
             name=name,
             rpc_url=chain.rpc_url,
-            address_config_path=chain.alkahest_address_config_path or None,
+            address_config_path=address_books.get(name),
         )
         for name, chain in chains.items()
     )
@@ -830,11 +835,13 @@ def build_runtime_from_configuration(
         "[Wallet].private_key": bool(private_key),
     }
     if alkahest_configured:
-        chain_config_paths = {
-            name: chain.alkahest_address_config_path or None
-            for name, chain in active.chains.items()
-        }
         alkahest_section = section_check.config.mechanism_config(ALKAHEST_CONFIG_KEY)
+        # Each chain's book, resolved once through the Alkahest kit and handed
+        # to everything that reads one: client construction, the probe,
+        # negotiation's plans, and escrow verification.
+        chain_config_paths = {
+            name: alkahest_address_book(alkahest_section, name) for name in active.chains
+        }
         # The map starts empty and the probe owns it: its first step constructs
         # each chain's client, bounded, since a websocket client connects while
         # it is built and composition must not wait on a chain. The composition
@@ -843,11 +850,17 @@ def build_runtime_from_configuration(
         chain_clients: dict[str, Any] = {}
         chain_probe: AlkahestChainProbe | None = AlkahestChainProbe(
             [
-                ProbedChain.from_config(name, chain)
+                ProbedChain.from_config(
+                    name, chain, address_book=chain_config_paths[name]
+                )
                 for name, chain in active.chains.items()
             ],
             build_client=build_chain_client(
-                _alkahest_client_policy(active.chains, private_key=private_key)
+                _alkahest_client_policy(
+                    active.chains,
+                    address_books=chain_config_paths,
+                    private_key=private_key,
+                )
             ),
             clients=chain_clients,
             interval_seconds=alkahest_section.probe_interval_seconds,

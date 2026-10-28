@@ -137,7 +137,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-apicredits-domain"
-version = "0.7.0"
+version = "0.8.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -150,7 +150,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_apicredits_domain-0.7.0-py3-none-any.whl" },
+    { path = "arkhai_apicredits_domain-0.8.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -195,7 +195,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "alkahest-py", specifier = "==1.1.2" },
-    { name = "arkhai-apicredits-domain", specifier = ">=0.7.0" },
+    { name = "arkhai-apicredits-domain", specifier = ">=0.8.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
     { name = "arkhai-core-registry-client", specifier = ">=0.12.1" },
     { name = "arkhai-core-storefront", specifier = ">=0.17.0" },

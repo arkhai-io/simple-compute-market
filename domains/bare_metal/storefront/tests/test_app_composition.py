@@ -339,7 +339,6 @@ async def test_an_oracle_gated_section_composes(tmp_path) -> None:
 
 ALKAHEST_SECTION = {
     "enabled": True,
-    "address_config_path": "/app/alkahest_anvil_addresses.json",
     "oracle_gated": False,
     "trusted_oracle_addresses": [],
     "interruptible": False,
@@ -578,10 +577,9 @@ async def test_a_configured_alkahest_section_composes_its_client_and_worker(
     monkeypatch, tmp_path, enabled
 ):
     document = _alkahest(publishable_configuration(tmp_path / "storefront.db"), enabled=enabled)
+    document["Settlement"]["alkahest"]["address_books"] = {"anvil": "addresses.json"}
     document["Wallet"] = {"address": WALLET_ADDRESS}
-    document["Chains"] = {
-        "anvil": {**CHAINS["anvil"], "alkahest_address_config_path": "addresses.json"}
-    }
+    document["Chains"] = CHAINS
     chain_clients = ChainClients()
 
     runtime = _configured_runtime(
@@ -606,6 +604,8 @@ async def test_a_configured_alkahest_section_composes_its_client_and_worker(
     assert WALLET_KEY not in repr(runtime)
     assert runtime.settlement_worker is not None
     assert "settlement-servicing" in runtime.loops.step_routes()
+    # The chain's book, from the Alkahest section, reaches client construction.
+    assert policy.chains[0].address_config_path == "addresses.json"
     # The chain probe owns the one live client map every consumer holds, and
     # readiness reads it through the composition's resources.
     probe = runtime.alkahest_chain_probe
@@ -679,14 +679,10 @@ async def test_the_registered_probe_loop_steps_the_probe_readiness_reads(
     chains = _Chains({"anvil": CHAINS["anvil"]["rpc_url"]})
     document = _alkahest(publishable_configuration(tmp_path / "storefront.db"))
     document["Wallet"] = {"address": WALLET_ADDRESS}
-    document["Chains"] = {
-        "anvil": {
-            **CHAINS["anvil"],
-            "chain_id": 31337,
-            "alkahest_address_config_path": str(anvil_address_book_path()),
-        }
+    document["Chains"] = {"anvil": {**CHAINS["anvil"], "chain_id": 31337}}
+    document["Settlement"]["alkahest"]["address_books"] = {
+        "anvil": str(anvil_address_book_path())
     }
-    document["Settlement"]["alkahest"]["address_config_path"] = str(anvil_address_book_path())
 
     runtime = _configured_runtime(
         monkeypatch,
@@ -723,12 +719,13 @@ async def test_status_reports_a_configured_chain_no_listing_publishes_on(
     document = _alkahest(publishable_configuration(tmp_path / "storefront.db"))
     document["Wallet"] = {"address": WALLET_ADDRESS}
     document["Chains"] = {
-        "anvil": {"rpc_url": "http://anvil.test:8545", "chain_id": 31337,
-                  "alkahest_address_config_path": book},
-        "base_sepolia": {"rpc_url": "http://base.test", "chain_id": 31337,
-                         "alkahest_address_config_path": book},
+        "anvil": {"rpc_url": "http://anvil.test:8545", "chain_id": 31337},
+        "base_sepolia": {"rpc_url": "http://base.test", "chain_id": 31337},
     }
-    document["Settlement"]["alkahest"]["address_config_path"] = book
+    document["Settlement"]["alkahest"]["address_books"] = {
+        "anvil": book,
+        "base_sepolia": book,
+    }
 
     runtime = _configured_runtime(
         monkeypatch,
@@ -786,6 +783,34 @@ async def test_a_configured_section_missing_an_input_starts_unready_naming_it(
     assert readiness["contact-exchange.v1"].ready is True
     # No client is built without the key and chains to build it from.
     assert runtime.chain_clients == {}
+
+
+async def test_an_address_naming_another_account_leaves_only_alkahest_unready(
+    monkeypatch, tmp_path
+):
+    """Spec scenario "The address names another account": the storefront
+    starts, Alkahest is unready with ``alkahest.wallet_address_mismatch``, and
+    contact exchange stays ready."""
+    document = _alkahest(publishable_configuration(tmp_path / "storefront.db"))
+    # A development address that is not the key's account.
+    document["Wallet"] = {"address": "0x" + "44" * 20}
+    document["Chains"] = CHAINS
+
+    runtime = _configured_runtime(
+        monkeypatch,
+        tmp_path,
+        document,
+        secrets=f'[Wallet]\nprivate_key = "{WALLET_KEY}"\n',
+        build_chain_client=ChainClients(),
+    )
+    readiness = await _readiness_by_mechanism(runtime)
+
+    alkahest = readiness["alkahest.v1"]
+    assert alkahest.ready is False
+    assert ("alkahest.wallet_address_mismatch", "configuration") in {
+        (b.code, b.kind) for b in alkahest.blockers
+    }
+    assert readiness["contact-exchange.v1"].ready is True
 
 
 async def test_an_omitted_address_is_the_account_its_key_signs_as(monkeypatch, tmp_path):
@@ -1090,15 +1115,11 @@ async def test_startup_does_not_wait_on_a_chain_whose_client_never_finishes_buil
     reports the chain unreachable, its JSON-RPC answering, and Alkahest unready."""
     document = _alkahest(publishable_configuration(tmp_path / "storefront.db"))
     book = str(anvil_address_book_path())
-    document["Settlement"]["alkahest"].update(address_config_path=book, rpc_timeout_seconds=0.2)
+    document["Settlement"]["alkahest"].update(
+        address_books={"anvil": book}, rpc_timeout_seconds=0.2
+    )
     document["Wallet"] = {"address": WALLET_ADDRESS}
-    document["Chains"] = {
-        "anvil": {
-            "rpc_url": "ws://anvil.test:8545",
-            "chain_id": 31337,
-            "alkahest_address_config_path": book,
-        }
-    }
+    document["Chains"] = {"anvil": {"rpc_url": "ws://anvil.test:8545", "chain_id": 31337}}
     write_configuration(
         monkeypatch, tmp_path, document, secrets=f'[Wallet]\nprivate_key = "{WALLET_KEY}"\n'
     )

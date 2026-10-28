@@ -56,6 +56,7 @@ from market_storefront.services.publication_terms import (
 )
 from market_storefront.utils.config import (
     CHAINS,
+    chain_address_book,
     get_evm_wallet_address,
     get_evm_wallet_private_key,
 )
@@ -225,16 +226,10 @@ class ListingService:
             return row, chain_name, None, None
         from market_alkahest.alkahest import get_escrow_codec_for
 
-        from market_storefront.utils.config import CHAINS
-
-        chain_cfg = CHAINS.get(chain_name)
-        config_path = (
-            chain_cfg.alkahest_address_config_path if chain_cfg is not None else None
-        )
         codec = get_escrow_codec_for(
             chain_name,
             escrow_address,
-            config_path=config_path,
+            config_path=chain_address_book(chain_name),
         )
         return row, chain_name, alkahest, codec
 

@@ -67,7 +67,11 @@ from market_storefront.lifecycle import trading_pause
 from market_storefront.services.listing_source_check import check_listing_source
 from market_capacity_publication import PublicationBinding
 from market_storefront.services.capacity_client import capacity_binding_for_listing
-from market_storefront.utils.config import CHAINS, get_evm_wallet_address, settings
+from market_storefront.utils.config import (
+    chain_address_books,
+    get_evm_wallet_address,
+    settings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -84,10 +88,6 @@ def _extra_policy_paths() -> list[str]:
     return list(getattr(_negotiation_settings(), "extra_policy_paths", []) or [])
 
 
-def _chain_settings() -> dict[str, Any]:
-    return dict(CHAINS)
-
-
 def _default_min_price() -> Any:
     return settings.pricing.default_min_price
 
@@ -102,7 +102,7 @@ def discover_file_policies(force: bool = False) -> None:
 def load_storefront_chain() -> Any:
     return vm_storefront_round._load_storefront_chain(
         negotiation_config=_negotiation_settings(),
-        chains=_chain_settings(),
+        chain_config_paths=_chain_config_paths(),
         extra_policy_paths=_extra_policy_paths(),
     )
 
@@ -135,14 +135,16 @@ def _default_seller_round_hook(domain: MarketDomainContract) -> SellerRoundHook:
         )
     return policy.run_negotiation_policy(
         negotiation_config=_negotiation_settings(),
-        chains=_chain_settings(),
+        chain_config_paths=_chain_config_paths(),
         extra_policy_paths=_extra_policy_paths(),
         default_min_price=_default_min_price(),
     )
 
 
 def _chain_config_paths() -> dict[str, str | None]:
-    return {name: chain.alkahest_address_config_path for name, chain in CHAINS.items()}
+    # The negotiation packages take each chain's book as data; the storefront
+    # resolves it through the Alkahest kit.
+    return chain_address_books()
 
 
 def _decode_vm_terms(domain: MarketDomainContract, raw_terms: Any) -> NegotiationTerms:

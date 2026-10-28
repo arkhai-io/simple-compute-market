@@ -25,12 +25,15 @@ from typing import Any
 from dynaconf import Dynaconf
 from core_storefront.identity_config import IdentityConfig, resolve_storefront_signer
 from core_storefront.multi_registry_client import RegistryAuthorityTrust
-from market_alkahest import wallet_account_address
+from market_alkahest import (
+    AlkahestSettlementConfig,
+    alkahest_address_book,
+    wallet_account_address,
+)
 from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
 from market_config.config_loader import (
     ChainConfig,
     chains_from_config,
-    derive_wallet_address,
     storefront_config_files,
 )
 from market_config.setting_types import positive_seconds
@@ -53,21 +56,6 @@ def _build_settings() -> Dynaconf:
         merge_enabled=True,
     )
     return s
-
-
-def resolve_evm_wallet() -> tuple[str, str]:
-    """Resolve explicit, matching Alkahest mechanism credentials."""
-    address = str(settings.get("wallet.address", "") or "")
-    private_key = str(settings.get("wallet.private_key", "") or "")
-    if not address or not private_key:
-        raise RuntimeError(
-            "API-credits Alkahest settlement requires wallet.address and "
-            "wallet.private_key",
-        )
-    derived = derive_wallet_address(private_key)
-    if not derived or derived.lower() != address.lower():
-        raise RuntimeError("configured Alkahest wallet address/private key mismatch")
-    return address, private_key
 
 
 def seller_wallet_address() -> str:
@@ -153,6 +141,21 @@ if not CHAINS:
         "[CONFIG] no [chains.<name>] tables configured — the storefront "
         "will fail when it needs to dispatch any on-chain call."
     )
+
+
+def chain_address_books() -> dict[str, str | None]:
+    """Each configured chain's Alkahest address book, by chain name.
+
+    Resolved from `[Settlement.alkahest.address_books]` through the Alkahest
+    kit, ``None`` for a chain the table names no book for, which uses the
+    SDK's built-in addresses. The storefront hands this mapping to the
+    packages it composes; none of them reads the table itself.
+    """
+    raw = settlement_config_mapping().get("alkahest")
+    section = (
+        AlkahestSettlementConfig.model_validate(raw) if isinstance(raw, dict) else None
+    )
+    return {name: alkahest_address_book(section, name) for name in CHAINS}
 
 
 def resolve_identity_config() -> IdentityConfig:

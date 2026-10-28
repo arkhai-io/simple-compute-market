@@ -701,7 +701,7 @@ pools = [
 
 [[package]]
 name = "arkhai-vms-negotiation"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-alkahest" },
@@ -709,19 +709,19 @@ dependencies = [
     { name = "arkhai-vms-listings" },
 ]
 wheels = [
-    { path = "arkhai_vms_negotiation-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_vms_negotiation-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-vms-settlement"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-vms-listings" },
 ]
 wheels = [
-    { path = "arkhai_vms_settlement-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_vms_settlement-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -834,8 +834,8 @@ requires-dist = [
     { name = "arkhai-kit-storefront", specifier = "==0.9.0" },
     { name = "arkhai-vms", specifier = ">=0.7.0" },
     { name = "arkhai-vms-listings", extras = ["pools", "overrides"], specifier = ">=0.7.0" },
-    { name = "arkhai-vms-negotiation", specifier = ">=0.5.0" },
-    { name = "arkhai-vms-settlement", specifier = ">=0.3.0" },
+    { name = "arkhai-vms-negotiation", specifier = ">=0.6.0" },
+    { name = "arkhai-vms-settlement", specifier = ">=0.4.0" },
     { name = "codespell", marker = "extra == 'lint'", specifier = ">=2.2.0,<3.0.0" },
     { name = "dynaconf", specifier = ">=3.0.0" },
     { name = "eth-account", specifier = ">=0.13.0" },

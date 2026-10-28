@@ -1269,10 +1269,9 @@ async def test_a_storefront_whose_chain_refuses_is_unready_until_a_stepped_probe
             SELLER_SIGNER,
             wallet="0x" + "33" * 20,
             chain_clients={"anvil": object()},
-            chain_probe=probe,
             # The probe stands in for the chain's address book here, so the
             # section names none for readiness to load.
-            section={"address_config_path": None},
+            chain_probe=probe,
         ),
         alkahest_chain_probe=probe,
         loop_controller_factory=held_loop_controller,
