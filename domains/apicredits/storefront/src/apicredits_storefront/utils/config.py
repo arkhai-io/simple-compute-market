@@ -25,6 +25,7 @@ from typing import Any
 from dynaconf import Dynaconf
 from core_storefront.identity_config import IdentityConfig, resolve_storefront_signer
 from core_storefront.multi_registry_client import RegistryAuthorityTrust
+from market_alkahest import wallet_account_address
 from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
 from market_config.config_loader import (
     ChainConfig,
@@ -67,6 +68,17 @@ def resolve_evm_wallet() -> tuple[str, str]:
     if not derived or derived.lower() != address.lower():
         raise RuntimeError("configured Alkahest wallet address/private key mismatch")
     return address, private_key
+
+
+def seller_wallet_address() -> str:
+    """The seller's EVM address: `[wallet].address`, else the account its key
+    signs as, so every place naming the seller names one account."""
+    return wallet_account_address(
+        {
+            "address": str(settings.get("wallet.address", "") or ""),
+            "private_key": str(settings.get("wallet.private_key", "") or ""),
+        }
+    )
 
 
 def _coerce_chains_table(raw: Any) -> dict[str, dict[str, Any]]:

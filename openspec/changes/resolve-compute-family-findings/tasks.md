@@ -3277,7 +3277,7 @@ Files:
   and the oracle-is-not-the-seller check;
 - `kit/alkahest/tests/unit/test_settlement_config.py`.
 
-- [ ] 22.1 A configured seller address that differs from the address its key
+- [x] 22.1 A configured seller address that differs from the address its key
   derives (through `kit/config`'s `derive_wallet_address`) makes Alkahest
   unready with `alkahest.wallet_address_mismatch`. An absent address is the
   key's. The oracle check compares the oracle with the signing account as well
@@ -3288,13 +3288,134 @@ Files:
   - "The oracle is the signing key".
 
   A buyer configuration with a mismatch is not refused.
-- [ ] 22.2 Bump `arkhai-kit-alkahest`, and run `make lock`. **Verification
+
+  `settlement_config.py`'s wallet blockers now read two accounts: the
+  configured address and the address the key signs as. A seller whose two
+  differ (compared case-insensitively) has
+  `alkahest.wallet_address_mismatch`. `alkahest.wallet_address_missing`
+  remains only for a wallet with neither an address nor a key the kit can
+  read. The oracle check compares the oracle each release model releases
+  through, the first configured, with both accounts. A disabled seller
+  section reports the mismatch with its other wallet blockers, as it reports
+  a missing key.
+
+  The kit exports `wallet_account_address(wallet)`, the account a wallet
+  names: its address, else its key's.
+
+  Moved forward from 24.2: each storefront names its seller through
+  `wallet_account_address`, in its one accessor, and raises its
+  `arkhai-kit-alkahest` floor to 0.11.0, the first version that has it:
+  - VM: `utils/config.py`'s `get_evm_wallet_address`, which every VM reader
+    of the seller's address calls, by a search of the source (release
+    conditions, the settlement composition's wallet, negotiation, status, the
+    client policy);
+  - bare metal: `runtime.py`'s seller address, which the composition's wallet
+    and so its release conditions read. The stale-input check still reads
+    the stated `[Wallet].address`;
+  - API credits: a new `utils/config.py` `seller_wallet_address`, read by
+    the settlement composition and the negotiation runtime.
+
+  Without this, a seller stating only a key would be Alkahest-ready while
+  its release conditions named an empty recipient: the fresh-context check
+  found it, against the permanent requirement "An Alkahest section that
+  cannot settle makes Alkahest unready". That requirement named a missing
+  address as a blocker. The change's `settlement-configuration` delta now
+  modifies it: a wallet with neither an address nor a key is the blocker,
+  and the oracle is compared with both accounts.
+
+  Unit (`kit/alkahest/tests/unit/test_settlement_config.py`):
+  - `test_the_address_names_another_account` and `test_the_address_is_omitted`,
+    readiness's part of those scenarios, the latter also pinning
+    `wallet_account_address`;
+  - `test_the_oracle_is_the_signing_key`, for the trusted and the
+    interruptible oracle, with another address and with none;
+  - `test_a_buyer_whose_address_is_not_its_keys_is_not_refused`;
+  - an uppercase-hex address names the same account as the key's.
+
+  Each scenario's application-level part, through `StorefrontClient`, is
+  24.2's, except API credits' below.
+
+  The storefronts' accessors:
+  - Unit, at the bare-metal composition root (its runtime built in process,
+    chain clients injected, no app):
+    `test_an_omitted_address_is_the_account_its_key_signs_as`. A key with no
+    address reports neither address blocker, and the composition's wallet
+    names the key's account. That its release conditions then name it is by
+    reading `_release_conditions`, not tested here.
+  - Unit (VM, `tests/unit/test_config_loader.py`):
+    `test_an_omitted_wallet_address_is_the_account_its_key_signs_as`, over a
+    built settings object.
+  - Application integration (API credits,
+    `tests/integration/test_alkahest_release_conditions.py`, the started app
+    through its typed clients):
+    `test_a_seller_stating_only_a_key_publishes_the_keys_account_as_recipient`,
+    whose published listing's release condition names the key's account.
+
+  The suite's seller wallet was an address with an unrelated key, so it now
+  uses Anvil's first published development account. The case that read a
+  key-only wallet as missing its address now states neither. The disabled
+  section's "address" case is now a mismatch.
+
+  Storefront tests outside the plan's files changed with it, since each stated
+  an address its key does not sign as and so read Alkahest unready:
+  - `domains/bare_metal/storefront/tests/test_app_composition.py`: the
+    development pair. The `[Wallet].address` row of
+    `test_a_configured_section_missing_an_input_starts_unready_naming_it` is
+    removed, since an omitted address is no longer missing; the test above
+    states what it now is;
+  - `domains/vms/storefront/tests/unit/test_alkahest_chain_probe_composition.py`
+    and `tests/integration/test_degraded_startup.py`: the development pair;
+  - `domains/apicredits/storefront/tests/integration/test_alkahest_release_conditions.py`:
+    the development pair;
+  - VM `tests/unit/test_config_loader.py`: the section comment that said
+    configuration never derives an address, and the test it named, now say
+    a stated address is returned as stated.
+
+  VM's `settings.toml` comment now says Alkahest needs the key, and an
+  address only when stated, as the key's account.
+
+  The change's `settlement-configuration` delta also modifies "Readiness
+  blockers state their kind", whose scenario "A wallet is missing" read a
+  wallet with no address as missing.
+
+  Declined from the fresh-context checks:
+  - A key the kit cannot parse is read as present: beside an address, no
+    mismatch is judged and readiness reports nothing; with no address,
+    readiness reports the address missing rather than the key. That
+    predates this section in substance, and no decision names a blocker for
+    an unreadable key. Follow-up, for closeout to carry to `design.md`.
+  - The VM derives the address from the key on every read when none is
+    stated, including on payments-only negotiations. Declined: it derives
+    only from a key the operator configured for Alkahest, so a configuration
+    with no EVM wallet derives nothing, which is what
+    `marketplace-identity`'s "Marketplace identity is independent of chain
+    credentials" requires.
+- [x] 22.2 Bump `arkhai-kit-alkahest`, and run `make lock`. **Verification
   checkpoint:**
   - 22.1;
   - `make test` in `kit/alkahest`;
   - `make check-packaging` and `make check-comment-hygiene`.
 
   Application integration and end-to-end are section 24's.
+
+  `arkhai-kit-alkahest` 0.10.0 → 0.11.0, its first bump in this change.
+  `make lock` moved it in the locks of every package installing it. The three
+  storefronts' floors are now `>=0.11.0`, since each imports
+  `wallet_account_address`; each storefront was already bumped in this change.
+  Results:
+  - `make test` in `kit/alkahest`: 424 passed;
+  - the VM, bare-metal, and API-credit storefront suites, rerun after the
+    second fresh-context check's fixes and the floors' relock: 1142 + 475,
+    513, and 244 passed;
+  - full `make test`: passes;
+  - `make check-packaging`: passes;
+  - `make check-change`: only the citation of
+    `openspec/specs/introduction-delivery/architecture.md`, a closeout
+    destination (27.9), fails. Comment hygiene is among its checks and passes.
+
+  End-to-end: none yet. The pipeline's storefronts state addresses their keys
+  sign as, so no scenario meets the blocker; section 24's scenarios carry the
+  wallet through publication.
 
 ## 23. Alkahest address books are named per chain in the Alkahest section
 
@@ -3399,6 +3520,15 @@ Files:
     `alkahest.wallet_address_mismatch`, the storefront's other mechanisms ready,
     and no Alkahest option published;
   - an omitted address is derived from the key.
+
+  Correction, recorded at section 22: the first bullet already held, since
+  API credits' settlement composition passes its wallet to readiness. The
+  storefronts' naming of the seller through `wallet_account_address`, which
+  is what makes `[Wallet].address` optional, moved to section 22 (22.1's
+  notes), with API credits' application test of the derived recipient.
+  Bare metal's `WalletSettings.address` already defaults to empty. What
+  remains here is `resolve_evm_wallet`'s removal and the application tests
+  above.
 - [ ] 24.3 Move the repository's storefront configurations and charts to
   `[Settlement.alkahest.address_books]`, and regenerate the values schemas with
   `make helm-values-schema`. The drift tests pass (D11).
@@ -3681,7 +3811,7 @@ column at closeout (27.9).
 | D8: why the mark is a flag, not a state (rollback); how it differs from the deferred outcome | `openspec/specs/settlement-servicing/architecture.md`, "Servicing lifecycle" | |
 | D9: one dispatch claimed by the completing start; no counterparty-triggered re-send | `openspec/specs/introduction-delivery/spec.md`, "Delivery fires once per reveal and re-delivery is explicit", through the archive | |
 | D9: the buyer-retry limit; why a new start, not a replay, completes a reveal; why the claim is its own table | `openspec/specs/introduction-delivery/architecture.md` (new), and its row in `openspec/specs/README.md` | |
-| D10 and D11: one seller account; address books per chain | `openspec/specs/settlement-configuration/spec.md`, through the archive; `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Settlement consumer configuration and cutover" and "Bare-metal role configuration"; `docs/seller-quickstart.md`, `docs/bare-metal-seller-quickstart.md`, `docs/buyer-quickstart.md`, and `docs/cookbooks/vllm-apicredits-seller.md`, wherever each names a book or the seller's address | |
+| D10 and D11: one seller account; address books per chain | `openspec/specs/settlement-configuration/spec.md`, through the archive; `openspec/specs/settlement-configuration/architecture.md`, where it lists an empty wallet address among the blockers (added at section 22); `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Settlement consumer configuration and cutover" and "Bare-metal role configuration"; `docs/seller-quickstart.md`, `docs/bare-metal-seller-quickstart.md`, `docs/buyer-quickstart.md`, and `docs/cookbooks/vllm-apicredits-seller.md`, wherever each names a book or the seller's address | |
 | D12 and D13: the bare-metal delivery conflict, and begin | `openspec/specs/storefront-publication/spec.md`, through the archive | |
 | D17: operator guest names | `openspec/specs/physical-provisioning/spec.md`, through the archive | |
 | Pre-1.0 incompatible changes; versioned contracts are versioned, not changed in place; neither applies at or above 1.0.0 | `docs/development/RELEASING.md`, "Versioning policy"; a pointer in `docs/development/ARCHITECTURE.md`, "Operators"; the owner's one sentence in `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Profile-based configuration" | |

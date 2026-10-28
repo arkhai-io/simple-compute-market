@@ -550,15 +550,19 @@ def test_nested_env_var_via_double_underscore(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# EVM wallet settings are optional, explicit mechanism inputs. Marketplace
-# configuration never derives an address from a private key.
+# EVM wallet settings are optional mechanism inputs, apart from the marketplace
+# identity. A stated address is returned as stated; with none, the seller is the
+# account its key signs as.
 # ---------------------------------------------------------------------------
 
 
+# Anvil's first published development key and the address it signs as; never
+# use them on a public network.
 _ANVIL_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+_ANVIL_ADDRESS = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 
 
-def test_evm_wallet_helpers_return_only_explicit_values(tmp_path, monkeypatch):
+def test_evm_wallet_helpers_return_the_stated_address(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     cfg_dir = tmp_path / "arkhai"
     cfg_dir.mkdir(parents=True)
@@ -572,6 +576,21 @@ address = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
         "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
     )
     assert agent_config.get_evm_wallet_private_key(cfg) == _ANVIL_KEY
+
+
+def test_an_omitted_wallet_address_is_the_account_its_key_signs_as(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    cfg_dir = tmp_path / "arkhai"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "storefront.toml").write_text(f"""
+[wallet]
+private_key = "{_ANVIL_KEY}"
+""")
+    cfg = agent_config._build_settings()
+
+    assert agent_config.get_evm_wallet_address(cfg) == _ANVIL_ADDRESS
 
 
 def test_build_chains_uses_known_chain_id_when_omitted(tmp_path, monkeypatch):

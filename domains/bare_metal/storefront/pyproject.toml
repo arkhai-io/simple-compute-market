@@ -16,7 +16,7 @@ dependencies = [
     "arkhai-core-registry-client>=0.12.1",
     "arkhai-core-storefront>=0.16.0",
     "arkhai-core-storefront-client>=0.25.0",
-    "arkhai-kit-alkahest>=0.10.0",
+    "arkhai-kit-alkahest>=0.11.0",
     "arkhai-kit-config>=0.4.0",
     "arkhai-kit-negotiation-runtime==0.5.2",
     "arkhai-kit-policy>=0.6.0",

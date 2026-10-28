@@ -48,3 +48,79 @@ table, and migration MUST move either into it.
 - **WHEN** an operator migrates a configuration naming a book under either retired key
 - **THEN** the book is named under `[Settlement.alkahest.address_books]` for its chain, and
   migration refuses two different books for one chain
+
+## MODIFIED Requirements
+
+### Requirement: An Alkahest section that cannot settle makes Alkahest unready
+
+A configured `[Settlement.alkahest]` section that parses but under which no deal could be
+settled MUST make the Alkahest mechanism unready, with a configuration blocker naming the
+setting, and MUST NOT stop the storefront, whether or not the section is enabled. That
+covers an oracle-gated section with no trusted oracle; a trusted or interruptible oracle
+equal to the seller wallet's address or to the account its key signs as; an interruptible
+section with no interruptible oracle; a seller wallet with neither an address nor a key,
+whatever clients the storefront composes; a missing wallet key or no configured chain
+where the storefront needs them to settle; and a release model the storefront's domain
+cannot deliver. A release condition MUST NOT fall back to the seller wallet as its oracle.
+A section that does not parse MUST stop startup, as any configuration does.
+
+#### Scenario: An oracle-gated section names no oracle
+
+- **WHEN** a storefront starts with an oracle-gated Alkahest section that lists no trusted
+  oracle
+- **THEN** it starts, Alkahest is unready with a configuration blocker naming the missing
+  oracle, and its other mechanisms publish
+
+#### Scenario: The oracle is the seller's own wallet
+
+- **WHEN** a storefront's Alkahest section names the seller wallet as its trusted oracle
+- **THEN** Alkahest is unready with a configuration blocker, and no candidate is refused
+  per cycle for it
+
+#### Scenario: The seller wallet has no address
+
+- **WHEN** a VM or API-credit storefront composes Alkahest clients but its seller wallet
+  states no address and has no key to derive one from
+- **THEN** Alkahest is unready with a configuration blocker, and no listing advertises a
+  release condition with no recipient
+
+### Requirement: Readiness blockers state their kind
+
+Every mechanism's readiness blocker MUST carry a kind: `configuration`, which the
+storefront's own configuration causes and only an operator can clear, or `reachability`,
+raised because a dependency the mechanism needs could not be reached, or has not yet been
+probed, to determine readiness. The kind MUST be set on every blocker: by each
+mechanism's preflight on the blockers it reports, and by the settlement runtime on the
+`not_configured` and `disabled` blockers it builds itself, which are configuration
+blockers. Status MUST report it. A mechanism whose readiness contacts nothing reports only
+configuration blockers. A disabled section's readiness MUST list, after `disabled`, the
+configuration blockers its mechanism's preflight reports for it.
+
+#### Scenario: A chain cannot be reached
+
+- **WHEN** Alkahest's chain probe cannot reach a configured chain
+- **THEN** its blocker is the reachability blocker `alkahest.chain_unreachable`
+
+#### Scenario: A required contract is not deployed
+
+- **WHEN** Alkahest's chain probe reaches a chain that has no code at an address its
+  address configuration requires
+- **THEN** its blocker is the configuration blocker `alkahest.contract_missing`
+
+#### Scenario: A wallet is missing
+
+- **WHEN** Alkahest's seller wallet states no address and has no key to derive one from
+- **THEN** its blocker is a configuration blocker
+
+#### Scenario: A mechanism is disabled
+
+- **WHEN** a mechanism's section is absent or disabled
+- **THEN** the settlement runtime's `not_configured` or `disabled` blocker is a
+  configuration blocker
+
+#### Scenario: A disabled section could not settle
+
+- **WHEN** a seller's Alkahest section is disabled and lacks its wallet key, or names a
+  release model its domain cannot deliver
+- **THEN** its readiness reports `disabled` followed by the configuration blocker naming
+  the problem, and no reachability blocker

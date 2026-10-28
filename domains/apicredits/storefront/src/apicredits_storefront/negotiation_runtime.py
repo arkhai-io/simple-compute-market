@@ -51,7 +51,7 @@ from apicredits_storefront.services.capacity_client import (
     build_capacity_client,
 )
 from apicredits_storefront.services.keys_lookup import lookup_key_record
-from apicredits_storefront.utils.config import CHAINS, settings
+from apicredits_storefront.utils.config import CHAINS, seller_wallet_address, settings
 from arkhai_apicredits.listings.pricing import determine_strategy_from_order
 from arkhai_apicredits.negotiation.storefront_round import (
     ApiCreditsSellerRoundHook,
@@ -90,7 +90,7 @@ def _chain_config_paths() -> dict[str, str | None]:
 
 
 def _seller_wallet_address() -> str | None:
-    return str(settings.get("wallet.address", "") or "") or None
+    return seller_wallet_address() or None
 
 
 class _QuotaSnapshot:

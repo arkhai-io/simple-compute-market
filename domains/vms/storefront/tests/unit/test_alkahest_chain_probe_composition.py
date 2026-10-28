@@ -37,7 +37,12 @@ _CHAINS = {
         alkahest_address_config_path=str(anvil_address_book_path()),
     )
 }
-_WALLET = {"address": "0x" + "33" * 20, "private_key": "0x" + "55" * 32}
+# Anvil's first published development account: a key and the address it signs
+# as, so the seller wallet names one account. Never use it on a public network.
+_WALLET = {
+    "address": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+    "private_key": "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+}
 
 
 def _never_called(*_args):

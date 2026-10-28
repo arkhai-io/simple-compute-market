@@ -94,7 +94,9 @@ priority = []
 
 # [Wallet] and [Chains.<name>] are optional EVM resources supplied by operator
 # Private wallet material belongs only in storefront.secrets.toml. Alkahest
-# requires Wallet.address plus a selected Chains entry with rpc_url and chain_id.
+# requires Wallet.private_key plus a selected Chains entry with rpc_url and
+# chain_id; Wallet.address, when stated, must be the account the key signs as,
+# and when omitted is that account.
 
 [registry]
 # Leave empty by default. Any user-supplied list at a higher overlay

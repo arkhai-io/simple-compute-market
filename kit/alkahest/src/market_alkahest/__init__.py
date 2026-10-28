@@ -35,6 +35,7 @@ from .settlement_config import (
     ALKAHEST_MECHANISM_ID,
     AlkahestSettlementConfig,
     create_alkahest_registration,
+    wallet_account_address,
 )
 
 __all__ = [
@@ -62,4 +63,5 @@ __all__ = [
     "json_rpc_call",
     "release_conditions",
     "verify_escrow_against_plan",
+    "wallet_account_address",
 ]

@@ -44,9 +44,10 @@ from tests.integration.test_publish_reconcile import _QuotaRuntime
 SEED = b"\x22" * 32
 SELLER_SIGNER = Ed25519Signer(SEED)
 ADMIN_SIGNER = Ed25519Signer(b"\x44" * 32)
-SELLER_WALLET = "0x" + "33" * 20
-# A deterministic development key; never used on a public network.
-SELLER_WALLET_KEY = "0x" + "55" * 32
+# Anvil's first published development account, a key and the address it signs
+# as, so the seller wallet names one account; never used on a public network.
+SELLER_WALLET = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+SELLER_WALLET_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 ORACLE = "0x" + "cd" * 20
 ESCROW = {
     "chain_name": "anvil",
@@ -231,6 +232,20 @@ async def test_a_published_listing_advertises_the_recipient_arbiter_paying_the_s
             ).lower(),
             "demand_data": {"recipient": SELLER_WALLET.lower()},
         }
+    ]
+
+
+async def test_a_seller_stating_only_a_key_publishes_the_keys_account_as_recipient(
+    storefront,
+):
+    with _replaced(wallet={"private_key": SELLER_WALLET_KEY}):
+        async with _started(_settlement()) as (listings, public, _admin):
+            created = await listings.publish_from_quota(_supplied_escrows())
+            listing = await public.get_listing(created.listing_id)
+
+    assert created.status == "created"
+    assert [demand["demand_data"] for demand in listing.extra["demands"]] == [
+        {"recipient": SELLER_WALLET.lower()}
     ]
 
 

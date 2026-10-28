@@ -22,6 +22,7 @@ from market_alkahest import (
     ReleaseModelError,
     create_alkahest_registration,
     json_rpc_call,
+    wallet_account_address,
 )
 from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
 from market_capacity_publication import (
@@ -812,15 +813,19 @@ def build_runtime_from_configuration(
     except (TypeError, ValueError) as exc:
         raise RuntimeError("[Settlement] must be strict shared settlement config") from exc
     # A configured Alkahest section, enabled or not, owns the obligations
-    # accepted under it. One that lacks its address, chains, or key cannot
-    # settle, which Alkahest readiness reports by name while the storefront's
-    # other mechanisms run; with no section, those inputs would be a second,
-    # stale statement of what the settlement root says, which is incoherent.
+    # accepted under it. One that lacks its chains or key, or whose address
+    # names another account than its key, cannot settle, which Alkahest
+    # readiness reports by name while the storefront's other mechanisms run;
+    # with no section, those inputs would be a second, stale statement of what
+    # the settlement root says, which is incoherent.
     alkahest_configured = section_check.configures(ALKAHEST_MECHANISM)
-    seller_evm_address = active.wallet.address.strip()
     private_key = active.wallet.private_key.strip()
+    # An omitted address is the account the key signs as.
+    seller_evm_address = wallet_account_address(
+        {"address": active.wallet.address, "private_key": private_key}
+    )
     supplied = {
-        "[Wallet].address": bool(seller_evm_address),
+        "[Wallet].address": bool(active.wallet.address.strip()),
         "[Chains]": bool(active.chains),
         "[Wallet].private_key": bool(private_key),
     }

@@ -22,6 +22,7 @@ from typing import Any
 from core_storefront.identity_config import IdentityConfig, resolve_storefront_signer
 from core_storefront.multi_registry_client import RegistryAuthorityTrust
 from dynaconf import Dynaconf
+from market_alkahest import wallet_account_address
 from market_config.config_loader import (  # type: ignore[import-not-found]
     ChainConfig,
     chains_from_config,
@@ -211,10 +212,16 @@ CHAINS: dict[str, ChainConfig] = _build_chains(settings)
 
 
 def get_evm_wallet_address(source: Dynaconf | None = None) -> str:
-    """Return the explicitly configured EVM mechanism address, if any."""
+    """The seller's EVM address: `[Wallet].address`, else the account its key
+    signs as, so every place naming the seller names one account."""
 
     active = settings if source is None else source
-    return str(active.get("wallet.address", "") or "").strip()
+    return wallet_account_address(
+        {
+            "address": str(active.get("wallet.address", "") or ""),
+            "private_key": get_evm_wallet_private_key(active),
+        }
+    )
 
 
 def get_evm_wallet_private_key(source: Dynaconf | None = None) -> str:

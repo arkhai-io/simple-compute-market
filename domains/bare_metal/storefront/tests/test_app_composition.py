@@ -345,8 +345,10 @@ ALKAHEST_SECTION = {
     "interruptible": False,
     "interruptible_oracle_addresses": [],
 }
-WALLET_ADDRESS = "0x" + "33" * 20
-WALLET_KEY = "0x" + "55" * 32
+# Anvil's first published development account: a key and the address it signs
+# as, so the seller wallet names one account. Never use it on a public network.
+WALLET_ADDRESS = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+WALLET_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 CHAINS = {"anvil": {"rpc_url": "http://anvil.test:8545"}}
 
 
@@ -757,7 +759,6 @@ async def _readiness_by_mechanism(runtime) -> dict:
 @pytest.mark.parametrize(
     ("missing", "blocker"),
     [
-        ("[Wallet].address", "alkahest.wallet_address_missing"),
         ("[Chains]", "alkahest.chains_missing"),
         ("[Wallet].private_key", "alkahest.wallet_key_missing"),
     ],
@@ -769,8 +770,7 @@ async def test_a_configured_section_missing_an_input_starts_unready_naming_it(
     storefront starts, Alkahest is unready with a configuration blocker naming
     what is missing, and contact exchange stays ready."""
     document = _alkahest(publishable_configuration(tmp_path / "storefront.db"), enabled=enabled)
-    if missing != "[Wallet].address":
-        document["Wallet"] = {"address": WALLET_ADDRESS}
+    document["Wallet"] = {"address": WALLET_ADDRESS}
     if missing != "[Chains]":
         document["Chains"] = CHAINS
     secrets = None if missing == "[Wallet].private_key" else f'[Wallet]\nprivate_key = "{WALLET_KEY}"\n'
@@ -785,8 +785,29 @@ async def test_a_configured_section_missing_an_input_starts_unready_naming_it(
     assert (blocker, "configuration") in {(b.code, b.kind) for b in alkahest.blockers}
     assert readiness["contact-exchange.v1"].ready is True
     # No client is built without the key and chains to build it from.
-    if missing != "[Wallet].address":
-        assert runtime.chain_clients == {}
+    assert runtime.chain_clients == {}
+
+
+async def test_an_omitted_address_is_the_account_its_key_signs_as(monkeypatch, tmp_path):
+    """A seller stating a key and no address is that key's account: readiness
+    reports no missing address, and the wallet its release conditions name is
+    the key's."""
+    document = _alkahest(publishable_configuration(tmp_path / "storefront.db"))
+    document["Chains"] = CHAINS
+
+    runtime = _configured_runtime(
+        monkeypatch,
+        tmp_path,
+        document,
+        secrets=f'[Wallet]\nprivate_key = "{WALLET_KEY}"\n',
+        build_chain_client=ChainClients(),
+    )
+    readiness = await _readiness_by_mechanism(runtime)
+
+    codes = {blocker.code for blocker in readiness["alkahest.v1"].blockers}
+    assert not codes & {"alkahest.wallet_address_missing", "alkahest.wallet_address_mismatch"}
+    wallet = runtime.settlement_composition.resources["wallet"]
+    assert wallet["address"].lower() == WALLET_ADDRESS
 
 
 def test_contradictory_release_models_are_refused_at_startup(monkeypatch, tmp_path):
