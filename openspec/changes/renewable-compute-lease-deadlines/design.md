@@ -75,7 +75,7 @@ exactly as today: null means unarmed, not reserved. The site is told when the le
 must be renewed by, never why; the field is a lease concept, and nothing commercial
 crosses the boundary.
 
-*Rejected:* one monotonic deadline from commit — a two-hour provisioning budget would
+*Rejected:* one monotonic deadline from commit — a two-hour provisioning allowance would
 then refuse a funded horizon twenty minutes out and authorize the lease to the allowance
 unfunded. *Rejected:* letting any renewal move the deadline earlier — a replayed old
 horizon could then shorten a funded lease.
