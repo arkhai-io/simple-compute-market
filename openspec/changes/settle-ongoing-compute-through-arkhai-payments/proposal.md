@@ -29,44 +29,70 @@ between the classes is settled in
 
 In `kit/arkhai-payments`, and nowhere domain-specific:
 
-- `PaymentsOptionParams` gains `period` and `reserve_ahead`, both ISO durations. An
-  option stating them is billed per period; `derive_mandate` derives one `rate` part
-  for it — `amount` the per-period rate from the Agreement, `period` and `reserveAhead`
-  from the params, `hold: {until: stop}` — and keeps deriving one `once` part for an
-  option without them. `reserve_ahead` is published as a clause field beside `window`,
-  so a buyer can bound it.
+- `PaymentsOptionParams` gains `period` and `reserve_ahead`, both ISO durations, and
+  an optional `minimum_charge`. An option stating a period is billed per period;
+  `derive_mandate` derives one `rate` part for it — `amount` the per-period charge,
+  `floor(hourly amount × period / 3600)` in minor units, both sides re-deriving it from
+  the Agreement's unchanged hourly `amount`; `period` and `reserveAhead` from the
+  params; `hold: {until: stop}` — plus one `once` part for the minimum charge where
+  stated, the enforceable minimum cost of a lease that a buyer's stop cannot recover;
+  and keeps deriving one `once` part for an option without a period. `reserve_ahead`
+  and `period` are published as clause fields beside `window`.
 - The mandate's stop authorities stay `[payer, payee]` for both classes: the payee's
   stop is the honest way to end billing when the seller must, and a routine on-demand
   preemption is a breach remedied through `reverse` and dispute, not by removing the
   authority. `reverse` stays `[payee, dispute authority]`.
 - Platform credits are `USD/6`; the kit's examples, README, and fixtures move from
   `USD/2`. No production code names an asset.
-- Snapshot-proof verification: `SignedTransactionSnapshot.proof` is verified against
-  the pinned service identity before `fundedThrough`, `stop`, parts, or events are read
-  as evidence, with a snapshot vector and a receipt-kit fixture, as the archived design
-  of `settle-through-arkhai-payments` required of the first reader of snapshot state.
-- `start` and `stop` client calls beside `reverse`, each with a stable
-  transaction-scoped idempotency key, and a read of the transaction's events so a
-  caller checks what was already sent before sending.
+- Snapshot verification: a snapshot is evidence only once its proof verifies against
+  the pinned service identity, it is bound to the expected transaction, mandate, and
+  deal, its parts match the mandate's, its `observedAt` is within tolerance, and its
+  event sequence has not regressed against a persisted high-water mark — with a
+  snapshot vector, a fixture, and hostile tests (stale, wrong-transaction, regressed,
+  post-stop), as the archived design of `settle-through-arkhai-payments` required of
+  the first reader of snapshot state. A receipt embedded in a verified snapshot is
+  trusted by that proof, which is what lets a running deal re-anchor across a
+  service-identity rotation listed in overlap, instead of being drained.
+- `start`, `stop`, and a partial `reverse{part, amount}` beside the whole-transaction
+  `reverse`, each keyed by the caller's durable decision rather than the transaction,
+  and a read of the transaction's events so a caller checks what was already sent.
+  The stop command carries no effective time, so a stop learned late is corrected
+  inside the contract: the periods earned after the effective end are reversed on the
+  rate part, whose charges stay held until its stop, and then the stop is issued —
+  charges after a deal's effective end are reversed before they are collected. A
+  future-effective stop is scheduled durably by the caller and issued immediately
+  when due.
 - Confirmation against the service's conformance vectors that the period clock runs
   from the `start` event — the mandate has no start time, and approval only reserves
   the first batch — since that is what lets billing begin at delivery.
 - The kit's fake grows into an in-lane HTTP double of the payments service: it serves
   approve, snapshots with verifiable proofs carrying `fundedThrough`, `stop`, and the
-  event sequence, `start`, `stop`, `reverse`, and a test control that exhausts a
-  payer's funds, so every payment scenario runs in the pipeline instead of skipping,
-  and exhaustion can be asserted deterministically. It is a test asset of the
-  mechanism, never a stand-in for live qualification.
+  event sequence, `start`, `stop`, partial and whole `reverse`, and test controls that
+  exhaust a payer's funds, serve stale or wrong-transaction snapshots, regress a
+  sequence, and rotate the signing identity, so every payment scenario runs in the
+  pipeline instead of skipping and the hostile cases can be asserted. It is a test
+  asset of the mechanism, never a stand-in for live qualification.
+- The registration declares, per composition, whether it runs the per-period
+  continuation; a per-period option publishes only where it does.
 
 ## Payments contract this builds on
 
-Unchanged from the earlier proposal, now vendored: `fundedThrough` per transaction in
-the signed snapshot, the earliest current reservation across rate parts; `reserveAhead`
-a required per-part term the option declares; a stop with an effective time, a cause
-(`payer`, `payee`, `authority`, `terms`), and settled amounts, payee stops backdatable
-and never future-dated, any stop ending the whole transaction; per-transaction event
-sequence numbers; billing per started period, counted from `start`; the first batch,
-including any `once` parts, reserved at approval.
+Now vendored: `fundedThrough` per transaction in the signed snapshot, the earliest
+current reservation across rate parts; `reserveAhead` a required per-part term the
+option declares; a stop with the service's effective time, a cause (`payer`, `payee`,
+`authority`, `terms`), and settled amounts, any stop ending the whole transaction;
+per-transaction event sequence numbers; a rate part's charges held until its stop;
+`reverse` taking a part and an amount; billing per started period, counted from
+`start`; the first batch, including any `once` parts, reserved at approval. The
+earlier proposal's note that payee stops may be backdated is not in the vendored
+schema, and the design does not rely on it.
+
+Confirmations owed to the service's published vectors before planning, each a blocker
+if unpublished: the snapshot proof's frame; a partial reverse of a running rate part
+before its stop, and whether after it; the period clock from `start`; a mandate
+mixing `once` and `rate` parts; whether `latestEventSequence` is strictly monotonic. A
+payee stop carrying its own effective time is recorded as unowned work outside this
+repository in `ROADMAP.md`, Goal 8.
 
 ## Capabilities
 
@@ -123,10 +149,15 @@ settings. No domain code.
 
 ### Knowledge to promote
 
-- A per-period option derives a `rate` part with `until: stop`; a prepaid one a
-  `once` part; the Agreement's `amount` is the per-period rate for the former —
-  `settlement-servicing` spec.
-- Snapshot proofs are verified before snapshot state is evidence, replacing the
+- A per-period option derives a `rate` part with `until: stop`, and a `once` part for
+  its minimum charge; the per-period charge is derived from the Agreement's hourly
+  `amount` by floored exact arithmetic — `settlement-servicing` spec.
+- Charges after a deal's effective end are reversed before they are collected; a
+  stop's effective time is corrected by partial reversal — `settlement-servicing` spec
+  and architecture companion.
+- A service-identity rotation is an overlap under which running deals re-anchor —
+  `settlement-servicing` spec; `DEPLOYMENT_AND_CONFIG.md`.
+- A snapshot is evidence only once verified, bound, and ordered, replacing the
   companion's "Snapshot proofs are not evidence" paragraph — `settlement-servicing`
   architecture companion.
 - The period clock runs from the `start` event, so billing begins when the payee

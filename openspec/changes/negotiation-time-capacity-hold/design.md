@@ -136,3 +136,12 @@ differs.
 - **Should a hold survive a negotiation's abandonment for a grace period, in case the
   counterparty returns?** Cheaper for a flaky client, worse for capacity utilization.
   Deferrable: it is a policy interval, not a structural question.
+
+## Related decision recorded by Goal 8
+
+Goal 8's `renewable-compute-lease-deadlines` bounds a per-period lease's provisioning
+window with a per-pool budget the site reads at commit, unpriced; `billable-capacity-reservations`'
+design records the revisit. When the hold moves to negotiation time here, the hold, the
+provisioning window, and the running lease become three consecutive priced-or-bounded
+windows on one reservation, and one pricing mechanism should serve them; revisit when
+this change is designed.

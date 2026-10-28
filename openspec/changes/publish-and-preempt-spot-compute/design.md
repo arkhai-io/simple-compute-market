@@ -1,10 +1,10 @@
 # Design
 
-The decisions below were settled with the owner in the goal-level design of
-[`ROADMAP.md`, Goal 8](../../../docs/development/ROADMAP.md#goal-8--sell-compute-by-the-period-until-either-party-stops)
-on 2026-10-28, across the goal's five changes. This change's own design session
-verifies them against the code as its dependencies left it and adds the spec deltas;
-it does not reopen them without a finding.
+The decisions below were settled at goal level with the owner on 2026-10-28 for
+[`ROADMAP.md`, Goal 8](../../../docs/development/ROADMAP.md#goal-8--sell-compute-by-the-period-until-either-party-stops),
+and revised the same day against three independent design reviews of the goal. This
+change's own design review may reopen any of them with a finding; its design session
+verifies them against the code as its dependencies left it and adds the spec deltas.
 
 ## Context
 
@@ -56,24 +56,37 @@ so a seller changing its policy after acceptance changes nothing for the deal, a
 *Rejected:* extending the admin interrupt route. It is administrator-authenticated,
 escrow-keyed, Alkahest-only, and truncates.
 
-### D2. The effective time is now plus the notice, and the stop is scheduled from it
+### D2. The effective time is now plus the notice; the stop is scheduled locally
 
-The route fixes `effective_at = now + notice_seconds`, records the stop intent with
-cause `seller_preemption` and that instant, issues the payee stop effective then
-(immediately when the notice is zero), and the continuation terminates the lease at
-the site when the instant arrives, through the terminate route. Until then the deal's
-status read shows the pending end and its effective time, which is the buyer's
-notice. A repeat returns the same intent. A buyer who cancels during the notice
-window ends the deal at their own earlier instant.
+The route fixes `effective_at = now + notice_seconds` and appends a request with cause
+`seller_preemption` and that instant to the deal's log; the decision fold makes it the
+effective end unless an earlier lawful request exists or arrives. The payments
+contract cannot carry a future-effective stop, so the storefront durably schedules
+the stop at the instant and issues an ordinary immediate `stop`, keyed by the
+decision, when it arrives — and terminates the lease at the site then, through the
+terminate route. If the storefront is down when the instant passes, the stop is late
+and is corrected as any late stop is (`converge-ongoing-compute-leases` D4). A
+scheduled stop whose decision was superseded — a buyer who cancels during the notice
+window ends the deal at their own earlier instant — is refused as stale by its key
+and never executes. Until the instant, a pending end and its effective time are
+observable through the deal's status; the design does not promise the buyer is told,
+and a push notice is deferred. A repeat returns the same decision.
 
-### D3. An override is a different act with its own cause
+*Rejected:* issuing the stop at once with a future effective time — not in the
+contract. *Rejected:* issuing it at once with no time — it stops billing while the
+buyer still holds the instance for the notice period.
 
-An administrator-authenticated override ends any deal whatever its policy, records
-cause `admin_override` with the operator's stated reason, and is reported distinctly
-in status and events. A preemption of an on-demand deal is therefore never possible
-through the preemption route, and an emergency never produces a record that looks
-like a lawful preemption; what a breach cost the buyer is read from the mechanism's
-event record and the policy.
+### D3. The override is `buyer-initiated-compute-termination`'s, not this change's
+
+The administrative override — any deal, whatever its policy, cause `admin_override`,
+the operator's reason and identity, reported distinctly — is a request kind of the
+decision log that `buyer-initiated-compute-termination` D5 introduces. This change
+adds only the seller's contractual route over that arbitration, so a preemption of a
+deal whose policy forbids it is never possible through it, and an emergency never
+produces a record that looks like a lawful preemption. On-demand means no
+discretionary preemption, not immunity from infrastructure: a site withdrawal of an
+on-demand lease is an exceptional end attributed to its cause, reconciled to its
+effective instant, with the remedy following the policy and the dispute authority.
 
 ### D4. Spot and on-demand differ only in the policy and the rate
 
@@ -96,6 +109,9 @@ is a financial convergence the stop intent can carry.
 - Whether the pending end during the notice window is served by the existing status
   reads or needs a field of its own; settled in design against the status models
   `buyer-initiated-compute-termination` left.
+- Where the durable schedule lives — a due instant on the decision row the
+  continuation's cycle reads, or a loop of its own; settled in design, the former
+  preferred since the continuation already runs per deal.
 - Whether the operator CLI's preemption verb lives in the storefront CLI only or also
   in a seller-side tool; settled in design.
 
@@ -109,6 +125,7 @@ session.
 
 | Decision | Destination |
 |---|---|
-| D1, D2, D3 | the storefront capability spec that owns the shared routes; `settlement-servicing` spec; `ARCHITECTURE.md`, "Release" |
+| D1, D2 | the storefront capability spec that owns the shared routes; `settlement-servicing` spec; `ARCHITECTURE.md`, "Release" |
+| D3 | `storefront-publication` architecture companion (the on-demand promise) |
 | D4 | `storefront-publication` architecture companion |
 | D5 | the change index, under `automate-seller-spot`'s lesser goal |

@@ -25,9 +25,12 @@ never stored**, from two terms that have homes of their own:
 
 - **How the deal is billed** is a settlement term carried by the selected option. A
   payments option whose params state a billing `period` (and `reserve_ahead`) is billed
-  per period until stopped; one without is prepaid, as today. The Agreement's `amount` is
-  the negotiated scalar as now: the prepaid total for a prepaid option, the per-period
-  rate for a per-period one. The option params themselves are
+  per period until stopped; one without is prepaid, as today. The Agreement's `amount`
+  keeps its unit — the option's hourly rate, for both kinds — and the per-period charge
+  is derived from it once, in the mandate, by exact floored arithmetic both sides
+  re-derive. A per-period option may state a `minimum_charge`, the enforceable minimum
+  cost of a lease, derived as a prepaid part beside the rate part. The option params
+  themselves are
   [`settle-ongoing-compute-through-arkhai-payments`](../settle-ongoing-compute-through-arkhai-payments/)'s;
   this change makes the rest of the system read them.
 - **Whether the seller may interrupt** is a listing term, `interruption_policy`:
@@ -64,11 +67,19 @@ overrides as `listing_shapes` and `asking_rates` are keyed today.
 
 Discovery: `interruption_policy` and `available_until_utc` become declared registry
 fields with filters (`in` on `seller_may_interrupt`, minimum bounds on `notice_seconds`
-and `available_until_utc`, and on `max_duration_seconds`); the billing kind stays a
-buyer-side settlement clause (`arkhai_payments.period`) evaluated locally after the
-registry query, as `arkhai_payments.window` is. A `--class reserved|on_demand|spot` on
-both buyer CLIs is sugar expanding to the registry filter plus the local clause; the
-buyer's duration flag becomes optional.
+and `available_until_utc`, and on `max_duration_seconds`), carried on the model
+`store-registry-listings-as-published` produces — the registry today discards any
+top-level field outside its fixed carrier set, so this change depends on that one; the
+billing kind stays a buyer-side settlement clause (`arkhai_payments.period`) evaluated
+locally after the registry query, as `arkhai_payments.window` is. A
+`--class reserved|on_demand|spot` on both buyer CLIs is sugar expanding to the registry
+filter plus the local clause; the buyer's duration flag becomes optional, and before
+approving a per-period selection the buyer sees the recurring charge, the minimum, the
+initial reserve, and the maximum horizon as distinct numbers.
+
+Publication: a per-period option publishes only where the storefront's composition
+declares the per-period continuation, so no per-period listing exists until
+[`converge-ongoing-compute-leases`](../converge-ongoing-compute-leases/) composes it.
 
 Seller policy: both domains' duration checks read both bounds; a per-period selection
 with no buyer horizon is accepted at the seller's bound; the VM round-zero duration
@@ -99,22 +110,27 @@ None expected.
   `publish-and-preempt-spot-compute`. This change publishes the policy; that one acts
   on it.
 - A stored commercial class on the listing or the Agreement (rejected; `design.md`).
+- A storefront deny list of payer accounts, the one identity with a cost behind it;
+  unowned, recorded in the goal. Rate limits and principal blacklists are rejected for
+  Goal 5's reasons.
 - A permitted-cause list for seller interruption, or a buyer cancellation term.
 - Extending a running lease when `available_until_utc` moves later: no lease
   extension operation exists, and the Agreement's horizon is fixed at acceptance.
 
 ## Dependencies and Related Changes
 
-- Depends on nothing. It reads the option params
-  `settle-ongoing-compute-through-arkhai-payments` adds, but the two can be worked in
-  parallel against one agreed param shape; the index records no dependency.
-- `publish-shape-bounds` and `store-registry-listings-as-published` touch the
-  registry's listing carrier and filter spec; coordinate the field additions.
+- Depends on `store-registry-listings-as-published`, gating design: its carrier policy
+  decides how this change's two registry fields are stored and served. That change
+  depends on `add-database-migration-commands`, so both precede this one.
+- Reads the option params `settle-ongoing-compute-through-arkhai-payments` adds, whose
+  shape that change's design session freezes first; the two are then worked in
+  parallel and the index records no dependency.
+- `publish-shape-bounds` also touches the registry's filter spec; coordinate.
 - `settle-capacity-claim-vocabulary` touches the provision-term carriers.
 
 ## Impact
 
-`core/registry`'s filter spec and schema, `core/src/market_core/schemas.py` only if the
+`core/registry`'s filter spec, schema, and carrier model as its dependency leaves it, `core/src/market_core/schemas.py` only if the
 Agreement needs to carry anything new (expected: nothing), both compute domains'
 listing and term models, `kit/resource-pools-contracts`' hints, both storefronts'
 publication terms, pool overrides, seller policies, and negotiation runtimes,
@@ -142,6 +158,10 @@ promise.
   the site's physical right to withdraw a resource unconditional and separate —
   `ARCHITECTURE.md`, "Deciding which party is authoritative"; `storefront-publication`
   architecture companion.
+- `amount` keeps its hourly unit; the per-period charge and the minimum are derived
+  once in the mandate — `settlement-servicing` spec.
+- A per-period option publishes only where the composition declares servicing —
+  `storefront-publication` and `settlement-configuration` specs.
 - The two seller bounds, their meanings, and how a per-period horizon defaults —
   `storefront-publication` spec and architecture companion.
 - Why the policy is explicit on every listing rather than omitted — `ARCHITECTURE.md`,

@@ -22,14 +22,16 @@ this change lets the seller end it under the policy the buyer accepted.
   negotiation ID and declared in the shared route contracts beside the buyer's end-deal
   route: it reads the accepted deal's `interruption_policy` from its Agreement — never
   the current listing — refuses a deal whose policy does not permit the seller to
-  interrupt, fixes the effective time as now plus `notice_seconds`, records the stop
-  intent with cause `seller_preemption`, issues the payee stop effective then, and
-  terminates the lease at the site when the time arrives. The canonical client gains the
-  method and the storefront operator CLI a verb.
-- A separate, explicitly audited **administrative override** that ends any deal
-  regardless of policy, recorded with its own cause, so an emergency never has to be
-  dressed as a preemption and a preemption of an on-demand deal is a breach the record
-  shows.
+  interrupt, fixes the effective time as now plus `notice_seconds`, appends a request
+  with cause `seller_preemption` to the deal's decision log, durably schedules the
+  payee stop at that instant — the contract carries no future-effective stop, so it is
+  issued immediately when due and corrected if late — and terminates the lease at the
+  site then. A buyer's earlier cancel supersedes it and the scheduled stop never
+  executes. A pending end is observable through the deal's status within the notice
+  window; the buyer is not promised to be told. The canonical client gains the method
+  and the storefront operator CLI a verb.
+- The administrative override is `buyer-initiated-compute-termination`'s request kind;
+  this change adds only the contractual route over it.
 - Spot publication end to end: a pool offering a per-period option with
   `seller_may_interrupt: true` publishes its spot listing beside its on-demand one at
   its own rate; `--class spot` finds it; the deal settles, runs, and is preempted with
@@ -56,8 +58,8 @@ None expected.
 
 - Automated preemption strategies, active-deal views, and splitter execution:
   `automate-seller-spot`.
-- Notifying the buyer of a pending preemption through any channel other than the
-  deal's status read; a push notice is `replace-polling-with-authenticated-push`'s shape.
+- Delivering notice of a pending preemption: the status read makes it observable by
+  polling; a push notice is `replace-polling-with-authenticated-push`'s shape.
 - A permitted-cause list for preemption, or a site-declared bound on it (rejected in
   `negotiate-open-ended-compute-terms`).
 - Alkahest deals, whose interruption is the splitter model's.
@@ -65,8 +67,8 @@ None expected.
 ## Dependencies and Related Changes
 
 - Depends on `negotiate-open-ended-compute-terms` (the policy in the Agreement, spot
-  listings) and `converge-ongoing-compute-leases` (the stop intent's causes, the payee
-  stop, the lease-ended path, the double-backed scenarios).
+  listings) and `converge-ongoing-compute-leases` (the decision log's financial
+  convergence, the late-stop correction, the double-backed scenarios).
 - Builds on `buyer-initiated-compute-termination`'s route shape, which lands with
   `converge-ongoing-compute-leases`' dependency on it.
 
@@ -87,8 +89,9 @@ stop, and the spot scenarios in both lanes.
 
 ### Knowledge to promote
 
-- A preemption is judged against the accepted deal's policy and scheduled from its
-  notice; an override is a different, audited act — `ARCHITECTURE.md`, "Release";
-  the owning storefront spec.
+- A preemption is judged against the accepted deal's policy and scheduled locally
+  from its notice; on-demand means no discretionary preemption, not immunity from
+  infrastructure — `ARCHITECTURE.md`, "Release"; the owning storefront spec;
+  `storefront-publication` architecture companion.
 - Spot and on-demand share every mechanism and differ only in the policy and the
   rate — `storefront-publication` architecture companion.

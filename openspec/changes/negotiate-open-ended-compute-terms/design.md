@@ -1,10 +1,10 @@
 # Design
 
-The decisions below were settled with the owner in the goal-level design of
-[`ROADMAP.md`, Goal 8](../../../docs/development/ROADMAP.md#goal-8--sell-compute-by-the-period-until-either-party-stops)
-on 2026-10-28, across the goal's five changes. This change's own design session
-verifies them against the code and adds the spec deltas; it does not reopen them
-without a finding.
+The decisions below were settled at goal level with the owner on 2026-10-28 for
+[`ROADMAP.md`, Goal 8](../../../docs/development/ROADMAP.md#goal-8--sell-compute-by-the-period-until-either-party-stops),
+and revised the same day against three independent design reviews of the goal. This
+change's own design review may reopen any of them with a finding; its design session
+verifies them against the code and adds the spec deltas.
 
 ## Context
 
@@ -20,7 +20,8 @@ Verified against the tree on 2026-10-28; re-verify before planning.
   per, value}], params}`, its ID the hash of those four. The payments option params
   are `PaymentsOptionParams{payee_account, asset, window, deposit_agreement}`; the
   registration declares `negotiates_scalar_amount`. `compute_rate_total` prices
-  `rate × duration` for `per: hour`, the only time unit `PER_UNIT_SECONDS` knows.
+  `rate × duration` for `per: hour`, the only time unit `PER_UNIT_SECONDS` knows; the
+  bare-metal buyer and seller call it directly.
 - VM: `VmListing.max_duration_seconds` (None = unlimited; `[pricing].default_max_duration_seconds = 0`),
   per-model and pool-override tiers; `listing_resource.interruptible` and
   `settlement_model: splitter_refund` set by `publication_terms` from
@@ -31,8 +32,13 @@ Verified against the tree on 2026-10-28; re-verify before planning.
 - The registry (`core/registry/filter-spec.yaml`, compute schema v2) declares
   `offering_mode`, `capacity_backing`, the shape dimensions, `asking_rate{amount,
   asset, period ∈ [hour]}`, and top-level `max_duration_seconds` (stored, no filter);
-  `interruptible` passes through `additionalProperties`. Settlement-option params are
-  not indexed; buyer clauses evaluate them locally after the query.
+  `interruptible` passes through `additionalProperties`. The publish route persists
+  an explicit carrier set — `listing_resource`, `accepted_escrows`,
+  `settlement_options`, `demands`, `max_duration_seconds`, `oracle_address` — and the
+  read serializes the same set (`core/registry/src/core_registry/api/listing_routes.py`,
+  `api/utils.py`); any other top-level field is accepted and discarded, the defect
+  `store-registry-listings-as-published` owns. Settlement-option params are not
+  indexed; buyer clauses evaluate them locally after the query.
 - Pool hints are `listing_cardinality_mode`, `max_reservation_hold_seconds`,
   `region`, `sla`, `pricing`, `listing_shapes`, `asking_rates`; VM pool override
   terms are `sla`, `max_duration_seconds`, `pricing`; bare metal's are
@@ -43,14 +49,15 @@ Verified against the tree on 2026-10-28; re-verify before planning.
 - Authority: the site never sees commercial terms, and a rule it declares but does
   not enforce at admission is advisory (`ARCHITECTURE.md`, "Deciding which party is
   authoritative"); an omitted term states no commitment ("Omission states no
-  commitment").
+  commitment"); a storefront publishes only what its composition can settle and
+  deliver (`storefront-publication`).
 
 ## Goals / Non-Goals
 
 **Goals:** a seller can offer compute per period until stopped, with or without the
 right to take it back, bounded by when their offer ends; a buyer can find it, take it
-without naming a horizon, and tell the three classes apart; nothing stored can
-contradict the terms it summarizes.
+without naming a horizon, see what it will cost, and tell the three classes apart;
+nothing stored can contradict the terms it summarizes.
 
 **Non-Goals:** settling a per-period deal; the lease machinery that keeps one alive;
 acting on the interruption policy; a stored class.
@@ -78,19 +85,40 @@ with the terms it summarizes, every reader would then need reconciliation handli
 and its only real use — filtering — is served by filters on the terms themselves.
 Revisit trigger: a product needs a class no combination of the two terms expresses.
 
-### D2. The billing kind is a settlement term; "until stopped" needs no term of its own
+### D2. The billing kind is a settlement term; `amount` keeps its unit
 
 A per-period deal is one whose selected payments option states a `period` (and
 `reserve_ahead`) in its params; the mandate derives a `rate` part with `until: stop`
 from it, a `once` part otherwise (`settle-ongoing-compute-through-arkhai-payments`).
-The Agreement is unchanged in shape: `amount` is the per-period rate for such an
-option, and VM's `selected_amount_not_duration_scaled` check does not apply because
-payments builds no obligation. No Agreement field says "until stopped".
+The Agreement is unchanged in shape and in meaning: `amount` is what the option's
+rate says it is — per hour, as every existing pricing path assumes — for a per-period
+option as for a prepaid one. The per-period charge is derived from it, once, in the
+mandate: `floor(amount × period_seconds / 3600)` in minor units, refused at
+publication when it floors to zero, re-derived identically by the buyer's mandate
+check. Worked, at $2.50/h = 2,500,000 `USD/6`: `PT15M` → 625,000; `PT1M` → 41,666
+(0.0016% in the buyer's favour per period); `PT1H` → 2,500,000. No Agreement field
+says "until stopped".
 
-*Rejected:* an additive `term: fixed | until_stopped` on the Agreement — redundant
-with the option, and a second place to disagree. *Rejected:* `duration_seconds = 0`
-as the signal — VM substitutes a duration today, so 0 is indistinguishable from an
-omission.
+A per-period option may also state a `minimum_charge` — an amount, or a count of
+periods at the rate — which the mandate derives as a `once` part beside the `rate`
+part, debited at approval, held for the option's window, and reversible only by the
+payee and the dispute authority. It is the enforceable minimum cost of a lease: a
+buyer who stops before delivery forfeits it unless the seller reverses it on the
+undelivered path, so repeated provisioning costs the buyer the minimum each time,
+which is the principle Goal 5 records — price the abused resource rather than limit
+identity, which is free to mint. A seller who wants no minimum states none and
+bears the churn.
+
+*Rejected:* `amount` as the per-period charge — it changes `amount`'s meaning by
+option kind, breaks the shared `rate × duration` paths, and makes the asking rate and
+the agreed amount different units on one listing. *Rejected:* `PT1H` only — no
+conversion, but per-started-period billing at an hour charges a buyer who stops after
+61 minutes for two, and loosening it later changes a derivation every accepted deal's
+buyer check is pinned to. *Rejected:* an additive `term` on the Agreement, and
+`duration_seconds = 0` as the signal. *Rejected* for the churn vector: rate limiting
+and a principal blacklist, for Goal 5's reasons. A storefront-side refusal of a
+*payer account* — a payments-service account funded through Stripe, the one identity
+with a cost behind it — is recorded as unowned rather than designed here.
 
 ### D3. `interruption_policy` is a listing term of sale, final at the storefront
 
@@ -100,9 +128,17 @@ Shape, versioned like other provision terms:
 {"interruption_policy": {"seller_may_interrupt": true, "notice_seconds": 120, "compensation": "none"}}
 ```
 
-- `seller_may_interrupt` — the promise itself.
-- `notice_seconds` — how long before teardown the buyer is told; 0 means none; the
-  preemption route schedules the effective time from it.
+- `seller_may_interrupt` — the promise: whether the seller may end the deal at its
+  discretion under this policy. It is not immunity from infrastructure: the site's
+  physical right to withdraw a resource is unconditional, and a withdrawal of a deal
+  whose policy says `false` is an exceptional end attributed to its cause and
+  reconciled to its effective instant, with the remedy following this policy and the
+  dispute authority. Nothing is non-preemptible by construction while the payee holds
+  stop authority.
+- `notice_seconds` — how long before teardown the buyer can observe the pending end;
+  0 means none; the preemption route schedules the effective time from it. A pending
+  end is observable through the deal's status; the design does not promise the buyer
+  is told.
 - `compensation` — `none`, or `refund_unused` for a prepaid term. For a per-period
   deal it is `none`, since billing stops at the effective time.
 
@@ -141,16 +177,22 @@ is the one term of sale that is never omitted, and the reason is recorded in
 ### D5. Two seller bounds, with distinct meanings
 
 `max_duration_seconds` (relative, existing): the longest any one deal may run from
-its start. `available_until_utc` (absolute, new): when the seller stops offering the
-resource. Both are pool hints with storefront override and configured default, keyed
-per offering mode. A reserved deal must satisfy both — `duration ≤ max_duration` as
-today and `start + duration ≤ available_until`, which nothing checks today. A seller
-who later moves `available_until_utc` does not extend running leases: the Agreement's
-horizon is fixed at acceptance and no lease extension operation exists.
+its start. `available_until_utc` (absolute, new): the latest end of any lease the
+listing sells — no lease sold under the listing ends after it, which implies no new
+deal is taken after it. Both are pool hints with storefront override and configured
+default, keyed per offering mode. A reserved deal must satisfy both — `duration ≤
+max_duration` as today and `start + duration ≤ available_until`, which nothing checks
+today. A seller who later moves `available_until_utc` does not extend running leases:
+the Agreement's horizon is fixed at acceptance and no lease extension operation
+exists.
 
 *Rejected:* one bound only. A relative bound is a real product (a maximum instance
 lifetime), and a seller who means a date should not restate it as a shrinking
 duration on every refresh; VM's "0 = unlimited" cannot bound a lease at all.
+*Rejected:* a rename to a lease-end name, or a second "offer end" bound beside it —
+nothing today needs the two to differ, and two bounds a seller must keep consistent
+is the kind of term that disagrees with itself. Revisit trigger: a seller who stops
+taking new deals before the hardware goes.
 
 ### D6. `duration_seconds` keeps its shape; a per-period horizon defaults to the seller's bound
 
@@ -159,7 +201,10 @@ which case `duration_seconds` is the distance from `start_utc` to the earliest s
 bound: `start + max_duration_seconds` where positive, `available_until_utc` where
 stated. It is always finite and ≤ both bounds. The site commits `lease_end_utc =
 start + duration` exactly as today; "open-ended" is the commercial term, not the lease
-window. The Agreement carries one horizon in one representation, and nothing new.
+window. What the buyer is promised is stated plainly on every surface: service
+continues until the earliest of the buyer's stop, a permitted preemption, the funding
+lapsing, or this bound — the buyer selects no end date, and buys no unconditional
+right to run.
 
 ### D7. An unbounded per-period candidate yields no listing
 
@@ -180,25 +225,54 @@ keyed in `listing_shapes`-style hints and overrides. Capacity is shared under si
 admission as every listing's is. `listing_cardinality_mode` keeps governing
 cardinality only.
 
-### D9. Discovery: registry filters on the listing terms, a local clause on the billing kind
+### D9. A per-period option publishes only where the composition can service it
+
+The payments registration declares, as a capability like `negotiates_scalar_amount`,
+whether the composition runs the per-period continuation. A per-period clause from a
+storefront that does not declare it is refused at publication as
+`no_settlement_option`, so no per-period listing exists anywhere until
+`converge-ongoing-compute-leases` composes the continuation, and the same
+configuration publishes the moment it does. Negotiation needs no second gate: an
+unpublished option cannot be selected. A storefront that stops declaring servicing
+stops publishing per-period options and keeps servicing its accepted per-period
+deals, as accepted deals already survive a mechanism being disabled.
+
+### D10. Discovery: registry fields for the listing terms, a local clause for the billing kind
 
 `interruption_policy` and `available_until_utc` become declared top-level registry
 fields with filters: `in` on `seller_may_interrupt`, minimum bounds on
-`notice_seconds`, `available_until_utc`, and `max_duration_seconds`. The billing
-kind lives inside the mechanism's option params, which the registry does not index,
-so it is a buyer settlement clause field, `arkhai_payments.period`, evaluated locally
-after the registry query as `arkhai_payments.window` is. `--class` on both buyer CLIs
-expands to the registry filter plus the local clause and is never a listing term.
+`notice_seconds`, `available_until_utc`, and `max_duration_seconds`. They are
+carried on the model `store-registry-listings-as-published` produces — projections
+of the stored document under its opaque policy, part of the closed schema under the
+other — which is why this change depends on it, gating design; the registry today
+discards any top-level field outside its fixed carrier set. The billing kind lives
+inside the mechanism's option params, which the registry does not index, so it is a
+buyer settlement clause field, `arkhai_payments.period`, evaluated locally after the
+registry query as `arkhai_payments.window` is. `--class` on both buyer CLIs expands
+to the registry filter plus the local clause and is never a listing term.
 `asking_rate.period` keeps `[hour]`; a per-period option's `rates` keep `per: hour`,
 and the billing `period` is the option's own param.
 
-### D10. Seller policy reads both bounds and accepts an unnamed horizon
+*Rejected:* owning the two fields' carrier extension here, ahead of the registry's
+policy — unblocked, but a migration the opaque policy makes redundant, and a sixth
+in-flight migration `add-database-migration-commands` would have to govern.
+*Rejected:* carrying the terms inside `listing_resource`, which is the capability
+shape; `capacity_backing`'s presence there is a precedent not to extend.
+
+### D11. Seller policy reads both bounds and accepts an unnamed horizon
 
 Both domains' duration checks read both bounds. A per-period selection naming no
 horizon is accepted at the seller's bound; one naming a horizon is checked against
 both. VM's round-zero substitution of a listing maximum or 3600 for a missing
 duration is retired: a reserved selection with no duration is refused, as bare
 metal's is.
+
+### D12. What the buyer sees before approving
+
+For a per-period selection both buyer CLIs show, as distinct numbers: the recurring
+charge per period (D2), the minimum charge if any, the initial reserve the service
+will hold (`reserve_ahead` at the rate, plus the minimum), and the maximum horizon
+(D6). The hourly rate is shown as the listing states it.
 
 ## Open questions
 
@@ -209,23 +283,27 @@ metal's is.
 - Where the per-period candidate dimension sits in the derivation key, so a listing
   keeps its identity across refreshes and reopens. Settled in design against
   `kit/capacity-publication`'s binding.
+- The option-param shape (`period`, `reserve_ahead`, `minimum_charge`) is frozen in
+  `settle-ongoing-compute-through-arkhai-payments`' design session before this one;
+  this design reads it and does not restate it.
 
 ## Implementation cadence (recommended)
 
 Two rounds. Round 1: the terms — the policy and `available_until_utc` through hints,
-overrides, defaults, listing models, publication, and the registry schema and
-filters, with the Alkahest flag retired. Round 2: negotiation and the buyers — both
-seller policies, the per-period horizon default, `--class`, the optional duration
-flag, and the discovery and listing-shape scenarios. One session per round.
+overrides, defaults, listing models, publication with the servicing gate, and the
+registry fields and filters on the carrier model the dependency left, with the
+Alkahest flag retired. Round 2: negotiation and the buyers — both seller policies,
+the per-period horizon default, `--class`, the optional duration flag, the pre-approval
+display, and the discovery and listing-shape scenarios. One session per round.
 
 ## Permanent documentation destinations
 
 | Decision | Destination |
 |---|---|
-| D1, D2 | `docs/development/ARCHITECTURE.md`, "One name per concept"; `negotiation-protocol` spec |
+| D1, D2 | `docs/development/ARCHITECTURE.md`, "One name per concept"; `negotiation-protocol` spec; `settlement-servicing` spec (the per-period charge and the minimum) |
 | D3 | `ARCHITECTURE.md`, "Authority boundaries" and "Deciding which party is authoritative"; `storefront-publication` spec and architecture companion |
 | D4 | `ARCHITECTURE.md`, "Omission states no commitment" |
 | D5, D6, D7 | `storefront-publication` spec and architecture companion; `resource-pool-management` spec |
-| D8 | `storefront-publication` spec |
-| D9 | `registry-discovery` spec; `cli-query-language` spec; `buyer-orchestration` spec |
-| D10 | `negotiation-protocol` spec |
+| D8, D9 | `storefront-publication` spec; `settlement-configuration` spec (the capability) |
+| D10 | `registry-discovery` spec; `cli-query-language` spec; `buyer-orchestration` spec |
+| D11, D12 | `negotiation-protocol` spec; `buyer-orchestration` spec |

@@ -28,22 +28,31 @@ payment"), and a per-period part, once one exists, stops at the effective time.
   terminate route — the path the expiry watchdog runs, without waiting for a cycle —
   never by truncation, and answers with durable progress, never claiming capacity
   released while teardown is only queued. A repeat finds the same end.
-- A durable **stop intent** per deal in the storefront, keyed by negotiation ID: one
-  effective cause and instant per deal end, with its financial and its physical
-  convergence tracked independently and each idempotent across retries and restarts.
-  This change records the buyer-cancel cause and the physical convergence; the later
-  changes of the goal add the other causes and the financial half.
-- The site's **lease-ended report**: the site tells the storefront the effective
-  instant and cause of a lease's end — expiry, termination with its reason,
-  force-release — when it forms the intent, before teardown, through the
-  capacity-release outbox so it survives the storefront being down, signed with the
-  site's service identity as every callback is. Both compute storefronts receive it
-  and retain it as the deal's evidence. Today the VM storefront receives a
-  `release-started` callback and bare metal none; the capacity-released callback,
-  after teardown is proven, stays as it is.
+- An **append-only log of requests to end a deal** and one **effective decision** per
+  deal, keyed by negotiation ID: every request — buyer, seller, site, administrator,
+  the storefront on a verified funding end — is appended with its principal, cause,
+  requested instant, and evidence; the decision is a deterministic fold (earliest
+  lawful effective instant wins, deterministic ties, final once passed or physically
+  begun), with its financial and physical convergence tracked independently and every
+  external call keyed by the decision. The log is retained for a seller-configured
+  window at least the dispute horizon. This change records the buyer, site, and
+  administrator request kinds and the physical convergence; the later changes add the
+  seller's and the storefront's, and the financial half.
+- An **administrative override**, a request kind with its own authority and audit,
+  so an emergency never has to be dressed as a preemption.
+- The site's **lease-ended event**: a durable, typed record — stable identity,
+  effective instant, cause, source state — written in the same transaction as every
+  transition that ends a lease, delivered through an outbox keyed by event identity,
+  signed with the site's service identity, received idempotently by both compute
+  storefronts and kept as evidence, with the lease read as the pull recovery path.
+  Today the site sends only `capacity_released`, after teardown is proven, from an
+  outbox keyed by reservation; that callback stays as it is. This is its own
+  acceptance boundary within the change.
 - The canonical storefront client gains the end-deal method, and both buyer CLIs a
   verb for it (`market vms` gains one; `market bare-metal teardown` is kept as the
-  verb over the shared route).
+  verb over the shared route). A deal whose fulfillment has not begun is ended too,
+  by release where nothing was dispatched; bare metal's refusal of that case is
+  retired.
 
 ## Capabilities
 
@@ -79,9 +88,11 @@ None expected.
 - First of the goal's five changes; `converge-ongoing-compute-leases` builds on its
   stop intent and lease-ended report, and `publish-and-preempt-spot-compute` on its
   route shape.
-- Touches the deal-event sink `replace-polling-with-authenticated-push` plans to move
-  onto a transactional outbox; the lease-ended report rides whatever carries the
-  capacity-released callback.
+- The lease-ended event's outbox is the shape `replace-polling-with-authenticated-push`
+  plans for every site event; that change adopts it rather than building a second.
+  Should it be designed first, this change depends on it for the transport.
+- `resolve-compute-family-findings` removes the VM storefront's senderless callback
+  routes; this change adds a route with a sender.
 - `buyers-use-the-storefront-client` owns moving production buyers onto the typed
   client generally; this change adds its one method and verb without waiting on it.
 
@@ -108,9 +119,11 @@ a buyer-cancel stage).
 
 - The buyer may end any compute deal; the consequence is the selected mechanism's —
   `settlement-servicing` architecture companion.
-- A deal's end is one durable intent with independent financial and physical
-  convergence — `ARCHITECTURE.md`, "Release".
-- The site reports a lease's end when it forms the intent, to the storefront only,
-  through the outbox — `physical-provisioning` spec and `ARCHITECTURE.md`.
+- A deal's end is an append-only log of requests folded into one effective decision,
+  with independent financial and physical convergence keyed by the decision —
+  `ARCHITECTURE.md`, "Release".
+- The site records a lease's end as a durable event with the ending transition and
+  reports it to the storefront only — `physical-provisioning` and `site-capacity`
+  specs, `ARCHITECTURE.md`.
 - Ending a deal terminates; truncation is for moving an end the watchdog will act on
   later — `site-capacity` architecture companion.
