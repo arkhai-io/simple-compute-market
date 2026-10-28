@@ -1185,6 +1185,55 @@ async def test_default_shapes_close_once_the_pools_members_declare_no_gpus(world
     assert _entry(await _report(world), "reports", "listing_shapes_required", "broker-a")
 
 
+async def test_a_shape_without_gpus_on_a_gpu_host_negotiates_and_reserves_no_gpu(tmp_path):
+    """Spec scenario "A GPU host's spare capacity sells as a VM without GPUs":
+    the listing opens a negotiation, and its acceptance hold, admitted on the GPU
+    host, holds the shape's vCPU and memory and none of its GPUs."""
+    cpu_shape = {"cpu": {"count": 8}, "memory": {"gib": 32}}
+    async with publication_app(tmp_path, negotiation=True) as world:
+        world.pools.append(_shaped(backing="backed", shapes=(cpu_shape,)))
+        world.site.add_resource(
+            "broker-a", 2,
+            attributes={"gpu_model": "H100", "region": "us-east"},
+            capacity=_BIG,
+        )
+        assert (await _cycle(world))["counts"] == {"publish": 1}
+        ((listing_id, listing),) = (await _listings(world)).items()
+        assert "gpu_count" not in listing["listing_resource"]
+        assert "gpu_model" not in listing["listing_resource"]
+        (escrow,) = listing["accepted_escrows"]
+
+        with settings_overrides(
+            **{
+                "negotiation.policies": [
+                    "has_matching_inventory_guard",
+                    "escrow_shape_guard",
+                    "accept_exact_listing",
+                ],
+                "capacity.hold_ttl_seconds": 900,
+            }
+        ):
+            result = await world.buyer.negotiate_new(
+                listing_id=listing_id,
+                initial_amount=int(escrow["rates"][0]["value"]),
+                provision_terms=_vm_provision(3600),
+                chain_name="anvil",
+                escrow_address=escrow["escrow_address"],
+                proposal_fields={},
+                literal_fields=escrow["literal_fields"],
+                rates=escrow["rates"],
+                demands=listing["demands"],
+                escrow_expiration_unix=1_800_000_000,
+                settlement_selection=_alkahest_selection(listing),
+            )
+
+        assert result["action"] == "accept"
+        (reservation,) = world.site.reservations.values()
+        assert reservation["dimensions"] == {"vcpu_count": 8, "ram_gb": 32}
+        assert reservation["units"] == 0
+        assert world.site.available_dimensions("broker-a")["gpu_count"] == 2
+
+
 async def test_a_pool_without_gpus_stating_no_shapes_publishes_nothing_and_is_reported(world):
     """Spec scenario "A pool whose members declare no GPUs states no shapes"."""
     world.pools.append(pool("cpu", backing="unbacked", gpu_model=None, capacity=_CPU_HOST))

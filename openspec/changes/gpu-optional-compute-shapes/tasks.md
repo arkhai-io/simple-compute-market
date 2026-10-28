@@ -574,7 +574,9 @@ tests `domains/vms/domain/tests/test_schema.py`,
   overstated notes (5.3's `to_dict` and "unchanged", 5.4's refusal and "only caller").
   Declined: raising `arkhai-vms-listings`' `arkhai-vms>=0.6.0` bound for the new
   `vm_listing_resource_shape`, since every lock pins the tree's 0.7.0 wheel and versions
-  are not bumped per change.
+  are not bumped per change. *Correction (section 7):* versions are bumped once per change
+  under `RELEASING.md`'s policy, and this change has bumped none; the bound moves with that
+  bump, which section 7's handoff leaves to the owner.
 
   *Handoff.* `DEPLOYMENT_AND_CONFIG.md` ("Storefront listing shapes and pool overrides",
   the constraint bullet) still says "`gpu.count` and `gpu.model` are required, so
@@ -760,7 +762,7 @@ Files: `domains/vms/listings/src/arkhai_vms_listings/pricing.py` (`extract_compu
 `domains/vms/storefront/tests/integration/{test_admin_api.py,test_negotiate_controller.py,test_payment_settlement.py}`,
 `domains/vms/provisioning/adapter/tests/unit/test_vm_fulfillment_plan.py`.
 
-- [ ] 7.1 `extract_compute_from_order` accepts a GPU-less compute resource through D6's
+- [x] 7.1 `extract_compute_from_order` accepts a GPU-less compute resource through D6's
   `resource_is_compute`, so claim building, the seller's recheck, and the negotiation
   opening reach a GPU-less listing (D9). Unit (`test_vm_job_spec_service.py`): the claim
   for a GPU-less listing carries `resource_type: compute.gpu`, `offering_mode: vm`, its
@@ -768,28 +770,107 @@ Files: `domains/vms/listings/src/arkhai_vms_listings/pricing.py` (`extract_compu
   D9). Unit (`test_listing_source_check.py`): a GPU-less listing whose source still serves
   its shape is confirmed, and one whose member shrank below it is refused as a declared
   mismatch.
-- [ ] 7.2 The Alkahest lease terms omit each GPU key the listing does not state (D9). Unit
+  *Done; no code change was needed beyond section 5's.* `resource_is_compute` (5.2) already
+  answers true for a non-empty GPU-less mapping, and the claim builder, the opening's
+  dimension check (`_validate_vm_opening`), and the source check (through the reconciler,
+  section 6) read only the fields a listing states. The claim builder's comment on
+  `_VM_RESOURCE_TYPE` now states D4's rule: the resource type is the category a claim
+  matches, `compute.gpu` for every VM declaration. Unit (VM storefront `tests/unit`, 1172
+  passed): a GPU-less order's claim is exactly `{offering_mode: vm, resource_type:
+  compute.gpu, pool_id, region, dimensions: {vcpu_count: 8, ram_gb: 32}}` from a dict, and
+  the same claim from a parsed `ComputeResource`. The opening
+  (`test_sync_negotiation_seller_round_hook.py`, through the negotiation runtime's opening
+  over a real `SQLiteClient`): a buyer naming `vcpu_count: 16` against a GPU-less listing
+  of 8 is refused `resource_shape_not_negotiable` naming the listing's 8, so the opening
+  reads the GPU-less listing as compute. `test_listing_source_check.py` (in `tests/unit`, but over
+  a real `SQLiteClient` and the fake projection site, as the module's existing cases are):
+  a backed listing of a stated `{cpu: 16, memory: 64}` over a GPU-less member is confirmed
+  `matches`; the same member declaring 32 GiB is a `declared_mismatch`. Its `_bind` helper
+  now derives the bound shape through `vm_listing_resource_shape`.
+- [x] 7.2 The Alkahest lease terms omit each GPU key the listing does not state (D9). Unit
   (`test_vm_evidence_validation.py` or a new `test_compute_lease.py` in the VM storefront's
   unit suite): `encode_compute_lease` for a GPU-less resource yields JSON with no
   `gpu_model` or `gpu_count` key and every other key unchanged; a GPU resource's bytes are
   unchanged.
-- [ ] 7.3 The admin reserve response's `gpu_count` is optional and absent for a GPU-less
+  *Done.* `encode_compute_lease` writes `gpu_model` and `gpu_count` only when the resource
+  states them, keeping the existing key order. Unit (new
+  `tests/unit/test_compute_lease.py`): a GPU-less resource's terms have neither key and
+  equal a GPU resource's terms less those two; a GPU resource's bytes equal the
+  hand-written JSON of the previous order and values.
+- [x] 7.3 The admin reserve response's `gpu_count` is optional and absent for a GPU-less
   reservation, with the `or 1` fallback removed (`admin_controller.py`,
   `capacity_admin_models.py`), and the storefront client model's `gpu_count` default of `0`
   becomes optional (D9). Application integration (`test_admin_api.py`, through the typed
   client): reserving a GPU-less listing returns no `gpu_count`; a GPU listing's reservation
   returns its count as before.
-- [ ] 7.4 Admission and fulfillment are unchanged (D10). Unit
+  *Done.* The route reports `gpu_count` from the reservation's `allocated_gpu_count`, or
+  `None` (`null` on the wire, not an omitted key) when that is zero or absent; the
+  server's `ReserveCapacityResponse.gpu_count` and the client's are `int | None`,
+  defaulting to `None`, and the client parses an absent or null value as `None` (unit,
+  new `core/storefront-client/tests/test_reserve_capacity_response.py`: a count, an absent
+  key, and a null). The VM storefront's `FakeSite` allocated one GPU to a claim stating
+  dimensions without one; it now allocates the claim's GPU count, zero when it states none,
+  as the real ledger's mirror reports it (`kit/site` `_match_payload`). Application
+  integration (VM storefront `tests/integration`, 503 passed): reserving a bound GPU-less
+  listing through `StorefrontClient.admin_reserve_capacity` returns `gpu_count` `None` and
+  the fake site holds `{vcpu_count: 8, ram_gb: 32}`; the existing GPU case still returns 2.
+  `core/storefront-client` `make test`: 68 passed.
+- [x] 7.4 Admission and fulfillment are unchanged (D10). Unit
   (`test_vm_fulfillment_plan.py`): a committed reservation with no `gpu_count` dimension
   yields no `vm_gpu_count` or `gpu_provisioned` variable. Application integration
   (`test_negotiate_controller.py` and `test_payment_settlement.py`): a GPU-less listing opens
   a negotiation, and its settled deal's reservation, admitted on a GPU host's fake-site
   member, holds only the listing's vCPU and memory.
-- [ ] 7.5 **Verification checkpoint.** Unit 7.1–7.2, 7.4; application integration 7.3–7.4.
+  *Done, in a different file and up to the acceptance hold.* Unit
+  (`domains/vms/provisioning/adapter` `make test`, 39 passed): a settlement resource whose
+  dimensions are `{vcpu_count: 8, ram_gb: 32}` prepares a create with `vm_vcpus` 8 and
+  `vm_gpu_count` and `gpu_provisioned` stored unset (`None`, as every uncommitted sizing
+  field is; the codec's dropping of `None` variables is not exercised here); one with
+  `{gpu_count: 2}` sets both. Application
+  integration: neither planned file composes publication, negotiation, and a site that
+  admits — `test_negotiate_controller.py` seeds GPU listings through its own helpers and
+  `test_payment_settlement.py` replaces delivery and reserves nothing — so the case is in
+  `test_publication_loop.py`, beside the existing stated-shape negotiation case: a GPU
+  host's pool states `{cpu: 8, memory: 32}`, a cycle publishes it with neither GPU key,
+  the buyer's `negotiate_new` (naming no `compute_resource`, so the opening's dimension
+  check is 7.1's unit case) opens and is accepted, and the acceptance hold at the fake site
+  holds `{vcpu_count: 8, ram_gb: 32}`, zero units, and leaves the host's two GPUs
+  available. Settlement's commit of that hold and fulfillment through mock provisioning
+  are section 8's scenario, not shown here.
+- [x] 7.5 **Verification checkpoint.** Unit 7.1–7.2, 7.4; application integration 7.3–7.4.
   Run `make test` in `domains/vms/storefront` (which carries the listings and settlement
   packages' behaviour suites), `domains/vms/provisioning/adapter`, and
   `core/storefront-client`, `make check-packaging`, and `make check-comment-hygiene`.
   End-to-end: section 8's scenario settles a GPU-less deal through mock provisioning.
+  *Done.* After `make dist`: VM storefront 1172 unit and 503 integration passed;
+  provisioning adapter 39; `core/storefront-client` 68; `make check-packaging` passes (no
+  dependency or lock changed); `make check-change`, comment hygiene included, passes; root
+  `make test` exited 0 before the fresh-context check's fixes (tests, a test-double
+  comment, a docstring), after which the four suites above were rerun and pass.
+  End-to-end: as planned, section 8's `e2e_listing_shapes` step; GPU deals in `e2e_deal`,
+  `e2e_deal_buyer_cli`, and `e2e_compute_dynamic_listings` still assert the admin
+  reserve's `gpu_count` for GPU claims, which the route still reports.
+
+  Fresh-context check: no layering, import, packaging-check, or change-name problem; the
+  lease terms, the reserve response, and the fake site's change match D9 and the real
+  ledger. Fixed from it: `FakeSite._match`'s stale comment ("now always routes
+  `gpu_count`"); the server model's docstring said "absent" where the wire carries `null`;
+  the new admin fixture's development addresses had no comment; the client model had no
+  unit test; the parsed-model claim and the opening check were not asserted as the notes
+  said; and two notes' wording. Declined: moving `test_listing_source_check.py`'s cases out
+  of `tests/unit`, an existing arrangement; reporting `None` rather than 0 in the release
+  and fulfillment-event responses, which D9 does not name and which hold a site's answer.
+
+  *Handoff.* The check found that no package version has been bumped anywhere in this
+  change (`git diff` of every `pyproject.toml` against the merge base with `dev` changes
+  none), while `docs/development/RELEASING.md` ("Versioning policy") bumps each changed
+  package once per change, minor for an incompatible change below 1.0, and earlier changes
+  did (`kit/resource-pools`, `provisioning/compute/contracts`, `core/storefront-client`).
+  This change makes incompatible edits from section 1 on (host contracts losing fields, the
+  storefront client's `gpu_count`, optional listing-model fields). No task plans the bumps,
+  and they move exact pins and need `make lock`, so they are the owner's to place: a fix
+  round before closeout, or a plan amendment. Section 5's note declining a raised bound
+  "since versions are not bumped per change" was wrong on that point (see its correction).
 
 ## 8. A GPU-less VM deal end to end
 

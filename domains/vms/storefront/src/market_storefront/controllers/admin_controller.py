@@ -1109,13 +1109,16 @@ class AdminController:
                 or (durable.pool_id if durable is not None else None)
             )
             require_reservation_fields(reserved, site_id=binding.site_id)
+            # A reservation of a shape stating no GPUs allocates none, so it
+            # reports no GPU count rather than a count nothing reserved.
+            allocated_gpu_count = reserved.get("allocated_gpu_count")
             return {
                 "capacity_reservation_id": str(reserved["capacity_reservation_id"]),
                 "pool_id": str(pool_id) if pool_id else None,
                 "member_id": (
                     str(reserved["member_id"]) if reserved.get("member_id") else None
                 ),
-                "gpu_count": int(reserved.get("allocated_gpu_count") or 1),
+                "gpu_count": int(allocated_gpu_count) if allocated_gpu_count else None,
                 "resource_state": reserved.get("state") or "available",
                 "closed_listing_ids": closed_listing_ids,
             }

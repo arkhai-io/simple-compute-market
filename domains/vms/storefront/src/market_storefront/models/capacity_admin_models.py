@@ -39,12 +39,13 @@ class ReserveCapacityResponse(BaseModel):
     ledger, the stage event recorded it, and then this model refused to
     serialize the result as `500 Storefront administrator request failed`.
     `pool_id` and `member_id` are what the boundary does report.
+    `gpu_count` is null for a reservation that allocates no GPUs.
     """
 
     capacity_reservation_id: str
     pool_id: str | None = None
     member_id: str | None = None
-    gpu_count: int
+    gpu_count: int | None = None
     resource_state: str | None = None
     closed_listing_ids: list[str] = Field(default_factory=list)
 

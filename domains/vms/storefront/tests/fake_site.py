@@ -423,14 +423,17 @@ class FakeSite:
             or offering_mode not in self.deliverable_modes
         ):
             return None
-        # compute_capacity_claim_from_order now always routes gpu_count.
-        # This fake only proves the GPU-count contract this test double
-        # documents itself as covering but it must at least read the
-        # quantity from the new location and skip "dimensions" in the
-        # attribute-equality mismatch check the same way the real
-        # ledger's _resource_matches skips it.
+        # A claim stating dimensions requests exactly those, as the ledger
+        # parses it, and allocates their GPU count: zero for a shape stating
+        # no GPUs, as the ledger's GPU mirror reports it. A claim with no
+        # dimensions is the legacy single-count form. "dimensions" is skipped
+        # in the attribute-equality check below, as the ledger's
+        # _resource_matches skips it.
         dimensions = claim.get("dimensions") or {}
-        requested = int(dimensions.get("gpu_count") or claim.get("gpu_count") or 1)
+        if dimensions:
+            requested = int(dimensions.get("gpu_count") or 0)
+        else:
+            requested = int(claim.get("gpu_count") or 1)
         requested_dimensions = {
             str(key): int(value) for key, value in dimensions.items()
         } or {"gpu_count": requested}

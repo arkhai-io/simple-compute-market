@@ -505,6 +505,57 @@ async def test_negotiation_runtime_rejects_mismatched_resource_shape(db):
 
 
 @pytest.mark.asyncio
+async def test_an_opening_on_a_listing_without_gpus_compares_its_own_dimensions(db):
+    """The opening reads a listing stating no GPUs as compute, and compares the
+    dimensions the buyer names against the ones it states."""
+    await db.upsert_listing_with_binding(
+        binding=_listing_binding(db, "L-cpu"),
+        status="open",
+        created_at=datetime.now().isoformat(),
+        updated_at=datetime.now().isoformat(),
+        listing_resource={
+            "vcpu_count": 8,
+            "ram_gb": 32,
+            "sla": 99.9,
+            "region": "California, US",
+            "resource_id": "resource-cpu",
+            "offering_mode": "vm",
+        },
+        settlement_options=[_option().model_dump(mode="json")],
+        fulfillment_resource=None,
+        max_duration_seconds=7200,
+        storefront_url="http://seller:8001",
+        seller_principal=_SELLER,
+    )
+
+    async def hook(**_kwargs):
+        raise AssertionError("seller policy must not run for a rejected request")
+
+    with pytest.raises(OfferUnfulfillableError) as exc_info:
+        await _start(
+            sqlite_client=db,
+            our_listing_id="L-cpu",
+            buyer_principal=_BUYER,
+            seller_principal=_SELLER,
+            proposal=_proposal(50),
+            provision_terms=ProvisionTerms(
+                kind="compute.v1",
+                version=1,
+                payload={
+                    "duration_seconds": 3600,
+                    "ssh_public_key": "ssh-rsa AAAA",
+                    "compute_resource": {"vcpu_count": 16},
+                },
+            ),
+            our_base_url="http://test-seller:8001",
+            their_agent_url="http://buyer:9000",
+            seller_round_hook=hook,
+        )
+    assert "resource_shape_not_negotiable" in str(exc_info.value)
+    assert "'listing': 8" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
 async def test_negotiation_runtime_permits_matching_resource_shape(db):
     """A buyer that names a shape equal to the listing's own is unaffected."""
     seen = {}

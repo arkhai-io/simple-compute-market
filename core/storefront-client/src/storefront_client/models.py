@@ -712,7 +712,8 @@ class ReserveCapacityResponse:
     #: was unsatisfiable for every reservation rather than only for pooled
     #: ones -- a caller reading it got `""` and could not tell that apart from
     #: an answer. `pool_id` and `member_id` are what the boundary does report.
-    gpu_count: int = 0
+    #: ``gpu_count`` is ``None`` for a reservation that allocates no GPUs.
+    gpu_count: int | None = None
     resource_state: str | None = None
     closed_listing_ids: list[str] = field(default_factory=list)
     extra: dict[str, Any] = field(default_factory=dict)
@@ -731,7 +732,7 @@ class ReserveCapacityResponse:
             capacity_reservation_id=str(d.get("capacity_reservation_id") or ""),
             pool_id=d.get("pool_id"),
             member_id=d.get("member_id"),
-            gpu_count=int(d.get("gpu_count") or 0),
+            gpu_count=None if d.get("gpu_count") is None else int(d["gpu_count"]),
             resource_state=d.get("resource_state"),
             closed_listing_ids=list(d.get("closed_listing_ids") or []),
             extra={k: v for k, v in d.items() if k not in known},
