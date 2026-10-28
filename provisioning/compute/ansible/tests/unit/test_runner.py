@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import stat
@@ -25,6 +26,7 @@ from compute_provisioning_ansible.runner import (
     extract_fact,
     extract_json_block,
     inventory_target,
+    read_fact,
     redact_ansible_output,
 )
 
@@ -151,6 +153,240 @@ def test_a_printed_fact_is_extracted_by_name() -> None:
 
     assert extract_fact(stdout, "node_grant_access_data") == {"host": "10.0.0.5", "port": "22"}
     assert extract_fact(stdout, "vm_creation_data") is None
+
+
+# Synthetic playbook output in the shapes the default stdout callback prints: the
+# YAML result format the packaged ansible.cfg selects, and the JSON format. Every
+# value is a development value: a documentation address (192.0.2.0/24), a
+# synthetic tenant account, a zeroed identifier, and a placeholder key.
+_GRANT = {
+    "action": "node_grant_access",
+    "host_id": "node-0000",
+    "physical_host_id": "00000000-0000-0000-0000-000000000000",
+    "ssh_user": "tenant0000",
+    "escrow_uid": "",
+    "timestamp": "2000-01-01T00:00:00Z",
+    "host": "192.0.2.10",
+    "port": "22",
+    "status": "success",
+}
+_RECLAIM = {**_GRANT, "action": "node_reclaim_access", "reclaim_policy": "remove_lease_key"}
+
+
+def _task(name: str, *result: str) -> str:
+    """One task's banner and its ``ok`` line, then its result lines."""
+    return "\n".join([f"TASK [{name}] {'*' * 40}", "ok: [node-0000] => ", *result, ""])
+
+
+def _msg_block(body: str, *, indicator: str = "|-", indent: int = 4) -> str:
+    """A ``debug: msg:`` result printed as a YAML literal block."""
+    pad = " " * indent
+    lines = [f"{pad}msg: {indicator}"]
+    lines += [f"{pad}    {line}" if line else "" for line in body.splitlines()]
+    return "\n".join(lines)
+
+
+def _json_msg(document: object, **block) -> str:
+    """The JSON text a role's ``to_nice_json`` prints, as a ``msg:`` block."""
+    return _msg_block(json.dumps(document, indent=4), **block)
+
+
+def _yaml_var(fact_name: str, fact: dict) -> str:
+    """A ``debug: var:`` result in the YAML format: an unquoted key."""
+    lines = [f"    {fact_name}:"]
+    lines += [f"        {key}: '{value}'" for key, value in sorted(fact.items())]
+    return "\n".join(lines)
+
+
+def _json_var(fact_name: str, fact: dict) -> str:
+    """A ``debug: var:`` result in the JSON format: a quoted key."""
+    return json.dumps({fact_name: fact}, indent=4)
+
+
+def _summary(indicator: str = "|-") -> str:
+    """The bare-metal play's prose summary. ansible-core 2.17 to 2.19 print it as
+    ``|-``, though its text ends in a newline; ``|`` is the other valid form."""
+    return _task(
+        "Summary of bare-metal node access operation",
+        _msg_block(
+            "Bare-metal Node Access Summary:\n"
+            "- Target Host: node-0000\n"
+            "- Host ID: node-0000\n"
+            "- Action Performed: node_grant_access\n"
+            "- Operation completed successfully\n",
+            indicator=indicator,
+        ),
+    )
+
+
+_SUMMARY = _summary()
+_RECAP = "PLAY RECAP *****\nnode-0000 : ok=9 changed=2 unreachable=0 failed=0\n"
+
+
+def _grant_output(*tasks: str) -> str:
+    return "\n".join(["PLAY [Bare-metal Node Access Operations] *****", "", *tasks, _RECAP])
+
+
+def test_the_shipped_yaml_format_is_read_from_its_msg_block() -> None:
+    """The packaged configuration prints the ``var:`` fact as YAML, which only the
+    ``msg:`` block beside it carries as JSON."""
+    stdout = _grant_output(
+        _task("Output node_grant_access data as parsable JSON", _yaml_var("node_grant_access_data", _GRANT)),
+        _task("Output node_grant_access JSON string for external parsing", _json_msg(_GRANT)),
+        _SUMMARY,
+    )
+
+    assert extract_fact(stdout, "node_grant_access_data") is None
+    assert read_fact(stdout, "node_grant_access_data", action="node_grant_access") == _GRANT
+
+
+@pytest.mark.parametrize("indent", [2, 4])
+@pytest.mark.parametrize("indicator", ["|", "|-"])
+def test_a_msg_block_is_read_at_any_indentation_and_chomping(indent, indicator) -> None:
+    stdout = _grant_output(_task("Output", _json_msg(_GRANT, indent=indent, indicator=indicator)))
+
+    assert read_fact(stdout, "node_grant_access_data", action="node_grant_access") == _GRANT
+
+
+def test_the_json_format_is_read_from_its_var_fact() -> None:
+    """Under the JSON format the ``msg:`` result is an escaped string, not a block;
+    the quoted ``var:`` fact is taken."""
+    escaped_msg = json.dumps({"msg": json.dumps(_GRANT, indent=4)}, indent=4)
+    stdout = _grant_output(
+        _task("Output node_grant_access data as parsable JSON", _json_var("node_grant_access_data", _GRANT)),
+        _task("Output node_grant_access JSON string for external parsing", escaped_msg),
+    )
+
+    assert read_fact(stdout, "node_grant_access_data", action="node_grant_access") == _GRANT
+    assert read_fact(stdout, "node_grant_access_data", action="node_grant_access") == extract_fact(
+        stdout, "node_grant_access_data"
+    )
+
+
+def test_the_json_formats_escaped_msg_alone_is_no_fact() -> None:
+    """With no ``var:`` fact, the JSON format's escaped ``msg:`` string is not a
+    literal block, so nothing is read from it."""
+    escaped_msg = json.dumps({"msg": json.dumps(_GRANT, indent=4)}, indent=4)
+    stdout = _grant_output(_task("Output node_grant_access JSON string for external parsing", escaped_msg))
+
+    assert read_fact(stdout, "node_grant_access_data", action="node_grant_access") is None
+
+
+def test_only_the_expected_actions_block_is_taken_wherever_it_falls() -> None:
+    other = {"action": "vm_list", "vm_count": 0}
+    stdout = _grant_output(
+        _task("Other", _json_msg(other)),
+        _task("Grant", _json_msg(_GRANT)),
+        _task("Reclaim", _json_msg(_RECLAIM)),
+        _SUMMARY,
+    )
+
+    assert read_fact(stdout, "node_grant_access_data", action="node_grant_access") == _GRANT
+    assert read_fact(stdout, "node_reclaim_access_data", action="node_reclaim_access") == _RECLAIM
+    assert read_fact(stdout, "vm_creation_data", action="create") is None
+
+
+def test_the_last_block_for_the_expected_action_is_taken() -> None:
+    first = {**_GRANT, "timestamp": "2000-01-01T00:00:00Z"}
+    last = {**_GRANT, "timestamp": "2000-01-01T00:00:01Z"}
+    stdout = _grant_output(_task("Grant", _json_msg(first)), _task("Grant again", _json_msg(last)))
+
+    assert read_fact(stdout, "node_grant_access_data", action="node_grant_access") == last
+
+
+@pytest.mark.parametrize("indicator", ["|-", "|"])
+def test_the_plays_summary_block_alone_is_no_fact(indicator) -> None:
+    stdout = _grant_output(_summary(indicator))
+
+    assert read_fact(stdout, "node_grant_access_data", action="node_grant_access") is None
+
+
+def test_a_later_document_outside_a_msg_block_is_not_adopted() -> None:
+    """Only ``msg:`` blocks are read: a later task's document for the action, under
+    another key or bare in the output, is not taken after the summary block, as a
+    forward scan from the summary's ``msg:`` to the next ``{`` would take it. That a
+    block ends at its own indentation is shown by the malformed-block and
+    sibling-key cases."""
+    later = _task(
+        "Record the grant for an operator",
+        "    stdout: |-",
+        *(f"        {line}" for line in json.dumps(_GRANT, indent=4).splitlines()),
+    )
+    bare = json.dumps(_GRANT, indent=4)
+    stdout = _grant_output(_SUMMARY, later, bare)
+
+    assert read_fact(stdout, "node_grant_access_data", action="node_grant_access") is None
+
+
+def test_a_malformed_block_and_an_unrelated_document_after_it_are_neither_taken() -> None:
+    truncated = json.dumps(_GRANT, indent=4)[:-40]
+    stdout = _grant_output(
+        _task("Grant", _msg_block(truncated)),
+        _task("Unrelated", _json_msg(_RECLAIM)),
+    )
+
+    assert read_fact(stdout, "node_grant_access_data", action="node_grant_access") is None
+    # The malformed block ended at its own boundary; the next block is read on its own.
+    assert read_fact(stdout, "node_reclaim_access_data", action="node_reclaim_access") == _RECLAIM
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        {key: value for key, value in _GRANT.items() if key != "action"},
+        [_GRANT],
+        "node_grant_access",
+        None,
+    ],
+    ids=["no action", "a list", "a string", "null"],
+)
+def test_a_document_that_is_not_an_object_naming_an_action_is_ignored(document) -> None:
+    stdout = _grant_output(_task("Grant", _json_msg(document)))
+
+    assert read_fact(stdout, "node_grant_access_data", action="node_grant_access") is None
+
+
+def test_a_block_nested_too_deeply_to_parse_is_ignored() -> None:
+    stdout = _grant_output(_task("Deep", _msg_block("[" * 100_000)), _task("Grant", _json_msg(_GRANT)))
+
+    assert read_fact(stdout, "node_grant_access_data", action="node_grant_access") == _GRANT
+
+
+def test_a_block_ends_at_a_sibling_key_and_keeps_its_blank_lines() -> None:
+    body = json.dumps(_GRANT, indent=4).replace('"host": "192.0.2.10",', '"host": "192.0.2.10",\n')
+    stdout = _grant_output(_task("Grant", _msg_block(body), "    changed: false"))
+
+    assert read_fact(stdout, "node_grant_access_data", action="node_grant_access") == _GRANT
+
+
+def test_no_fact_at_all_is_absent() -> None:
+    stdout = _grant_output(_task("Gather", "    changed: false"))
+
+    assert read_fact(stdout, "node_grant_access_data", action="node_grant_access") is None
+    assert read_fact("", "node_grant_access_data", action="node_grant_access") is None
+
+
+def test_ignored_blocks_are_counted_in_the_debug_log_without_their_content(caplog) -> None:
+    secret = "placeholder-private-key-not-a-real-key"
+    stdout = _grant_output(
+        _task("Malformed", _msg_block('{"action": "node_grant_access", "key": "' + secret)),
+        _task("No action", _json_msg({"key": secret})),
+        _task("Not an object", _json_msg([secret])),
+        _task("Other action", _json_msg({**_RECLAIM, "key": secret})),
+        _SUMMARY,
+    )
+    caplog.set_level(logging.DEBUG, logger="compute_provisioning_ansible.runner")
+
+    assert read_fact(stdout, "node_grant_access_data", action="node_grant_access") is None
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert messages, "the reader logs what it ignored"
+    logged = "\n".join(messages)
+    assert "5 ignored" in logged
+    for reason in ("not_json=2", "not_object=1", "no_action=1", "other_action=1"):
+        assert reason in logged
+    for content in (secret, "tenant0000", "192.0.2.10", "Summary"):
+        assert content not in logged
 
 
 @pytest.mark.parametrize(

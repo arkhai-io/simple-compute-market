@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-compute-provisioning-ansible"
-version = "0.4.1"
+version = "0.5.0"
 license = "MIT"
 description = "Ansible implementation of compute provisioning execution: the ssh connection codec and Ansible job mechanics"
 requires-python = ">=3.12"

@@ -71,7 +71,7 @@ delivery evidence". Files:
 - its `__init__` exports
 - `provisioning/compute/ansible/tests/unit/test_runner.py`
 
-- [ ] 2.1 Add a reader that takes the output, the fact name, and the expected action:
+- [x] 2.1 Add a reader that takes the output, the fact name, and the expected action:
       - It returns the fact printed in JSON `var:` form, when one is printed.
       - Otherwise it reads each `msg: |` or `msg: |-` literal block alone. A block
         is the indented lines after its key, up to the first non-blank line indented
@@ -86,7 +86,18 @@ delivery evidence". Files:
 
       `extract_fact` stays for callers that pass no action, and reads the JSON form
       only.
-- [ ] 2.2 Unit tests, on synthetic output in each form the shipped configuration and
+
+      Done: `read_fact(stdout, fact_name, *, action)` in `runner.py`, exported from
+      `compute_provisioning_ansible` and `compute_provisioning_ansible.runner`. A JSON
+      `var:` fact is returned as `extract_fact` reads it, with no action check, since
+      judging the fact is the codec's (D1). A block's key line is a whole line
+      `msg: |` or `msg: |-` after spaces. Scanning resumes after a block's end, so no
+      line belongs to two blocks. Each block is dedented and parsed with `json.loads`.
+      The debug line names the fact, the action, found or absent, and counts per
+      reason (`not_json`, `not_object`, `no_action`, `other_action`), and is logged
+      only when a block was ignored. `extract_fact` is unchanged; its docstring now
+      says it reads the JSON form only. No caller uses `read_fact` yet.
+- [x] 2.2 Unit tests, on synthetic output in each form the shipped configuration and
       the JSON configuration print:
       - YAML `var:` plus `msg: |-` JSON;
       - JSON `var:`;
@@ -99,12 +110,125 @@ delivery evidence". Files:
       - a document with no `action`;
       - no fact at all;
       - a debug log that carries no block content.
-- [ ] 2.3 Verification:
+
+      Done (unit): thirteen tests, 19 cases, in `test_runner.py`, on pure strings
+      with no collaborators. Each case listed above has a test. Further cases:
+      - 2- and 4-space key indentation, under `|` and `|-`;
+      - the JSON format's escaped `msg:` string, which is not a block;
+      - a JSON list, string, or `null` document;
+      - a block that keeps a blank line and ends at a sibling key;
+      - the malformed block's neighbour, read on its own;
+      - a block nested too deeply to parse, on which `json.loads` raises
+        `RecursionError` rather than `ValueError`, is ignored as `not_json`.
+
+      Each fixture's shape follows ansible-core 2.18's default callback under the
+      packaged `ansible.cfg`, in both result formats. That output was printed once
+      from a local playbook of `debug` tasks against `localhost` and kept out of the
+      repository. Under the YAML format it indents results four spaces, and prints
+      even a prose `msg:` with a trailing newline as `|-`. Values are development
+      values: `192.0.2.10`, `tenant0000`, a zeroed identifier, and a placeholder key.
+
+      Red, before the reader existed: a stub returning `extract_fact`'s answer, which
+      is today's behaviour, gave 10 failed and 101 passed. The shipped YAML form read
+      as `None`. This is the reader's behaviour on synthetic output, not a replay of
+      the captured run. Green: 111 passed. The deep-nesting case was added after
+      that run, with the `RecursionError` catch; the suite then passed 112, listed
+      under 2.3.
+
+      Corrections after the section's precommit compliance check. The suite now has
+      fourteen tests and 21 cases.
+      - **The JSON format's escaped `msg:`.** The note above credited this case to
+        a test where the `var:` fact is present. There the reader returns before it
+        reads any block. A new case gives the escaped `msg:` alone, with no `var:`
+        fact, and reads no fact. It passed on its first run, so no defect was found.
+      - **The summary followed by another task's JSON.** That test is now
+        `test_a_later_document_outside_a_msg_block_is_not_adopted`. It shows that a
+        later document under another key, or bare in the output, is not adopted, as
+        a forward scan from the summary's `msg:` would adopt it. It does not by
+        itself show where a block ends. The malformed-block and sibling-key cases
+        show that.
+      - **The fixtures' source.** The earlier capture printed plain `debug` tasks,
+        not the roles' own pattern, and the summary fixture used `|` while the
+        capture printed `|-`. The summary now uses `|-`, and `|` remains a
+        parametrized variant, as it does for JSON blocks. Both are valid forms.
+        Neither is claimed as the output of a deployed run.
+      - **The roles' own pattern.** A second local experiment, kept out of the
+        repository, repeated the roles' printing pattern:
+        - `set_fact` of the mapping, then `set_fact` of its `to_nice_json`;
+        - `debug: var:` of the mapping;
+        - `debug: msg: "{{ ..._json }}"`;
+        - the play's prose summary.
+
+        It ran on `localhost` with synthetic values, under the packaged
+        `ansible.cfg`, on ansible-core 2.17.14, 2.18.19, and 2.19.14. The last is
+        what the service image's `ansible-core>=2.17,<2.20` resolves to today. Each
+        version printed both facts' `msg:` as a `|-` literal block, and the summary
+        as `|-` too. `read_fact` read the grant fact and a nested VM create fact
+        from every output, and `extract_fact` read `None` under the YAML format.
+        This is a local playbook's output, not the deployed roles on a host. Their
+        structured grant and VM results remain the live lanes' evidence (14.8).
+- [x] 2.3 Verification:
       - `make -C provisioning/compute/ansible test` (unit);
       - `make check-packaging`.
 
       End-to-end: none directly. Sections 4 and 5 carry the reader through the mock
       lanes.
+
+      Done. The final evidence below was run on the final tree, after the wheelhouse
+      was rebuilt with the last source change. It supersedes the earlier passes
+      recorded under 2.2.
+      - **The wheel.** The 0.5.0 wheel's eleven package files equal their source byte
+        for byte.
+      - `make -C provisioning/compute/ansible test`: 112 passed (unit).
+      - `make check-packaging`: passed, the architecture rules included.
+      - `make test`, which every section runs (`change-implement`, step 5) beyond
+        the focused list above: passed, exit 0. Four skips stand in the core and VM
+        storefronts' suites, outside this section's files. An earlier full run,
+        against a wheel built before the last source change, was interrupted inside
+        the VM storefront's suite with no exit recorded. It is not counted as
+        evidence.
+      - `make check-change CHANGE=repair-compute-purchase-recovery`, which includes
+        comment hygiene: passed.
+
+      What this proves is unit-level: the reader's behaviour on synthetic output.
+      No application, pipeline, or live run exercises it, because no caller uses
+      it yet.
+
+      **Packaging.** `arkhai-compute-provisioning-ansible` goes from 0.4.1 to 0.5.0.
+      No exact (`==`) pin of it exists in the tree. Its dependants — the VM and
+      bare-metal provisioning adapters and the provisioning service — keep their
+      `>=0.4.0` floors, since none imports `read_fact` yet. `make lock` refreshed
+      the four locks that resolve it; only the version changed.
+
+      **End-to-end, confirmed.** No caller of `read_fact` exists outside the kit, so
+      no pipeline scenario exercises this section. Owed by validation: none.
+
+      **Handoff to Sections 4 and 5.**
+      - Each codec calls `read_fact(output.stdout, fact_name, action=...)`, with the
+        action from its own mapping (D1's table), and raises its adapter's floor on
+        this kit to `>=0.5.0` with its own minor bump.
+      - A JSON `var:` fact comes back without an action check, so the codec's
+        linkage check is what refuses another action's fact in that form.
+      - `extract_vm_fact`'s forward scan is what Section 5 replaces.
+      - A fact's templated port is a string before ansible-core 2.19 and may be an
+        integer on 2.19. In the local experiment, a `default(22)` printed `"22"`
+        and `22` respectively. The grant fact's `port` is detail only (D3), so a
+        codec should not compare it as text.
+
+      Corrections after the section's precommit compliance check. The check found
+      evidence-precision gaps and no parser defect; see 2.2's corrections.
+      - **What changed.** `read_fact`'s docstring now gives the reason the YAML
+        form is not read. The tests and the notes changed as 2.2 says. Nothing else
+        changed. With docstrings stripped, `runner.py`'s syntax tree equals the
+        source that the full `make test` above ran on. So that pass still covers
+        the reader's runtime logic, and the full suite was not run again for these
+        edits.
+      - **Evidence for the edits** (focused):
+        - `make -C provisioning/compute/ansible test`: 114 passed (unit).
+        - `make dist` and `make lock`: the locks changed only in version.
+        - The rebuilt wheel's eleven files equal their source.
+        - `make check-packaging`, `make check-change`, `make check-comment-hygiene`,
+          and `make check-tasks`: all passed.
 
 ## 3. A tenant-facing port beside the tenant-facing address
 

@@ -3,8 +3,8 @@
 ``AnsibleRunner`` spawns and streams ``ansible-playbook`` processes, renders a
 transient inventory from registered hosts' ``ssh`` connections (decrypting an
 embedded private key just in time, through the ``ssh`` codec, into an
-owner-only file), runs ``ansible -m ping`` connectivity checks, and extracts
-JSON blocks a playbook prints. It knows no domain: what a job's variables are
+owner-only file), runs ``ansible -m ping`` connectivity checks, and reads
+the facts a playbook prints. It knows no domain: what a job's variables are
 and what its output means belong to the domain whose playbook runs.
 
 No inventory file is ever read as an execution source, and nothing else in the
@@ -23,9 +23,11 @@ import signal
 import subprocess
 import sys
 import tempfile
+import textwrap
 import time
 import uuid
-from collections.abc import Callable, Iterable, Mapping
+from collections import Counter
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -114,12 +116,96 @@ def extract_json_block(text: str, search_start: int) -> Optional[dict]:
 
 
 def extract_fact(stdout: str, fact_name: str) -> Optional[dict]:
-    """The value of fact ``fact_name`` a ``debug: var:`` task printed, if any."""
+    """The value of fact ``fact_name`` a ``debug: var:`` task printed, if any.
+
+    Only the JSON result format quotes the fact's name, so only that format is
+    read; ``read_fact`` also reads the fact a role prints for an action.
+    """
     marker = f'"{fact_name}":'
     index = stdout.find(marker)
     if index == -1:
         return None
     return extract_json_block(stdout, index + len(marker))
+
+
+#: The key line of a ``debug: msg:`` result the YAML result format prints as a
+#: literal block, and the indentation of its key.
+_MSG_BLOCK_KEY = re.compile(r"(?P<indent> *)msg: \|-?")
+
+
+def _msg_blocks(stdout: str) -> Iterator[str]:
+    """The text of each ``msg: |`` or ``msg: |-`` literal block in ``stdout``.
+
+    A block is the lines after its key line, up to the first non-blank line
+    indented no deeper than the key; its text has their common indentation
+    removed. A block never extends into the output after it, so a block that
+    is not a document cannot borrow a later task's.
+    """
+    lines = stdout.splitlines()
+    index = 0
+    while index < len(lines):
+        key = _MSG_BLOCK_KEY.fullmatch(lines[index].rstrip())
+        index += 1
+        if key is None:
+            continue
+        key_indent = len(key.group("indent"))
+        body: list[str] = []
+        while index < len(lines):
+            line = lines[index]
+            if line.strip() and len(line) - len(line.lstrip(" ")) <= key_indent:
+                break
+            body.append(line)
+            index += 1
+        yield textwrap.dedent("\n".join(body))
+
+
+def read_fact(stdout: str, fact_name: str, *, action: str) -> Optional[dict]:
+    """The fact a role printed for ``action``, whichever result format printed it.
+
+    The fact ``fact_name`` printed by a ``debug: var:`` task in the JSON result
+    format is taken first, as ``extract_fact`` reads it. The YAML result format
+    prints that fact as YAML, which is not read: this kit declares a YAML parser
+    for its tests only, and decoding the JSON copy of the fact a role also prints
+    keeps reading to the standard library. A role prints that copy through a
+    ``debug: msg:`` task, which the YAML format prints as a literal block. Each
+    such block is parsed alone, as one JSON document, and
+    one that is not JSON, not an object, names no ``action``, or names another
+    action is ignored: a play prints other blocks, its human-readable summary
+    among them. The last document naming ``action`` is the fact. With none,
+    the fact is absent.
+
+    Whether the fact belongs to the job, and what it means, is the caller's to
+    judge. Only how many blocks were ignored, and why, is logged: a block may
+    carry credentials.
+    """
+    fact = extract_fact(stdout, fact_name)
+    if fact is not None:
+        return fact
+    ignored: Counter[str] = Counter()
+    for block in _msg_blocks(stdout):
+        try:
+            document = json.loads(block)
+        except (ValueError, RecursionError):
+            ignored["not_json"] += 1
+            continue
+        if not isinstance(document, dict):
+            ignored["not_object"] += 1
+        elif "action" not in document:
+            ignored["no_action"] += 1
+        elif document["action"] != action:
+            ignored["other_action"] += 1
+        else:
+            fact = document
+    if ignored:
+        logger.debug(
+            "Reading fact %s for action %s: %s; %d ignored (%s)",
+            fact_name,
+            action,
+            "found" if fact is not None else "absent",
+            sum(ignored.values()),
+            ", ".join(f"{reason}={count}" for reason, count in sorted(ignored.items())),
+        )
+    return fact
 
 
 @dataclass
@@ -580,5 +666,6 @@ __all__ = [
     "extract_fact",
     "extract_json_block",
     "inventory_target",
+    "read_fact",
     "redact_ansible_output",
 ]
