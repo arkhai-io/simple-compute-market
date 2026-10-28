@@ -86,7 +86,7 @@ None expected.
 - Depends on nothing. The site's terminate route and release path exist
   (`openspec/specs/physical-provisioning/spec.md`, early termination uses the
   expiry release path).
-- First of the goal's five changes; `converge-ongoing-compute-leases` builds on its
+- First of the goal's six changes; `converge-ongoing-compute-leases` builds on its
   stop intent and lease-ended report, and `publish-and-preempt-spot-compute` on its
   route shape.
 - The lease-ended event's outbox is the shape `replace-polling-with-authenticated-push`

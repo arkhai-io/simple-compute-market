@@ -2,10 +2,9 @@
 
 The decisions below were settled at goal level with the owner on 2026-10-28 for
 [`ROADMAP.md`, Goal 8](../../../docs/development/ROADMAP.md#goal-8--sell-compute-by-the-period-until-either-party-stops),
-revised the same day against three independent design reviews of the goal, and again
-against a second review of the revision. This change's own design review may reopen
-any of them with a finding; its design session verifies them against the code and
-adds the spec deltas.
+and revised the same day against three rounds of independent design review of the
+goal. This change's own design review may reopen any of them with a finding; its
+design session verifies them against the code and adds the spec deltas.
 
 ## Context
 
@@ -86,19 +85,33 @@ with the terms it summarizes, every reader would then need reconciliation handli
 and its only real use — filtering — is served by filters on the terms themselves.
 Revisit trigger: a product needs a class no combination of the two terms expresses.
 
-### D2. The billing kind is a settlement term; `amount` keeps its unit
+### D2. The billing kind is a settlement term; the option's kind sets the unit of `amount`
 
 A per-period deal is one whose selected payments option states a `period` (and
 `reserve_ahead`) in its params; the mandate derives a `rate` part with `until: stop`
 from it, a `once` part otherwise (`settle-ongoing-compute-through-arkhai-payments`).
-The Agreement is unchanged in shape and in meaning: `amount` is what the option's
-rate says it is — per hour, as every existing pricing path assumes — for a per-period
-option as for a prepaid one. The per-period charge is derived from it, once, in the
-mandate: `floor(amount × period_seconds / 3600)` in minor units, refused at
-publication when it floors to zero, re-derived identically by the buyer's mandate
-check. Worked, at $2.50/h = 2,500,000 `USD/6`: `PT15M` → 625,000; `PT1M` → 41,666
-(0.0016% in the buyer's favour per period); `PT1H` → 2,500,000. No Agreement field
-says "until stopped".
+The Agreement is unchanged in shape, and the meaning of `amount` changes in one case,
+stated as a change: for a prepaid option it is the **total** for the agreed term, as
+it is today — bare metal computes `compute_rate_total(rate, duration)`, VM's seller
+reference is `floor(per_hour × seconds / 3600)`, the buyer's per-unit bounds are
+multiplied by the hours, and the `once` mandate charges it as is; for a per-period
+option it is the **hourly rate** the option's `rates` state (`per: hour`), because a
+deal with no total has only a rate to bargain. Every reader of `amount` branches on
+the selected option's kind, which it already holds: both domains' seller policies and
+reference amounts, VM's amount check, both buyers' caps and display, the mandate
+policy. The per-period charge is then derived once, in the mandate,
+`floor(amount × period_seconds / 3600)` in minor units, refused at publication when
+it floors to zero, re-derived identically by the buyer. Worked, at $2.50/h =
+2,500,000 `USD/6`: `PT15M` → 625,000; `PT1M` → 41,666 (0.0016% in the buyer's favour
+per period); `PT1H` → 2,500,000; a two-hour prepaid deal at the same rate carries
+5,000,000, unchanged. Scenarios: a multi-hour prepaid deal, a sub-hour per-period
+one, and recovery of an accepted prepaid Agreement. No Agreement field says "until
+stopped". An older reader would misread a per-period `amount` as a total; no such
+Agreement exists until servicing is declared, which the publication gate ensures.
+
+The unit of a negotiated scalar following the thing negotiated is already how the
+market works — API credits bargain a counted-unit total, compute a duration-scaled
+one — and this adds one case to that rule.
 
 A per-period option may also state a `minimum_spend` — an amount, or a count of
 periods at the rate — under which the buyer pays `max(minimum, usage)`: the
@@ -117,13 +130,18 @@ per-period options state no minimum and the churn vector is an accepted interim 
 additional fee ($5.00 for the first hour at $2.50/h with one period stated), and an
 honestly named `initial_fee` is a different product from the one buyers recognise.
 
-*Rejected:* `amount` as the per-period charge — it changes `amount`'s meaning by
-option kind, breaks the shared `rate × duration` paths, and makes the asking rate and
-the agreed amount different units on one listing. *Rejected:* `PT1H` only — no
+*Rejected:* an explicit rate carrier beside `amount` — a core Agreement change every
+signer, verifier, and recovery path must learn, for a value the option states, with
+`amount` zero on a live deal tripping every free-deal guard; revisit if
+`negotiation-driven-capacity-resize`'s basis-point multiplier lands first, which
+would absorb the question into its structure. *Rejected:* `amount` as the per-period
+charge — it makes the asking rate and the agreed amount different units on one
+listing and moves the conversion into negotiation. *Rejected:* `PT1H` only — no
 conversion, but per-started-period billing at an hour charges a buyer who stops after
 61 minutes for two, and loosening it later changes a derivation every accepted deal's
 buyer check is pinned to. *Rejected:* an additive `term` on the Agreement, and
-`duration_seconds = 0` as the signal. *Rejected* for the churn vector: rate limiting
+`duration_seconds = 0` as the signal. *Withdrawn:* the earlier claim that `amount` is
+hourly today; it is not. *Rejected* for the churn vector: rate limiting
 and a principal blacklist, for Goal 5's reasons. A storefront-side refusal of a
 *payer account* — a payments-service account funded through Stripe, the one identity
 with a cost behind it — is recorded as unowned rather than designed here.
@@ -207,9 +225,11 @@ taking new deals before the hardware goes.
 For a per-period selection the buyer may name a horizon and usually names none, in
 which case `duration_seconds` is the distance from `start_utc` to the earliest seller
 bound: `start + max_duration_seconds` where positive, `available_until_utc` where
-stated. It is always finite and ≤ both bounds. The site commits `lease_end_utc =
-start + duration` exactly as today; "open-ended" is the commercial term, not the lease
-window. What the buyer is promised is stated plainly on every surface: service
+stated. It is always finite and ≤ both bounds. The site commits the Agreement's
+window, `lease_end_utc = start_utc + duration`, in both domains — VM does today and
+bare metal commits from `now`, which an absolute bound cannot tolerate; the one
+delivery path `converge-ongoing-compute-leases` creates owns the derivation.
+"Open-ended" is the commercial term, not the lease window. What the buyer is promised is stated plainly on every surface: service
 continues until the earliest of the buyer's stop, a permitted preemption, the funding
 lapsing, or this bound — the buyer selects no end date, and buys no unconditional
 right to run.

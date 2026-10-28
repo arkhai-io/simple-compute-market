@@ -39,15 +39,18 @@ In `kit/site` and the compute provisioning service that composes it:
   keeps reading `lease_end_utc`: the capacity is committed through the agreed end
   whatever the deadline says, or a forward reservation could be admitted into a window
   a running deal then renews into.
-- A **provisioning budget**, a Resource Pool policy tag the site reads itself at
-  commit: *every* commit records `renew_by_utc = commit + budget` in phase
-  `provisioning`, with no flag and no request field — the site classifies no lease.
-  A storefront that dies before delivery leaves a lease that expires, reserved or
-  per-period alike, and a slow provision has the time the pool's operator gave it
-  rather than the running lease's renewal allowance. Provisioning time is non-billable
-  by construction and accounted separately: the site stamps the active instant it
-  already records at activation, so provisioning time is that instant less the
-  commit, readable per lease.
+- A **provisioning allowance**, a Resource Pool policy tag each *provider* declares
+  with its default and a pool may override, validated at pool write: a commit records
+  a provisioning deadline, `renew_by_utc = commit + allowance`, when the reservation's
+  pool resolves an allowance, and leaves the lease without one when it resolves none
+  — no flag, no request field, the site classifies no lease. The compute providers
+  declare one, so every compute lease gets a deadline; the API-credits provider
+  declares none, so quota holds get none, by the same rule. A storefront that dies
+  before delivery leaves a lease that expires, reserved or per-period alike, and a
+  slow provision has the time the pool's operator gave it. Provisioning time is
+  non-billable by construction and accounted separately: the site stamps the active
+  instant it already records at activation. This changes reserved deals: every
+  compute commit caller becomes an activation caller, in this change's plan.
 - A **renewal-lapse policy**, a pool policy tag with a site-wide default, for a lease
   whose deadline passed unrenewed: `reclaim` (expire at the deadline; the default, and
   today's expiry), `grace <seconds>` (expire that much later, bounded and reported),
@@ -75,6 +78,8 @@ None expected.
 
 - Anything that decides *whether* to renew: the storefront continuation, verified
   funding, the payee stop — `converge-ongoing-compute-leases`.
+- A buyer-facing expectation of provisioning time, which would be a listing term the
+  storefront publishes; none is proposed.
 - Extending `lease_end_utc`; a lease pool sharing one deadline across reservations
   (pooled funding, unowned in the goal); the storefront–site liability a `continue`
   policy would attach to (unowned).
@@ -91,13 +96,15 @@ None expected.
 
 ## Impact
 
-`kit/site`'s models, migration, ledger, router, and client; `kit/site-client`; both compute storefronts' delivery paths, which activate every lease after delivery;
+`kit/site`'s models, migration, ledger, router, and client; `kit/site-client`; the compute provisioning composition's provider declarations; every compute commit caller in both storefronts, which activate every lease after delivery;
 `kit/resource-pools-contracts`' hints; the provisioning service's lease lifecycle and
-watchdog; the site's integration suite (two-session renewal-versus-expiry races, a
-deadline lapsing under each policy, a prepaid lease untouched). One compute
-provisioning migration adds the column; the tags need none. Pipeline evidence is
-"existing lanes unchanged" until the convergence change renews a lease end to end,
-which closeout records as a stated gap.
+watchdog; the site's integration suite (two-session races, a deadline lapsing under each
+policy, repeat activation, a lease committed before the change untouched). One compute
+provisioning migration adds the columns; the tags need none. Pipeline evidence: both
+lanes prove a reserved deal activated and running past the pool's allowance, a crash
+before activation expiring at it, and an API-credit purchase unchanged; the
+per-period renewal end to end is the convergence change's, which closeout records as
+a stated gap.
 
 ## Permanent documentation impact
 
@@ -110,11 +117,12 @@ which closeout records as a stated gap.
 
 ### Knowledge to promote
 
-- Every lease is armed at commit, activated once after delivery, and kept alive by
-  renewal within its agreed end; the site classifies no lease and decides alone what
-  an unrenewed one does — `site-capacity` spec and architecture companion;
-  `ARCHITECTURE.md`, "Capacity reservation".
+- A compute lease gets a provisioning deadline at commit, is activated once after
+  delivery, and is kept alive by renewal within its agreed end; the site classifies
+  no lease and decides alone what an unrenewed one does — `site-capacity` spec and
+  architecture companion; `ARCHITECTURE.md`, "Capacity reservation".
 - Expiry claims against the deadline it read; the deadline is enforced by the claim —
   `site-capacity` spec.
-- Provisioning has its own budget and is accounted apart from billable time —
+- A provider declares whether its pools carry a provisioning allowance and its
+  default; provisioning is accounted apart from billable time —
   `resource-pool-management` spec; `physical-provisioning` spec.

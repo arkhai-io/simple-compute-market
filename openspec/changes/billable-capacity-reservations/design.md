@@ -201,10 +201,10 @@ deployment boundary.
 ## Related decision recorded by Goal 8
 
 `renewable-compute-lease-deadlines` (Goal 8) gives a per-period lease an initial renewal
-deadline equal to the commit plus a per-pool provisioning budget the site reads itself, so
+deadline equal to the commit plus a per-pool provisioning allowance the site reads itself, so
 provisioning time is bounded and accounted apart from billable time but is not priced.
 Once held time is priced here, the provisioning window is a candidate for the same
-machinery — a seller-stated budget that costs the buyer, rather than one that only
+machinery — an allowance that costs the buyer, rather than one that only
 expires — and the minimum charge a per-period option may state
 (`settle-ongoing-compute-through-arkhai-payments`) is the goal's interim answer to
 repeated provisioning. Revisit both when this change is designed.

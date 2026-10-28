@@ -25,10 +25,11 @@ never stored**, from two terms that have homes of their own:
 
 - **How the deal is billed** is a settlement term carried by the selected option. A
   payments option whose params state a billing `period` (and `reserve_ahead`) is billed
-  per period until stopped; one without is prepaid, as today. The Agreement's `amount`
-  keeps its unit — the option's hourly rate, for both kinds — and the per-period charge
-  is derived from it once, in the mandate, by exact floored arithmetic both sides
-  re-derive. A per-period option may state a `minimum_spend`, a true minimum with a
+  per period until stopped; one without is prepaid, as today. The selected option's
+  kind sets the unit of the Agreement's `amount`: a prepaid option's total, as today;
+  a per-period option's hourly rate, from which the per-period charge is derived once,
+  in the mandate, by exact floored arithmetic both sides re-derive. Every reader of
+  `amount` branches on the kind. A per-period option may state a `minimum_spend`, a true minimum with a
   committed refund rule, published once the payments service can draw usage down
   against a prepaid part; until then no minimum is stated. The option params
   themselves are
@@ -107,6 +108,7 @@ None expected.
 - Deriving or settling a `rate` part, snapshot verification, the `start`/`stop` calls:
   `settle-ongoing-compute-through-arkhai-payments`.
 - Any lease-side change (`renew_by_utc`, the renewal-lapse policy):
+  `renewable-compute-lease-deadlines`; the window derivation at commit:
   `converge-ongoing-compute-leases`.
 - The seller's preemption route and spot's end-to-end evidence:
   `publish-and-preempt-spot-compute`. This change publishes the policy; that one acts

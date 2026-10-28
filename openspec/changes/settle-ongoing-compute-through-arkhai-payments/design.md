@@ -2,10 +2,10 @@
 
 The decisions below were settled at goal level with the owner on 2026-10-28 for
 [`ROADMAP.md`, Goal 8](../../../docs/development/ROADMAP.md#goal-8--sell-compute-by-the-period-until-either-party-stops),
-revised the same day against three independent design reviews of the goal, and again
-against a second review of the revision. This change's own design review may reopen
-any of them with a finding; its design session verifies them against the code and the
-service's vectors and adds the spec deltas.
+and revised the same day against three rounds of independent design review of the
+goal. This change's own design review may reopen any of them with a finding; its
+design session verifies them against the code and the service's vectors and adds the
+spec deltas.
 
 ## Context
 
@@ -79,12 +79,16 @@ publication blocker. `MandatePolicy` stops requiring a duration for a per-period
 option. The buyer's `check` re-derives under its own policy as now, so an option the
 buyer did not select cannot be billed per period.
 
-The per-period charge is derived from the Agreement's `amount`, which keeps its unit
-— the option's hourly rate — as `floor(amount × period_seconds / 3600)` in minor
-units, exact integer arithmetic, refused at publication when it floors to zero, and
-re-derived identically by the buyer. Both sides therefore agree the charge from the
-Agreement alone, which the correction in D5 needs. Worked, at $2.50/h =
-2,500,000 `USD/6`: `PT15M` → 625,000; `PT1M` → 41,666; `PT1H` → 2,500,000.
+The unit of the Agreement's `amount` is set by the selected option's kind
+(`negotiate-open-ended-compute-terms` D2): for a prepaid option it is the total, as
+today, and the `once` part charges it directly; for a per-period option it is the
+hourly rate the option's `rates` state, and the per-period charge is derived from it
+as `floor(amount × period_seconds / 3600)` in minor units, exact integer arithmetic,
+refused at publication when it floors to zero, and re-derived identically by the
+buyer. `MandatePolicy` reads the kind from the option and the amount accordingly.
+Worked, at $2.50/h = 2,500,000 `USD/6`: `PT15M` → 625,000; `PT1M` → 41,666; `PT1H`
+→ 2,500,000; and a two-hour prepaid deal at the same rate carries `amount` 5,000,000,
+unchanged.
 
 A per-period option may also state a **`minimum_spend`** — an amount in the option's
 asset, or a count of periods at the rate — under which the buyer pays
@@ -148,8 +152,16 @@ snapshot, checks in order:
    since its job is to catch a replayed day-old snapshot rather than adjudicate
    skew;
 5. `latestEventSequence` against a high-water mark the caller persists per deal in
-   its continuation state (`converge-ongoing-compute-leases` D1), refusing a
-   regression.
+   its continuation state (`converge-ongoing-compute-leases` D2), refusing a
+   regression; a snapshot *at* the mark is accepted only if its `observedAt` is newer
+   than the one recorded, and never advances the mark.
+
+Freshness and sequence have distinct roles and neither replaces the other: a
+replayed snapshot at sequence N passes the sequence check while the service has
+accepted stop N+1, and funding state moves without a lifecycle event, so
+monotonicity cannot prove currency; the sequence refuses known regression, freshness
+bounds age, and local terminal state prevents resurrection. The hostile fixtures
+include an equal-sequence stale snapshot, across a restart.
 
 Every reader of `fundedThrough`, `stop`, `parts`, or `events` goes through it;
 `_fully_reversed` moves onto it. An absent `fundedThrough` is "unknown" and
@@ -173,54 +185,47 @@ rotation (D7).
 from is exactly the replayed one. *Rejected:* trusting only the event stream and
 renewing to a fixed lead — it gives up `fundedThrough` as the renewal input.
 
-### D5. `start`, `stop`, and a partial `reverse`, keyed by the caller's decision
+### D5. `start`, `stop`, and a partial `reverse`, keyed by the caller's journaled operation
 
-`start(transaction, decision)`, `stop(transaction, decision)`, and
-`reverse(transaction, decision, part=, amount=)` post `EventCommand{kind, part?,
-amount?}` with idempotency keys `{kind}-{decision}`, where the decision is the
-caller's durable stop decision or delivery authorization
-(`buyer-initiated-compute-termination` D4): a future-effective seller stop, an
-earlier buyer cancel, and a later override are different decisions and must not
-share a key. The existing whole-transaction `reverse` keeps its `reverse-{txid}` key
-for refunds. A `transaction_events(transaction)` read returns the verified snapshot's
-events so a caller checks what it already sent.
+`start(transaction, operation)`, `stop(transaction, operation)`, and
+`reverse(transaction, operation, part=, amount=)` post `EventCommand{kind, part?,
+amount?}` with idempotency keys `{kind}-{operation}`, where the operation is the
+identity of an entry in the caller's financial operation journal
+(`converge-ongoing-compute-leases` D5): immutable once written, with its amount and
+part, so a retry resends the same command under the same key and a later correction
+is a different operation with its own. The existing whole-transaction `reverse` keeps
+its `reverse-{txid}` key for refunds. A `transaction_events(transaction)` read returns
+the verified snapshot's events so a caller resolves what it already sent.
 
-**The effective time of a stop is corrected inside the contract: stop first, then
-reverse the excess the stop fixed.** `EventCommand` carries no effective time, so a
-stop takes effect at receipt. The stop freezes the amount — nothing accrues after it,
-and `TransactionStop.settled` states what each part earned — so the excess is a pure
-function of two durable facts, the decision's financial effective end and the stopped
-snapshot: the periods started strictly after the effective end, at the per-period
-charge of D1. Billing is per *started* period, so the period in which the end falls is
-charged in full; the buyer pays at most one period past the end, and the design
-discloses it. A rate part's charges stay held until its stop and `reverse` accepts
-`part` and `amount`, so the caller reverses that excess on the part, keyed by the
-decision; a crash anywhere leaves a stop with no reversal, recovered by recomputing
-the same number, or both, and there is no window in which the excess can grow. The
-guarantee the kit offers: *charges after a deal's effective end are reversed before
-they are collected.* A future-effective stop needs no service support: the caller
-durably schedules it and issues an ordinary immediate `stop` at the instant; if it is
-late, it is corrected the same way.
+**The guarantee, and the contract it needs.** The goal promises *charges after a
+deal's effective end are reversed before they are collected.* `EventCommand` carries
+no effective time, so a stop takes effect at receipt; a rate part's hold is
+`{until: stop}`, so the stop releases its earned periods toward the payee's balance
+(`PartState` `held → released`, `PayoutBalance.withdrawable`); `reverse` reaches held
+funds only; and `PartSnapshot.refunded` has no command behind it. Neither order of
+stop and reversal keeps the promise: reverse-then-stop leaves an unbounded excess
+across a crash, and stop-then-reverse cannot exclude collection in the gap or correct
+evidence that arrives later. The promise therefore rests on two service capabilities,
+**required** (see "Requests to the payments service"): an effective-time payee stop,
+with `settled` computed to the stated instant, which removes the correction for the
+common late case; and a correction entitlement after a stop — a refund of released,
+unwithdrawn funds up to `settled` within a stated horizon — for evidence that arrives
+later. Until both are vendored, per-period servicing is not declared
+(`converge-ongoing-compute-leases` D1): the mechanism is built, the double is built
+to the published contract — it releases on stop — and the hostile collection
+scenario fails as it should. Meanwhile the kit does what the contract allows: stop
+at once, reverse what is still held, and report the shortfall for the journal.
 
-One confirmation is owed to the service's vectors in design, and is the gate on this
-decision: that a partial `reverse{part, amount}` of a *stopped* rate part is accepted
-while its funds are held and uncollected — "collectable once stopped" read as
-collectable, not collected — rather than refused as `hold_matured` or
-`hold_not_reversible`. If the service refuses it, the order falls back to
-reverse-then-stop with a residual of at most one started period per crash, the
-guarantee narrows by that residual, and a payee stop carrying its own effective time
-— recorded as unowned work outside this repository in `ROADMAP.md` — becomes the fix
-rather than a simplification. A vector showing the stop *collects* held periods
-immediately would make the reversal impossible and promote that capability to a
-prerequisite; it is the single most important thing the service's answer settles.
+A future-effective stop needs no service support: the caller durably schedules it
+and issues an ordinary immediate `stop` at the instant. The arithmetic of an excess —
+half-open interval, a period charged iff it starts before the end, the started
+period charged in full — is the caller's (`converge-ongoing-compute-leases` D5).
 
-*Rejected:* reverse-then-stop as the primary order — the window between the last
-reversal and the stop always admits one more started period, and a crash between them
-leaves an excess that keeps growing. *Rejected:* assuming payee backdating — not in
-the vendored schema. *Rejected:* narrowing the guarantee to "billing ends when the
-stop is received" — it makes the buyer bear the seller's outage and turns the buyer's
-protection into a dispute. *Rejected:* carrying an effective time in `payload`, which
-the service never interprets.
+*Rejected:* keying by the decision — a second correction under the same key is a
+replay or a conflict, and a fresh key carrying a recomputed total over-refunds.
+*Rejected:* shipping under a narrowed guarantee, blocking the whole convergence change,
+or keeping the strong wording over the weak mechanism (`converge-ongoing-compute-leases`
+D1). *Rejected:* assuming payee backdating, or an effective time in `payload`.
 
 ### D6. The period clock runs from the `start` event
 
@@ -283,25 +288,31 @@ options only where it is declared.
 ## Requests to the payments service
 
 Recorded here as this repository's needs, in the order they matter to it; the owner
-forwards them. None blocks this change's design except where marked.
+forwards them. The first two are required for the goal's billing guarantee and gate
+the servicing declaration, not this change's design.
 
-1. *Confirmation, blocking D5:* a partial `reverse{part, amount}` of a stopped rate
-   part is accepted while its funds are held and uncollected, with a vector.
-2. *Capability, required for `minimum_spend` (D1):* a prepaid part that usage on a
-   rate part draws down, so the payer pays `max(minimum, usage)`. Until it exists,
-   per-period options state no minimum.
-3. *Capability, a simplification:* an effective time on a payee stop, at or before
-   receipt and never after, with `settled` computed to it — removing D5's reversal
-   entirely.
-4. *Capability, a simplification:* a prorated final period on a rate part, removing
-   the one-period overcharge D5 discloses.
-5. *Confirmation and vector:* the pre-start snapshot's shape — whether
+1. *Required capability:* an effective time on a payee stop — at or before receipt,
+   never after; ignored or refused for the payer; `TransactionStop.effectiveAt` the
+   stated instant and `settled` computed to it; one error code for a refused time;
+   a vector.
+2. *Required capability:* a correction entitlement after a stop — a refund of a
+   stopped rate part's released, unwithdrawn funds to the payer, up to `settled`,
+   within a stated horizon, idempotent by request identity; ideally cumulative
+   ("settle this transaction as of this instant"), which collapses the journal to one
+   operation per evidence instant; a vector.
+3. *Capability, required for `minimum_spend` (D1):* a prepaid part that usage on a
+   rate part draws down, so the payer pays `max(minimum, usage)`.
+4. *Confirmation and vector:* the pre-start snapshot's shape — whether
    `fundedThrough` is populated from the reserved batch before `start` (which would
    collapse D4's pre-start branch), and what the receipt's reserved parts carry.
-6. *Confirmations and vectors:* the snapshot proof's frame (D4); the period clock
-   from `start` and `start` refused on a stopped transaction (D6); whether
-   `latestEventSequence` is strictly monotonic (if so, D4's timestamp check is
-   redundant).
+5. *Confirmations and vectors:* the snapshot proof's frame (D4); the period clock
+   from `start` and `start` refused on a stopped transaction (D6); a mandate mixing
+   `once` and `rate` parts.
+6. *Capability, a simplification:* a prorated final period on a rate part, removing
+   the one started period a buyer pays past an end.
+7. *Capability, unowned here:* periodic collection of a running rate part's earned
+   periods by the payee, since under `{until: stop}` a months-long deal pays the seller
+   at its end.
 
 ## Open questions
 - Whether the double lives under `kit/arkhai-payments/fixtures`, as the fake does, or
@@ -310,6 +321,9 @@ forwards them. None blocks this change's design except where marked.
 - The option-param shape (D1) is frozen in this change's design session before
   `negotiate-open-ended-compute-terms`' runs; `minimum_spend` is in it, inactive until
   the service capability lands.
+- `negotiation-driven-capacity-resize` reinterprets the negotiated quantity as a
+  basis-point multiplier; if it lands first, the unit of `amount` by option kind is
+  absorbed into its structure and this change's session reads its design first.
 
 ## Implementation cadence (recommended)
 
@@ -323,7 +337,8 @@ payment scenarios running against it. One session per round.
 
 | Decision | Destination |
 |---|---|
-| D1, D2, D5, D6 | `openspec/specs/settlement-servicing/spec.md` |
+| D1, D2, D6 | `openspec/specs/settlement-servicing/spec.md` |
+| D5 | `settlement-servicing` spec and architecture companion (the guarantee and its dependency) |
 | D3, D10 | `openspec/specs/settlement-configuration/spec.md` |
 | D4 | `settlement-servicing` architecture companion (replacing its snapshot paragraph) and spec |
 | D7 | `settlement-servicing` spec; `DEPLOYMENT_AND_CONFIG.md`, "Settlement consumer configuration and cutover" |

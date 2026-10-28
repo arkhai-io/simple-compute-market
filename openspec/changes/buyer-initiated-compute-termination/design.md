@@ -2,10 +2,9 @@
 
 The decisions below were settled at goal level with the owner on 2026-10-28 for
 [`ROADMAP.md`, Goal 8](../../../docs/development/ROADMAP.md#goal-8--sell-compute-by-the-period-until-either-party-stops),
-revised the same day against three independent design reviews of the goal, and again
-against a second review of the revision. This change's own design review may reopen
-any of them with a finding; its design session verifies them against the code and
-adds the spec deltas.
+and revised the same day against three rounds of independent design review of the
+goal. This change's own design review may reopen any of them with a finding; its
+design session verifies them against the code and adds the spec deltas.
 
 ## Context
 
@@ -150,9 +149,11 @@ state is monotonic toward "the buyer pays less".
 
 Financial and physical convergence hang off the decision and are tracked
 independently, each idempotent across retries and restarts. Every external call a
-decision causes — a payment stop or reversal, a lease terminate, a scheduled stop —
-carries the decision's identity in its idempotency key, so a superseded decision's
-scheduled action, if it fires, is refused as stale rather than executed. Stage events
+decision causes is an operation the deal's journal records with its own identity —
+a payment stop or reversal (`converge-ongoing-compute-leases` D5), a lease terminate,
+a scheduled stop — and carries that identity in its idempotency key, so a retry
+resends the same operation and a superseded decision's scheduled action, if it fires,
+is refused as stale rather than executed. Stage events
 are emitted from the decision for observability and are not its authority.
 
 **Retention.** The log is dispute evidence, so its window is at least the payments

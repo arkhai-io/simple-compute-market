@@ -33,9 +33,10 @@ In `kit/arkhai-payments`, and nowhere domain-specific:
   an optional `minimum_spend`. An option stating a period is billed per period;
   `derive_mandate` derives one `rate` part for it — `amount` the per-period charge,
   `floor(hourly amount × period / 3600)` in minor units, both sides re-deriving it from
-  the Agreement's unchanged hourly `amount`; `period` and `reserveAhead` from the
-  params; `hold: {until: stop}` — and keeps deriving one `once` part for an option
-  without a period. `minimum_spend` is a true minimum — the buyer pays
+  the Agreement's `amount`, which for a per-period option is the hourly rate the
+  option states (for a prepaid option it stays the total, as today); `period` and
+  `reserveAhead` from the params; `hold: {until: stop}` — and keeps deriving one
+  `once` part for an option without a period. `minimum_spend` is a true minimum — the buyer pays
   `max(minimum, usage)`, with a committed buyer-visible refund rule — which needs the
   payments service to draw usage down against a prepaid part; it is a required
   capability in the request to the service, and until it lands per-period options
@@ -57,15 +58,16 @@ In `kit/arkhai-payments`, and nowhere domain-specific:
   trusted by that proof, which is what lets a running deal re-anchor across a
   service-identity rotation listed in overlap, instead of being drained.
 - `start`, `stop`, and a partial `reverse{part, amount}` beside the whole-transaction
-  `reverse`, each keyed by the caller's durable decision rather than the transaction,
-  and a read of the transaction's events so a caller checks what was already sent.
-  The stop command carries no effective time, so a stop learned late is corrected
-  inside the contract: the stop is issued first, which freezes the amount, and the
-  periods started after the effective end — a pure function of the stopped snapshot
-  and the recorded end — are then reversed on the rate part, whose charges stay held
-  until collection; charges after a deal's effective end are reversed before they are
-  collected, the straddling started period excepted and disclosed. A future-effective
-  stop is scheduled durably by the caller and issued immediately when due.
+  `reverse`, each keyed by the caller's journaled operation rather than the
+  transaction, and a read of the transaction's events so a caller resolves what it
+  already sent. The stop command carries no effective time and a stop releases a rate
+  part's earned periods toward the payee's balance, so the goal's guarantee — charges
+  after a deal's effective end are reversed before they are collected — rests on two
+  service capabilities, required: an effective-time payee stop, and a correction
+  entitlement after a stop. Until both are vendored the kit stops at once, reverses
+  what is still held, and reports the shortfall, and per-period servicing is not
+  declared. A future-effective stop is scheduled durably by the caller and issued
+  immediately when due.
 - Confirmation against the service's conformance vectors that the period clock runs
   from the `start` event — the mandate has no start time, and approval only reserves
   the first batch — since that is what lets billing begin at delivery.
@@ -91,12 +93,11 @@ per-transaction event sequence numbers; a rate part's charges held until its sto
 earlier proposal's note that payee stops may be backdated is not in the vendored
 schema, and the design does not rely on it.
 
-The requests to the service — one confirmation that gates the correction (a partial
-reverse of a stopped rate part while held), one capability the minimum spend needs,
-two simplifications (an effective time on a payee stop; a prorated final period), and
-the vectors the design verifies against — are listed in `design.md`, "Requests to the
-payments service"; the effective-time stop is recorded as unowned work outside this
-repository in `ROADMAP.md`, Goal 8.
+The requests to the service — two capabilities the billing guarantee requires (an
+effective-time payee stop; a correction entitlement after a stop), one the minimum
+spend needs, the vectors the design verifies against, and two it would welcome — are
+listed in `design.md`, "Requests to the payments service"; the required two are
+recorded as the goal's external dependency in `ROADMAP.md`, Goal 8.
 
 ## Capabilities
 
@@ -153,12 +154,12 @@ settings. No domain code.
 
 ### Knowledge to promote
 
-- A per-period option derives a `rate` part with `until: stop`, and a `once` part for
-  its minimum charge; the per-period charge is derived from the Agreement's hourly
-  `amount` by floored exact arithmetic — `settlement-servicing` spec.
-- Charges after a deal's effective end are reversed before they are collected; a
-  stop's effective time is corrected by partial reversal — `settlement-servicing` spec
-  and architecture companion.
+- A per-period option derives a `rate` part with `until: stop`; the per-period charge
+  is derived from the Agreement's `amount`, whose unit the selected option's kind
+  sets, by floored exact arithmetic — `settlement-servicing` spec.
+- Charges after a deal's effective end are reversed before they are collected, a
+  guarantee that depends on two service capabilities and is not declared until they
+  are vendored — `settlement-servicing` spec and architecture companion.
 - A service-identity rotation is an overlap under which running deals re-anchor —
   `settlement-servicing` spec; `DEPLOYMENT_AND_CONFIG.md`.
 - A snapshot is evidence only once verified, bound, and ordered, replacing the

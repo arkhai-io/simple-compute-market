@@ -2,8 +2,8 @@
 
 The decisions below were settled at goal level with the owner on 2026-10-28 for
 [`ROADMAP.md`, Goal 8](../../../docs/development/ROADMAP.md#goal-8--sell-compute-by-the-period-until-either-party-stops),
-revised the same day against three independent design reviews of the goal, and again
-against a second review of the revision, which raised nothing structural here. This
+and revised the same day against three rounds of independent design review of the
+goal, none of which raised anything structural here. This
 change's own design review may reopen any of them with a finding; its design session
 verifies them against the code as its dependencies left it and adds the spec deltas.
 
@@ -118,9 +118,9 @@ is a financial convergence the stop intent can carry.
 
 ## Implementation cadence (recommended)
 
-One round: the route and override in both domains, the client method and CLI verb,
-the scheduled stop in the continuation, and the spot scenarios in both lanes. One
-session.
+One round: the route in both domains over the override `buyer-initiated-compute-termination`
+provides, the client method and CLI verb, the scheduled stop in the continuation, and
+the spot scenarios in both lanes. One session.
 
 ## Permanent documentation destinations
 
