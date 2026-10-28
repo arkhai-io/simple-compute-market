@@ -2462,6 +2462,17 @@ Files:
   serialization schema still lists `host_id`; `LeaseState` has no
   `provisioning_failed` and the projection refuses both retired states.
   Pass.
+
+  Correction (section 19): `2.11` was the wrong floor. Pydantic 2.11 accepts
+  `exclude_if` and ignores it, so a `2.11` environment serializes an absent
+  `host_id` as `null`. The bare-metal storefront's lock held 2.11, and in
+  that environment the model emitted the `null`. The floor protects every
+  party that serializes the model, since each must omit the field. The floor is `2.12`, the first
+  release that applies it. `make lock` refreshed the
+  contracts' own lock and moved pydantic from 2.11.7 to 2.14.1 in the
+  bare-metal storefront's, the VM storefront's, and the e2e tests' locks. The
+  move brought the `pydantic-core`, `typing-extensions`, and
+  `typing-inspection` releases that pydantic 2.14.1 requires.
 - [x] 16.2 The schedule route sets `host_id` from the scheduled resource's
   declaration, and omits it when the declaration names none. The resource's
   `physical_host_id` stays in its top-level attributes (D13).
@@ -2858,7 +2869,7 @@ Files:
 - tests in `domains/bare_metal/storefront/tests/`: `test_fulfillment_service.py`
   and `test_http_settlement.py`.
 
-- [ ] 19.1 Begin compares the schedule response's `host_id` and the scheduled
+- [x] 19.1 Begin compares the schedule response's `host_id` and the scheduled
   resource's top-level `physical_host_id` with the accepted terms. It refuses an
   absent or different `host_id`, or a different `physical_host_id`, as a
   conflict with its terms. It no longer reads `bare_metal_publication` (D13).
@@ -2869,17 +2880,125 @@ Files:
     - "The scheduled resource is another machine": the deal reports the
       conflict.
     - "The scheduled resource names no host": the deal reports the conflict.
-- [ ] 19.2 A site-reported delivery that differs from the recorded result makes
+
+  Unit (`test_fulfillment_service.py`, the service over a fake fulfillment
+  client and a fake store): the fake schedules `machine-a`/`host-a`;
+  `test_begin_refuses_a_scheduled_resource_the_terms_did_not_sell` covers no
+  host, another host, and another machine. Each case is refused as a
+  conflict, with one schedule and no begin. Pass.
+
+  Application integration (`test_http_settlement.py`, the app served over
+  loopback, settled through `StorefrontClient`): the provisioning fake's
+  schedule now names `host_id` and a top-level `physical_host_id`, with no
+  publication copy. The existing deal tests are the case "a declaration names
+  its machine once": settlement begins fulfillment and the buyer reads it
+  active. The new
+  `test_a_scheduled_resource_the_terms_did_not_sell_is_reported_as_a_conflict`
+  covers another machine and no host. Settlement answers
+  `settlement_verified`, and no begin reaches the fake. The deal reports the
+  conflict only in its servicing log: the worker's `settlement_retry` stage
+  event names the `fulfill` operation and the conflict. No buyer or admin
+  read is asserted to report it. Pass.
+
+  `tests/integration/test_payment_settlement_client.py`'s schedule fake still
+  nested the copies. It answered with no `host_id`, so its deal waited on a
+  begin that never came and the suite hung rather than failed. The fake now
+  answers as the contract does.
+
+  Plan correction, for section 16: the contracts' pydantic floor rises to
+  `2.12`. Pydantic 2.11, held by the bare-metal storefront's lock, ignores
+  `exclude_if`, so an absent `host_id` serialized as `null` there (see
+  section 16's correction).
+- [x] 19.2 A site-reported delivery that differs from the recorded result makes
   the status, result, and access reads answer 409 `delivery_conflict`, and the
   recorded result stands (D12). Application integration, through
   `StorefrontClient`: "The site reports a different delivery".
-- [ ] 19.3 The bare-metal e2e driver stops declaring the nested copies of the
+
+  The status read records the result through `_record_result`. When the
+  store refuses the write-once result, the service reloads the recorded
+  result. If that result differs from the reported delivery, the read is
+  refused as `BareMetalFulfillmentError(error="delivery_conflict")`. The
+  store raises `StorefrontDomainBindingError` for other mismatches too, so
+  any other refusal still propagates. The four fulfillment routes (status,
+  result, access, and teardown) answer a coded refusal as
+  `{"error": …, "reason": …}`, the shape of the storefront's other typed
+  refusals (`paused`, `offer_unfulfillable`). Teardown reads status first, so
+  under a delivery conflict it answers the same 409, where it answered 500
+  before (see the handoff in 19.4).
+
+  Unit (`test_fulfillment_service.py`,
+  `test_a_delivery_conflict_is_named_only_when_the_recorded_result_differs`,
+  over a fake store that keeps the result write-once): another reported
+  account is refused with `error == "delivery_conflict"` and leaves the
+  recorded result in place. A store refusal of the same result for another
+  reason propagates as `StorefrontDomainBindingError`. Pass.
+
+  Application integration (`test_http_settlement.py`,
+  `test_a_delivery_other_than_the_recorded_result_is_a_conflict`): settles
+  through `StorefrontClient` and reads the result. The site then reports
+  another delivery (a different account). Status, result, and access each
+  answer 409 with `detail.error == "delivery_conflict"`, and the stored
+  result is unchanged. Pass.
+
+  Plan corrections:
+  - `StorefrontClient` has no fulfillment reads. Their typed client is the
+    bare-metal buyer's `BareMetalFulfillmentTransport`, which the test uses,
+    as the existing fulfillment tests do. Its `AuthenticatedHTTPError`
+    carries the status and the signed body.
+  - `sqlite_client.py` is unchanged. The core store already refuses a
+    differing write-once artifact, and the service names the conflict.
+- [x] 19.3 The bare-metal e2e driver stops declaring the nested copies of the
   host and machine (D13). Verify: `make -C e2e-tests test-unit`.
-- [ ] 19.4 Bump the bare-metal storefront, unless section 18 already did, and run
+
+  `compute_deal_driver.py` declares the machine's publication settings as
+  `enabled` and `access_methods` only. `make -C e2e-tests test-unit`: 169
+  passed, but none of those tests imports the driver. `uv run pytest
+  --collect-only tests/e2e/roles/scenarios/bare_metal` imports it: 64
+  collected. The evidence that a deal begins from the declaration is
+  `e2e_bare_metal_mock_deal`, which validation runs. The other e2e
+  declarations never nested the copies: the introduction driver, and the
+  introduction and publication scenarios.
+- [x] 19.4 Bump the bare-metal storefront, unless section 18 already did, and run
   `make lock`. **Verification checkpoint:**
   - 19.1–19.3;
   - `make test` in `domains/bare_metal/storefront`;
   - `make check-packaging` and `make check-comment-hygiene`.
+
+  No bump: section 18 took `arkhai-bare-metal-storefront` to `0.23.0`, and
+  the contracts' floor change falls within section 16's `0.11.0`. `make lock`
+  ran for the pydantic floor (section 16's correction).
+
+  Results:
+  - `make test` in `domains/bare_metal/storefront`: 513 passed before the
+    fresh-context fixes, and 514 after them.
+  - Full `make test` passes.
+  - `make check-packaging` and `make check-comment-hygiene` pass.
+  - `make check-change` fails only on the closeout citation that section 1
+    notes.
+
+  Handoff, from the fresh-context check.
+
+  Fixed:
+  - The other-refusal branch was untested. A unit test now covers it.
+  - The begin test's match was loose. It now matches "scheduled resource
+    conflicts".
+  - The error docstring misdescribed the response shape. Corrected.
+  - The e2e driver's docstring still described the publication copies.
+    Rewritten.
+  - The notes overstated four things: a "real store", the deal "reporting"
+    the conflict, the e2e unit run proving the driver, and section 16's
+    correction giving no reason. All four are corrected.
+
+  Left for triage, since D12 names only the buyer's status, result, and
+  access reads:
+  - Under a delivery conflict, the buyer's teardown answers the typed 409
+    rather than ending the lease (it answered 500 before), because teardown
+    reads status first. Settlement-driven `end_lease` still ends it. Letting
+    teardown proceed past a conflict is a behaviour this section does not
+    decide.
+  - The admin settle-status read (`deal_controls.py`) calls the same status
+    read. Nothing on that path maps the refusal, so the operator still gets
+    an unhandled error, as before.
 
   End-to-end: `e2e_bare_metal_mock_deal` begins fulfillment from a declaration
   that no longer repeats its identity in its publication settings, which is the

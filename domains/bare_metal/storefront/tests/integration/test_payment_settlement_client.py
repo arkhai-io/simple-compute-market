@@ -111,13 +111,8 @@ class Provisioning:
             pool_id=POOL,
             resource_kind="compute.bare-metal",
             provider="bare_metal.ansible",
-            attributes={
-                "bare_metal_publication": {
-                    "enabled": True,
-                    "host_id": HOST,
-                    "physical_host_id": PHYSICAL_HOST,
-                }
-            },
+            host_id=HOST,
+            attributes={"physical_host_id": PHYSICAL_HOST},
         )
 
     async def begin_fulfillment(self, request):

@@ -89,9 +89,9 @@ class BareMetalComputeDealDriver:
 
         The host record is what dispatch renders the job's inventory from; the
         declaration, a bare-metal resource, is what admission, publication,
-        scheduling, and the seller's inventory guard read. The machine's
-        publication view names its host and physical machine, as the storefront
-        checks a scheduled resource against the accepted terms.
+        scheduling, and the seller's inventory guard read. The declaration names
+        its host and physical machine once, and the storefront checks the
+        scheduled resource's own host and machine against the accepted terms.
         """
         held_before = self._held_generation()
         self.site_operator.create_pool(
@@ -138,11 +138,11 @@ class BareMetalComputeDealDriver:
                     "gpu_model": GPU_MODEL,
                     "physical_host_id": self.physical_host_id,
                     "allocation_mode": "exclusive",
+                    # The publication settings repeat neither the host nor the
+                    # machine named above.
                     "bare_metal_publication": {
                         "enabled": True,
                         "access_methods": ["ssh"],
-                        "host_id": self.host_id,
-                        "physical_host_id": self.physical_host_id,
                     },
                 },
             )

@@ -13,7 +13,7 @@ dependencies = [
     # principal a rotation answer names.
     "arkhai-kit-identity==0.4.0",
     # Field(exclude_if=...), with which a schedule response omits an absent host.
-    "pydantic>=2.11",
+    "pydantic>=2.12",
 ]
 
 [build-system]
