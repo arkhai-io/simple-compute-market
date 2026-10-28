@@ -32,9 +32,10 @@ class FakeLedger:
         self.calls.append(("record_unmanaged", {"capacity_reservation_id": capacity_reservation_id, **kwargs}))
         return {**self.reservation, "state": "unmanaged"}
 
-    def release(self, **kwargs):
-        self.calls.append(("release", kwargs))
-        return {**self.reservation, **kwargs}
+    def release(self, *, forced=False, **kwargs):
+        self.calls.append(("release", {"forced": forced, **kwargs}))
+        state = "force_released" if forced else "released"
+        return {**self.reservation, **kwargs, "state": state}
 
     def events_after(self, after_version, *, limit=500):
         self.calls.append(("events_after", {"after_version": after_version, "limit": limit}))

@@ -3287,9 +3287,8 @@ def _migrate_retired_reservation_states(engine: Engine) -> None:
     """Convert every reservation stored in a state nothing writes.
 
     No lifecycle transition writes ``provisioning`` or ``provisioning_failed``,
-    and the readers outside the site ledger decide about neither, so a stored
-    row moves to the state that keeps it held or free and that an operator's
-    tools act on. Each converted row's failure reason names the state it held,
+    and no reader decides about either, so a stored row moves to the state
+    that keeps it held or free and that an operator's tools act on. Each converted row's failure reason names the state it held,
     and the reason it had, if any, moves into its failure message. A database
     holding neither state is unchanged, so a rerun changes nothing.
     """

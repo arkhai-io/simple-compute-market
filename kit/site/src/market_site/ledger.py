@@ -601,7 +601,6 @@ class CapacityReleaseGuard(Protocol):
 _BEGIN_RELEASING_FROM = frozenset(
     {
         ReservationState.reserved.value,
-        ReservationState.provisioning.value,
         ReservationState.leased.value,
         ReservationState.release_failed.value,
     }
@@ -609,7 +608,6 @@ _BEGIN_RELEASING_FROM = frozenset(
 _RECORD_RELEASE_FAILED_FROM = frozenset(
     {
         ReservationState.reserved.value,
-        ReservationState.provisioning.value,
         ReservationState.leased.value,
         ReservationState.releasing.value,
     }
@@ -1509,18 +1507,24 @@ class CapacityLedgerService:
         *,
         capacity_reservation_id: str | None = None,
         deal_ref: Mapping[str, Any] | None = None,
-        state: str = ReservationState.released.value,
+        forced: bool = False,
         failure_reason: str | None = None,
         failure_message: str | None = None,
     ) -> dict[str, Any] | None:
         """Return a held reservation's capacity to the pool, if the guard permits.
 
-        Returns ``None`` when no reservation matches, when it is not held, and
-        when the release guard refuses; a refusal changes nothing. A release to
-        ``force_released`` is an operator's override and is not guarded, and it
-        alone frees an ``unmanaged`` reservation, which an operator has taken
-        over from the lease lifecycle.
+        The reservation ends ``released``, or ``force_released`` when
+        ``forced``: an operator's override, which is not guarded and alone frees
+        an ``unmanaged`` reservation, one an operator has taken over from the
+        lease lifecycle. Returns ``None`` when no reservation matches, when it
+        is not held, and when the release guard refuses; a refusal changes
+        nothing.
         """
+        state = (
+            ReservationState.force_released.value
+            if forced
+            else ReservationState.released.value
+        )
         escrow_uid = dict(deal_ref or {}).get("escrow_uid")
         with self.serialized(), self._session_factory() as db:
             reservation = self._find_reservation(
@@ -1542,7 +1546,6 @@ class CapacityLedgerService:
                 return self._reservation_payload(reservation)
             if reservation.state not in HELD_RESERVATION_STATES:
                 return None
-            forced = state == ReservationState.force_released.value
             if not forced and reservation.state == ReservationState.unmanaged.value:
                 return None
             # A forced release is the operator's recorded override after
@@ -1801,8 +1804,8 @@ class CapacityLedgerService:
 
         A conditional transition, so a lease lifecycle acting on a stale read
         cannot undo what an operator or a completed release recorded: allowed
-        from ``reserved``, ``provisioning``, ``leased``, and ``release_failed``
-        (a retry); a reservation already ``releasing`` under the same handle is
+        from ``reserved``, ``leased``, and ``release_failed`` (a retry); a
+        reservation already ``releasing`` under the same handle is
         returned unchanged. ``None`` means the transition was refused (an
         ``unmanaged`` or released reservation, or one releasing under another
         handle) and nothing was written; the caller re-reads it.
@@ -1842,8 +1845,8 @@ class CapacityLedgerService:
     ) -> dict[str, Any] | None:
         """Record that a release failed, if the reservation is still releasable.
 
-        A conditional transition: allowed from ``reserved``, ``provisioning``,
-        ``leased``, and ``releasing``; a ``releasing`` reservation must still be
+        A conditional transition: allowed from ``reserved``, ``leased``, and
+        ``releasing``; a ``releasing`` reservation must still be
         releasing under ``release_job_id`` when one is given. A stale failure
         cannot reach a reservation an operator took over or force-released, nor
         one already released. ``None`` means refused, and nothing was written.
@@ -1912,7 +1915,6 @@ class CapacityLedgerService:
         terminal = {
             ReservationState.released.value,
             ReservationState.force_released.value,
-            ReservationState.provisioning_failed.value,
         }
         if reservation is None or reservation.state in terminal:
             return None
@@ -1944,45 +1946,12 @@ class CapacityLedgerService:
         terminal = {
             ReservationState.released.value,
             ReservationState.force_released.value,
-            ReservationState.provisioning_failed.value,
         }
         if reservation is None or reservation.state in terminal:
             return None
         if reservation.executor_target is None:
             self._sync_executor_fields(reservation, executor_target=executor_target)
         return self._reservation_payload(reservation)
-
-    def update_reservation_state(
-        self,
-        capacity_reservation_id: str,
-        *,
-        state: str,
-        failure_reason: str | None = None,
-        failure_message: str | None = None,
-        release_job_id: str | None = None,
-    ) -> dict[str, Any] | None:
-        """Update a site reservation state without emitting capacity events.
-
-        This is a generic state mutation primitive for lifecycle services.
-        Releasing, release_failed, and unmanaged still consume capacity; use
-        ``release`` when capacity should become available and an event should be
-        published.
-        """
-        with self.serialized(), self._session_factory() as db:
-            reservation = db.get(CapacityReservation, capacity_reservation_id)
-            if reservation is None:
-                return None
-            reservation.state = str(state)
-            if failure_reason is not None:
-                reservation.failure_reason = failure_reason
-            if failure_message is not None:
-                reservation.failure_message = failure_message
-            self._set_release_job_id(
-                reservation,
-                release_job_id=release_job_id,
-            )
-            db.commit()
-            return self._reservation_payload(reservation)
 
     # ------------------------------------------------------------------
     # Event feed

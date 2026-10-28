@@ -2323,18 +2323,52 @@ Files:
 - `kit/site/tests/integration/test_ledger.py`;
 - `provisioning/compute/service/tests/unit/services/test_ledger_lease_lifecycle.py`.
 
-- [ ] 15.1 Remove the two members, and every set, transition, and terminal
+- [x] 15.1 Remove the two members, and every set, transition, and terminal
   check that names them (D5). Library integration (`test_ledger.py`): the
   conditional transitions and truncation refusals hold for the remaining
   states.
-- [ ] 15.2 Remove `CapacityLedgerService.update_reservation_state` and its
+
+  `ReservationState.provisioning` and `provisioning_failed` are gone, with
+  `provisioning` from `HELD_RESERVATION_STATES`, `_BEGIN_RELEASING_FROM`,
+  and `_RECORD_RELEASE_FAILED_FROM`, and `provisioning_failed` from the
+  terminal sets of `record_create_handle_in_session` and
+  `record_executor_target_in_session`; the enum's docstring and the two
+  transitions' docstrings name only the remaining states. Library
+  integration (`test_ledger.py`, the existing transition and truncation
+  tests, every one reaching its state through a transition now): passes.
+  Unit (new `tests/unit/test_reservation_states.py`): the enum is exactly
+  `reserved`, `leased`, `releasing`, `released`, `release_failed`,
+  `unmanaged`, and `force_released`, and the held set exactly the five that
+  hold.
+- [x] 15.2 Remove `CapacityLedgerService.update_reservation_state` and its
   authority-protocol entry. Tests reach a state through the real transitions,
   or seed the row where no API expresses it (TESTING.md, "Service-internal
   state setup") (D5).
   Verify:
   - a repository search finds no caller;
   - unit: the authority protocol exposes no generic state writer.
-- [ ] 15.3 Bump `arkhai-kit-site`, unless section 10 already did, and run
+
+  Removed from the ledger and `SiteAuthorityLedger`. Its four test callers
+  now use the transitions: `begin_releasing` (`test_ledger.py`'s cross-mode
+  releasing case), `record_release_failed` (three: the release-timing,
+  release-failed-holds, and shared-host cases), and `record_unmanaged`
+  (`test_ledger_lease_lifecycle.py`'s force-release case); none needed a
+  seeded row. A search (Python, outside `.venv` and `openspec`) finds no
+  caller. A second writer was found: `release` assigned whatever `state` its
+  caller named, so `release(state="leased")` would have set a held state and
+  published a release event. It now takes `forced: bool` and writes
+  `released` or `force_released` itself, as the delta's "A caller asks to
+  set a state directly" requires (no operation writes a state its caller
+  names). Its one production caller that chose the state, the site
+  authority's `record_release_success` (through which the operator's forced
+  release runs), passes its own `forced`; the HTTP router passes none; six
+  tests that passed `state="force_released"` pass `forced=True`. The
+  protocol `SiteAuthorityLedger` now also declares `record_release_failed`
+  and `record_unmanaged`, which the adapter already calls on it. Unit
+  (`test_reservation_states.py`): no public operation of the ledger or the
+  protocol takes a parameter whose name contains `state`, or `**kwargs`,
+  but the reservation list's filter. Pass (`kit/site`, 304).
+- [x] 15.3 Bump `arkhai-kit-site`, unless section 10 already did, and run
   `make lock`. **Verification checkpoint:**
   - library integration, 15.1–15.2;
   - `make test` in `kit/site`, `kit/site-client`, `provisioning/compute`,
@@ -2344,6 +2378,36 @@ Files:
 
   End-to-end: `e2e_deal`, `e2e_deal_buyer_cli`, and `e2e_bare_metal_mock_deal`
   lease and release through the remaining transitions. No scenario is owed.
+
+  Section 10 bumped `arkhai-kit-site` to `0.12.0` over `dev`, so it is not
+  bumped again, and no dependency changed, so no lock did. No consumer's
+  floor rises: no production code outside `kit/site` names the removed
+  members or method since section 14, or passes `release` a state. The
+  service's `test_compute_contract_api.py` enumerated every
+  `ReservationState` member against the contract's mapping and failed the
+  first full run; its expectation drops the two states here. The contract's
+  own mapping still carries `provisioning` and `provisioning_failed`
+  entries, which 16.1 (amended) removes.
+
+  `make test` (full, after the fresh-context fixes) passes: `kit/site` 304,
+  `kit/site-client` 63, `provisioning/compute` 243, the service 605 unit and
+  447 integration, the VM storefront 1138 unit and 475 integration, the
+  API-credits service among the rest. `make check-packaging` passes; `make
+  check-change` passes its comment-hygiene and other checks but for the
+  closeout citation section 1 notes.
+
+  Handoff, from the fresh-context check: it found the contract API test
+  failing (fixed above, as the first full run showed), the checkpoint runs
+  unrecorded (recorded), the contract's `provisioning` mapping key in no
+  section's plan (16.1 amended), `release` meeting the "set a state
+  directly" scenario only by a runtime check (now a flag), the unit test
+  narrower than its claim (widened to any `state`-named or keyword-catching
+  parameter), tests naming the removed names (the absence check and the
+  release test went with the flag), and the migration docstring's "outside
+  the site ledger" stale (rewritten). Noted, not this section's:
+  `resize_reservation` frees an `unmanaged` reservation with only the
+  guard's permission, against "Only a forced release MAY free an
+  `unmanaged` reservation"; nothing in production calls it.
 
 ## 16. The compute provisioning contract is major 3
 
@@ -2376,6 +2440,11 @@ Files:
   - a 2.x model is refused, naming the supported major;
   - a schedule response validates with and without `host_id`;
   - `LeaseState` has no `provisioning_failed`.
+
+  Amended by section 15: `lease_state_for_reservation_state`'s mapping
+  loses both retired keys, `provisioning` (to `PENDING`) as well as
+  `provisioning_failed`, since neither is a reservation state any longer
+  (D5's "the mapping entries").
 - [ ] 16.2 The schedule route sets `host_id` from the scheduled resource's
   declaration, and omits it when the declaration names none. The resource's
   `physical_host_id` stays in its top-level attributes (D13).
