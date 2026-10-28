@@ -17,9 +17,10 @@ GPUs.
 
 - Retire the host's `gpu_count` and `gpu_model` from the host API (`HostCreate`,
   `HostUpdate`, `HostResponse`) and from the INI inventory format (`gpus=`, `gpu_model=`),
-  with a provisioning migration that drops the columns. Requests and inventories that
-  still carry them have the fields ignored. A host's hardware is stated only by its
-  capacity declaration.
+  with a provisioning migration that drops the columns; the upgrade is fail-forward, and
+  rolling the provisioning service back past it restores its pre-upgrade database backup.
+  Requests and inventories that still carry them have the fields ignored. A host's
+  hardware is stated only by its capacity declaration.
 - The capability-shape kit reads a field's `required` as "required when its family
   appears"; the compute schema then makes no family required while `gpu.count` and
   `gpu.model` appear together or not at all.
@@ -128,6 +129,15 @@ None.
 - A host record carries no hardware description; retired fields are ignored →
   `openspec/specs/physical-provisioning/spec.md` (deltas), `openspec/specs/site-capacity/architecture.md#declared-capacity-and-connection-identity`,
   `docs/development/DEPLOYMENT_AND_CONFIG.md`, and both seller quickstarts.
+- The host column drop is a fail-forward upgrade whose rollback restores the pre-upgrade
+  backup, and why the expand/contract rule does not govern it →
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`, beside the other fail-forward upgrades.
+- A VM listing resource carries no GPU key, rather than `null`, when its shape states no
+  GPUs, and one dispatch rule decides a resource payload's kind →
+  `openspec/specs/storefront-publication/architecture.md#listing-shapes-and-the-storefronts-authority`.
+- Every other absent optional field of a VM listing resource publishes as `null`, where
+  the specification says the field is not published → `docs/development/ROADMAP.md`
+  (unowned gaps).
 - The resource type is the category a claim matches by equality, `compute.gpu` for every
   VM declaration → `openspec/specs/site-capacity/spec.md` (deltas).
 - The resource type as the compute-shape category (`compute.cpu`, `compute.db`), and bare

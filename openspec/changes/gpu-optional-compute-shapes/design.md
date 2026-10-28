@@ -109,6 +109,13 @@ itself: today a listing the path resolves nothing for is decided by `on_missing`
 an `exists` test runs, so `exists:false` matches nothing. Keeping the requirement.
 Enforcing the whole schema at publish, a larger decision about listings already accepted.
 
+*The publish requirement (10 F4).* `registry-discovery`'s "Schema-driven listing validation"
+says an ordinary publish validates against the listing shape; the publish route refuses only
+the retired spellings. That gap predates this change, and nothing here depends on it.
+`store-registry-listings-as-published` names it and chooses whether publish enforces the
+specification, so its delta reconciles the requirement; this change's delta leaves it alone
+rather than fixing the current behaviour as normative while it is under design.
+
 ### D4. Every VM declaration keeps the `compute.gpu` resource type
 
 GPU-less VM declarations are declared `compute.gpu`, and VM claims name `compute.gpu` for
@@ -132,6 +139,11 @@ claim vocabulary. Renaming `compute.gpu`, which is the right name for GPU capaci
 - **Storage.** The provisioning service's migration drops `hosts.gpu_count` and
   `hosts.gpu_model` by rebuilding the table from the model, following
   `20261023_002_hosts_pool_optional`. It logs nothing per host.
+- **Upgrade (10 F3).** The upgrade is fail-forward: an older provisioner maps both columns
+  and cannot read the rebuilt table, and its migration IDs are recorded as applied, so
+  rolling the provisioning service back past this release means restoring its pre-upgrade
+  database backup. `DEPLOYMENT_AND_CONFIG.md` states this beside the other fail-forward
+  upgrades.
 - **API.** `HostCreate`, `HostUpdate`, and `HostResponse` lose both fields. A request
   that still sends them is accepted with the fields ignored, as the models ignore any field
   they do not define.
@@ -145,22 +157,49 @@ field that affects nothing to be recorded — is easily diagnosed and fixed. The
 weighing was made for the migration's log line. Each retirement is judged case by case;
 no general rule is adopted.
 
+The drop departs from `ARCHITECTURE.md`'s expand/contract rule for non-additive schema
+changes, whose only stated exception is a disposable-database reset contract. That rule
+protects old and new readers that coexist and a rollback after a failed deployment. No two
+provisioner versions share the database: the chart deploys with `strategy: Recreate`
+over one ReadWriteOnce volume, and one operator upgrades sites and storefronts together
+(`ARCHITECTURE.md` "Operators"). What remains is rollback, which the upgrade note above
+answers with the pre-upgrade backup, as this service's earlier single-release column drops
+did.
+
 *Rejected.* Refusing the two names with 422 naming capacity declarations, and warning per
-host on an INI parse. Freezing the columns for a deployment cycle, which protects only
-state that has no other copy. Keeping the fields as descriptive, which contradicts
+host on an INI parse. Retaining the columns, unread, for a release and dropping them in a
+later one: a safe `helm rollback`, bought with two dormant mapped columns and a follow-up
+drop that needs an owner. Keeping the fields as descriptive, which contradicts
 declarations being the one statement of hardware.
 
 ### D6. VM listing models and resource dispatch
 
 `ComputeResource.gpu_count` and `gpu_model` are optional, and the `VmListing` validator
 checks D1's rule by flattening the listing's fields through the compute schema rather than
-restating it. A resource payload with a `token` key is a `TokenResource`; any other
-mapping is a `ComputeResource`, whose validation refuses what is not compute.
-`resource_is_compute` follows the same rule. Stored VM listings all carry `gpu_model`, so
-nothing migrates.
+restating it.
+
+*Dispatch (10 F1).* One rule decides a resource payload's kind at every seam that decides
+it: `Resource.parse_from_dict`, `resource_is_compute`, and the adapter registry's
+`parse_resource_from_dict`, which storefront publication calls. An explicit
+`resource_type` selects its adapter; otherwise a payload with a `token` key is a
+`TokenResource` and any other mapping is a `ComputeResource`. The compute adapter stops
+discriminating on `gpu_model`, so a GPU-less candidate, which carries neither
+`resource_type` nor `gpu_model`, reaches compute validation. `ComputeResource` refuses a
+mapping whose shape, flattened through the compute schema, is empty: the shape kit's
+refusal of an empty shape (D1), not a separate check. Stored VM listings all carry
+`gpu_model` and parse as before, so nothing migrates.
+
+*Serialization (10 F2).* The resource's serializer omits an absent `gpu_count` and
+`gpu_model` as it already omits an absent `asking_rate`, so a GPU-less listing carries no
+GPU key, rather than `null`, when stored, refreshed, and published. The refresh
+comparison reads a missing key and a stored `null` alike, so no stored listing churns.
+Other absent optional fields still publish as `null`; that is a recorded gap, not this
+change's.
 
 *Rejected.* Dispatching on `region`, which couples parsing to a field derived from a pool
 hint; requiring an explicit `resource_type` on every payload, which stored listings lack.
+Publishing `null` GPU fields, which contradicts the listing publishing no GPU field and
+which the registry's dry-run refuses, since it types a present `gpu_model` as a string.
 
 ### D7. Bare metal
 
@@ -213,6 +252,9 @@ which never decides a VM claim because VM listings are pinned to one site.
   shapes; bare-metal derivation, listing, and claim; VM shape resolution and dispatch; host
   models without GPU fields; the INI parser.
 - Integration: VM publication with GPU-less and mixed members and the pool report; the
+  storefront's publication path accepting a GPU-less payload, still parsing a stored GPU
+  listing, and refusing a compute mapping with no quantity; the exact registry body of a
+  GPU-less VM listing, with no GPU key, on first publication and on refresh; the
   registry's `validate-publish` accepting a GPU-less listing and the GPU filters excluding
   it; the host API and the column-drop migration.
 - System: the VM lane's listing-shapes scenario states a GPU-less shape that a `vcpu_count`
@@ -249,12 +291,15 @@ Two rounds.
   any omitted dimension is.
 - A GPU-less listing is invisible to buyers who filter on GPU fields, by design.
 - Dropping the host columns discards GPU values recorded on hosts after the upgrade
-  derivation; they were never sellable.
+  derivation; they were never sellable. A `helm rollback` of the provisioning service past
+  this release does not recover by itself: the older image cannot read `hosts` until its
+  pre-upgrade backup is restored.
 
 ## Migration
 
-The provisioning service rebuilds `hosts` without the two columns. No storefront, registry,
-or bare-metal migration; the registry's filter spec version changes.
+The provisioning service rebuilds `hosts` without the two columns; the upgrade is
+fail-forward, and a rollback past it restores the pre-upgrade database backup (D5). No
+storefront, registry, or bare-metal migration; the registry's filter spec version changes.
 
 ## Open Questions
 
