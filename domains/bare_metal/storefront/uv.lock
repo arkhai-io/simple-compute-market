@@ -167,7 +167,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal-storefront"
-version = "0.23.0"
+version = "0.23.1"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-bare-metal" },
@@ -340,7 +340,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-storefront"
-version = "0.17.0"
+version = "0.17.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -348,11 +348,12 @@ dependencies = [
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-resource-pools-contracts" },
+    { name = "fastapi" },
     { name = "httpx" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_core_storefront-0.17.0-py3-none-any.whl" },
+    { path = "arkhai_core_storefront-0.17.1-py3-none-any.whl" },
 ]
 
 [[package]]

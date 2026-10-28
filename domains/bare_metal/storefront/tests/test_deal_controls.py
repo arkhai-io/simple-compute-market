@@ -243,6 +243,34 @@ async def test_wait_returns_once_the_settled_lease_is_active(tmp_path) -> None:
     assert len(capacity.reserve_calls) == len(provisioning.begin_calls) == 1
 
 
+async def test_wait_answers_a_delivery_conflict_as_the_fulfillment_reads_do(
+    tmp_path,
+) -> None:
+    """The site reports a delivery other than the recorded result: the settle
+    wait ends on the 409 ``delivery_conflict`` refusal the buyer's reads give,
+    rather than polling past it as a failed read."""
+    provisioning = _ProvisioningClient()
+    runtime, negotiation_id, _capacity = await _runtime(
+        tmp_path, provisioning=provisioning
+    )
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with _client(app, ADMIN_SIGNER, "admin") as admin:
+            await admin.admin_pause_lifecycle_loops()
+            async with _buyer(app) as buyer:
+                await buyer.settle_evm(
+                    ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
+                )
+            delivered = await admin.wait_for_settlement(ESCROW_UID, timeout=1.0)
+            provisioning.delivered_user = "tenant-b"
+            with pytest.raises(StorefrontClientError) as refused:
+                await admin.wait_for_settlement(ESCROW_UID, timeout=1.0)
+
+    assert delivered.ready is True
+    assert refused.value.status_code == 409
+    assert "delivery_conflict" in str(refused.value)
+
+
 async def test_admin_reserve_takes_the_listings_machine(tmp_path) -> None:
     runtime, _negotiation_id, capacity = await _runtime(tmp_path)
     app = _app(runtime)

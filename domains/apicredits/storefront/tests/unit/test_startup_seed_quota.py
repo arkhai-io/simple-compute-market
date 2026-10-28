@@ -183,6 +183,9 @@ def _errors(caplog) -> list[logging.LogRecord]:
     return [record for record in caplog.records if record.levelno >= logging.ERROR]
 
 
+# Known flaky: the `no-response` case failed once in a full `make test` on
+# 2026-10-28, with asyncio reporting a task destroyed while pending, and passed
+# on every rerun. Not yet investigated.
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "unanswered",

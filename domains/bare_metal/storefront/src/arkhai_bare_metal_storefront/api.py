@@ -1345,7 +1345,12 @@ async def admin_settle_wait(
         operation="admin_settle_wait",
         resource=f"{escrow_uid}?timeout={raw_timeout}",
     )
-    waited = await settlement_admin_routes(runtime).wait(escrow_uid, timeout=timeout)
+    try:
+        waited = await settlement_admin_routes(runtime).wait(
+            escrow_uid, timeout=timeout
+        )
+    except SettlementAdminRouteError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     return BareMetalSettleWaitResponse.model_validate(waited)
 
 

@@ -19,9 +19,13 @@ from market_capacity_publication import CapacityAdminRouteService, CapacityEffec
 from market_core.schemas import EscrowProposal
 from market_identity import Identity
 from market_resource_pools_contracts.backing import CapacityNotAdmittedError
-from market_settlement_runtime import SettlementAdminRouteService
+from market_settlement_runtime import (
+    SettlementAdminRouteError,
+    SettlementAdminRouteService,
+)
 
 from .claims import ClaimAttributesMissing, whole_machine_claim
+from .fulfillment_service import BareMetalFulfillmentError
 from .listing_binding import bare_metal_listing_binding
 from .settlement_composition import ALKAHEST_MECHANISM
 
@@ -132,10 +136,21 @@ def settlement_admin_routes(
             )
             if thread is None:
                 raise LookupError("settled negotiation not found")
-            lifecycle = await runtime.fulfillment_service().status(
-                negotiation_id=str(escrow["negotiation_id"]),
-                buyer_principal=Identity.model_validate(thread["buyer_principal"]),
-            )
+            try:
+                lifecycle = await runtime.fulfillment_service().status(
+                    negotiation_id=str(escrow["negotiation_id"]),
+                    buyer_principal=Identity.model_validate(thread["buyer_principal"]),
+                )
+            except BareMetalFulfillmentError as exc:
+                # A refused fulfillment read, a delivery conflict among them, is
+                # the settlement's answer as the buyer's fulfillment routes give
+                # it, not a failed read for the settle wait to poll past.
+                raise SettlementAdminRouteError(
+                    exc.status_code,
+                    exc.detail
+                    if exc.error is None
+                    else {"error": exc.error, "reason": exc.detail},
+                ) from exc
         state = str((lifecycle or {}).get("state") or "")
         if state in _READY_STATES:
             if (

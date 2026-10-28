@@ -103,7 +103,7 @@ SITE_B = "site-b"
 ADMIN_SIGNER = Ed25519Signer(b"\x71" * 32)
 BUYER_SIGNER = Ed25519Signer(b"\x72" * 32)
 REGISTRY_SIGNER = Ed25519Signer(b"\x73" * 32)
-#: The provisioning service's signer, for fulfillment-event callbacks.
+#: The provisioning service's signer, for the capacity-released callback.
 SERVICE_SIGNER = Ed25519Signer(b"\x74" * 32)
 _ADMINISTRATORS = TrustedIdentitySet(identities=(ADMIN_SIGNER.identity,))
 _PUBLISHERS = TrustedIdentitySet(identities=(TEST_MARKETPLACE_SIGNER.identity,))
@@ -752,8 +752,9 @@ async def publication_app(
             routers = (*routers, introductions_router)
         try:
             admin_identity.initialize_administrator_identities(db.db_path)
-            # The provisioning service's callbacks authenticate as a service
-            # peer trusted for the home site, seeded as the lifespan seeds it.
+            # The provisioning service's capacity-released callback authenticates
+            # as a service peer trusted for the home site, seeded as the lifespan
+            # seeds it.
             service_peer_trust = ServicePeerTrust(
                 db.db_path,
                 {
