@@ -8,13 +8,17 @@ records and their triage, the sections and checks of its task list, its workflow
 log, and whether a round view is open, and prints one JSON object:
 
 - `{"step": <step>, "reason": …}` for a step to run: `design`, `plan`, `round`
-  (with the `sections` of each session of the plan's next round, to be recorded
-  `by: plan` as it starts), `implement` (with its `sections`), `round-view`,
-  `validate`, `review` (with its `kind`), `validate-and-review`, `triage`,
-  `closeout`, or `archive-cleanup`; for a change in its own clone, a `round-view`,
-  or a validation or review that runs beside the owner's reading (`reading`),
-  names the `workspace` the reading takes place in; the reading of a repeat pass,
-  over a fix triage committed, names its `base`, the commit the view starts from;
+  (with the `sections` of each session of the round, to be recorded with its `by`
+  as it starts: the plan's next round, or sections a triage or the owner named out
+  of the plan's order), `implement` (with its `sections`), `round-view`,
+  `validate` (with the `target` it is for), `review` (with its `kind`),
+  `validate-and-review` (with the review's `kind` and the validation's `target`),
+  `triage` (with the `kind` of review it triages), `closeout`, or
+  `archive-cleanup`; a step named as the remedy of a guard on an exit carries that
+  exit as its `target`; for a change in its own clone, a `round-view`, or a
+  validation or review that runs beside the owner's reading (`reading`), names the
+  `workspace` the reading takes place in; the reading of a repeat pass, over a fix
+  triage committed, names its `base`, the commit the view starts from;
 - `{"step": "clone", "arguments": …}` when the change's clone is to be created,
   or finished, with `make change-clone` and those arguments;
   `{"step": "in-clone", "clone": …}` when the change is worked in its clone, where
@@ -22,23 +26,41 @@ log, and whether a round view is open, and prints one JSON object:
   clone's bootstrap runs and the step named would need it;
 - `{"step": "owner", "reason": …}` when only the owner can move the change on: a
   merge in progress in the checkout (`merging`), named before anything else is
-  read, a question to answer, a returned step to decide, a round the plan does not map, a
-  validation that did not pass, a prerequisite to land, a failed bootstrap, a
-  change whose records are in the workspace but whose branch is not; for a waiting
-  run, its `seq` — a question or a stop is resumed by it;
-- `{"step": "done", …}` for an archived change;
+  read, a question to answer, a returned step to decide, a round the plan does not
+  map, a validation that did not pass, a prerequisite to land, a failed bootstrap,
+  a change whose records are in the workspace but whose branch is not, an exit its
+  node does not declare (`choice`, and the node's `exits`), an exit whose target
+  cannot be entered, or a change whose records predate the log's format, with the
+  command that converts them (`convert`); for a waiting run, its `seq` — a question
+  or a stop is resumed by it; for a guard on an exit no step can satisfy, the exit
+  as `target`;
+- `{"step": "done", …}` for an archived change, or once archive cleanup names it;
 - `{"step": "unclassified", "reason": …, "read": …}` when no rule applies, with
   what it read, for the orchestrating session to work out.
 
 The workflow's graph is the table in `change_workflow/graph.py`: each node's exits,
-the join an exit waits on, and the guards on each exit with the step that remedies
-each. This computation reads where the change stands and which exit its last step
-chose, then follows that exit through its guards. A review's triage file records
-under `## Next` whether the change advances, another review round runs, or the
-triage returned the change to an earlier phase, and that token chooses the
-triage's exit; the change then advances once the exit's guards hold — a passing
-validation of the round's fix commit, of `HEAD` before closeout, and of a closeout
-correction that changed more than documentation — without the owner.
+the join an exit waits on, the guards on each exit with the step that remedies
+each, and each node's entry guards. This computation reads the route from the log
+— the exit the last step's outcome named, or the owner's latest direction until a
+run of the node it directs is logged — and checks it against the table. An exit
+its node does not declare, a validation's exit other than the target it was given,
+and an exit whose target's entry guard is not met name the owner; an unmet guard on
+a declared exit names the step that remedies it, carrying the exit as `target`, or
+the owner where no step can; a direction checks no exit guard. A validation that
+clears a guard leaves the route where it was, so the guard is checked again. The
+round's join is read from the records its members supply (`graph.ROUND_JOIN`). A
+review's triage file routes nothing: a review whose triage file exists while no
+triage outcome, and no conversion line, names it is a triage in progress.
+
+Every line the workflow tooling appends to a log carries the log's format marker. A
+change whose log holds a line without it, or that has numbered records and no log,
+is routed on none of them: the owner converts its records first.
+
+The files hold the change's state and the log its route: the step the route names
+is named whatever the status says. Where the status is past that step — a step that
+set its status and closed before recording its outcome — or the log's last step is
+past the status, a status set back by hand, the result carries a `disagreement`
+saying so.
 
 A change is computed where it is worked: in the checkout that has its branch
 checked out — its own name's branch, or one the owner's decision says it is
@@ -47,12 +69,10 @@ clone, to compute there or to create, or the owner, for a change whose records
 are in this workspace and so cannot simply be cloned. In a clone, implementation
 and later steps wait for the clone's bootstrap, and the owner reads a round in
 the workspace beside its validation and review, the workspace's view read
-through the clone's `workspace` remote. Where the log and the files
-disagree — a status set by hand — the files decide the step, and the result
-carries a `disagreement` saying so. A
-task list whose tasks sit under another section's heading is not routed on
-(`task_problems`, which `scripts/check_tasks.py` runs for the skills). `--plain`
-prints the result as lines rather than JSON.
+through the clone's `workspace` remote. A task list whose tasks sit under another
+section's heading is not routed on (`task_problems`, which
+`scripts/check_tasks.py` runs for the skills). `--plain` prints the result as
+lines rather than JSON.
 
 Contract: openspec/specs/change-workflow/spec.md, "The next step is computed from
 the files".
@@ -65,9 +85,8 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -78,22 +97,22 @@ from check_change_index import _DEPENDENCY, INDEX, Row, index_rows  # noqa: E402
 from find_change import ChangeNotFound, change_directory, is_archived  # noqa: E402
 from round_view import RoundError, View, open_view  # noqa: E402
 from change_workflow import graph  # noqa: E402
-from change_workflow.common import ORCHESTRATOR, StepError  # noqa: E402
-from change_workflow.graph import (ARCHIVE_CLEANUP, CLOSEOUT,  # noqa: E402
-                                   CLOSEOUT_REVIEW, CLOSEOUT_TRIAGE,
-                                   DESIGN, DESIGN_REVIEW, DESIGN_TRIAGE,
+from change_workflow.common import ORCHESTRATOR, STEPS, StepError  # noqa: E402
+from change_workflow.graph import (CLOSEOUT, CLOSEOUT_REVIEW, DESIGN, DONE,  # noqa: E402
                                    IMPLEMENTATION_REVIEW, IMPLEMENTATION_TRIAGE, PHASES,
-                                   PLAN, PRE_CLOSEOUT_REVIEW, PRE_CLOSEOUT_TRIAGE, ROUND,
-                                   ROUND_VIEW, VALIDATE, Node)
+                                   ROUND, ROUND_JOIN, ROUND_VIEW, VALIDATE, Join, Node,
+                                   Standing, TargetError, entry_refusal, node_of)
 from change_workflow.graph import owner as _owner  # noqa: E402
-from change_workflow.log import (branch_decisions, directed_step, log_path,  # noqa: E402
-                                 read_log, redesigned_after_return)
+from change_workflow.log import (FORMAT, LOG, branch_decisions, log_path,  # noqa: E402
+                                 ran, read_log, standing)
 from change_workflow.records import (ChangedSince, changed_since,  # noqa: E402
                                      is_documentation, is_record, latest_validation,
                                      validation_problem, validation_result)
 
 ROOT = Path(__file__).resolve().parents[1]
 _RECORD = re.compile(r"^(?P<number>\d+)-(?P<kind>[a-z-]+)\.md$")
+# A record as a triage's outcome names it, its file's name without `.md`.
+_RECORD_NAME = re.compile(r"^(?P<number>\d+)-(?P<kind>[a-z-]+)$")
 _REVIEWED_COMMIT = re.compile(r"<!-- reviewed-commit: (\S+) -->")
 # The change's task list, whose sections and checks say how far implementation got.
 TASKS_FILE = "tasks.md"
@@ -105,30 +124,27 @@ _TASK = re.compile(r"^\s*- \[(?P<done>[ xX])\] "
 _STEP_PHASE = {"design": "design", "plan": "planning", "implement": "implementation",
                "validate": "implementation", "triage": None, "review": None,
                "closeout": "closeout", "archive-cleanup": "closeout"}
-# What a review's triage file records next, read from its `## Next` token.
-ADVANCE, ANOTHER_ROUND, RETURNED, IN_PROGRESS, OWNER = (
-    "advance", "another round", "returned", "in progress", "owner")
+# The step a returned outcome's `return_to` names, for an outcome that gives the
+# phase it returns to rather than its target.
+_RETURN_STEP = {"design": "design", "planning": "plan", "implementation": ROUND.step}
+# The records a member of a round's join supplies, besides the round's sections.
+_SUPPLIES = {ROUND_VIEW: "implementation-owner", VALIDATE: "validation",
+             IMPLEMENTATION_REVIEW: "implementation"}
+# The target a validation in a round's join is given: the round's triage.
+_ROUND_TRIAGE = {"step": IMPLEMENTATION_TRIAGE.step, "kind": IMPLEMENTATION_TRIAGE.kind}
+CONVERT = "python3 scripts/run_change_step.py convert {change}"
+RECORD = "python3 scripts/run_change_step.py record {change} {step} --outcome '<its outcome>'"
 
-
-def _section_text(text: str, heading: str) -> str | None:
-    """The body of a `## <heading>` section of a Markdown file, if it has one; words
-    after a colon on the heading's own line (`## Next: Advance`) begin it. Only the
-    bare heading counts: `## Next round` is another section."""
-    match = re.search(rf"^## {re.escape(heading)}(?::(.*))?[ \t]*$", text, re.M)
-    if match is None:
-        return None
-    rest = text[match.end():]
-    end = re.search(r"^## ", rest, re.M)
-    return (match.group(1) or "") + "\n" + (rest[:end.start()] if end else rest)
-
-
-def _seconds(at: str) -> int:
-    """A log line's `at`, UTC to the second, as seconds since the epoch."""
-    return int(datetime.strptime(at, "%Y-%m-%dT%H:%M:%SZ").replace(
-        tzinfo=timezone.utc).timestamp())
+# How the log routes the change (`Route.how`): a step's exit; the owner's direction;
+# a round started, by the line recording it; a directed validation that ran, naming
+# the target it was given; a validation naming another target than it was given;
+# and a finished run naming no exit.
+EXIT, DIRECTED, ROUND_STARTED, VALIDATED, ELSEWHERE, NO_EXIT = (
+    "exit", "directed", "round started", "validated", "elsewhere", "no exit")
 
 
 Result = dict[str, Any]
+Entry = dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -140,36 +156,17 @@ class Record:
     path: Path
 
     @property
+    def name(self) -> str:
+        """The record as a triage's outcome names it, `NN-<kind>`."""
+        return self.path.name[:-3]
+
+    @property
     def triage(self) -> Path:
         return self.path.with_name(self.path.name[:-3] + ".triage.md")
 
     @property
     def triaged(self) -> bool:
         return self.triage.is_file()
-
-    def next_token(self) -> str | None:
-        """What a review's triage recorded next; None while it is untriaged.
-
-        Triage writes `## Next` last, its first words `Advance`, `Another round`,
-        or, for a triage that returns the change to an earlier phase, `Returned`,
-        and the change is routed on that token alone: `ADVANCE`, `ANOTHER_ROUND`,
-        `RETURNED`, `OWNER` for any other first words, and `IN_PROGRESS` for a
-        triage file without the section, a triage not yet finished. A file from
-        before `## Next` ends with `## Gate`; one beginning "Passed" reads as
-        `ADVANCE`, so nothing already passed reopens, and any other goes to the
-        owner.
-        """
-        if not self.triaged:
-            return None
-        text = self.triage.read_text("utf-8")
-        if (following := _section_text(text, "Next")) is not None:
-            words = following.strip().lower()
-            return (ADVANCE if words.startswith("advance")
-                    else ANOTHER_ROUND if words.startswith("another round")
-                    else RETURNED if words.startswith("returned") else OWNER)
-        if (gate := _section_text(text, "Gate")) is not None:
-            return ADVANCE if gate.strip().lower().startswith("passed") else OWNER
-        return IN_PROGRESS
 
     @property
     def needs_no_triage(self) -> bool:
@@ -245,6 +242,49 @@ class State:
             "workspace_round_view": bool(self.workspace_view),
             "bootstrap": self.bootstrap.state if self.bootstrap else None,
         }
+
+
+@dataclass(frozen=True)
+class Route:
+    """Where the log sends the change, and the line that sends it there: `how` is
+    one of `EXIT`, `DIRECTED`, `ROUND_STARTED`, `VALIDATED`, `ELSEWHERE`, `NO_EXIT`.
+    `target` is the exit or direction's target, `source` the node of the run that
+    named an exit, and `given` the target a validation was given."""
+
+    how: str
+    line: Entry
+    target: Mapping[str, Any] | None = None
+    source: Node | None = None
+    given: Mapping[str, Any] | None = None
+
+    @property
+    def node(self) -> Node | None:
+        try:
+            return node_of(self.target) if self.target is not None else None
+        except TargetError:
+            return None
+
+
+@dataclass(frozen=True)
+class Pass:
+    """A round's records and the owner's reading of them, in its first pass or in a
+    repeat pass that a triage choosing another review opened over a committed fix:
+    `again` is that review, and `base` the commit the pass's reading starts from."""
+
+    mine: list[Record]
+    kinds: set[str]
+    in_clone: bool
+    again: Record | None
+    base: str | None
+    unread: bool
+    # The workspace's view of this pass, None when there is none or it is stale;
+    # `stale` names the owner when a stale view must close before this pass is read.
+    view: View | None
+    stale: Result | None
+
+    @property
+    def pass_base(self) -> dict[str, str]:
+        return {"base": self.base} if self.base else {}
 
 
 def read_records(reviews: Path) -> list[Record]:
@@ -338,33 +378,166 @@ def _step_lines(log: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
     return [entry for entry in log if entry.get("step") != ORCHESTRATOR]
 
 
-def _triage_phase(before: Sequence[dict[str, Any]]) -> str | None:
-    """The phase a triage run belongs to: that of the review or validation it
-    followed, the nearest one logged before it; None with none logged."""
-    for entry in reversed(before):
-        if entry.get("step") == "review":
-            return graph.review_phase(entry.get("kind", ""))
-        if entry.get("step") == "validate":
+def _triaged_reviews(entry: Mapping[str, Any]) -> list[tuple[int, str]]:
+    """The reviews a triage or conversion line names in `triaged`, each as its
+    number and kind, `-external` copies by their kind, in order of number."""
+    found = []
+    for name in entry.get("triaged") or ():
+        if isinstance(name, str) and (match := _RECORD_NAME.match(name)):
+            kind = match["kind"].removesuffix("-external")
+            if graph.review_phase(kind):
+                found.append((int(match["number"]), kind))
+    return sorted(found)
+
+
+def _triage_phase(entry: Mapping[str, Any], before: Sequence[dict[str, Any]]) -> str | None:
+    """The phase a triage run belongs to: that of the latest review its outcome
+    names, or, for a run that named none, of the review or validation it followed,
+    the nearest one logged before it; None with none logged."""
+    if reviews := _triaged_reviews(entry):
+        return graph.review_phase(reviews[-1][1])
+    for earlier in reversed(before):
+        if earlier.get("step") == "review":
+            return graph.review_phase(earlier.get("kind", ""))
+        if earlier.get("step") == "validate":
             return "implementation"
     return None
 
 
-def governing(reviews: Sequence[Record]) -> Record:
-    """The review whose triage decides what follows: the latest, unless its triage
-    file has no `## Next` and an earlier review was triaged with it.
+def _run_node(entry: Mapping[str, Any]) -> Node | None:
+    """The node a step's run is a run of: a review by its kind, a triage by the kind
+    of the latest review its outcome names; None for a run that names no kind."""
+    step = entry.get("step")
+    if step == "review":
+        node = Node(step, entry.get("kind"))
+    elif step == "triage":
+        reviews = _triaged_reviews(entry)
+        node = Node(step, reviews[-1][1]) if reviews else Node(step)
+    else:
+        node = next((d.node for d in graph.TABLE if d.runs == step and not d.node.kind),
+                    Node(str(step)))
+    return node if node in graph.NODES else None
 
-    Two reviews triaged together — one from `make review`, one pasted — may carry
-    `## Next` in one triage file only; the earlier one's was written after the
-    latest review was published. An earlier review triaged before that belongs to
-    an earlier round, whose token says nothing of this one.
+
+def _exit_of(entry: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    """The exit a run's outcome names: its target `next` when it finished or
+    returned; a return that gives only the phase it returns to names that phase's
+    step. None for a run that took no exit."""
+    if entry.get("outcome") not in ("finished", "returned"):
+        return None
+    target = entry.get("next")
+    if isinstance(target, Mapping):
+        return target
+    if entry.get("outcome") == "returned" and entry.get("return_to") in _RETURN_STEP:
+        return {"step": _RETURN_STEP[entry["return_to"]]}
+    return None
+
+
+def _same(one: Mapping[str, Any], other: Mapping[str, Any]) -> bool:
+    """Whether two targets name the same node, with the same sections, and, for a
+    validation, the same target."""
+    try:
+        node = node_of(one)
+        if node != node_of(other) or one.get("sections") != other.get("sections"):
+            return False
+    except TargetError:
+        return False
+    return node != VALIDATE or _same(one["target"], other["target"])
+
+
+def _label(target: Mapping[str, Any]) -> str:
+    """A target as a reason writes it, `review:pre-closeout`; never parsed."""
+    try:
+        node = node_of(target)
+    except TargetError:
+        return json.dumps(target, ensure_ascii=False, default=str)
+    if node == VALIDATE:
+        return f"{node.label} for {_label(target['target'])}"
+    if target.get("sections"):
+        return f"{target['step']} {json.dumps(target['sections'])}"
+    return node.label
+
+
+def _members(join: Join) -> set[Node]:
+    return {node for _, node in join.waits_for}
+
+
+def _in_join(route: Route | None, join: Join) -> bool:
+    """Whether the route leads into the round's join: a round started, the exit of
+    one of the join's members into the round's triage, or the owner's direction to
+    the round view, which reads the join."""
+    if route is None:
+        return False
+    return route.how == ROUND_STARTED or (
+        route.how == EXIT and route.source in _members(join)
+        and route.node == IMPLEMENTATION_TRIAGE) or (
+        route.how == DIRECTED and route.node == ROUND_VIEW)
+
+
+def _given(route: Route | None, joined: bool) -> Mapping[str, Any] | None:
+    """The target the computation gave a validation run under `route`: the round's
+    triage in its join, the target an owner's direction to validation names, and
+    otherwise the exit whose guard it remedies."""
+    if route is None:
+        return None
+    if joined:
+        return _ROUND_TRIAGE
+    if route.how == DIRECTED:
+        return route.target.get("target") if route.node == VALIDATE else None
+    if route.how in (EXIT, VALIDATED):
+        return route.target
+    return None
+
+
+def route_of(log: Sequence[Entry], join: Join = ROUND_JOIN) -> Route | None:
+    """Where the log sends the change: the exit the last step's outcome named, or
+    the owner's latest direction while no run of the node it directs is logged after
+    it; None while neither is logged.
+
+    A round's line records it starting. A run that took no exit — a question, a
+    block, a stop — leaves the route where it was, so its step is named again once
+    the owner answers or resolves it. A run of a member of the round's join that
+    names no exit leaves the round where it was too, since the round's records say
+    how far it got; any other finished run naming none is the owner's. A validation
+    naming the target it was given leaves the route where it was, so the guards it
+    remedied are checked again; one directed by the owner leads to its target once
+    it passed. The conversion line names no exit, and routes nothing.
     """
-    latest = reviews[-1]
-    if latest.next_token() != IN_PROGRESS:
-        return latest
-    published = latest.path.stat().st_mtime_ns
-    return next((r for r in reversed(reviews[:-1])
-                 if r.next_token() not in (None, IN_PROGRESS)
-                 and r.triage.stat().st_mtime_ns >= published), latest)
+    route: Route | None = None
+    for entry in log:
+        step = entry.get("step")
+        if step == ORCHESTRATOR:
+            if entry.get("outcome") == "round":
+                route = Route(ROUND_STARTED, entry, {"step": ROUND.step}, ROUND)
+            elif entry.get("by") == "owner" and isinstance(entry.get("next"), Mapping):
+                route = Route(DIRECTED, entry, entry["next"])
+            continue
+        if step not in STEPS:
+            continue
+        if route is not None and route.how == DIRECTED and route.node is not None \
+                and graph.NODES[route.node].runs and not ran(route.node, entry):
+            # A direction stands until a run of its node; a node no run is logged
+            # for, as the round's reading, gives way to the next run of any step.
+            continue
+        joined = _in_join(route, join)
+        exit_ = _exit_of(entry)
+        if exit_ is None:
+            if entry.get("outcome") == "finished" and not (
+                    joined and step in {graph.NODES[m].runs for m in _members(join)}):
+                route = Route(NO_EXIT, entry)
+            continue
+        source = _run_node(entry)
+        if source is None:
+            route = Route(NO_EXIT, entry)
+        elif source == VALIDATE:
+            given = _given(route, joined)
+            if given is None or not _same(exit_, given):
+                route = Route(ELSEWHERE, entry, exit_, source, given)
+            elif route is not None and route.how == DIRECTED and route.node == VALIDATE:
+                route = Route(VALIDATED, entry, given)
+        else:
+            route = Route(EXIT, entry, exit_, source)
+    return route
 
 
 def _waiting(entry: dict[str, Any], read: bool = True) -> Result | None:
@@ -392,8 +565,10 @@ def _waiting(entry: dict[str, Any], read: bool = True) -> Result | None:
         return _owner(f"the {step} step asks: {entry.get('message', '')}",
                       awaiting=entry.get("awaiting"), resume=step)
     if outcome == "returned":
-        return _owner(f"the {step} step proposes returning to {entry.get('return_to')}: "
-                      f"{entry.get('message', '')}", return_to=entry.get("return_to"))
+        target = _exit_of(entry)
+        return _owner(f"the {step} step proposes returning to "
+                      f"{_label(target) if target else entry.get('return_to')}: "
+                      f"{entry.get('message', '')}", target=target)
     if outcome == "blocked":
         return _owner(f"the {step} step is blocked on {entry.get('blocked_on')}: "
                       f"{entry.get('message', '')}", blocked_on=entry.get("blocked_on"))
@@ -410,7 +585,8 @@ class Computation:
                  workspace: Callable[[Path], Path | None] = workspace_of,
                  clone: Callable[[Path, str], Path | None] = clone_of,
                  bootstrap: Callable[[Path], Bootstrap] = bootstrap_state,
-                 merging: Callable[[Path], bool] = _merging) -> None:
+                 merging: Callable[[Path], bool] = _merging,
+                 join: Join = ROUND_JOIN) -> None:
         self.root = root
         self.state = State(change)
         self._merging = merging
@@ -422,6 +598,7 @@ class Computation:
         self._workspace = workspace
         self._clone = clone
         self._bootstrap = bootstrap
+        self._join = join
 
     def run(self) -> Result:
         state = self.state
@@ -462,6 +639,8 @@ class Computation:
         state.head = self._head(self.root)
         if state.row is None:
             return self.unclassified(f"{INDEX} has no row for {state.change}")
+        if unconverted := self.unconverted():
+            return unconverted
         if state.workspace is not None:
             if held := self.bootstrap_held():
                 return held
@@ -469,12 +648,33 @@ class Computation:
         if result.get("step") not in ("owner", "unclassified", "done"):
             if waiting := self.bootstrapping(result):
                 return waiting
-            if disagreement := self.disagreement():
+            if "disagreement" not in result and (disagreement := self.disagreement()):
                 result["disagreement"] = disagreement
         return result
 
     def unclassified(self, reason: str) -> Result:
         return {"step": "unclassified", "reason": reason, "read": self.state.summary()}
+
+    def unconverted(self) -> Result | None:
+        """The owner, with the command that converts the change's records, while
+        they are not in the log's format: a line of the log without its marker, or
+        numbered records under `reviews/` and no log. Such a log is routed on not at
+        all, since an older line's shapes — a decision's string `next` and `kind`,
+        a return with no target, triage tokens in files — would be read as the new
+        format's."""
+        state = self.state
+        if any(entry.get("format") != FORMAT for entry in state.log):
+            unmarked = next(entry for entry in state.log if entry.get("format") != FORMAT)
+            why = f"its workflow log holds lines without the log's format, from seq " \
+                  f"{unmarked['seq']}"
+        elif not state.log and state.records:
+            why = "it has numbered records under reviews/ and no workflow log"
+        else:
+            return None
+        command = CONVERT.format(change=state.change)
+        return _owner(f"{state.change}'s records are not in the workflow log's format: {why}; "
+                      f"the owner converts them, between steps, with `{command}`",
+                      convert=command)
 
     # Where the change is worked.
 
@@ -592,11 +792,20 @@ class Computation:
             return self.unclassified(f"status {status!r} names no phase")
         if waiting := self.dependencies(phase):
             return waiting
-        if waiting := self.pending(phase):
+        route = route_of(state.log, self._join)
+        # A step the owner directed into another phase sets its status as it
+        # starts, so a run of it that stopped before doing so waits in its own phase.
+        phases = {phase, *(graph.NODES[route.node].phases if route and route.node else ())}
+        if waiting := self.pending(phases):
             return waiting
-        if directed := self.directed():
-            return directed
-        return getattr(self, f"_{phase}")(status)
+        if phase == "design" and status != "ready for design" and (
+                blocked := self.blocked_on_prerequisite()):
+            return blocked
+        if route is None:
+            return self.unrouted(status, phase)
+        return {EXIT: self.chosen, DIRECTED: self.directed, ROUND_STARTED: self.round_join,
+                VALIDATED: self.validated_direction, ELSEWHERE: self.elsewhere,
+                NO_EXIT: self.no_exit}[route.how](route)
 
     def dependencies(self, phase: str) -> Result | None:
         """A dependency that gates `phase` or an earlier one, and is not yet released:
@@ -630,114 +839,233 @@ class Computation:
                           prerequisite=name)
         return None
 
-    # Where the change stands in the graph, and the exit its last step chose, read
-    # from the status, the latest runs of its steps, and the `## Next` tokens of its
-    # triage files; each exit is then followed through its guards in the table
-    # (`follow`). The status's phase says where to start reading, and each phase's
-    # reading is called with the status.
+    # The route, checked against the table.
 
-    def _design(self, status: str) -> Result:
-        if status == "ready for design":
-            return DESIGN.result("ready for design")
-        if blocked := self.blocked_on_prerequisite():
-            return blocked
-        if untriaged := self.untriaged(kinds=("design",)):
-            return self.follow(DESIGN_REVIEW, DESIGN_TRIAGE, f"{untriaged} has no triage")
-        last = self.last(("design", "review", "triage"))
-        if last and last.get("step") == "design":
-            if last.get("outcome") == "finished":
-                if waiver := self.waived_design_review(last):
-                    planned = next((e for e in reversed(self.state.log)
-                                    if e.get("step") == "plan" and e["seq"] > waiver["seq"]),
-                                   None)
-                    if planned is None:
-                        return {"step": "plan",
-                                "reason": f"the owner waived another design review after "
-                                          f"the return (seq {waiver['seq']})"}
-                    # Planning ran on the waiver and the change is still in design: it
-                    # did not take the change on, so the owner decides, never a rerun.
-                    if waiting := _waiting(planned):
-                        return {**waiting, "seq": planned["seq"]}
-                    return _owner(f"planning ran on the owner's waiver (seq "
-                                  f"{planned['seq']}) but left the change in design: the "
-                                  "files decide, so the status is the owner's to correct")
-                return self.follow(DESIGN, DESIGN_REVIEW, "the design discussion finished; "
-                                                          "its design review is next")
-            return DESIGN.result("in design")
-        reviews = [r for r in self.state.records if r.review_kind == "design"]
-        if not reviews:
-            return DESIGN.result("in design")
-        review = reviews[-1]
-        if waiting := self.not_advancing(review, DESIGN_TRIAGE):
-            return waiting
-        if review.next_token() == RETURNED:
-            return self.follow(DESIGN_TRIAGE, DESIGN, f"{review.triage.name} returned the "
-                                                      "change to design", review=review)
-        if review.next_token() == ANOTHER_ROUND:
-            return self.follow(DESIGN_TRIAGE, DESIGN_REVIEW,
-                               f"{review.triage.name} records another round", review=review)
-        return self.follow(DESIGN_TRIAGE, PLAN, f"{review.triage.name} records that the change "
-                                                "advances", review=review)
+    def unrouted(self, status: str, phase: str) -> Result:
+        """Before the log names any exit or direction: a change in design is at its
+        first step; any later status, set with no step's exit or the owner's
+        direction logged, is the owner's to direct."""
+        if phase == "design":
+            return DESIGN.result(status)
+        return _owner(f"the status is {status!r}, and the workflow log names no step's exit "
+                      "and no direction of the owner's to say where the change goes: the "
+                      "owner directs it")
 
-    def _planning(self, status: str) -> Result:
-        if status == "ready for planning":
-            return PLAN.result("ready for planning")
-        last = self.last(("plan",))
-        if last and last.get("outcome") == "finished":
-            # Planning sets the change ready for implementation as it finishes.
-            return _owner("the plan finished but left the change in planning: the files "
-                          "decide, so the status is the owner's to correct")
-        return PLAN.result("in planning")
+    def chosen(self, route: Route) -> Result:
+        """A step's exit: the owner for an exit its node does not declare; the first
+        unmet guard's remedy, carrying the exit as `target`; the owner for a target
+        whose unwaivable entry guard is not met; otherwise the target's step. An exit
+        into the round's triage waits on the round's join."""
+        source, target, line = route.source, route.target, route.line
+        assert source is not None and target is not None
+        run = f"the {source.label} run at seq {line['seq']}"
+        try:
+            node = node_of(target)
+        except TargetError as exc:
+            return _owner(f"{run} names no node of the workflow graph as its exit: {exc}",
+                          choice=target)
+        declared = graph.exits(source, target=node)
+        if len(declared) > 1:
+            out_of_order = target.get("step") == "implement"
+            declared = [e for e in declared
+                        if (e.when == graph.OUT_OF_ORDER) == out_of_order] or declared
+        if not declared:
+            exits = [e.target.label for e in graph.NODES[source].exits]
+            return _owner(f"{run} names {_label(target)} as its exit, which {source.label} "
+                          f"does not declare; its exits are {', '.join(exits) or 'none'}",
+                          choice=target, exits=exits)
+        exit_ = declared[0]
+        if exit_.join is not None:
+            return self.round_join(route)
+        context = self.context(route)
+        if isinstance(context, str):
+            return _owner(f"{run} chose {_label(target)}, but {context}", choice=target)
+        if guarded := self.guarded(exit_, target, context):
+            result = guarded
+        else:
+            result = self.entered(node, target, f"{run} chose {_label(target)}", line,
+                                  by=source.step)
+            if result.get("step") == node.step and (missing := self.passed_by_status(node)):
+                result["disagreement"] = missing
+        if source == IMPLEMENTATION_TRIAGE and node == IMPLEMENTATION_REVIEW:
+            return self.read_beside(result, context["pass"])
+        return result
 
-    def _implementation(self, status: str) -> Result:
+    def guarded(self, exit_: graph.Exit, target: Mapping[str, Any],
+                context: Mapping[str, Any]) -> Result | None:
+        """The first unmet checked guard on `exit_`, in the table's order, naming its
+        remedy or the owner and carrying `target`; None when each holds. A held
+        guard is skipped: `dependencies` holds the change on it before it is read,
+        and `bootstrap_held` and `bootstrapping` around whatever is named."""
+        for guard in exit_.guards:
+            if guard.check is not None and (result := guard.check(self, context)):
+                return {**result, "target": dict(target)}
+        return None
+
+    def entered(self, node: Node, target: Mapping[str, Any], reason: str, line: Entry, *,
+                by: str) -> Result:
+        """`target`, reached by a step's exit, once its unwaivable entry guards hold;
+        the owner, naming the guard, while one does not."""
+        if refusal := entry_refusal(target, self.standing(), directed=False):
+            return _owner(f"{reason}, and {refusal}", choice=dict(target))
+        return self.enter(node, target, reason, line, by=by)
+
+    def enter(self, node: Node, target: Mapping[str, Any], reason: str, line: Entry, *,
+              by: str) -> Result:
+        """The result naming `target`'s step, for the route `line` chose.
+
+        A step named with no run of it logged since is in progress or next, and the
+        reason says so: only the owner knows whether an interactive session of it is
+        open, or closed before it recorded its outcome.
+        """
         state = self.state
-        rounds = [e for e in state.log if e.get("outcome") == "round"]
-        work = [s for s in state.sections if not s.closeout]
+        if node == DONE:
+            return {"step": DONE.step, "reason": "archived"}
+        reason += self.in_progress(node, line)
+        if node == VALIDATE:
+            result: Result = {"step": VALIDATE.step, "target": dict(target["target"]),
+                              "reason": reason}
+        elif node == ROUND:
+            if problem := self.sections_problem():
+                return problem
+            if target.get("step") == "implement":
+                result = {"step": ROUND.step, "sections": target["sections"], "by": by,
+                          "reason": f"{reason}: record the round as it starts, then "
+                                    "implement it"}
+            else:
+                result = self.next_round()
+        elif node == CLOSEOUT_REVIEW and self._uncommitted(self.root, state.directory):
+            result = CLOSEOUT.result("the archive is not committed: closeout resumes after "
+                                     "its archive step")
+        else:
+            result = node.result(reason)
+        return result
+
+    def in_progress(self, node: Node, line: Entry) -> str:
+        """What the reason adds for a step named with no run of it logged after
+        `line`: a session of it may be open, or may have ended without recording."""
+        runs = graph.NODES[node].runs
+        if runs is None or node == ROUND or any(
+                entry["seq"] > line["seq"] and ran(node, entry) for entry in self.state.log):
+            return ""
+        return ("; no run of it is logged since: if no session of it is open, an interactive "
+                "one ended without recording — resume it, or record its outcome with "
+                f"`{RECORD.format(change=self.state.change, step=runs)}`")
+
+    def passed_by_status(self, node: Node) -> str | None:
+        """Why the status is past `node`, a step's exit named, when it is: the step
+        set the status as it finished and its session closed before it recorded the
+        outcome, which alone carries its exit. An owner's direction back to an
+        earlier step is not this: the step it directs sets its status as it
+        starts."""
+        status = self.state.row.status if self.state.row else ""
+        phase = _phase(status)
+        phases = graph.NODES[node].phases
+        if phase is None or not phases or PHASES.index(phase) <= max(map(PHASES.index, phases)):
+            return None
+        step = graph.NODES[node].runs or node.step
+        return (f"the status is {status!r}, past {node.label}, but no {step} outcome is "
+                f"recorded: if its session ended without recording, record it with "
+                f"`{RECORD.format(change=self.state.change, step=step)}`")
+
+    def directed(self, route: Route) -> Result:
+        """The owner's direction, until a run of its node is logged: no exit guard is
+        checked, and the node's unwaivable entry guards, which the log's writer
+        checked as it wrote the direction, are checked again on the change as it now
+        stands."""
+        line, target = route.line, route.target
+        assert target is not None
+        why = f"the owner directed {_label(target)} at seq {line['seq']}: " \
+              f"{line.get('decision', '')}"
+        try:
+            node = node_of(target)
+            refusal = entry_refusal(target, self.standing(), directed=True)
+        except TargetError as exc:
+            return _owner(f"{why}, which names no node: {exc}", choice=dict(target))
+        if refusal:
+            return _owner(f"{why}, and {refusal}", choice=dict(target))
+        if node == ROUND_VIEW:
+            # No run of the round view is logged: the round's own records say
+            # whether its reading is still due.
+            return self.round_join()
+        return self.enter(node, target, why, line, by="owner")
+
+    def validated_direction(self, route: Route) -> Result:
+        """A validation the owner directed, run and naming its target: the target
+        once the validation passed, its entry guards checked; the owner when it
+        failed or was inconclusive."""
+        target, line = route.target, route.line
+        assert target is not None
+        why = f"the owner directed a validation before {_label(target)}, which ran at seq " \
+              f"{line['seq']}"
+        if result := self.validated(why):
+            return {**result, "target": dict(target)}
+        return self.entered(node_of(target), target, why, line, by="owner")
+
+    def elsewhere(self, route: Route) -> Result:
+        """A validation that named another exit than the target it was given."""
+        given = _label(route.given) if route.given else "no target the log records"
+        return _owner(f"the validation at seq {route.line['seq']} names "
+                      f"{_label(route.target or {})} as its exit, but it was given {given}: "
+                      "the owner decides where it leads", choice=route.target,
+                      given=route.given)
+
+    def no_exit(self, route: Route) -> Result:
+        line = route.line
+        return _owner(f"the {line.get('step')} run at seq {line['seq']} finished naming no "
+                      "exit, so nothing says where the change goes: the owner directs it")
+
+    def context(self, route: Route) -> dict[str, Any] | str:
+        """What the guards on a step's exit read: the run, the review a triage's
+        outcome names of its kind, the first closeout review, and, for the triage of
+        an implementation round, its pass. A string says why one is missing."""
+        source, line = route.source, route.line
+        assert source is not None
+        records = self.state.records
+        review = None
+        if source.step == "triage":
+            named = [number for number, kind in _triaged_reviews(line) if kind == source.kind]
+            review = next((r for r in reversed(records) if named and r.number == named[-1]
+                           and r.review_kind == source.kind), None)
+            if review is None:
+                return "the review its outcome names is not in reviews/"
+        closeouts = [r for r in records if r.review_kind == "closeout"]
+        context: dict[str, Any] = {"run": line, "review": review,
+                                   "first": closeouts[0] if closeouts else review}
+        if source == IMPLEMENTATION_TRIAGE:
+            again = review if route.node == IMPLEMENTATION_REVIEW else None
+            current = self.current_round() or {}
+            work = self.round_pass(current, again)
+            if work.stale:
+                return "a view of an earlier round, or of this round's earlier pass, is open " \
+                       "in the workspace: run `make round-done` there first"
+            context.update(unread=work.unread, in_clone=work.in_clone, base=work.pass_base,
+                           **{"pass": work})
+        return context
+
+    def standing(self) -> Standing:
+        directory = self.state.directory
+        assert directory is not None
+        return standing(directory / "reviews" / LOG, self.state.log)
+
+    # The round.
+
+    def sections_problem(self) -> Result | None:
+        """Why the task list cannot be routed on: it has no sections, or a task sits
+        under another section's heading. The skills check the task list before
+        acting on it; this is the backstop for routing on its sections, since a
+        list missing a heading would have whole sections repeated or skipped."""
+        state = self.state
         if not state.sections:
             return self.unclassified("the task list has no sections")
         if problems := task_problems(state.tasks):
-            # The skills check the task list before acting on it; this is the
-            # backstop for the one phase routed on its sections, since a list
-            # missing a heading would have whole sections repeated or skipped.
             return self.unclassified("the task list is malformed: " + "; ".join(problems))
-        current = rounds[-1] if rounds else None
-        if current and self.set_aside(current):
-            # Read before the round's sections: the amended plan may have renumbered
-            # or dropped them. The next round's own validation covers the
-            # work-in-progress commit the return left, so none is asked for before it.
-            return self.planned(work)
-        round_sections = ([str(s) for session in current["sections"] for s in session]
-                          if current else [])
-        by_id = {s.id: s for s in state.sections}
-        if current and (unknown := [s for s in round_sections if s not in by_id]):
-            return self.unclassified(f"the agreed round names sections the task list lacks: "
-                                     f"{', '.join(unknown)}")
+        return None
 
-        def unfinished(section: Any) -> bool:
-            # The closeout section is closeout's, never a round's to implement.
-            return not by_id[str(section)].complete and not by_id[str(section)].closeout
+    def current_round(self) -> Entry | None:
+        return next((e for e in reversed(self.state.log) if e.get("outcome") == "round"), None)
 
-        # The round's join waits first for its sections, each session in turn.
-        if current and any(unfinished(s) for s in round_sections):
-            for session in current["sections"]:
-                if any(unfinished(s) for s in session):
-                    return {
-                        "step": "implement", "sections": session,
-                        "reason": "the agreed round's sections are not all checked"}
-        if current is None:
-            return self.planned(work)
-        return self.in_round(current, work)
-
-    def planned(self, work: list[Section]) -> Result:
-        """The plan's exit: its next round, or, with nothing left to implement, the
-        pre-closeout review."""
-        if all(s.complete for s in work):
-            return self.pre_closeout(PLAN)
-        if unmet := self.unmet(PLAN, ROUND):
-            return unmet
-        return self.next_round(work)
-
-    def next_round(self, work: list[Section]) -> Result:
+    def next_round(self) -> Result:
         """The next round of the latest plan's mapping, for the orchestrating session
         to record `by: plan` as it starts; the owner when there is no mapping.
 
@@ -752,7 +1080,10 @@ class Computation:
         owner before anything is recorded: the mapping no longer describes the plan,
         and a round line naming it would leave the round unclassifiable.
         """
-        open_ids = [s.id for s in work if not s.complete]
+        open_ids = [s.id for s in self.state.sections if not s.closeout and not s.complete]
+        if not open_ids:
+            return _owner("the next round is named, but every section before closeout is "
+                          "checked: the owner directs what follows")
         by_id = {s.id: s for s in self.state.sections}
         plan = next((e for e in reversed(self.state.log)
                      if e.get("step") == "plan" and e.get("outcome") == "finished"), None)
@@ -777,46 +1108,54 @@ class Computation:
         return _owner("agree the next implementation round: which sections, and how many "
                       "sessions; the plan maps none", round=open_ids)
 
-    def in_round(self, current: dict[str, Any], work: list[Section]) -> Result:
-        """The round's sections are checked: the rest of its join — its reading,
-        validation, and review — then its triage, and the exit that triage chose.
+    def triage_line(self, record: Record) -> Entry | None:
+        """The latest finished or returned triage line, or the conversion line, that
+        names `record` among what it triaged: the outcome of its triage."""
+        return next((e for e in reversed(self.state.log)
+                     if record.name in (e.get("triaged") or ())
+                     and ((e.get("step") == "triage"
+                           and e.get("outcome") in ("finished", "returned"))
+                          or e.get("step") == "convert")), None)
 
-        A change worked in this checkout is read first, since its view moves the
-        branch its own steps run on. A change in its own clone is read in the
-        owner's workspace while its validation and review run in the clone, so the
-        reading holds triage alone: triage is named once the owner record, the
-        review, and the validation all exist and the workspace's view is closed.
+    def repeat_review(self, mine: Sequence[Record]) -> Record | None:
+        """The latest of the round's implementation reviews whose triage chose the
+        implementation review again: the review a repeat pass follows."""
+        for record in reversed(mine):
+            if record.review_kind == "implementation" and (line := self.triage_line(record)):
+                exit_ = _exit_of(line)
+                if exit_ is not None and _same(exit_, {"step": "review",
+                                                       "kind": "implementation"}):
+                    return record
+        return None
 
-        A triage that records another round over a committed fix opens a repeat
-        pass, read in the same way from the commit that triage's review read: the
-        fix is work the owner has not seen, and the repeat round exists because it
-        changed something central. The pass's reading is an owner record saved after
-        that triage finished — in a clone the first pass's record may be numbered
-        after the review, since it is read beside it — and the result naming the
-        reading carries the pass's `base`.
+    def round_pass(self, current: Mapping[str, Any], again: Record | None) -> Pass:
+        """The round's records and the owner's reading of them.
+
+        A triage that chose another review over a committed fix opens a repeat
+        pass, read from the commit that triage's review read: the fix is work the
+        owner has not seen, and the repeat round exists because it changed
+        something central. The pass's reading is an owner record saved after that
+        triage finished — in a clone the first pass's record may be numbered after
+        the review, since it is read beside it. A change in its own clone is read in
+        the owner's workspace while its validation and review run in the clone, so
+        a first pass is unread there until its owner record exists.
         """
         state = self.state
         mine = [r for r in state.records if r.number > current.get("after", 0)]
         kinds = {r.review_kind or r.kind for r in mine}
         in_clone = state.workspace is not None
-        if not in_clone and not kinds & {"implementation-owner", "implementation",
-                                         "validation"}:
-            return ROUND_VIEW.result("the round's sections are committed; the owner reads "
-                                     "the round")
-        again = next((r for r in reversed(mine) if r.review_kind == "implementation"
-                      and r.next_token() == ANOTHER_ROUND), None)
         base = again.reviewed_commit if again and self.fixed_since(again) else None
         if again is None:
             unread = in_clone and "implementation-owner" not in kinds
         else:
             # Records are never rewritten, so a record's time is when it was saved,
-            # and a triage file's is when `## Next` ended it.
-            finished = again.triage.stat().st_mtime_ns
+            # and a triage file's is when its triage last wrote it.
+            finished = again.triage.stat().st_mtime_ns if again.triaged else 0
             unread = base is not None and not any(
                 r.kind == "implementation-owner" and r.number > again.number
                 and r.path.stat().st_mtime_ns > finished for r in mine)
-        pass_base = {"base": base} if base else {}
         view = state.workspace_view if in_clone else None
+        stale = None
         # A view the owner left open over an earlier round, or an earlier pass,
         # following its fixes, is not this pass's reading; this one needs it closed
         # first. A base may be named by an abbreviated commit, a pasted review's.
@@ -824,36 +1163,88 @@ class Computation:
         if view is not None and started and not (view.base.startswith(started)
                                                   or started.startswith(view.base)):
             if unread:
-                return _owner("a view of an earlier round, or of this round's earlier pass, "
-                              "is open in the workspace: run `make round-done` there, so this "
-                              "pass can be read over its own base", round_view=state.change,
-                              workspace=str(state.workspace))
+                stale = _owner("a view of an earlier round, or of this round's earlier pass, "
+                               "is open in the workspace: run `make round-done` there, so this "
+                               "pass can be read over its own base", round_view=state.change,
+                               workspace=str(state.workspace))
             view = None
-        viewing = view is not None
-        missing = [kind for kind in ("validation", "implementation") if kind not in kinds]
+        return Pass(mine, kinds, in_clone, again, base, unread, view, stale)
+
+    def read_beside(self, result: Result, work: Pass) -> Result:
+        """A repeat pass's validation or review, in a clone, run beside the owner's
+        reading of the fix in the workspace."""
+        if work.unread and work.view is None and result["step"] in ("validate", "review"):
+            result.update(reading=True, workspace=str(self.state.workspace), **work.pass_base)
+            result["reason"] += "; the owner reads the fix in the workspace beside it"
+        return result
+
+    def round_join(self, route: Route | None = None) -> Result:
+        """The round's join, read from the records its members supply: its sessions'
+        sections checked, each in turn; then the owner's reading, its validation,
+        and its implementation review; then its triage, once every record but a
+        validation with nothing to triage has its triage file.
+
+        A change worked in this checkout is read first, since its view moves the
+        branch its own steps run on. A change in its own clone is read in the
+        owner's workspace while its validation and review run in the clone, so the
+        reading holds triage alone: triage is named once the owner record, the
+        review, and the validation all exist and the workspace's view is closed. A
+        member the join does not wait for supplies nothing it waits on.
+        """
+        state = self.state
+        if problem := self.sections_problem():
+            return problem
+        current = self.current_round()
+        if current is None:
+            return self.unclassified("the route leads into a round's join, and no round is "
+                                     "recorded")
+        members = _members(self._join)
+        by_id = {s.id: s for s in state.sections}
+        round_sections = [str(s) for session in current["sections"] for s in session]
+        if unknown := [s for s in round_sections if s not in by_id]:
+            return self.unclassified(f"the agreed round names sections the task list lacks: "
+                                     f"{', '.join(unknown)}")
+        if ROUND in members:
+            for session in current["sections"]:
+                # The closeout section is closeout's, never a round's to implement.
+                if any(not by_id[str(s)].complete and not by_id[str(s)].closeout
+                       for s in session):
+                    return {"step": "implement", "sections": session,
+                            "reason": "the agreed round's sections are not all checked"}
+        reading = ROUND_VIEW in members
+        work = self.round_pass(current, self.repeat_review(
+            [r for r in state.records if r.number > current.get("after", 0)]))
+        supplied = {_SUPPLIES[member] for member in members if member in _SUPPLIES}
+        if reading and not work.in_clone and not work.kinds & supplied:
+            return ROUND_VIEW.result("the round's sections are committed; the owner reads "
+                                     "the round")
+        if work.stale:
+            return work.stale
+        viewing = work.view is not None
+        unread = reading and work.unread
+        missing = [node for node in (VALIDATE, IMPLEMENTATION_REVIEW)
+                   if node in members and _SUPPLIES[node] not in work.kinds]
         if missing:
             result: Result = (
-                {"step": "validate-and-review", "kind": "implementation",
+                {"step": "validate-and-review", "kind": IMPLEMENTATION_REVIEW.kind,
+                 "target": dict(_ROUND_TRIAGE),
                  "reason": "the round has no validation or implementation review"}
-                if missing == ["validation", "implementation"]
-                else VALIDATE.result("the round has no validation")
-                if missing == ["validation"]
+                if len(missing) == 2
+                else {"step": VALIDATE.step, "target": dict(_ROUND_TRIAGE),
+                      "reason": "the round has no validation"}
+                if missing == [VALIDATE]
                 else IMPLEMENTATION_REVIEW.result("the round has no implementation review"))
             if unread and not viewing:
                 result.update(reading=True, workspace=str(state.workspace))
                 result["reason"] += ("; the owner reads the round in the workspace beside "
                                      "them")
             return result
-        # A validation that passed, or was inconclusive, has no finding: the fix
-        # commit's validation alone opens no triage, though one opened for the
-        # round's other records triages it beside them. A repeat pass's owner record
-        # waits for the pass's own review, as a first pass's does.
-        reviewing = again is not None and not any(
-            r.review_kind == "implementation" and r.number > again.number for r in mine)
-        untriaged = [r for r in mine if not r.triaged
-                     and not (reviewing and r.kind == "implementation-owner")]
+        # A validation that passed, or was inconclusive, has no finding, so it alone
+        # opens no triage, though one opened for the round's other records triages
+        # it beside them.
+        untriaged = [r for r in work.mine if not r.triaged]
         if any(not r.needs_no_triage for r in untriaged):
-            if viewing:
+            if reading and viewing:
                 return _owner(("the owner is reading the round in the workspace: save their "
                                "answer as this clone's next NN-implementation-owner.md, then "
                                "run `make round-done` in the workspace, before triage")
@@ -862,111 +1253,29 @@ class Computation:
                                "still open in the workspace: run `make round-done` there "
                                "before triage"),
                               round_view=state.change, workspace=str(state.workspace))
-            # Before a repeat pass's review is in, a fix commit's failed validation
-            # is triaged alone, and the reading waits for the review.
-            if unread and not reviewing:
-                return {"step": "round-view", **pass_base,
-                        **({"workspace": str(state.workspace)} if in_clone else {}),
+            if unread:
+                return {"step": ROUND_VIEW.step, **work.pass_base,
+                        **({"workspace": str(state.workspace)} if work.in_clone else {}),
                         "reason": "the round's validation and review are in, and the owner "
-                                  "reads the round" + (" in the workspace" if in_clone else "")
+                                  "reads the round"
+                                  + (" in the workspace" if work.in_clone else "")
                                   + " before triage"}
-            return self.follow(IMPLEMENTATION_REVIEW, IMPLEMENTATION_TRIAGE,
-                               ", ".join(r.path.name for r in untriaged) + " have no triage")
-        review = governing([r for r in mine if r.review_kind == "implementation"])
-        if waiting := self.not_advancing(review, IMPLEMENTATION_TRIAGE):
-            return waiting
-        if review.next_token() == ANOTHER_ROUND:
-            result = self.follow(IMPLEMENTATION_TRIAGE, IMPLEMENTATION_REVIEW,
-                                 f"{review.triage.name} records another round", review=review,
-                                 unread=unread, in_clone=in_clone, base=pass_base)
-            if unread and not viewing and result["step"] in ("validate", "review"):
-                result.update(reading=True, workspace=str(state.workspace), **pass_base)
-                result["reason"] += "; the owner reads the fix in the workspace beside it"
-            return result
-        # Anything else advances: a return waits above until the owner confirms it,
-        # and once confirmed has set the round aside before it is read here.
-        if all(s.complete for s in work):
-            if unmet := self.unmet(IMPLEMENTATION_TRIAGE, PRE_CLOSEOUT_REVIEW):
-                return unmet
-            return self.pre_closeout(IMPLEMENTATION_TRIAGE)
-        if unmet := self.unmet(IMPLEMENTATION_TRIAGE, ROUND):
-            return unmet
-        return self.next_round(work)
+            return self.triage(", ".join(r.path.name for r in untriaged) + " have no triage")
+        reviews = [r for r in work.mine if r.review_kind == "implementation"]
+        if reviews and self.triage_line(reviews[-1]) is None:
+            return self.triage(f"{reviews[-1].triage.name} names no recorded outcome: its "
+                               "triage is in progress")
+        return self.unclassified("the round's records are triaged, and no triage outcome "
+                                 "after them routes the change")
 
-    def pre_closeout(self, source: Node) -> Result:
-        """The pre-closeout review, reached by `source`'s exit to it, and where its
-        triage leads: the review is named once that exit's guards hold."""
-        if untriaged := self.untriaged(kinds=("pre-closeout",)):
-            return self.follow(PRE_CLOSEOUT_REVIEW, PRE_CLOSEOUT_TRIAGE,
-                               f"{untriaged} has no triage")
-        reviews = [r for r in self.state.records if r.review_kind == "pre-closeout"]
-        review = governing(reviews) if reviews else None
-        if review is not None and (waiting := self.not_advancing(review, PRE_CLOSEOUT_TRIAGE)):
-            return waiting
-        # A review whose triage returned the change describes work the return
-        # replaced, so the work implemented since is reviewed afresh.
-        if review is None or review.next_token() == RETURNED:
-            return self.follow(source, PRE_CLOSEOUT_REVIEW,
-                               "every section before closeout is checked and validated")
-        # From here closeout is next, and its own checks read the documentation, so
-        # a triage's commit of documents alone needs no validation.
-        if review.next_token() == ANOTHER_ROUND:
-            return self.follow(PRE_CLOSEOUT_TRIAGE, PRE_CLOSEOUT_REVIEW,
-                               f"{review.triage.name} records another round", review=review)
-        return self.follow(PRE_CLOSEOUT_TRIAGE, CLOSEOUT,
-                           f"{review.triage.name} records that the change advances, and "
-                           "HEAD is validated", review=review)
-
-    def _closeout(self, status: str) -> Result:
-        state = self.state
-        if status == "ready for closeout" or not is_archived(self.root, state.directory):
-            return CLOSEOUT.result(status)
-        if self._uncommitted(self.root, state.directory):
-            return CLOSEOUT.result("the archive is not committed: closeout resumes after its "
-                                   "archive step")
-        if untriaged := self.untriaged(kinds=("closeout",)):
-            return self.follow(CLOSEOUT_REVIEW, CLOSEOUT_TRIAGE, f"{untriaged} has no triage")
-        reviews = [r for r in state.records if r.review_kind == "closeout"]
-        if not reviews:
-            return self.follow(CLOSEOUT, CLOSEOUT_REVIEW,
-                               "the change is archived; its closeout review is next")
-        review = governing(reviews)
-        if waiting := self.not_advancing(review, CLOSEOUT_TRIAGE):
-            return waiting
-        if review.next_token() == RETURNED:
-            # The table gives a closeout triage no return among its exits.
-            return _owner(f"{review.triage.name} records a return, and an archived change "
-                          "has no earlier phase to return to: the owner directs its "
-                          "correction")
-        if review.next_token() == ANOTHER_ROUND:
-            return self.follow(CLOSEOUT_TRIAGE, CLOSEOUT_REVIEW,
-                               f"{review.triage.name} records another round", review=review)
-        return self.follow(CLOSEOUT_TRIAGE, ARCHIVE_CLEANUP,
-                           f"{review.triage.name} records that the change advances",
-                           review=review, first=reviews[0])
-
-    # Following an exit through the table.
-
-    def unmet(self, source: Node, target: Node | None = None, *, when: str | None = None,
-              **context: Any) -> Result | None:
-        """The first unmet guard's result on the exit of `source` to `target`, or taken
-        on `when`, in the table's order; None when every guard holds. A held guard
-        is skipped: `dependencies` holds the change on it before it is read, and
-        `bootstrap_held` and `bootstrapping` around whatever is named. The exits a
-        return may take share their guard, so a return names no target."""
-        found = graph.exits(source, target=target, when=when)
-        if not found:
-            raise StepError(f"the workflow graph gives {source.label} no exit "
-                            f"{target.label if target else when}")
-        for guard in found[0].guards:
-            if guard.check is not None and (result := guard.check(self, context)):
-                return result
-        return None
-
-    def follow(self, source: Node, target: Node, reason: str, **context: Any) -> Result:
-        """The exit of `source` to `target`: the first unmet guard's remedy, or
-        `target`'s step once every guard holds."""
-        return self.unmet(source, target, **context) or target.result(reason)
+    def triage(self, reason: str) -> Result:
+        """The round's triage, once an implementation review awaits it: its entry
+        guard holds the rest of the round's records, which only a review's triage
+        triages beside it."""
+        target = dict(_ROUND_TRIAGE)
+        if refusal := entry_refusal(target, self.standing(), directed=False):
+            return _owner(f"{reason}, and {refusal}", choice=target)
+        return IMPLEMENTATION_TRIAGE.result(reason)
 
     # Shared readings.
 
@@ -974,7 +1283,7 @@ class Computation:
         """The latest log line of one of `steps`."""
         return next((e for e in reversed(self.state.log) if e.get("step") in steps), None)
 
-    def pending(self, phase: str) -> Result | None:
+    def pending(self, phases: set[str]) -> Result | None:
         """A step whose latest run waits on the owner, if one does.
 
         A question is answered by resuming its session; a returned, blocked, or
@@ -989,11 +1298,12 @@ class Computation:
         prerequisite rules', not this one's, once its denials, if any, are read.
 
         A question, return, block, or stop without unread denials waits only in
-        the phase it was raised in: a crashed design triage must not hold
-        implementation. Unread denials wait whatever the phase, since the step
+        `phases`, the phase it was raised in — the status's, or that of the step
+        the log routes to: a crashed design triage must not hold implementation.
+        Unread denials wait whatever the phase, since the step
         that recorded them may be the one that moved the change on — a design
-        triage recording `Advance` sets the status to the next phase in the same run
-        — and the reading is owed before any step runs; a stopped run with
+        triage that advances sets the status to the next phase in the same run —
+        and the reading is owed before any step runs; a stopped run with
         denials waits, in any phase, until a line resolves it or its resumed run
         supersedes it as its step's latest. The result names the waiting run's
         `seq`, which a resume must give.
@@ -1004,17 +1314,17 @@ class Computation:
         read = {e.get("reads") for e in decisions} | resolved
         latest: dict[str, dict[str, Any]] = {}
         latest_any: dict[str, dict[str, Any]] = {}
-        steps = graph.phase_steps(phase)
+        steps = {step for phase in phases for step in graph.phase_steps(phase)}
         for index, entry in enumerate(log):
             name = entry.get("step")
-            if name == ORCHESTRATOR:
+            if name == ORCHESTRATOR or name not in STEPS:
                 continue
             latest_any[name] = entry
             if name not in steps:
                 continue
-            if name == "review" and graph.review_phase(entry.get("kind", "")) != phase:
+            if name == "review" and graph.review_phase(entry.get("kind", "")) not in phases:
                 continue
-            if name == "triage" and _triage_phase(log[:index]) not in (phase, None):
+            if name == "triage" and _triage_phase(entry, log[:index]) not in (*phases, None):
                 continue
             latest[name] = entry
         waiting = [(entry["seq"], result) for entry in latest_any.values()
@@ -1032,105 +1342,14 @@ class Computation:
         seq, result = max(waiting)
         return {**result, "seq": seq}
 
-    def directed(self) -> Result | None:
-        """The step the latest decision directs, until that step has run.
-
-        An `orchestrator` line with `next` is the owner's word on a step: a
-        confirmed return names the phase's step, which sets the status when it
-        runs, and resolves the returned run, which would otherwise wait ahead of
-        it; a review asked for again outside a triage names `review` and its kind,
-        and no run; and the owner's waiver of the validation `_closeout` names
-        directs archive cleanup, and no run, ahead of that validation. A line
-        directing any step but a review is the owner's alone, so one the log
-        attributes to anyone else directs nothing. It still resolves its run: a
-        triage's return the phase's routing then finds unconfirmed, and any other
-        returned run is left resolved, as by a decline.
-        """
-        log = self.state.log
-        decision = next((e for e in reversed(log)
-                         if e.get("outcome") == ORCHESTRATOR and directed_step(e)
-                         and (directed_step(e) == "review" or e.get("by") == "owner")), None)
-        if decision is None:
-            return None
-        step = directed_step(decision)
-        kind = (decision["next"].get("kind") if isinstance(decision["next"], dict)
-                else decision.get("kind"))
-        if any(e["seq"] > decision["seq"] and e.get("step") == step
-               and (step != "review" or kind is None or e.get("kind") == kind)
-               for e in log):
-            return None
-        result = {"step": step, "reason": f"directed by the decision at seq {decision['seq']}: "
-                                          f"{decision.get('decision', '')}"}
-        if kind:
-            result["kind"] = kind
-        return result
-
-    def waived_design_review(self, design: dict[str, Any]) -> dict[str, Any] | None:
-        """The owner's waiver of another design review, recorded after `design`, the
-        finished design run that followed a confirmed return, if there is one: a
-        decision directing planning and naming no run."""
-        log = self.state.log
-        if not redesigned_after_return(log):
-            return None
-        return next((entry for entry in reversed(log)
-                     if entry.get("outcome") == ORCHESTRATOR and entry.get("by") == "owner"
-                     and directed_step(entry) == "plan" and entry.get("resolves") is None
-                     and entry["seq"] > design["seq"]), None)
-
-    def not_advancing(self, review: Record, triage: Node) -> Result | None:
-        """The step while `review`'s triage, the node `triage`, records no token the
-        phase can route on: the triage, while it has no `## Next`; the owner, for a
-        legacy gate not passed, a `## Next` without a token, or a return whose guard
-        does not hold, where `triage` has a return among its exits."""
-        token = review.next_token()
-        if token == IN_PROGRESS:
-            return triage.result(f"{review.triage.name} has no `## Next`: its triage is in "
-                                 "progress")
-        if token == OWNER:
-            return _owner(f"{review.triage.name} records neither Advance, Another round, nor "
-                          "Returned under `## Next`, or a gate it did not pass: the owner "
-                          "decides what follows")
-        if token == RETURNED and graph.exits(triage, when=graph.RETURN):
-            return self.unmet(triage, when=graph.RETURN, review=review)
-        return None
-
-    def return_confirmed(self, review: Record) -> bool:
-        """Whether the owner confirmed the return `review`'s triage records: the
-        owner's decision resolving a returned triage run and directing design or
-        planning, recorded once that triage wrote its `## Next`.
-
-        Triage writes `## Next` as its last edit and is never rewritten after it,
-        so the file's time is when the return was proposed, and a decision from
-        before it confirmed some earlier return. A triage run's log line does not
-        name the review it triaged, so the file's time is what ties the two. Until
-        the owner decides, the returned run waits in `pending`, ahead of the
-        phase's routing; a decision resolving it without directing design or
-        planning declines the return, and the triage's `Returned` no longer says
-        what follows."""
-        log = self.state.log
-        returned = {e["seq"] for e in log
-                    if e.get("step") == "triage" and e.get("outcome") == "returned"}
-        proposed = review.triage.stat().st_mtime_ns // 1_000_000_000
+    def return_confirmed(self, run: Mapping[str, Any]) -> bool:
+        """Whether the owner confirmed the return `run` proposed: a decision of the
+        owner's that resolves the run and directs a step. Until the owner decides,
+        the returned run waits in `pending`; a decision resolving it without
+        directing a step declines the return, and the owner decides what follows."""
         return any(e.get("outcome") == ORCHESTRATOR and e.get("by") == "owner"
-                   and e.get("resolves") in returned
-                   and directed_step(e) in ("design", "plan")
-                   and isinstance(e.get("at"), str) and _seconds(e["at"]) >= proposed
-                   for e in log)
-
-    def set_aside(self, current: dict[str, Any]) -> bool:
-        """Whether a confirmed return set the current round aside: the review that
-        governs it — its implementation review, or the pre-closeout review after
-        it — records `Returned`, and the owner confirmed it.
-
-        What the design or plan made of the return is a round of its own, read,
-        validated, and reviewed afresh, even where it reworks one of this round's
-        sections, so this round's records no longer decide anything."""
-        reviews = [r for r in self.state.records if r.number > current.get("after", 0)
-                   and r.review_kind in ("implementation", "pre-closeout")]
-        if not reviews:
-            return False
-        review = governing(reviews)
-        return review.next_token() == RETURNED and self.return_confirmed(review)
+                   and e.get("resolves") == run.get("seq")
+                   and isinstance(e.get("next"), Mapping) for e in self.state.log)
 
     def validated(self, why: str, exempt: Callable[[str], bool] = is_record) -> Result | None:
         """None when the latest validation passed for `HEAD`, or for an ancestor it
@@ -1148,9 +1367,8 @@ class Computation:
         record = latest_validation(reviews)
         result = validation_result(record) if record else None
         if result != "passed":
-            # Nothing the owner records clears it: a validation that passes does.
-            # Before archive cleanup the owner's waiver routes past it (`directed`)
-            # without clearing it.
+            # Nothing the owner records clears it: a validation that passes does, or
+            # the owner's direction past it, which checks no exit guard.
             return _owner(f"{why}, and {record.name if record else 'the validation'} of HEAD "
                           f"is {result or 'without a result'}: the owner decides how the "
                           "missing evidence is had, and validation runs again",
@@ -1182,12 +1400,6 @@ class Computation:
             return f"{head[:12]}, which does not descend from {reviewed[:12]},"
         return next((path for path in changed if not is_documentation(path)), None)
 
-    def untriaged(self, kinds: Sequence[str]) -> str | None:
-        for record in reversed(self.state.records):
-            if record.review_kind in kinds and not record.triaged:
-                return record.path.name
-        return None
-
     def blocked_on_prerequisite(self) -> Result | None:
         """A design that ended blocked, until its prerequisite's row reaches this
         branch by merging dev and the dependency is recorded."""
@@ -1216,16 +1428,24 @@ class Computation:
         return validation_problem(self.state.directory / "reviews", head, self.root)
 
     def disagreement(self) -> str | None:
-        """How the log's last step disagrees with the status, if it does."""
-        lines = [e for e in _step_lines(self.state.log) if _STEP_PHASE.get(e.get("step"))]
+        """How the log's last step is past the status, if it is: the status was set
+        back by hand, which the route the log names does not follow. An owner's
+        direction after that step accounts for it, since the step it directs sets
+        its own status as it starts."""
+        log = self.state.log
+        lines = [e for e in _step_lines(log) if _STEP_PHASE.get(e.get("step"))]
         status = self.state.row.status if self.state.row else ""
         phase = _phase(status)
-        if not lines or phase is None:
+        if not lines or phase is None or any(
+                e.get("outcome") == ORCHESTRATOR and e.get("by") == "owner"
+                and isinstance(e.get("next"), Mapping) and e["seq"] > lines[-1]["seq"]
+                for e in log):
             return None
         logged = _STEP_PHASE[lines[-1]["step"]]
         if PHASES.index(logged) > PHASES.index(phase):
             return (f"the status is {status!r}, but the log's last step was "
-                    f"{lines[-1]['step']} (seq {lines[-1]['seq']}); the files decide")
+                    f"{lines[-1]['step']} (seq {lines[-1]['seq']}): the result follows the "
+                    "log's route, and a status set back by hand is the owner's to direct")
         return None
 
 

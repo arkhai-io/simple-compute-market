@@ -530,7 +530,7 @@ record their outcome", and the phase requirement's exception for directions).
 Touches `scripts/change_next_step.py`, `scripts/change_workflow/graph.py`,
 `scripts/tests/test_change_next_step.py`, and `scripts/tests/`.
 
-- [ ] 6.1 The route: the last step's exit, or the owner's latest direction until a
+- [x] 6.1 The route: the last step's exit, or the owner's latest direction until a
       later run of its target is logged; the governing review's latest triage
       outcome is the latest triage line whose `triaged` names it, or the conversion
       line that names it; a triage file no such line names is a triage in progress,
@@ -538,7 +538,48 @@ Touches `scripts/change_next_step.py`, `scripts/change_workflow/graph.py`,
       that resolves its run. `next_token()`, `governing()`'s and
       `return_confirmed()`'s file times, and the `## Gate` reading are deleted (D3,
       D7).
-- [ ] 6.2 Checking the route against the table (D4): an exit its node does not
+      `route_of(log, join)` walks the log into a `Route`: a step's exit (`EXIT`),
+      the owner's direction (`DIRECTED`), a round line (`ROUND_STARTED`), a
+      directed validation that ran (`VALIDATED`), a validation naming another
+      target (`ELSEWHERE`), a finished run naming none (`NO_EXIT`). A direction
+      stands until a run of its node takes an exit (`log.ran`: a review of its kind,
+      a triage naming a review of its kind, a round line or `implement` for the
+      round); a run of another node in between leaves it. A run taking no exit — a
+      question, block, or stop — leaves the route where it was, so its step is named
+      again once answered or resolved; `log.unused_direction`, the pre-closeout
+      review's override, now reads a direction the same way, through the same
+      `ran`, where section 5 had any run use it up. No run of `round-view` is
+      logged, so a direction to it reads the round's join, whose records say whether
+      the reading is due: a validation in it names the round's triage as given, and
+      a review's exit replaces it. `unused_direction` never sees such a direction
+      used, which matters to no override, since only a review's direction is one. A triage line's node is the kind of the
+      latest review its `triaged` names; `triage_line(record)` is a review's
+      outcome. `return_confirmed(run)`: an owner's decision resolving the run with a
+      target; graph's `RETURN_CONFIRMED` now reads the returned run
+      (`Readings.return_confirmed(run)`), and once confirmed the direction is the
+      route, so the guard is met only by a direction. Deleted with the token
+      readings: `governing`, `_section_text`, `_seconds`, `set_aside`,
+      `waived_design_review`, `not_advancing`, the per-kind reading of decisions
+      that `directed()` held (it now reads one direction), `untriaged`, `planned`,
+      `pre_closeout`, `in_round`, `_design`, `_planning`, `_implementation`,
+      `_closeout`, and, unused once the log is read only in its format, log.py's
+      `redesigned_after_return` and `directed_step`. Decisions this task's reading
+      made, beyond the plan's words: the route names its step whatever the status
+      says (D8's "an exit or direction that contradicts the status is reported");
+      `disagreement()` still reports a log whose last step is past the status, now
+      saying the result follows the log's route, and not once an owner's direction
+      follows that step, whose step sets its own status. With no exit or direction logged, a
+      design status names design, and any later status the owner, rather than a
+      step inferred from the phase. A finished run naming no exit (a prose `next`,
+      which the schema admits until 8.5) inside the round's join leaves the round as
+      its records say — section 8's own implementation session ends that way — and
+      anywhere else names the owner. `pending` waits in the status's phase and in
+      the phases of the node the route names, so a directed step that stopped before
+      setting its status waits rather than reruns. A marked `returned` outcome that
+      gives only `return_to` — the schema's transitional form, not an older line's —
+      returns to that phase's step (`implementation`: the round), so a declined one
+      still names the owner; `_RETURN_STEP` goes with the field (see the handoff).
+- [x] 6.2 Checking the route against the table (D4): an exit its node does not
       declare, a validation's exit other than the target it was given, and an exit
       whose target's entry guard is not met name the owner, with the choice, the
       node's exits or the target, and the guard; an unmet exit guard names its
@@ -548,17 +589,42 @@ Touches `scripts/change_next_step.py`, `scripts/change_workflow/graph.py`,
       again on its exit. `done` names `{"step": "done", "reason": "archived"}` as
       today. A `round` result for sections an `implement` target names out of the
       plan's order, recorded as a round line as it starts (D2).
-- [ ] 6.3 Recovery (D8): the step a last exit or direction names, with no run of it
+      `chosen(route)`: an undeclared exit names the owner with `choice` and the
+      node's `exits`; `guarded` gives the first unmet checked guard's result with
+      the exit as `target` (the owner's too); `entered` checks the target's
+      unwaivable entry guards with `entry_refusal(..., directed=False)`; an exit
+      with a join reads the round's join. The implementation triage's two exits to
+      the round are told apart by the target's sections (`graph.OUT_OF_ORDER`, now
+      a constant). A validation naming the target it was given — the round's
+      triage in the join, the direction's nested target, otherwise the exit whose
+      guard it remedies (`_given`) — leaves the route where it was, so the guards
+      are checked again from the files; a directed one leads, once
+      `validated()` passes, to its target through its entry guards. The join's
+      `validate-and-review` and `validate` carry `target`. `directed()` checks the
+      direction's unwaivable entry guards again on the change as it stands. An
+      out-of-order round carries `by`: `triage` or `owner`, each tested.
+- [x] 6.3 Recovery (D8): the step a last exit or direction names, with no run of it
       logged, is named as in progress, its reason saying that if no session of it is
       open an interactive session ended without recording, to be resumed or recorded
       with `record`; where the files have moved past it — a plan that set
       `ready for implementation` and recorded no outcome — that step is named with a
       `disagreement` naming the missing outcome and `record`, and no step after it.
-- [ ] 6.4 Detection (D7): a log holding a line without the format marker, or numbered
+      `enter` adds `in_progress(node, line)` to the reason — the `record` command for
+      the node's step — when no run of the node follows the routing line (not for
+      the round, whose run is its line, nor `round-view` or `done`), and, on a
+      step's exit only, `passed_by_status(node)` as the `disagreement` when the
+      status's phase is past every phase of the node: an owner's direction back to
+      an earlier step is no missing outcome.
+- [x] 6.4 Detection (D7): a log holding a line without the format marker, or numbered
       records under `reviews/` and no log, names the owner with
       `python3 scripts/run_change_step.py convert <change>`, and the log is read as
       nothing else. The module docstring's result contract gains `target`.
-- [ ] 6.5 `scripts/tests/test_change_next_step.py` rewritten to the new records: its
+      `unconverted()`, after the change is located and its records read, before the
+      bootstrap and every routing reading: the result carries the command as
+      `convert` and names the first unmarked line's seq. A cleaned-up change is
+      `done` before it, as history. This change's own log now names the owner with
+      the command, which section 7 creates.
+- [x] 6.5 `scripts/tests/test_change_next_step.py` rewritten to the new records: its
       fixtures write marked outcomes with object exits and `triaged`, and marked
       decisions, in place of `## Next` tokens and file times; every test that held a
       behaviour this change keeps is kept under its behaviour, and each
@@ -582,23 +648,92 @@ Touches `scripts/change_next_step.py`, `scripts/change_workflow/graph.py`,
       owner directs a repeat review"; and the interactive requirement's "An
       interactive session ends without recording" and "An interactive plan sets its
       status and records nothing".
-- [ ] 6.6 Verification, unit: `test_change_next_step.py` as rewritten; the graph
+      Fixtures log marked outcomes through `record_outcome`, `note_round`, and
+      `note_orchestrator`: object exits (`_done`, `_returned`), review runs naming
+      their triage (`_review`), triage runs naming `triaged` beside their files
+      (`_triage`), owner directions (`_direct`), and unmarked lines written raw
+      (`_unmarked`); triage files hold prose only. Each named scenario has a test,
+      most named for it; three share or carry another's name: "Triage records
+      another round" is the three another-round tests (pre-closeout over a fix, the
+      same commit with no fix, closeout); "A triage has not finished" and "A new
+      triage file awaits its outcome" are one parametrized test; "A validation
+      before closeout passes" is the pre-closeout triage advancing once `HEAD` is
+      validated. Kept under the behaviour they hold: waiting runs and denials,
+      dependencies, the plan's mapping, the clone, the bootstrap, the round view,
+      merges, the repeat pass and its readings. Deleted with what they held: the
+      `## Next` token and `## Gate` readings, the file-time confirmation, two reviews
+      triaged together read by their files' times, an earlier round's token, and a
+      status with no route naming its phase's step past design (now the owner,
+      tested for planning, implementation, and closeout). Changed: a failed fix
+      validation before the repeat review, triaged alone, now names the owner,
+      since a triage names a review among what it triaged; "a plan that finished
+      leaving the status in planning", which went to the owner, is now "a status
+      set back by hand is reported" — the route, with its `disagreement`. Added
+      beyond the scenarios: a direction to sections out of order, to the round
+      view, a directed review that stopped and was resolved, and a direction back
+      reporting no disagreement.
+- [x] 6.6 Verification, unit: `test_change_next_step.py` as rewritten; the graph
       tests with any redrawn diagram; every other `scripts/tests/test_change_*`,
       `test_round_view.py`, and `test_run_change_step.py`; `make test`; `make
       check-change CHANGE=workflow-steps-name-next-step`. End-to-end: none, and none
       is owed.
-- [ ] 6.7 The round's join read from `graph.ROUND_JOIN`: the records its members
+      `test_change_next_step.py`: 192 passed; unit, each calling `compute`, or `main`
+      for the command's output, with injected seams over real files in a temporary
+      directory, but for three that
+      start `git` in a real repository (the round view, the conflicted merge, the
+      clone), a process boundary, as before. The graph tests, unit: 64 passed; no
+      diagram redrawn, since no guard, exit, or entry guard changed.
+      `test_change_workflow_log.py`, unit, with `unused_direction`'s test of a
+      question that leaves a direction standing. Workflow suites (`-k "change or
+      run_change_step or check_tasks or round_view"` over `scripts/tests/`): 1041
+      passed. `make test`: passed, every suite (`scripts/tests`: 1736), before the
+      two fresh-context checks' fixes, which touched only `scripts/`; `scripts/tests`
+      rerun after them: 1742 passed. `make check-packaging`: passed. `make
+      check-change`: every check passes but the documentation citations, which
+      report `scripts/change_workflow/convert.py`, section 7's file. End-to-end:
+      none, confirmed; no `Owed by validation:` line.
+- [x] 6.7 The round's join read from `graph.ROUND_JOIN`: the records its members
       supply decide what the join still waits for and which member's step the
       computation names, the clone's and the repeat pass's reading rules kept; unit,
       in `test_change_next_step.py`, a table whose join lacks a member no longer
       waits for that member's record (52 F1: the table declared the join while
       `in_round` read it from record kinds of its own, so a changed join redrew the
       diagram and left routing as it was).
-- [ ] 6.8 `graph.py`: a triage's result names the kind of review it triages
+      `round_join` reads `Computation`'s `join` seam, `ROUND_JOIN` by default: the
+      round's sessions only while the round is a member, the owner's reading only
+      while `round-view` is, and validation and the review only while each is
+      (`_SUPPLIES`, the record kind each member supplies). The repeat pass's state is
+      `round_pass(current, again)` (`Pass`), shared with the implementation
+      triage's exit to another review. Tests: a join without `round-view` goes from
+      a committed round straight to `validate-and-review`; one without validation
+      triages a round with no validation record.
+- [x] 6.8 `graph.py`: a triage's result names the kind of review it triages
       (`Node.result`, D2), with `test_change_next_step.py`'s rewrite (6.5) and the
       graph test `test_a_node_names_its_step_and_a_reviews_kind`: section 3 left
       it, since that test file is unchanged until 6.5 and compares a triage's
       result exactly.
+      The graph test is now `test_a_node_names_its_step_and_its_kind`.
+
+Handoff from section 6: from this commit the computation names the owner with the
+`convert` command for this change itself, whose log holds unmarked lines, and the
+command is section 7's; section 7 is started directly, not from the computation.
+For `convert` (section 7): the conversion line (`step` `convert`) is skipped by
+`route_of` and `pending`, which read only `STEPS`, and counted by `triage_line` and
+`log.standing` as naming its `triaged`; the direction after it is an ordinary owner
+direction, routed by `directed()`. Detection is any line whose `format` is not 2,
+so every rewritten line needs the marker. The proposal's "a later decision whose
+target has not run" is `route_of`'s `DIRECTED` route, and `log.ran` the one
+reading of a run of a node; the remedy of an unmet exit guard on the edge is what
+`Computation.guarded` gives for the edge with `context`, which the proposal can
+reuse rather than evaluate the guards again. For 8.5: once `returned` requires an
+object `next`, delete `_RETURN_STEP` and its reading in `_exit_of`; once `next` is
+an object only, `route_of`'s tolerance for a finished run naming no exit inside the
+round's join can go too (section 8's own implementation session is the run it
+exists for). Declined from the fresh-context check: removing the repeat pass's
+file-time reading (an owner record saved after the pass's triage file), which 6.7
+keeps. For review: the route names its step whatever the status says, and a status
+with no exit or direction logged names the owner past design — this section's
+reading of D8 and of "MUST NOT infer an exit from the phase", noted in 6.1.
 
 ## 7. `convert`: a change's records converted when it takes the new code
 

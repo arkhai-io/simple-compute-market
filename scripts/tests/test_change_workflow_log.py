@@ -600,15 +600,18 @@ def test_a_direction_to_a_triage_is_used_by_a_triage_of_its_kind(tmp_path: Path)
     assert unused_direction(read_log(log)) is None
 
 
-def test_a_direction_to_any_other_step_is_used_by_its_run(tmp_path: Path) -> None:
+def test_a_direction_to_any_other_step_is_used_by_its_run_taking_an_exit(
+        tmp_path: Path) -> None:
     log = log_file(tmp_path)
     note_orchestrator(log, "plan", "r", by="owner", next_step="plan")
     directed = read_log(log)[-1]
     record_outcome(log, "design", VALID["finished"], session="s", commit=COMMIT)
 
     assert unused_direction(read_log(log)) == directed
+    # A question took no exit: the step directed is still the one to run.
     record_outcome(log, "plan", VALID["question"], session="s", commit=COMMIT)
-    # A run of it, however it ended.
+    assert unused_direction(read_log(log)) == directed
+    record_outcome(log, "plan", VALID["finished"], session="s", commit=COMMIT)
     assert unused_direction(read_log(log)) is None
     # Only the owner's latest direction counts.
     note_orchestrator(log, "closeout", "r", by="owner", next_step="closeout")

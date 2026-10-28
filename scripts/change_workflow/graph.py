@@ -12,10 +12,11 @@ records an exit waits for: the round's triage waits for its sections, the owner'
 reading, its validation, and its implementation review, each supplied by a step of
 its own.
 
-`scripts/change_next_step.py` interprets the table: it reads where the change
-stands and which exit its last step chose from the change's files and log, and
-follows that exit through its guards. A guard is checked against the readings that
-computation supplies (`Readings`), so the table holds no state of its own. A
+`scripts/change_next_step.py` interprets the table: it reads the exit the last
+step's outcome named, or the owner's direction, from the change's log, checks it
+against the exits the table declares, and follows it through its guards. A guard is
+checked against the readings that computation supplies (`Readings`), so the table
+holds no state of its own. A
 *held* guard is not checked as its exit is taken: the computation holds a whole
 stretch of the workflow on it. A dependency gating planning, implementation, or
 closeout holds every step from that phase on, before the change is read; a clone's
@@ -49,8 +50,9 @@ from change_workflow.common import StepError
 from change_workflow.records import is_documentation, is_record
 
 Result = dict[str, Any]
-# What the reading of where the change stands hands a guard: the review whose
-# triage chose the exit, and what the round's reading of it found.
+# What the reading of where the change stands hands a guard: the run whose outcome
+# named the exit, the review a triage's outcome named, and what the round's reading
+# of it found.
 Context = Mapping[str, Any]
 
 OWNER = "owner"
@@ -59,11 +61,13 @@ OWNER = "owner"
 WAIT = "wait"
 PHASES = ("design", "planning", "implementation", "closeout")
 
-# What each exit is taken on, as the diagram labels it; a triage's `## Next`
-# token chooses among them.
+# What each exit is taken on, as the diagram labels it. A step's outcome names the
+# exit's target; where a node has two exits to one target, the target's sections say
+# which (`OUT_OF_ORDER`).
 ADVANCE = "advance"
 ANOTHER_ROUND = "another round"
 RETURN = "a return"
+OUT_OF_ORDER = "sections out of the plan's order"
 
 
 @dataclass(frozen=True)
@@ -80,16 +84,16 @@ class Node:
         return f"{self.step}:{self.kind}" if self.kind else self.step
 
     def result(self, reason: str, **extra: Any) -> Result:
-        """The computation's result naming this node's step. A review names its kind;
-        a triage names none, since it triages whatever records await it."""
-        kind = {"kind": self.kind} if self.kind and self.step == "review" else {}
+        """The computation's result naming this node's step: a review with its kind,
+        a triage with the kind of review it triages."""
+        kind = {"kind": self.kind} if self.kind else {}
         return {"step": self.step, **kind, "reason": reason, **extra}
 
 
 class Readings(Protocol):
     """What the guards read of the change, supplied by the next-step computation. A
     review is that computation's record of one, read for its file and its triage
-    file's names."""
+    file's names; a run is a line of the workflow log."""
 
     def validated(self, why: str,
                   exempt: Callable[[str], bool] = is_record) -> Result | None: ...
@@ -98,7 +102,7 @@ class Readings(Protocol):
 
     def changed_outside_documentation(self, review: Any) -> str | None: ...
 
-    def return_confirmed(self, review: Any) -> bool: ...
+    def return_confirmed(self, run: Mapping[str, Any]) -> bool: ...
 
 
 Check = Callable[[Readings, Context], "Result | None"]
@@ -208,12 +212,12 @@ def owner(reason: str, **extra: Any) -> Result:
 # The guards' checks. Each reads only what `Readings` and the context supply.
 
 def _return_confirmed(readings: Readings, context: Context) -> Result | None:
-    review = context["review"]
-    if readings.return_confirmed(review):
+    run = context["run"]
+    if readings.return_confirmed(run):
         return None
-    return owner(f"{review.triage.name} records a return the owner has not confirmed: "
-                 "resume its triage if it stopped before proposing the return, or decide "
-                 "what the triage records")
+    return owner(f"the {run.get('step')} run at seq {run.get('seq')} proposed a return the "
+                 "owner has not confirmed: the owner confirms it by a decision that resolves "
+                 "the run and directs the step returned to, or decides what follows")
 
 
 def _validated(why: str, exempt: Callable[[str], bool] = is_record) -> Check:
@@ -352,7 +356,7 @@ _STEPS = (
     _declare(IMPLEMENTATION_REVIEW, ("implementation",), TO_ROUND_TRIAGE),
     _declare(IMPLEMENTATION_TRIAGE, ("implementation",),
              Exit(ROUND, (ROUND_FIX_VALIDATED,), ADVANCE),
-             Exit(ROUND, (ROUND_FIX_VALIDATED,), "sections out of the plan's order"),
+             Exit(ROUND, (ROUND_FIX_VALIDATED,), OUT_OF_ORDER),
              Exit(PRE_CLOSEOUT_REVIEW, (ROUND_FIX_VALIDATED,), "advance, after the last round"),
              Exit(IMPLEMENTATION_REVIEW, (REPEAT_FIX_READ, REPEAT_FIX_VALIDATED),
                   ANOTHER_ROUND),

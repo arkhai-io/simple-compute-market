@@ -35,8 +35,8 @@ from pathlib import Path
 from typing import IO, Any, Sequence
 
 from change_workflow.common import KINDS, ORCHESTRATOR, STEPS, Clock, Entry, StepError, utc_now
-from change_workflow.graph import (NODES, Standing, TargetError, entry_refusal, node_of,
-                                   section_ids)
+from change_workflow.graph import (NODES, ROUND, Node, Standing, TargetError, entry_refusal,
+                                   node_of, section_ids)
 from change_workflow.outcome import outcome_problems
 from change_workflow.records import NUMBERED, next_number, triage_outcome_problems
 from find_change import ARCHIVE, ChangeNotFound, change_directory, find_records
@@ -244,17 +244,6 @@ def note_round(path: Path, sections: Any, by: str, after: int | None = None,
                                else after, **({"commit": commit} if commit else {})}, clock)
 
 
-def redesigned_after_return(entries: Sequence[Entry]) -> bool:
-    """Whether the latest design run finished after the latest confirmed return to
-    design: when the owner may waive another design review for what it settled."""
-    returns = [entry["seq"] for entry in entries if entry.get("outcome") == ORCHESTRATOR
-               and entry.get("by") == "owner" and directed_step(entry) == "design"
-               and entry.get("resolves") is not None]
-    designs = [entry for entry in entries if entry.get("step") == "design"]
-    return bool(returns and designs and designs[-1].get("outcome") == "finished"
-                and designs[-1]["seq"] > returns[-1])
-
-
 def standing(path: Path, entries: Sequence[Entry] | None = None) -> Standing:
     """What the entry guards read of the change whose log is at `path`: whether its
     directory is under the archive, and the kinds of review awaiting triage.
@@ -281,15 +270,6 @@ def standing(path: Path, entries: Sequence[Entry] | None = None) -> Standing:
             awaiting.add(kind)
     return Standing(archived=directory.parent.as_posix().endswith(ARCHIVE.as_posix()),
                     awaiting=frozenset(awaiting))
-
-
-def directed_step(entry: Entry) -> str | None:
-    """The step a decision line directs: its target's, or, on a line the log's
-    format has not marked, the step it names as a string."""
-    target = entry.get("next")
-    if isinstance(target, dict):
-        return target.get("step")
-    return target if isinstance(target, str) else None
 
 
 def direction(next_step: str, kind: str | None = None,
@@ -389,12 +369,29 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
     return append_entry(path, line, clock)
 
 
-def unused_direction(entries: Sequence[Entry]) -> Entry | None:
-    """The owner's latest direction, while no run of the node it directs is logged
-    after it; None once one is, or when the owner has directed nothing.
+def ran(node: Node, entry: Entry) -> bool:
+    """Whether `entry` is a run of `node`: a review of its kind; a triage naming a
+    review of its kind among the records it triaged; for the round, the line
+    recording it starting, or an implementation session."""
+    if node == ROUND and entry.get("outcome") == "round":
+        return True
+    if entry.get("step") != NODES[node].runs:
+        return False
+    if node.step == "review":
+        return entry.get("kind") == node.kind
+    if node.step == "triage":
+        return any(isinstance(name, str) and name.split("-", 1)[-1].removesuffix(
+            "-external") == node.kind for name in entry.get("triaged") or ())
+    return True
 
-    A run of a review is of the kind directed; a run of a triage names a review of
-    the kind directed among the records it triaged.
+
+def unused_direction(entries: Sequence[Entry]) -> Entry | None:
+    """The owner's latest direction, while no run of the node it directs has taken
+    an exit after it; None once one has, or when the owner has directed nothing.
+
+    A run that ended with a question, a block, or a stop took no exit: its step is
+    still the one directed, and is named again once the owner answers or resolves
+    it, so the direction stands for it as for the run that finishes it.
     """
     direction_ = next((entry for entry in reversed(entries)
                        if entry.get("outcome") == ORCHESTRATOR and entry.get("by") == "owner"
@@ -405,19 +402,8 @@ def unused_direction(entries: Sequence[Entry]) -> Entry | None:
         node = node_of(direction_["next"])
     except TargetError:
         return None
-    runs = NODES[node].runs
-
-    def ran(entry: Entry) -> bool:
-        if entry.get("step") != runs:
-            return False
-        if node.step == "review":
-            return entry.get("kind") == node.kind
-        if node.step == "triage":
-            return any(isinstance(name, str) and name.split("-", 1)[-1].removesuffix(
-                "-external") == node.kind for name in entry.get("triaged") or ())
-        return True
-
-    return None if any(entry["seq"] > direction_["seq"] and ran(entry)
+    return None if any(entry["seq"] > direction_["seq"] and ran(node, entry)
+                       and entry.get("outcome") in ("finished", "returned", "round")
                        for entry in entries) else direction_
 
 

@@ -179,12 +179,14 @@ def test_the_phases_read_from_the_table() -> None:
     assert graph.review_phase("owner") is None
 
 
-def test_a_node_names_its_step_and_a_reviews_kind() -> None:
+def test_a_node_names_its_step_and_its_kind() -> None:
     assert graph.PRE_CLOSEOUT_REVIEW.label == "review:pre-closeout"
     assert graph.PRE_CLOSEOUT_REVIEW.result("why") == {
         "step": "review", "kind": "pre-closeout", "reason": "why"}
-    # A triage triages whatever records await it, so its result names no kind.
-    assert graph.CLOSEOUT_TRIAGE.result("why") == {"step": "triage", "reason": "why"}
+    # A triage names the kind of review it triages.
+    assert graph.CLOSEOUT_TRIAGE.result("why") == {"step": "triage", "kind": "closeout",
+                                                   "reason": "why"}
+    assert graph.CLOSEOUT.result("why") == {"step": "closeout", "reason": "why"}
 
 
 # The diagram.
