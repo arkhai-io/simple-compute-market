@@ -384,19 +384,121 @@ async def test_an_excluded_path_needs_no_signature(client):
     assert response.json() == {"status": "ok"}
 
 
+def _assert_unsigned_and_naming_no_credential(
+    response: httpx.Response, request_headers: dict[str, str]
+) -> None:
+    """An unroutable request's answer carries no proof and echoes no credential.
+
+    The server knows no operation, or no resource, to sign over, so the answer
+    is unsigned; and nothing the caller sent to authenticate comes back, in
+    the body or in a header.
+    """
+    for header in (
+        SIGNATURE_VERSION_HEADER,
+        IDENTITY_SCHEME_HEADER,
+        IDENTITY_IDENTIFIER_HEADER,
+        ROLE_HEADER,
+        REQUEST_ID_HEADER,
+        TIMESTAMP_HEADER,
+        SIGNATURE_HEADER,
+    ):
+        assert header not in response.headers
+    answered = response.text + "".join(response.headers.values())
+    for credential in (
+        request_headers[SIGNATURE_HEADER],
+        request_headers[IDENTITY_IDENTIFIER_HEADER],
+    ):
+        assert credential not in answered
+
+
 @pytest.mark.asyncio
-async def test_a_route_with_no_contract_is_refused_before_any_handler(client):
-    response = await client.get(
-        "/api/v1/capacity/not-a-real-route",
-        headers=_signed_headers(
-            signer=SELLER_SIGNER,
-            role="seller",
-            method="GET",
-            operation="capacity_snapshot",
-            resource="",
-        ),
+async def test_a_path_no_contract_names_answers_an_unsigned_404(client):
+    headers = _signed_headers(
+        signer=SELLER_SIGNER,
+        role="seller",
+        method="GET",
+        operation="capacity_snapshot",
+        resource="",
     )
+    response = await client.get("/api/v1/capacity/not-a-real-route", headers=headers)
     assert response.status_code == 404
+    _assert_unsigned_and_naming_no_credential(response, headers)
+
+
+@pytest.mark.asyncio
+async def test_an_unroutable_request_is_answered_by_its_route_whatever_its_body(client):
+    """A body the authority cannot read does not hide that nothing serves it."""
+    headers = _signed_headers(
+        signer=SELLER_SIGNER,
+        role="seller",
+        method="POST",
+        operation="capacity_probe",
+        resource="",
+    )
+    unknown = await client.post(
+        "/api/v1/capacity/not-a-real-route",
+        content=b"not json",
+        headers={**headers, "content-type": "text/plain"},
+    )
+    unserved = await client.post(
+        "/api/v1/capacity/snapshot",
+        content=b"not json",
+        headers={**headers, "content-type": "text/plain"},
+    )
+    routed = await client.post(
+        "/api/v1/capacity/probe",
+        content=b"not json",
+        headers={**headers, "content-type": "text/plain"},
+    )
+    assert (unknown.status_code, unserved.status_code, routed.status_code) == (
+        404,
+        405,
+        400,
+    )
+    assert unserved.headers["Allow"] == "GET"
+
+
+@pytest.mark.asyncio
+async def test_a_known_path_under_another_method_answers_an_unsigned_405(client):
+    """`Allow` names every method the table serves at the path, in one header."""
+    headers = _signed_headers(
+        signer=SELLER_SIGNER,
+        role="seller",
+        method="DELETE",
+        operation="capacity_reservations_list",
+        resource="",
+    )
+    response = await client.delete("/api/v1/capacity/reservations", headers=headers)
+    assert response.status_code == 405
+    assert response.headers["Allow"] == "GET, POST"
+    _assert_unsigned_and_naming_no_credential(response, headers)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "body",
+    ({"capacity_reservation_id": 7}, ["capacity_reservation_id"]),
+    ids=("not-a-string", "not-an-object"),
+)
+async def test_a_body_resource_that_cannot_be_bound_answers_an_unsigned_400(
+    client, body
+):
+    headers = _signed_headers(
+        signer=SELLER_SIGNER,
+        role="seller",
+        method="POST",
+        operation="capacity_release",
+        resource="",
+        body=body,
+    )
+    response = await client.post(
+        "/api/v1/capacity/releases", json=body, headers=headers
+    )
+    assert response.status_code == 400
+    # The middleware's own answer is under test, not a route's: naming the
+    # field is the behaviour the requirement asks of it.
+    assert "capacity_reservation_id" in response.json()["detail"]
+    _assert_unsigned_and_naming_no_credential(response, headers)
 
 
 @pytest.mark.asyncio

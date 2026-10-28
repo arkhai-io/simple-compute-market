@@ -1551,7 +1551,7 @@ merged, confirm that `arkhai-kit-policy`, `arkhai-kit-contact-exchange`,
 release, and record the versions in 10.4's note. A package that does not is
 bumped in 10.4 by a minor version, with `make lock`.
 
-- [ ] 10.1 Route resolution reports which case failed through a typed error. The
+- [x] 10.1 Route resolution reports which case failed through a typed error. The
   middleware answers each case unsigned (D3):
   - 404 when no contract names the path;
   - 405 with `Allow` naming the contracts' methods;
@@ -1560,17 +1560,74 @@ bumped in 10.4 by a minor version, with `make lock`.
   Resolution stays first-match over the one ordered table it is given.
   Library integration (`test_site_auth_middleware.py`): each case answers its
   status, carries no response signature, and names no credential.
-- [ ] 10.2 The site client reports an answer with no response authentication as
+
+  `market_site.auth` gains `SiteRouteResolutionError` (a `ValueError`, so the
+  API-credits route-coverage test's `except ValueError` still reads it) and its
+  cases `SiteRouteNotFound` (404), `SiteRouteMethodNotAllowed` (405, with
+  `allowed_methods` and an `Allow` header), and `SiteRouteResourceUnbound`
+  (400, with `field`); each carries its status and headers, and the middleware
+  answers `_rejection(detail, status, headers=…)` from it. `resolve_site_route`
+  stays first-match: a contract matching method and path decides, a contract
+  naming only the path adds its method to `Allow`. A body that is not an
+  object now also names the field it should carry. A request whose body or
+  query cannot be read is answered by its route first: 404 or 405 when it is
+  unroutable, and the body's 400 only when a contract serves it (the
+  middleware's `_route_by_path`), since the requirement's answers hold
+  whatever the body. The module docstring now says refusals of a routed
+  request are signed and an unroutable request's answer is not.
+  - Unit (new `kit/site` `tests/unit/test_route_resolution.py`): not found
+    with status 404 and no headers; 405 with `allowed_methods` and `Allow:
+    GET, POST`; the unbound release body (an empty string, a number, a list)
+    with status 400 and `field`; and first match deciding between a literal
+    and a capture route. The parity module keeps only its original
+    unknown-route refusal.
+  - Library integration (`test_site_auth_middleware.py`, the real middleware
+    over a stand-in app): an unknown path answers 404, `DELETE
+    /api/v1/capacity/reservations` answers 405 with `Allow: GET, POST`, and a
+    release whose `capacity_reservation_id` is a number or whose body is a
+    list answers 400 naming the field; each answer carries none of the seven
+    request-authentication headers, and neither the request's signature nor
+    its principal appears in its body or any header. A `text/plain` body
+    sent to an unknown path answers 404, to the snapshot path under POST 405
+    with `Allow: GET`, and to the probe route 400. Pass (`kit/site`, 302).
+- [x] 10.2 The site client reports an answer with no response authentication as
   unauthenticated, with its status. The report contains no part of the body, no
   header value, and no credential. A malformed or wrong signature is reported
   as today (D3). Unit (`test_client.py`).
-- [ ] 10.3 Application integration, rejection path, asserting the status and
+
+  `SiteCapacityUnauthenticatedResponseError`, a subclass of
+  `SiteCapacityAuthenticationError` so every existing catch still refuses it,
+  exported from `market_site_client`. An answer without `X-Market-Signature`
+  is reported as "site authority answered HTTP <status> without response
+  authentication", with `status_code`; an answer that carries one but cannot
+  be read keeps "missing or malformed …", and a failed verification keeps its
+  code. Unit (`test_client.py`): an unsigned 200 and an unsigned 405 from an
+  `httpx.MockTransport`, each with a canary body and header, are refused with
+  the new error, its status, and a report naming neither canary nor the
+  request's signature; an unknown response protocol is still "missing or
+  malformed" and not the new error. The earlier "missing" case of the
+  protocol test became the unsigned case, and the fake site's
+  `omit_response_authentication` control, which nothing set any longer,
+  went. Pass (`kit/site-client`, 63).
+- [x] 10.3 Application integration, rejection path, asserting the status and
   `Allow` only:
   - the provisioning service's site routes answer 405 to a known site path under
     another method;
   - the API-credits service, whose table extends the site's, answers the same
     (`test_signed_authority.py`).
-- [ ] 10.4 Bump `arkhai-kit-site` and `arkhai-kit-site-client`, and run
+
+  Plan correction: the provisioning service does not compose
+  `SiteAuthMiddleware`. It authenticates the site's routes through
+  `ProvisioningAuthMiddleware` over the table `route_table.py` assembles,
+  translating each `SiteRouteContract` into a `ProvisioningRouteContract`, so
+  its 405 for a site path is section 13's middleware and is proven there
+  (13.1 is amended to take a site path among its cases). Only the API-credits
+  service composes this middleware outside `kit/site`'s tests.
+  Application integration, rejection path (`test_signed_authority.py`, the
+  service's real `main.app`): `DELETE /api/v1/capacity/snapshot` answers 405
+  with `Allow: GET`, and `DELETE /api/v1/keys/key-1/revoke`, a credits route,
+  answers 405 with `Allow: POST`; status and `Allow` only. Pass (75).
+- [x] 10.4 Bump `arkhai-kit-site` and `arkhai-kit-site-client`, and run
   `make lock`. **Verification checkpoint:**
   - 10.1–10.3;
   - `make test` in `kit/site`, `kit/site-client`, `provisioning/compute/service`,
@@ -1580,6 +1637,46 @@ bumped in 10.4 by a minor version, with `make lock`.
   End-to-end: the provisioning smoke hook's `provisioning_security` check still
   sends an unsigned read to a protected route that matches, and expects 401 or
   403. No scenario sends an unroutable request, and none is owed.
+
+  Decision A's check: the last release is `main`'s version (publishing runs
+  on a push to `main`), and every package it names stands at least one minor
+  version over it — `arkhai-kit-policy` 0.6.0 (main 0.1.1),
+  `arkhai-kit-contact-exchange` 0.4.0 (0.1.2), `arkhai-core-storefront`
+  0.16.0 (0.3.0), `arkhai-core-storefront-client` 0.27.0 (0.17.0),
+  `arkhai-vms-storefront` 0.22.0 (0.3.5). None is bumped.
+
+  Bumps, measured against `dev` (RELEASING.md): with the branch merged, every
+  package this change bumped in round 1 stands at `dev`'s version, the
+  branch having bumped it to the same value, except the VM operator client
+  (`0.10.0`, `dev` `0.9.1`). So from section 10 on, a section bumps a
+  package once over `dev`'s version, as 20.3's "since the merge" reads, and
+  no later section bumps it again. `arkhai-kit-site` `0.11.0` → `0.12.0` and
+  `arkhai-kit-site-client` `0.12.0` → `0.13.0`; no exact pin names either.
+  `arkhai-apicredits-service` raises its floor on `arkhai-kit-site` to
+  `0.12.0`, since its answers are the middleware's, and takes its one bump
+  here, `0.6.1` → `0.7.0`, which 14.4 therefore does not repeat. The
+  provisioning service's floor is not raised: it does not compose this
+  middleware. `make lock` moved every lock resolving the two kits.
+
+  Checkpoint: `make test` (full, before the fresh-context fixes and the
+  bumps) passes, `provisioning/compute/service` 583 unit and 438
+  integration among it. After them: `kit/site` 302, `kit/site-client` 63,
+  `domains/apicredits/service` 75, `provisioning/compute/service` 583 and
+  438, all passing; the API-credits run installed a settlement-runtime
+  wheel carrying section 11's uncommitted edits, which that service does
+  not exercise. `make check-packaging` passes; `make check-change` passes
+  its comment-hygiene and other checks but for the closeout citation section
+  1 notes.
+
+  Handoff: the fresh-context check found the bump skipped on a reading
+  RELEASING.md does not support (fixed above), 13.1 not carrying the site
+  path the note handed it (amended), a comment and the module docstring
+  stale against the unsigned answers (rewritten), an unroutable request with
+  an unreadable body answered 400 (now answered by its route), evidence
+  wording broader than the helper's checks (helper widened), a dead fake
+  control (removed), and resolution tests in the parity module (moved). The
+  400 test's assertion on `detail` is kept and commented: naming the field
+  is the middleware's behaviour under test.
 
 ## 11. Settlement servicing records awaiting delivery, reports every retry, and waits through a failed read
 
@@ -1742,6 +1839,10 @@ Files:
     - a known path under another method answers 405, its `Allow` naming the
       contract's methods;
     - a route whose body resource is missing answers 400.
+
+  Amended by section 10's plan correction (10.3): the 405 cases include a
+  known site path under another method, since the service authenticates the
+  site's routes through this middleware.
 - [ ] 13.2 The family client reports an answer with no response authentication
   as unauthenticated, with its status, and still refuses it. A malformed or
   other-principal signature is reported as today. The report contains no body,
