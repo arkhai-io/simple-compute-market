@@ -135,7 +135,7 @@ Supported actions:
 
 | Action | Behavior |
 |---|---|
-| `release_capacity` | Explicit admin repair for a reservation proven safe outside the fulfillment lifecycle. Do not configure this as an automatic response to provider create/teardown failure; provisioning-owned teardown is authoritative. |
+| `release_capacity` | Release the failed deal's reservation at the listing's recorded site, recording the failure as its reason, and reopen the listings the release makes fit again. It is in the default list, so it runs whenever the storefront reads a failed fulfillment. Omit it to leave the reservation held until the fulfillment's own teardown, which provisioning owns, or an operator's recovery releases it. |
 | `emit_event` | Write a `stage_events` row with `stage="fulfillment"` and `event="failed"`; this is visible through `/api/v1/system/events` and its SSE stream. |
 | `webhook` | POST the failure payload to `webhook_url`. Failures are logged and do not block the rest of the policy chain. |
 | `refund` | Attempt the explicit seller refund path: send already-claimed assets back to the buyer. Token escrows dispatch through the selected escrow codec, covering native token, ERC-20, ERC-721, ERC-1155, and token-bundle escrows. Rows without a stored escrow proposal are skipped rather than deriving refund details from listing defaults. |

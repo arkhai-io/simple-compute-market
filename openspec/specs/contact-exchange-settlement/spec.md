@@ -161,8 +161,8 @@ already delivered to either side's sinks.
 
 - **WHEN** an introduction start has persisted the complete introduction and is still
   completing the deal's obligation when a deletion of its payloads commits
-- **THEN** the start completes and answers the reveal, and delivers it if it is the
-  first reveal
+- **THEN** the start completes and answers the reveal, and delivers it if it claims the
+  introduction's seller-side delivery
 - **AND** every later read or start answers the deleted outcome
 
 #### Scenario: A deleted introduction cannot be restored or removed

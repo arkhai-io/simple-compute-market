@@ -274,7 +274,7 @@ VM and bare-metal execution MUST consume the common compute-provisioning envelop
 - **THEN** the domain's codec renders its variables and interprets its result, and the shared mechanics hold no VM or bare-metal meaning
 
 ### Requirement: Compute-owned caller contract
-Shared storefront/provisioner DTOs, the job, host, credential, lease, and system-status wire models, and the family's route contracts MUST be owned by compute provisioning rather than the VM domain, in a contracts distribution that depends on no service, persistence, or web-framework package. Routes the provisioning service hosts for another capability, such as resource-pool administration and capacity-definition import, MUST keep that capability's models, contracts, and client; hosting a route does not make it compute provisioning's. The family's typed client MUST be a separate client distribution depending on no service, persistence, or web-framework package: only that contracts distribution, the core carrier package, the identity kit, its HTTP library, and its model library; it offers async and sync variants with identical operations, and the family kit itself MUST contain no client. Direct VM operator APIs MAY retain VM-owned VM action, relay, and VM pool-configuration models and a VM client extension over the family client's authenticated transport; callers import compute-owned models from the contracts distribution. Compute provisioning MUST NOT name a domain's routes: a domain, an execution implementation, or another capability MUST contribute the route contracts of the routes it mounts. The service's request authentication MUST resolve requests against the table the provisioning service's composition root assembles from those contributions; each typed client MUST sign its routes from its owner's contracts. Where the owner's contracts are one declaration that both the service's table and the client read, as the compute family's, the resource-pool authority's, the Ansible implementation's, and each domain's are, operation, resource binding, and roles cannot diverge. Where an owner keeps separate server and client declarations, as the site capacity authority does, a contract-parity test MUST hold the two equal in method, path, operation, resource binding, and the models they exchange.
+Shared storefront/provisioner DTOs, the job, host, credential, lease, system-status, worker-control, and mock-rule wire models, and the family's route contracts MUST be owned by compute provisioning rather than the VM domain, in a contracts distribution that depends on no service, persistence, or web-framework package. Routes the provisioning service hosts for another capability, such as resource-pool administration and capacity-definition import, MUST keep that capability's models, contracts, and client; hosting a route does not make it compute provisioning's. The family's typed client MUST be a separate client distribution depending on no service, persistence, or web-framework package: only that contracts distribution, the core carrier package, the identity kit, its HTTP library, and its model library; it offers async and sync variants with identical operations, and the family kit itself MUST contain no client. The family's mock mechanism is the family's capability wherever it is mounted: the contracts distribution MUST own its route contracts as one template instantiated by a mount, a path prefix and an operation-name prefix, and the family client MUST offer its typed client over a mount; a compute domain MUST contribute only its mount for those routes, never declarations of its own. Each compute domain's client package MAY offer an extension over the family client's authenticated transport for other routes that domain mounts; direct VM operator APIs MAY retain VM-owned VM action, relay, and VM pool-configuration models; callers import compute-owned models from the contracts distribution. Compute provisioning MUST NOT name a domain's routes: a domain, an execution implementation, or another capability MUST contribute the route contracts of the routes it mounts, and for the mock mechanism's routes a domain contributes them through its mount. The service's request authentication MUST resolve requests against the table the provisioning service's composition root assembles from those contributions; each typed client MUST sign its routes from its owner's contracts. Where the owner's contracts are one declaration that both the service's table and the client read, as the compute family's, the resource-pool authority's, the Ansible implementation's, and each domain's are, operation, resource binding, and roles cannot diverge. Where an owner keeps separate server and client declarations, as the site capacity authority does, a contract-parity test MUST hold the two equal in method, path, operation, resource binding, and the models they exchange.
 
 #### Scenario: Bare-metal storefront installs the shared client
 - **WHEN** a bare-metal caller installs the compute-provisioning client without VM execution extras
@@ -295,6 +295,18 @@ Shared storefront/provisioner DTOs, the job, host, credential, lease, and system
 #### Scenario: An operator reads a lease
 - **WHEN** an operator reads a VM or bare-metal lease through the generic lease routes
 - **THEN** the response is the neutral lease view, carrying no VM-only field
+
+#### Scenario: A test reads a mock rule through the family client
+- **WHEN** a test lists or installs a bare-metal or VM mock rule through the family's mock-rule client, constructed with that domain's mount
+- **THEN** the request is signed with the domain's existing path and operation name, and the test receives the family's typed rule model from the contracts distribution
+
+#### Scenario: A compute domain mounts the mock mechanism
+- **WHEN** a compute domain mounts the mock mechanism's routes
+- **THEN** it states its path prefix and operation-name prefix, and its route contracts and typed client come from the family without a declaration of its own
+
+#### Scenario: An operator runs a worker control
+- **WHEN** an operator checks leases, runs or advances a convergence cycle, or rotates the provisioning identity through the family client
+- **THEN** the answer is a typed model from the contracts distribution
 
 ### Requirement: Compute-owned provisioning service
 
@@ -2046,6 +2058,90 @@ unambiguously.
   teardown input
 - **THEN** migration fails visibly rather than creating a partial record
 
+### Requirement: The provisioning service answers an unroutable request by what failed to match
+
+The provisioning service's authentication middleware MUST answer a request that resolves to
+no route contract, without signing it, with 404 when no contract names its path, 405 naming
+the allowed methods when a contract names its path under another method, and 400 naming the
+field when its route's body resource cannot be bound. Such an answer is unsigned because no
+contract supplies the operation and resource a response proof binds.
+
+A route contract's path pattern MUST consist of literal segments, single-segment named
+captures (`[^/]+`), and finite alternations of literal segments, optionally ending in an
+optional trailing slash (`/?`), and building a contract from a declaration MUST refuse any
+other pattern. Composing the route table MUST compare the contracts of different
+contributions segment by segment, a pattern ending in an optional slash as both its forms,
+and MUST refuse, before the service accepts traffic, two whose method and segments can
+match one request. Within one contribution, the first matching contract MUST decide, in
+the order its owner gave.
+
+#### Scenario: An unknown path is requested
+
+- **WHEN** a request names a path no route contract matches
+- **THEN** the service answers an unsigned 404 before checking authentication
+
+#### Scenario: A known path is requested with another method
+
+- **WHEN** a request uses a method no contract binds to a path a contract names
+- **THEN** the service answers an unsigned 405 whose `Allow` names the contract's methods
+
+#### Scenario: A route's body resource is missing
+
+- **WHEN** a request matches a route whose bound resource is a body field it omits
+- **THEN** the service answers an unsigned 400 naming the field
+
+#### Scenario: Two contributions claim one route
+
+- **WHEN** the route table is composed from two contributions whose contracts, compared
+  segment by segment, can both match one method and path
+- **THEN** composition is refused before the service accepts traffic
+
+#### Scenario: A contract's pattern is outside the grammar
+
+- **WHEN** a contribution declares a route whose pattern uses a construct other than a
+  literal segment, a single-segment capture, a literal alternation, or a terminal optional
+  slash
+- **THEN** building its contract is refused, naming the route
+
+#### Scenario: The service's own route table composes
+
+- **WHEN** the provisioning composition root assembles the family's routes and every
+  contribution the service ships
+- **THEN** every contract is built under the grammar and composition succeeds
+- **AND** a path with or without a route's optional trailing slash resolves to that route
+
+#### Scenario: One contribution orders overlapping routes
+
+- **WHEN** one contribution declares a literal route before a capture route that would also
+  match it
+- **THEN** composition succeeds and a request for the literal path resolves to the literal
+  route
+
+### Requirement: The family client names an unauthenticated answer
+
+The compute provisioning client MUST report an answer that carries no response
+authentication as unauthenticated, with its status, distinctly from one whose
+authentication is malformed or from another principal. It MUST still refuse the answer,
+and the report MUST contain no part of the response body, no header value, and no
+credential.
+
+#### Scenario: The client and service route tables differ
+
+- **WHEN** the client sends a request the service's table does not route and receives an
+  unsigned 405
+- **THEN** the client refuses it and reports an unauthenticated 405
+
+### Requirement: An operator-named VM guest satisfies provisioning's naming rules
+
+VM's operator route that creates a VM by name MUST refuse, with 422 and before anything is
+prepared, a guest name that is not a valid hostname label or whose login, stripped to
+letters and digits, is not at most 32 characters starting with a letter.
+
+#### Scenario: An operator names a guest whose login is too long
+
+- **WHEN** an operator creates a VM named so that its login exceeds 32 characters
+- **THEN** the request is refused with 422 naming the rule, and no job is submitted
+
 ## Evidence
 
 - Bare-metal obligation servicing resolved from the accepted Agreement: `domains/bare_metal/storefront/tests/test_obligation_servicing.py` and `test_app_composition.py`.
@@ -2055,10 +2151,10 @@ unambiguously.
 - Executor-specific release, failed-release capacity retention, retry, and force release: `provisioning/compute/service/tests/integration/test_bare_metal_leases_api.py`, `test_leases_api.py`, and `unit/services/test_ledger_lease_lifecycle.py`.
 - Adapter composition and generic import boundaries: `provisioning/compute/service/tests/unit/test_composition.py` and `test_import_boundaries.py`.
 - VM sizing precedence (committed reservation, pool default, unset), relay access-path selection, and teardown from the lease: `domains/vms/provisioning/adapter/tests/unit/test_vm_fulfillment_plan.py` (`TestSizingPrecedence`, `TestRelayAccessPath`, `TestTeardown`); the delivered credentials and endpoint: `provisioning/compute/service/tests/integration/test_fulfillment_api.py::TestStatusAndResultQueries`.
-- Relay administration, token confidentiality, rebinding, and definition-document reconciliation: `provisioning/compute/service/tests/integration/test_relay_administration.py`, `test_relay_port_allocator.py`, `test_relay_port_leases.py`, `test_relays_api.py` through the canonical client, plus `tests/unit/services/test_definition_document_restart_safety.py`.
+- Relay administration, token confidentiality, rebinding, and definition-document reconciliation: `domains/vms/provisioning/adapter/tests/integration/test_relay_administration.py`, `test_relay_port_allocator.py`, and `test_relay_port_leases.py`, over VM's own schema; through the canonical client, `provisioning/compute/service/tests/integration/test_relays_api.py`; the service's importer and migrations, `provisioning/compute/service/tests/integration/test_definition_document_digest.py` and `test_relay_migrations.py`, plus `provisioning/compute/service/tests/unit/services/test_definition_document_restart_safety.py`.
 - Relay ports held through fulfillment convergence, including a failed creation, and the reservation-released predicate reconciliation is given: `provisioning/compute/service/tests/integration/test_fulfillment_convergence.py`; their return with a reservation's capacity: `provisioning/compute/tests/integration/test_release.py` and `kit/site/tests/integration/test_ledger.py`.
 - Host writes declaring no capacity — an INI import and the startup inventory seed carrying `gpus=`, placed and unplaced, a host created and updated through the host API, and an operator's declaration surviving a re-import: `provisioning/compute/service/tests/integration/test_host_writes_declare_no_capacity_api.py` and `test_capacity_api.py`; the upgrade derivation: `provisioning/compute/service/tests/unit/test_legacy_host_capacity_migration.py`.
-- A VM job's playbook frozen at preparation, the pool's own or the service's `vm_playbook_path`, for create and teardown, and refused with neither: `domains/vms/provisioning/adapter/tests/unit/test_vm_fulfillment_plan.py`; through the typed client for a pool stating none: `provisioning/compute/service/tests/integration/test_fulfillment_api.py`; an omitted or null pool playbook stored and a blank one refused: `provisioning/compute/service/tests/integration/test_ansible_pool_config_handler.py` and `test_pools_api.py`; the `ansible_pool_configs` rebuild: `test_vm_pool_config_migration.py`.
+- A VM job's playbook frozen at preparation, the pool's own or the service's `vm_playbook_path`, for create and teardown, and refused with neither: `domains/vms/provisioning/adapter/tests/unit/test_vm_fulfillment_plan.py`; through the typed client for a pool stating none: `provisioning/compute/service/tests/integration/test_fulfillment_api.py`; an omitted or null pool playbook stored and a blank one refused: `domains/vms/provisioning/adapter/tests/integration/test_ansible_pool_config_handler.py` and `provisioning/compute/service/tests/integration/test_pools_api.py`; the `ansible_pool_configs` rebuild: `provisioning/compute/service/tests/integration/test_vm_pool_config_migration.py`.
 - A bare-metal grant and reclaim carrying the configured playbook, and the codec passing it to the plan: `domains/bare_metal/provisioning/adapter/tests/test_bare_metal_fulfillment_plan.py` and `test_bare_metal_codec.py`; through the composed service: `provisioning/compute/service/tests/integration/test_bare_metal_mock_profile.py`.
 - `vm_playbook_path` resolution and refusal of the retired `playbook_path` in a profile and the environment layer: `provisioning/compute/service/tests/unit/test_config.py` and `test_worker.py`; through the app's lifespan: `provisioning/compute/service/tests/integration/test_retired_settings_startup.py`; the chart's renamed value and refused key: `helm/charts/provisioning/tests/test_render.py`.
 

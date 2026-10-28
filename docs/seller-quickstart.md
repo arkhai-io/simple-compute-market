@@ -100,11 +100,17 @@ priority = ["alkahest.v1"]
 
 [Settlement.alkahest]
 enabled = true
-address_config_path = "/path/to/alkahest.json"
+
+[Settlement.alkahest.address_books]
+# One entry per chain whose Alkahest contracts are a deployment of your own;
+# a chain not listed uses the SDK's built-in addresses.
+# base_sepolia = "/path/to/alkahest.json"
 
 [wallet]
-address = "0x<YOUR_SELLER_ADDRESS>"
-# Supply private_key through the deployment Secret overlay.
+# Supply private_key through the deployment Secret overlay. The address is
+# derived from it; state one only to check it, since an address naming another
+# account leaves Alkahest unready.
+# address = "0x<YOUR_SELLER_ADDRESS>"
 
 [chains.base_sepolia]
 chain_id = 84532
@@ -315,7 +321,8 @@ registry it cannot reach marks its system status `degraded`, a chain its Alkahes
 probe cannot reach leaves Alkahest unready until a probe reaches it, and a site
 it cannot reach holds that site's listings. An Alkahest section that cannot
 settle — no trusted oracle for `oracle_gated`, an oracle equal to the seller
-wallet, no wallet address or key, no `[Chains]` — leaves Alkahest unready rather
+wallet, no wallet key, a wallet address naming another account than the key's, an
+address book for a chain not under `[Chains]`, no `[Chains]` — leaves Alkahest unready rather
 than stopping the storefront; system status's `settlement` names each mechanism's
 blockers. `GET /api/v1/system/status` also reports, under `publication_derivation`,
 each site's `holds`, `refusals`, and `reports` from the last publication cycle,

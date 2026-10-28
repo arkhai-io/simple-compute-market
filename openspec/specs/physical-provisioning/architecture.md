@@ -16,6 +16,10 @@ compute service composition
 
 The offering-mode-neutral composition root lets generic services dispatch by recorded executor or provider identity without importing a concrete domain implementation.
 
+The mock mechanism is a worked instance of the five-piece route pattern (`docs/development/ARCHITECTURE.md`, "Route contracts and their HTTP binding") in which the family owns every piece but the binding's location. `compute_provisioning_contracts.mock_rules` holds the route-contract template, `MockRouteMount`, a path prefix and an operation-name prefix whose `route_declarations()` yields the rule add, list, delete, and resume routes and the evaluate-job route, and the wire models those routes answer with (`MockRuleAdded`, `MockRuleView`, `MockRuleDeleted`, `MockRuleResumed`, `MockJobEvaluation`, and the request `MockRuleCreate`). The family kit's `MockRuleRouteService` (`compute_provisioning.jobs.executor_mock`) answers with them, and `compute_provisioning_client`'s `MockRuleClient` and `SyncMockRuleClient` sign each call from a mount's declarations and return the same models. A domain states only its mount: VM's is `VM_MOCK_ROUTE_MOUNT`, `("/test", "provisioning_test")`, in `vm_provisioning_operator.routes`; bare metal's two values, `"/test/bare-metal"` and `"provisioning_test_bare_metal"`, live in `arkhai_bare_metal.provisioning_routes`, so `arkhai-bare-metal` keeps no compute dependency and its adapter builds the mount. Each adapter binds the route service under its mount's prefix and contributes the mount's declarations to the service's table. The evaluate-job request stays each domain's, since its fields are the domain's job parameters. A further compute domain mounts the mechanism by stating its two values.
+
+The service's database holds VM's tables, so its metadata (`db/database.py`) and its one migration history (`db/migrations.py`) name them: the history is the record of how those tables were created and evolved, including VM's pool-configuration table and VM's legacy lease conversion. `deployment-state`'s "Service-owned migration history" still gives the migration entrypoint only its database; nothing injects VM's schema. A single chain is adequate while one compute domain owns provisioning-side tables. When a second domain needs its own, each adapter would own its chain, run in an order the contributions declare, which amends that requirement.
+
 The resource-pool projection a site serves is neutral, and a domain that publishes more — a view of a whole machine it sells, or a pool's configured defaults — contributes an `InventoryViewProjection` from `compute_provisioning.inventory_views`, which owns the protocol and its composer. The service merges what each projection returns and never names a domain's view, attribute, or provider configuration. A resource view is built with its pool's context, an `InventoryPoolContext` of pool ID, provider, and the pool's resolved declarations, because what a view may carry depends on them: a bare-metal view carries its delivery terms only where the pool's backing delegate passes them through (see the [resource-pool management architecture](../resource-pool-management/architecture.md#advertisement-delivery-and-backing)). The provisioning service, as the composition root, reads the pool rows in its own resource pass, resolves each pool once through the shared resolver, and hands each declaration its pool's context, interpreting none of it; the pool pass reads raw tags and the provider from the same column, so the two passes cannot drift on a pool's provider. A stored pool whose declarations do not resolve, which startup refuses and no write path produces, gives its members no context, so they project with no views and no problems, and the service logs a warning. Building the context is compute-family work, so it sits at the contributed-view seam and nothing above the compute family learns of it: `kit/site` copies the per-resource result into its projection without reading it, and `kit/resource-pools` and core do not see it.
 
 A contributed projection never raises on a declaration's content. Declarations reach the site over its API from any client, and one a view builder could not handle would otherwise fail the site's whole resource-pool projection, every pool and every domain with it. `resource_views` returns a `ResourceViews` of the views it built and, per declared view it could not build, the reasons, which the projected resource carries as `publication_view_problems` keyed by view identifier. A backed bare-metal declaration naming no host or no access methods, a missing or invalid `allocation_mode` or `physical_host_id`, and a private-looking capacity or capability key are such cases. A storefront reads a resource with problems as an unreadable declaration and holds its listing (see the [storefront publication architecture](../storefront-publication/architecture.md#reconciliation)). Refusing a malformed attribute when the declaration is written was rejected: its backing-dependent rules need a site read of pool state that the site may not take while its edge into the pool authority stands, so a write-time check would be partial and the projection would still have to tolerate what it missed.
@@ -148,6 +152,48 @@ re-raised only once the status is sent, so the middleware would sign, and the
 provisioning service record, a truncated body under the original status. No
 route streams its response, so the limit is latent; a streaming route needs the
 middleware to detect that failure or to refuse streamed responses.
+
+A request that resolves to no route contract is answered before authentication,
+by what failed to match, and unsigned: 404 for a path no contract names, 405
+with `Allow` for a path named only under other methods, 400 for a route whose
+body resource cannot be bound. Route resolution reports the case through a
+typed error (`ProvisioningRouteNotFound`, `ProvisioningRouteMethodNotAllowed`,
+`ProvisioningRouteResourceUnbound` in `compute_provisioning_contracts.routes`;
+`SiteRouteNotFound`, `SiteRouteMethodNotAllowed`, `SiteRouteResourceUnbound`
+in `market_site.auth` for `kit/site`'s middleware). Such an answer cannot be
+signed meaningfully: a response proof binds the method, operation, resource,
+request identity, status, and body, and a client verifies it against its own
+operation and resource, while the server knows no operation for an unknown path
+or a wrong method and no resource for an unbindable body, and a request carries
+a signature over its operation rather than the operation itself. Signing "not
+served" over the caller's claimed operation needs a request envelope that states
+its operation, which the current version does not; until then the answers stay
+unsigned. The family client and the site client refuse an unsigned answer as
+they refuse any unverifiable one, but report it distinctly
+(`ComputeProvisioningUnauthenticatedResponseError`,
+`SiteCapacityUnauthenticatedResponseError`), by its status alone: an unsigned
+answer is also what anything between client and authority may give, so nothing
+it says is repeated. The family client resolves its own table before sending,
+so it meets these answers only when its table and the service's differ.
+
+The route table can answer by cause, and can refuse ambiguity, because a route
+contract's pattern is restricted: literal segments, `[^/]+` named captures,
+finite alternations of literal segments, and an optional terminal `/?`. Building
+a contract refuses any other pattern, and so does a pattern compiled with a
+flag, since the comparison reads only the pattern's text. Over that grammar,
+overlap is decidable segment by segment, so `ProvisioningRouteTable` refuses,
+when it is composed and before the service accepts traffic, two contracts of
+different contributions that one method and path could both match: neither
+owner can say which signature such a request means. Within one contribution the
+first matching contract decides, in the order its owner gave. Detecting
+ambiguity per request instead would let a mis-composed service start and fail on
+exactly the overlapping requests. The grammar is hand-written only while it
+stays this small: a route needing more, such as a tail capture or a typed
+segment, is a reason to adopt an established path-template grammar and its
+matcher, and rebuild the overlap comparison on it, not to widen this one.
+`kit/site`'s middleware has no ambiguous case: it resolves first-match over the
+one ordered table its composition root gives it, which the API-credits service
+extends with its own routes, and it takes no contributions.
 
 One such failure is refused at startup instead: the service does not start
 while a stored pool names a provider no registered handler serves. Handlers are fixed by

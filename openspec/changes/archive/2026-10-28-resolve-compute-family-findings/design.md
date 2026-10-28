@@ -651,6 +651,149 @@ Made with this design's recording:
   and `hollow-pre-floor-provisioning-migrations` (the legacy-backfill import; the index
   declaration).
 
+## Implementation record
+
+What implementation decided or corrected beyond the decisions above, moved here from
+`tasks.md`'s section notes at closeout.
+
+Sequencing and versions:
+
+- **The owner's decision A (sections 6–8).** Sections 6, 7, and 8 bumped no version
+  and moved no pin. Their bumps reached exact (`==`) pins in files
+  `unbacked-bare-metal-listings`' branch also edited, so each package's bump was left
+  to the branch's, which bumped the same packages unreleased. Section 10 confirmed,
+  with the branch merged, that `arkhai-kit-policy` (0.6.0), `arkhai-kit-contact-exchange`
+  (0.4.0), `arkhai-core-storefront` (0.16.0), `arkhai-core-storefront-client` (0.27.0),
+  and `arkhai-vms-storefront` (0.22.0) each stood a minor version over `main`'s.
+- **The owner's decision B (section 3).** Renaming `arkhai_bare_metal.provisioning_client`
+  removed an export the e2e harness imported, a file the plan did not name. Section 3
+  also edited the harness to build bare metal's mount from `provisioning_routes`' values
+  and raised `e2e-tests/pyproject.toml`'s floors, accepting a one-line merge conflict on
+  the `arkhai-bare-metal` line, resolved by keeping both sides.
+- **The owner's decision B (section 9).** Section 9 waited for the branch, as round 2
+  did: the VM storefront's integration harness (`tests/publication_app.py`) lists its
+  routers explicitly and was the branch's file.
+- **Bumps after the merge.** With the branch merged, every package round 1 bumped stood
+  at `dev`'s version, the branch having bumped it alike, except the VM operator client.
+  From section 10 on, each section bumped a package once over `dev`'s version, and both
+  provisioning adapters took their bump over `dev` at section 16.
+- **Exact-pin moves take no bump (sections 11, 16, 18).** A package whose only change
+  is an exact pin, or a floor, moving to a version `dev` holds unreleased is not bumped:
+  `RELEASING.md` does not say otherwise, precedent was mixed, and each bump would move
+  further exact pins for no change a release would see. Taken at implementation; no
+  triage ruled on it.
+
+Plan corrections:
+
+- **A FastAPI route's return annotation is its response model** (section 2), so typing
+  `MockRuleRouteService`'s answers meant typing both adapters' rule routes in the same
+  commit, which moved those adapters' bumps into section 2.
+- **The evaluate-job request stays each domain's** (sections 2–3): its fields are the
+  domain's job parameters. Only the report, `MockJobEvaluation`, is the family's.
+- **`pyyaml` is a runtime dependency of the VM adapter** (section 5), not a test one:
+  its `services/relay_definitions.py` imports `yaml`.
+- **Two suites stay in the service** (section 5): `TestTheDigestGate` and
+  `test_relay_port_leases.py`'s `TestMigrations` test the service's importer and
+  migrations, not VM's models, so D20's own reason keeps them there.
+- **The provisioning service does not compose `SiteAuthMiddleware`** (section 10): it
+  authenticates the site's routes through `ProvisioningAuthMiddleware` over translated
+  contracts, so its 405 for a site path is proven by section 13.
+- **An unroutable request with an unreadable body is answered by its route** (sections
+  10, 13): 404 or 405 when it is unroutable, the body's 400 only when a contract serves
+  it, since the requirement's answers hold whatever the body.
+- **`last_error` reaches the wire** (sections 11, 18): `core_storefront`'s
+  `SettleWaitResponse` and the core client's model gain an optional `last_error`, which
+  every storefront's wait route passes through; otherwise the delta's "Every read fails"
+  held only at the route service.
+- **The awaiting-delivery mark is consumed when honoured** (section 11), so a later step
+  that neither starts nor waits cannot ride a mark it did not write; a refusal
+  (`LookupError` or `SettlementAdminRouteError`) ends the settle wait as an answer.
+- **The retired-state conversion is wider than "exactly"** (section 14). The ledger's
+  windowed reads count an `unmanaged` row against every window and a `provisioning` row
+  only within its lease window, so a converted windowed row holds its bucket and host for
+  all windows until an operator repairs it, as the delta's scenario says; it never frees
+  what was held. A converted `force_released` row reads as released, so VM's relay-port
+  backstop reclaims its port and `release`, `terminate`, and `force_release` answer it as
+  already released.
+- **`release` no longer writes a state its caller names** (section 15): it took a
+  `state` argument, a second generic state writer, and now takes `forced: bool`, as "A
+  caller asks to set a state directly" requires.
+- **The schedule response omits an absent `host_id` with `Field(exclude_if=…)`**
+  (sections 16, 19), which keeps the published schema whole; the contracts' pydantic
+  floor is `2.12`, since 2.11 accepts `exclude_if` and ignores it.
+- **A hostless schedule is proven in `kit/fulfillment`** (section 16): every provider the
+  service composes needs a host, so "A resource with no host is scheduled" cannot happen
+  through it.
+- **Composition callbacks are shown by behaviour** (section 18): the worker exposes no
+  accessor for its `on_event`, so each storefront's worker is driven to write its
+  `claims` stage event instead of asserting identity. Declined: one shared callback in
+  `kit/storefront`, an ownership change D8 does not make.
+- **The bare-metal fulfillment reads' typed client is the buyer's**
+  `BareMetalFulfillmentTransport` (section 19); `StorefrontClient` has none. The core
+  store already refused a differing write-once result, so `sqlite_client.py` is
+  unchanged.
+- **The seller's account moved forward to section 22.** Without
+  `wallet_account_address` in each storefront, a seller stating only a key would be
+  Alkahest-ready with an empty recipient, against "An Alkahest section that cannot
+  settle makes Alkahest unready"; the `settlement-configuration` delta modifies that
+  requirement and "Readiness blockers state their kind" accordingly.
+- **Three domain packages take the resolved books as data** (section 24):
+  `arkhai-vms-negotiation`'s and `arkhai-apicredits-domain`'s `storefront_round.py`, and
+  `arkhai-vms-settlement`'s `token_resource_from_accepted_escrow`, whose chain tables no
+  longer carry a book; without the last, a native-token escrow on `anvil` would not read
+  as native.
+- **Each role refuses the retired keys before resolving its section** (section 26),
+  since the settlement registry refuses the section key only as an unknown key. Running
+  the VM storefront's whole startup refusal first was tried and reverted: the
+  contradictory release-model tests rely on that refusal coming first. The refusal names
+  no command, since the bare-metal and API-credit storefronts and an API-credit-only
+  buyer have no settlement migration command. After review 86 (F2) the VM and API-credit
+  storefronts also refuse inside `chain_address_books()`, which every book reader passes
+  through.
+- **Round 1's delta correction (65 F1).** "Deal-scoped lifecycle events"' first scenario
+  dropped "without the provisioner depending on the full storefront client": the
+  requirement fixes what crosses the wire, not the client library.
+- **Round 1's validation failure (66 V1)** was inherited: both domain buyers registered a
+  root `settlement` group; `unbacked-bare-metal-listings` fixed it on `dev`.
+- **The values schemas were edited by hand** (sections 23, 26): `make helm-values-schema`
+  was denied to the implementation sessions. The drift tests, which compare parsed JSON,
+  pass; a byte-for-byte check by a run of the target remains owed.
+
+Found during implementation and not this change's:
+
+- `RelayPortAllocator.allocate_in_session` retries on every `IntegrityError`, so a
+  concurrent retry for one owner ends as a false `RelayWindowExhaustedError`; it needs a
+  decision (re-read the owner's lease, or refuse as a conflict) by whichever change next
+  touches relay allocation.
+- `resize_reservation` frees an `unmanaged` reservation with only the guard's
+  permission, against "Only a forced release MAY free an `unmanaged` reservation";
+  nothing in production calls it.
+- Under a bare-metal delivery conflict, the buyer's teardown answers the typed 409
+  rather than ending the lease, since it reads status first, and the admin
+  settle-status read (`deal_controls.py`) leaves the refusal unmapped.
+- A key `kit/alkahest` cannot parse is read as present: beside an address no mismatch
+  is judged; with none, readiness reports the address missing rather than the key. No
+  decision names a blocker for an unreadable key.
+- `docs/configuration.md`'s `release_capacity` row says not to configure it as an
+  automatic response to a provider failure, while it is a default action and the policy
+  now runs only automatically.
+- The seller quickstart's "mock mode" sections may describe a mode the base seller
+  stack, which runs provisioning's `seller` profile, does not run.
+- Stale texts outside the change's files: `arkhai_vms_negotiation/rl/policy-making.md`
+  (`market policy train`/`eval`); `test_escrow_fields_policy.py`'s docstring
+  (`[negotiation].chain`); `core_buyer/negotiation_client.py` (the loader's `KeyError`
+  "at the extras"); `e2e-tests/settings.toml` and the VM storefront's
+  `tests/publication_app.py` ("callbacks" in the plural); `notify_capacity_released`'s
+  async docstring (a watchdog sender and a legacy PATCH).
+- `core/storefront` imports FastAPI without declaring it.
+- The VM storefront's legacy-database synthesis (`utils/migrations.py`) resolves books
+  outside a handler, so under a retired key it stops with a raw `ValueError`.
+- The VM storefront's escrow CLI, refund action, and listing service do not run the
+  startup refusal; run alone they would ignore a retired chain key.
+- `kit/config`'s settlement migration encodes the Alkahest table's meaning beside
+  `kit/alkahest`'s refusal, continuing the existing placement of settlement migration in
+  the foundation kit.
+
 ## Open Questions
 
 - **Per-adapter migration chains.** The provisioning service's single migration chain

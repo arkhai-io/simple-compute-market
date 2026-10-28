@@ -162,12 +162,25 @@ Each package follows [SemVer](https://semver.org):
 - **Patch** — bug fix or internal change.
 
 Before a package reaches 1.0.0 its major version stays at zero: an
-incompatible change takes a **minor** bump in place of a major one, and
-the other rules apply unchanged. A consumer that depends on the
-incompatible behaviour raises its lower bound to the new minor version.
-Moving a package to 1.0.0 is a deliberate decision that sets its
-compatibility commitment, not a consequence of shipping an incompatible
-change.
+incompatible change to anything the package publishes — its API, a wire
+format it sends or accepts, or the meaning of a configuration key it
+reads — takes a **minor** bump in place of a major one, and the other
+rules apply unchanged. Its users are expected to update; a consumer that
+depends on the incompatible behaviour raises its lower bound to the new
+minor version. Moving a package to 1.0.0 is a deliberate decision that
+sets its compatibility commitment, not a consequence of shipping an
+incompatible change.
+
+A contract that carries its own version — a `VersionedEnvelope`'s
+`(kind, schema_version)`, a contract version, a protocol identifier — is
+never changed in place, before 1.0.0 or after. An incompatible change
+defines a new version, and each party states the versions it accepts and
+refuses the others, naming what it supports. Before 1.0.0 the release that
+introduces a version may stop accepting the one before, so the parties to
+it upgrade, and roll back, together. Persisted state keeps its own
+migration rules. Neither pre-1.0 allowance applies at or above 1.0.0.
+Incompatibility is signalled by the version numbers and the versioned
+contracts alone; no per-release list of incompatible changes is kept.
 
 A change bumps each package it changes at most once, measured against the
 package's version on the branch the change merges into: that is the version a
