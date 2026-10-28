@@ -441,7 +441,7 @@ def pool(
     pool_id: str,
     *,
     backing: str,
-    gpu_model: str = "H100",
+    gpu_model: str | None = "H100",
     gpu_count: int = 1,
     enabled: bool = True,
     capacity: dict[str, int] | None = None,
@@ -451,12 +451,17 @@ def pool(
     """One projected fungible pool with a single member.
 
     ``capacity`` declares every dimension of the member; without it the member
-    declares ``gpu_count`` only. ``available`` defaults to the capacity.
+    declares ``gpu_count`` only. ``available`` defaults to the capacity. A
+    member with ``gpu_model=None`` declares no GPU model, as a machine without
+    GPUs does.
 
     Built by the site client's contract fixture, the shape the provisioning
     service's own tests validate its projection against.
     """
     policy_tags = {"listing_cardinality_mode": "fungible", "region": "us-east", **tags}
+    attributes = {"region": policy_tags["region"]}
+    if gpu_model is not None:
+        attributes["gpu_model"] = gpu_model
     return build_resource_pool_row(
         pool_id,
         capacity_backing=backing,
@@ -469,7 +474,7 @@ def pool(
                 available=available,
                 # A claim matches region against the declaration itself, so the
                 # member declares the region its pool advertises.
-                attributes={"gpu_model": gpu_model, "region": policy_tags["region"]},
+                attributes=attributes,
             )
         ],
     )

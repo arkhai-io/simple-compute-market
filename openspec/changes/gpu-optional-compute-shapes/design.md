@@ -84,6 +84,13 @@ exactly what it publishes now. A pool may legitimately publish nothing so long a
 operator can easily discover why. The generator stays the domain's seam for another
 default policy.
 
+*Which pools are reported.* The report's condition is the delta's: no stated shapes, and no
+enabled member declaring a positive GPU count. So a pool whose members all declare
+`gpu_count: 0` is reported, as one whose members declare none is; a zero-count member beside
+a GPU member is silent, as a member is never reported on its own account. A pool with no
+enabled member is not reported: it publishes nothing for want of members, which stating
+shapes would not change.
+
 *Rejected.* Enumerating vCPUs, which publishes on the order of two hundred listings per
 large host and leaves the memory each slice is given unreserved at scale, and which must
 also decide whether GPU members sell CPU slices by default. One whole-member shape per

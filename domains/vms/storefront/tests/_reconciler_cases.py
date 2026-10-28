@@ -245,14 +245,18 @@ def _seed_listing_binding(
     gpu_count: int,
     gpu_model: str = "H100",
     schema_version: int = 2,
+    listing_shape: dict | None = None,
 ) -> None:
     """Bind a listing as publication does: version 2 carries the listing's
-    shape; version 1 is how listings were bound before shapes."""
+    shape, by default a GPU-only one; version 1 is how listings were bound
+    before shapes."""
     payload: dict = {"site_id": site_id, "pool_id": pool_id, "resource_id": resource_id}
     if schema_version == 1:
         payload["gpu_count"] = gpu_count
     else:
-        payload["listing_shape"] = {"gpu": {"count": gpu_count, "model": gpu_model}}
+        payload["listing_shape"] = listing_shape or {
+            "gpu": {"count": gpu_count, "model": gpu_model}
+        }
     source = {
         "kind": "compute.listing_source",
         "schema_version": schema_version,
@@ -306,8 +310,17 @@ def _seed_listing(
     site_id: str | None = None,
     gpu_model: str = "H100",
     schema_version: int = 2,
+    listing_shape: dict | None = None,
 ):
-    listing_resource = {"offering_mode": "vm", "gpu_count": gpu_count, "gpu_model": gpu_model}
+    """Seed a listing, by default a GPU-only one; ``listing_shape`` publishes
+    exactly that shape's fields instead."""
+    if listing_shape is None:
+        listing_resource = {"offering_mode": "vm", "gpu_count": gpu_count, "gpu_model": gpu_model}
+    else:
+        resolved = resolve_shape(listing_shape)
+        listing_resource = {
+            "offering_mode": "vm", **resolved.quantities, **resolved.attributes
+        }
     if pool_id:
         listing_resource["pool_id"] = pool_id
     if resource_id:
@@ -339,6 +352,7 @@ def _seed_listing(
             gpu_count=gpu_count,
             gpu_model=gpu_model,
             schema_version=schema_version,
+            listing_shape=listing_shape,
         )
 
 

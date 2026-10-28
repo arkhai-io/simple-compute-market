@@ -596,10 +596,15 @@ tests `domains/vms/domain/tests/test_shape_generation.py`,
 `domains/vms/storefront/tests/_reconciler_cases.py`,
 `domains/vms/storefront/tests/integration/{test_reconciler_derivation.py,test_publication_loop.py,test_shape_feasibility.py}`.
 
-- [ ] 6.1 `ResolvedShape.gpu_count` and `gpu_model` return `None` for a shape stating no
+- [x] 6.1 `ResolvedShape.gpu_count` and `gpu_model` return `None` for a shape stating no
   GPUs, and every reader handles `None` (D8). Unit (`test_listing_shape_resolution.py`): a
   stated GPU-less shape resolves with both `None`; a GPU shape is unchanged.
-- [ ] 6.2 A member's GPU count is no precondition for membership (D8):
+  *Done.* Unit (VM storefront `tests/unit`): a stated `{cpu, memory}` shape resolves with
+  both properties `None`, its quantities `vcpu_count`/`ram_gb`, and no attribute; a GPU
+  shape still names its count and model. The readers are the reconciler's pricing and
+  family-rate grouping (6.3) and the candidate builder's per-model lookups, which key on
+  `None` for such a shape.
+- [x] 6.2 A member's GPU count is no precondition for membership (D8):
   `_projected_resource_usage` no longer returns an absent-count outcome for a member without
   `gpu_count`; GPU usage and fungible GPU availability apply only to shapes naming GPUs, and
   a GPU-less shape's availability is judged on the dimensions it declares through the site
@@ -609,7 +614,23 @@ tests `domains/vms/domain/tests/test_shape_generation.py`,
   memory are feasible for it (delta scenario "A GPU host's spare capacity sells as a VM
   without GPUs"); a backed GPU-less shape whose member's available memory is below it is not
   published; a malformed count holds.
-- [ ] 6.3 Group pricing and family rates by an optional GPU model, so a GPU-less shape
+  *Done.* `_projected_resource_usage` reads an absent `gpu_count` as zero, so a member
+  declaring none, or zero, is a member with zero GPU usage; only a malformed count
+  (negative, non-integer, boolean) or a missing resource kind keeps a member out, as
+  before. Feasibility needed no change: `shape_feasibility.py` already builds the shape's
+  claim and judges it with the site's predicate, which requests only the dimensions the
+  shape declares. Unit (VM storefront `tests/unit`): a member with no count or a zero count
+  uses zero GPUs; a malformed count is still unresolvable; a GPU-less member is feasible for
+  a stated `{cpu: 16, memory: 64}`; a GPU host's (`_BIG`) spare vCPU and memory are, and the
+  shape's claim requests `vcpu_count` and `ram_gb` and no GPU dimension or model; a backed
+  GPU-less member with 32 GiB free is not, and is reported infeasible `available`; a
+  malformed member beside a GPU-less one holds the pool. Library integration
+  (`test_shape_feasibility.py`, the storefront's judgement against a real
+  `CapacityLedgerService.probe`): four cases added — a GPU-less shape on a GPU host's spare
+  capacity, on a member without GPUs, beyond that member's free memory under a hold, and a
+  GPU shape on a member without GPUs — each agreeing with admission on declared capacity,
+  on availability, and through the capacity bucket.
+- [x] 6.3 Group pricing and family rates by an optional GPU model, so a GPU-less shape
   resolves flat rates or cpu, memory, and storage family rates, and a pool whose only rates
   are per GPU model leaves it with no settlement option, refused and reported as
   `no_settlement_option` (D8). Order the availability reopen by GPU count with an absent
@@ -617,7 +638,23 @@ tests `domains/vms/domain/tests/test_shape_generation.py`,
   mixed pool's GPU and GPU-less shapes each resolve their rates without error; a
   per-model-only pool's GPU-less shape is refused as `no_settlement_option`; reopen ordering
   of a GPU-less listing does not fail.
-- [ ] 6.4 Replace the per-member `member_gpu_count_missing` report with one pool report when
+  *Done, at three levels.* `pricing_resolution.py` already handled `gpu_model=None` (no
+  hint or per-model configured terms, no GPU family rates); the reconciler now sorts its
+  models with `None` first, which a plain `sorted` of a mixed set could not, and keys
+  `pricing_by_model`/`family_rates_by_model` on `None` for a GPU-less shape. Reopen order is
+  GPU count with an absent count as zero, then listing id. Unit (`test_reconciler.py`): a
+  mixed pool resolves `None` and `H100` terms, the GPU-less shape the flat default's clause
+  and the `cpu` and `memory` rates, the GPU shape its own clause and the GPU rate too; a
+  pool priced only per model leaves the GPU-less shape no clause and no rates. The refusal
+  itself is the publication cycle's, so it is application integration
+  (`test_publication_loop.py`, below): with `[pricing].settlements` empty and the pool's
+  only clause under `pricing.gpu.H100`, the GPU shape publishes and the GPU-less one is
+  refused as `no_settlement_option` naming its digest. Reopen ordering reads the database,
+  so it is library integration (`test_reconciler_derivation.py`): two closed GPU-less
+  listings and a one-GPU listing reopen as `cpu-a`, `cpu-b`, `gpu-1`; the old code raised
+  `KeyError`. `_reconciler_cases.py`'s `_seed_listing` gained a `listing_shape` argument
+  for it.
+- [x] 6.4 Replace the per-member `member_gpu_count_missing` report with one pool report when
   a pool states no listing shapes and no enabled member declares a positive GPU count,
   naming the site and pool and saying the VM default generates GPU shapes only and the pool
   must state `listing_shapes`; it is recorded through the storefront's derivation log and
@@ -628,18 +665,84 @@ tests `domains/vms/domain/tests/test_shape_generation.py`,
   quantity"); a pool of GPU-less members with no stated shapes yields nothing and one pool
   report (delta "A pool whose members declare no GPUs states no shapes"); a zero count
   yields nothing and no report.
-- [ ] 6.5 Application integration (`test_publication_loop.py`, through the storefront's
+  *Done.* The report's category is `pools_without_default_shapes`; its entry is a `report`
+  (holding nothing) with reason `listing_shapes_required` and a `message`
+  (`POOL_SHAPES_REQUIRED_MESSAGE`) saying the default generates GPU shapes only and the
+  pool must state `listing_shapes`, on its hint or an override. It is made when the shapes
+  are generated and the pool has at least one enabled member and none declares a positive
+  GPU count. Two choices the plan did not state, now recorded in `design.md` D2 ("Which
+  pools are reported"): a pool with no enabled member is not reported; and a pool whose
+  only members declare zero is reported as the pool, since the delta's condition is "no
+  positive GPU count", which departs from this task's "a zero count yields … no report" for
+  such a pool, while a zero-count member beside a GPU member is silent as the task says.
+  `members_without_gpu_count` is gone from the report. The generator's module docstring
+  states that a member declaring no GPUs yields no default shape. Unit
+  (`test_shape_generation.py`, in `domains/vms/domain`'s 60): a GPU member beside a
+  GPU-less one yields the GPU defaults; GPU-less members yield none. Unit
+  (`test_reconciler.py`): the same through the row builder with no report; a GPU-less pool
+  stating no shapes yields one `listing_shapes_required` entry from
+  `site_derivation_entries`; zero beside GPUs is silent; a zero-only pool is reported; a
+  stating pool and an empty pool are not. Library integration
+  (`test_reconciler_derivation.py`, `TestEnumerationQuantity`): the old absent-count case
+  now asserts the pool report; the old zero-only "silent" case, false now that a zero-only
+  pool is reported, is replaced by zero beside a GPU member, and a third case puts a
+  GPU-less member beside a GPU member, both silent.
+- [x] 6.5 Application integration (`test_publication_loop.py`, through the storefront's
   typed client and fake site): a pool hint stating `{cpu: {count: 16}, memory: {gib: 64}}`
   publishes one listing whose exact registry body carries `vcpu_count: 16` and `ram_gb: 64`
   and no GPU key, on first publication and on a refresh (D11; delta "A pool states a shape
   with no GPUs"); a GPU-less pool with no stated shapes publishes nothing and system status
   reports it (D2, D12). Library integration (`test_reconciler_derivation.py`,
   `test_shape_feasibility.py`): mixed and GPU-less pools derive as 6.2–6.4 say.
-- [ ] 6.6 **Verification checkpoint.** Unit 6.1–6.4; library integration and application
+  *Done.* Application integration (VM storefront `tests/integration`, 501 passed), cycles
+  run through the typed client's lifecycle controls against `tests.publication_app`, whose
+  registries are the recording double where `MultiRegistryClient` wraps them: a pool hint
+  stating `{cpu: 16, memory: 64}` over a member declaring no GPU publishes one listing; every
+  registry's publish body carries a `listing_resource` equal to the stored one, with
+  `vcpu_count: 16`, `ram_gb: 64`, and no GPU key, and a term change refreshes it at every
+  registry with that same `listing_resource`. "Exact" is this equality and the GPU keys'
+  absence: the other absent optional fields still publish as `null` (D6's recorded gap). A
+  GPU-less pool stating no shapes publishes nothing and `get_system_status`'s
+  `publication_derivation` carries its `listing_shapes_required` report; a pool whose two
+  default listings were published closes both once its member declares no GPUs, and is
+  reported; the per-model-only refusal of 6.3. That the claim requests no GPU is unit
+  evidence here (6.2) and the deal path's in section 7. `publication_app.pool` takes
+  `gpu_model=None` for a member without GPUs. Library integration
+  (`test_reconciler_derivation.py`, against SQLite, through `available_compute_slices`): a
+  GPU-less pool derives one candidate for its stated shape with no GPU field and no report;
+  a mixed pool derives candidates for its GPU and GPU-less shapes; reopen ordering (6.3).
+  `test_shape_feasibility.py` as in 6.2.
+- [x] 6.6 **Verification checkpoint.** Unit 6.1–6.4; library integration and application
   integration 6.5. Run `make test` in `domains/vms/domain` and `domains/vms/storefront`, and
   `make check-comment-hygiene`.
   End-to-end: `e2e_listing_shapes`, `e2e_compute_dynamic_listings`, and `e2e_deal` prove GPU
   publication unchanged; section 8 proves GPU-less publication in the running stack.
+  *Done.* After `make dist`: `domains/vms/domain` 60 passed; `domains/vms/storefront` 1165
+  unit and 501 integration passed; `make check-change`, comment hygiene included, passes;
+  root `make test` exited 0 before the fresh-context check's fixes (a message, a docstring,
+  a test comment, a stronger refresh assertion, and one new publication-loop case), after
+  which the storefront suite was rerun and passes. No `pyproject.toml` or lock changed, so
+  `make check-packaging` was not rerun; no suite runs a type checker over these packages
+  (the storefront declares `mypy` but no target runs it), and none was run for
+  `ResolvedShape`'s `int | None` and `str | None`. End-to-end, not run in this section and
+  owed to validation: `e2e_listing_shapes`, `e2e_compute_dynamic_listings`, and `e2e_deal`
+  publish GPU shapes through the changed reconciler; no lane states a GPU-less shape before
+  section 8.
+
+  Fresh-context check: no layering, import, packaging, or comment-hygiene problem; the code
+  meets D2, D8, D12 and the delta. Fixed from it: the pool report's message said "a GPU
+  count" where the condition is a positive one; `_projected_pool_rows`' docstring did not
+  say a GPU-less shape's terms key on `None`; a unit test's comment claimed a reservation
+  it does not make; the refresh assertion and the "defaults close" clause of the delta
+  scenario, now tested; D8's pricing rule had no promotion row, now added; and five
+  overstated notes. Declined: moving the listings package's reconciler tests out of the
+  storefront's suite, an existing arrangement; and reporting a pool whose members declare
+  a GPU count but no model, which the delta does not ask for and which predates this
+  change.
+
+  *Handoff.* Section 7's readers of a listing's GPU fields remain: the admin reserve's
+  `or 1` and the Alkahest lease terms. A GPU-less candidate still carries its pool's
+  `total_gpu_count` and `available_gpu_count`, which nothing publishes or reads.
 
 ## 7. Claims, recheck, opening, delivery facts, and the admin reserve without GPUs
 
@@ -808,6 +911,7 @@ citations, and a current index.
 | D1 a required field is required when its family appears; the compute schema requires no family and binds GPU count and model | `openspec/specs/market-composition/spec.md` — the two requirements, via archive; `openspec/specs/market-composition/architecture.md` — "The compute family vocabulary", a paragraph after the one on `unflatten_shape` | |
 | D2 the VM default stays GPU-only; GPU-less members are members; a pool with no shapes and no GPUs is reported once | `openspec/specs/storefront-publication/spec.md` — the two requirements, via archive; `openspec/specs/storefront-publication/architecture.md` — "Listing shapes and the storefront's authority", the paragraph beginning "Shapes are stated or generated"; `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Definition documents", the sentence beginning "A pool that states no shapes publishes its domain's default shapes", and "Storefront listing shapes and pool overrides" | |
 | A pool may create no listings, provided its operator can easily discover why | `docs/development/ARCHITECTURE.md` — "Holding or closing a listing the storefront cannot fully derive", a closing paragraph | |
+| D8 a VM shape stating no GPUs takes only the override's and flat default's terms and the unkeyed families' rates, so a pool priced only per GPU model leaves it with no settlement option, refused as `no_settlement_option` | `openspec/specs/storefront-publication/architecture.md` — "Listing shapes and the storefront's authority", beside the paragraph on family rates or, failing one, after the D4 paragraph below | |
 | D4 a GPU machine's spare server resources may sell as VMs: the mechanisms are neutral and nothing forbids it | `openspec/specs/storefront-publication/architecture.md` — "Listing shapes and the storefront's authority", after the paragraph on feasibility | |
 | D4 the resource type is the category a claim matches by equality, `compute.gpu` for every VM declaration | `openspec/specs/site-capacity/spec.md` — "Resource-pool projection metadata", via archive | |
 | D6 a VM listing resource carries no GPU key when its shape states no GPUs; one dispatch rule decides a resource payload's kind | `openspec/specs/storefront-publication/architecture.md` — "Listing shapes and the storefront's authority", after the paragraph on a published dimension being a commitment | |

@@ -23,6 +23,7 @@ import sqlite3
 from dataclasses import asdict
 
 import pytest
+from arkhai_vms_listings.listing_shapes import resolve_shape
 from market_alkahest.alkahest import get_recipient_arbiter
 from market_alkahest.dev_chain import anvil_address_book_path
 from market_pool_overrides import PoolOverrideClient
@@ -1135,6 +1136,88 @@ async def test_a_stated_shape_negotiates_and_reserves_every_declared_dimension(t
         assert reservation["dimensions"] == {
             "gpu_count": 1, "vcpu_count": 8, "ram_gb": 32, "disk_gb": 100,
         }
+
+
+_CPU_SHAPE = {"cpu": {"count": 16}, "memory": {"gib": 64}}
+_CPU_HOST = {"vcpu_count": 64, "ram_gb": 512}
+
+
+async def test_a_shape_without_gpus_publishes_no_gpu_field_and_refreshes_without_one(world):
+    """Spec scenario "A pool states a shape with no GPUs", its publication: the
+    claim it reserves with is the deal path's to prove."""
+    world.pools.append(
+        _shaped("cpu", gpu_model=None, capacity=_CPU_HOST, shapes=(_CPU_SHAPE,))
+    )
+
+    assert (await _cycle(world))["counts"] == {"publish": 1}
+
+    ((listing_id, listing),) = (await _listings(world)).items()
+    published = world.registries.to("publish", listing_id)
+    assert len(published) == len(world.registries.urls)
+    body = published[0][1]["listing_resource"]
+    assert body == listing["listing_resource"]
+    assert (body["vcpu_count"], body["ram_gb"]) == (16, 64)
+    assert "gpu_count" not in body and "gpu_model" not in body
+    assert all(other["listing_resource"] == body for _, other in published)
+
+    world.registries.sent.clear()
+    world.set_settlement_clauses([settlement_clause(rate="250")])
+    assert (await _cycle(world))["counts"] == {"refresh": 1}
+
+    # A refresh sends every registry the same resource, still with no GPU key.
+    refreshed = world.registries.to("publish", listing_id)
+    assert len(refreshed) == len(world.registries.urls)
+    assert all(other["listing_resource"] == body for _, other in refreshed)
+
+
+async def test_default_shapes_close_once_the_pools_members_declare_no_gpus(world):
+    """Spec scenario "A pool whose members declare no GPUs states no shapes":
+    listings derived from its default shapes close, and the pool is reported."""
+    world.pools.append(pool("broker-a", backing="unbacked", gpu_count=2))
+    await _cycle(world)
+    assert len(await _listings(world)) == 2
+
+    world.pools[0] = pool("broker-a", backing="unbacked", gpu_model=None, capacity=_CPU_HOST)
+    result = await _cycle(world)
+
+    assert result["counts"].get("close") == 2 and "publish" not in result["counts"]
+    assert await _listings(world) == {}
+    assert _entry(await _report(world), "reports", "listing_shapes_required", "broker-a")
+
+
+async def test_a_pool_without_gpus_stating_no_shapes_publishes_nothing_and_is_reported(world):
+    """Spec scenario "A pool whose members declare no GPUs states no shapes"."""
+    world.pools.append(pool("cpu", backing="unbacked", gpu_model=None, capacity=_CPU_HOST))
+
+    result = await _cycle(world)
+
+    assert "publish" not in result["counts"]
+    assert await _listings(world) == {}
+    entry = _entry(await _report(world), "reports", "listing_shapes_required", "cpu")
+    assert entry is not None
+    assert "GPU shapes only" in entry["message"]
+    assert "listing_shapes" in entry["message"]
+
+
+async def test_a_pool_priced_only_per_gpu_model_refuses_its_shape_without_gpus(world):
+    cpu_shape = {"cpu": {"count": 8}, "memory": {"gib": 32}}
+    world.pools.append(
+        _shaped(
+            shapes=(_SHAPE, cpu_shape),
+            pricing={"gpu": {"H100": {"settlements": [settlement_clause()]}}},
+        )
+    )
+
+    with replaced_setting("pricing.settlements", []):
+        await _cycle(world)
+        listings = await _listings(world)
+        derivation = await _derivation(world)
+
+    ((_, listing),) = listings.items()
+    assert listing["listing_resource"]["gpu_model"] == "H100"
+    (refusal,) = derivation["refusals"]
+    assert (refusal["reason"], refusal["pool_id"]) == ("no_settlement_option", "broker-a")
+    assert refusal["shape_digest"] == resolve_shape(cpu_shape).digest
 
 
 # ---------------------------------------------------------------------------

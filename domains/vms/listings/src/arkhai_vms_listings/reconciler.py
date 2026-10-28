@@ -204,16 +204,17 @@ def _site_pool_overrides(
 
 @dataclass(frozen=True)
 class _ProjectedResourceUsage:
+    """One member's identity and GPU usage; zero GPUs when it declares none."""
+
     resource_id: str
     total: int
     available: int
 
 
-# Why a member yields no usage. Each is handled differently: an absent count is
-# reported to the operator, a declared zero is silent, and a malformed count
-# makes the member unresolvable, because an unreadable count is not a zero.
-_GPU_COUNT_ABSENT = "absent"
-_GPU_COUNT_ZERO = "zero"
+# Why a member yields no usage. A malformed count makes the member
+# unresolvable, because an unreadable count is not a zero. A member declaring no
+# GPU count, or a zero, is still a member: its GPU usage is zero, and whether it
+# serves a shape is the shape's feasibility to decide.
 _GPU_COUNT_MALFORMED = "malformed"
 # The projection contract requires every member to state its resource kind. A
 # member that does not is malformed rather than incapable, so it is held like
@@ -229,10 +230,11 @@ def _projected_resource_usage(
 ) -> "_ProjectedResourceUsage | str | None":
     """Derive one projected resource's identity and GPU usage.
 
-    Returns ``None`` if it has no physical_resource_id to key on, or one of the
-    ``_GPU_COUNT_*`` outcomes when its declared GPU count cannot be enumerated.
-    Pure and independently testable: no dict mutation, no accumulation, just
-    this one resource's own facts.
+    Returns ``None`` if it has no physical_resource_id to key on,
+    ``_GPU_COUNT_MALFORMED`` when its declared GPU count cannot be read, or
+    ``_RESOURCE_TYPE_ABSENT`` when it states no resource kind. A member
+    declaring no GPU count uses zero GPUs. Pure and independently testable: no
+    dict mutation, no accumulation, just this one resource's own facts.
     """
     resource_id = str(resource.get("physical_resource_id") or "")
     if not resource_id:
@@ -241,13 +243,11 @@ def _projected_resource_usage(
     if not isinstance(resource_type, str) or not resource_type.strip():
         return _RESOURCE_TYPE_ABSENT
     capacity = resource.get("capacity") or {}
-    if "gpu_count" not in capacity or capacity.get("gpu_count") is None:
-        return _GPU_COUNT_ABSENT
-    raw_total = capacity["gpu_count"]
+    raw_total = capacity.get("gpu_count")
+    if raw_total is None:
+        raw_total = 0
     if isinstance(raw_total, bool) or not isinstance(raw_total, int) or raw_total < 0:
         return _GPU_COUNT_MALFORMED
-    if raw_total == 0:
-        return _GPU_COUNT_ZERO
     total = raw_total
     available_field = resource.get("available")
     if available_field is not None:
@@ -368,8 +368,8 @@ class _SiteDerivationReport:
     compatibility_rule: bool = False
     unresolvable_pools: dict[str, tuple[str, ...]] = field(default_factory=dict)
     unresolvable_members: dict[str, str] = field(default_factory=dict)
-    members_without_gpu_count: dict[str, str] = field(default_factory=dict)
     members_without_resource_type: dict[str, str] = field(default_factory=dict)
+    pools_without_default_shapes: set[str] = field(default_factory=set)
     unreadable_shapes: dict[str, list[str]] = field(default_factory=dict)
     inadmissible_listing_shapes: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     unusable_shape_constraints: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
@@ -390,12 +390,10 @@ class _SiteDerivationReport:
                 for pool_id, codes in sorted(self.unresolvable_pools.items())
             },
             "unresolvable_members": dict(sorted(self.unresolvable_members.items())),
-            "members_without_gpu_count": dict(
-                sorted(self.members_without_gpu_count.items())
-            ),
             "members_without_resource_type": dict(
                 sorted(self.members_without_resource_type.items())
             ),
+            "pools_without_default_shapes": sorted(self.pools_without_default_shapes),
             "unreadable_shapes": dict(sorted(self.unreadable_shapes.items())),
             "inadmissible_listing_shapes": dict(
                 sorted(self.inadmissible_listing_shapes.items())
@@ -439,13 +437,21 @@ _POOL_ENTRIES: dict[str, tuple[str, str, str]] = {
 
 #: The member-keyed categories, as ``_POOL_ENTRIES`` states the pool-keyed ones.
 #: A member whose ``gpu_count`` cannot be read holds its listings (a fungible
-#: pool's whole range), while one declaring none yields no listing and holds
-#: nothing.
+#: pool's whole range). A member declaring no GPUs is not reported on its own
+#: account: it yields no default shape and is judged for any shape stated.
 _MEMBER_ENTRIES: dict[str, tuple[str, str]] = {
     "unresolvable_members": ("hold", "member_gpu_count_unreadable"),
-    "members_without_gpu_count": ("report", "member_gpu_count_missing"),
     "members_without_resource_type": ("hold", "member_resource_type_missing"),
 }
+
+#: What the report of a pool that publishes nothing for want of stated shapes
+#: says, so an operator reading system status learns what to change.
+POOL_SHAPES_REQUIRED_REASON = "listing_shapes_required"
+POOL_SHAPES_REQUIRED_MESSAGE = (
+    "the VM default generates GPU shapes only and no enabled member declares a "
+    "positive GPU count; state listing_shapes for this pool, on its hint or a "
+    "storefront override, to publish it"
+)
 
 
 def site_derivation_entries(report: Mapping[str, Any]) -> list[tuple[str, dict[str, Any]]]:
@@ -470,6 +476,17 @@ def site_derivation_entries(report: Mapping[str, Any]) -> list[tuple[str, dict[s
             )
     for pool_id in report.get("regionless_pools") or ():
         entries.append(("hold", {"pool_id": pool_id, "reason": "pool_region_missing"}))
+    for pool_id in report.get("pools_without_default_shapes") or ():
+        entries.append(
+            (
+                "report",
+                {
+                    "pool_id": pool_id,
+                    "reason": POOL_SHAPES_REQUIRED_REASON,
+                    "message": POOL_SHAPES_REQUIRED_MESSAGE,
+                },
+            )
+        )
     for pool_id, finding in (report.get("undeclared_attributes") or {}).items():
         entries.append(
             (
@@ -608,9 +625,9 @@ def _projected_pool_rows(
     downstream ``publish_priceless`` handling.
 
     Every row carries the pool's resolved shapes, each GPU model's resolved
-    terms (``pricing_by_model``), and the shapes its source members are
-    feasible for (``feasible_shapes``). A listing's terms are those of its
-    shape's model.
+    terms (``pricing_by_model``, with a shape stating no GPUs under ``None``),
+    and the shapes its source members are feasible for (``feasible_shapes``).
+    A listing's terms are those of its shape's model.
     """
     pool_id = str(pool.get("pool_id") or "").strip()
     if not pool_id:
@@ -636,9 +653,7 @@ def _projected_pool_rows(
             continue
         enabled_member_count += 1
         resource_id = str(resource.get("physical_resource_id"))
-        if usage == _GPU_COUNT_ABSENT:
-            report.members_without_gpu_count[resource_id] = pool_id
-        elif usage == _GPU_COUNT_MALFORMED:
+        if usage == _GPU_COUNT_MALFORMED:
             malformed_members.append(resource_id)
             report.unresolvable_members[resource_id] = pool_id
         elif usage == _RESOURCE_TYPE_ABSENT:
@@ -692,6 +707,13 @@ def _projected_pool_rows(
         ]
         holds.add(("pool", site_id, pool_id))
         return []
+    # The default generates GPU shapes only, so a pool stating no shapes whose
+    # members declare no GPUs publishes nothing; reported once, for the pool,
+    # because that is where its operator states the shapes it should sell. A
+    # pool with no enabled member publishes nothing for want of members, which
+    # stated shapes would not change, so it is not reported.
+    if not resolution.stated and usages and not any(usage.total > 0 for usage in usages):
+        report.pools_without_default_shapes.add(pool_id)
 
     # Every declaration was read, so a listing whose policy cannot be computed,
     # or whose offer its own policy excludes, is not derived and an open
@@ -836,7 +858,14 @@ def _projected_pool_rows(
         return declaration.backing.judge(declared, available)
 
     # Terms resolve per GPU model because the hint and configured tiers are
-    # keyed by model; a listing takes its shape's model's terms.
+    # keyed by model; a listing takes its shape's model's terms. A shape
+    # stating no GPUs groups under ``None``: it resolves only the override's and
+    # the flat default's terms and the unkeyed families' rates, so a pool whose
+    # only terms are per GPU model leaves it with no settlement option.
+    models = sorted(
+        {shape.gpu_model for shape in shapes},
+        key=lambda model: (model is not None, model or ""),
+    )
     pricing_by_model = {
         model: resolve_gpu_pricing(
             policy_tags,
@@ -845,13 +874,13 @@ def _projected_pool_rows(
             config_defaults_by_model=hint_resolution.gpu_pricing_defaults_by_model,
             flat_default=hint_resolution.gpu_pricing_flat_default,
         )
-        for model in sorted({shape.gpu_model for shape in shapes})
+        for model in models
     }
     # Family rates resolve per model for the same reason: the GPU family is
     # keyed by model.
-    family_rates_by_model: dict[str, Mapping[str, Any]] = {}
+    family_rates_by_model: dict[str | None, Mapping[str, Any]] = {}
     unreadable_rates: list[str] = []
-    for model in sorted({shape.gpu_model for shape in shapes}):
+    for model in models:
         family = resolve_family_rates(
             policy_tags,
             gpu_model=model,
@@ -1790,7 +1819,9 @@ def closed_available_listing_ids(
                 site_id,
             )
             continue
-        available.append((int(listing_resource["gpu_count"]), listing_id))
+        # Smallest first, then by id, so the order is deterministic; a listing
+        # stating no GPUs orders as zero.
+        available.append((int(listing_resource.get("gpu_count") or 0), listing_id))
     return [listing_id for _, listing_id in sorted(available)]
 
 
