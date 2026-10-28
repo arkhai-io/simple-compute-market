@@ -76,6 +76,14 @@ None.
   listing without GPUs cannot be stated".
 - Coordinates with `bring-host-inventory-under-definition-documents`, which
   changes how host inventory enters the registry.
+- `repair-compute-purchase-recovery` delivers one slice of "make the `gpu` family
+  optional": the compute capability schema requires no family, and a VM shape
+  stated by a pool hint or a storefront override may omit `gpu`. Everything else
+  above stays here: the host fields, the VM default generator for pools without
+  GPUs, bare-metal shapes without GPUs, the resource type of a declaration without
+  GPUs, and the registry filters. That change gates this one's planning, as this
+  change's row in the change index records, so this design is reverified against it
+  first.
 
 ## Permanent documentation impact
 
