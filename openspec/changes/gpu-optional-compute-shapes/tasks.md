@@ -882,7 +882,7 @@ not require GPU fields").
 Files: `e2e-tests/tests/e2e/roles/scenarios/vms/test_listing_shapes.py`, and
 `host_registry.py` for the scenario's declaration.
 
-- [ ] 8.1 Extend `test_listing_shapes.py` with a step after its existing ones: the pool's
+- [x] 8.1 Extend `test_listing_shapes.py` with a step after its existing ones: the pool's
   hint states one GPU-less shape `{cpu: {count: 8}, memory: {gib: 32}}` against a member
   declaring vCPU and memory and no GPU; one publication cycle publishes it with no GPU key in
   the storefront's and the registry's listing; a buyer `vcpu_count>=8` query finds it and a
@@ -890,10 +890,61 @@ Files: `e2e-tests/tests/e2e/roles/scenarios/vms/test_listing_shapes.py`, and
   negotiates, escrows, settles, and provisions it to ready through mock provisioning, and the
   site's reservation holds the shape's vCPU and memory and no GPU. Update the module
   docstring's numbered steps.
-- [ ] 8.2 **Verification checkpoint.** Run `make test-e2e-unit` and `make
+  *Written; runs at validation.* Stage `TestStage09_ShapeWithoutGpus`, after stage 08,
+  needing only stage 00's `site_id`. Two departures from the plan's wording, each for
+  determinism: the GPU-less member is in a pool of its own
+  (`compute-e2e-listing-shapes-cpu-pool`, host `kvm-shapes-cpu`), not the stage-00 pool,
+  because a stated GPU-less shape is feasible on the stage-00 GPU host too (D4), so a
+  reservation there could land on either member; and the discovery queries are scoped by a
+  region no other scenario declares (`Oregon, US`), since the filter spec's capacity
+  filters have lower bounds only and other listings in the lane state vCPUs. The pool
+  carries stage 00's `pricing` hint, keyed by GPU model, which a GPU-less shape cannot use
+  (D8), so a storefront override states that hint's flat clause, which also keeps the
+  stage off the storefront's configured default rate; `09g` removes it. Stages: `09a`
+  declares the pool, host, and a declaration of `{vcpu_count: 16, ram_gb: 64, disk_gb:
+  200}` with no GPU, and writes the override, checked against the live projection; `09b`
+  one cycle publishes `{vcpu_count: 8, ram_gb: 32}` with no `gpu_count`, `gpu_model`, or
+  `disk_gb` at the storefront and the registry; `09c` `region="Oregon, US" vcpu_count>=8`
+  finds one listing and `… gpu_count>=1` none; `09d` arms a completing create rule for the
+  host; `09e` `market buy` through the vCPU query reaches `ready` (escrow and settlement
+  are implied by `ready`, as in stage 04); `09f` the reservation's dimensions are exactly
+  `{vcpu_count: 8, ram_gb: 32}` and the create job has `vm_vcpus` 8, `vm_ram` 32768, and no
+  GPU count; `09g` the override's deletion is confirmed. `host_registry.py`'s
+  `declare_e2e_capacity` and `provision_e2e_executor` take `sellable_units=None` with a
+  capacity naming no `gpu_count`, so the site records no GPU mirror for the machine, and
+  refuse `None` beside a `gpu_count`. The module docstring has step 9; the `e2e_listing_shapes`
+  marker description and the pool-override dependency comment in `e2e-tests/pyproject.toml`
+  name the new stage. Of the registry-discovery delta, this stage shows the GPU filter
+  excluding the listing (`gpu_count`, not `gpu_model`) and a CPU-only query finding it;
+  the `validate-publish` dry run is section 3's integration evidence.
+- [x] 8.2 **Verification checkpoint.** Run `make test-e2e-unit` and `make
   check-comment-hygiene`; the scenario itself runs in the VM lane at validation.
   End-to-end: `e2e_listing_shapes` (8.1).
   Owed by validation: none beyond the pipeline's VM lane.
+  *Done.* `make test-e2e-unit`: 169 passed (it does not import the scenario modules, and
+  neither compiling nor collecting the module was allowed in this session, so stage 09's
+  first import and run are the VM lane's at validation). `make check-change`, comment
+  hygiene included, and `make check-packaging` pass (`e2e-tests/pyproject.toml` changed a
+  comment and a marker description only); root `make test` exited 0 before the
+  fresh-context check's fixes, which touched only the scenario, `host_registry.py`'s
+  docstring, and that `pyproject.toml`, after which `make test-e2e-unit` and `make
+  check-packaging` were rerun and pass. End-to-end, confirmed: `e2e_listing_shapes` stage
+  09 is the section's scenario; no other marker exercises a GPU-less VM listing.
+  Owed by validation: none beyond the pipeline's VM lane, confirmed.
+
+  Fresh-context check: no runtime problem found by reading (imports, fixtures, client
+  signatures, the query grammar for `region="Oregon, US"`, state fields, the e2e source
+  checks); no comment-hygiene or test-level problem. Fixed from it: the override's stated
+  reason was false while the pool had no `pricing` hint (it now carries stage 00's); 09b
+  did not assert the omitted `disk_gb`; 09a and 09g did not measure their writes; a
+  duplicated listing helper; `provision_e2e_executor`'s docstring; the mock output's
+  fixture comment; the `pyproject.toml` marker text. Declined: a dry-run preview before
+  09b's cycle, which no stage of this module takes.
+
+  *Handoff.* Stage 09 is unrun. A first failure there is this section's to fix. Two parts
+  of it no in-process test has exercised: the real site ledger committing and leasing a
+  VM reservation of zero GPU units (it reserves one in `test_shape_feasibility.py`), and
+  the buyer CLI's ranking and display over a GPU-less listing.
 
 ## 9. Closeout
 

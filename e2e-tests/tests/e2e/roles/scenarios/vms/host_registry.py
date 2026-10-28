@@ -62,6 +62,7 @@ E2E_NON_ERC20_HOST = "kvm-non-erc20"
 E2E_DYNAMIC_HOST = "kvm-dynamic"
 E2E_FUNGIBLE_HOSTS = ("kvm-fungible-a", "kvm-fungible-b")
 E2E_LISTING_SHAPES_HOST = "kvm-shapes"
+E2E_LISTING_SHAPES_CPU_HOST = "kvm-shapes-cpu"
 
 #: One pool per scenario, for the same reason as one executor per scenario: a
 #: pool's `listing_mode` is resolved per pool, and its structural default flips to
@@ -73,6 +74,7 @@ E2E_DEAL_CLI_POOL_ID = "compute-e2e-deal-cli-pool"
 E2E_MULTI_REGISTRY_POOL_ID = "compute-e2e-multi-pool"
 E2E_NON_ERC20_POOL_ID = "compute-e2e-non-erc20-pool"
 E2E_LISTING_SHAPES_POOL_ID = "compute-e2e-listing-shapes-pool"
+E2E_LISTING_SHAPES_CPU_POOL_ID = "compute-e2e-listing-shapes-cpu-pool"
 
 
 def _pools(provisioning_client: Any) -> SyncResourcePoolClient:
@@ -225,13 +227,15 @@ def declare_e2e_capacity(
     host_id: str,
     attributes: dict[str, Any],
     pool_id: str,
-    sellable_units: int,
+    sellable_units: int | None,
     capacity: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """Declare one executor's sellable capacity in the site ledger.
 
     `capacity` declares every dimension; its `gpu_count` must equal
-    `sellable_units`. Omitted, the declaration states the GPU count only.
+    `sellable_units`. Omitted, the declaration states the GPU count only. A
+    machine without GPUs passes `sellable_units=None` and a `capacity` naming no
+    `gpu_count`: the site then records no GPU mirror for it, rather than zero.
 
     `sellable_units` has no default on purpose. It must equal what the scenario's
     own seeded resource declares, because that number decides when a slice listing
@@ -265,8 +269,15 @@ def declare_e2e_capacity(
 
 
 def _declared_capacity(
-    sellable_units: int, capacity: dict[str, int] | None
+    sellable_units: int | None, capacity: dict[str, int] | None
 ) -> dict[str, int]:
+    if sellable_units is None:
+        if not capacity or "gpu_count" in capacity:
+            raise ValueError(
+                "a declaration with no sellable GPU units must state a capacity "
+                f"naming no gpu_count, not {capacity!r}"
+            )
+        return dict(capacity)
     if capacity is None:
         return {"gpu_count": sellable_units}
     if capacity.get("gpu_count") != sellable_units:
@@ -285,7 +296,7 @@ def provision_e2e_executor(
     resource_id: str,
     attributes: dict[str, Any],
     pool_id: str,
-    sellable_units: int,
+    sellable_units: int | None,
     listing_mode: str = "specific_resource",
     deliverable_modes: tuple[str, ...] = ("vm",),
     listing_shapes: dict[str, list[dict[str, Any]]] | None = None,
@@ -300,7 +311,8 @@ def provision_e2e_executor(
 
     `sellable_units` is what the declaration offers and must match the scenario's
     seeded resource: declaring more than its listing sells leaves units
-    available after the reserve, so a slice listing never closes.
+    available after the reserve, so a slice listing never closes. `None` declares
+    a machine without GPUs; see `declare_e2e_capacity`.
 
     The pool must exist before a host can join it, and the host before a
     declaration correlates to it. Most scenarios want exactly this sequence once,
