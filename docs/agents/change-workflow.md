@@ -30,12 +30,12 @@ memory.
 | Implementation | `change-implement` | `make implement CHANGE=<change> [SECTION=<n> \| SECTIONS=<n-m>]` | each section's code and tests, its task notes, one commit per section |
 | Implementation review | `change-review` | `make review CHANGE=<change> KIND=implementation` | `reviews/NN-implementation.md` |
 | Validation | `change-validate` | `make validate CHANGE=<change>` | `reviews/NN-validation.md`; pushes `HEAD`, runs the pipeline (`make run-e2e`, `make fetch-e2e-logs`), and dispatches and reads each CI workflow the change's complete sections owe (`make run-ci`, `make validate-ci`) |
-| Triage | `change-triage` | `make triage CHANGE=<change>` | `reviews/NN-<kind>.triage.md` ending with `## Next`, `interventions.jsonl`, accepted fixes in one commit, the index row when a phase-closing review's triage advances the change; whatever it edited that no fix commit holds, in one commit of its own |
+| Triage | `change-triage` | `make triage CHANGE=<change>` | `reviews/NN-<kind>.triage.md` ending with `## Next`, the exit it chose in prose; an outcome naming that exit and the records it triaged; `interventions.jsonl`, accepted fixes in one commit, the index row when a phase-closing review's triage advances the change; whatever it edited that no fix commit holds, in one commit of its own |
 | Pre-closeout review | `change-review` | `make review CHANGE=<change> KIND=pre-closeout` | `reviews/NN-pre-closeout.md` |
 | Closeout | `change-closeout` | `make closeout CHANGE=<change>` | permanent documents, the promotion record, the archived change, one commit |
 | Closeout review | `change-review` | `make review CHANGE=<change> KIND=closeout` | `reviews/NN-closeout.md` |
 | Archive cleanup | `change-archive-cleanup` | `make archive-cleanup CHANGE=<change>` | the index (dependents released, row `archived`), any waiver as a ledger line, one commit, `reviews/pull-request.md`; the capacity figure its latest validation measured (`make record-capacity`), in a commit of its own, or none when nothing was measured; then tears down the change's validation namespace and images (`make -C helm teardown`) and, for a change worked in its own clone, copies its history into your workspace (`make change-history`) |
-| Orchestration | `change-orchestrate` | `make orchestrate CHANGE=<change>` | the change's clone and branch, `orchestrator` and `round` lines in the workflow log, the owner's notes on a round, the ledger line of a waived design review, workflow commits on your word, its own observations of the tooling |
+| Orchestration | `change-orchestrate` | `make orchestrate CHANGE=<change>` | the change's clone and branch, `orchestrator` and `round` lines in the workflow log — your directions among them, on your word — the conversion of a change's records on your word, the owner's notes on a round, the ledger line of a waived design review, workflow commits on your word, its own observations of the tooling |
 
 Every step but the review opens an interactive Claude Code session. With
 `UNATTENDED=1` the same target runs the step headless instead, through
@@ -43,6 +43,27 @@ Every step but the review opens an interactive Claude Code session. With
 `.claude/change-steps.toml`, on its step's models, ending with an outcome appended
 to the change's workflow log. `make plan` unattended resumes the design step's
 session; `FRESH=1` starts a fresh one. The review always runs unattended.
+
+Every step's outcome names the exit it takes as a target — `{"step": "review",
+"kind": "design"}`, `{"step": "round"}`, `{"step": "plan"}` — and a triage's names
+the records it triaged. An outcome is checked against
+`.agents/change-outcome.schema.json`, and its target against the workflow graph, so
+one naming no node is refused. Run interactively, a
+step records its own outcome as its last act:
+
+```text
+python3 scripts/run_change_step.py record <change> <step> --outcome '<the outcome, as JSON>'
+```
+
+It checks the outcome as the wrapper checks an unattended run's, and appends it with
+the session's id, which it reads from `CLAUDE_CODE_SESSION_ID` (`printenv
+CLAUDE_CODE_SESSION_ID` shows it) or is given with `--session`, `HEAD`, and
+`interactive: true`. It refuses without a session id, and inside an unattended run,
+whose outcome the wrapper records. An interactive session closed before it records
+leaves its step in progress where only its outcome says where the change goes: the
+computation names the step again, to be resumed, or its outcome recorded. Where the
+files say it — a round's checked sections, a validation's record — the computation
+reads them, and only the session's report is lost.
 
 An unattended step runs one command per Bash call, and does a read the permissions
 refuse through the Read tool instead. Two shapes are refused by the harness itself,
@@ -85,19 +106,35 @@ The order is the one the phases give: design and its review until the design
 review's triage advances the change; planning; then, per implementation round,
 implementation, its review beside validation of the same commit, and one triage of
 both; a pre-closeout review and its triage; closeout; the closeout review and its
-triage; archive cleanup. A review is not a gate: its triage records under `## Next`
-whether the change advances (`Advance`) or another review round runs (`Another
-round`), asking the owner which once every finding is disposed and before any fix;
-a triage that returns the change to design or planning records `Returned`, and
-once the owner confirms the return, what it leads to is implemented and reviewed
-afresh.
+triage; archive cleanup. A review is not a gate: its triage names its exit among
+those its node declares — the step that advances the change, the plan's next round
+after an implementation round; another review of the same kind; or, before
+closeout, a return to design or planning — asking the owner which once every
+finding is disposed and before any fix; its file's `## Next` records the choice in
+prose, and nothing routes on it. Once the owner confirms a return, what it leads to
+is implemented and reviewed afresh.
+
+That order is a graph: one table in `scripts/change_workflow/graph.py` declares
+each step — a review by its kind, a triage by the kind of review it triages — its
+exits, the records a join waits for, the guards on each exit with the step that
+satisfies each, and the entry guards without which a step cannot do its work.
+`make change-graph` prints it as the Mermaid diagram the `change-workflow`
+architecture shows, and a test fails when that diagram and the table disagree.
+`scripts/change_next_step.py` routes on the exit the last step named, and on your
+latest direction, checking each against the table, as the `change-workflow`
+specification's "The next step is computed from the files" requires: an unmet
+guard names the step that satisfies it, and an exit the table does not allow comes
+to you.
 
 A step that finds the change in the wrong state refuses and says why. Design and
 implementation take only an active change. Closeout archives the change as its last
 step, so every step after it — the closeout review, its triage, validation, archive
 cleanup — finds the change under `openspec/changes/archive/` by its name
 (`python3 scripts/find_change.py <change>`). `make review KIND=closeout` refuses a
-change that is not archived, and `make archive-cleanup` one that is not.
+change that is not archived, and `make archive-cleanup` one that is not. Planning,
+closeout, and archive cleanup ask the next-step computation as they start, and go
+on only when it names them — archive cleanup also when it names a validation
+before it, which it then checks for your waiver.
 
 `make check-change CHANGE=<change>` runs a step's closing checks — comment hygiene,
 the agent skills, the change's citations and task list, the change index, and the
@@ -149,7 +186,54 @@ waiting run's `seq`. Between turns you can take a step over with
 `claude --resume <session>`, the session id on its log line, run in the checkout
 the step ran in, since a session is keyed by its checkout's path; hand back, and
 never resume one concurrently. The orchestrating session rereads the files
-afterwards.
+afterwards. A step you run interactively records its own outcome with `record`;
+when you closed one before it recorded, the computation names its step again: tell
+the orchestrating session, which then starts nothing for it, and resume the session
+or record its outcome yourself, naming the closed session with `--session`. The
+orchestrating session gives you the command and never runs it.
+
+**Directing a change.** You can send a change to any node of the graph outside the
+exits its steps take — another review, a validation before a step, a step past a
+guard that is not met, a confirmed return — by telling the orchestrating session,
+which records your direction, `by: owner`:
+
+```text
+python3 scripts/run_change_step.py note <change> orchestrator --by owner --next validate --target closeout --decision "validate HEAD before closeout" --reason "<why, and what it skips>"
+```
+
+`--next` names the step, `--kind` a review's kind or the kind of review a triage
+triages, `--sections` sections out of the plan's order, and `--target` — qualified
+by `--kind` and `--sections` in turn — what a validation is for; `--resolves` names
+a run the direction settles, such as a return it confirms. The computation names
+the directed step until a run of it is logged, and the step sets its own status. A
+direction checks no exit guard on its way, so its reason says what it skips; it is
+refused, naming the guard, while an unwaivable entry guard of a node it names is
+not met — design, planning, or implementation of an archived change, the closeout
+review, its triage, or archive cleanup of one not archived, a triage with nothing
+awaiting it, a validation naming no target, and `done`, which only archive cleanup
+reaches. The waivers of another design review
+and of archive cleanup's validation are such directions. The orchestrating session
+never directs a step of its own accord, and never records a step's exit for it.
+
+**Converting a change's records.** A change whose workflow log holds a line without
+the log's format marker, `"format": 2` — written by the tooling from before steps
+named their exits — or which has numbered records and no log, is read as nothing
+until it is converted, and the computation brings it to you with the command:
+
+```text
+python3 scripts/run_change_step.py convert <change>
+```
+
+Run between steps, never while one runs. Alone, it writes nothing: it shows the
+direction it proposes to where the change stands, or why it proposes none, and
+every review its conversion line will name, flagging each that no recorded triage
+outcome names, with the first line of the `## Next` or `## Gate` it read.
+`--confirm` writes it, attesting that each flagged triage finished; `--next`, with
+`--kind`, `--sections`, and `--target` as `note` takes them, gives the direction in
+the proposal's place; `--confirm --decline` declines a pending return it proposes
+to confirm. If you will not attest a flagged triage, write nothing: its own session
+finishes it and records its outcome, and the command is run again. It refuses a
+change already converted, or one with a triage still in progress.
 
 **Maintaining the step table.** `.claude/change-steps.toml` gives each step its
 skill, its allow and deny rules, and its models in priority order with their
@@ -361,7 +445,8 @@ table's policy: `REVIEW_MODEL` replaces the review's models with the one named, 
 record and its log line mark the run as an override. The orchestrating session
 never sets them. A pre-closeout review refuses until the latest validation passed
 and names `HEAD`, or an ancestor that differs only in the change's ledger and
-reviews; `UNVALIDATED=1` overrides that. `make design-review CHANGE=<change>` is
+reviews; `UNVALIDATED=1` overrides that, as does your direction to the
+pre-closeout review, logged and not yet used by a run of it. `make design-review CHANGE=<change>` is
 shorthand for `KIND=design`.
 
 A plan names evidence only a push produces — a CI workflow's run, which a change
@@ -390,8 +475,8 @@ above). For a change worked in the workspace the view moves the branch its steps
 run on, so it comes first, and while it is open every step that could commit
 refuses (`make round-view-closed`). The owner's notes on the round go to triage
 with the reviews; under orchestration, the orchestrating session opens and closes
-the view and saves the notes. When the round's triage records another round over a
-fix it committed, the owner reads the fix the same way before the repeat pass is
+the view and saves the notes. When the round's triage names another implementation
+review as its exit over a fix it committed, the owner reads the fix the same way before the repeat pass is
 triaged: `make round-view CHANGE=<change> BASE=<commit>`, over the commit that
 triage's review read, which the next-step computation names as `base`.
 
@@ -413,7 +498,7 @@ openspec/changes/<change>/reviews/
   05-design-external.md              a review pasted from elsewhere
   06-orchestrator.md                 the orchestrating session's observations of the tooling
   pull-request.md                    archive cleanup's merge drafts
-  workflow.jsonl                     one line per unattended run and per orchestrator decision
+  workflow.jsonl                     one line per run, unattended or recorded, and per orchestrator decision
   transcripts/
     01-design.log                    the reviewer's whole session
     07-implement.jsonl               an unattended step's event stream
@@ -430,11 +515,13 @@ the directory in place; for a change worked in its own clone it also copies it i
 your workspace, which holds the history of every cleaned-up change ("History and
 removal", above).
 
-`workflow.jsonl` is written by `scripts/run_change_step.py` alone: each run's
-outcome with its session, commit, model, cost, and denials; each `round` line; and
-each `orchestrator` line, a decision naming the run it resolves or whose denials it
-read and the step it directs. `python3 scripts/run_change_step.py log <change>`
-prints it.
+`workflow.jsonl` is written by `scripts/run_change_step.py` alone: each unattended
+run's outcome with its session, commit, model, cost, and denials; each interactive
+run's outcome as `record` appends it, marked `interactive`; each `round` line; each
+`orchestrator` line, a decision naming the run it resolves or whose denials it read
+and, for your direction, the target it directs; and a conversion's `convert` line.
+Every line carries the log's format marker, `"format": 2`. `python3
+scripts/run_change_step.py log <change>` prints it.
 
 The three steps that edit the index — triage when a phase-closing review's triage
 advances the change, closeout, and archive cleanup — run `make check-change-index`
@@ -460,6 +547,7 @@ agent's proposal is recorded only in the triage file. One JSON object per line:
 review raised; `section` is the `tasks.md` section, or `null`. An entry that revises
 an earlier one starts its `owner_disposition` with `revises <review> <finding>:`.
 When the owner waives archive cleanup's validation of a correction outside
-`openspec/` and `docs/`, archive cleanup records it as a line under the closeout
-review's record with `"finding": "validated"` and the owner's reason. Read together,
+`openspec/` and `docs/` — by their direction to archive cleanup — archive cleanup
+records it as a line under the closeout review's record with `"finding":
+"validated"` and the owner's reason. Read together,
 a change's ledgers show where the guidance or the skills fell short.

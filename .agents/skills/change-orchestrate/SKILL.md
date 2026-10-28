@@ -23,9 +23,9 @@ uses the owner's interactive permissions; the step table limits unattended runs
 only.
 
 You relay and route; you do not judge. Read only what routing and recovery need:
-the computation and the inputs it names — the index row, the triage files'
-`## Next`, `tasks.md`'s list of sections — the workflow log, and the denials
-report, through which alone you read a transcript. Never read code, reviews, or
+the computation and the inputs it names — the index row, `tasks.md`'s list of
+sections — the workflow log, and the denials report, through which alone you read
+a transcript. Never read code, reviews, or
 change documents to form or state a view of a finding or a design question, and
 add nothing to a step's message but a routing note ("validation and review are
 starting") and the `make change-watch` line.
@@ -61,10 +61,37 @@ the workspace holds triage alone, and the computation says when it does.
 Files prevail over a disagreeing log: say what disagreed and record why you
 followed the files. If the computation errors or answers `unclassified`, inspect
 its reported inputs and the files it names. Decide routing or recovery yourself
-only when it decides no finding, answers no design question, and changes no
-status; record the decision and evidence through `note`. Otherwise bring the
-evidence and the options to the owner in prose and wait. Never silently replace
-the computation with your own transition table.
+only when it decides no finding, answers no design question, changes no status,
+and directs no step; record the decision and evidence through `note`. Otherwise
+bring the evidence and the options to the owner in prose and wait. Never silently
+replace the computation with your own transition table: the workflow's graph is
+the table in `scripts/change_workflow/graph.py`, which `make change-graph` draws.
+
+### A change not yet converted
+
+A log holding a line without the format marker, or numbered records with no log,
+is read as nothing until the change's records are converted: the computation names
+the owner with the command, `convert`, its reason naming the first unmarked line's
+seq or the missing log. Between
+steps, never while one runs, on the owner's word, run it to show what it would
+write:
+
+```text
+python3 scripts/run_change_step.py convert <change>
+```
+
+It writes nothing yet. Relay what it shows as it shows it: the direction it
+proposes to where the change stands, or why it proposes none, and every review its
+conversion line will name, flagging those no recorded triage outcome names, each
+with the first line of the `## Next` or `## Gate` it read. Confirming attests that
+each flagged triage finished; an owner who will not attest one has its triage
+finished by its own session, which records its outcome, and the command run again,
+writing nothing meanwhile. Otherwise run it again as the owner answers: `--confirm`
+to write the proposal; `--confirm --next <step>`, with `--kind`, `--sections`, or
+`--target` as they qualify it, for a direction they give in its place; `--confirm
+--decline` where it proposes confirming a pending return the owner declines. A
+refusal — a triage still in progress, a direction an entry guard refuses — goes to
+the owner as it stands. Recompute once it has written.
 
 ### The branch decision
 
@@ -144,9 +171,10 @@ waiting runs distinct. Never advance with a
 process still running or bypass a guard that refuses. A failed review has no
 published result; an earlier record does not count.
 
-For `round`, record the planned round the computation names, as it names it,
-just before starting its first session — copying the list is routing, not a
-reading of the plan:
+For `round`, record the round the computation names, as it names it, just before
+starting its first session — copying the list is routing, not a reading of the
+plan — with its `by`: `plan` for the plan's next round, `triage` or `owner` for
+sections a triage's exit or the owner's direction names out of the plan's order:
 
 ```text
 python3 scripts/run_change_step.py note <change> round --sections '1,2;3' --by plan
@@ -154,6 +182,13 @@ python3 scripts/run_change_step.py note <change> round --sections '1,2;3' --by p
 
 That is one session for sections 1 and 2 and another for 3, reviewed as one
 round. Recompute, and run its sessions.
+
+A result naming validation carries its `target`, the exit it is for — the round's
+triage in a round's join, the exit whose guard it remedies, or the target of the
+owner's direction to it — and the step's outcome names it back. Say it in the
+relay ("validation of `HEAD`, for closeout"), and in what you tell the owner of any
+result carrying `target`: an unmet guard's remedy, or an owner result naming the
+exit it holds.
 
 Before any long-running unattended turn — validation, implementation, a review,
 closeout, or a discussion resumed to apply fixes or run checks — tell the owner
@@ -181,7 +216,11 @@ session (`make plan CHANGE=<change> UNATTENDED=1 FRESH=1`) only when the owner
 asks for one; you judge no session's size. Closeout and archive cleanup are
 delegated like other steps, with their questions relayed; archive cleanup drafts
 the merge message and pull request, which you publish at `done`. Recompute after every
-outcome; its free-text `next` is not a routing command.
+outcome: its `next` is the exit the step chose, which the computation checks
+against the graph and routes on — an exit the step's node does not declare, a
+validation naming another target than it was given, an unmet guard no step can
+satisfy, or a target an entry guard refuses comes to the owner, carrying the step's `choice` or the `target` it holds — and you never route
+on it yourself.
 
 ## Relay each discussion turn
 
@@ -192,11 +231,11 @@ owner's reply back as written. A line carrying `earlier` is a run whose session
 took more turns after reporting — a wake-up, a background command finishing — and
 is logged from its last: show each earlier message too, before the last, since the
 report is often the earlier one. Design and triage stay conversations with the
-owner. A triage records in its file's `## Next` whether the change advances,
-another review round runs, or the triage returned the change to an earlier phase,
-and the computation routes on that; there is no gate
-to bring to the owner, and a triage with nothing to dispose of advances without
-them.
+owner. A triage names its exit in its outcome — the change advances, another review
+round runs, or the triage returns the change to an earlier phase — with the records
+it triaged, and the computation routes on that; its file's `## Next` is prose that
+nothing routes on. There is no gate to bring to the owner, and a triage with
+nothing to dispose of advances without them.
 
 An `owner` result carrying `merging` is a merge in progress in the checkout; it
 concludes as "Maintain the workflow" says, and nothing else runs until it has.
@@ -213,39 +252,77 @@ review ending beside a validation question must not receive its answer. Recheck
 that the run still waits before resuming. Pass the owner's answer faithfully,
 with proper shell quoting or structured command arguments.
 
-A `returned` outcome proposes an earlier phase. Show its message and evidence to
-the owner; leave the status unchanged until confirmation. Record confirmation with
-`--by owner --resolves <returned-seq> --next <step>` (`plan` for planning).
-Recompute; the directed leaf sets its phase's status. A declined return also needs
-an explicit owner disposition. A repeat review the owner asks for outside a triage
-records `--next review --kind <kind>` with no `resolves`: no run waits on it.
+### The owner's directions
+
+Every direction is the owner's: a confirmed return, a repeat review, a waiver, and
+an intervention sending the change to any node of the graph. Record one only on
+their word, `--by owner`, its target as `--next <step>`, with `--kind <kind>` for
+a review or a triage (the kind of review it triages), `--sections '1,2;3'` for
+sections out of the plan's order, and `--target <step>` — itself qualified by
+`--kind` and `--sections` — for a validation, naming what it is for:
+
+```text
+python3 scripts/run_change_step.py note <change> orchestrator --by owner --next validate --target closeout --decision "validate HEAD before closeout" --reason <the owner's words>
+```
+
+You direct nothing of your own accord, and never record a step's exit on its
+behalf. A direction checks no exit guard on the way there, so its `reason` says
+what it skips. The log's writer refuses one an unwaivable entry guard of a node it
+names refuses — design, planning, or implementation of an archived change; the
+closeout review, its triage, or archive cleanup of a change not archived; a triage
+with no review of its kind awaiting it; a validation naming no target; `done`,
+which only archive cleanup reaches — naming the guard: relay the refusal. The computation names the directed step until a run of it is
+logged, and the step sets its own status as it starts.
+
+A `returned` outcome proposes an earlier phase, its `next` the step it returns to.
+Show its message and evidence to the owner; leave the status unchanged until
+confirmation. Record confirmation as their direction resolving the run, `--by
+owner --resolves <returned-seq> --next <step>`, the return's own target unless the
+owner names another. Recompute; the directed leaf sets its phase's status. A
+declined return also needs an explicit owner disposition, a decision resolving the
+run with no `--next`. A repeat review the owner asks for outside a triage is a
+direction with no `resolves`, since no run waits on it: `--by owner --next review
+--kind <kind>`.
 
 After a confirmed return to design, once the design step has finished, the
 computation names a design review of what it settled. The owner may waive that
-review. Only on the owner's word, record it as their decision directing planning,
-naming no run:
+review. Only on the owner's word, record it as their direction to planning, naming
+no run:
 
 ```text
 python3 scripts/run_change_step.py note <change> orchestrator --by owner --next plan --decision "waives another design review" --reason <the owner's reason>
 ```
 
-The log accepts it only while the change is `in design` and its latest design run
-finished after the confirmed return. Append the waiver's line to the change's
+Append the waiver's line to the change's
 `interventions.jsonl` — the clone's, for a change worked there — uncommitted, for
 planning to commit with its plan:
 `{"review": "plan", "finding": "<the decision the design step settled>",
 "section": null, "lens": "readiness", "basis": "judgement", "severity": null,
 "agent_position": "the next-step computation named another design review",
 "owner_disposition": "<the owner's waiver and reason>", "summary": "<one line>"}`.
-Recompute: the computation names planning, and planning's entry check accepts the
-waiver.
+Recompute: the computation names planning, and planning's entry check, which asks
+the computation, accepts it.
 
 When the computation names validation, or the owner, before archive cleanup —
 `HEAD` changes a path outside `openspec/` and `docs/` since the closeout review —
 the owner may waive that validation, judging the paths its reason names. Only on
 the owner's word, record `--by owner --next archive-cleanup` with no `resolves`,
-the paths in its reason; archive cleanup's own check then asks the owner and
-writes the waiver to the ledger.
+the paths in its reason; archive cleanup finds the direction in the log and writes
+the waiver to the ledger.
+
+**An interactive run left unrecorded.** A step the owner runs interactively records
+its own outcome with `record`. When the owner tells you they ran a step themselves
+and closed its session before it recorded, the computation names that step again,
+as though no run of it had happened, so start nothing for it: the owner resumes the
+session, or records its outcome themselves. Give them the command, naming the
+closed session, since run from any other session `record` would read that other
+session's id:
+
+```text
+python3 scripts/run_change_step.py record <change> <step> --session <the closed session's id> --outcome '<the outcome, as JSON>'
+```
+
+Never run it yourself: a step's exit is the step's, or the owner's, to record.
 
 A prerequisite `blocked` outcome halts this workflow. Relay what the owner must
 do; never orchestrate the prerequisite. Design writes its proposal in a separate
@@ -403,11 +480,13 @@ from Git's view state and finish that reading; preserve notes already saved.
 Never discard or commit the owner's edits to force a clean checkout.
 
 The records and the owner's notes go to a fresh triage session together. Triage
-commits accepted fixes, pushes them, and records `## Next`; the computation then
-names validation of the fix commit, and the next round, the pre-closeout review,
-or another review round as the triage recorded.
+commits accepted fixes, pushes them, and names its exit — the next round, sections
+out of the plan's order, the pre-closeout review, or another implementation
+review; the computation then names validation of the fix commit, carrying that
+exit as its target, and the exit once the validation passed.
 
-**A repeat pass.** When a triage records another round over a fix it committed,
+**A repeat pass.** When a triage names another implementation review as its exit
+over a fix it committed,
 the owner reads the fix as they read the round: the computation's `round-view`,
 or its validation or review carrying `reading`, then names `base`, the commit the
 earlier pass's review read. Open the view with `make round-view CHANGE=<change>
@@ -468,27 +547,33 @@ merge is in progress the computation names no waiting run, so a question or stop
 from that run is resumed by the `seq` on the line its target printed when it
 ended — the one run you started — after `python3 <clone>/scripts/run_change_step.py
 log <change> --last 3` confirms it is still the latest. Recompute once the merge is
-concluded and pushed. Its `implement` line makes the computation report a
-`disagreement` while the change is in design or planning: the files decide, as
-always, and you record that the run was the merge's.
+concluded and pushed. A merge is the owner's intervention, so the run names an
+exit implementation does not declare and its message says where the change stood:
+the computation names the owner with that choice. Relay it, and record where the
+owner directs the change, usually where it stood before the merge.
 
-## Record decisions through the wrapper
+## Record decisions through the log's writer
 
-The wrapper alone writes `reviews/workflow.jsonl`. Use:
+`reviews/workflow.jsonl` is written only through `scripts/run_change_step.py`: the
+wrapper's line for each unattended run, a review's among them, `record`'s for an
+interactive one, the `round` and decision lines `note` writes, and `convert`'s. Every line it writes carries the log's format
+marker. Use:
 
 ```text
 python3 scripts/run_change_step.py note <change> orchestrator --by <owner-or-orchestrator> --decision <decision> --reason <reason>
 ```
 
 Add `--reads <seq>` for the run whose denials were read, `--resolves <seq>` only
-for the run settled, and `--next <step>` for a direction, with `--kind <kind>`
-for review. A confirmed return resolves its run; a repeat review, and the owner's
-waiver of a design review or of archive cleanup's validation, name no run.
+for the run settled, and, for the owner's direction alone, `--next <step>` with
+the `--kind`, `--sections`, and `--target` that qualify it ("The owner's
+directions"). A confirmed return resolves its run; a repeat review, and the
+owner's waiver of a design review or of archive cleanup's validation, name no run.
 Record every routing or recovery decision, the owner's included, with its reason.
 Never append log lines by hand or clear one run with a decision about another.
-Leaf skills record `## Next`, design decisions, and the intervention ledger: relay
-the owner's answer to the waiting leaf rather than substituting your own record.
-The ledger line of the owner's waiver of a design review is the one you write.
+Leaf skills record their exits, design decisions, and the intervention ledger:
+relay the owner's answer to the waiting leaf rather than substituting your own
+record. The ledger line of the owner's waiver of a design review is the one you
+write.
 
 ## Report what only you see
 

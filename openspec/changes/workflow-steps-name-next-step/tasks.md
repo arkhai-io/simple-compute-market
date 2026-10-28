@@ -1077,7 +1077,7 @@ D11; requirement "The owner directs a change's next step"). Touches
 `.agents/skills/change-orchestrate/SKILL.md`, `docs/agents/change-workflow.md`, and
 `.claude/change-steps.toml`.
 
-- [ ] 9.1 `change-orchestrate`: every direction is the owner's — a confirmed return, a
+- [x] 9.1 `change-orchestrate`: every direction is the owner's — a confirmed return, a
       repeat review, a waiver, an intervention to any node — written with `--next`,
       `--kind`, `--sections`, and `--target`; the orchestrating session directs
       nothing on its own and never records a step's exit; a result's `target` shown
@@ -1086,19 +1086,69 @@ D11; requirement "The owner directs a change's next step"). Touches
       flags for the owner's confirmation; `record` for a step the owner ran
       interactively and closed before recording; "its free-text `next` is not a
       routing command" replaced by the exit the outcome names.
-- [ ] 9.2 `docs/agents/change-workflow.md`: the triage row of the steps table, the
+      A new "The owner's directions" subsection holds the flags, the writer's
+      refusals by entry guard (the archive both ways, a triage with nothing
+      awaiting it, a validation with no target, `done`), returns confirmed and
+      declined, repeat reviews, and the waivers; the design-review waiver's old gate
+      (`in design`, a finished redesign) is gone, and archive cleanup finds the
+      waiver's direction in the log. "A change not yet converted" relays `convert`'s
+      preview and writes with `--confirm`, `--next`, or `--confirm --decline` on the
+      owner's word. A round is recorded with the computation's `by` (`plan`,
+      `triage`, `owner`); a merge run's undeclared exit is relayed to the owner for
+      their direction; the log's writers are listed as the wrapper, `record`,
+      `note`, and `convert`. Correction to the plan: the orchestrating session
+      does not run `record` for a step the owner closed unrecorded — the delta's
+      "MUST NOT … record a step's exit on its behalf" has no exception, and a line
+      it wrote would read as the step's own — so it gives the owner the command,
+      naming the closed session with `--session`, and starts nothing for the step;
+      it acts when the owner says they ran a step interactively, not on the
+      computation's reason, which carries the in-progress wording whenever a step is
+      named before its first run.
+- [x] 9.2 `docs/agents/change-workflow.md`: the triage row of the steps table, the
       paragraph on the order of steps (`## Next` tokens), "Orchestrating a change"
       and "Answering and taking over" for exits, directions, `record`, `convert`, and
       `make change-graph`.
-- [ ] 9.3 `.claude/change-steps.toml` — the orchestrator's, on the owner's word,
+      Also: the orchestration row (directions, conversion); a paragraph on exits as
+      targets and `record` after the unattended-run paragraph; the graph's table,
+      `make change-graph`, and the drift test beside the order of steps, routing
+      cited to the spec's "The next step is computed from the files"; the entry
+      checks that ask the computation; "Directing a change" and "Converting a
+      change's records" under "Orchestrating a change"; the pre-closeout review's
+      override by a direction; the log's writers and format marker; the repeat
+      pass's wording; the ledger's waiver by direction.
+- [x] 9.3 `.claude/change-steps.toml` — the orchestrator's, on the owner's word,
       before section 8's session starts, committed by that session with section 8:
       every step may run `printenv CLAUDE_CODE_SESSION_ID`, and no broader reading
       of the environment (D11).
-- [ ] 9.4 Verification: `make check-agent-skills`; the step table loads
+      Correction to the plan: committed by the orchestrating session on the owner's
+      word as its own commit, 0d4535448, before section 8 started, in `[common]`;
+      sections 8 and 9 carry no `.claude/` edit. `test_change_workflow_steps.py`
+      loads the table (9.4).
+- [x] 9.4 Verification: `make check-agent-skills`; the step table loads
       (`test_change_workflow_steps.py`, unit); `make test`; `make check-change
       CHANGE=workflow-steps-name-next-step`; the guide's commands run as written
       (`make change-graph`, `run_change_step.py record --help`, `convert --help`).
       End-to-end: none, and none is owed.
+      `make check-agent-skills`: passed. `test_change_workflow_steps.py`, unit:
+      36 passed. `scripts/tests`: 1788 passed. `make test`: passed, before the
+      fresh-context check's fixes, which touched only the two Markdown files. `make
+      check-change`: every check passes. `make change-graph`: ran, printing the
+      table's Mermaid rendering. `run_change_step.py record --help` and `convert
+      --help` were denied in this run (no rule allows them); in their place every
+      command and flag the guide and the skill give was read against `cli.py`'s
+      parser, and each exists as written. The fresh-context check ran once on this
+      section; its fixes were not checked again. End-to-end: none, confirmed; no
+      `Owed by validation:` line.
+
+Handoff from section 9: the orchestrate skill and the guide describe exits,
+directions, `record`, and `convert`; the change's skills now all write targets.
+Left for closeout (10.3, 10.9): the guide's account of the graph and of the log is
+contributor procedure, and its routing sentence cites the spec; the delta's
+MODIFIED scenario "The owner waives archive cleanup's validation under
+orchestration" still says archive cleanup "asks the owner", against the ADDED "by
+a direction" scenario and both skills (section 8's handoff); and the permanent
+`change-workflow` spec and architecture still describe the tokens until the archive
+and 10.9 rewrite them.
 
 ## 10. Closeout
 
