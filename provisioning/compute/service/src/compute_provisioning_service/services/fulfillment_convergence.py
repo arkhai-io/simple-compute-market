@@ -79,6 +79,9 @@ class FulfillmentConvergenceWatchdog:
         # the same rows underneath it.
         self._resume_event = asyncio.Event()
         self._resume_event.set()
+        # Timer cycles past the gate and not yet finished. A pause stops new
+        # ones at the gate; one already running finishes first.
+        self._timer_cycles_in_flight = 0
 
     def pause(self) -> None:
         """Stop timer-driven cycles; explicit cycles still run."""
@@ -94,6 +97,17 @@ class FulfillmentConvergenceWatchdog:
     @property
     def is_paused(self) -> bool:
         return not self._resume_event.is_set()
+
+    @property
+    def is_at_gate(self) -> bool:
+        """Paused with no timer cycle running, so none can run until resumed.
+
+        A timer cycle that passed the gate before the pause keeps running to
+        its end; until it does the watchdog is paused but not yet held, and a
+        caller holding it waits for this. An explicit ``run_cycle`` or
+        ``advance_cycle`` is the caller's own and does not count.
+        """
+        return self.is_paused and self._timer_cycles_in_flight == 0
 
     async def advance_cycle(self) -> dict[str, object]:
         """Run one cycle guaranteed to reach this worker's own claimed rows.
@@ -144,12 +158,15 @@ class FulfillmentConvergenceWatchdog:
         logger.info("[FULFILLMENT_CONVERGENCE] Started (interval=%ss)", interval)
         while True:
             try:
-                if not self._resume_event.is_set():
+                # Read again after each wake: a resume and a pause in quick
+                # succession wake the waiter with the watchdog paused again,
+                # and a pause that answered "at the gate" must hold this cycle.
+                while not self._resume_event.is_set():
                     logger.debug(
                         "[FULFILLMENT_CONVERGENCE] Cycle blocked — watchdog is paused"
                     )
                     await self._resume_event.wait()
-                await self.run_cycle()
+                await self._run_timer_cycle()
                 await asyncio.sleep(interval)
             except asyncio.CancelledError:
                 logger.info("[FULFILLMENT_CONVERGENCE] Cancelled, shutting down")
@@ -157,6 +174,13 @@ class FulfillmentConvergenceWatchdog:
             except Exception:
                 logger.exception("[FULFILLMENT_CONVERGENCE] Unhandled cycle error")
                 await asyncio.sleep(interval)
+
+    async def _run_timer_cycle(self) -> dict[str, object]:
+        self._timer_cycles_in_flight += 1
+        try:
+            return await self.run_cycle()
+        finally:
+            self._timer_cycles_in_flight -= 1
 
     async def run_cycle(self) -> dict[str, object]:
         """Run one production convergence cycle and return bounded diagnostics.

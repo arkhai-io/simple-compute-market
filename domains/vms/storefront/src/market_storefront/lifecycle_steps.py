@@ -24,6 +24,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from core_storefront.stage_log import stage_event
+from market_alkahest import ALKAHEST_CHAIN_PROBE_LOOP, ALKAHEST_CHAIN_PROBE_ROUTE
 from market_capacity_publication import SiteProjectionState
 from market_contact_exchange import INTRODUCTION_RETENTION_ROUTE
 from market_storefront_kit import (
@@ -218,6 +219,15 @@ async def introduction_retention_preview() -> Mapping[str, Any]:
     return await retention.preview()
 
 
+async def alkahest_chain_probe_step() -> Mapping[str, Any]:
+    """Probe each configured chain; answers disabled with no
+    Alkahest section, since then there is no probe."""
+    probe = _container.resolved_alkahest_chain_probe
+    if probe is None:
+        return {"loop": ALKAHEST_CHAIN_PROBE_LOOP, "enabled": False}
+    return {"loop": ALKAHEST_CHAIN_PROBE_LOOP, **(await probe.step())}
+
+
 def _fulfillment_resume_interval() -> float:
     return float(getattr(settings, "fulfillment_resume_sweep_interval", 30))
 
@@ -242,6 +252,11 @@ def register_vm_lifecycle_steps() -> None:
         route=INTRODUCTION_RETENTION_ROUTE,
         step=introduction_retention_step,
         preview=introduction_retention_preview,
+    )
+    register_step(
+        ALKAHEST_CHAIN_PROBE_LOOP,
+        route=ALKAHEST_CHAIN_PROBE_ROUTE,
+        step=alkahest_chain_probe_step,
     )
 
 
@@ -279,7 +294,9 @@ def register_capacity_events_fan_out() -> None:
 
 
 def register_vm_loops(
-    *, retention_interval_seconds: float | None = None
+    *,
+    retention_interval_seconds: float | None = None,
+    alkahest_probe_interval_seconds: float | None = None,
 ) -> dict[str, float]:
     """Register each loop's timer over its step, with its configured interval,
     and the capacity-event pollers' fan-out.
@@ -292,7 +309,11 @@ def register_vm_loops(
     first one back gives an operator who holds the loops as the storefront
     starts a whole interval to do so. The retention sweep is registered only
     when ``retention_interval_seconds`` is given, which startup does while
-    contact exchange is composed. Publication gets a fresh wake each time,
+    contact exchange is composed, and the Alkahest chain probe only when
+    ``alkahest_probe_interval_seconds`` is, which startup does while an
+    Alkahest section is configured; the probe's first cycle runs as its timer
+    starts, since readiness reads every chain unprobed until it has run.
+    Publication gets a fresh wake each time,
     bound to the event loop its timer runs on. Returns each registered loop's
     interval, by loop name.
     """
@@ -349,6 +370,14 @@ def register_vm_loops(
             preview=introduction_retention_preview,
             interval_seconds=retention_interval_seconds,
             initial_delay_seconds=retention_interval_seconds,
+        )
+    if alkahest_probe_interval_seconds is not None:
+        intervals[ALKAHEST_CHAIN_PROBE_LOOP] = alkahest_probe_interval_seconds
+        register_loop(
+            ALKAHEST_CHAIN_PROBE_LOOP,
+            route=ALKAHEST_CHAIN_PROBE_ROUTE,
+            step=alkahest_chain_probe_step,
+            interval_seconds=alkahest_probe_interval_seconds,
         )
     return intervals
 

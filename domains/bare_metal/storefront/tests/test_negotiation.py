@@ -133,6 +133,28 @@ async def test_policy_rejects_invalid_physical_request(
 
 
 @pytest.mark.asyncio
+async def test_policy_refuses_access_to_an_unbacked_listing_rather_than_raising() -> None:
+    """An unbacked listing carries no host and no access methods, so a round
+    asking for SSH access to it is refused as access the listing does not list."""
+    listing = _listing()
+    for term in ("host_id", "physical_host_id", "access_methods"):
+        del listing["listing_resource"][term]
+    listing["listing_resource"]["capacity_backing"] = "unbacked"
+
+    result = await default_seller_round_hook()(
+        listing=listing,
+        message=_message(),
+        history=_history(),
+        seller_reference_amount=100,
+        listing_source=MATCHES,
+    )
+
+    assert result.decision.action == "reject"
+    assert result.decision.reason == "bare_metal_access_method_not_listed"
+    assert "bare_metal_terms" not in result.intermediate
+
+
+@pytest.mark.asyncio
 async def test_policy_applies_shared_listed_price_after_domain_guards() -> None:
     accepted = {
         "chain_name": "base",
@@ -207,19 +229,16 @@ def _escrow(amount: str) -> dict:
     }
 
 
-def test_every_chain_begins_with_the_inventory_guard() -> None:
-    assert seller_policy_names() == [
-        "has_matching_inventory_guard",
-        *DEFAULT_SELLER_POLICIES,
+def test_every_chain_begins_with_the_inventory_and_escrow_shape_guards() -> None:
+    """No configuration drops either: the listing, not a seller policy, says
+    which escrows can settle."""
+    guards = ["has_matching_inventory_guard", "escrow_shape_guard"]
+    assert seller_policy_names() == [*guards, *DEFAULT_SELLER_POLICIES]
+    assert seller_policy_names(["bisection"]) == [*guards, "bisection"]
+    assert seller_policy_names(["escrow_shape_guard", "listed_price"]) == [
+        *guards,
+        "listed_price",
     ]
-    assert seller_policy_names(["escrow_shape_guard", "bisection"]) == [
-        "has_matching_inventory_guard",
-        "escrow_shape_guard",
-        "bisection",
-    ]
-    assert seller_policy_names(
-        ["has_matching_inventory_guard", "listed_price"]
-    ) == ["has_matching_inventory_guard", "listed_price"]
 
 
 def test_an_unknown_policy_is_refused_when_the_chain_is_composed() -> None:

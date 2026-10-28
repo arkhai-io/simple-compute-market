@@ -50,7 +50,10 @@ malformed view, refusing the site's generation as it refuses any malformed view.
 pool whose declarations do not resolve is held, and its views' terms are not judged.
 The storefront MUST report each resource the site projects with a
 `publication_view_problems` entry for the bare-metal view as a
-`publication_view_unbuildable` report in that site's derivation.
+`publication_view_unbuildable` report in that site's derivation. Such a declaration
+is unreadable, not withdrawn: an open listing of the resource MUST be held, neither
+closed nor refreshed, unless the declaration is disabled or its pool no longer admits
+bare metal, which still closes it as a withdrawn source.
 
 #### Scenario: An unbacked declaration names a host
 
@@ -78,6 +81,15 @@ The storefront MUST report each resource the site projects with a
   bare-metal view
 - **THEN** no listing is derived from it, and the site's derivation reports
   `publication_view_unbuildable` with the problem
+
+#### Scenario: An open listing's resource loses its view
+
+- **WHEN** the site projects the Physical Resource behind an open bare-metal listing with
+  a `publication_view_problems` entry for the bare-metal view, its declaration enabled
+  and its pool still admitting bare metal
+- **THEN** the listing keeps its identity and its last-published terms, nothing is sent to
+  a registry, and the site's derivation reports `publication_view_unbuildable`
+- **AND** once the site builds the view again, the listing is reconciled as usual
 
 ### Requirement: A compute candidate with no settlement option yields no listing
 
@@ -205,7 +217,17 @@ MUST NOT. Each storefront's system status MUST report `publication_derivation` f
 per site, as `holds`, `refusals`, and `reports`: a site that derived cleanly present with
 empty lists, and a configured site no publication cycle has derived since start absent.
 The log MUST record each entry as a warning when it first appears in a site's derivation
-and at info when it clears, and MUST NOT log a standing entry again or log a preview.
+and at info when it clears, and MUST NOT log a standing entry again or log a preview. A
+cycle that cannot read a site at all holds the site, and the site's other entries from
+the last cycle that read it MUST stand beside that hold until a cycle reads the site
+again.
+
+#### Scenario: A site's projection becomes unknown
+
+- **WHEN** a site whose pool is held for a missing region becomes unreachable, and later
+  answers again with the pool unchanged
+- **THEN** status reports the site's hold beside the pool's while it is unreachable, and
+  the log records only the site's hold appearing and clearing
 
 #### Scenario: A pool states no region for many cycles
 
@@ -234,6 +256,43 @@ and at info when it clears, and MUST NOT log a standing entry again or log a pre
 - **WHEN** an administrator reads the system status of a VM and of a bare-metal storefront
   each with a pool that states no region
 - **THEN** both report it under the site's `holds` with the reason `pool_region_missing`
+
+### Requirement: API-credit listing creation waits for or names an unreachable mechanism
+
+An API-credit storefront's configured seed listing MUST be created by a lifecycle loop
+step, never during startup: the step MUST wait while the credits service cannot be
+reached or a mechanism the seed's clauses use is unknown, MUST stop after logging once on
+a configuration failure, and MUST stop once the listing exists. A create request refused
+only because a mechanism's readiness is unknown MUST answer 503 naming the unreached
+mechanism, and a create refused for configuration MUST answer 400 with its blocker codes.
+The storefront CLI's listing commands MUST act through the running storefront's routes and
+MUST NOT build the storefront's services or open its database in their own process.
+
+#### Scenario: A storefront starts with its dependencies up
+
+- **WHEN** an API-credit storefront with a configured seed starts while its chain and its
+  credits service answer
+- **THEN** the seed listing is published once its chain's first probe succeeds
+
+#### Scenario: A storefront starts with its chain down
+
+- **WHEN** an API-credit storefront with a configured seed starts while its chain cannot
+  be reached, and the chain later answers
+- **THEN** no seed listing is created while the chain is unreachable, and it is published
+  after a probe reaches the chain, without a restart
+
+#### Scenario: An operator creates a listing before the chain is reached
+
+- **WHEN** an operator creates an API-credit listing whose only mechanism is Alkahest
+  before any probe has reached its chain
+- **THEN** the storefront answers 503 naming Alkahest's unreached chain, and the same
+  request succeeds once a probe reaches it
+
+#### Scenario: An operator publishes through the CLI
+
+- **WHEN** an operator runs the storefront CLI's publish command
+- **THEN** the listing is created by the running storefront through its create route, and
+  the command fails naming the storefront when it cannot be reached
 
 ## MODIFIED Requirements
 
@@ -271,7 +330,10 @@ these hold:
 
 - the shape digest differs from the binding's;
 - the region differs from the published region;
-- the Physical Resource is absent, disabled, or no longer projected under its bound pool.
+- the Physical Resource is absent, disabled, or no longer projected under its bound pool;
+- the site projects the Physical Resource, enabled in a pool admitting bare metal, with the
+  problems that kept it from building a bare-metal view, which the storefront's record of
+  the refusal names.
 
 For a capacity-backed listing it MUST refuse with the availability reason when the held
 projection's bare-metal view shows the Physical Resource unavailable; an unbacked listing
@@ -293,6 +355,13 @@ the site by at most that window; admission at the site remains authoritative.
 - **WHEN** a buyer opens a negotiation on a capacity-backed bare-metal listing whose
   Physical Resource is reserved by another deal, as the held projection shows
 - **THEN** the opening is refused with the availability reason
+
+#### Scenario: The site builds no view for the listing's resource
+
+- **WHEN** a buyer opens a negotiation on a bare-metal listing whose Physical Resource the
+  held projection carries with a `publication_view_problems` entry for the bare-metal view
+- **THEN** the opening is refused with a declared-match reason, and the storefront's record
+  of the refusal names the site's problem
 
 #### Scenario: An unbacked listing's resource reads as unavailable
 
@@ -452,42 +521,18 @@ naming the model, rather than refusing startup.
   while Alkahest is unready
 - **THEN** no release condition is derived for them and no Alkahest option is published
 
-### Requirement: API-credit listing creation waits for or names an unreachable mechanism
+#### Scenario: A VM listing request supplies its escrows
 
-An API-credit storefront's configured seed listing MUST be created by a lifecycle loop
-step, never during startup: the step MUST wait while the credits service cannot be
-reached or a mechanism the seed's clauses use is unknown, MUST stop after logging once on
-a configuration failure, and MUST stop once the listing exists. A create request refused
-only because a mechanism's readiness is unknown MUST answer 503 naming the unreached
-mechanism, and a create refused for configuration MUST answer 400 with its blocker codes.
-The storefront CLI's listing commands MUST act through the running storefront's routes and
-MUST NOT build the storefront's services or open its database in their own process.
+- **WHEN** a VM operator creates a listing with accepted escrows supplied and no clauses
+  while Alkahest is ready
+- **THEN** the listing advertises the release condition the Alkahest mechanism derives for
+  each escrow's chain, as for an escrow its clauses compile
 
-#### Scenario: A storefront starts with its dependencies up
+#### Scenario: A listing request supplies release conditions
 
-- **WHEN** an API-credit storefront with a configured seed starts while its chain and its
-  credits service answer
-- **THEN** the seed listing is published once its chain's first probe succeeds
-
-#### Scenario: A storefront starts with its chain down
-
-- **WHEN** an API-credit storefront with a configured seed starts while its chain cannot
-  be reached, and the chain later answers
-- **THEN** no seed listing is created while the chain is unreachable, and it is published
-  after a probe reaches the chain, without a restart
-
-#### Scenario: An operator creates a listing before the chain is reached
-
-- **WHEN** an operator creates an API-credit listing whose only mechanism is Alkahest
-  before any probe has reached its chain
-- **THEN** the storefront answers 503 naming Alkahest's unreached chain, and the same
-  request succeeds once a probe reaches it
-
-#### Scenario: An operator publishes through the CLI
-
-- **WHEN** an operator runs the storefront CLI's publish command
-- **THEN** the listing is created by the running storefront through its create route, and
-  the command fails naming the storefront when it cannot be reached
+- **WHEN** a VM operator's create request supplies `demands`
+- **THEN** the storefront refuses the request, since the conditions a listing advertises
+  are derived from the storefront's own configuration, and creates no listing
 
 ### Requirement: Publication derives all ready settlement options
 
@@ -512,6 +557,57 @@ A storefront MUST preflight every enabled installed settlement registration and 
 
 - **WHEN** one VM pool's override names only an unready mechanism while another pool's clauses name a ready one
 - **THEN** the first pool's candidates are refused, the second's publish, and no accepted negotiation or settlement state changes
+
+### Requirement: A storefront that cannot publish refuses to start
+
+A storefront that derives listings from site projections MUST refuse to start, naming each
+problem, when publishing is impossible for the whole storefront: it has no registry to publish
+to, or a registry without its authority pin; it has no enabled settlement mechanism; or it has
+no configured site, a site not bound to exactly one service peer, or a site whose authority URL
+is not an HTTP(S) origin: a URL the WHATWG URL standard parses, with an `http` or `https`
+scheme and no credentials, path, query, or fragment. A refusal names the site and never echoes
+its URL. A storefront that only
+services deals already accepted is not a supported deployment. Settlement clauses and a lease
+bound MAY come from a pool's override or hint instead of the storefront's defaults, so missing
+defaults MUST NOT refuse startup; a pool that resolves no lease bound its domain requires from
+any tier MUST be held and reported per site, and a candidate whose pool resolves no settlement
+clause from any tier MUST be refused as "A compute candidate with no settlement option yields no
+listing" requires.
+
+#### Scenario: A bare-metal storefront has no registry
+
+- **WHEN** a bare-metal storefront starts with no `[registry].urls`
+- **THEN** it refuses to start, naming the missing registry, and starts no loop
+
+#### Scenario: A site's authority URL is not an origin
+
+- **WHEN** a VM or bare-metal storefront starts with a `[capacity.sites]` URL that states a
+  path, credentials, a query, a fragment, or a port that is not a number
+- **THEN** it refuses to start, naming the site, without echoing the URL
+
+#### Scenario: No settlement mechanism is enabled
+
+- **WHEN** a VM storefront starts with no enabled settlement mechanism
+- **THEN** it refuses to start, naming the missing mechanism
+
+#### Scenario: A storefront's terms live in its pools
+
+- **WHEN** a VM storefront starts with an empty `[pricing].settlements` while its pools'
+  overrides or hints state settlement clauses
+- **THEN** it starts and publishes those pools' listings
+
+#### Scenario: A bare-metal pool resolves no lease bound
+
+- **WHEN** a bare-metal storefront has no `[pricing].default_max_duration_seconds` and one
+  pool's override states no maximum duration
+- **THEN** that pool's listings are held and reported, and every other pool publishes
+
+#### Scenario: A pool resolves no settlement clause
+
+- **WHEN** a storefront has no `[pricing].settlements` and one pool's override and hint state
+  no settlement clause
+- **THEN** it starts, that pool's candidates are refused as having no settlement option, and
+  an open listing among them closes as `no_settlement_option`
 
 ## REMOVED Requirements
 

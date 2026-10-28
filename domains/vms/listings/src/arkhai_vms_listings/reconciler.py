@@ -420,158 +420,72 @@ class _SiteDerivationReport:
         }
 
 
-_LATEST_DERIVATION_REPORTS: dict[str, dict[str, Any]] = {}
+#: A derivation report's pool-keyed categories, each as the action a
+#: publication cycle records and the reason code it records it under, and the
+#: name the category's detail is given in the entry. A ``hold`` holds the pool's
+#: listings; a ``report`` holds nothing.
+_POOL_ENTRIES: dict[str, tuple[str, str, str]] = {
+    "unresolvable_pools": ("hold", "pool_unresolvable", "problems"),
+    "unreadable_shapes": ("hold", "listing_shapes_unreadable", "problems"),
+    "inadmissible_listing_shapes": ("report", "listing_shape_inadmissible", "findings"),
+    "unusable_shape_constraints": ("report", "shape_constraints_unusable", "findings"),
+    "unreadable_asking_rates": ("hold", "asking_rates_unreadable", "problems"),
+    "unpublished_asking_rates": ("report", "asking_rate_shape_unpublished", "shapes"),
+    "infeasible_shapes": ("report", "listing_shape_infeasible", "shapes"),
+    "retired_pricing_keys": ("report", "retired_pricing_keys", "keys"),
+    "unreadable_family_rates": ("hold", "family_rates_unreadable", "problems"),
+    "families_without_rates": ("report", "families_without_rates", "entries"),
+}
+
+#: The member-keyed categories, as ``_POOL_ENTRIES`` states the pool-keyed ones.
+#: A member whose ``gpu_count`` cannot be read holds its listings (a fungible
+#: pool's whole range), while one declaring none yields no listing and holds
+#: nothing.
+_MEMBER_ENTRIES: dict[str, tuple[str, str]] = {
+    "unresolvable_members": ("hold", "member_gpu_count_unreadable"),
+    "members_without_gpu_count": ("report", "member_gpu_count_missing"),
+    "members_without_resource_type": ("hold", "member_resource_type_missing"),
+}
 
 
-def derivation_reports() -> dict[str, dict[str, Any]]:
-    """Per-site report from the latest projection-path derivation."""
-    return {site: dict(report) for site, report in _LATEST_DERIVATION_REPORTS.items()}
+def site_derivation_entries(report: Mapping[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """One site's derivation report as the holds and reports a cycle records.
 
-
-def _record_site_report(site_id: str, report: _SiteDerivationReport) -> None:
-    # Logged when a site's report changes rather than on every reconcile, so a
-    # standing condition is visible once per projection generation instead of
-    # on every poll.
-    current = report.as_dict()
-    if _LATEST_DERIVATION_REPORTS.get(site_id) == current:
-        return
-    _LATEST_DERIVATION_REPORTS[site_id] = current
-    if current["compatibility_rule"]:
-        logger.warning(
-            "[PUBLICATION] site %s projects no advertisement or backing "
-            "declarations; every pool reads as capacity-backed with delivery "
-            "authorizing advertisement",
-            site_id,
+    ``report`` is a site's report as a derivation's ``reports`` receives it.
+    Each entry is its action and its reason code with the pool or member it
+    concerns and any detail, in a stable order.
+    """
+    entries: list[tuple[str, dict[str, Any]]] = []
+    if report.get("compatibility_rule"):
+        # The site predates the pool declarations: every pool reads as
+        # capacity-backed, with delivery authorizing advertisement.
+        entries.append(("report", {"reason": "legacy_producer_backing"}))
+    for category, (action, reason) in _MEMBER_ENTRIES.items():
+        for resource_id, pool_id in (report.get(category) or {}).items():
+            entries.append(
+                (
+                    action,
+                    {"pool_id": pool_id, "physical_resource_id": resource_id, "reason": reason},
+                )
+            )
+    for pool_id in report.get("regionless_pools") or ():
+        entries.append(("hold", {"pool_id": pool_id, "reason": "pool_region_missing"}))
+    for pool_id, finding in (report.get("undeclared_attributes") or {}).items():
+        entries.append(
+            (
+                "report",
+                {
+                    "pool_id": pool_id,
+                    "reason": "claimed_attribute_undeclared",
+                    "attribute": finding.get("attribute"),
+                    "value": finding.get("value"),
+                },
+            )
         )
-    for pool_id, codes in current["unresolvable_pools"].items():
-        logger.warning(
-            "[PUBLICATION] site %s pool %s is unresolvable (%s); its listings "
-            "are held",
-            site_id,
-            pool_id,
-            ", ".join(codes),
-        )
-    for resource_id, pool_id in current["unresolvable_members"].items():
-        logger.warning(
-            "[PUBLICATION] site %s pool %s member %s declares a malformed "
-            "gpu_count; its listings are held",
-            site_id,
-            pool_id,
-            resource_id,
-        )
-    for resource_id, pool_id in current["members_without_gpu_count"].items():
-        logger.warning(
-            "[PUBLICATION] site %s pool %s member %s declares no gpu_count; "
-            "no VM listing is derived from it",
-            site_id,
-            pool_id,
-            resource_id,
-        )
-    for resource_id, pool_id in current["members_without_resource_type"].items():
-        logger.warning(
-            "[PUBLICATION] site %s pool %s member %s projects no resource_type; "
-            "its listings are held",
-            site_id,
-            pool_id,
-            resource_id,
-        )
-    for pool_id, problems in current["unreadable_shapes"].items():
-        logger.warning(
-            "[PUBLICATION] site %s pool %s states listing shapes the VM "
-            "vocabulary cannot read (%s); its listings are held",
-            site_id,
-            pool_id,
-            "; ".join(problems),
-        )
-    for pool_id, findings in current["inadmissible_listing_shapes"].items():
-        logger.warning(
-            "[PUBLICATION] site %s pool %s states %d shape(s) whose offer its "
-            "admissibility policy excludes; they are not published (%s)",
-            site_id,
-            pool_id,
-            len(findings),
-            "; ".join(
-                problem["message"] for finding in findings for problem in finding["problems"]
-            ),
-        )
-    for pool_id, findings in current["unusable_shape_constraints"].items():
-        logger.warning(
-            "[PUBLICATION] site %s pool %s states %d listing(s) whose "
-            "admissibility cannot be computed; they are not published (%s)",
-            site_id,
-            pool_id,
-            len({finding["shape_digest"] for finding in findings}),
-            "; ".join(
-                f"{finding['tier']} {', '.join(finding['paths'])}: {finding['problem']}"
-                for finding in findings
-            ),
-        )
-    for pool_id, problems in current["unreadable_asking_rates"].items():
-        logger.warning(
-            "[PUBLICATION] site %s pool %s states asking rates the VM market "
-            "cannot read (%s); its listings are held",
-            site_id,
-            pool_id,
-            "; ".join(problems),
-        )
-    for pool_id, shapes in current["unpublished_asking_rates"].items():
-        logger.warning(
-            "[PUBLICATION] site %s pool %s prices %d shape(s) it does not "
-            "publish; those rates reach no buyer",
-            site_id,
-            pool_id,
-            len(shapes),
-        )
-    for pool_id, shapes in current["infeasible_shapes"].items():
-        logger.warning(
-            "[PUBLICATION] site %s pool %s states %d shape(s) no member is "
-            "feasible for; they publish nothing",
-            site_id,
-            pool_id,
-            len(shapes),
-        )
-    for pool_id, finding in current["undeclared_attributes"].items():
-        logger.warning(
-            "[PUBLICATION] site %s pool %s publishes nothing: its listings claim "
-            "%s %r and no enabled member declares it",
-            site_id,
-            pool_id,
-            finding.get("attribute"),
-            finding.get("value"),
-        )
-    for pool_id in current["regionless_pools"]:
-        logger.warning(
-            "[PUBLICATION] site %s pool %s states no region; publication holds "
-            "its listings",
-            site_id,
-            pool_id,
-        )
-    for pool_id, keys in current["retired_pricing_keys"].items():
-        logger.warning(
-            "[PUBLICATION] site %s pool %s states retired pricing keys (%s); "
-            "they are not read",
-            site_id,
-            pool_id,
-            ", ".join(keys),
-        )
-    for pool_id, problems in current["unreadable_family_rates"].items():
-        logger.warning(
-            "[PUBLICATION] site %s pool %s states family rates the VM market "
-            "cannot read (%s); its listings are held",
-            site_id,
-            pool_id,
-            "; ".join(problems),
-        )
-    for pool_id, entries in current["families_without_rates"].items():
-        logger.info(
-            "[PUBLICATION] site %s pool %s includes families without a rate, "
-            "which are not charged: %s",
-            site_id,
-            pool_id,
-            "; ".join(
-                f"{', '.join(entry['families'])} in {entry['asset']}" for entry in entries
-            ),
-        )
+    for category, (action, reason, detail) in _POOL_ENTRIES.items():
+        for pool_id, value in (report.get(category) or {}).items():
+            entries.append((action, {"pool_id": pool_id, "reason": reason, detail: value}))
+    return entries
 
 
 def _families_without_rates(
@@ -1173,7 +1087,6 @@ def _pool_rows_from_projection(
     shape_feasible: ShapeFeasibility,
     declared_only: bool = False,
     overrides: Mapping[tuple[str, str], Mapping[str, Any]] | None = None,
-    record_reports: bool = True,
     excluded: set[tuple[str, str, str]] | None = None,
     reports: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
@@ -1186,10 +1099,7 @@ def _pool_rows_from_projection(
     and the storefront's configured defaults -- see `_projected_pool_rows`. A
     pool with no override still resolves through its hints and defaults.
 
-    ``record_reports`` false leaves the published per-site derivation reports
-    untouched, for a caller judging a projection other than the one
-    publication derives from, or previewing a cycle. ``reports``, when given,
-    receives each site's report whether or not it is published.
+    ``reports``, when given, receives each site's derivation report.
 
     ``site_capacity_buckets`` is the matching ``site_capacity_buckets``
     projection (same per-site-list shape as ``site_pool_projection``),
@@ -1248,8 +1158,6 @@ def _pool_rows_from_projection(
             )
         if reports is not None:
             reports[site_id] = report.as_dict()
-        if record_reports:
-            _record_site_report(site_id, report)
     return pool_rows
 
 
@@ -1290,7 +1198,6 @@ def declared_shape_feasibility(
             shape_feasible=shape_feasible,
             declared_only=True,
             overrides={(site_id, pool_id): override},
-            record_reports=False,
         )
     finally:
         conn.close()
@@ -1344,7 +1251,6 @@ def available_compute_slices(
     shape_feasible: ShapeFeasibility,
     configured_sites: Collection[str] = (),
     excluded: set[tuple[str, str, str]] | None = None,
-    record_reports: bool = True,
     reports: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Return publishable compute listing slices from the site projections.
@@ -1409,10 +1315,10 @@ def available_compute_slices(
     ``region``/``sla`` hints are trusted relative to the storefront's override
     and configured defaults -- see `arkhai_vms_listings.pool_descriptors`.
 
-    Each site's derivation report is published for status
-    (``derivation_reports``) unless ``record_reports`` is false, as for a
-    previewed cycle, which changes nothing a status reader sees; ``reports``,
-    when given, receives every site's report either way.
+    ``reports``, when given, receives each site's derivation report: what it
+    could not publish, and why. Deriving records nothing else; a publication
+    cycle turns the reports into its holds and reports
+    (``site_derivation_entries``).
     """
     held = holds if holds is not None else set()
     for site_id in configured_sites:
@@ -1431,7 +1337,6 @@ def available_compute_slices(
             shape_feasible=shape_feasible,
             declared_only=declared_range,
             excluded=excluded,
-            record_reports=record_reports,
             reports=reports,
         )
     finally:
@@ -1515,7 +1420,6 @@ def current_available_resource_keys(
     configured_sites: Collection[str] = (),
     admissibility_default: Declaration | None,
     excluded: set[tuple[str, str, str]] | None = None,
-    record_reports: bool = True,
 ) -> set[str]:
     # Keys come from the full derivation, not a structural shortcut, because a
     # listing's key depends on its shape and its shape can come from the
@@ -1542,7 +1446,6 @@ def current_available_resource_keys(
         shape_feasible=shape_feasible,
         configured_sites=configured_sites,
         excluded=excluded,
-        record_reports=record_reports,
     ):
         if row.get("resource_key"):
             keys.add(str(row["resource_key"]))
@@ -1772,7 +1675,6 @@ def stale_open_listing_ids(
     scope: ReconciliationScope,
     shape_feasible: ShapeFeasibility,
     admissibility_default: Declaration | None,
-    record_reports: bool = True,
 ) -> list[str]:
     """Return bound VM listings whose exact site-scoped slice is gone.
 
@@ -1785,8 +1687,6 @@ def stale_open_listing_ids(
     reconciliation acts only on listings availability bounds.
     ``admissibility_default`` is the storefront's configured default, which
     publication applies, so a listing whose offer it excludes is stale here too.
-    ``record_reports`` false, for a previewed cycle, publishes no derivation
-    report (see ``available_compute_slices``).
     """
 
     holds: set[tuple[str, str, str]] = set()
@@ -1801,7 +1701,6 @@ def stale_open_listing_ids(
         configured_sites=configured_sites,
         admissibility_default=admissibility_default,
         excluded=excluded,
-        record_reports=record_reports,
     )
     stale: list[str] = []
     for listing in _bound_vm_listings(

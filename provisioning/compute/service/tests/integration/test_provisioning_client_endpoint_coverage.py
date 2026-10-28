@@ -136,8 +136,8 @@ class TestSystemClientEndpointCoverage:
         paused = await client.family.pause_lease_watchdog()
         resumed = await client.family.resume_lease_watchdog()
 
-        assert paused["paused"] is True
-        assert resumed["paused"] is False
+        assert paused.paused is True
+        assert resumed.paused is False
 
 
 class TestCapacityClientEndpointCoverage:

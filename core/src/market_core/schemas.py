@@ -20,8 +20,8 @@ Mechanisms serviced through the obligation runtime additionally carry a
 obligations (payer and claimant, amount and asset, expiration, conditions),
 with mechanism-specific materialization behind a ``{mechanism, params}``
 envelope that kit codecs interpret. ``EscrowTerms`` is the typed params
-shape of the ``alkahest.v1`` mechanism and the legacy flat proposal shape
-coerced into that envelope.
+shape of the ``alkahest.v1`` mechanism, which the mechanism's kit codec
+converts to and from that envelope; core reads neither shape as the other.
 """
 
 from __future__ import annotations
@@ -277,10 +277,9 @@ class EscrowTerms(BaseModel):
     outcome travels as a ``SettlementPlan`` whose obligations carry a
     ``{mechanism, params}`` envelope; this type is the *typed params
     shape* of the ``alkahest.v1`` mechanism (its fields minus ``maker``
-    are exactly that envelope's params) and the source shape of the
-    marked legacy coercions on ``SettlementObligation`` /
-    ``SettlementPlan``, which keep pre-plan artifacts (flat terms dicts
-    and bare terms lists) parsing.
+    are exactly that envelope's params). A settlement obligation or plan is
+    never parsed from this flat shape: the mechanism codec in
+    ``kit/alkahest`` converts between them.
     """
 
     maker: Literal["buyer", "seller"] = Field(
@@ -327,14 +326,6 @@ class EscrowTerms(BaseModel):
             "tolerance window."
         ),
     )
-
-
-_ALKAHEST_MECHANISM = "alkahest.v1"
-"""Mechanism tag for the legacy flat-``EscrowTerms`` wire coercions below.
-
-A legacy wire tag, not a core interpretation of the params — core never
-dispatches on it. The matching codec lives in ``kit/alkahest``.
-"""
 
 
 class SettlementObligation(BaseModel):
@@ -448,47 +439,6 @@ class SettlementObligation(BaseModel):
     def _serialize_obligation_amount(self, v: int | None) -> str | None:
         return _serialize_uint256_str(v)
 
-    @model_validator(mode="before")
-    @classmethod
-    def _coerce_legacy_escrow_terms(cls, value: Any) -> Any:
-        """LEGACY wire compatibility — not part of the carrier contract.
-
-        Pre-plan artifacts (run logs, negotiation threads, the current
-        client wheels) carry flat ``EscrowTerms`` dicts: ``{maker,
-        chain_name?, escrow_contract, obligation_data, expiration_unix}``.
-        Normalize that shape into the mechanism envelope here so old
-        artifacts keep parsing. Remove once no deployed client sends the
-        flat shape (leaves with the client-wheel wire bump).
-        """
-        if not isinstance(value, dict):
-            return value
-        if "mechanism" in value or "escrow_contract" not in value:
-            return value
-
-        data = dict(value)
-        maker = data.pop("maker", "buyer")
-        obligation_data = data.pop("obligation_data", {}) or {}
-        params: dict[str, Any] = {
-            "escrow_contract": data.pop("escrow_contract"),
-            "obligation_data": obligation_data,
-        }
-        if data.get("chain_name") is not None:
-            params["chain_name"] = data.pop("chain_name")
-        else:
-            data.pop("chain_name", None)
-
-        amount = obligation_data.get("amount")
-        return {
-            "payer": maker,
-            "claimant": "seller" if maker == "buyer" else "buyer",
-            "amount": amount if isinstance(amount, (int, str)) else None,
-            "asset": obligation_data.get("token"),
-            "expiration_unix": data.pop("expiration_unix", None),
-            "mechanism": _ALKAHEST_MECHANISM,
-            "params": params,
-            **data,
-        }
-
 
 class SettlementPlan(BaseModel):
     """The negotiated settlement plan both sides derive identically.
@@ -528,19 +478,6 @@ class SettlementPlan(BaseModel):
             "identity, interval boundaries). Opaque to market core."
         ),
     )
-
-    @model_validator(mode="before")
-    @classmethod
-    def _coerce_legacy_terms_list(cls, value: Any) -> Any:
-        """LEGACY wire compatibility — not part of the carrier contract.
-
-        Pre-plan artifacts carry a bare ``list[EscrowTerms]`` where the
-        plan now travels. Wrap it; the per-obligation legacy coercion
-        handles each entry. Remove with the client-wheel wire bump.
-        """
-        if isinstance(value, list):
-            return {"obligations": value}
-        return value
 
 
 # ---------------------------------------------------------------------------

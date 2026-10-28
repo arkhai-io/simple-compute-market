@@ -25,13 +25,19 @@ from .domain_runtime import build_vm_storefront_registry
 from .utils.sqlite_client import SQLiteClient
 
 
-def prepare_vm_listing_binding(
-    *,
-    listing_id: str,
-    candidate: dict[str, Any],
-) -> StorefrontListingBinding:
-    """Validate one VM candidate and return its immutable public-safe binding."""
+def vm_candidate_derivation_key(candidate: dict[str, Any]) -> str:
+    """The derivation key the listing a VM candidate derives is bound under."""
+    site_id, binding, source = _derivation_source(candidate)
+    return build_storefront_derivation_key(
+        site_id=site_id,
+        binding=binding,
+        offering_mode=binding.offering_mode,
+        source_identity=source,
+    )
 
+
+def _derivation_source(candidate: dict[str, Any]) -> tuple[str, Any, dict[str, Any]]:
+    """A VM candidate's site, domain binding, and derivation source, validated."""
     site_id = candidate.get("site_id")
     if not isinstance(site_id, str) or not site_id.strip():
         raise ValueError("VM publication candidate requires an exact trusted site_id")
@@ -42,14 +48,7 @@ def prepare_vm_listing_binding(
     # Every derivation path produces a shape; a candidate without a valid one
     # is a programming error, not a default shape to be assumed.
     listing_shape = resolve_shape(candidate.get("listing_shape")).shape
-    try:
-        backing = capacity_backing(candidate.get("capacity_backing"))
-    except UnknownCapacityBackingError as exc:
-        raise ValueError(
-            f"VM publication candidate requires an explicit capacity_backing: {exc}"
-        ) from exc
-    registry = build_vm_storefront_registry()
-    registration = registry.resolve_mode("vm")
+    registration = build_vm_storefront_registry().resolve_mode("vm")
     # The derivation identity includes the canonical shape, whichever source
     # produced it, so identity depends only on what is offered.
     source = {
@@ -62,14 +61,33 @@ def prepare_vm_listing_binding(
             "listing_shape": {family: dict(fields) for family, fields in listing_shape.items()},
         },
     }
+    return site_id, registration.binding, source
+
+
+def prepare_vm_listing_binding(
+    *,
+    listing_id: str,
+    candidate: dict[str, Any],
+) -> StorefrontListingBinding:
+    """Validate one VM candidate and return its immutable public-safe binding."""
+
+    site_id, binding, source = _derivation_source(candidate)
+    try:
+        backing = capacity_backing(candidate.get("capacity_backing"))
+    except UnknownCapacityBackingError as exc:
+        raise ValueError(
+            f"VM publication candidate requires an explicit capacity_backing: {exc}"
+        ) from exc
+    pool_id = candidate.get("pool_id")
+    resource_id = candidate.get("resource_id")
     return StorefrontListingBinding(
         listing_id=listing_id,
         site_id=site_id,
-        binding=registration.binding,
+        binding=binding,
         derivation_key=build_storefront_derivation_key(
             site_id=site_id,
-            binding=registration.binding,
-            offering_mode=registration.binding.offering_mode,
+            binding=binding,
+            offering_mode=binding.offering_mode,
             source_identity=source,
         ),
         source_envelope_json=canonical_source_envelope(source),

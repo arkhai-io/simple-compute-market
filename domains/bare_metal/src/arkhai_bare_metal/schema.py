@@ -14,6 +14,7 @@ from typing import Any, Literal
 from arkhai_compute import COMPUTE_CAPABILITY_SCHEMA
 from market_capability_shape import FieldKind, shape_digest, unflatten_shape
 from market_resource_pools_contracts.backing import CapacityBackingLabel
+from market_resource_pools_contracts.backing import capacity_backing as backing_of
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .provision_terms import BareMetalProvisionTerms
@@ -35,6 +36,15 @@ BARE_METAL_ACCESS_ACTIONS = (
 )
 EXCLUSIVE_ALLOCATION_MODE = "exclusive"
 PHYSICAL_HOST_ID_REF_KEY = "physical_host_id"
+#: A listing's delivery terms: the fields committing the marketplace to deliver
+#: a particular machine and access to it. Its pool's backing decides whether it
+#: carries them -- a backed listing must, an unbacked one must not -- so none
+#: has a default. See openspec/specs/resource-pool-management/spec.md,
+#: "Capacity backing is interpreted by one delegate".
+BARE_METAL_LISTING_DELIVERY_TERMS = ("host_id", "physical_host_id", "access_methods")
+#: A publication view's delivery terms: the listing's, and whether the whole
+#: machine is available, which bounds only supply an admission authority holds.
+BARE_METAL_VIEW_DELIVERY_TERMS = (*BARE_METAL_LISTING_DELIVERY_TERMS, "available")
 
 
 def bare_metal_executor_ref(
@@ -74,6 +84,10 @@ class BareMetalListing(BaseModel):
     be added beside them. ``asking_rate`` is a term of sale, not hardware.
     See openspec/specs/storefront-publication/spec.md, "A bare-metal listing's
     shape is derived from its declaration".
+
+    Its delivery terms (:data:`BARE_METAL_LISTING_DELIVERY_TERMS`) are carried
+    only when its backing stands behind them, which its validator asks of the
+    backing's delegate.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -86,15 +100,26 @@ class BareMetalListing(BaseModel):
     capacity_backing: CapacityBackingLabel = Field(
         description="Whether an admission authority stands behind the listing.",
     )
-    host_id: str = Field(
-        description="Bare-metal executor-local machine identity.",
+    host_id: str | None = Field(
+        default=None,
+        description=(
+            "Bare-metal executor-local machine identity; absent when nothing "
+            "stands behind delivering the machine."
+        ),
     )
-    physical_host_id: str = Field(
-        description="Stable physical host identity for cross-mode accounting.",
+    physical_host_id: str | None = Field(
+        default=None,
+        description=(
+            "Stable physical host identity for cross-mode accounting; absent "
+            "when nothing stands behind delivering the machine."
+        ),
     )
-    access_methods: list[str] = Field(
-        default_factory=lambda: [SSH_ACCESS_METHOD],
-        description="Buyer-visible access methods supported by this listing.",
+    access_methods: list[str] | None = Field(
+        default=None,
+        description=(
+            "Buyer-visible access methods supported by this listing; absent "
+            "when nothing stands behind delivering access."
+        ),
     )
     min_duration_seconds: int | None = Field(
         default=None,
@@ -122,13 +147,20 @@ class BareMetalListing(BaseModel):
 
     @model_validator(mode="after")
     def _validate_listing(self) -> "BareMetalListing":
-        for field_name in ("host_id", "physical_host_id", "region", "gpu_model"):
+        for field_name in ("region", "gpu_model"):
             if not str(getattr(self, field_name)).strip():
                 raise ValueError(f"{field_name} must be non-empty")
-        if not self.access_methods:
-            raise ValueError("access_methods must contain at least one method")
-        if any(not str(method).strip() for method in self.access_methods):
+        for field_name in ("host_id", "physical_host_id"):
+            value = getattr(self, field_name)
+            if value is not None and not value.strip():
+                raise ValueError(f"{field_name} must be non-empty when stated")
+        if self.access_methods is not None and any(
+            not str(method).strip() for method in self.access_methods
+        ):
             raise ValueError("access_methods must not contain blank values")
+        backing_of(self.capacity_backing).delivery_term_constraints(
+            {name: getattr(self, name) for name in BARE_METAL_LISTING_DELIVERY_TERMS}
+        )
         if (
             self.min_duration_seconds is not None
             and self.max_duration_seconds is not None

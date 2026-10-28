@@ -35,20 +35,26 @@ from market_storefront.utils.config import (
 
 logger = logging.getLogger(__name__)
 
+# The negotiation-strategy probe's synthetic listing: placeholder values that
+# name no real contract or party. The shape guard refuses an escrow naming no
+# contract, one its listing does not accept, and a condition its listing does
+# not advertise, so the probe's opening names this listing's escrow and
+# condition.
+_PROBE_ESCROW = {"chain_name": "probe", "escrow_address": "0x" + "11" * 20}
+_PROBE_CONDITION = {
+    "chain_name": "probe",
+    "arbiter": "0x" + "22" * 20,
+    "demand_data": {"recipient": "0x" + "33" * 20},
+}
+_PROBE_LISTING = {"accepted_escrows": [_PROBE_ESCROW], "demands": [_PROBE_CONDITION]}
+
 
 def _default_publication_derivation_provider() -> dict[str, dict[str, Any]]:
-    """Per-site report of what the latest derivation could not publish.
-
-    For each site: whether it was read under the compatibility rule for a
-    producer predating the pool declarations, which pools and members are
-    unresolvable and held, which members declare no GPU count or no resource
-    type, which pools state shapes the VM vocabulary cannot read, which stated
-    shapes no member is feasible for, and which pools publish nothing because
-    their listings claim an attribute no member declares.
-    """
-    from arkhai_vms_listings.reconciler import derivation_reports
-
-    return derivation_reports()
+    """Each site's holds, refusals, and reports from the latest publication
+    cycle that derived it, from the process's site-derivation log; empty
+    before any cycle has run."""
+    log = _container.resolved_site_derivation_log
+    return log.latest() if log is not None else {}
 
 
 async def _default_pool_override_status_provider() -> list[dict[str, Any]] | None:
@@ -64,6 +70,19 @@ def _default_lifecycle_provider() -> dict[str, dict[str, Any]]:
     """Every lifecycle loop's controller state and the outcome of its last
     cycle, by loop name, from the process's one loop controller."""
     return {name: loop.to_dict() for name, loop in lifecycle.snapshot().items()}
+
+
+async def _default_settlement_provider() -> list[dict[str, Any]] | None:
+    """Each composed mechanism's readiness, as its registration projects it.
+
+    Readiness reads the Alkahest chain probe's last results and calls no chain,
+    so a status read never waits on one. Status names nothing being published,
+    so Alkahest's readiness answers for every configured chain.
+    """
+    composition = _container.resolved_settlement_composition
+    if composition is None:
+        return None
+    return [status.safe_projection() for status in await composition.readiness()]
 
 
 def _default_listing_identity_carryover_provider() -> dict[str, Any]:
@@ -99,8 +118,15 @@ class SystemService:
             Callable[[], Awaitable[list[dict[str, Any]] | None]] | None
         ) = None,
         lifecycle_provider: Callable[[], dict[str, dict[str, Any]]] | None = None,
+        settlement_provider: (
+            Callable[[], Awaitable[list[dict[str, Any]] | None]] | None
+        ) = None,
+        registry_probe_transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._db = sqlite_client
+        # The transport the registry health probes are sent over; the network's
+        # unless a caller answers them itself.
+        self._registry_probe_transport = registry_probe_transport
         self._marketplace_signer = marketplace_signer
         self._agent_id = agent_id or AGENT_ID or "agent"
         # Both read the storefront's one projection state unless a caller
@@ -123,6 +149,7 @@ class SystemService:
             pool_override_status_provider or _default_pool_override_status_provider
         )
         self._lifecycle_provider = lifecycle_provider or _default_lifecycle_provider
+        self._settlement_provider = settlement_provider or _default_settlement_provider
 
     # ------------------------------------------------------------------
     # Health / connectivity checks
@@ -259,6 +286,10 @@ class SystemService:
                 result["lifecycle"] = self._lifecycle_provider()
             except Exception:
                 result["lifecycle"] = None
+            try:
+                result["settlement"] = await self._settlement_provider()
+            except Exception:
+                result["settlement"] = None
 
         return result
 
@@ -287,7 +318,9 @@ class SystemService:
             if token:
                 headers["Authorization"] = f"Bearer {token}"
             try:
-                async with httpx.AsyncClient(timeout=2.0) as client:
+                async with httpx.AsyncClient(
+                    timeout=2.0, transport=self._registry_probe_transport
+                ) as client:
                     resp = await client.get(f"{url}/health", headers=headers)
                 return "ok" if resp.status_code < 500 else f"http_{resp.status_code}"
             except httpx.ConnectError:
@@ -307,7 +340,8 @@ class SystemService:
         """Probe the configured negotiation chain. Returns a viability string.
 
         Runs the chain against a synthetic round-0 input (buyer matching
-        seller price exactly, no listing context) and reports whether the
+        seller price exactly, on a synthetic listing accepting the probe's
+        escrow and condition) and reports whether the
         terminal middleware would accept/counter (viable) or exit (broken
         config). Guard middlewares fire first; their veto produces
         ``exit_on_probe`` with the guard's reason — operator can read the
@@ -335,13 +369,10 @@ class SystemService:
                     # Minimal structurally-valid opening proposal: the VM
                     # opening guard validates the full EscrowProposal shape
                     # (chain_name/escrow_address/expiration_unix required).
-                    # The zero escrow address keeps the shape guard's legacy
-                    # carve-out applicable, so the probe needs no
-                    # accepted-escrows context on a listing.
                     proposal={
-                        "chain_name": "probe",
-                        "escrow_address": "0x" + "00" * 20,
+                        **_PROBE_ESCROW,
                         "fields": {"amount": 10_000},
+                        "demand": _PROBE_CONDITION,
                         "expiration_unix": 4_102_444_800,  # 2100-01-01
                     },
                 )
@@ -349,6 +380,7 @@ class SystemService:
             context = NegotiationContext(
                 direction="maximize",
                 our_reference_amount=10_000,
+                listing=_PROBE_LISTING,
                 # The probe exercises the strategy, not a listing: no source is
                 # checked, so the inventory guard is given a matching verdict.
                 listing_source=ListingSourceVerdict("matches"),

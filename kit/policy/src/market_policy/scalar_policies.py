@@ -49,8 +49,6 @@ _CONVERGENCE_NUM, _CONVERGENCE_DEN = 101, 100
 _SHORTFALL_NUM, _SHORTFALL_DEN = 99, 100
 _REASONABLE_NUM, _REASONABLE_DEN = 3, 2
 
-_ZERO_ADDRESS = "0x" + "0" * 40
-
 
 class NegotiationAmountError(ValueError):
     """A scalar amount is not a non-negative decimal integer."""
@@ -614,8 +612,6 @@ def _accepted_escrow_for_proposal(
     if not isinstance(proposal_addr_raw, str) or not proposal_addr_raw:
         return None
     proposal_addr = proposal_addr_raw.lower()
-    if proposal_addr == _ZERO_ADDRESS:
-        return None
     proposal_chain = proposal.get("chain_name")
     for entry in accepted:
         if not isinstance(entry, dict):
@@ -646,6 +642,39 @@ def _settlement_option_for_selection(
             and option.get("mechanism") == mechanism
         ):
             return option
+    return None
+
+
+def is_escrow_proposal(proposal: Mapping[str, Any] | None) -> bool:
+    """Whether ``proposal`` carries an Alkahest escrow: it states a chain or an escrow address.
+
+    A counter carrying only ``fields`` carries none, and neither does an opening
+    carrying only a ``settlement_selection``.
+    """
+    return isinstance(proposal, Mapping) and (
+        "chain_name" in proposal or "escrow_address" in proposal
+    )
+
+
+def escrow_contract_unpinned(proposal: Mapping[str, Any]) -> bool:
+    """Whether an escrow proposal names no escrow contract: no address, or the zero address."""
+    address = proposal.get("escrow_address")
+    digits = address.lower().removeprefix("0x") if isinstance(address, str) else ""
+    return not digits or set(digits) <= {"0"}
+
+
+def pinned_proposal(history: list[NegotiationRound]) -> dict[str, Any] | None:
+    """The buyer's opening proposal, which every acceptance of the thread settles.
+
+    A seller prices the option this proposal selects in every round: a counter
+    may change the amount, but whatever else it names is not what an acceptance
+    settles, so it never changes what the seller negotiates from. None when the
+    buyer has sent nothing, or when its opening carried no proposal.
+    """
+    for round_ in history:
+        if round_.sender == "them":
+            proposal = round_.proposal
+            return dict(proposal) if isinstance(proposal, Mapping) else None
     return None
 
 
@@ -743,7 +772,11 @@ def buyer_counter_guard(
     history: list[NegotiationRound],
     context: NegotiationContext,
 ) -> NegotiationStep:
-    """Validate and canonicalize buyer counter-round negotiation content."""
+    """Validate and canonicalize buyer counter-round negotiation content.
+
+    Whether the round bargains an amount is read from the buyer's pinned
+    opening, which an acceptance settles, never from what a counter names.
+    """
     if not history:
         return None, context
     latest = history[-1]
@@ -754,7 +787,10 @@ def buyer_counter_guard(
     pinned = context.our_escrow_proposal
     proposal = latest.proposal if isinstance(latest.proposal, dict) else None
     proposal_for_scalar = proposal or pinned
-    uses_scalar_amount = proposal_uses_scalar_amount(listing, proposal_for_scalar)
+    opening = pinned_proposal(history)
+    uses_scalar_amount = proposal_uses_scalar_amount(
+        listing, opening if opening is not None else proposal_for_scalar
+    )
     context.intermediate["uses_scalar_amount"] = uses_scalar_amount
 
     raw_amount = _amount_from_proposal(proposal_for_scalar)
@@ -796,30 +832,35 @@ def escrow_shape_guard(
 ) -> NegotiationStep:
     """Veto when the buyer's escrow proposal diverges from the listing.
 
-    A proposal carrying no escrow (none, no escrow address, or the zero-address
-    placeholder) and a listing accepting no escrow pass. Otherwise the escrow
-    must be one the listing accepts, with its literal fields, and the release
-    condition the proposal selects must be one the listing advertises on the
-    proposal's chain; a listing advertising none refuses. This is the early,
-    explained refusal: the seller's plan materialization holds the release
-    condition to the listing whether or not this guard runs.
+    A round whose proposal carries no escrow (none, only ``fields``, or only a
+    settlement selection) passes. An escrow proposal naming no escrow contract
+    (no address, or the zero address) is refused whatever the listing accepts.
+    Otherwise the escrow must be one the listing accepts (a listing accepting
+    none refuses every escrow), its literal fields must equal that entry's, and
+    the release condition the proposal selects must be one the listing
+    advertises on the proposal's chain; a listing advertising none refuses. The
+    seller prices an escrow the listing does not accept from no entry, so this
+    refusal is what stops a negotiation against it. It is also the early,
+    explained refusal: the seller's plan materialization refuses an unpinned
+    contract and holds the release condition to the listing whether or not
+    this guard runs.
     """
     proposal = _peer_proposal(history)
-    if not isinstance(proposal, dict):
+    if not is_escrow_proposal(proposal):
         return None, context
+    if escrow_contract_unpinned(proposal):
+        return (
+            NegotiationDecision(
+                action="reject",
+                reason=(
+                    "escrow_contract_unpinned: the escrow proposal names no escrow "
+                    f"contract on chain {proposal.get('chain_name')!r}"
+                ),
+            ),
+            context,
+        )
 
     listing = context.listing or {}
-    accepted = _loads_json_list(listing.get("accepted_escrows"))
-    if not accepted:
-        return None, context
-
-    proposal_addr_raw = proposal.get("escrow_address")
-    if not isinstance(proposal_addr_raw, str) or not proposal_addr_raw:
-        return None, context
-    proposal_addr = proposal_addr_raw.lower()
-    if proposal_addr == _ZERO_ADDRESS:
-        return None, context
-
     proposal_literal = proposal.get("literal_fields") or {}
 
     matched = _accepted_escrow_for_proposal(listing, proposal)
@@ -914,19 +955,23 @@ def accept_unpriced_selection_middleware(
     the exact selection of such an option is accepted here, after the guards
     that check the selection and the inventory behind it. Any other proposal
     passes through to the rest of the chain.
+
+    What is judged and accepted is the buyer's opening, which an acceptance
+    settles: a counter selecting an unpriced option after a priced opening
+    would otherwise be accepted at the counter's amount against the opening.
     """
-    proposal = _peer_proposal(history)
-    if not isinstance(proposal, dict) or not isinstance(
-        proposal.get("settlement_selection"), dict
+    opening = pinned_proposal(history)
+    if not isinstance(opening, dict) or not isinstance(
+        opening.get("settlement_selection"), dict
     ):
         return None, context
-    option = _settlement_option_for_selection(context.listing or {}, proposal)
+    option = _settlement_option_for_selection(context.listing or {}, opening)
     if option is None or option_uses_scalar_amount(option):
         return None, context
     return (
         NegotiationDecision(
             action="accept",
-            proposal=dict(proposal),
+            proposal=dict(opening),
             reason="unpriced_selection",
         ),
         context,
@@ -942,6 +987,10 @@ def accept_exact_listing_middleware(
 
     With no peer proposal yet (the buyer-side round-0 opening), proposes
     our pinned escrow unchanged — exactly what the listing advertised.
+
+    A settlement selection is judged, and accepted, as the peer's opening
+    selected it: an acceptance settles the opening, so a counter naming
+    another option supplies at most the amount, never the option priced.
     """
     proposal = _peer_proposal(history)
     if not isinstance(proposal, dict):
@@ -959,8 +1008,10 @@ def accept_exact_listing_middleware(
         )
 
     listing = context.listing or {}
-    if isinstance(proposal.get("settlement_selection"), dict):
-        matched_option = _settlement_option_for_selection(listing, proposal)
+    opening = pinned_proposal(history)
+    basis = opening if opening is not None else proposal
+    if isinstance(basis.get("settlement_selection"), dict):
+        matched_option = _settlement_option_for_selection(listing, basis)
         if matched_option is None:
             return (
                 NegotiationDecision(
@@ -988,7 +1039,7 @@ def accept_exact_listing_middleware(
             return (
                 NegotiationDecision(
                     action="accept",
-                    proposal=_set_proposal_amount(proposal, expected_amount),
+                    proposal=_set_proposal_amount(basis, expected_amount),
                     reason="exact_listing",
                 ),
                 context,
@@ -996,7 +1047,7 @@ def accept_exact_listing_middleware(
         return (
             NegotiationDecision(
                 action="accept",
-                proposal=dict(proposal),
+                proposal=dict(basis),
                 reason="exact_listing",
             ),
             context,
@@ -1251,6 +1302,9 @@ def buyer_escrow_shape_guard(
 
 __all__ = [
     "_amount_from_proposal",
+    "escrow_contract_unpinned",
+    "is_escrow_proposal",
+    "pinned_proposal",
     "selected_settlement_artifact",
     "NegotiationAmountError",
     "format_wire_amount",

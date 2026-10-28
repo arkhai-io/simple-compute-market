@@ -26,7 +26,7 @@ the one its `pyproject.toml` declares.
 
 | Package | Path | Internal deps |
 |---|---|---|
-| `arkhai-kit-alkahest` | `kit/alkahest/` | `arkhai-kit-settlement-runtime` |
+| `arkhai-kit-alkahest` | `kit/alkahest/` | `arkhai-kit-config`, `arkhai-kit-settlement-runtime` |
 | `arkhai-kit-config` | `kit/config/` | `arkhai-kit-settlement-runtime` |
 | `arkhai-kit-identity` | `kit/identity/` | none |
 | `arkhai-kit-arkhai-payments` | `kit/arkhai-payments/` | `arkhai-core`, `arkhai-kit-identity`, `arkhai-kit-settlement-runtime` |
@@ -66,7 +66,7 @@ the one its `pyproject.toml` declares.
 | `arkhai-vms-buyer` | `domains/vms/buyer/` | `arkhai-core`, `arkhai-core-buyer`, `arkhai-kit-alkahest`, `arkhai-kit-arkhai-payments`, `arkhai-kit-config`, `arkhai-kit-contact-exchange`, `arkhai-kit-identity`, `arkhai-kit-policy`, `arkhai-kit-settlement-runtime`, `arkhai-vms`, `arkhai-vms-listings`, `arkhai-vms-negotiation` |
 | `arkhai-vms-provisioning-operator-client` | `domains/vms/provisioning/client/` | `arkhai-compute-provisioning-contracts` |
 | `arkhai-vms-provisioning-adapter` | `domains/vms/provisioning/adapter/` | `arkhai-compute-provisioning`, `arkhai-compute-provisioning-ansible`, `arkhai-compute-provisioning-contracts`, `arkhai-core`, `arkhai-kit-config`, `arkhai-kit-fulfillment`, `arkhai-kit-resource-pools`, `arkhai-vms`, `arkhai-vms-provisioning-operator-client` |
-| `arkhai-compute-provisioning` | `provisioning/compute/` | `arkhai-compute-provisioning-contracts`, `arkhai-core`, `arkhai-kit-fulfillment`, `arkhai-kit-resource-pools`, `arkhai-kit-site` |
+| `arkhai-compute-provisioning` | `provisioning/compute/` | `arkhai-compute-provisioning-contracts`, `arkhai-core`, `arkhai-kit-fulfillment`, `arkhai-kit-resource-pools`, `arkhai-kit-resource-pools-contracts`, `arkhai-kit-site` |
 | `arkhai-compute-provisioning-contracts` | `provisioning/compute/contracts/` | `arkhai-core`, `arkhai-kit-identity` |
 | `arkhai-compute-provisioning-client` | `provisioning/compute/client/` | `arkhai-compute-provisioning-contracts`, `arkhai-core`, `arkhai-kit-identity` |
 | `arkhai-compute-provisioning-ansible` | `provisioning/compute/ansible/` | `arkhai-compute-provisioning`, `arkhai-compute-provisioning-contracts`, `arkhai-core`, `arkhai-kit-config` |
@@ -168,6 +168,14 @@ incompatible behaviour raises its lower bound to the new minor version.
 Moving a package to 1.0.0 is a deliberate decision that sets its
 compatibility commitment, not a consequence of shipping an incompatible
 change.
+
+A change bumps each package it changes at most once, measured against the
+package's version on the branch the change merges into: that is the version a
+release sees. A package already bumped on the change's branch is bumped again
+only when a later edit needs a larger bump than the one it has, such as an
+incompatible edit to a package bumped only for a fix, and exact pins on it move
+only with that bump. Bumping an unreleased version again changes nothing a
+release sees and moves every exact pin on it for nothing.
 
 ### Import package renames
 

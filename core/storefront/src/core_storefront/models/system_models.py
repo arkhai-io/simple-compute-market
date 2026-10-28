@@ -83,12 +83,11 @@ class HealthResponse(BaseModel):
     # honored but arrived under the deprecated ingestion key. A pool's
     # absence means nothing is owed, not that data is missing.
     listing_cardinality_mode_explanations: dict[str, dict[str, str]] | None = None
-    # Per-site report from the latest publication derivation: whether the site
-    # is read under the compatibility rule for a producer predating the pool
-    # declarations, which pools and members are unresolvable and held, which
-    # members declare no enumeration quantity, and which fungible pools mix
-    # kinds. A site's absence means it has not been derived from yet.
-    publication_derivation: dict[str, dict[str, Any]] | None = None
+    # Each configured site's latest publication derivation, as ``holds``,
+    # ``refusals``, and ``reports``: every entry a reason code with the pool or
+    # resource it concerns and any detail. A site derived cleanly has empty
+    # lists; a site no publication cycle has derived since start is absent.
+    publication_derivation: dict[str, dict[str, list[dict[str, Any]]]] | None = None
     storefront_domains: tuple[dict[str, str], ...] | None = None
     #: The storefront-to-provisioning contract major this storefront speaks,
     #: read from its own installed `compute_provisioning` wheel. A cutover
@@ -114,6 +113,11 @@ class HealthResponse(BaseModel):
     #: its most recent cycle, the publication loop's included. Present on
     #: system status, not on the liveness probes.
     lifecycle: dict[str, LoopStatus] | None = None
+    #: Each composed settlement mechanism's readiness as its registration
+    #: projects it: whether it is ready, each blocker's code, message, and kind,
+    #: and the public details the mechanism reports. Present on system status,
+    #: not on the liveness probes.
+    settlement: tuple[dict[str, Any], ...] | None = None
 
 
 class AdminPauseResponse(BaseModel):

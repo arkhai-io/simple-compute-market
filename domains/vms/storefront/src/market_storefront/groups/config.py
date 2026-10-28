@@ -408,8 +408,6 @@ _INIT_USER_TEMPLATE = """\
 # mode = ""                                    # "mock" for dry runs | "" (= http) for real KVM/libvirt
 # timeout = 3600
 # poll_interval = 15
-# preflight_timeout = 30                        # how long startup waits for /health to come up
-# fail_on_unreachable = true                    # set false in dev when service comes up later
 
 [fulfillment.failure_policy]
 # actions = ["release_capacity", "emit_event"] # valid actions: release_capacity, emit_event,

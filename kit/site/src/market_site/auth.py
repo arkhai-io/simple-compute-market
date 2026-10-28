@@ -71,6 +71,10 @@ SIGNATURE_HEADER = "X-Market-Signature"
 #: than by lacking a contract, so an unlisted route is a refusal.
 EXCLUDED_PATHS = frozenset({"/health", "/docs", "/openapi.json", "/redoc"})
 
+#: The detail of the signed 500 answering a route that raised after
+#: authentication; it reveals nothing of the error.
+ROUTE_FAILURE_DETAIL = "Site-authority request failed"
+
 #: The operator's own role. Accepted on every contract rather than enumerated
 #: route by route: `admin` exists for manual operation, debugging and
 #: intervention, and a role that can read a site's whole ledger but not one
@@ -519,8 +523,25 @@ class SiteAuthMiddleware(BaseHTTPMiddleware):
                         request_id=authenticated.request_id,
                     )
 
-        response = await call_next(request)
-        raw = b"".join([chunk async for chunk in response.body_iterator])
+        try:
+            response = await call_next(request)
+            raw = b"".join([chunk async for chunk in response.body_iterator])
+        except Exception:
+            # The caller is authenticated, so it gets a signed answer it can
+            # verify rather than an unsigned 500 its client reads as missing
+            # response authentication. The detail is fixed: the error belongs
+            # in this service's log. Nothing is recorded, as this store keeps no
+            # outcomes; an exact retry is handled as its route's retry contract says.
+            logger.exception(
+                "Site-authority route failed after authentication: %s %s",
+                request.method,
+                request.url.path,
+            )
+            response = JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content={"detail": ROUTE_FAILURE_DETAIL},
+            )
+            raw = bytes(response.body)
         return self._signed_outcome(
             signer,
             method=request.method,

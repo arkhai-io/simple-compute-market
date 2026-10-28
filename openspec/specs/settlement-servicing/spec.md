@@ -430,6 +430,47 @@ an operator, by mechanism status or by any operation.
 - **WHEN** obligations wait for an operator by mechanism status or by an operation
 - **THEN** the repository's count includes each such obligation once
 
+### Requirement: Settlement verifies against the accepted plan
+
+Every storefront that settles Alkahest deals MUST verify a buyer's escrow, register its
+obligations, and settle against the settlement plan committed when the deal was
+accepted, and MUST NOT re-derive the plan, its release condition, or its escrow terms
+from the listing as currently stored or from current settlement configuration. Every
+other reader of an accepted deal's settlement terms — an administrator's preview of its
+verification, its oracle evidence's heartbeat interval, and an administrator's interrupt
+deciding whether it is interruptible — MUST read the same plan. A seller's change to its
+release policy, its wallet, or the address-book entries of its release conditions after
+acceptance MUST NOT change how an accepted deal is verified. The address book is read only
+to find the codec of the escrow contract a deal funded, so an address book that stops
+naming that contract leaves the deal unverifiable, and the buyer's escrow reclaimable at
+expiry.
+
+#### Scenario: The seller changes its release policy after acceptance
+
+- **WHEN** a VM, bare-metal, or API-credit deal is accepted under the recipient release
+  model, the seller then configures another model, and the buyer settles an escrow funded
+  under the accepted plan
+- **THEN** settlement verifies the escrow against the accepted plan and proceeds
+
+#### Scenario: The seller's address book moves the arbiter after acceptance
+
+- **WHEN** a deal is accepted and the seller's address book then names another recipient
+  arbiter, and the buyer settles an escrow funded under the accepted plan
+- **THEN** settlement verifies the escrow against the accepted plan and proceeds
+
+#### Scenario: An escrow does not match the accepted plan
+
+- **WHEN** a buyer settles an escrow whose arbiter, demand, token, or contract differs
+  from the accepted plan's obligation
+- **THEN** settlement refuses it, whatever the listing now states
+
+#### Scenario: An administrator previews verification after a policy change
+
+- **WHEN** a seller changes its release policy after acceptance and an administrator
+  previews verification of the deal's escrow
+- **THEN** the preview checks the escrow against the accepted plan and agrees with
+  settlement's verification
+
 ## Evidence
 
 - Plan envelopes and lifecycle-universal fields:

@@ -223,6 +223,12 @@ def test_provisioning_bootstrap_dotenv_uses_environment_layer_without_dotenv_loc
     monkeypatch.delenv(local_key, raising=False)
     monkeypatch.setenv(environment_key, "environment")
     monkeypatch.chdir(tmp_path)
+    # Dynaconf's discovery returns the first `.env` found walking up from the
+    # invoked script before it tries the working directory, so a `.env` in any
+    # ancestor of the test runner would shadow this one. Rooting discovery here
+    # keeps the service's discovery path while excluding the runner's
+    # surroundings.
+    monkeypatch.setenv("ROOT_PATH_FOR_DYNACONF", str(tmp_path))
 
     options = replace(
         config_module._BOOTSTRAP_OPTIONS,

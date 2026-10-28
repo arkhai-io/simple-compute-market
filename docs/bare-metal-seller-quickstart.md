@@ -292,6 +292,82 @@ ignored.
 Everything in `attributes` is published to storefronts. Registration is
 independently idempotent and must complete before publication.
 
+A declaration the site cannot build a bare-metal view from — a backed one with no
+`host_id`, no `access_methods`, or no `physical_host_id`, a missing or invalid
+`allocation_mode`, or a private-looking capacity or capability key — is still
+projected, without the view and with the reason, and the storefront reports it as
+`publication_view_unbuildable`. Its open listing is held until you correct the
+declaration; disabling the declaration still closes it.
+
+**Listing machines the marketplace does not deliver.** A machine you arrange
+directly with the buyer, outside this site's provisioning, is listed from an
+unbacked pool. Declare one that delivers nothing and advertises bare metal:
+
+```yaml
+pools:
+  - id: whole-host-direct
+    label: Whole Host, arranged directly
+    provider: bare_metal.ansible
+    enabled: true
+    policy_tags:
+      deliverable_modes: []
+      advertisable_modes: [bare_metal]
+      capacity_backing: unbacked
+      region: California, US
+    provider_config: {}
+```
+
+and register each machine in it as a Physical Resource whose `bare_metal_publication`
+opts it in, with no host:
+
+```json
+{
+  "resource_type": "compute.bare-metal",
+  "pool_id": "whole-host-direct",
+  "capacity": {"units": 1, "gpu_count": 8, "vcpu_count": 192, "ram_gb": 2048, "disk_gb": 7680},
+  "attributes": {
+    "gpu_model": "H200",
+    "allocation_mode": "exclusive",
+    "bare_metal_publication": {"enabled": true}
+  },
+  "enabled": true
+}
+```
+
+The shape, region, and asking-rate rules are a backed machine's. Its listing
+publishes `capacity_backing: unbacked` and carries no `host_id`,
+`physical_host_id`, or `access_methods`, even where the declaration names a host,
+since nothing the marketplace delivers stands behind them; a buyer finds it with
+`capacity_backing=unbacked`. It is never judged against availability, so it never
+closes as leased, and it is never reserved, scheduled, or fulfilled. It publishes
+only settlement options bare metal does not fulfil through capacity, which today
+means contact exchange: enable `[Settlement.contact]` with a contact for the site
+and a profile, here `[Settlement.contact.profiles.default]` (see
+`docs/development/DEPLOYMENT_AND_CONFIG.md`'s "Contact-exchange contacts"), and offer it to
+the pool through a `contact-exchange.v1` clause, in `[pricing].settlements` or, to
+keep it to this pool, a pool override:
+
+```bash
+bare-metal-storefront pool-override set --file override.json
+```
+
+```json
+{
+  "site_id": "california-1",
+  "pool_id": "whole-host-direct",
+  "offering_mode": "bare_metal",
+  "settlements": [
+    {"mechanism": "contact-exchange.v1", "asset": "introduction", "mechanism_input": {"profile": "default"}}
+  ]
+}
+```
+
+A deal on it settles by introduction: once the buyer reveals it, each party
+receives the other's contact through its `[Delivery]` sinks, and the deal has no
+settlement or fulfillment, so a settle request is answered 409 and its fulfillment
+routes 404. A pool whose clauses leave such a listing no option refuses it, as the
+cycle below describes.
+
 The stack persists registry, Redis, provisioning, and storefront state in
 separate named volumes. Do not treat an HTTP 200 alone as deal readiness:
 inspect the storefront health projection and stop if database, fulfillment, or
@@ -305,13 +381,24 @@ that is down is reported there and does not mark the whole storefront degraded.
 The storefront refuses to start, naming every problem, when it cannot publish at
 all: no `[registry].urls`, or a registry without its `[registry.authorities]`
 pin; no enabled `[Settlement]` mechanism; no `[capacity.sites]`, a site bound to
-no service peer or to several, or a site URL that is not an origin. Missing
-storefront-wide terms are not a refusal: a pool whose override and configuration
-state no settlement clause or no positive maximum lease duration is held and
-reported instead. Its administrator's system status (`get_system_status()` through
-the canonical storefront client) reports each lifecycle loop's state and last
-cycle as `lifecycle`, and the latest publication's per-site holds, refusals, and
-reports as `publication_derivation`.
+no service peer or to several, or a site URL that is not an origin. It does not
+wait for its registry, chains, or site: a registry it cannot reach marks its status
+`degraded`, a chain it cannot reach leaves Alkahest unready, and a site it cannot
+reach is reported under `site_projections`, its listings held. Missing storefront-wide
+terms are not a refusal: a pool whose override and configuration state no positive
+maximum lease duration is held and reported instead, and one whose override and
+configuration state no settlement clause has its machines refused as
+`no_settlement_option`, closing any listing it had open. An Alkahest section that
+cannot settle — no `[Wallet].address`, `[Chains]`, or wallet key, or the
+`interruptible` release model — leaves Alkahest unready, its options unpublished,
+rather than stopping the storefront. Its administrator's system status
+(`get_system_status()` through the canonical storefront client) reports each
+lifecycle loop's state and last cycle as `lifecycle`, each settlement mechanism's
+readiness and blockers as `settlement`, and as `publication_derivation` each
+site's `holds`, `refusals`, and `reports` from the latest publication cycle, each
+a reason code with the pool or machine it concerns. A site no cycle has derived
+since start is absent from it, and an entry is logged when it first appears and
+when it clears, not every cycle.
 
 The storefront publishes on its own. Its projection poller loads every
 configured site's projections at startup and every `[capacity].poll_interval`
@@ -331,27 +418,32 @@ the lifecycle pause holds the loop without stopping trading. Each cycle:
 - Reads the resource-pool projection the storefront holds for every configured
   site, calling no site, and derives one listing per Physical Resource from the
   bare-metal view the site projects for it.
-- Lists a resource only if its pool advertises `bare_metal`, is enabled, and is
-  capacity-backed, as the Resource Pool document above declares. The listing's
-  region is the pool's `region`; a pool that states none is held and reported,
-  since the compute registry requires a region.
+- Lists a resource only if its pool advertises `bare_metal` and is enabled, as
+  the Resource Pool document above declares, whether the pool is backed or
+  unbacked; each listing publishes its pool's `capacity_backing`. The listing's
+  region is the pool's `region`; a pool that states none is held and reported as
+  `pool_region_missing`, since the compute registry requires a region.
 - Publishes each machine's declared hardware as the listing's shape. A machine
   whose declaration cannot be read as one is held and reported with the reason;
   other machines in its pool are unaffected. Correcting a machine's declared
-  hardware closes its listing and publishes a successor under the new shape. A pool that
-  declares itself unbacked yields no bare-metal listing, and the round reports
-  it by name.
+  hardware closes its listing and publishes a successor under the new shape.
 - Closes a listing whose capacity declaration is disabled, or whose pool stops
   advertising `bare_metal` or is disabled.
-- Closes a listing whose machine is leased, and reopens it once the machine is
-  free again.
+- Closes a backed listing whose machine is leased, and reopens it once the machine
+  is free again. An unbacked listing is never judged against availability.
+- Refuses a machine whose listing would carry no settlement option, as
+  `no_settlement_option` when the configuration rules out every mechanism its
+  clauses name, closing its open listing, which reopens under the same identity
+  once an option returns. While one of those mechanisms only cannot be reached, its
+  chain or service unreachable, the open listing is held instead, as
+  `settlement_mechanism_unknown`.
 - Treats a Physical Resource moved to another pool as a new listing: the old
   one closes and a new one is published under the new pool.
 - Leaves a listing its seller closed as it is.
 - Holds, without closing or refreshing, the listings of a site whose projection
   the storefront does not hold or whose projection is malformed, and of a pool
-  whose declarations do not resolve or that resolves no settlement clause or lease
-  bound. A site that stops answering keeps its last generation, reported stale,
+  whose declarations do not resolve or that resolves no lease bound. A site that
+  stops answering keeps its last generation, reported stale,
   and its listings keep deriving from it. The cycle reports each hold; every other
   site is reconciled as usual.
 - Writes every new listing locally before any registry is told of it, records
@@ -363,7 +455,7 @@ refusal, and registry repair. It publishes independent typed
 settlement options; it does not manufacture availability or substitute a
 different site or resource.
 
-While the configuration has an Alkahest section, enabled or not, `[Wallet].address`, at least one `[Chains.<name>]`, and the overlay's `[Wallet].private_key` are required, since a disabled section still services accepted deals; with no Alkahest section they must be absent. Payments-only startup constructs no wallet, RPC, chain, or Alkahest client. The public `[Settlement]` section contains service, account, and trust settings only. An Alkahest listing advertises the release condition its escrow will use on each chain, the recipient arbiter paying the seller's wallet by default, and the storefront refuses to start configured for the interruptible release model, which bare metal cannot deliver. The runtime composes obligation servicing for Alkahest and contact exchange, and receipt-based settlement and reconciliation for Arkhai payments.
+While the configuration has an Alkahest section, enabled or not, it settles with `[Wallet].address`, at least one `[Chains.<name>]`, and the overlay's `[Wallet].private_key`, since a disabled section still services accepted deals; Alkahest readiness names each one missing. With no Alkahest section they must be absent, or the storefront refuses to start. Payments-only startup constructs no wallet, RPC, chain, or Alkahest client, and with Alkahest configured, startup constructs no chain client either: the `alkahest-chain-probe` loop builds each and probes each chain every `[Settlement.alkahest].probe_interval_seconds`, so the storefront starts while a chain is down and its Alkahest listings wait for it. The public `[Settlement]` section contains service, account, and trust settings only. An Alkahest listing advertises the release condition its escrow will use on each chain, the recipient arbiter paying the seller's wallet by default; configured for the interruptible release model, which bare metal cannot deliver, Alkahest is unready. The runtime composes obligation servicing for Alkahest and contact exchange, and receipt-based settlement and reconciliation for Arkhai payments.
 
 ### Resetting the storefront database
 

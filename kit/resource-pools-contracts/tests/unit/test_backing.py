@@ -8,6 +8,7 @@ from market_resource_pools_contracts.backing import (
     BACKED,
     UNBACKED,
     CapacityNotAdmittedError,
+    DeliveryTermsError,
     UnknownCapacityBackingError,
     admitted_backing,
     capacity_backing,
@@ -146,3 +147,70 @@ class TestAdmissibleSettlement:
 
         assert kept == ({"mechanism": "contact.v1"},)
         assert dropped == ("alkahest.v1",)
+
+
+_PRESENT_TERMS = {
+    "host_id": "kvm-1",
+    "access_methods": ["ssh"],
+    "available": True,
+}
+_PRESENT_VALUES = ["kvm-1", ["ssh"], {"ssh": {}}, True, False, 0, 7]
+_ABSENT_VALUES = [None, "", [], (), {}]
+
+
+class TestCarryDeliveryTerms:
+    @pytest.mark.parametrize("value", _PRESENT_VALUES + _ABSENT_VALUES)
+    def test_backed_supply_carries_the_terms_as_given(self, value):
+        terms = {**_PRESENT_TERMS, "term": value}
+
+        carried = BACKED.carry_delivery_terms(terms)
+
+        assert carried == terms
+        assert carried is not terms
+
+    @pytest.mark.parametrize("value", _PRESENT_VALUES + _ABSENT_VALUES)
+    def test_unbacked_supply_carries_none_of_them(self, value):
+        assert UNBACKED.carry_delivery_terms({**_PRESENT_TERMS, "term": value}) == {}
+
+
+class TestDeliveryTermConstraints:
+    @pytest.mark.parametrize("value", _PRESENT_VALUES)
+    def test_backed_supply_accepts_a_present_term(self, value):
+        BACKED.delivery_term_constraints({"term": value})
+
+    @pytest.mark.parametrize("value", _ABSENT_VALUES)
+    def test_backed_supply_refuses_an_absent_or_empty_term(self, value):
+        with pytest.raises(DeliveryTermsError) as refused:
+            BACKED.delivery_term_constraints({**_PRESENT_TERMS, "term": value})
+
+        assert refused.value.terms == ("term",)
+        assert isinstance(refused.value, ValueError)
+
+    def test_an_unavailable_backed_host_states_its_term(self):
+        BACKED.delivery_term_constraints({**_PRESENT_TERMS, "available": False})
+
+    @pytest.mark.parametrize("value", _ABSENT_VALUES)
+    def test_unbacked_supply_accepts_an_absent_or_empty_term(self, value):
+        UNBACKED.delivery_term_constraints({"term": value})
+
+    @pytest.mark.parametrize("value", _PRESENT_VALUES)
+    def test_unbacked_supply_refuses_a_present_term(self, value):
+        with pytest.raises(DeliveryTermsError) as refused:
+            UNBACKED.delivery_term_constraints({"term": value})
+
+        assert refused.value.terms == ("term",)
+
+    def test_a_refusal_names_every_offending_term(self):
+        with pytest.raises(DeliveryTermsError, match="host_id, physical_host_id") as refused:
+            BACKED.delivery_term_constraints(
+                {"host_id": None, "physical_host_id": "", "available": False}
+            )
+        assert refused.value.terms == ("host_id", "physical_host_id")
+
+        with pytest.raises(DeliveryTermsError) as refused:
+            UNBACKED.delivery_term_constraints({**_PRESENT_TERMS, "physical_host_id": None})
+        assert refused.value.terms == ("host_id", "access_methods", "available")
+
+    def test_no_terms_constrain_nothing(self):
+        BACKED.delivery_term_constraints({})
+        UNBACKED.delivery_term_constraints({})

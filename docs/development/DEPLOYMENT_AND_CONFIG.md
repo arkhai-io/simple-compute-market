@@ -137,6 +137,23 @@ charts set `enableServiceLinks: false`, because Kubernetes would otherwise injec
 variables for every Service in the namespace, and one named `storefront…` would
 land in the storefronts' `STOREFRONT_` override layer.
 
+**A deployment does not wait on a service's dependencies.** No chart holds a
+service back with an init container that waits for or validates an external
+dependency — a chain, a registry, a site, or another service — and no service
+waits for one in process either. The service starts with its dependencies
+unreachable, reports each one it cannot reach in its system status as degraded,
+and its own loops retry it; a misaddressed dependency is indistinguishable at
+start from one that is down, so it is reported the same way rather than refused.
+The one init container a chart runs is the provisioning service's migration,
+which acts on the service's own state (see "Migrations at startup"). What stops a
+service is its own configuration or stored state being incoherent (see
+"Storefront startup and site trust"), since waiting does not repair either. Both
+storefront charts give their container a `startupProbe` on `/health`, so a slow
+start holds the liveness and readiness probes off rather than being judged by
+them; `/health` is a process check that calls no dependency. Each chart's render
+tests assert that no `wait-for-` container and no init container renders for a
+storefront, and that the `startupProbe` does.
+
 **Toggling a mock/test profile:** A boolean chart value (for example
 `mockMode`) can conditionally append a profile name to
 `ACTIVE_PROFILES` in the Deployment template, causing the service's own
@@ -286,7 +303,9 @@ replaces it, and startup refuses a renamed or removed key under its own heading,
 `enable_registry_discovery`, refused whatever its value, so an operator who had
 turned publication off is not silently switched on, since VM always publishes to
 every `[registry].urls` entry; the removed `[provisioning.identity]`, since every
-site client verifies against its site's service peer; and the local-inventory keys,
+site client verifies against its site's service peer; the removed
+`provisioning.fail_on_unreachable` and `provisioning.preflight_timeout`, since the
+storefront starts without waiting for its provisioning service; and the local-inventory keys,
 which startup does not refuse (see "Settlement consumer configuration and
 cutover"). The chart's hand-written block holds only the chart's own retired values
 shape, that of storefront chart releases before 0.2.0 — `seller`,
@@ -334,12 +353,85 @@ site's URL is not an HTTP(S) origin. The refusal runs before the storefront open
 database or builds a signer, so it leaves no database file and starts no loop.
 Missing storefront-wide terms are not a refusal: an empty `[pricing].settlements` or
 an absent `[pricing].default_max_duration_seconds` leaves the terms to each pool's
-override or hint, and a pool that resolves none is held and reported in system
-status's `publication_derivation`. Retired settings are refused under their own
+override or hint. A pool that resolves no lease bound is held and reported in system
+status's `publication_derivation`; a candidate whose pool resolves no settlement
+clause is refused as `no_settlement_option`, and its open listing is closed through
+reconciliation and reopened under the same identity once a clause resolves (see
+"Storefront listing shapes and pool overrides"). Retired settings are refused under their own
 heading, apart from these, since a stale key is not a reason publication is
 impossible. A storefront that only services deals already accepted is not a supported
 deployment. A storefront chart cannot check any of this, which is why each chart's
 render tests run the storefront's own refusal over a rendered `storefront.json`.
+
+**A service refuses to start on its own incoherent state, never on a dependency.**
+A service refuses to start when its own configuration contradicts itself or its
+stored state cannot be served as it stands, since waiting repairs neither; a
+dependency it cannot reach is reported, not refused (see "Kubernetes: ConfigMap and
+Secret mounting"). Every storefront refuses an Alkahest section selecting both the
+oracle-gated and the interruptible release model, and the bare-metal storefront
+refuses Alkahest inputs — `[Wallet].address`, `[Chains]`, `[Wallet].private_key` —
+stated with no Alkahest section. The provisioning service refuses to start while a
+stored resource pool lacks valid advertisement and backing declarations, or names a
+provider no handler in its build serves, naming each pool and provider: handlers are
+fixed by the build and every write refuses an unknown provider, so such a row comes
+from outside the service's write paths, and no pool document can repair it.
+
+**A storefront starts with its dependencies unreachable.** None waits for its
+registry, chain, site, or credits service. The VM storefront's
+`[seller.provisioning]` and the API-credit storefront's `credits` sections have no
+reachability preflight: their removed `fail_on_unreachable` and `preflight_timeout`
+keys are retired settings, refused at startup and, for VM, by the values schema and
+`market-storefront config set`. A storefront started with its registry unreachable
+reports the registry check unreachable and itself `degraded`, and its publication
+cycle still completes, each listing it could not publish recording
+`registry_not_converged` until a later cycle publishes it. One started with its site
+unreachable holds no projection of that site, so its cycle holds the site's listings
+and closes none, and its fulfillment and settlement calls to the site fail
+retryably. API credits' configured seed listing is created by its `listing-seed`
+loop step, which waits while the credits service cannot be reached or a mechanism
+its clauses use is unknown, and gives up, logging once, on a configuration failure.
+
+**An Alkahest section that cannot settle makes Alkahest unready.** A section that
+parses but under which no deal could settle is reported through Alkahest readiness
+blockers, its options are not published, and the storefront's other mechanisms run:
+`oracle_gated` with no `trusted_oracle_addresses`, `interruptible` with no
+`interruptible_oracle_addresses`, a release oracle equal to the seller wallet, a
+seller wallet with no address, no private key where the storefront signs, no
+`[Chains]` entry, an address configuration that cannot be loaded, or a release
+model the storefront's domain does not deliver (bare metal delivers `recipient` and
+`oracle_gated`). A section that does not parse stops startup, as all configuration
+does. A disabled section reports, after `disabled`, the configuration blockers that
+would keep it from settling. Readiness governs publication only: an address, chains,
+or key removed while Alkahest deals are open leaves the seller unable to service or
+collect them, the buyer's escrow staying reclaimable at expiry, and the blocker
+naming what is missing is the operator's signal. Every readiness blocker states its
+`kind`: `configuration`, which the storefront's own settings cause, or
+`reachability`, when the mechanism's chain or service could not be reached;
+publication reads the kind to decide whether an open listing left with no option is
+closed or held (see "Storefront listing shapes and pool overrides").
+
+**Alkahest probes its chains.** Readiness makes no chain call. Each storefront
+composing Alkahest runs an `alkahest-chain-probe` lifecycle loop that, once per
+`[Settlement.alkahest].probe_interval_seconds` (30 by default), reads each
+configured chain's `eth_chainId` and the code at each contract its address
+configuration requires, each call bounded by `rpc_timeout_seconds` (5 by default);
+both are seller settings and positive seconds. An RPC that errors or times out reads
+as the reachability blocker `alkahest.chain_unreachable`; a different chain ID is
+`alkahest.chain_id_mismatch`, and a required contract with no code
+`alkahest.contract_missing`, both configuration blockers. A chain not yet probed
+since start reads as unreachable, so a freshly started storefront holds its open
+Alkahest listings rather than closing them; a result does not expire, so while the
+loop is held readiness reads the last one however old. Startup constructs no chain
+client: the probe constructs each at its first step, waiting no longer than the RPC
+timeout, and again at each probe until one succeeds, so a storefront recovers
+without a restart, and a chain whose client cannot be constructed reads
+unreachable whatever its RPC answers. The probe calls a `ws://` or `wss://`
+`rpc_url` over `http://` or `https://` at the same host, port, and path, so a
+provider serving the two on different endpoints reads as unreachable. Status
+readiness judges every configured chain, so `ready` there means every one is
+reachable and deployed; publication judges the chains a candidate's escrows name,
+and one unreachable chain among them withholds the candidate's Alkahest options on
+all of them.
 
 **A site's authority URL is an origin.** Each `[capacity.sites]` URL is parsed by the
 WHATWG URL standard (pydantic's `AnyHttpUrl`) and must have an `http` or `https`
@@ -396,10 +488,25 @@ not positive seconds.
 **System status.** Each storefront's system status reports its lifecycle loops as
 `lifecycle`: each loop's state and last cycle's outcome, a failure's stage and error
 type, and its message only for the storefront's own configuration and publication
-errors. The VM and bare-metal storefronts also report each site's projection families
-and the latest publication derivation. The API-credit storefront's status is the
+errors. Each also reports `settlement`, every composed mechanism's readiness as its
+registration projects it — `mechanism`, `ready`, and each blocker's `code` and
+`kind` — with Alkahest's carrying each chain's last probe result and when it was
+taken (`chain_probe`); and `status` is `degraded`, rather than `ok`, while a check
+such as the registry's fails, the process itself still serving. The VM and
+bare-metal storefronts also report each site's projection families and its
+`publication_derivation`, in one shape for both: per site, the `holds`, `refusals`,
+and `reports` the last real publication cycle made, each entry a reason code with
+the pool or Physical Resource it concerns and any detail. Only a publication cycle
+records it — a preview, a listing-source check, and capacity-event reconciliation
+do not — so a configured site no cycle has derived since start is absent, and a site
+present with empty lists derived cleanly. The storefront logs each entry as a
+warning when it first appears and at info when it clears, and never logs a standing
+entry again or a preview, so a condition that lasts many cycles is logged once. A
+cycle that cannot read a site at all records a hold naming no pool, and the site's
+other entries from the last cycle that read it stand beside that hold until a cycle
+reads the site again. The API-credit storefront's status is the
 administrator's signed read (`admin_system_status`), as VM's and bare metal's are;
-`/health` stays unauthenticated.
+`/health` stays unauthenticated and is a process check.
 
 ## Marketplace identity configuration
 
@@ -626,6 +733,19 @@ value (Anvil accounts 8 and 9) never for a public network. Release 2 reuses rele
 An end-to-end scenario that needs release 2 states `make helm-topology-up` on its
 Makefile target and in its suite module's docstring; the Helm validation scenarios
 need release 1 alone.
+
+**Helm test pods carry no workload selector label.** Each chart labels its Helm
+test pod through its own `<chart>.testLabels` helper: chart, version, managed-by,
+instance, and `app.kubernetes.io/component: test`, but never
+`app.kubernetes.io/name`, which every Deployment selector requires. So
+`kubectl logs -l <selector>` or `kubectl logs deploy/<name>` finds only the
+service's pods, and no Service routes traffic to a test pod. Adding `component`
+to the Deployment selectors instead is not available: a selector is immutable, and
+changing one forces each release to recreate its Deployments.
+`helm/tests/test_release_topology.py` renders both topology releases and asserts
+that no Pod annotated `helm.sh/hook: test` carries all of any Deployment's
+`matchLabels` or any Service's selector, and that each release renders its expected
+test pods.
 
 ### Validation namespaces
 
@@ -1129,9 +1249,10 @@ system status names the retired keys.
   undefined field, or with an unknown key; bounds that merge to an empty range; or
   one base shape stated twice with different constraints — closes alone, and the
   pool's other listings publish. System status reports the inadmissible offers and
-  the uncomputable policies per site in `publication_derivation`, under
-  `inadmissible_listing_shapes` and `unusable_shape_constraints`, naming the tier,
-  path, and problem, each tier's conflicting value, or each conflicting entry.
+  the uncomputable policies under each site's `publication_derivation` `reports`,
+  as `listing_shape_inadmissible` and `shape_constraints_unusable` entries whose
+  `findings` name the tier, path, and problem, each tier's conflicting value, or
+  each conflicting entry.
 
 - **Writes refuse what they can check.** The provisioning service refuses a pool
   write whose constraint mappings are malformed or that states one base shape twice
@@ -1159,6 +1280,43 @@ system status names the retired keys.
   unreachable does not delist that site. Listings derive only from site
   projections; nothing local stands in for one. A site decommissioned without
   closing its listings leaves them advertised until an operator closes them.
+- **A candidate with no settlement option yields no listing.** In VM and bare metal
+  alike, a candidate whose payload carries no settlement option and no accepted
+  escrow is refused and recorded under its site's `publication_derivation`
+  `refusals`, with its pool and Physical Resource. Its admissible clauses are its
+  pool override's, else the configured ones, after admissibility for its backing
+  (an unbacked listing publishes only options its domain does not fulfil through
+  capacity). When the candidate's listing is open, each mechanism of those clauses
+  is judged by its readiness blockers' `kind` (see "Storefront startup and site
+  trust"):
+  - every mechanism ruled out by configuration — no clause, a contact-only option
+    whose origin has no contact, or any configuration blocker — refuses it as
+    `no_settlement_option` and closes the listing through reconciliation; it
+    reopens under the same identity on the first cycle whose payload builds again;
+  - any mechanism whose every blocker is reachability — its chain or service
+    unreachable, or not yet probed since start — holds the listing on its
+    last-published terms as `settlement_mechanism_unknown`, a hold, and it
+    negotiates as before; with no open listing that is a refusal;
+  - any other payload failure is refused as `payload_unbuildable`, its text the
+    entry's `error`, and leaves an open listing as it is.
+
+  A mechanism outside the candidate's admissible clauses is not judged, so an
+  outage on a mechanism the listing could never publish neither holds nor closes
+  it.
+- **A clause naming a disabled mechanism is dropped wherever it is stated.** A
+  settlement clause is read in full before its mechanism's enablement is judged,
+  so a malformed clause — including a stated `mechanism_input` that is not a
+  mapping — is a payload failure that leaves its listing as it is. A readable
+  clause whose mechanism's section is absent or disabled is dropped and rules that
+  mechanism out, whether a pool's hint, an override, or `[pricing].settlements`
+  states it, so a listing it alone priced closes as `no_settlement_option`.
+  `market-storefront config migrate --scope settlement|publication` validates its result
+  through the same reading, so it accepts a configuration whose clause names a
+  disabled mechanism, as the storefront starts with one; disabling a mechanism is a
+  deliberate operator act.
+- **A region is the pool's alone.** A pool stating no `region` is held as
+  `pool_region_missing`: it publishes nothing new and leaves its open listings
+  unrefreshed.
 
 Constraints are additive: every shape stated without them is valid, and with no
 constraint and no configured default publication is unchanged. Sites and storefronts
@@ -1198,8 +1356,18 @@ error's type.
   the next publication cycle holds that pool as `pool_override_terms_conflict`
   rather than publishing; raise the maximum or correct the override. A pool for
   which neither the override nor configuration states a positive maximum is held
-  as `pool_lease_bound_missing`, and one resolving no settlement clause as
-  `pool_settlement_clauses_missing`.
+  as `pool_lease_bound_missing`. A pool resolving no settlement clause is not
+  held: its candidates have no settlement option, as "A candidate with no
+  settlement option yields no listing" above describes.
+- **A machine the site builds no view for is reported, and its listing held.** The
+  site projects a declaration from which it cannot build a bare-metal view — a
+  backed one naming no host, no access methods, or no `physical_host_id`, a missing
+  or invalid `allocation_mode`, a private-looking capacity or capability key —
+  without the view, and with the reason in its `publication_view_problems`. The
+  storefront reports it as `publication_view_unbuildable` with those problems and
+  refuses openings against it; an open listing of it is held, neither closed nor
+  refreshed, until the declaration is corrected, while a disabled declaration or a
+  pool that stops admitting bare metal still closes it.
 - **A write takes effect at once.** An accepted write refreshes the site's held
   projections and wakes the publication loop.
 - **Status is judged against the held projection.** An override's status reads
@@ -1394,6 +1562,16 @@ Operators re-deliver a revealed introduction to its origin's instances with
 bare-metal storefront's `redeliver-introduction` command. Delivery and re-delivery
 are specified in [introduction delivery](../../openspec/specs/introduction-delivery/spec.md).
 
+The VM and bare-metal end-to-end lanes each run a Mailpit as the seller's mail sink.
+Each lane's storefront configuration (`domains/vms/storefront/storefront.bob.toml`,
+`domains/bare_metal/storefront/storefront.dev.toml`) enables one SMTP instance,
+`[Delivery.seller-mail]`, sending to the `mailpit` host on port 1025 and addressed
+to the seller contact its `[Settlement.contact]` reveals; the bare-metal lane adds
+the service in `compose.bare-metal-local.yml`, which its storefront waits on until
+healthy. The introduction scenarios read the mail back through the lane's
+`MAILPIT.API_URL` (`e2e-tests/config/config-docker.yml`). Every address in them is a
+development value on a reserved domain.
+
 ### Contact-exchange retention
 
 Two seller-only settings in `[Settlement.contact]` bound how long revealed contacts
@@ -1418,7 +1596,7 @@ The bare-metal storefront reads its configuration as every storefront does: `$XD
 
 `[capacity.sites]` maps each site to its authority URL, and each site is bound to exactly one `[Identity.service_peers.<peer>]`, seeded at the server's start and rotated through the identity routes (see "Storefront startup and site trust"). Health and status report each site by its ID, its service peer, and the peer's active principals, primary first, never its URL; a site's error text in status may name the URL, which is public configuration refused at startup when it carries credentials. `[capacity].poll_interval` (5 s), `[capacity].publication_interval_seconds` (30 s), and `[capacity].source_confirmation_seconds` (three poll intervals unless stated) time the projection poller, the publication loop, and the opening recheck's confirmation window. `[pricing].settlements` compile when the storefront starts, so a clause that cannot be read refuses startup naming the key; an empty list is not a refusal. `[negotiation].policies` names the seller chain.
 
-`[Settlement]` is the strict shared settlement root. A configured Alkahest section, enabled or disabled, requires the seller's public address (`[Wallet].address`), at least one chain (`[Chains.<name>]`, its `rpc_url` and optional `alkahest_address_config_path`), and the wallet key (`[Wallet].private_key`, in the Secret overlay only). Disabled sections still service accepted obligations. Those inputs supplied with no Alkahest section are refused. Payments-only configuration supplies none of them and constructs no Alkahest wallet, chain, or RPC client; its payment credentials remain behind the secret boundary. The storefront delivers the `recipient` and `oracle_gated` release models and refuses to start configured as `interruptible`. Publication additionally requires authenticated registry trust, exact typed clauses, freshly confirmed site projections for its source checks, and a maximum lease duration per pool.
+`[Settlement]` is the strict shared settlement root. A configured Alkahest section, enabled or disabled, settles with the seller's public address (`[Wallet].address`), at least one chain (`[Chains.<name>]`, its `rpc_url` and optional `alkahest_address_config_path`), and the wallet key (`[Wallet].private_key`, in the Secret overlay only); a section missing any of them starts, and Alkahest readiness names each missing input as a blocker, since disabled sections still service accepted obligations. Those inputs supplied with no Alkahest section are refused at startup. Payments-only configuration supplies none of them and constructs no Alkahest wallet, chain, or RPC client; its payment credentials remain behind the secret boundary. The storefront delivers the `recipient` and `oracle_gated` release models; configured as `interruptible`, Alkahest is unready (see "Storefront startup and site trust"). Publication additionally requires authenticated registry trust, exact typed clauses, freshly confirmed site projections for its source checks, and a maximum lease duration per pool.
 
 The Compose wrapper mounts the operator's `storefront.toml` and the Secret overlay and reads the identity credential from its own environment file. The Helm chart, `helm/charts/bare-metal-storefront`, is the storefront chart's agent shape with one agent's keys at its top level: `config` rendered into `storefront.json` in a ConfigMap with null-valued keys removed (see "Storefront agents: pass-through configuration"); `secret` naming an existing Secret whose key is mounted as `storefront.secrets.toml`; `identity.credentialSecret`; `alkahestAddressBook` mounting an existing ConfigMap read-only; `port`, which the container, probes, and Service share; persistence; and scheduling. The pod's environment carries only `XDG_CONFIG_HOME` and the credential, and service links are off. The chart derives only what the release knows, and only where `config` states none: `port` always (a different stated value refused), `base_url` as the Service's URL, `db_path` under `persistence.mountPath`, and, in an umbrella release, the internal registry's URL with the chart-level `internalRegistryTrust` under it and `[capacity.sites]` as `{default: <provisioning URL>}`. A site bound to the release's provisioning service must have a role-`service` peer naming `global.provisioningIdentity`, which the chart checks and never adds. Installed alone, with no umbrella globals, it derives the first three only and refuses `internalRegistryTrust`. Its values schema is closed: the top level refuses every value it does not know, retired ones by name, and `config` is typed by a definition generated from the storefront's settings models, each section closed, so a misspelled or secret key is refused at render. A key stated in two spellings is refused at render too, since the loader would merge them silently. The chart validates no service semantics; the storefront's startup refusal does.
 

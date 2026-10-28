@@ -27,6 +27,7 @@ from market_alkahest.proposals import (
     escrow_proposal_from_accepted_entry,
     selected_release_condition,
 )
+from market_alkahest.release_authorization import require_pinned_escrow
 from market_arkhai_payments import (
     MandatePolicyError,
     PaymentSettlementData,
@@ -39,6 +40,7 @@ from market_core.schemas import (
     EscrowProposal,
 )
 from market_identity import Identity
+from market_policy.scalar_policies import is_escrow_proposal
 
 import market_storefront.container as _container
 from market_storefront.failure_actions import (
@@ -61,7 +63,7 @@ from market_storefront.services.vm_job_spec_service import (
 from market_storefront.utils import config
 from market_storefront.utils.escrow_verification import (
     EscrowVerificationError,
-    verify_escrow_for_settlement,
+    verify_escrow_against_plan,
 )
 
 logger = logging.getLogger(__name__)
@@ -84,6 +86,31 @@ class PaymentSettleResult:
     payload: dict[str, Any] = field(default_factory=dict)
 
 
+def accepted_alkahest_proposal(
+    thread: Mapping[str, Any], *, mechanism: str
+) -> dict[str, Any]:
+    """The escrow proposal an accepted Alkahest deal recorded.
+
+    It names the chain and escrow contract the buyer funds; the escrow itself is
+    checked against the deal's committed settlement plan. Raises ``ValueError``
+    when the accepted Agreement does not select ``mechanism`` or recorded none.
+    """
+    raw = thread.get("agreement_bytes")
+    if not isinstance(raw, bytes):
+        raise ValueError("accepted Agreement bytes are unavailable")
+    agreement = json.loads(raw)
+    selected = agreement.get("settlement")
+    if not isinstance(selected, Mapping) or selected.get("mechanism") != mechanism:
+        raise ValueError("accepted Agreement does not select Alkahest")
+    # Only the accepted proposal carries the release condition the seller
+    # authorized; the buyer's opening is not a substitute for it.
+    data = thread.get("settlement_data") or {}
+    proposal = data.get("accepted_escrow_proposal")
+    if not isinstance(proposal, dict) or "chain_name" not in proposal:
+        raise ValueError("accepted negotiation has no persisted accepted escrow proposal")
+    return proposal
+
+
 @dataclass(frozen=True)
 class VmAlkahestSellerStage:
     # Whether a deal through this entry settles from the accepted Agreement
@@ -100,10 +127,16 @@ class VmAlkahestSellerStage:
     # fulfillment. Required of every VM seller stage, with no default, because
     # publication drops such a stage's options from an unbacked listing.
     fulfils_through_capacity: bool = field(kw_only=True)
+    # Whether a deal through this entry completes outside settlement and
+    # fulfillment, so that it has no settle, delivery, or refund operation.
+    # Required of every VM seller stage, with no default, because the settle
+    # route answers such a deal from it. It is not fulfils_through_capacity:
+    # a mechanism may settle without delivering through capacity.
+    completes_outside_settlement: bool = field(kw_only=True)
     # The Alkahest release models this entry can deliver, from
-    # market_alkahest.RELEASE_MODELS. Composition refuses a configured
-    # [Settlement.alkahest] model outside them, so a listing never advertises
-    # a release condition its deal could not honour.
+    # market_alkahest.RELEASE_MODELS. A configured [Settlement.alkahest] model
+    # outside them makes Alkahest unready, so a listing never advertises a
+    # release condition its deal could not honour.
     release_models: frozenset[str] = field(kw_only=True)
 
     def readiness_inputs(self, clauses: Any) -> dict[str, Any]:
@@ -127,6 +160,11 @@ class VmAlkahestSellerStage:
         entry = option.get("params", {}).get("accepted_escrow")
         if not isinstance(entry, Mapping):
             raise ValueError("selected Alkahest option has no accepted escrow")
+        # The escrow funded is the option's, so an escrow carrier the buyer
+        # sends beside its selection is never materialized; one naming no
+        # contract is still refused, as materializing it would be.
+        if is_escrow_proposal(context.proposal):
+            require_pinned_escrow(context.proposal)
         # The escrow settles under the listing's authorized condition, and a
         # condition the buyer's proposal selects beside its option must be that
         # one: the selection names the option, never the condition.
@@ -197,19 +235,17 @@ class VmAlkahestSellerStage:
             or proposal.escrow_address != source["escrow_address"]
         ):
             raise ValueError("Alkahest source differs from accepted settlement")
-        facts = evidence.evidence["delivery"]["payload"]
-        index = await verify_escrow_for_settlement(
+        # Recovery rechecks the escrow against the plan committed at acceptance,
+        # as settlement verified it, not the listing recorded with the evidence.
+        index = await verify_escrow_against_plan(
             escrow_uid=evidence.settlement_ref,
-            seller_wallet=config.get_evm_wallet_address(),
-            agreed_price=int(thread["agreed_price"]),
-            agreed_duration_seconds=facts["duration_seconds"],
-            listing=facts["order"],
+            settlement_plan=thread.get("settlement_plan"),
             alkahest_client=client,
             chain_name=chain_name,
+            escrow_address=proposal.escrow_address,
             alkahest_address_config_path=config.CHAINS[
                 chain_name
             ].alkahest_address_config_path,
-            escrow_proposal=proposal,
         )
         if index != source["obligation_index"]:
             raise ValueError("Alkahest recovered obligation changed")
@@ -296,20 +332,7 @@ class VmAlkahestSellerStage:
         return {"accepted_escrow_proposal": artifacts["accepted_escrow_proposal"]}
 
     def accepted_proposal(self, thread: Mapping[str, Any]) -> dict[str, Any]:
-        raw = thread.get("agreement_bytes")
-        if not isinstance(raw, bytes):
-            raise ValueError("accepted Agreement bytes are unavailable")
-        agreement = json.loads(raw)
-        selected = agreement.get("settlement")
-        if not isinstance(selected, Mapping) or selected.get("mechanism") != self.mechanism:
-            raise ValueError("accepted Agreement does not select Alkahest")
-        # Only the accepted proposal carries the release condition the seller
-        # authorized; the buyer's opening is not a substitute for it.
-        data = thread.get("settlement_data") or {}
-        proposal = data.get("accepted_escrow_proposal")
-        if not isinstance(proposal, dict) or "chain_name" not in proposal:
-            raise ValueError("accepted negotiation has no persisted accepted escrow proposal")
-        return proposal
+        return accepted_alkahest_proposal(thread, mechanism=self.mechanism)
 
     async def start(
         self,
@@ -389,6 +412,13 @@ class VmAlkahestSellerStage:
                 detail=f"settlement mechanism {mechanism!r} is not configured",
             )
         if accepted_chain not in _container.configured_chain_names():
+            # A configured chain whose client the chain probe has not built yet,
+            # at start or while its endpoint is down, is retryable.
+            if accepted_chain in config.CHAINS:
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"settlement chain {accepted_chain!r} is unavailable; retry",
+                )
             raise HTTPException(
                 status_code=400,
                 detail=(
@@ -423,6 +453,7 @@ class VmPaymentsSellerStage:
     settles_from_agreement: ClassVar[bool] = True
     mechanism: str = "arkhai.payments.v1"
     fulfils_through_capacity: bool = field(kw_only=True)
+    completes_outside_settlement: bool = field(kw_only=True)
 
     def readiness_inputs(self, clauses: Any) -> dict[str, Any]:
         return {}
@@ -703,13 +734,15 @@ class VmContactSellerStage:
 
     Its accepted plan comes from the registration, and the reveal is served by
     the contact-exchange kit, so this entry publishes no chains and has no
-    settle, delivery or refund operation.
+    settle, delivery or refund operation; it declares that it completes outside
+    settlement, and the settle route answers its deals from that declaration.
     """
 
     # Its plan is built by the registration's obligation builder.
     settles_from_agreement: ClassVar[bool] = False
     mechanism: str = CONTACT_MECHANISM
     fulfils_through_capacity: bool = field(kw_only=True)
+    completes_outside_settlement: bool = field(kw_only=True)
 
     def readiness_inputs(self, clauses: Any) -> dict[str, Any]:
         return {}
@@ -722,12 +755,6 @@ class VmContactSellerStage:
     ) -> dict[str, Any]:
         return {}
 
-    async def start(self, **_: Any) -> Any:
-        raise HTTPException(
-            status_code=409,
-            detail="a contact exchange completes by introduction, not settlement",
-        )
-
 
 def vm_seller_stages(build_plan: Callable[..., Any]) -> SettlementStageTable[Any]:
     return SettlementStageTable(
@@ -735,13 +762,21 @@ def vm_seller_stages(build_plan: Callable[..., Any]) -> SettlementStageTable[Any
             # A VM listing may be a preemptible spot shape, so VM delivers every
             # release model, the interruptible splitter included.
             "alkahest.v1": VmAlkahestSellerStage(
-                build_plan, fulfils_through_capacity=True, release_models=RELEASE_MODELS
+                build_plan,
+                fulfils_through_capacity=True,
+                completes_outside_settlement=False,
+                release_models=RELEASE_MODELS,
             ),
             # A payment deal provisions its VM through capacity, like Alkahest.
-            "arkhai.payments.v1": VmPaymentsSellerStage(fulfils_through_capacity=True),
+            "arkhai.payments.v1": VmPaymentsSellerStage(
+                fulfils_through_capacity=True, completes_outside_settlement=False
+            ),
             # An introduction settles by revealing contacts; nothing is admitted
-            # against capacity, so an unbacked listing may offer it.
-            CONTACT_MECHANISM: VmContactSellerStage(fulfils_through_capacity=False),
+            # against capacity, so an unbacked listing may offer it, and nothing
+            # is settled or delivered after the reveal.
+            CONTACT_MECHANISM: VmContactSellerStage(
+                fulfils_through_capacity=False, completes_outside_settlement=True
+            ),
         }
     )
 

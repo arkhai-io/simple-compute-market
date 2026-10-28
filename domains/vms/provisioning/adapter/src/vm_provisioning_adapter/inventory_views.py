@@ -11,6 +11,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from compute_provisioning import InventoryPoolContext, ResourceViews
+
 from vm_provisioning_adapter.db import AnsiblePoolConfig
 
 #: The pool view this projection produces.
@@ -47,9 +49,9 @@ class AnsiblePoolDefaultsViews:
         self._provider = provider
 
     def resource_views(
-        self, declaration: Mapping[str, Any], *, pool_id: str
-    ) -> Mapping[str, Mapping[str, Any]]:
-        return {}
+        self, declaration: Mapping[str, Any], *, pool: InventoryPoolContext
+    ) -> ResourceViews:
+        return ResourceViews()
 
     def pool_views(
         self, db: Any, *, pool_id: str, provider: str

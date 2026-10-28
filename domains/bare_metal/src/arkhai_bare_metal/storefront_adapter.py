@@ -17,6 +17,7 @@ CloseStaleCallback = Callable[[str, str], list[str]]
 CandidateCallback = Callable[[str], list[dict[str, Any]]]
 RecordPublishedCallback = Callable[[str, dict[str, Any], str], None]
 ReopenExistingCallback = Callable[..., dict[str, Any] | None]
+CloseCandidateListingCallback = Callable[[str, str, dict[str, Any], str], None]
 
 
 def bare_metal_candidate_skip_keys(candidate: dict[str, Any]) -> set[str]:
@@ -31,6 +32,7 @@ def bare_metal_publication_adapter(
     available_candidates: CandidateCallback,
     record_published: RecordPublishedCallback,
     reopen_existing: ReopenExistingCallback,
+    close_candidate_listing: CloseCandidateListingCallback,
 ) -> PublicationSource:
     """Build the bare-metal publication source for a concrete storefront."""
     return PublicationSource(
@@ -43,5 +45,6 @@ def bare_metal_publication_adapter(
         pricing_resource=lambda _candidate, listing_resource: listing_resource,
         record_published=record_published,
         reopen_existing=reopen_existing,
+        close_candidate_listing=close_candidate_listing,
         reopen_error_label="reconcile bare-metal listing",
     )

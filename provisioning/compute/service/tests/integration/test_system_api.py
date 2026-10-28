@@ -33,6 +33,7 @@ from compute_provisioning_contracts import (
     SUPPORTED_COMPUTE_PROVISIONING_MAJOR_VERSIONS,
     HealthResponse,
     SystemStatusResponse,
+    WorkerPauseResponse,
 )
 import pytest
 from vm_provisioning_adapter.services.mock_output import vm_mock_output
@@ -222,27 +223,42 @@ class TestWorkerControls:
 
         assert raised.value.status_code == 409
 
-    async def test_a_paused_convergence_advances_then_resumes(self, client_and_queue):
+    async def test_a_paused_convergence_is_at_its_gate_advances_then_resumes(
+        self, client_and_queue
+    ):
+        """No timer cycle runs during the test, so the pause answers the
+        watchdog held at its gate at once; an explicit cycle does not take it
+        off the gate."""
         client, _ = client_and_queue
 
-        assert await client.family.pause_fulfillment_convergence() == {"paused": True}
+        paused = await client.family.pause_fulfillment_convergence()
         try:
             advanced = await client.family.advance_fulfillment_convergence_cycle()
             ran = await client.family.run_fulfillment_convergence_cycle()
+            again = await client.family.pause_fulfillment_convergence()
         finally:
-            assert await client.family.resume_fulfillment_convergence() == {"paused": False}
+            resumed = await client.family.resume_fulfillment_convergence()
 
+        assert paused == WorkerPauseResponse(paused=True, at_gate=True)
+        assert again == WorkerPauseResponse(paused=True, at_gate=True)
+        assert resumed == WorkerPauseResponse(paused=False, at_gate=False)
         assert isinstance(advanced, dict) and isinstance(ran, dict)
 
-    async def test_the_lease_watchdog_pauses_and_still_checks(self, client_and_queue):
+    async def test_a_paused_lease_watchdog_is_at_its_gate_and_still_checks(
+        self, client_and_queue
+    ):
         client, _ = client_and_queue
 
-        assert await client.family.pause_lease_watchdog() == {"paused": True}
+        paused = await client.family.pause_lease_watchdog()
         try:
             cycle = await client.family.check_leases()
+            again = await client.family.pause_lease_watchdog()
         finally:
-            assert await client.family.resume_lease_watchdog() == {"paused": False}
+            resumed = await client.family.resume_lease_watchdog()
 
+        assert paused == WorkerPauseResponse(paused=True, at_gate=True)
+        assert again == WorkerPauseResponse(paused=True, at_gate=True)
+        assert resumed == WorkerPauseResponse(paused=False, at_gate=False)
         assert cycle["checked"] == 0
 
 

@@ -626,3 +626,81 @@ async def test_an_exact_retry_of_a_non_replay_safe_route_is_refused(app):
     assert "cannot be safely retried" in second.json()["detail"]
     # The refusal's whole purpose: the handler ran once.
     assert len(calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# A route failing after authentication
+# ---------------------------------------------------------------------------
+
+
+def _failing_app(calls: list[int], *, exact_retry_safe: bool) -> FastAPI:
+    application = FastAPI()
+
+    @application.post("/api/v1/capacity/reservations")
+    def reserve() -> dict[str, Any]:
+        calls.append(1)
+        raise RuntimeError("ledger row unreadable: internal detail")
+
+    application.add_middleware(
+        SiteAuthMiddleware,
+        signer_provider=lambda: AUTHORITY_SIGNER,
+        expected_principals=_expected_principals,
+        contracts=tuple(
+            replace(contract, exact_retry_safe=exact_retry_safe)
+            if contract.operation == "capacity_reserve"
+            else contract
+            for contract in CAPACITY_ROUTE_CONTRACTS
+        ),
+    )
+    return application
+
+
+async def _reserve_twice(application: FastAPI) -> tuple[httpx.Response, httpx.Response]:
+    body = {"claim": {"units": 1}}
+    headers = _signed_headers(
+        signer=SELLER_SIGNER,
+        role="seller",
+        method="POST",
+        operation="capacity_reserve",
+        resource="",
+        body=body,
+    )
+    transport = httpx.ASGITransport(app=application)
+    async with httpx.AsyncClient(transport=transport, base_url="http://authority") as http:
+        first = await http.post("/api/v1/capacity/reservations", json=body, headers=headers)
+        second = await http.post("/api/v1/capacity/reservations", json=body, headers=headers)
+    return first, second
+
+
+@pytest.mark.asyncio
+async def test_a_route_failing_after_authentication_answers_a_signed_500(caplog):
+    """Signed with a fixed detail; the error goes to the log, not the caller.
+
+    This store keeps no outcomes, so nothing is recorded: an exact retry of a
+    retry-safe route runs again and fails the same way.
+    """
+    calls: list[int] = []
+
+    with caplog.at_level("ERROR"):
+        first, second = await _reserve_twice(_failing_app(calls, exact_retry_safe=True))
+
+    for response in (first, second):
+        assert response.status_code == 500
+        assert response.json() == {"detail": "Site-authority request failed"}
+        _assert_signed_by_authority(response)
+    assert "internal detail" not in first.text
+    assert "internal detail" in caplog.text
+    assert len(calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_an_exact_retry_of_a_failed_unsafe_route_is_refused():
+    calls: list[int] = []
+
+    first, second = await _reserve_twice(_failing_app(calls, exact_retry_safe=False))
+
+    assert first.status_code == 500
+    _assert_signed_by_authority(first)
+    assert second.status_code == 409
+    assert "cannot be safely retried" in second.json()["detail"]
+    assert len(calls) == 1

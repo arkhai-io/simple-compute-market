@@ -60,9 +60,9 @@ async def test_seller_readiness_blocks_without_payload_or_profiles() -> None:
     )
     (readiness,) = await registry.ordered_readiness(config, role="seller")
     assert not readiness.ready
-    assert {blocker.code for blocker in readiness.blockers} == {
-        "no_contact_profiles",
-        "no_contact_payload",
+    assert {(blocker.code, blocker.kind) for blocker in readiness.blockers} == {
+        ("no_contact_profiles", "configuration"),
+        ("no_contact_payload", "configuration"),
     }
 
 

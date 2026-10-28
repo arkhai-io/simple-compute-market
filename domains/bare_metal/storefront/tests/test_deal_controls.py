@@ -6,6 +6,7 @@ them as an administrator, or as the site, would, over the production app.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import replace
 
@@ -17,6 +18,7 @@ from storefront_client.client import StorefrontClientError
 from test_http_settlement import (
     ADMIN_SIGNER,
     BUYER,
+    ESCROW_ADDRESS,
     ESCROW_UID,
     SELLER_SIGNER,
     SITE_SIGNER,
@@ -27,6 +29,7 @@ from test_http_settlement import (
     _ProvisioningClient,
 )
 
+from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 from held_loops import held_loop_controller
 from site_trust import seeded_sites
 from source_sites import SourceSite, source_projections
@@ -69,9 +72,11 @@ async def _runtime(tmp_path, *, verifier=None, provisioning=None, authorities=No
     return runtime, negotiation_id, capacity
 
 
-async def test_verify_reads_the_escrow_against_a_listing_and_writes_nothing(
+async def test_verify_reads_the_escrow_against_the_accepted_plan_and_writes_nothing(
     tmp_path,
 ) -> None:
+    """The dry run checks the escrow as settlement does: against the plan the
+    accepted negotiation committed, on its proposal's chain and contract."""
     calls = []
 
     async def verifier(**kwargs):
@@ -82,36 +87,48 @@ async def test_verify_reads_the_escrow_against_a_listing_and_writes_nothing(
     app = _app(runtime)
     async with app.router.lifespan_context(app):
         async with _client(app, ADMIN_SIGNER, "admin") as admin:
-            valid = await admin.verify_settle(
-                ESCROW_UID,
-                seller_wallet="0x3333333333333333333333333333333333333333",
-                agreed_price=100,
-                agreed_duration_seconds=3600,
-                listing_id="listing-1",
-            )
-            unknown_chain = await admin.verify_settle(
-                ESCROW_UID,
-                seller_wallet="0x3333333333333333333333333333333333333333",
-                agreed_price=100,
-                agreed_duration_seconds=3600,
-                listing_id="listing-1",
-                chain_name="mainnet",
-            )
+            valid = await admin.verify_settle(ESCROW_UID, negotiation_id=negotiation_id)
             with pytest.raises(StorefrontClientError) as missing:
-                await admin.verify_settle(
-                    ESCROW_UID,
-                    seller_wallet="0x3333333333333333333333333333333333333333",
-                    agreed_price=100,
-                    agreed_duration_seconds=3600,
-                    listing_id="no-such-listing",
-                )
+                await admin.verify_settle(ESCROW_UID, negotiation_id="no-such-negotiation")
 
+    thread = await runtime.db.load_negotiation_thread_row(negotiation_id=negotiation_id)
     assert valid == {"escrow_uid": ESCROW_UID, "valid": True, "reason": None}
-    assert unknown_chain["valid"] is False
     assert missing.value.status_code == 404
-    assert len(calls) == 1 and calls[0]["agreed_price"] == 100
+    (call,) = calls
+    assert call["settlement_plan"] == thread["settlement_plan"]
+    assert (call["chain_name"], call["escrow_address"]) == ("anvil", ESCROW_ADDRESS)
     assert await runtime.db.load_escrow(escrow_uid=ESCROW_UID) is None
     assert (await runtime.settlement_runtime.get_status(negotiation_id)).obligations == []
+
+
+async def test_verify_of_a_deal_on_a_chain_with_no_client_is_not_valid(tmp_path) -> None:
+    calls = []
+
+    async def verifier(**kwargs):
+        calls.append(kwargs)
+        return 1
+
+    runtime, negotiation_id, _capacity = await _runtime(tmp_path, verifier=verifier)
+    # State no route can produce: a deal accepted on a chain this storefront
+    # holds no Alkahest client for.
+    with sqlite3.connect(runtime.db.db_path) as conn:
+        (raw,) = conn.execute(
+            "SELECT buyer_escrow_proposal FROM negotiation_threads WHERE negotiation_id = ?",
+            (negotiation_id,),
+        ).fetchone()
+        proposal = {**json.loads(raw), "chain_name": "mainnet"}
+        conn.execute(
+            "UPDATE negotiation_threads SET buyer_escrow_proposal = ? WHERE negotiation_id = ?",
+            (json.dumps(proposal), negotiation_id),
+        )
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with _client(app, ADMIN_SIGNER, "admin") as admin:
+            result = await admin.verify_settle(ESCROW_UID, negotiation_id=negotiation_id)
+
+    assert result["valid"] is False
+    assert "'mainnet'" in result["reason"]
+    assert calls == []
 
 
 async def test_evaluate_previews_the_reservation_settlement_would_make(tmp_path) -> None:
@@ -127,6 +144,64 @@ async def test_evaluate_previews_the_reservation_settlement_would_make(tmp_path)
     assert preview["required_attributes"]["resource_id"] == "resource-1"
     assert preview["required_attributes"]["dimensions"] == {"units": 1}
     assert capacity.reserve_calls == []
+
+
+def _durable_rows(db_path: str) -> dict[str, list[str]]:
+    """Every table's rows but the request-replay reservations, which record the
+    administrator's own signed request rather than anything the route did."""
+    with sqlite3.connect(db_path) as conn:
+        tables = [
+            name
+            for (name,) in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' "
+                "AND name != 'auth_replay_reservations'"
+            )
+        ]
+        return {
+            table: sorted(repr(row) for row in conn.execute(f'SELECT * FROM "{table}"'))
+            for table in tables
+        }
+
+
+async def test_evaluate_refuses_a_listing_no_authority_stands_behind_and_writes_nothing(
+    tmp_path,
+) -> None:
+    """An unbacked listing is one no fulfillment can start for, so the preview
+    answers that settlement would submit nothing, naming why, where it would
+    otherwise preview a reservation naming no host; the backed listing beside it
+    still previews its reservation. A preview reserves and writes nothing for
+    either backing, so the last assertions hold the route to that rather than
+    showing the refusal. The loops are held, so no cycle writes during it."""
+    runtime, _negotiation_id, capacity = await _runtime(tmp_path)
+    runtime = replace(runtime, loop_controller_factory=held_loop_controller)
+    await runtime.db.upsert_bare_metal_listing(
+        listing_id="listing-unbacked",
+        status="open",
+        created_at="now",
+        updated_at="now",
+        seller_principal=runtime.seller_principal,
+        storefront_url=runtime.storefront_url,
+        site_id="site-a",
+        pool_id="pool-u",
+        physical_resource_id="resource-u",
+        listing={"capacity_backing": "unbacked", **LISTING_HARDWARE, "kind": "bare_metal.v2"},
+        accepted_escrows=[],
+    )
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with _client(app, ADMIN_SIGNER, "admin") as admin:
+            before = _durable_rows(runtime.db.db_path)
+            refused = await admin.evaluate_settle(ESCROW_UID, listing_id="listing-unbacked")
+            after = _durable_rows(runtime.db.db_path)
+            backed = await admin.evaluate_settle(ESCROW_UID, listing_id="listing-1")
+
+    assert refused["would_submit"] is False
+    assert "requires capacity-backed supply" in refused["reason"]
+    assert refused["host_id"] is None
+    assert after == before
+    assert capacity.reserve_calls == []
+    assert backed["would_submit"] is True
+    assert backed["required_attributes"]["resource_id"] == "resource-1"
 
 
 async def test_wait_returns_once_the_settled_lease_is_active(tmp_path) -> None:
@@ -191,24 +266,38 @@ async def test_admin_reserve_takes_the_listings_machine(tmp_path) -> None:
 
 
 async def test_admin_reserve_refuses_a_listing_no_authority_stands_behind(tmp_path) -> None:
+    """An unbacked bare-metal listing constructs no capacity claim (requirement
+    "A bare-metal listing sells one whole unit"): the refusal comes before any
+    claim is built, so an administrator's required attribute the machine would
+    not match is answered with the listing's backing, not with nothing found."""
     runtime, _negotiation_id, capacity = await _runtime(tmp_path)
-    # A binding recorded unbacked: bare metal publishes none today, so the
-    # durable record is written directly past its immutability trigger.
-    with sqlite3.connect(runtime.db.db_path) as conn:
-        conn.execute("DROP TRIGGER storefront_listing_binding_immutable")
-        conn.execute(
-            "UPDATE storefront_listing_bindings SET capacity_backing='unbacked' "
-            "WHERE listing_id='listing-1'"
-        )
+    await runtime.db.upsert_bare_metal_listing(
+        listing_id="listing-unbacked",
+        status="open",
+        created_at="now",
+        updated_at="now",
+        seller_principal=runtime.seller_principal,
+        storefront_url=runtime.storefront_url,
+        site_id="site-a",
+        pool_id="pool-u",
+        physical_resource_id="resource-u",
+        listing={"capacity_backing": "unbacked", **LISTING_HARDWARE, "kind": "bare_metal.v2"},
+        accepted_escrows=[],
+    )
     app = _app(runtime)
+    refused = []
     async with app.router.lifespan_context(app):
         async with _client(app, ADMIN_SIGNER, "admin") as admin:
-            with pytest.raises(StorefrontClientError) as refused:
-                await admin.admin_reserve_capacity(
-                    required_attributes={}, listing_id="listing-1"
-                )
+            for required in ({}, {"gpu_model": "a different model"}):
+                with pytest.raises(StorefrontClientError) as refusal:
+                    await admin.admin_reserve_capacity(
+                        required_attributes=required, listing_id="listing-unbacked"
+                    )
+                refused.append(refusal.value)
 
-    assert refused.value.status_code == 409
+    for refusal in refused:
+        assert refusal.status_code == 409
+        assert "requires capacity-backed supply" in str(refusal), refusal
     assert capacity.reserve_calls == []
 
 

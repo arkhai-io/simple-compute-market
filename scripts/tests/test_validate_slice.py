@@ -25,6 +25,7 @@ _SPEC.loader.exec_module(validator)
 COMMIT = "0123456789abcdef0123456789abcdef01234567"
 VM_MARKERS = "e2e_deal or multi_registry or e2e_listing_shapes"
 BARE_METAL_MARKERS = "e2e_bare_metal_publication"
+APICREDITS_MARKERS = "e2e_credits_deal"
 CHANGE = "pilot"
 NAMESPACE = "validate-pilot"
 RELEASE = "arkhai-node-operator"
@@ -58,7 +59,8 @@ class Fake:
         self.head = COMMIT
         self.context = context
         self.markers = markers or {"E2E_MODULE": VM_MARKERS,
-                                   "E2E_BARE_METAL_MODULE": BARE_METAL_MARKERS}
+                                   "E2E_BARE_METAL_MODULE": BARE_METAL_MARKERS,
+                                   "E2E_APICREDITS_MODULE": APICREDITS_MARKERS}
         self.nodes = nodes
         self.docker_up = docker_up
         self.cast = cast
@@ -411,7 +413,7 @@ def test_helm_runs_every_step_for_a_change_in_its_namespace(tmp_path: Path) -> N
         f"deployment/{RELEASE}-registry deployment/{RELEASE}-storefront-bob",
     ]
     assert set(summary.not_run) == {"e2e_deal", "multi_registry", "e2e_listing_shapes",
-                                    "e2e_bare_metal_publication"}
+                                    "e2e_credits_deal", "e2e_bare_metal_publication"}
     assert "not run multi_registry" in validator.render(summary)
 
 
@@ -424,7 +426,7 @@ def test_the_overlay_names_the_changes_images_and_the_scenarios(tmp_path: Path) 
     # The image the scenario pod runs.
     assert images["e2e-tests"]["integrationTests"]["tag"] == "e2e-tests-pilot"
     assert scenarios == {"e2e-tests": {"scenarios": {
-        "markers": "contracts or e2e_alkahest_escrow_codecs"}}}
+        "markers": "contracts or e2e_alkahest_escrow_codecs or e2e_alkahest_trusted_oracle"}}}
 
 
 def test_no_namespace_but_the_changes_is_scaled_deleted_or_deployed(tmp_path: Path) -> None:
@@ -924,13 +926,17 @@ def test_a_marker_list_that_is_not_a_plain_disjunction_is_refused(tmp_path: Path
     assert "e2e_deal and not slow" in summary.steps[-1].detail
 
 
-def test_all_scenarios_runs_every_pipeline_scenario(tmp_path: Path) -> None:
+def test_all_scenarios_runs_every_pipeline_scenario_and_the_served_list(
+    tmp_path: Path,
+) -> None:
     summary = _helm(tmp_path, Fake(), scenarios=None)
 
     assert summary.not_run == {}
     scenarios = json.loads((_attempt(tmp_path) / "scenarios.json").read_text("utf-8"))
     assert scenarios["e2e-tests"]["scenarios"]["markers"] == (
-        "e2e_deal or multi_registry or e2e_listing_shapes or e2e_bare_metal_publication")
+        "e2e_deal or multi_registry or e2e_listing_shapes or e2e_bare_metal_publication or "
+        "e2e_credits_deal or contracts or e2e_alkahest_escrow_codecs or "
+        "e2e_alkahest_trusted_oracle")
 
 
 # --- the capacity figure and memory quantities ----------------------------------
@@ -1501,6 +1507,7 @@ def test_the_pipeline_marker_variables_exist_and_are_plain_disjunctions() -> Non
     markers = validator.pipeline_markers(validator._read)
 
     assert "e2e_deal" in markers
+    assert "e2e_credits_deal" in markers
     assert "e2e_bare_metal_publication" in markers
 
 

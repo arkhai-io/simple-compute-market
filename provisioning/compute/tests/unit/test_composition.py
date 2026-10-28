@@ -6,7 +6,9 @@ import pytest
 from compute_provisioning import (
     ExecutorAdapterBundle,
     ExecutorAdapterContribution,
+    InventoryPoolContext,
     JobExecutorTable,
+    ResourceViews,
     compose_adapter_bundles,
 )
 from market_fulfillment import (
@@ -17,6 +19,8 @@ from market_fulfillment import (
     ProviderStatus,
 )
 from market_core import VersionedEnvelope
+from market_resource_pools_contracts.backing import UNBACKED
+from market_resource_pools_contracts.hints import PoolDeclarations
 
 
 class FakeJobExecutor:
@@ -267,11 +271,23 @@ class FakeViews:
         self.pool_view_ids = frozenset(pool)
         self.consumed_attributes = frozenset(consumed)
 
-    def resource_views(self, declaration, *, pool_id):
-        return {view_id: {"pool_id": pool_id} for view_id in self.resource_view_ids}
+    def resource_views(self, declaration, *, pool):
+        return ResourceViews(
+            views={
+                view_id: {"pool_id": pool.pool_id, "backing": pool.declarations.backing.label}
+                for view_id in self.resource_view_ids
+            }
+        )
 
     def pool_views(self, db, *, pool_id, provider):
         return {}
+
+
+POOL = InventoryPoolContext(
+    pool_id="p",
+    provider="test.provider",
+    declarations=PoolDeclarations(advertisable_modes=frozenset({"vm"}), backing=UNBACKED),
+)
 
 
 def _compose_views(first, second):
@@ -320,18 +336,59 @@ def test_composed_views_merge_and_refuse_an_undeclared_view():
     views = composed.inventory_views
 
     assert views.consumed_attributes == {"a", "b"}
-    assert views.resource_views({}, pool_id="p") == {
-        "a.v1": {"pool_id": "p"},
-        "b.v1": {"pool_id": "p"},
-    }
+    # Each projection receives the declaration's pool context.
+    assert views.resource_views({}, pool=POOL) == ResourceViews(
+        views={
+            "a.v1": {"pool_id": "p", "backing": "unbacked"},
+            "b.v1": {"pool_id": "p", "backing": "unbacked"},
+        },
+    )
 
     class Overreaching(FakeViews):
-        def resource_views(self, declaration, *, pool_id):
-            return {"other.v1": {}}
+        def resource_views(self, declaration, *, pool):
+            return ResourceViews(views={"other.v1": {}})
 
     overreaching = _compose_views(Overreaching(resource=["c.v1"]), FakeViews())
     with pytest.raises(ValueError, match="undeclared view"):
-        overreaching.inventory_views.resource_views({}, pool_id="p")
+        overreaching.inventory_views.resource_views({}, pool=POOL)
+
+
+def test_composed_views_merge_each_projections_problems():
+    class Unbuildable(FakeViews):
+        def resource_views(self, declaration, *, pool):
+            return ResourceViews(problems={"b.v1": ["declaration names no host"]})
+
+    composed = _compose_views(FakeViews(resource=["a.v1"]), Unbuildable(resource=["b.v1"]))
+
+    produced = composed.inventory_views.resource_views({}, pool=POOL)
+
+    assert produced.views == {"a.v1": {"pool_id": "p", "backing": "unbacked"}}
+    assert produced.problems == {"b.v1": ("declaration names no host",)}
+
+
+def test_a_view_both_built_and_unbuildable_is_refused():
+    class Contradictory(FakeViews):
+        def resource_views(self, declaration, *, pool):
+            return ResourceViews(views={"c.v1": {}}, problems={"c.v1": ("no",)})
+
+    composed = _compose_views(Contradictory(resource=["c.v1"]), FakeViews())
+
+    with pytest.raises(ValueError, match="same view"):
+        composed.inventory_views.resource_views({}, pool=POOL)
+
+
+def test_a_problem_for_an_undeclared_view_is_refused():
+    """A problem keyed by a view the projection never declared could mask
+    another domain's view, as an undeclared view could replace it."""
+
+    class Overreaching(FakeViews):
+        def resource_views(self, declaration, *, pool):
+            return ResourceViews(problems={"other.v1": ("no",)})
+
+    composed = _compose_views(Overreaching(resource=["c.v1"]), FakeViews())
+
+    with pytest.raises(ValueError, match="undeclared view"):
+        composed.inventory_views.resource_views({}, pool=POOL)
 
 
 class UndeclaredProvider(FakeProvider):

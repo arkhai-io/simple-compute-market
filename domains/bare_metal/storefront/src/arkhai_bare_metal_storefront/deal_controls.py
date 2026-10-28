@@ -3,7 +3,7 @@
 The kit owns the routes' contracts, refusals, and wait semantics
 (``market_settlement_runtime.SettlementAdminRouteService`` and
 ``market_capacity_publication.CapacityAdminRouteService``); this module supplies
-what is bare metal's own: how an escrow is read against a listing's terms, what
+what is bare metal's own: how an escrow is read against an accepted deal's plan, what
 fulfillment settlement would start, when a settlement is terminal, how a listing
 is reserved administratively, and what a site's capacity-released callback
 records. Verify and evaluate write nothing.
@@ -16,7 +16,9 @@ from typing import TYPE_CHECKING, Any
 
 from core_storefront.stage_log import stage_event
 from market_capacity_publication import CapacityAdminRouteService, CapacityEffects
+from market_core.schemas import EscrowProposal
 from market_identity import Identity
+from market_resource_pools_contracts.backing import CapacityNotAdmittedError
 from market_settlement_runtime import SettlementAdminRouteService
 
 from .claims import ClaimAttributesMissing, whole_machine_claim
@@ -56,13 +58,22 @@ def settlement_admin_routes(
     """Verify, evaluate, and wait, over this storefront's settlements."""
 
     async def verify(escrow_uid: str, request: Mapping[str, Any]) -> dict[str, Any]:
-        listing = await runtime.db.load_listing(listing_id=str(request["listing_id"]))
-        if listing is None:
-            raise LookupError(f"listing {request['listing_id']!r} not found")
+        # Checked as settlement verifies it: against the plan the accepted deal
+        # committed, on the chain and escrow contract its proposal names.
+        negotiation_id = str(request["negotiation_id"])
+        thread = await runtime.db.load_negotiation_thread_row(
+            negotiation_id=negotiation_id
+        )
+        if thread is None or thread.get("terminal_state") != "success":
+            raise LookupError(f"accepted negotiation {negotiation_id!r} not found")
+        try:
+            proposal = EscrowProposal.model_validate(thread.get("buyer_escrow_proposal"))
+        except (TypeError, ValueError):
+            return {"valid": False, "reason": "the accepted deal recorded no escrow proposal"}
         composition = runtime.settlement_composition
-        chain_name = str(request.get("chain_name") or "")
+        chain_name = proposal.chain_name
         clients = (
-            composition.resources.get("clients") or {}
+            composition.chain_clients
             if composition is not None and composition.configures(ALKAHEST_MECHANISM)
             else {}
         )
@@ -72,12 +83,10 @@ def settlement_admin_routes(
         try:
             await runtime.escrow_verifier(
                 escrow_uid=escrow_uid,
-                seller_wallet=str(request["seller_wallet"]),
-                agreed_price=int(request["agreed_price"]),
-                agreed_duration_seconds=int(request["agreed_duration_seconds"]),
-                listing=listing,
+                settlement_plan=thread.get("settlement_plan"),
                 alkahest_client=client,
                 chain_name=chain_name,
+                escrow_address=proposal.escrow_address,
                 alkahest_address_config_path=runtime.chain_config_paths.get(chain_name),
             )
         except Exception as exc:
@@ -85,10 +94,17 @@ def settlement_admin_routes(
         return {"valid": True}
 
     async def preview(escrow_uid: str, request: Mapping[str, Any]) -> dict[str, Any]:
-        context = await _listing_context(runtime, str(request["listing_id"]))
+        listing_id = str(request["listing_id"])
+        context = await _listing_context(runtime, listing_id)
+        binding = await bare_metal_listing_binding(runtime.db, listing_id)
+        if binding is None:
+            raise LookupError(f"listing {listing_id!r} has no bare-metal binding")
         try:
+            # The preview answers as settlement would: no fulfillment starts for
+            # a listing no admission authority stands behind.
+            binding.backing.require_admission("a bare-metal fulfillment")
             claim = whole_machine_claim(context)
-        except ClaimAttributesMissing as exc:
+        except (CapacityNotAdmittedError, ClaimAttributesMissing) as exc:
             return {"would_submit": False, "reason": str(exc)}
         claim["resource_id"] = str(context["physical_resource_id"])
         return {
@@ -158,6 +174,13 @@ def capacity_admin_routes(
         context = await _listing_context(runtime, listing_id)
         if runtime.capacity_client is None:
             raise ConnectionError("no site is configured")
+        binding = await bare_metal_listing_binding(runtime.db, listing_id)
+        if binding is None:
+            raise LookupError(f"listing {listing_id!r} has no bare-metal binding")
+        # A listing no admission authority stands behind constructs no claim:
+        # its delegate refuses first, which the kit's route answers as a
+        # conflict, whatever the administrator required.
+        binding.backing.require_admission("a bare-metal reservation")
         try:
             claim = whole_machine_claim(context)
         except ClaimAttributesMissing as exc:
@@ -167,11 +190,6 @@ def capacity_admin_routes(
         if any(claim.get(str(name)) != str(value) for name, value in required.items()):
             return None
         claim["resource_id"] = str(context["physical_resource_id"])
-        binding = await bare_metal_listing_binding(runtime.db, listing_id)
-        if binding is None:
-            raise LookupError(f"listing {listing_id!r} has no bare-metal binding")
-        # The kit's guard refuses a listing no admission authority stands
-        # behind, which the kit's route answers as a conflict.
         return await CapacityEffects(runtime.capacity_client).reserve(
             binding, claim=claim, deal_ref=dict(deal_ref)
         )

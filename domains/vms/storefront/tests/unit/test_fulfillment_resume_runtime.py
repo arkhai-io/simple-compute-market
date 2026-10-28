@@ -231,7 +231,10 @@ async def test_post_physical_convergence_records_ready_and_claim():
             authentication={"tenant": {"password": "secret", "key_type": "ed25519"}},
             continuation=partial(
                 VmAlkahestSellerStage(
-                    None, fulfils_through_capacity=True, release_models=RELEASE_MODELS
+                    None,
+                    fulfils_through_capacity=True,
+                    completes_outside_settlement=False,
+                    release_models=RELEASE_MODELS,
                 ).continue_delivery,
                 evidence=vm_delivery_evidence(),
                 db=db,
@@ -282,7 +285,10 @@ async def test_ambiguous_onchain_recovery_never_blindly_resubmits():
             authentication=None,
             continuation=partial(
                 VmAlkahestSellerStage(
-                    None, fulfils_through_capacity=True, release_models=RELEASE_MODELS
+                    None,
+                    fulfils_through_capacity=True,
+                    completes_outside_settlement=False,
+                    release_models=RELEASE_MODELS,
                 ).continue_delivery,
                 evidence=vm_delivery_evidence(),
                 db=db,

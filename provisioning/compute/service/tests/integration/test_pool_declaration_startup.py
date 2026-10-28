@@ -1,12 +1,14 @@
 """A site's pools at startup: the pool document, the fresh-site seed, and the
-declaration check.
+check that the service can serve every stored pool.
 
 A configured pool document is the site's authority over its pools. A fresh site
 with none is seeded from ``pool_seed_path``, once, and a site that holds any
 pool is never seeded. Then every stored pool must carry valid advertisement and
-backing declarations: a pool lacking either must never reach the resource-pool
-projection, where a consumer could not tell it from a site that predates the
-declarations, so the service refuses to start, naming the pool.
+backing declarations and name a provider a registered handler serves: a pool
+lacking either declaration must never reach the resource-pool projection, where
+a consumer could not tell it from a site that predates the declarations, and a
+pool whose provider no handler serves cannot be read at all. The service
+therefore refuses to start, naming the pool, rather than serving it.
 
 External boundary: SQLAlchemy against file-backed SQLite and real pool and
 seed documents in a temp directory, driven through the real startup entry
@@ -189,6 +191,32 @@ def test_a_stored_pool_without_declarations_stops_startup_and_is_named(deploymen
     message = str(exc_info.value)
     assert "pool 'rewritten-by-older-version' advertisable_modes" in message
     assert "pool 'rewritten-by-older-version' capacity_backing" in message
+    assert "pool 'default'" not in message
+
+
+@pytest.mark.parametrize("enabled", [True, False], ids=["enabled", "disabled"])
+def test_a_stored_pool_naming_an_unserved_provider_stops_startup_and_is_named(
+    deployment, enabled,
+):
+    with Session(deployment.engine) as db, db.begin():
+        db.add(ResourcePool(
+            id="orphaned",
+            label="Orphaned",
+            provider="retired.provider",
+            enabled=enabled,
+            policy_tags={
+                "deliverable_modes": [],
+                "advertisable_modes": [],
+                "capacity_backing": "backed",
+            },
+        ))
+
+    with pytest.raises(PoolValidationError) as exc_info:
+        app_runtime.verify_pool_declarations()
+
+    message = str(exc_info.value)
+    assert "pool 'orphaned' provider 'retired.provider'" in message
+    assert "registered providers: 'bare_metal.ansible', 'vm.ansible'" in message
     assert "pool 'default'" not in message
 
 

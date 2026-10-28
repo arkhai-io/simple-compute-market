@@ -33,6 +33,7 @@ Usage (async)::
         resp = await client.negotiate_new(
             listing_id="listing-id",
             initial_amount=100,
+            escrow_address="0x...",
             provision_terms={...},
         )
 """
@@ -175,8 +176,11 @@ def _negotiate_new_proposal(
     """The opening proposal ``negotiate_new`` sends.
 
     An escrow opening carries an Alkahest escrow carrier: chain, escrow address,
-    fields, literal fields, and expiry, with development defaults for any the
-    caller omits. A selection-only opening carries only ``fields`` beside its
+    fields, literal fields, and expiry. It must name the escrow contract it
+    funds, since a storefront refuses an escrow naming none, so an opening with
+    no ``escrow_address`` is refused here; the chain and expiry have development
+    defaults, and the token appears only when the caller states one. A
+    selection-only opening carries only ``fields`` beside its
     ``settlement_selection``: a payments or introduction mechanism has no escrow,
     and a storefront may refuse a proposal that mixes the two carriers. Stating
     an escrow parameter in a selection-only opening is refused here rather than
@@ -206,12 +210,17 @@ def _negotiate_new_proposal(
                 "a selection-only opening carries no escrow; remove " + ", ".join(stated)
             )
         return {"fields": fields}
+    if not escrow_address:
+        raise ValueError(
+            "an escrow opening names the escrow contract it funds; pass escrow_address, "
+            "or open with selection_only=True for a mechanism with no escrow"
+        )
     literals = dict(literal_fields or {})
-    if token or literal_fields is None:
-        literals.setdefault("token", token or ("0x" + "0" * 40))
+    if token:
+        literals.setdefault("token", token)
     proposal: dict[str, Any] = {
         "chain_name": chain_name or "anvil",
-        "escrow_address": escrow_address or ("0x" + "0" * 40),
+        "escrow_address": escrow_address,
         "fields": fields,
         "literal_fields": literals,
         "expiration_unix": escrow_expiration_unix or (int(time.time()) + 3600),
@@ -1419,8 +1428,9 @@ class StorefrontClient(_StorefrontClientBase):
         interprets a domain payload. ``initial_amount`` is the absolute opening
         amount for scalar escrows; amountless exact escrows can pass
         ``initial_amount=None`` with explicit ``literal_fields`` / ``rates``.
-        ``selection_only=True`` opens with a ``settlement_selection`` and no
-        escrow carrier, as a payments or introduction buyer does.
+        An escrow opening must name its ``escrow_address``; ``ValueError``
+        otherwise. ``selection_only=True`` opens with a ``settlement_selection``
+        and no escrow carrier, as a payments or introduction buyer does.
         """
         proposal = _negotiate_new_proposal(
             initial_amount=initial_amount,
@@ -1621,31 +1631,17 @@ class StorefrontClient(_StorefrontClientBase):
         self,
         escrow_uid: str,
         *,
-        seller_wallet: str,
-        agreed_price: int,
-        agreed_duration_seconds: int,
-        listing_id: str,
-        chain_name: str = "anvil",
+        negotiation_id: str,
         request_id: str | None = None,
     ) -> dict:
         """POST /api/v1/admin/settle/{escrow_uid}/verify.
 
-        Reads the escrow from chain on ``chain_name`` and confirms it
-        matches the supplied terms. Returns dict with valid=True/False
-        and reason on failure. No DB writes.
-
-        ``agreed_price`` is base units in the uint256 domain, sent as a
-        decimal-digit string: this body is canonicalized for signing and an
-        18-decimal amount has no JSON number form. It was typed ``float``,
-        which no amount in this protocol is.
+        Reads the escrow from chain and confirms it matches the settlement
+        plan the accepted negotiation ``negotiation_id`` committed, as settle
+        verifies it. Returns dict with valid=True/False and reason on failure.
+        No DB writes.
         """
-        body = {
-            "seller_wallet": seller_wallet,
-            "agreed_price": str(int(agreed_price)),
-            "agreed_duration_seconds": agreed_duration_seconds,
-            "listing_id": listing_id,
-            "chain_name": chain_name,
-        }
+        body = {"negotiation_id": negotiation_id}
         return await self._authenticated_post(
             f"/api/v1/admin/settle/{escrow_uid}/verify",
             body,
@@ -2671,8 +2667,9 @@ class SyncStorefrontClient(_StorefrontClientBase):
 
         ``provision_terms`` is the required versioned domain envelope. The
         shared client validates its generic shape without interpreting payload.
-        ``selection_only=True`` opens with a ``settlement_selection`` and no
-        escrow carrier, as a payments or introduction buyer does.
+        An escrow opening must name its ``escrow_address``; ``ValueError``
+        otherwise. ``selection_only=True`` opens with a ``settlement_selection``
+        and no escrow carrier, as a payments or introduction buyer does.
         """
         proposal = _negotiate_new_proposal(
             initial_amount=initial_amount,
@@ -2873,31 +2870,17 @@ class SyncStorefrontClient(_StorefrontClientBase):
         self,
         escrow_uid: str,
         *,
-        seller_wallet: str,
-        agreed_price: int,
-        agreed_duration_seconds: int,
-        listing_id: str,
-        chain_name: str = "anvil",
+        negotiation_id: str,
         request_id: str | None = None,
     ) -> dict:
         """POST /api/v1/admin/settle/{escrow_uid}/verify.
 
-        Reads the escrow from chain on ``chain_name`` and confirms it
-        matches the supplied terms. Returns dict with valid=True/False
-        and reason on failure. No DB writes.
-
-        ``agreed_price`` is base units in the uint256 domain, sent as a
-        decimal-digit string: this body is canonicalized for signing and an
-        18-decimal amount has no JSON number form. It was typed ``float``,
-        which no amount in this protocol is.
+        Reads the escrow from chain and confirms it matches the settlement
+        plan the accepted negotiation ``negotiation_id`` committed, as settle
+        verifies it. Returns dict with valid=True/False and reason on failure.
+        No DB writes.
         """
-        body = {
-            "seller_wallet": seller_wallet,
-            "agreed_price": str(int(agreed_price)),
-            "agreed_duration_seconds": agreed_duration_seconds,
-            "listing_id": listing_id,
-            "chain_name": chain_name,
-        }
+        body = {"negotiation_id": negotiation_id}
         return self._authenticated_post(
             f"/api/v1/admin/settle/{escrow_uid}/verify",
             body,

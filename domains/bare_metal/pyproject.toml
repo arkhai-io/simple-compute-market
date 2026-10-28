@@ -10,12 +10,13 @@ dependencies = [
     "arkhai-compute>=0.1.0",
     "arkhai-kit-capability-shape>=0.2.0",
     # The backing vocabulary and delegate a listing publishes and classification asks.
-    "arkhai-kit-resource-pools-contracts>=0.2.0",
+    "arkhai-kit-resource-pools-contracts>=0.3.0",
 ]
 
 [project.optional-dependencies]
 storefront = [
-    "arkhai-core-storefront>=0.11.0",
+    # The publication source's close hook.
+    "arkhai-core-storefront>=0.16.0",
 ]
 
 [project.entry-points."market.storefront_domains"]
@@ -34,6 +35,6 @@ testpaths = ["tests"]
 
 [dependency-groups]
 dev = [
-    "arkhai-core-storefront>=0.11.0",
+    "arkhai-core-storefront>=0.16.0",
     "pytest>=8.0",
 ]

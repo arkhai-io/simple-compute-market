@@ -24,6 +24,7 @@ from market_settlement_runtime import (
     SettlementAdminRouteError,
     SettlementAdminRouteService,
 )
+from market_storefront_kit import LifecycleRouteError, refuse_introduction_settle
 from storefront_client.settlement_routes import SETTLE_STATUS
 
 import market_storefront.container as _container
@@ -37,6 +38,10 @@ from market_storefront.services.admin_settle_service import AdminSettleService
 from market_storefront.settlement_composition import serialize_settlement_job
 
 logger = logging.getLogger(__name__)
+
+#: Why a deal settled by introduction has nothing to settle; VM's one such
+#: mechanism is contact exchange.
+SETTLED_BY_INTRODUCTION = "a contact exchange completes by introduction, not settlement"
 
 router = APIRouter(prefix="/api/v1/settle", tags=["settle"])
 settlements_router = APIRouter(prefix="/api/v1", tags=["settlements"])
@@ -85,6 +90,13 @@ class SettleController:
             stage = composition.seller_stages[selected.get("mechanism")]
         except KeyError as exc:
             raise HTTPException(status_code=400, detail="accepted settlement mechanism is unsupported") from exc
+        try:
+            refuse_introduction_settle(
+                completes_outside_settlement=stage.completes_outside_settlement,
+                reason=SETTLED_BY_INTRODUCTION,
+            )
+        except LifecycleRouteError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
         started = await stage.start(
             reference=escrow_uid, body=body, thread=thread, auth=auth,
             composition=composition, db=self._db, configured_chains=_container,
@@ -204,12 +216,12 @@ class AdminSettleController:
     @admin_settle_router.post(
         "/{escrow_uid}/verify",
         response_model=VerifyEscrowResponse,
-        summary="Verify an on-chain escrow matches expected terms (dry-run, no DB writes)",
+        summary="Verify an on-chain escrow funds an accepted deal's plan (dry-run, no DB writes)",
     )
     async def verify_escrow(
         self, escrow_uid: str, body: VerifyEscrowRequest
     ) -> VerifyEscrowResponse:
-        """Read the escrow from chain and confirm it matches caller-supplied terms.
+        """Read the escrow from chain and confirm it funds the named deal's committed plan.
 
         No DB writes. Returns valid=True/False.
         """

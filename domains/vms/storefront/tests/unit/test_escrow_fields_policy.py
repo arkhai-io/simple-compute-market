@@ -358,23 +358,11 @@ class TestPassesThroughWithoutVetoing:
         decision, _ = escrow_shape_guard(history, ctx)
         assert decision is None
 
-    def test_listing_with_no_accepted_escrows_passes(self):
-        """Publish-time synthesis couldn't resolve a chain — pinning
-        nothing means the buyer is free to propose anything."""
-        history, ctx = _ctx(
-            listing={"listing_id": "L1", "accepted_escrows": []},
-            escrow_proposal={
-                "chain_name": "anvil",
-                "escrow_address": _ADDR,
-                "literal_fields": {"token": _TOKEN},
-            },
-        )
-        decision, _ = escrow_shape_guard(history, ctx)
-        assert decision is None
 
-    def test_zero_address_passes(self):
-        """Legacy buyer client sends the zero placeholder for
-        escrow_address; the default guard skips it too."""
+class TestRejectsAnEscrowNamingNoContract:
+    def test_zero_address_is_refused(self):
+        """An escrow proposal naming no contract has nothing to fund, price, or
+        verify at, so the default guard refuses it by name."""
         history, ctx = _ctx(
             listing=_listing_with_one_escrow(),
             escrow_proposal={
@@ -384,7 +372,8 @@ class TestPassesThroughWithoutVetoing:
             },
         )
         decision, _ = escrow_shape_guard(history, ctx)
-        assert decision is None
+        assert decision is not None and decision.action == "reject"
+        assert decision.reason.startswith("escrow_contract_unpinned")
 
 
 class TestRejectsWithoutAnAdvertisedReleaseCondition:
@@ -423,6 +412,22 @@ class TestRejectsWithoutAnAdvertisedReleaseCondition:
 
 
 class TestRejectsWhenEscrowNotAdvertised:
+    def test_a_listing_accepting_no_escrow_rejects_any(self):
+        """The seller prices such an escrow from no entry, so the guard
+        refuses it rather than letting the buyer propose anything."""
+        history, ctx = _ctx(
+            listing={"listing_id": "L1", "accepted_escrows": []},
+            escrow_proposal={
+                "chain_name": "anvil",
+                "escrow_address": _ADDR,
+                "literal_fields": {"token": _TOKEN},
+            },
+        )
+        decision, _ = escrow_shape_guard(history, ctx)
+        assert decision is not None
+        assert decision.action == "reject"
+        assert "escrow_not_in_accepted_set" in (decision.reason or "")
+
     def test_address_advertised_but_not_in_set_rejects(self):
         """The structural accepted-set membership check is policy, so the
         default guard rejects a real proposal outside the listing set."""

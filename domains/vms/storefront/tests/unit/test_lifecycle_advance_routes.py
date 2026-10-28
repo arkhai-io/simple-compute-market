@@ -38,6 +38,7 @@ def _loop_names() -> set[str]:
         lifecycle.SITE_PROJECTION_POLLER,
         lifecycle.PUBLICATION,
         lifecycle.INTRODUCTION_RETENTION,
+        lifecycle.ALKAHEST_CHAIN_PROBE,
     }
 
 
@@ -159,6 +160,7 @@ class TestEveryRouteNamesARegisteredLoop:
             "capacity-events",
             "publication",
             "introduction-retention",
+            "alkahest-chain-probe",
         }
 
 

@@ -18,6 +18,10 @@ settlement_app.add_typer(contact_app, name="contact")
 
 
 def _settlement_context() -> tuple[Any, SettlementConfig, dict[str, Any]]:
+    # Imported when the command runs, after the root `--config` option: the
+    # storefront's settings resolve when its config module is first imported,
+    # and each of these imports it.
+    from market_storefront.domain_runtime import build_vm_seller_stages
     from market_storefront.settlement_composition import (
         build_storefront_settlement_registry,
     )
@@ -33,7 +37,10 @@ def _settlement_context() -> tuple[Any, SettlementConfig, dict[str, Any]]:
     config = registry.resolve(settlement_config_mapping(), role="seller")
     resources: dict[str, Any] = {}
     alkahest = config.mechanism_config("alkahest")
-    if alkahest is not None and alkahest.enabled:
+    # The command is an explicit check, so it reads the wallet and chains of a
+    # configured section, enabled or not: a disabled section's readiness names
+    # the configuration problems its preflight finds, as the server's does.
+    if alkahest is not None:
         resources.update(
             {
                 "chains": CHAINS,
@@ -42,6 +49,11 @@ def _settlement_context() -> tuple[Any, SettlementConfig, dict[str, Any]]:
                     "address": get_evm_wallet_address(),
                     "private_key": get_evm_wallet_private_key(),
                 },
+                "signs_transactions": True,
+                # The same models the server's composition hands readiness.
+                "deliverable_release_models": (
+                    build_vm_seller_stages()["alkahest.v1"].release_models
+                ),
             }
         )
     return registry, config, resources

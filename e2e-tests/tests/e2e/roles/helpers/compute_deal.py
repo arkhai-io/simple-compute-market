@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import pytest
@@ -32,8 +34,8 @@ def advance_storefront(storefront_admin_client, loop: str) -> dict:
     timer was already invoking, so a stage advances production behaviour rather
     than a test-only path.
 
-    This is the other half of `pause_storefront`. Pausing without advancing
-    just stops the system; the pair is what makes ordering assertable -- a
+    This is the other half of `storefront_loops_held`. Holding without
+    advancing just stops the system; the pair is what makes ordering assertable -- a
     stage asks for the work it is about to assert on, instead of racing a timer
     that may or may not have run.
     """
@@ -55,44 +57,165 @@ def dry_run_storefront(storefront_admin_client, loop: str) -> dict:
     return result
 
 
-def pause_storefront(storefront_admin_client) -> bool:
-    """Hold the storefront's timer loops idle, and prove they are.
+# A scenario that needs a shared service's timer held -- a storefront's
+# lifecycle loops, provisioning's fulfillment convergence or lease watchdog --
+# takes its lane's hold fixture for the whole module with `usefixtures`, listed
+# first. Each fixture is one of the helpers below: the hold is taken before the
+# module's first stage, waits until every held loop reports itself at its gate,
+# and is released in a `finally` whatever the module's outcome. Stages assert a
+# hold; they never pause or resume a service themselves, which
+# `tests/unit/test_scenario_holds.py` checks from source. A module killed by
+# `helm test`'s timeout runs no finaliser, and only a restart clears its pause.
 
-    Pauses the loops only -- trading stays open, so a scenario can pause at its
-    readiness stage and still agree a deal.
+#: How long a hold waits for a cycle that began before the pause to finish.
+HOLD_TIMEOUT_SECONDS = 60.0
+_HOLD_POLL_SECONDS = 0.5
 
-    Called from a scenario's own stage rather than an autouse fixture: a
-    scenario should name the state it depends on, and pausing a service is a
-    dependency as much as registering a host is.
 
-    Every side effect a scenario asserts on should be one the scenario asked
-    for. While the timer loops run, a stage's observation races them: a listing
-    reconciled a second later reads differently than one reconciled a second
-    earlier. Waiting for the system to settle instead is what
-    `docs/development/TESTING.md` forbids, and it cannot establish ordering
-    even when it passes.
+def _until_held(
+    pause,
+    held,
+    describe: str,
+    *,
+    timeout: float = HOLD_TIMEOUT_SECONDS,
+    clock=time.monotonic,
+    sleep=time.sleep,
+) -> Any:
+    """Repeat ``pause`` until ``held`` accepts what it answers.
 
-    The response names each loop's gate state, which is what lets this assert
-    that the loop a scenario depends on actually reached its gate rather than
-    merely that a pause was requested.
+    A pause is idempotent and answers the loops' gate state as it stands, so
+    repeating it reads that state afresh. A loop running a cycle that began
+    before the pause reaches its gate once the cycle ends; the wait is bounded
+    so a loop that never does fails the hold instead of hanging the module.
     """
-    result = storefront_admin_client.admin_pause_lifecycle_loops()
-    assert result.get("paused") is True, (
-        f"storefront did not report its loops paused: {result!r}. An "
-        "assertion made now would race the timer loops it was meant to hold."
+    deadline = clock() + timeout
+    while True:
+        answer = pause()
+        if held(answer):
+            return answer
+        if clock() >= deadline:
+            raise AssertionError(
+                f"{describe} did not reach its gate within {timeout:.0f}s: "
+                f"{answer!r}. A stage run now would race the cycle still going."
+            )
+        sleep(_HOLD_POLL_SECONDS)
+
+
+def _storefront_loops_at_gate(answer: dict) -> bool:
+    assert answer.get("paused") is True, (
+        f"the storefront did not report its loops paused: {answer!r}"
     )
-    loops = result.get("loops") or {}
-    not_at_gate = {
-        name: state for name, state in loops.items() if state != "paused"
-    }
-    assert loops and not not_at_gate, (
-        f"these loops had not reached a gate when the pause returned: "
-        f"{not_at_gate or 'none registered'}. `running` means a cycle that "
-        "began before the request is still going, so an assertion made now "
-        "would race it."
+    loops = answer.get("loops") or {}
+    assert loops, f"the storefront registered no loop to hold: {answer!r}"
+    return all(state == "paused" for state in loops.values())
+
+
+@contextmanager
+def storefront_loops_held(storefront_admin_client) -> Iterator[dict]:
+    """Hold a storefront's lifecycle loops for a module, and release them after.
+
+    Pauses the loops only -- trading stays open, so a held module still agrees
+    deals -- and yields once every loop reports itself paused at its gate, so
+    each cycle a stage observes is one the stage asked for (`advance_storefront`)
+    rather than one racing a timer. Resumed in the `finally`, which also covers
+    a hold that never reached its gate -- the pause was already sent -- so
+    neither a failing stage nor a failed hold leaves the next module with the
+    loops stopped. See the module-hold rule above.
+    """
+    try:
+        held = _until_held(
+            storefront_admin_client.admin_pause_lifecycle_loops,
+            _storefront_loops_at_gate,
+            "a storefront lifecycle loop",
+        )
+        log.info("[hold] storefront loops held: %s", held.get("loops"))
+        yield held
+    finally:
+        storefront_admin_client.admin_resume_lifecycle_loops()
+        log.info("[hold] storefront loops resumed")
+
+
+def assert_storefront_loops_held(storefront_admin_client) -> dict:
+    """The module's storefront hold, read back through system status: every
+    timed loop paused. What a stage asserts instead of pausing.
+
+    A loop registered as a step alone runs no timer and reports no state, so
+    there is nothing of it to hold; the pause answer leaves it out the same way.
+    """
+    lifecycle = storefront_admin_client.get_system_status().lifecycle or {}
+    timed = {name: loop for name, loop in lifecycle.items() if loop.get("state") is not None}
+    assert timed, f"the storefront reports no timed lifecycle loop: {lifecycle}"
+    running = {name: loop.get("state") for name, loop in timed.items() if loop.get("state") != "paused"}
+    assert not running, (
+        f"these storefront loops are not held: {running}. The module takes its "
+        "lane's storefront hold fixture with `usefixtures`."
     )
-    log.info("[lifecycle] storefront loops paused; loops=%s", loops)
-    return True
+    return lifecycle
+
+
+@contextmanager
+def fulfillment_convergence_held(provisioning_client) -> Iterator[Any]:
+    """Hold fulfillment convergence's timer for a module, and release it after.
+
+    For a module that advances convergence itself: every convergence transition
+    it asserts is triggered by an explicit advance. A timer cycle that claimed a
+    row while its provider call was still gated would hold the claim lease, and
+    the stage's own cycle would then reach nothing at all. Yields once the
+    watchdog is at its gate; a failed pause fails the hold. Resumed in the
+    `finally`, which also covers a hold that never reached its gate, since the
+    provisioning service is shared across modules. See the module-hold rule
+    above.
+    """
+    try:
+        held = _until_held(
+            provisioning_client.pause_fulfillment_convergence,
+            lambda answer: answer.at_gate,
+            "fulfillment convergence",
+        )
+        log.info("[hold] fulfillment convergence held")
+        yield held
+    finally:
+        provisioning_client.resume_fulfillment_convergence()
+        log.info("[hold] fulfillment convergence resumed")
+
+
+@contextmanager
+def lease_watchdog_held(provisioning_client) -> Iterator[Any]:
+    """Hold the lease watchdog's timer for a module, and release it after.
+
+    For a module that steps lease expiry itself (`check_leases`): with the
+    timer held, an expiry a stage back-dates sits unobserved until the stage
+    runs one cycle, so trigger and reaction are separate, asserted steps.
+    Yields the watchdog's pause state once it is at its gate; resumed in the
+    `finally`, which also covers a hold that never reached its gate. Stages
+    read the hold back with `assert_lease_watchdog_held`. See the module-hold
+    rule above.
+    """
+    try:
+        held = _until_held(
+            provisioning_client.pause_lease_watchdog,
+            lambda answer: answer.at_gate,
+            "the lease watchdog",
+        )
+        log.info("[hold] lease watchdog held")
+        yield held
+    finally:
+        provisioning_client.resume_lease_watchdog()
+        log.info("[hold] lease watchdog resumed")
+
+
+def assert_lease_watchdog_held(provisioning_client) -> None:
+    """The module's lease-watchdog hold, read back through system status.
+
+    What a stage that steps lease expiry asserts instead of pausing: a module
+    that reused such a stage without taking the hold fails here rather than
+    racing the watchdog's timer.
+    """
+    checks = provisioning_client.get_system_status().checks
+    assert checks.get("lease_watchdog") == "paused", (
+        f"the lease watchdog is not held: {checks.get('lease_watchdog')!r}. The "
+        "module takes its lane's `lease_watchdog_held` fixture with `usefixtures`."
+    )
 
 
 def wait_for_stage_event(
@@ -157,42 +280,6 @@ def delete_mock_rules_if_present(provisioning_test_client, *rule_ids: str) -> No
             log.debug("Could not delete mock rule %s: %s", rule_id, exc)
 
 
-def convergence_paused(provisioning_client) -> Iterator[None]:
-    """Hold fulfillment convergence's timer for a module that advances it itself.
-
-    The body of each conftest's opt-in ``convergence_advanced_explicitly``
-    fixture, taken with ``pytest.mark.usefixtures`` by the modules that drive
-    convergence. Deliberately not autouse: other scenarios reach ``active`` on
-    the timer without ever asking for a cycle, and pausing it for them would
-    stall their fulfillment instead of making it deterministic.
-
-    Every convergence transition such a module asserts is triggered by an
-    explicit advance, so the timer is stopped for the duration. Leaving it
-    running made those stages races rather than steps: a timer cycle that
-    claimed a row while its provider call was still gated would hold the claim
-    lease, and the stage's own cycle would then reach nothing at all.
-
-    Resumed when the generator closes, so it is restored even when a stage
-    fails. That matters because the provisioning service is shared across
-    scenario modules, and leaving convergence paused would stall the next
-    module's fulfillment rather than this one's.
-    """
-    try:
-        paused = provisioning_client.pause_fulfillment_convergence()
-        log.info("[setup] Fulfillment convergence timer paused: %s", paused)
-    except Exception as exc:
-        log.warning("[setup] Could not pause fulfillment convergence: %s", exc)
-    try:
-        yield
-    finally:
-        try:
-            provisioning_client.resume_fulfillment_convergence()
-        except Exception as exc:
-            log.warning(
-                "[teardown] Could not resume fulfillment convergence: %s", exc
-            )
-
-
 def advance_fulfillment_to(
     provisioning_client,
     fulfillment_id: str,
@@ -215,9 +302,9 @@ def advance_fulfillment_to(
     touch the row, and any number of them in that window is still zero
     advances. `advance-cycle` releases the watchdog's own claims first.
 
-    Requires the convergence watchdog to be paused (see
-    `convergence_paused`), which is also what stops the timer from claiming
-    the same rows mid-scenario.
+    Requires the convergence watchdog to be held (see
+    `fulfillment_convergence_held`), which is also what stops the timer from
+    claiming the same rows mid-scenario.
 
     ``max_advances`` is small deliberately: with the timer stopped and the
     provider gate released, each transition needs exactly one advance, so

@@ -43,7 +43,41 @@ __all__ = [
     "BareMetalSettlementService",
     "PaymentSettleResult",
     "SettlementRequestError",
+    "accepted_seller_stage",
 ]
+
+
+def accepted_seller_stage(
+    stages: SettlementStageTable[Any], thread: Mapping[str, Any], negotiation_id: str
+) -> Any:
+    """The seller entry the accepted negotiation's Agreement selected.
+
+    The Agreement must be the accepted thread's own, naming its negotiation,
+    listing, parties, amount, and duration; the entry is resolved from it,
+    never from current configuration.
+    """
+    if thread.get("terminal_state") != "success":
+        raise SettlementRequestError("negotiation is not accepted")
+    try:
+        agreement = Agreement.model_validate_json(thread["agreement_bytes"])
+        if (
+            agreement.negotiation_id != negotiation_id
+            or agreement.listing_id != thread["our_listing_id"]
+            or Identity.model_validate(agreement.buyer)
+            != Identity.model_validate(thread["buyer_principal"])
+            or Identity.model_validate(agreement.seller)
+            != Identity.model_validate(thread["seller_principal"])
+            or agreement.amount != thread["agreed_price"]
+            or agreement.duration_seconds != thread["agreed_duration_seconds"]
+        ):
+            raise ValueError("Agreement differs from accepted negotiation")
+        if agreement.settlement is None:
+            raise ValueError("Agreement has no selected settlement")
+        return stages[agreement.settlement.mechanism]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise SettlementRequestError(
+            "accepted Agreement has no supported settlement stage"
+        ) from exc
 
 
 @dataclass(frozen=True)
@@ -103,28 +137,16 @@ class BareMetalSettlementService:
         return thread
 
     def accepted_stage(self, thread: Mapping[str, Any], negotiation_id: str) -> Any:
-        if thread.get("terminal_state") != "success":
-            raise SettlementRequestError("negotiation is not accepted")
-        try:
-            agreement = Agreement.model_validate_json(thread["agreement_bytes"])
-            if (
-                agreement.negotiation_id != negotiation_id
-                or agreement.listing_id != thread["our_listing_id"]
-                or Identity.model_validate(agreement.buyer)
-                != Identity.model_validate(thread["buyer_principal"])
-                or Identity.model_validate(agreement.seller)
-                != Identity.model_validate(thread["seller_principal"])
-                or agreement.amount != thread["agreed_price"]
-                or agreement.duration_seconds != thread["agreed_duration_seconds"]
-            ):
-                raise ValueError("Agreement differs from accepted negotiation")
-            if agreement.settlement is None:
-                raise ValueError("Agreement has no selected settlement")
-            return self.stages[agreement.settlement.mechanism]
-        except (KeyError, TypeError, ValueError) as exc:
-            raise SettlementRequestError(
-                "accepted Agreement has no supported settlement stage"
-            ) from exc
+        return accepted_seller_stage(self.stages, thread, negotiation_id)
+
+    async def owned_accepted_stage(
+        self, *, negotiation_id: str, buyer_principal: Identity
+    ) -> Any:
+        """The accepted deal's seller entry, once ``buyer_principal`` owns it."""
+        thread = await self._owned_thread(
+            negotiation_id=negotiation_id, buyer_principal=buyer_principal
+        )
+        return self.accepted_stage(thread, negotiation_id)
 
     async def physical_terms(
         self, thread: Mapping[str, Any], negotiation_id: str
@@ -251,6 +273,10 @@ class BareMetalSettlementService:
             raise SettlementRequestError(
                 "settlement evidence conflicts with accepted state"
             )
+        if stage.revalidate is None:
+            raise SettlementRequestError(
+                "the accepted deal completes outside settlement"
+            )
         try:
             await stage.revalidate(
                 self, thread, record, delivery_started=delivery_started
@@ -309,6 +335,10 @@ class BareMetalSettlementService:
         ):
             raise SettlementRequestError(
                 "settlement evidence conflicts with accepted state"
+            )
+        if stage.verify is None:
+            raise SettlementRequestError(
+                "the accepted deal completes outside settlement"
             )
         return await stage.verify(
             self,

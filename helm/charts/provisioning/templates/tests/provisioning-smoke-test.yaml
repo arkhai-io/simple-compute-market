@@ -26,7 +26,7 @@ kind: Pod
 metadata:
   name: {{ include "provisioning.fullname" . }}-smoke-test
   labels:
-    {{- include "provisioning.labels" . | nindent 4 }}
+    {{- include "provisioning.testLabels" . | nindent 4 }}
   annotations:
     "helm.sh/hook": test
     "helm.sh/hook-delete-policy": before-hook-creation

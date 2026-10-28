@@ -187,7 +187,8 @@ A listing's commercial terms come from three places, highest first:
 
 Region is a physical fact, so only the pool states it; no override does. A
 pool that states no region publishes nothing new and leaves the listings it
-already published unrefreshed; system status names it under `regionless_pools`.
+already published unrefreshed; system status reports it among its site's
+`publication_derivation` holds as `pool_region_missing`.
 `DEPLOYMENT_AND_CONFIG.md`'s "Storefront listing shapes and pool overrides"
 describes each term. Capacity admission, physical selection, prepared
 execution, and teardown are owned by the selected provisioning site.
@@ -308,6 +309,22 @@ be run or previewed while held. Inspect readiness without publishing:
 ```bash
 market-storefront settlement status --json
 ```
+
+The storefront does not wait for its registry, chain, or site at startup: a
+registry it cannot reach marks its system status `degraded`, a chain its Alkahest
+probe cannot reach leaves Alkahest unready until a probe reaches it, and a site
+it cannot reach holds that site's listings. An Alkahest section that cannot
+settle — no trusted oracle for `oracle_gated`, an oracle equal to the seller
+wallet, no wallet address or key, no `[Chains]` — leaves Alkahest unready rather
+than stopping the storefront; system status's `settlement` names each mechanism's
+blockers. `GET /api/v1/system/status` also reports, under `publication_derivation`,
+each site's `holds`, `refusals`, and `reports` from the last publication cycle,
+each a reason code with the pool it concerns: `pool_region_missing` for a pool
+stating no region; `no_settlement_option` for a pool whose configuration rules
+out every settlement mechanism its clauses name, whose open listings then close
+until an option returns; `settlement_mechanism_unknown` while such a mechanism
+only cannot be reached, its open listings held. A site no cycle has derived since
+start is absent, and an entry is logged when it first appears and when it clears.
 
 A buyer can now run
 `market buy --resource 'gpu_model=H200' --settlement 'mechanism=alkahest.v1'`

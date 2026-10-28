@@ -8,22 +8,29 @@ storefront's own async services hands its coroutine back to the event loop the
 cycle started on and waits for the result.
 
 What a cycle derives, closes, holds, and reopens is the domain's; this module
-owns only how that work is driven, what the cycle reports, and the registry
-convergence every publication pass ends with. See
+owns only how that work is driven, what the cycle reports, the registry
+convergence every publication pass ends with, and the log of each site's
+latest derivation the storefront's status reports. See
 openspec/specs/storefront-publication/spec.md, "Registries converge on each
-listing's local status".
+listing's local status" and "A compute storefront reports and logs its site
+derivation".
 """
 
 from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import copy
+import json
+import logging
 import threading
-from collections.abc import Awaitable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, TypeVar
+from typing import Any, Protocol, TypeVar
 
 from core_storefront.publication_runner import (
+    NO_SETTLEMENT_OPTION,
+    NoSettlementOption,
     PayloadBuilder,
     PublicationCycleResult,
     PublishOffer,
@@ -34,6 +41,8 @@ from core_storefront.publication_sources import PublicationSource
 from .publication import PublicationRuntime
 
 T = TypeVar("T")
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -62,6 +71,345 @@ class PublicationCycleReport:
             "actions": list(self.actions),
             "counts": dict(sorted(counts.items())),
         }
+
+
+#: Why a candidate refused for no settlement option is held, or refused with no
+#: listing to hold: a mechanism it could publish has readiness that could not
+#: be determined.
+SETTLEMENT_MECHANISM_UNKNOWN = "settlement_mechanism_unknown"
+#: Why a candidate is refused when its payload fails to build for any other
+#: reason; the error's text is detail, not part of the reason.
+PAYLOAD_UNBUILDABLE = "payload_unbuildable"
+
+
+def record_payload_refusal(
+    report: PublicationCycleReport,
+    source: Mapping[str, Any],
+    refusal: Exception,
+    *,
+    listing_open: bool,
+) -> None:
+    """Record a candidate its payload builder refused, under the candidate's site.
+
+    ``source`` names the candidate at the entry's top level -- at least its
+    site and pool -- so the entry reaches that site's derivation.
+
+    - A :class:`NoSettlementOption` whose every mechanism the storefront's
+      configuration rules out is refused as ``no_settlement_option``, naming
+      those mechanisms; the runner closes its open listing.
+    - One with an unknown mechanism holds the candidate's open listing, as
+      ``settlement_mechanism_unknown`` naming the unknown mechanisms; with no
+      ``listing_open`` there is nothing to hold, so it is refused for that
+      reason instead.
+    - Any other failure is refused as ``payload_unbuildable``.
+
+    The refusal's text is each entry's ``error``, which is not part of what
+    makes it the same entry from cycle to cycle.
+    """
+    if not isinstance(refusal, NoSettlementOption):
+        report.record("refuse", **source, reason=PAYLOAD_UNBUILDABLE, error=str(refusal))
+        return
+    if refusal.ruled_out_by_configuration:
+        report.record(
+            "refuse",
+            **source,
+            reason=NO_SETTLEMENT_OPTION,
+            mechanisms=list(refusal.mechanisms),
+            error=str(refusal),
+        )
+        return
+    report.record(
+        "hold" if listing_open else "refuse",
+        **source,
+        reason=SETTLEMENT_MECHANISM_UNKNOWN,
+        mechanisms=list(refusal.unknown),
+        error=str(refusal),
+    )
+
+
+class ListingLookup(Protocol):
+    """The storefront persistence a refused candidate's open listing is found in."""
+
+    async def load_listing_binding_by_derivation(
+        self, *, derivation_key: str
+    ) -> Any: ...
+
+    async def load_listing(self, *, listing_id: str) -> dict[str, Any] | None: ...
+
+
+class RefusedCandidates:
+    """What a publication cycle does with a candidate its payload builder refused.
+
+    One implementation for every storefront that drives its cycle with
+    ``PublicationCycleDriver``. ``refuse`` records the refusal under the
+    candidate's site (``record_payload_refusal``) and hands the runner its
+    result; ``close_candidate_listing`` is the source's close hook, which the
+    runner calls when configuration rules out every mechanism the candidate
+    could publish. It closes the open listing bound under the candidate's
+    derivation key through reconciliation, so the listing reopens under the
+    same identity on the first cycle whose payload builds again; a listing its
+    seller closed is not open and is left alone. A preview, the report's
+    ``dry_run``, records the close it would make and applies none.
+
+    A storefront supplies only what is its own: ``derivation_key`` and
+    ``derivation_source`` read a candidate as its domain does, and
+    ``reconciliation_close`` closes listings through its publication runtime.
+    Both methods run on the runner's worker thread and reach the storefront's
+    async services through ``call``, the cycle driver's.
+    """
+
+    def __init__(
+        self,
+        report: PublicationCycleReport,
+        *,
+        call: Callable[[Awaitable[Any]], Any],
+        listings: ListingLookup,
+        derivation_key: Callable[[Mapping[str, Any]], str],
+        derivation_source: Callable[[Mapping[str, Any]], Mapping[str, Any]],
+        reconciliation_close: Callable[
+            [list[str]], Awaitable[Mapping[str, Sequence[str]]]
+        ],
+    ) -> None:
+        self._report = report
+        self._call = call
+        self._listings = listings
+        self._derivation_key = derivation_key
+        self._derivation_source = derivation_source
+        self._reconciliation_close = reconciliation_close
+        self._refused: set[int] = set()
+
+    def refuse(
+        self, candidate: Mapping[str, Any], refusal: Exception
+    ) -> NoSettlementOption | str:
+        """Record ``refusal`` under the candidate's site and return what the
+        runner takes in place of a payload."""
+        self._refused.add(id(candidate))
+        unknown = isinstance(refusal, NoSettlementOption) and not (
+            refusal.ruled_out_by_configuration
+        )
+        listing_open = False
+        if unknown:
+            try:
+                listing_open = self._open_listing_id(candidate) is not None
+            except Exception as exc:
+                # The runner does not guard its payload builder, so a lookup
+                # that raises here would end the whole cycle. An unknown
+                # mechanism leaves any open listing as it is whatever the
+                # lookup would have found, so the refusal is recorded as the
+                # hold it would be for an open listing, beside the failure.
+                self._report.record(
+                    "fail",
+                    source=dict(self._derivation_source(candidate)),
+                    reason=f"open listing lookup failed: {exc}",
+                )
+                listing_open = True
+        record_payload_refusal(
+            self._report,
+            self._derivation_source(candidate),
+            refusal,
+            listing_open=listing_open,
+        )
+        return refusal if isinstance(refusal, NoSettlementOption) else str(refusal)
+
+    def refused(self, candidate: Mapping[str, Any]) -> bool:
+        """Whether this cycle refused ``candidate``'s payload, and so recorded it
+        in the site derivation, whose log records it when it appears."""
+        return id(candidate) in self._refused
+
+    def close_candidate_listing(
+        self, _db_path: str, _base_url: str, candidate: dict[str, Any], reason: str
+    ) -> None:
+        """Close the open listing bound under a refused candidate's key, if any.
+
+        A close that raises is reported before the runner records the
+        candidate as failed.
+        """
+        try:
+            listing_id = self._open_listing_id(candidate)
+            if listing_id is None:
+                return
+            if self._report.dry_run:
+                self._report.record("close", listing_id=listing_id, reason=reason)
+                return
+            result = self._call(self._reconciliation_close([listing_id]))
+        except Exception as exc:
+            self._report.record(
+                "fail",
+                source=dict(self._derivation_source(candidate)),
+                reason=f"close failed: {exc}",
+            )
+            raise
+        if listing_id in result["closed"]:
+            self._report.record("close", listing_id=listing_id, reason=reason)
+        else:
+            self._report.record("fail", listing_id=listing_id, reason="local_close_failed")
+
+    def _open_listing_id(self, candidate: Mapping[str, Any]) -> str | None:
+        """The open listing bound under a candidate's derivation key, if any."""
+        existing = self._call(
+            self._listings.load_listing_binding_by_derivation(
+                derivation_key=self._derivation_key(candidate)
+            )
+        )
+        if existing is None:
+            return None
+        stored = self._call(self._listings.load_listing(listing_id=existing.listing_id))
+        if stored is None or stored.get("status") != "open":
+            return None
+        return existing.listing_id
+
+
+#: One site's derivation: its ``holds``, ``refusals``, and ``reports``, each
+#: entry a reason code with the pool or resource it concerns and any detail.
+SiteDerivation = dict[str, list[dict[str, Any]]]
+
+# Each derivation action a site's summary lists, by the summary's name for it.
+_DERIVATION_ACTIONS = {"hold": "holds", "refuse": "refusals", "report": "reports"}
+
+
+def site_derivations(
+    report: PublicationCycleReport, site_ids: Iterable[str]
+) -> dict[str, SiteDerivation]:
+    """Each of ``site_ids``' derivation from one cycle's report.
+
+    Every hold, refusal, and report action naming one of the sites, without
+    its action and site, in the order the cycle took them. A site the cycle
+    derived cleanly has empty lists, so it is told apart from one no cycle
+    has derived.
+    """
+    summary: dict[str, SiteDerivation] = {
+        site_id: {name: [] for name in _DERIVATION_ACTIONS.values()}
+        for site_id in site_ids
+    }
+    for item in report.actions:
+        name = _DERIVATION_ACTIONS.get(item["action"])
+        site_id = item.get("site_id")
+        site = summary.get(site_id) if isinstance(site_id, str) else None
+        if name is None or site is None:
+            continue
+        site[name].append(
+            {key: value for key, value in item.items() if key not in ("action", "site_id")}
+        )
+    return summary
+
+
+# An entry's error text is what an unreachable source happened to answer this
+# time, so it is not part of what makes the entry the same entry.
+_VOLATILE_DETAIL = frozenset({"error"})
+
+
+def _entry_key(entry: Mapping[str, Any]) -> str:
+    return json.dumps(
+        {key: value for key, value in entry.items() if key not in _VOLATILE_DETAIL},
+        sort_keys=True,
+        default=str,
+    )
+
+
+def _detail_text(value: Any) -> str:
+    if isinstance(value, (list, tuple)):
+        if all(isinstance(item, (str, int, float, bool)) for item in value):
+            return "; ".join(str(item) for item in value)
+        return f"{len(value)} item(s)"
+    if isinstance(value, Mapping):
+        return f"{len(value)} field(s)"
+    return str(value)
+
+
+def _entry_text(entry: Mapping[str, Any]) -> str:
+    details = ", ".join(
+        f"{key}={_detail_text(entry[key])}" for key in sorted(entry) if key != "reason"
+    )
+    reason = entry.get("reason", "unspecified")
+    return f"{reason} ({details})" if details else str(reason)
+
+
+def _holds_the_site(entry: Mapping[str, Any]) -> bool:
+    return "pool_id" not in entry
+
+
+def _standing(previous: SiteDerivation, derivation: SiteDerivation) -> SiteDerivation:
+    """A site's derivation as it now stands.
+
+    A hold naming no pool holds the whole site: the cycle could not read it,
+    so every other entry of the last derivation that did still describes it
+    and stands beside the site's hold, rather than clearing until the site is
+    read again. The earlier site hold itself is replaced by the current one.
+    """
+    current = {name: list(derivation.get(name, ())) for name in _DERIVATION_ACTIONS.values()}
+    if not any(_holds_the_site(entry) for entry in current["holds"]):
+        return current
+    for name in _DERIVATION_ACTIONS.values():
+        current[name].extend(
+            entry
+            for entry in previous.get(name, ())
+            if not (name == "holds" and _holds_the_site(entry))
+        )
+    return current
+
+
+class SiteDerivationLog:
+    """Each site's latest publication derivation, kept per publication source.
+
+    Only a publication cycle that ran records into it: a previewed cycle's
+    report is ignored, and a listing-source check or capacity-event
+    reconciliation has no cycle report to record, so status always reports
+    what the last publication cycle derived. Each source keeps its own
+    derivation of a site, so two sources composed in one storefront never clear
+    or raise each other's entries. A site no cycle has recorded since start is
+    absent.
+
+    An entry is logged as a warning when it first appears in a site's
+    derivation and at info when it clears; a standing entry is not logged
+    again, however many cycles it stands for, nor when only its error text
+    changes. While a hold naming no pool holds a whole site, the site's pool
+    entries from its last derivation stand beside it (see ``_standing``).
+    """
+
+    def __init__(self) -> None:
+        self._latest: dict[str, dict[str, SiteDerivation]] = {}
+
+    def record(
+        self, source: str, report: PublicationCycleReport, site_ids: Iterable[str]
+    ) -> None:
+        """Record ``source``'s derivation of each of ``site_ids`` from one cycle.
+
+        A previewed cycle records and logs nothing.
+        """
+        if report.dry_run:
+            return
+        recorded = self._latest.setdefault(source, {})
+        for site_id, derived in site_derivations(report, site_ids).items():
+            previous = recorded.get(site_id, {})
+            derivation = _standing(previous, derived)
+            for name in _DERIVATION_ACTIONS.values():
+                before = {_entry_key(entry): entry for entry in previous.get(name, ())}
+                after = {_entry_key(entry): entry for entry in derivation.get(name, ())}
+                for key in after.keys() - before.keys():
+                    logger.warning(
+                        "[PUBLICATION] %s site %s %s: %s",
+                        source, site_id, name, _entry_text(after[key]),
+                    )
+                for key in before.keys() - after.keys():
+                    logger.info(
+                        "[PUBLICATION] %s site %s %s cleared: %s",
+                        source, site_id, name, _entry_text(before[key]),
+                    )
+            recorded[site_id] = copy.deepcopy(
+                {name: list(derivation.get(name, ())) for name in _DERIVATION_ACTIONS.values()}
+            )
+
+    def latest(self) -> dict[str, SiteDerivation]:
+        """Each recorded site's derivation, every source's entries together."""
+        merged: dict[str, SiteDerivation] = {}
+        for derivations in self._latest.values():
+            for site_id, derivation in derivations.items():
+                site = merged.setdefault(
+                    site_id, {name: [] for name in _DERIVATION_ACTIONS.values()}
+                )
+                for name in _DERIVATION_ACTIONS.values():
+                    site[name].extend(copy.deepcopy(derivation[name]))
+        return merged
 
 
 class PublicationCycleStopped(RuntimeError):
@@ -180,8 +528,16 @@ async def converge_registries(
 
 
 __all__ = [
+    "PAYLOAD_UNBUILDABLE",
+    "SETTLEMENT_MECHANISM_UNKNOWN",
+    "ListingLookup",
     "PublicationCycleDriver",
     "PublicationCycleStopped",
     "PublicationCycleReport",
+    "RefusedCandidates",
+    "SiteDerivation",
+    "SiteDerivationLog",
     "converge_registries",
+    "record_payload_refusal",
+    "site_derivations",
 ]

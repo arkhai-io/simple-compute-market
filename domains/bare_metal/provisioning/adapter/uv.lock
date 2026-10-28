@@ -66,6 +66,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "arkhai-kit-resource-pools-contracts" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
 ]
@@ -85,6 +86,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.3.0" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-asyncio", specifier = ">=0.23" },
 ]
@@ -109,6 +111,7 @@ dependencies = [
     { name = "arkhai-core" },
     { name = "arkhai-kit-fulfillment" },
     { name = "arkhai-kit-resource-pools" },
+    { name = "arkhai-kit-resource-pools-contracts" },
     { name = "arkhai-kit-site" },
     { name = "pydantic" },
     { name = "sqlalchemy" },
@@ -147,13 +150,13 @@ wheels = [
 
 [[package]]
 name = "arkhai-core"
-version = "0.4.1"
+version = "0.5.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_core-0.4.1-py3-none-any.whl" },
+    { path = "arkhai_core-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -177,7 +180,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-config"
-version = "0.4.0"
+version = "0.4.1"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-settlement-runtime" },
@@ -188,7 +191,7 @@ dependencies = [
     { name = "tomlkit" },
 ]
 wheels = [
-    { path = "arkhai_kit_config-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_kit_config-0.4.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -225,7 +228,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-resource-pools"
-version = "0.7.0"
+version = "0.8.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-resource-pools-contracts" },
@@ -234,12 +237,12 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_resource_pools-0.7.0-py3-none-any.whl" },
+    { path = "arkhai_kit_resource_pools-0.8.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-resource-pools-contracts"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-capability-admissibility" },
@@ -247,12 +250,12 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_resource_pools_contracts-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_resource_pools_contracts-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-settlement-runtime"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -260,7 +263,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_settlement_runtime-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_kit_settlement_runtime-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]

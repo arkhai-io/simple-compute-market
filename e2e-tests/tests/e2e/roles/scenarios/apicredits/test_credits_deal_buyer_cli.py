@@ -32,6 +32,7 @@ from tests.e2e.roles.buyer_cli import (
     _toml_quote,
     create_profiled_buyer_cli,
 )
+from tests.e2e.roles.helpers.compute_deal import advance_storefront
 from tests.e2e.roles.helpers.domain_deal import (
     DealStage,
     DomainDealState,
@@ -146,10 +147,21 @@ def _forecast(secret: str, base_url: str) -> httpx.Response:
         )
 
 
+def _seed_published(credits_storefront_admin) -> None:
+    """Step the storefront's chain probe and then its seed, so discovery reads
+    a published listing instead of racing the seed's timer."""
+    advance_storefront(credits_storefront_admin, "alkahest-chain-probe")
+    seeded = advance_storefront(credits_storefront_admin, "listing-seed")
+    assert seeded["state"] == "done", f"the configured seed did not publish: {seeded}"
+
+
 def test_credits_full_deal(
     credits_buyer_cli: BuyerCli,
     credits_deal_state: DomainDealState,
+    credits_storefront_admin,
 ) -> None:
+    _seed_published(credits_storefront_admin)
+
     # --- 1. Buy 3 credits into a fresh key --------------------------------
     buy = credits_buyer_cli.run([
         "credits", "buy",

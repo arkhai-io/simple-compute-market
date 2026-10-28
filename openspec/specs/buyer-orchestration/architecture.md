@@ -39,6 +39,8 @@ A buy run records selected domain, policy parameters, discovered candidates, acc
 
 Recovery starts from the latest authoritative persisted handoff. If negotiation already produced accepted terms or settlement produced a deal reference, recovery inspects or resumes that stage rather than silently renegotiating and risking a second commercial commitment.
 
+A run also records what its selected settlement entry needs to know about the listing it negotiated, as one opaque `listing_record`. Core writes and reads it without naming its contents: the entry supplies it through the `accepted_listing_record` hook, and for Alkahest it is `kit/alkahest`'s record of the listing's advertised release conditions (`release_conditions_record`, read back by `recorded_release_conditions`). `market buy` writes it when negotiation starts and in an agreed completion; the negotiate commands write it at run start and at run end, whatever the outcome. A resume reads the record of the listing it resumes, per listing, so a run that negotiated several listings cannot fund one under another's conditions. A resumed escrow is derived from the run's recorded accepted proposal and that record, at the amount taken exactly from the recorded Agreement — the run-log's `agreed_amount` passes through a float — and must still equal the seller's recorded plan. Deriving against the listing as the registry now serves it was rejected: it adds a registry read to resume and refuses correct runs whose listing has since changed. A run accepted before release conditions were recorded is refused before funding, naming the reason, so a new run is needed; a run whose escrow exists derives nothing and resumes.
+
 ## Aggregation
 
 Aggregation is buyer-local policy over discovered offers. Settlement-specific aggregation mechanisms may come from kit packages, but core does not assume a particular escrow, token, or market-domain score. Aggregation output is converted through domain codecs before entering negotiation.
@@ -66,6 +68,25 @@ entry-specific acceptance validator. The validator receives the exact
 accepted-round observation or persistence. Alkahest-only artifact requirements
 belong there. An entry can bind `make_escrow_settle_hook` explicitly; neither
 proposal presence nor absence selects it.
+
+What an Agreement and its listing determine the buyer derives for itself, and the
+seller's copy is compared, never used: the accept reply carries no escrow terms,
+and the buyer materializes its escrow through `kit/alkahest` from its accepted
+proposal or selection and the listing's advertised release condition. The plan
+check runs where funds move. `make_escrow_settle_hook` takes a required
+`check_escrows_fund_plan` port, which each buyer fills with `kit/alkahest`'s
+`require_escrow_terms_fund_plan`, run over the buyer's own derivation before any
+escrow is created; an acceptance carrying no seller plan is refused before
+funding as `seller_plan_missing`, since a seller accepts an escrow only with its
+plan. Every resume path derives through `kit/alkahest`'s
+`derive_accepted_escrow_terms`, which holds the derivation to the recorded plan.
+The selection-branch validator, `AdvertisedPlanValidatorFn`, checks the
+selection branch at acceptance; the plan check is a separate port rather than a
+widening of it because API credits opens with escrow
+proposals, which that validator never sees. The plan that stays in the reply is
+the seller's committed copy the buyer compares against, which also exposes
+derivation skew between buyer and seller before funds move. `core/buyer` imports
+no `kit/alkahest`.
 
 Prerequisites are late-bound: Arkhai payments uses trusted service policy and
 owner-scoped credentials, while Alkahest resolves its own EVM inputs.
@@ -99,7 +120,7 @@ API-credit buys preserve the accepted option, exact Agreement, and mandate rathe
 
 ## Current limits
 
-The plugin boundary and shipped export contracts do not prove that every arbitrary third-party command composes without collision. Persisted recovery covers documented stages; it is not a universal exactly-once transaction spanning registries, storefronts, and settlement mechanisms.
+The core buyer application refuses at startup a root command name two installed domains register, naming both, because with two domains installed one domain's command would otherwise run as the other's, decided by entry-point discovery order. That check covers root names only; the plugin boundary and shipped export contracts do not prove that every arbitrary third-party command composes without collision. Persisted recovery covers documented stages; it is not a universal exactly-once transaction spanning registries, storefronts, and settlement mechanisms.
 
 ## Related contracts
 

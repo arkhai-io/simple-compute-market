@@ -73,6 +73,7 @@ from .system import (
     SystemStatusComponent,
     SystemStatusResponse,
     VersionResponse,
+    WorkerPauseResponse,
 )
 from .routes import (
     ADMIN_PROVISIONING_OPERATIONS,
@@ -151,6 +152,7 @@ __all__ = [
     "SystemStatusComponent",
     "SystemStatusResponse",
     "VersionResponse",
+    "WorkerPauseResponse",
     "ADMIN_PROVISIONING_OPERATIONS",
     "IDENTITY_IDENTIFIER_HEADER",
     "IDENTITY_SCHEME_HEADER",

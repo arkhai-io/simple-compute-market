@@ -24,7 +24,6 @@ from market_policy.negotiation_middleware import (
 from market_policy.scalar_policies import (  # noqa: F401 — re-exports
     DEFAULT_CONVERGENCE_RATIO,
     DEFAULT_REASONABLE_MULTIPLIER,
-    _ZERO_ADDRESS,
     _accepted_entry_uses_scalar_amount,
     _accepted_escrow_for_proposal,
     _amount_from_proposal,

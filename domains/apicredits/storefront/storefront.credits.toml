@@ -31,16 +31,13 @@ private_key = "" # APICREDITS_STOREFRONT_WALLET__PRIVATE_KEY secret environment 
 
 # Which settlement mechanisms this seller will actually service. Without
 # this section `mechanism_config("alkahest")` is None, `alkahest_enabled`
-# is false, and `_build_alkahest_clients()` is never called -- so the
-# storefront starts cleanly, publishes, negotiates and accepts, and then
-# refuses `POST /api/v1/settle/...` with
+# is false, and no chain probe is composed, so no chain client is ever
+# built -- the storefront starts cleanly, publishes, negotiates and accepts,
+# and then refuses `POST /api/v1/settle/...` with
 # `chain 'anvil' not configured on this storefront — available chains: []`.
-# The chain table below is read only when these clients are built, so
-# configuring one without the other leaves it inert.
-#
-# The absence produced no startup warning: the "no chains configured" and
-# "required EVM settings are missing" warnings both live inside the
-# builder, and the builder was the thing being skipped.
+# Only that probe builds chain clients, so without this section the chain
+# table below yields none: configuring one without the other leaves it
+# inert, and the absence produces no startup warning.
 [settlement]
 schema_version = 1
 priority = ["alkahest.v1"]
@@ -49,7 +46,7 @@ priority = ["alkahest.v1"]
 enabled = true
 # The same address book `[chains.anvil]` below points at. Read separately:
 # this one by the settlement readiness preflight, that one per chain when
-# the clients are built.
+# the chain probe builds the clients.
 address_config_path = "/app/alkahest_anvil_addresses.json"
 oracle_gated = false
 trusted_oracle_addresses = []
@@ -92,8 +89,6 @@ identities = [
 # selected explicitly below and the separate issuance/keys mechanism API.
 service_url         = "http://credits-service:8082"
 admin_key_file      = "/run/secrets/arkhai/api-credits-admin-key"
-preflight_timeout   = 60
-fail_on_unreachable = true
 
 [capacity]
 # Poll fast — the suite waits on delta-driven listing reconciliation.
@@ -150,10 +145,11 @@ policies = []
 default_min_price = "1"
 
 [seed]
-# Demo self-seed (e2e): on startup, register this quota resource in the
-# credits-service ledger and publish a listing from it, so a fresh
-# `compose up` has something to discover. The listing's base_url points
-# at the gated sample app the buyer will consume.
+# Demo self-seed (e2e): the storefront's listing-seed loop registers this
+# quota resource in the credits-service ledger and publishes a listing from
+# it once the credits service and the chain answer, so a fresh `compose up`
+# has something to discover. The listing's base_url points at the gated
+# sample app the buyer will consume.
 resource_id     = "weather-quota"
 total_units     = 100
 service_name    = "weather-api"

@@ -41,6 +41,20 @@ seam; patching around it defeats the purpose of the seam and produces
 tests that break when internal call structure changes even though
 behavior didn't.
 
+**Command-module convention:** a command module — a storefront's operator
+commands or a domain's buyer commands — has no constructor: the framework calls
+its module-level functions. It is its own composition root instead, and builds
+its collaborators through module-level factory functions it defines, named for
+what they provide; those factories are its one seam. A test replaces a factory
+on the module that defines it and nothing else — no library name, no name the
+module imports from another, no name inside core — because an import-style
+change can silently undo such a patch, and the test then runs the real
+collaborator. The bare-metal buyer CLI
+(`domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/cli.py`) has this shape:
+its tests replace `fresh_identity`, `recovery_identity`, `registry_client`, and
+`payment_approval`. The other CLIs' tests still replace library and imported
+names; [`ROADMAP.md`](ROADMAP.md) records that gap.
+
 **Composition-boundary convention:** When a role receives a versioned domain contract, unit tests should inject a distinct compatible object and assert object identity at each constructor boundary rather than patching the default resolver. Fail-closed cases belong at the composition root and must assert that persistence, network, and worker collaborators were not constructed. Existing integration tests remain responsible for public behavior and persisted-state parity.
 
 **Negotiation-runtime convention:** Protocol invariants are tested once in
@@ -166,11 +180,20 @@ draws a scenario following this:
 
 | Loop | Pause | Explicit step |
 |---|---|---|
-| Lease watchdog | `POST /api/v1/system/lease-watchdog/pause` | `POST /api/v1/system/check-leases` |
-| Fulfillment convergence | `POST /api/v1/system/fulfillment-convergence/pause` | `POST /api/v1/system/fulfillment-convergence/advance-cycle` |
-| VM storefront loops (`publication`, `capacity-events`, `site-projections`, `settlement-servicing`, `fulfillment-resume`, `negotiation-watchdog`, and `introduction-retention` while contact exchange is enabled) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../<loop>/dry-run` for `publication`, `capacity-events`, and `introduction-retention` |
-| Bare-metal storefront loops (`publication`, `site-projections`, `settlement-servicing`, `negotiation-watchdog`, `payment-reconciliation` while Arkhai payments is composed, and `introduction-retention` while contact exchange is enabled) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../<loop>/dry-run` for `publication` and `introduction-retention`; the `bare-metal-storefront publish` command is a client of the `publication` step and its preview |
-| API-credit storefront loops (`capacity-events`, `settlement-servicing`, `negotiation-watchdog`, and `payment-reconciliation` while Arkhai payments is composed) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../capacity-events/dry-run` |
+| Lease watchdog | `POST /api/v1/system/lease-watchdog/pause`, answering `paused` and `at_gate` (`WorkerPauseResponse`) | `POST /api/v1/system/check-leases` |
+| Fulfillment convergence | `POST /api/v1/system/fulfillment-convergence/pause`, answering `paused` and `at_gate` (`WorkerPauseResponse`) | `POST /api/v1/system/fulfillment-convergence/advance-cycle` |
+| VM storefront loops (`publication`, `capacity-events`, `site-projections`, `settlement-servicing`, `fulfillment-resume`, `negotiation-watchdog`, `introduction-retention` while contact exchange is enabled, and `alkahest-chain-probe` while an Alkahest section is configured) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../<loop>/dry-run` for `publication`, `capacity-events`, and `introduction-retention` |
+| Bare-metal storefront loops (`publication`, `site-projections`, `settlement-servicing`, `negotiation-watchdog`, `payment-reconciliation` while Arkhai payments is composed, `introduction-retention` while contact exchange is enabled, and `alkahest-chain-probe` while Alkahest is composed) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../<loop>/dry-run` for `publication` and `introduction-retention`; the `bare-metal-storefront publish` command is a client of the `publication` step and its preview |
+| API-credit storefront loops (`capacity-events`, `settlement-servicing`, `negotiation-watchdog`, `payment-reconciliation` while Arkhai payments is composed, `alkahest-chain-probe` while Alkahest is composed, and `listing-seed` while a seed listing is configured) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../capacity-events/dry-run` |
+
+A provisioning worker's pause answers `at_gate` beside `paused`: a cycle that
+began before the pause finishes first, so a caller that needs the worker held
+repeats the pause until `at_gate` is true. A storefront's pause answers each
+loop's gate state the same way. `alkahest-chain-probe` probes every configured
+chain at each step, and settlement readiness reads only its last results, so a
+held storefront judges Alkahest by the probe a stage last stepped.
+`listing-seed` finishes once the configured seed listing exists and waits while
+a dependency it needs cannot be reached.
 
 Every storefront composes its loops onto the one kit loop controller in
 `kit/storefront`, so the routes, response shapes, and the canonical
@@ -184,8 +207,30 @@ from a generation polled within its `[capacity].source_confirmation_seconds`. A
 scenario that holds the loops keeps trading, so it steps `site-projections`
 wherever a site changed before stepping publication or negotiating, and the
 end-to-end lanes widen the window to an hour so a scenario's rounds are not
-refused between steps. The bare-metal scenarios hold the loops through an opt-in
-per-module fixture (`bare_metal_loops_held`) resumed in a finaliser.
+refused between steps.
+
+A scenario that needs a shared service's timer held — a storefront's lifecycle loops,
+provisioning's fulfillment convergence or lease watchdog — takes that lane's hold fixture
+for the whole module with `usefixtures`, listed first so it is released last. A hold is
+taken before the module's first stage and waits until each loop is at its gate, and is
+released in a finaliser whatever the module's outcome. Stages assert a hold; they never
+pause or resume a service themselves, and a source check enforces it.
+
+The hold helpers are `storefront_loops_held`, `fulfillment_convergence_held`, and
+`lease_watchdog_held` in `e2e-tests/tests/e2e/roles/helpers/compute_deal.py`; each
+compute lane's `conftest.py` builds its fixtures of the same names on them, and the VM
+lane adds `alice_loops_held` for Alice's storefront. A stage reads a hold back through
+live system status (`assert_storefront_loops_held`, `assert_lease_watchdog_held`), so a
+module that lost its hold fails rather than racing a timer. A lane's cleanup fixtures
+are not autouse: pytest sets an autouse fixture up first and so finalises it after the
+holds, so each module lists its cleanup after its holds, and the holds keep the timers
+stopped while the cleanup runs. `e2e-tests/tests/unit/test_scenario_holds.py` refuses,
+from source, any pause or resume call or route outside the hold helpers and the
+conftests' hold fixtures, and `e2e-tests/tests/unit/test_scenario_cleanup_order.py`
+reads the fixture order pytest resolves for every compute-lane scenario module and
+refuses a hold released before the module's other cleanup. A module killed by `helm
+test`'s timeout runs no finaliser, and only a restart clears its pause; modules in a
+lane run serially.
 
 Traps this has already sprung, worth checking for a new loop:
 
@@ -213,14 +258,6 @@ Traps this has already sprung, worth checking for a new loop:
   cursor lock. Test it with the real loop body and an interval far longer
   than the test waits. A test that needs a self-gating body runs it as a
   fan-out with no children.
-- **Scope the pause to the module that owns the advances.** A pause in
-  a shared `conftest.py` reaches every scenario in that directory, and a
-  scenario that legitimately relies on the timer — one that arms an
-  ungated provider rule and waits for the lease, say — is stalled rather
-  than made deterministic by it. Make the fixture opt-in and take it with
-  `pytest.mark.usefixtures` from the modules that drive the loop
-  themselves, and resume in a finaliser so a failing stage does not leave
-  the loop stopped for the next module.
 
 ### 3. Smoke Tests (Deployment Validation)
 
@@ -341,6 +378,20 @@ checks the stage set from source: each domain subclasses every shared stage once
 in order, with an empty body, and every state field has one producer that runs
 before any stage reads it.
 
+Settlement by introduction is defined once the same way, in
+`e2e-tests/tests/e2e/roles/helpers/introduction_stages.py`: disclosure of the
+retention window before any contact is given, backed and unbacked supply
+discovered together under one rate bound, the reveal into the buyer's own sink,
+and seller-side delivery read back from the lane's Mailpit. VM's
+`e2e_vm_introduction` and bare metal's `e2e_bare_metal_unbacked_introduction`
+subclass those stages in order and insert their own between them; each
+domain's `IntroductionDriver`
+(`e2e-tests/tests/e2e/roles/scenarios/vms/introduction_driver.py`,
+`e2e-tests/tests/e2e/roles/scenarios/bare_metal/introduction_driver.py`) seeds
+the supply and speaks its CLI verbs, and only stages write the shared
+`IntroductionState`. `e2e-tests/tests/unit/test_introduction_stages.py` holds
+each domain to the shared stages and fields.
+
 #### One part, zoomed in
 
 Settle has the fullest shape of any part, so it is the one drawn open. The
@@ -389,10 +440,22 @@ project of its own:
   refund, reporting one it cannot read or tear down; a refund that still fails
   fails the run with the negotiation and
   transaction for an operator. Each cleanup step is
-  attempted even after an earlier one fails, and the loops the module paused
-  resume last.
+  attempted even after an earlier one fails, and the module's holds are
+  released last.
   Unconfigured payments remain a named blocked prerequisite; no real SSH claim
-  is made.
+  is made. Its `e2e_bare_metal_unbacked_introduction` scenario is the compute
+  family's introduction scenario on bare metal: the site's operator declares a
+  whole machine in a capacity-backed pool naming its host, one in an unbacked
+  pool naming none, each at an asking rate, and one in a backed pool stating no
+  rate, and a storefront pool override offers the unbacked pool by
+  introduction alone. A rate-bounded `market bare-metal list` returns the backed
+  and unbacked listings together and leaves out the rateless one, a
+  `capacity_backing=unbacked` query returns only the unbacked one, and the
+  unbacked listing publishes `capacity_backing: unbacked`, no host fields, no
+  `access_methods`, and only `contact-exchange.v1`. The buyer reveals the
+  introduction through the CLI into its own file sink, the storefront mails the
+  buyer's contact to the seller through the lane's Mailpit, and the deal's
+  fulfillment status route answers 404.
 - **API-credit lane** (`make -C e2e-tests test-e2e-apicredits`): the credits
   registry, service, storefront, and gated sample app, a compute-schema registry
   of the lane's own that the credits deal's discovery is routed away from, and
@@ -862,6 +925,19 @@ passing render is not deployment evidence, just as it is not deal evidence.
   Without its interpreter each check reports a skip. No CI job has both Helm and
   those environments, so in CI these checks do not run; run them locally before a
   change to a chart or a loader is reviewed.
+- `helm/charts/storefront/tests/test_render.py` also asserts, over the defaults,
+  the local release, every rendering fixture, and a second agent, that no VM
+  storefront Deployment renders an init container or a `wait-for-` container and
+  that each carries a `startupProbe` on `/health`, as the bare-metal chart's does:
+  the storefront starts with its dependencies unreachable and reports them
+  degraded.
+- `helm/tests/test_release_topology.py` asserts, over both topology releases,
+  that no Pod annotated `helm.sh/hook: test` carries all of any Deployment's
+  `matchLabels` or any Service's selector — every test pod carries
+  `app.kubernetes.io/component: test` and its release's instance label and lacks
+  `app.kubernetes.io/name`, which every selector requires — and that each release
+  renders exactly its expected test templates, so a test pod that stops rendering
+  fails rather than leaving nothing to check.
 
 **How to write one:**
 

@@ -25,5 +25,11 @@ build-backend = "hatchling.build"
 packages = ["src/bare_metal_provisioning_adapter"]
 
 [dependency-groups]
-dev = ["pytest>=9.0.2", "pytest-asyncio>=0.23"]
+dev = [
+    # The backing delegates and pool declarations the view tests build pool
+    # contexts from.
+    "arkhai-kit-resource-pools-contracts>=0.3.0",
+    "pytest>=9.0.2",
+    "pytest-asyncio>=0.23",
+]
 

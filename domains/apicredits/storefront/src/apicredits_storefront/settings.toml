@@ -87,8 +87,6 @@ root_path = ""
 service_url       = "http://localhost:8082"
 admin_key         = ""
 admin_key_file    = ""
-preflight_timeout = 30
-fail_on_unreachable = true
 
 [capacity]
 # Configure one stable table per site under [capacity.sites.<site_id>] with:

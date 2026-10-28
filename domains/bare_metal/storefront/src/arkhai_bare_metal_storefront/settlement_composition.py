@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
-from core_storefront.publication_runner import PublicationPayload
+from core_storefront.publication_runner import NoSettlementOption, PublicationPayload
 from market_core import SettlementStageTable
 from market_core.schemas import SettlementOption
 from .alkahest_lifecycle import alkahest_servicing
@@ -19,20 +19,18 @@ from .settlement_stages import (
     declined_servicing,
     refund_payment,
     revalidate_alkahest,
-    revalidate_contact,
     revalidate_payment,
     settle_payment,
     verify_alkahest,
-    verify_contact,
     verify_payment,
 )
 from market_alkahest import (
     ALKAHEST_CONFIG_KEY,
     ORACLE_GATED_RELEASE,
     RECIPIENT_RELEASE,
+    configured_release_model,
     create_alkahest_registration,
-    release_conditions,
-    require_deliverable_release_model,
+    escrow_release_conditions,
 )
 from market_contact_exchange import (
     MECHANISM as CONTACT_MECHANISM,
@@ -63,6 +61,7 @@ SELLER_STAGES = SettlementStageTable(
             verify_alkahest,
             revalidate_alkahest,
             True,
+            completes_outside_settlement=False,
             servicing=alkahest_servicing,
             release_models=frozenset({RECIPIENT_RELEASE, ORACLE_GATED_RELEASE}),
         ),
@@ -71,14 +70,18 @@ SELLER_STAGES = SettlementStageTable(
             verify_payment,
             revalidate_payment,
             True,
+            completes_outside_settlement=False,
             refund=refund_payment,
             reconcile=settle_payment,
         ),
+        # An introduction delivers nothing through capacity and is completed by
+        # its reveal, so it has no settle operation or recovery gate.
         CONTACT_MECHANISM: ContactStage(
             create_contact_exchange_registration,
-            verify_contact,
-            revalidate_contact,
-            False,
+            verify=None,
+            revalidate=None,
+            fulfils_through_capacity=False,
+            completes_outside_settlement=True,
             servicing=declined_servicing,
         ),
     }
@@ -120,13 +123,10 @@ class BareMetalStorefrontSettlementComposition:
         ):
             raise ValueError("enabled settlement mechanism has no seller stage")
         self.registry.validate(self.config, role="seller")
-        alkahest = self.config.mechanisms.get(ALKAHEST_CONFIG_KEY)
-        if alkahest is not None and ALKAHEST_MECHANISM in self.seller_stages:
-            # A configured section owns the deals accepted under it, enabled or
-            # not, so its release model must be one bare metal delivers.
-            require_deliverable_release_model(
-                alkahest, self.seller_stages[ALKAHEST_MECHANISM].release_models
-            )
+        # A section selecting contradictory release models is incoherent and
+        # refused here; a coherent model bare metal cannot deliver is an
+        # Alkahest readiness blocker, given the deliverable models as a resource.
+        configured_release_model(self.config.mechanisms.get(ALKAHEST_CONFIG_KEY))
         object.__setattr__(self, "resources", MappingProxyType(dict(self.resources)))
         # Accepted payment deals are serviced whether or not new payment options
         # are published, so the stage follows the servicing fields, not `enabled`.
@@ -155,6 +155,16 @@ class BareMetalStorefrontSettlementComposition:
     @property
     def enabled_mechanisms(self) -> tuple[str, ...]:
         return self.config.priority
+
+    @property
+    def chain_clients(self) -> Mapping[str, Any]:
+        """The Alkahest chain clients, as the live map the chain probe updates.
+
+        The map itself, even while empty, so a client the probe builds after
+        startup reaches every holder.
+        """
+        clients = self.resources.get("clients")
+        return clients if isinstance(clients, Mapping) else {}
 
     def arkhai_payments_stage(self) -> PaymentSellerStage | None:
         return self.payments_stage
@@ -208,16 +218,20 @@ class BareMetalStorefrontSettlementComposition:
         """Build ready settlement publication alternatives.
 
         A listing publishing an Alkahest escrow advertises, per chain its
-        escrows are on, the release condition the Alkahest mechanism derives
-        from the configured section, the seller wallet, and that chain's
-        address book.
+        escrows name, the release condition the Alkahest mechanism derives from
+        the configured section, the seller wallet, and that chain's address
+        book, and only while Alkahest is ready: an unready mechanism's clauses
+        publish no escrow to release.
+
+        ``clauses`` are the candidate's admissible clauses. When none of them
+        builds an option, the candidate is refused with ``NoSettlementOption``,
+        naming their mechanisms and those whose readiness is unknown.
         """
 
         readiness = await self.readiness(clauses=clauses)
         readiness_by_mechanism = {item.mechanism: item for item in readiness}
         accepted_escrows: list[dict[str, Any]] = []
         settlement_options: list[dict[str, Any]] = []
-        alkahest_chains: set[str] = set()
 
         for clause in clauses:
             mechanism_readiness = readiness_by_mechanism.get(clause.mechanism)
@@ -248,12 +262,31 @@ class BareMetalStorefrontSettlementComposition:
             ):
                 raise ValueError("settlement option builder returned invalid carriers")
             accepted_escrows.extend(dict(item) for item in built_escrows)
-            if clause.mechanism == ALKAHEST_MECHANISM:
-                alkahest_chains.update(str(item["chain_name"]) for item in built_escrows)
             settlement_options.extend(
                 SettlementOption.model_validate(item).model_dump(mode="json")
                 for item in built_options
             )
+
+        if not accepted_escrows and not settlement_options:
+            mechanisms = tuple(dict.fromkeys(clause.mechanism for clause in clauses))
+            # A ready mechanism that built nothing, as contact exchange does
+            # for an origin with no contact, is ruled out like a misconfigured one.
+            unknown = tuple(
+                mechanism
+                for mechanism in mechanisms
+                if mechanism in readiness_by_mechanism
+                and readiness_by_mechanism[mechanism].unknown
+            )
+            detail = (
+                f"pool {candidate.get('pool_id')!r} publishes no settlement option: "
+                + (
+                    f"readiness unknown for {', '.join(unknown)}"
+                    if unknown
+                    else "configuration rules out "
+                    + (", ".join(mechanisms) or "every mechanism")
+                )
+            )
+            raise NoSettlementOption(detail, mechanisms=mechanisms, unknown=unknown)
 
         option_ids = [item["option_id"] for item in settlement_options]
         if len(option_ids) != len(set(option_ids)):
@@ -267,17 +300,20 @@ class BareMetalStorefrontSettlementComposition:
             publication_clauses=tuple(
                 item.model_dump(mode="json", exclude_none=True) for item in clauses
             ),
-            demands=tuple(self._release_conditions(alkahest_chains)),
+            demands=tuple(self._release_conditions(accepted_escrows, readiness)),
             max_duration_seconds=max_duration_seconds,
         )
 
-    def _release_conditions(self, chain_names: set[str]) -> list[dict[str, Any]]:
-        if not chain_names:
-            return []
+    def _release_conditions(
+        self,
+        accepted_escrows: Sequence[Mapping[str, Any]],
+        readiness: Sequence[MechanismReadiness],
+    ) -> list[dict[str, Any]]:
         chains = self.resources.get("chains")
-        return release_conditions(
+        return escrow_release_conditions(
             self.config.mechanisms.get(ALKAHEST_CONFIG_KEY),
-            chain_names=chain_names,
+            accepted_escrows,
+            readiness=readiness,
             chains=chains if isinstance(chains, Mapping) else {},
             wallet_address=_wallet_address(self.resources.get("wallet")),
         )

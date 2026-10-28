@@ -372,8 +372,12 @@ async def test_settlement_is_verified_idempotently_without_fulfillment_claims(
         calls[1]["alkahest_client"]
         is restarted.settlement_composition.resources["clients"]["anvil"]
     )
-    assert calls[0]["agreed_duration_seconds"] == 3600
-    assert calls[0]["agreed_price"] == 100
+    # Verified against the plan committed at acceptance, on the accepted
+    # escrow contract, and never against the listing.
+    thread = await restarted.db.load_negotiation_thread_row(negotiation_id=negotiation_id)
+    assert all(call["settlement_plan"] == thread["settlement_plan"] for call in calls)
+    assert all(call["escrow_address"] == ESCROW_ADDRESS for call in calls)
+    assert all("listing" not in call for call in calls)
     assert "ssh_public_key" not in body
     assert (first.provisioning_job_id, first.fulfillment_id) == (None, None)
     assert not ({"tenant_credentials", "receipt", "result"} & first.extra.keys())
@@ -783,13 +787,13 @@ async def test_alkahest_recovery_rechecks_chain_before_physical_effects(
     assert len(capacity.reserve_calls) == len(provisioning.begin_calls) == 1
     assert len(calls) == 4
     assert all(call["escrow_uid"] == ESCROW_UID for call in calls)
-    assert all(call["agreed_price"] == 100 for call in calls)
-    assert all(call["agreed_duration_seconds"] == 3600 for call in calls)
+    thread = await restarted.db.load_negotiation_thread_row(negotiation_id=negotiation_id)
+    assert all(call["settlement_plan"] == thread["settlement_plan"] for call in calls)
     assert (
         calls[-1]["alkahest_client"]
         is restarted.settlement_composition.resources["clients"]["anvil"]
     )
-    assert calls[-1]["escrow_proposal"].escrow_address == ESCROW_ADDRESS
+    assert calls[-1]["escrow_address"] == ESCROW_ADDRESS
 
 
 async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(

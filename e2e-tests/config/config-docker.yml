@@ -71,6 +71,15 @@ api_credits:
   registry_url:   "http://api-credits-registry:8080"
   service_url:    "http://credits-service:8082"
   storefront_url: "http://credits-storefront:8000"
+  # The credits storefront's principal, which signs its responses, and its
+  # administrator, which steps its loops: both the committed Anvil 3
+  # development key (dev-env/identities/api-credits.identity.env), as
+  # storefront.credits.toml pins them. A well-known development value, never
+  # to be used on a public network.
+  storefront_scheme:           "eip191"
+  storefront_identifier:       "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+  storefront_admin_scheme:     "eip191"
+  storefront_admin_credential: "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6"
   # The credits registry's own signing principal, pinned by the buyer: a
   # registry read is authenticated in both directions, and the buyer refuses
   # to discover through an index it cannot pin. Matches
