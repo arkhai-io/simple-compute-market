@@ -2191,7 +2191,7 @@ Files:
 - **Not changed:** historical migrations that name the states as data of their
   time.
 
-- [ ] 14.1 Add a provisioning migration that converts stored reservations (D5):
+- [x] 14.1 Add a provisioning migration that converts stored reservations (D5):
   - `provisioning` becomes `unmanaged`;
   - `provisioning_failed` becomes `force_released`.
 
@@ -2202,14 +2202,72 @@ Files:
   - a database with neither is unchanged.
 
   A rerun changes nothing.
-- [ ] 14.2 Add the same conversion to the API-credits service's chain (D5).
+
+  `20261028_001_retired_reservation_states` in the service's chain: one
+  `UPDATE` per retired state sets the new state, `failure_reason`
+  `retired_state_<state>`, and a failure message saying what it was stored
+  as, carrying any earlier reason and message after it; a row becoming
+  `force_released` gains `released_at` if it had none. No capacity event is
+  written. A debit counts only while its reservation is in
+  `HELD_RESERVATION_STATES`, which holds `provisioning` and `unmanaged` and
+  neither `provisioning_failed` nor `force_released`, so a converted row
+  stays held or free. **Not exactly the same effect, for triage:** the
+  ledger's windowed reads (`_held_dimensions` and the exclusive-host
+  overlap check) count an `unmanaged` row against every window and a
+  `provisioning` row only within its lease window, so a converted row with a
+  window holds its bucket and host for all windows until an operator
+  repairs it, which is what the delta's "its capacity stays held until an
+  operator repairs it" says, and wider than D5's "keeps the row's capacity
+  effect exactly". It never frees what was held. A converted `force_released`
+  row also now reads as released to `reservation_is_released`, so VM's
+  relay-port backstop reclaims a port it held, and `release`, `terminate`,
+  and `force_release` answer it as already released where they refused.
+  No deployment is known to hold either state, since nothing has written
+  them. Persistence integration (new
+  `tests/integration/test_retired_reservation_states_migration.py`, a
+  file-backed SQLite database the chain migrated, seeded by SQL as a
+  deployed one could hold the rows): a `provisioning` row becomes
+  `unmanaged`, in the held set, its reason naming the state and no release
+  time; a `provisioning_failed` row with an earlier reason becomes
+  `force_released`, out of the held set, its message keeping that reason,
+  with a release time; a database of `reserved`, `leased`, `unmanaged`, and
+  `force_released` rows is unchanged, and a second run after a conversion
+  changes nothing; and `run_migrations` applies the conversion as part of
+  the chain. "Capacity held" and "free" are read as membership of the
+  ledger's own held set, the rule its debit sums apply; no test sums a debit
+  or reads a window, and the windowed widening above is read from the code.
+  `test_database.py`'s list of the chain's migrations names the new one.
+  Pass.
+- [x] 14.2 Add the same conversion to the API-credits service's chain (D5).
   Persistence integration in its `tests/integration`: the same three cases, and
   the rerun.
-- [ ] 14.3 The readers listed above stop naming the two states (D5). Verify:
+
+  `20261028_006_retired_reservation_states`, the same conversion: each
+  service owns its migration history, and `kit/site` holds no migrations to
+  share. Persistence integration (new
+  `tests/integration/test_retired_reservation_states_migration.py`): the
+  same three cases, the rerun, and the chain applying it; `test_migrations.py`'s
+  list and count of applied migrations name it. Pass (79).
+- [x] 14.3 The readers listed above stop naming the two states (D5). Verify:
   - a repository search finds them only in `kit/site`'s definitions (until
     section 15), historical migrations, and the conversion and its tests;
   - unit `test_lease_lifecycle.py` passes on the remaining states.
-- [ ] 14.4 Bump the service, the family kit, the VM storefront, and the
+
+  Removed from `LeaseLifecycleService.TERMINAL_FAILURE_STATES`, convergence's
+  `_TERMINAL_RESERVATION_STATES`, the VM storefront's
+  `_INTERRUPTIBLE_HELD_STATES` and its release loop's state list, the
+  API-credits keys service's held-state set, and the three fakes. The search
+  (Python, outside `.venv` and `openspec`) finds the states only in
+  `kit/site`'s `db.py` and `ledger.py` (section 15), the contract's
+  `LeaseState.PROVISIONING_FAILED` and its mapping with
+  `test_compute_contract_api.py` (section 16, which removes them),
+  historical migrations of the service (`migrations.py`: three references to
+  the reservation states, and one to a legacy VM lease's own `provisioning`
+  status), and the two conversions and their tests. The string also appears as a failure *reason*
+  in the VM storefront's failure policy, the core buyer, and tests: a reason
+  a fulfillment failed, not a reservation state. Unit `test_lease_lifecycle.py`
+  passes (`provisioning/compute`, 243).
+- [x] 14.4 Bump the service, the family kit, the VM storefront, and the
   API-credits service, and run `make lock`. **Verification checkpoint:**
   - 14.1–14.3;
   - `make test` in `provisioning/compute`, `provisioning/compute/service`,
@@ -2219,6 +2277,31 @@ Files:
   End-to-end: every compute lane and the API-credit lane migrate fresh
   databases, which hold no such row. No scenario is owed: the conversion is one
   service's migration, which persistence integration owns.
+
+  Over `dev`: `arkhai-compute-provisioning` `0.20.0` → `0.21.0` and
+  `arkhai-vms-storefront` `0.22.0` → `0.23.0`; no exact pin names either. The
+  service (section 13, `0.19.0`) and the API-credits service (section 10,
+  `0.7.0`) already stand one bump over `dev`, so neither is bumped again.
+  `make lock` moved every lock resolving them.
+
+  `make test` (full, before the fresh-context fixes) passes. After them: the
+  family kit 243, the service 605 unit and 447 integration, the VM
+  storefront 1138 unit and 475 integration, the API-credits service 79.
+  `make check-packaging` passes; `make check-change` passes its
+  comment-hygiene and other checks but for the closeout citation section 1
+  notes.
+
+  Handoff, from the fresh-context check: it found the conversion of a
+  windowed `provisioning` row wider than "exactly" (recorded above for
+  triage; D5 names `unmanaged` and the delta's scenario describes what
+  results), the capacity evidence a set membership (stated as such), the
+  `force_released` side effects unstated (stated), comments and the stored
+  message calling the states undefined while `kit/site` still defines them
+  until section 15 (now "a state nothing writes"), the checks unrecorded
+  (recorded), the historical-migration count wrong (corrected), and a test
+  named for startup where the provisioning service migrates in its init
+  container (renamed in both services). The migration now sits after the
+  helper its neighbour calls.
 
 ## 15. The site ledger defines only the states its lifecycle writes
 

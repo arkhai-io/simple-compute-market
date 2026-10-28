@@ -30,7 +30,6 @@ from compute_provisioning.job_fulfillment import fulfillment_executor_target
 _TERMINAL_RESERVATION_STATES = (
     ReservationState.released.value,
     ReservationState.force_released.value,
-    ReservationState.provisioning_failed.value,
 )
 
 logger = logging.getLogger(__name__)

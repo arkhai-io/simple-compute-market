@@ -104,7 +104,7 @@ class FakeSite:
             for reservation in self.reservations.values()
             if reservation["resource_id"] == resource_id
             and reservation["state"]
-            in ("reserved", "provisioning", "leased", "releasing")
+            in ("reserved", "leased", "releasing")
         )
         return self.resources[resource_id]["total_units"] - held
 

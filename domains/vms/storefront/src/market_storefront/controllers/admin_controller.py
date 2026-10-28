@@ -89,9 +89,7 @@ from market_resource_pools_contracts.backing import (
 logger = logging.getLogger(__name__)
 
 # Site-ledger reservation states that still hold capacity.
-_INTERRUPTIBLE_HELD_STATES = frozenset(
-    {"reserved", "provisioning", "leased", "releasing"}
-)
+_INTERRUPTIBLE_HELD_STATES = frozenset({"reserved", "leased", "releasing"})
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
@@ -933,7 +931,7 @@ class AdminController:
         try:
             sites = remote_site_clients(self._capacity())
             for site_name, client in sites.items():
-                for state in ("reserved", "provisioning", "leased", "releasing"):
+                for state in ("reserved", "leased", "releasing"):
                     for reservation in await client.list_reservations(state=state):
                         done = await client.release(
                             capacity_reservation_id=reservation.get(
