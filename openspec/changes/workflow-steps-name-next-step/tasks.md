@@ -14,9 +14,12 @@ the orchestrator's, made on the owner's word before its section's session starts
 and that session commits it with its section; the rest of the section is the
 implementer's.
 
-The table is drawn into `openspec/specs/change-workflow/architecture.md` from
-section 2 on, and a test holds the drawing to the table: a section that changes the
-table updates the drawing in the same commit with `make change-graph`.
+The table is drawn in `docs/development/diagrams/change-workflow-graph.drawio` and
+its SVG export, which `openspec/specs/change-workflow/architecture.md` shows, and a
+test holds the drawing to the table: a section that changes the table redraws both
+in the same commit, from what `make change-graph` prints. (Until the round-3 triage,
+69 O1, the drawing was a Mermaid block in the architecture; see the note under
+section 9.)
 
 ## 1. The workflow graph as a table, interpreted with today's routing
 
@@ -205,6 +208,23 @@ algorithm and lets `drift` confirm it line by line, as this one did. The rendere
 fails `test_the_diagrams_ids_are_distinct_and_its_labels_need_no_escaping` rather
 than drawing invalid Mermaid. The target runs `python3 -m change_workflow.graph`
 where its neighbours run a script file, since the plan adds no script.
+
+Fix from the round-3 triage, 69 O1 (the owner chose a hand-laid draw.io diagram over
+a generated one, for control over its layout): the Mermaid block is gone from the
+architecture companion, which shows `docs/development/diagrams/change-workflow-graph.svg`
+and names its source, `change-workflow-graph.drawio`, beside it, as the repository's
+other diagrams do. `graph.drawing(table)` gives the boxes and edges any diagram of
+the table draws (`Edge.pieces`: what a join's member supplies, what the exit is taken
+on, and each guard's `guard_text`), and `mermaid()` renders from it, unchanged; the
+drawing writes guards as numbers, `G1`–`G12`, in a legend box (`guards`).
+`test_change_workflow_graph.py`'s `drift` parses the `.drawio`, writes each edge's
+numbers out through the legend, and names every box or edge that differs from
+`drawing()`, with a test that the SVG's embedded `content` draws the same, and one
+that the architecture shows the export and names the source. The first layout was
+written by this triage's session as draw.io XML and its SVG by hand, with no draw.io
+here to render it: the owner adjusts it in draw.io, re-exporting the SVG with its
+source embedded, and the test checks structure only. A table change now redraws
+both files, from what `make change-graph` prints.
 
 ## 3. Targets, the outcome's exit and `triaged`, and the log's format
 
@@ -500,6 +520,23 @@ guards, D5, D6; requirement "The owner directs a change's next step", and
       the documentation citations, which report `scripts/change_workflow/convert.py`,
       section 7's file. End-to-end: none, confirmed; no `Owed by validation:` line.
 
+Fix from the round-3 triage, 68 F1: a failed or inconclusive validation of a fix
+commit a triage made names the owner, and the triage skill said the owner "may run
+this triage by hand", since the triage's entry guard refused the owner's direction
+to it once its review was triaged. `log.standing()` now also counts, as awaiting the
+triage of the latest review's kind, an untriaged validation record numbered after
+that review, unless it is a design review, whose triage makes no commit a validation
+reads (narrowed after the fresh-context check, which found the first round's
+validation opening a design triage); `AWAITS_TRIAGE` reads "a review of its kind, or
+a validation after it, awaits triage". The triage skill says the owner directs it, and the orchestrate
+skill's list of refusals names the validation. Tests: unit,
+`test_change_workflow_log.py::test_a_triage_is_directed_for_a_validation_after_its_kinds_latest_review`
+(a validation before the latest review does not count; one after it does, until a
+triage names it), and `test_change_next_step.py::test_the_owner_directs_a_failed_fix_validations_triage`
+(the full path: the failed validation names the owner, the direction names the
+triage, and that triage's outcome, naming the review and the validation, routes
+through its exit's guard once a passing validation is in).
+
 Handoff from section 5: until section 9 rewrites `change-orchestrate`, the
 orchestrating session's own repeat-review decision (`--by orchestrator --next
 review`) is refused by the writer, as D5 intends; the owner's word is recorded `--by
@@ -713,6 +750,36 @@ Touches `scripts/change_next_step.py`, `scripts/change_workflow/graph.py`,
       it, since that test file is unchanged until 6.5 and compares a triage's
       result exactly.
       The graph test is now `test_a_node_names_its_step_and_its_kind`.
+
+Fixes from the round-3 triage:
+
+- 68 F2 (the triage's fix over the reviewer's, on the owner's word): in a change
+  worked in the owner's checkout, a validation or review record stood in for the
+  owner's reading, so the round went to triage with no owner record. `round_pass`
+  now holds a first pass unread until its owner record exists, wherever the change
+  is worked; `round_join` still names a missing validation or review first, adding
+  `reading` beside them only in a clone, since in this checkout the view would move
+  the branch under them, and names `round-view` once both are in. Tests: unit,
+  `test_the_round_is_read_before_triage_though_its_validation_and_review_ran_first`;
+  `test_reviews_and_validation_await_triage` and
+  `test_an_external_implementation_review_counts_for_the_round` gain the owner
+  record they assumed.
+- 69 O2 (the owner's reading of D8, seq 78): a status set back by hand was reported
+  as a `disagreement` beside the log's route. `Computation.set_back` now follows it:
+  with the status's phase earlier than the log's last step's and no owner direction
+  after that step, the computation names the node the phase starts at
+  (`_PHASE_START`: `design`, `plan`, the round; no step runs after closeout), its
+  unwaivable entry guards checked as for a direction, the reason saying the status
+  is followed and not that a session may have closed unrecorded (`enter(...,
+  fresh=True)`). An owner's direction or a round line after that step ends it: the
+  fresh-context check found the round named again and again once its line was
+  recorded, since a round line is the orchestrating session's and has no phase.
+  `disagreement()` is gone; `passed_by_status`, a status ahead of the log, stays.
+  Tests: unit, `test_a_status_set_back_by_hand_is_followed` (was "…is reported"),
+  `test_a_status_set_back_is_followed_to_where_its_phase_starts` (planning, the
+  round), `test_a_status_set_back_to_implementation_routes_on_once_its_round_is_recorded`,
+  `test_a_status_set_back_and_then_directed_follows_the_direction`, and
+  `test_a_status_set_back_past_the_archive_goes_to_the_owner`.
 
 Handoff from section 6: from this commit the computation names the owner with the
 `convert` command for this change itself, whose log holds unmarked lines, and the
@@ -1055,6 +1122,15 @@ the step table's rule in 9.3. Touches every skill under `.agents/skills/change-*
       notes above answer. End-to-end: none, confirmed; no `Owed by validation:`
       line.
 
+Settled at the round-3 triage, documents only: 68 F3 — the merge run's undeclared
+exit (8.1) is kept, the owner having accepted it, and its rationale is now in
+`design.md` D4, with the declared alternatives and why they were not taken; 69 O5 —
+`change-review`'s interactive exception (8.3) is recorded in D11, and the delta's
+MODIFIED scenario "The owner waives archive cleanup's validation under
+orchestration" now has archive cleanup find the owner's direction and record the
+waiver without asking again, as the ADDED scenario and both skills do (the owner:
+"Certainly would prefer it to find my direction and record the waiver").
+
 Handoff from section 8: from this commit the wrapper refuses a string `next`, so
 every run's outcome names a target; this session's own outcome names
 `{"step": "triage", "kind": "implementation"}`. Open for the implementation review
@@ -1149,6 +1225,40 @@ orchestration" still says archive cleanup "asks the owner", against the ADDED "b
 a direction" scenario and both skills (section 8's handoff); and the permanent
 `change-workflow` spec and architecture still describe the tokens until the archive
 and 10.9 rewrite them.
+
+The round-3 triage (reviews 67-validation, 68-implementation, 69-implementation-owner;
+the round `f9c2b1c50`..`b902d8866`) resolved the MODIFIED scenario above (69 O5,
+section 8's note). Its fixes are noted in the sections they concern: 68 F1 under
+section 5; 68 F2 and 69 O2 under section 6; 69 O1 under section 2. One concerns no
+section:
+
+- 69 O3 (the owner: fix it here): a resume that found no conversation reported a
+  fresh session's total, 0, and `cost.run_cost` logged the run at minus the
+  session's earlier spending, its `session_usd` reset to 0, so `make change-cost`
+  understated the change and the session's next run was measured from zero. A
+  running total only grows, so a last total below the one logged now records no
+  `usd` and no `session_usd`, and `measured_cost` keeps the total it found.
+  Unit, `test_change_workflow_cost.py::test_a_resume_that_found_no_conversation_records_no_dollars`,
+  through the wrapper with a fake harness: both its assertions fail on the code
+  before (−97.0, and 98.5 for the next run).
+
+Evidence for the round-3 fixes: `scripts/tests`, unit (and the process-boundary
+tests among them, as before): 1797 passed. `make test`: passed, before the
+fresh-context check's follow-ups and again after them, over the committed fixes.
+`make check-packaging`:
+passed. `make check-change CHANGE=workflow-steps-name-next-step`: every check
+passes, comment hygiene and documentation citations included. The fresh-context
+check of the diff against `b902d8866` found one defect, fixed (a status set back to
+implementation named its round again after the round was recorded, under 69 O2's
+note), and optional points, of which these were taken: the triage guard narrowed to
+exclude design (under 68 F1's note); no "closed without recording" wording in a
+followed status's reason; closeout dropped from `_PHASE_START`, being unreachable;
+the guide and the architecture no longer claim the SVG's drawing is checked, only
+the source it embeds; the graph tests' module docstring; a long line; and the
+orchestrate skill's refusal naming the review's kind. Not taken: narrowing the guard
+to failed validations only — a passed one already routes on its own, and the
+direction is the owner's. End-to-end: none, and none is owed; no `Owed by
+validation:` line.
 
 ## 10. Closeout
 

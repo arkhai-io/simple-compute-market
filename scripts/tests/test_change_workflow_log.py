@@ -286,8 +286,11 @@ def test_a_triage_is_directed_only_while_a_review_of_its_kind_awaits_it(
         tmp_path: Path) -> None:
     log = log_file(tmp_path)
     _review(log, "13-design", triaged=True)
+    # The first round's validation, after the design review: no design triage's fix.
+    _review(log, "14-validation")
 
-    with pytest.raises(StepError, match="no design review awaits triage"):
+    with pytest.raises(StepError, match="no design review, and no validation after it, "
+                                        "awaits triage"):
         note_orchestrator(log, "triage again", "r", by="owner", next_step="triage",
                           kind="design")
     # A review awaits its triage until a triage's outcome names it, its triage file
@@ -297,6 +300,31 @@ def test_a_triage_is_directed_only_while_a_review_of_its_kind_awaits_it(
                              kind="design")
 
     assert line["next"] == {"step": "triage", "kind": "design"}
+
+
+def test_a_triage_is_directed_for_a_validation_after_its_kinds_latest_review(
+        tmp_path: Path) -> None:
+    # The validation of a fix commit a triage made: its failures are triaged by a
+    # triage of the same kind, which names that review again.
+    log = log_file(tmp_path)
+    _review(log, "50-validation")
+    _review(log, "52-implementation", triaged=True)
+
+    # A validation before the latest review was triaged with it, or superseded.
+    with pytest.raises(StepError, match="no implementation review, and no validation"):
+        note_orchestrator(log, "d", "r", by="owner", next_step="triage", kind="implementation")
+    _review(log, "53-validation")
+    line = note_orchestrator(log, "triage the fix's failures", "r", by="owner",
+                             next_step="triage", kind="implementation")
+    (log.parent / "53-validation.triage.md").write_text("Its triage.\n", "utf-8")
+    record_outcome(log, "triage", {"outcome": "finished", "message": "Fixed.",
+                                   "next": {"step": "round"},
+                                   "triaged": ["52-implementation", "53-validation"]},
+                   session="s", commit=COMMIT)
+
+    assert line["next"] == {"step": "triage", "kind": "implementation"}
+    with pytest.raises(StepError, match="no implementation review, and no validation"):
+        note_orchestrator(log, "d", "r", by="owner", next_step="triage", kind="implementation")
 
 
 def test_a_direction_checks_no_exit_guard(tmp_path: Path) -> None:

@@ -330,7 +330,12 @@ def standing(path: Path, entries: Sequence[Entry] | None = None) -> Standing:
     A review — a numbered record of a review kind, `-external` included — awaits
     triage until a triage's finished or returned outcome, or a conversion line,
     names it in `triaged`; a review whose triage file exists and whose outcome is
-    not yet recorded is a triage in progress, and still awaits it.
+    not yet recorded is a triage in progress, and still awaits it. A validation
+    record numbered after the latest review, which awaits nothing, is triaged in
+    that review's triage too: the validation of the fix commit its triage made,
+    whose failures the owner may direct a triage of the same kind to fix, naming
+    that review again. A design triage makes no commit a validation reads, so a
+    validation after a design review — the first round's — awaits no design triage.
     """
     directory = path.parent.parent
     entries = read_log(path) if entries is None else entries
@@ -340,13 +345,24 @@ def standing(path: Path, entries: Sequence[Entry] | None = None) -> Standing:
                or entry.get("step") == "convert"
                for name in entry.get("triaged") or () if isinstance(name, str)}
     awaiting = set()
+    latest: tuple[int, str] | None = None
+    validations = []
     for record in (path.parent.iterdir() if path.parent.is_dir() else ()):
         stem = record.name.removesuffix(".md")
-        if not record.name.endswith(".md") or not NUMBERED.match(stem) or stem in triaged:
+        if not record.name.endswith(".md") or not (number := NUMBERED.match(stem)):
             continue
         kind = stem.split("-", 1)[1].removesuffix("-external")
+        if kind in KINDS and (latest is None or int(number[1]) > latest[0]):
+            latest = (int(number[1]), kind)
+        if stem in triaged:
+            continue
         if kind in KINDS:
             awaiting.add(kind)
+        elif kind == "validation":
+            validations.append(int(number[1]))
+    if latest is not None and latest[1] != "design" and any(number > latest[0]
+                                                            for number in validations):
+        awaiting.add(latest[1])
     return Standing(archived=directory.parent.as_posix().endswith(ARCHIVE.as_posix()),
                     awaiting=frozenset(awaiting))
 

@@ -100,6 +100,21 @@ def test_a_crashed_predecessor_marks_the_dollars_partial(tmp_path: Path) -> None
     assert (line["cost"]["usd"], line["cost"]["usd_partial"]) == (1.0, True)
 
 
+def test_a_resume_that_found_no_conversation_records_no_dollars(tmp_path: Path) -> None:
+    # The resume reports a fresh session's zero, not the session's running total.
+    claude = FakeClaude((_costed(VALID["question"], (97.0, _usage())), 0),
+                        (_costed(VALID["question"], (0.0, _usage(given=0, out=0))), 1),
+                        (_costed(VALID["finished"], (98.5, _usage())), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    asked = wrapper.run("triage", CHANGE)
+    failed = wrapper.resume(CHANGE, asked["seq"], "accept")
+
+    line = wrapper.resume(CHANGE, failed["seq"], "go on")
+
+    assert "usd" not in failed["cost"] and failed["cost"]["session_usd"] == 97.0
+    assert line["cost"]["usd"] == pytest.approx(1.5)
+
+
 def test_turns_the_wrapper_did_not_run_mark_the_dollars_partial_and_set_the_gap(
         tmp_path: Path) -> None:
     claude = FakeClaude((_costed(VALID["question"], (1.0, _usage())), 0),

@@ -270,7 +270,9 @@ behalf. A direction checks no exit guard on the way there, so its `reason` says
 what it skips. The log's writer refuses one an unwaivable entry guard of a node it
 names refuses — design, planning, or implementation of an archived change; the
 closeout review, its triage, or archive cleanup of a change not archived; a triage
-with no review of its kind awaiting it; a validation naming no target; `done`,
+with no review of its kind awaiting it, nor a validation after the latest review,
+when that review is of its kind;
+a validation naming no target; `done`,
 which only archive cleanup reaches — naming the guard: relay the refusal. The computation names the directed step until a run of it is
 logged, and the step sets its own status as it starts.
 

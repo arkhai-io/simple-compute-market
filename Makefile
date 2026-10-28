@@ -1000,7 +1000,7 @@ change-next: ## Print the next step of an OpenSpec change as the orchestrator co
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
 	@python3 scripts/change_next_step.py "$(CHANGE)" --plain
 
-change-graph: ## Print the workflow's graph as the Mermaid diagram the change-workflow architecture shows: every node, exit, join, and guard with its remedy, as the next-step computation interprets them
+change-graph: ## Print the workflow's graph as a Mermaid flowchart, to redraw the change-workflow architecture's diagram from: every node, exit, join, and guard with its remedy, as the next-step computation interprets them
 	@PYTHONPATH=scripts python3 -m change_workflow.graph
 
 change-cost: ## Report what an OpenSpec change's unattended runs cost, by step and by round, with partial dollars as a range and the cache misses with their gaps (CHANGE=<change>)

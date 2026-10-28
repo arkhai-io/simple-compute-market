@@ -1,15 +1,17 @@
 """The workflow's graph is one table: every exit and remedy names a node of it, and
 every node is reached from design and leads on until the change is done. Its
-diagram draws every node, exit, join, and guard, and the diagram the change-workflow
-architecture shows is held to that rendering."""
+Mermaid rendering draws every node, exit, join, and guard, and the hand-laid diagram
+the change-workflow architecture shows, with the source its export embeds, draws
+the table's boxes and edges."""
 
 from __future__ import annotations
 
+import collections
 import dataclasses
-import itertools
 import os
 import re
 import subprocess
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
@@ -21,24 +23,64 @@ from change_workflow.graph import (ARCHIVE_CLEANUP, CLOSEOUT_TRIAGE, DESIGN, NOD
 
 ROOT = Path(__file__).resolve().parents[2]
 ARCHITECTURE = Path("openspec/specs/change-workflow/architecture.md")
-_DIAGRAM = re.compile(r"^```mermaid\n(.*?)^```$", re.M | re.S)
+DIAGRAMS = Path("docs/development/diagrams")
+SOURCE = DIAGRAMS / "change-workflow-graph.drawio"
+EXPORT = DIAGRAMS / "change-workflow-graph.svg"
+# The legend of guards, which an edge names by number, `G6` or `G7 · G8`.
+_LEGEND = "guards"
+_GUARD = re.compile(r"^G(\d+): (.*)$")
+_GUARDS = re.compile(r"^G\d+(?: · G\d+)*$")
 
 EXITS = [(declaration.node, exit_) for declaration in TABLE for exit_ in declaration.exits]
 
+Drawn = tuple[dict[str, tuple[str, ...]], collections.Counter]
 
-def drift(document: str, rendering: str) -> str | None:
-    """How the diagram in `document`, its one `mermaid` block, departs from
-    `rendering`: the first line that differs, and the command that redraws it."""
-    redraw = f"replace the block in {ARCHITECTURE} with what `make change-graph` prints"
-    diagrams = _DIAGRAM.findall(document)
-    if len(diagrams) != 1:
-        return f"{ARCHITECTURE} holds {len(diagrams)} mermaid blocks, not one: {redraw}"
-    pairs = itertools.zip_longest(diagrams[0].splitlines(), rendering.splitlines())
-    for number, (documented, rendered) in enumerate(pairs, start=1):
-        if documented != rendered:
-            return (f"the diagram departs from the table at its line {number}: it reads "
-                    f"{documented!r} where the table renders {rendered!r}; {redraw}")
-    return None
+
+def _lines(value: str) -> tuple[str, ...]:
+    return tuple(re.sub(r"</?b>", "", line).strip() for line in value.split("<br>"))
+
+
+def drawn(source: str) -> Drawn:
+    """What a draw.io file draws: its boxes by id, each the lines of its text, and
+    its edges, each its source, target, and label, the legend's guards written out
+    for their numbers."""
+    cells = ET.fromstring(source).iter("mxCell")
+    vertices, edges = {}, []
+    for cell in cells:
+        if cell.get("vertex") == "1":
+            vertices[cell.get("id")] = _lines(cell.get("value", ""))
+        elif cell.get("edge") == "1":
+            edges.append((cell.get("source"), cell.get("target"), cell.get("value", "")))
+    legend = {match[1]: match[2] for line in vertices.pop(_LEGEND, ())
+              if (match := _GUARD.match(line))}
+    drawn_edges: collections.Counter = collections.Counter()
+    for source_, target, value in edges:
+        pieces: list[str] = []
+        for line in (_lines(value) if value else ()):
+            pieces += ([legend.get(number[1:], number) for number in line.split(" · ")]
+                       if _GUARDS.match(line) else [line])
+        drawn_edges[(source_, target, tuple(pieces))] += 1
+    return vertices, drawn_edges
+
+
+def expected(table=TABLE) -> Drawn:
+    boxes, edges = graph.drawing(table)
+    return boxes, collections.Counter((e.source, e.target, e.pieces) for e in edges)
+
+
+def drift(source: str, table=TABLE) -> str | None:
+    """How the diagram drawn in `source` departs from the table: each box or edge
+    one draws and the other does not."""
+    (boxes, edges), (want_boxes, want_edges) = drawn(source), expected(table)
+    problems = [f"box {id_} reads {boxes.get(id_)!r} where the table has {text!r}"
+                for id_, text in want_boxes.items() if boxes.get(id_) != text]
+    problems += [f"box {id_} is no node of the table" for id_ in boxes.keys() - want_boxes]
+    problems += [f"no edge draws {edge}" for edge in want_edges - edges]
+    problems += [f"the edge {edge} is not the table's" for edge in edges - want_edges]
+    if not problems:
+        return None
+    return (f"{SOURCE} departs from the table: " + "; ".join(problems) + "; redraw it, "
+            f"with `make change-graph` printing the table, and export {EXPORT} from it")
 
 
 def test_each_node_is_declared_once() -> None:
@@ -101,10 +143,10 @@ def test_the_entry_guards_are_the_tables() -> None:
         assert _entry(node) == ["the change is not archived"]
     for node in (graph.CLOSEOUT_REVIEW, ARCHIVE_CLEANUP):
         assert _entry(node) == ["the change is archived"]
-    assert _entry(CLOSEOUT_TRIAGE) == ["the change is archived",
-                                       "a review of its kind awaits triage"]
+    awaits = "a review of its kind, or a validation after it, awaits triage"
+    assert _entry(CLOSEOUT_TRIAGE) == ["the change is archived", awaits]
     for node in (graph.DESIGN_TRIAGE, graph.IMPLEMENTATION_TRIAGE, graph.PRE_CLOSEOUT_TRIAGE):
-        assert _entry(node) == ["a review of its kind awaits triage"]
+        assert _entry(node) == [awaits]
     # Closeout is the step that archives.
     assert _entry(graph.CLOSEOUT) == []
     assert _entry(graph.VALIDATE) == ["it carries a target that is a node"]
@@ -126,7 +168,7 @@ ARCHIVED = graph.Standing(archived=True, awaiting=frozenset())
                                           "archived) is not met: the change is not archived"),
     ({"step": "triage", "kind": "design"}, ACTIVE, None),
     ({"step": "triage", "kind": "implementation"}, ACTIVE,
-     "no implementation review awaits triage"),
+     "no implementation review, and no validation after it, awaits triage"),
     ({"step": "validate", "target": {"step": "archive-cleanup"}}, ACTIVE,
      "archive-cleanup's entry guard"),
     ({"step": "review", "kind": "pre-closeout"}, ACTIVE, None),
@@ -234,40 +276,54 @@ def test_the_diagrams_ids_are_distinct_and_its_labels_need_no_escaping() -> None
     assert not [label for label in labels if '"' in label or "|" in label]
 
 
-def test_the_documented_diagram_is_the_tables_rendering() -> None:
-    problem = drift((ROOT / ARCHITECTURE).read_text("utf-8"), graph.mermaid())
+def test_the_documented_diagram_draws_the_table() -> None:
+    problem = drift((ROOT / SOURCE).read_text("utf-8"))
 
     assert problem is None, problem
+
+
+def test_the_export_embeds_the_diagram_it_draws() -> None:
+    # A draw.io export carries its source, so it opens in draw.io too.
+    exported = ET.parse(ROOT / EXPORT).getroot().get("content")
+
+    assert exported is not None
+    assert drawn(exported) == drawn((ROOT / SOURCE).read_text("utf-8"))
+
+
+def test_the_architecture_shows_the_export_and_names_its_source() -> None:
+    document = (ROOT / ARCHITECTURE).read_text("utf-8")
+    to_diagrams = "../../../" + DIAGRAMS.as_posix()
+
+    assert f"]({to_diagrams}/{EXPORT.name})" in document
+    assert f"]({to_diagrams}/{SOURCE.name})" in document
+    assert "```mermaid" not in document
 
 
 def test_a_table_with_an_added_exit_no_longer_matches_the_diagram() -> None:
     table = [dataclasses.replace(d, exits=d.exits + (graph.Exit(DESIGN, when=graph.RETURN),))
              if d.node == CLOSEOUT_TRIAGE else d for d in TABLE]
 
-    problem = drift((ROOT / ARCHITECTURE).read_text("utf-8"), graph.mermaid(table))
+    problem = drift((ROOT / SOURCE).read_text("utf-8"), table)
 
     assert problem is not None
-    assert "triage_closeout" in problem and "make change-graph" in problem
+    assert "no edge draws ('triage_closeout', 'design', ('a return',))" in problem
+    assert "make change-graph" in problem
 
 
-def test_a_drift_names_the_first_line_that_differs_and_both_versions() -> None:
-    document = "Text.\n\n```mermaid\nflowchart TD\n    a --> b\n    b --> c\n```\n"
+def test_a_drift_names_each_box_and_edge_that_differs() -> None:
+    source = ('<mxfile><mxCell id="design" vertex="1" value="&lt;b&gt;design&lt;/b&gt;"/>'
+              '<mxCell id="extra" vertex="1" value="x"/>'
+              '<mxCell id="guards" vertex="1" value="G1: a guard"/>'
+              '<mxCell edge="1" source="design" target="extra" value="advance&lt;br&gt;G1"/>'
+              '</mxfile>')
 
-    changed = drift(document, "flowchart TD\n    a --> b\n    b --> d\n")
-    shorter = drift(document, "flowchart TD\n    a --> b\n")
+    problem = drift(source)
 
-    assert changed is not None and "line 3" in changed
-    assert "'    b --> c'" in changed and "'    b --> d'" in changed
-    assert shorter is not None and "line 3" in shorter and "None" in shorter
-
-
-@pytest.mark.parametrize("blocks", [0, 2])
-def test_a_document_without_exactly_one_diagram_drifts(blocks: int) -> None:
-    document = "Text.\n" + "```mermaid\nflowchart TD\n```\n" * blocks
-
-    problem = drift(document, "flowchart TD\n")
-
-    assert problem is not None and f"holds {blocks} mermaid blocks" in problem
+    assert problem is not None
+    assert "box design reads ('design',) where the table has" in problem
+    assert "box extra is no node of the table" in problem
+    assert "the edge ('design', 'extra', ('advance', 'a guard')) is not the table's" in problem
+    assert "no edge draws ('design', 'review_design', ())" in problem
 
 
 def test_make_change_graph_prints_the_rendering() -> None:

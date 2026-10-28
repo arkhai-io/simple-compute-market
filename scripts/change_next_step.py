@@ -56,11 +56,11 @@ Every line the workflow tooling appends to a log carries the log's format marker
 change whose log holds a line without it, or that has numbered records and no log,
 is routed on none of them: the owner converts its records first.
 
-The files hold the change's state and the log its route: the step the route names
-is named whatever the status says. Where the status is past that step — a step that
-set its status and closed before recording its outcome — or the log's last step is
-past the status, a status set back by hand, the result carries a `disagreement`
-saying so.
+The files hold the change's state and the log its route. A status set back by hand
+behind the log's last step is followed: the computation names the node its phase
+starts at, as it would the owner's direction there. Where the status is past the
+step the route names — a step that set its status and closed before recording its
+outcome — that step is named, its result carrying a `disagreement` saying so.
 
 A change is computed where it is worked: in the checkout that has its branch
 checked out — its own name's branch, or one the owner's decision says it is
@@ -124,6 +124,9 @@ _TASK = re.compile(r"^\s*- \[(?P<done>[ xX])\] "
 _STEP_PHASE = {"design": "design", "plan": "planning", "implement": "implementation",
                "validate": "implementation", "triage": None, "review": None,
                "closeout": "closeout", "archive-cleanup": "closeout"}
+# The node each phase a status can be set back to starts at, which the status is
+# followed to; no step runs after closeout, so no status is set back behind it.
+_PHASE_START = {"design": DESIGN, "planning": graph.PLAN, "implementation": ROUND}
 # The records a member of a round's join supplies, besides the round's sections.
 _SUPPLIES = {ROUND_VIEW: "implementation-owner", VALIDATE: "validation",
              IMPLEMENTATION_REVIEW: "implementation"}
@@ -629,8 +632,6 @@ class Computation:
         if result.get("step") not in ("owner", "unclassified", "done"):
             if waiting := self.bootstrapping(result):
                 return waiting
-            if "disagreement" not in result and (disagreement := self.disagreement()):
-                result["disagreement"] = disagreement
         return result
 
     def read(self) -> None:
@@ -797,6 +798,8 @@ class Computation:
         if phase == "design" and status != "ready for design" and (
                 blocked := self.blocked_on_prerequisite()):
             return blocked
+        if followed := self.set_back(status, phase):
+            return followed
         if route is None:
             return self.unrouted(status, phase)
         return {EXIT: self.chosen, DIRECTED: self.directed, ROUND_STARTED: self.round_join,
@@ -907,17 +910,19 @@ class Computation:
         return self.enter(node, target, reason, line, by=by)
 
     def enter(self, node: Node, target: Mapping[str, Any], reason: str, line: Entry, *,
-              by: str) -> Result:
+              by: str, fresh: bool = False) -> Result:
         """The result naming `target`'s step, for the route `line` chose.
 
         A step named with no run of it logged since is in progress or next, and the
         reason says so: only the owner knows whether an interactive session of it is
-        open, or closed before it recorded its outcome.
+        open, or closed before it recorded its outcome. A `fresh` entry is named for
+        the first time, so it is next.
         """
         state = self.state
         if node == DONE:
             return {"step": DONE.step, "reason": "archived"}
-        reason += self.in_progress(node, line)
+        if not fresh:
+            reason += self.in_progress(node, line)
         if node == VALIDATE:
             result: Result = {"step": VALIDATE.step, "target": dict(target["target"]),
                               "reason": reason}
@@ -1132,9 +1137,9 @@ class Computation:
         owner has not seen, and the repeat round exists because it changed
         something central. The pass's reading is an owner record saved after that
         triage finished — in a clone the first pass's record may be numbered after
-        the review, since it is read beside it. A change in its own clone is read in
-        the owner's workspace while its validation and review run in the clone, so
-        a first pass is unread there until its owner record exists.
+        the review, since it is read beside it. A first pass is unread until its
+        owner record exists, wherever the change is worked: its validation and
+        review are no evidence that the owner read the round.
         """
         state = self.state
         mine = [r for r in state.records if r.number > current.get("after", 0)]
@@ -1142,7 +1147,7 @@ class Computation:
         in_clone = state.workspace is not None
         base = again.reviewed_commit if again and self.fixed_since(again) else None
         if again is None:
-            unread = in_clone and "implementation-owner" not in kinds
+            unread = "implementation-owner" not in kinds
         else:
             # Records are never rewritten, so a record's time is when it was saved,
             # and a triage file's is when its triage last wrote it.
@@ -1181,11 +1186,12 @@ class Computation:
         validation with nothing to triage has its triage file.
 
         A change worked in this checkout is read first, since its view moves the
-        branch its own steps run on. A change in its own clone is read in the
-        owner's workspace while its validation and review run in the clone, so the
-        reading holds triage alone: triage is named once the owner record, the
-        review, and the validation all exist and the workspace's view is closed. A
-        member the join does not wait for supplies nothing it waits on.
+        branch its own steps run on; were validation or the review run before it,
+        the reading is named once both are in, when no step runs beside the view. A
+        change in its own clone is read in the owner's workspace while its
+        validation and review run in the clone. Either way triage is named only once
+        the owner record, the review, and the validation all exist and the view is
+        closed. A member the join does not wait for supplies nothing it waits on.
         """
         state = self.state
         if problem := self.sections_problem():
@@ -1230,7 +1236,9 @@ class Computation:
                       "reason": "the round has no validation"}
                 if missing == [VALIDATE]
                 else IMPLEMENTATION_REVIEW.result("the round has no implementation review"))
-            if unread and not viewing:
+            # In this checkout the view would move the branch under them, so the
+            # reading waits until both are in.
+            if unread and work.in_clone and not viewing:
                 result.update(reading=True, workspace=str(state.workspace))
                 result["reason"] += ("; the owner reads the round in the workspace beside "
                                      "them")
@@ -1423,26 +1431,43 @@ class Computation:
             return "HEAD cannot be read"
         return validation_problem(self.state.directory / "reviews", head, self.root)
 
-    def disagreement(self) -> str | None:
-        """How the log's last step is past the status, if it is: the status was set
-        back by hand, which the route the log names does not follow. An owner's
-        direction after that step accounts for it, since the step it directs sets
-        its own status as it starts."""
+    def set_back(self, status: str, phase: str) -> Result | None:
+        """The node `phase` starts at, when the status was set back by hand behind
+        the log's last step: the files hold the change's state, so the route the log
+        names gives way to the status, as to a direction of the owner's, its
+        unwaivable entry guards checked. Once that node's step starts — for the
+        round, once its line is recorded — the log routes the change again.
+
+        An owner's direction after that step accounts for the status, since the step
+        it directs sets its own status as it starts, and so does a round recorded
+        after it. A status ahead of the log is not followed (`passed_by_status`): a
+        step sets the status it reaches as it finishes, so the step is in progress,
+        its outcome unrecorded.
+        """
         log = self.state.log
         lines = [e for e in _step_lines(log) if _STEP_PHASE.get(e.get("step"))]
-        status = self.state.row.status if self.state.row else ""
-        phase = _phase(status)
-        if not lines or phase is None or any(
-                e.get("outcome") == ORCHESTRATOR and e.get("by") == "owner"
-                and isinstance(e.get("next"), Mapping) and e["seq"] > lines[-1]["seq"]
+        if not lines or any(
+                e["seq"] > lines[-1]["seq"] and e.get("outcome") in (ORCHESTRATOR, "round")
+                and (e.get("outcome") == "round"
+                     or (e.get("by") == "owner" and isinstance(e.get("next"), Mapping)))
                 for e in log):
             return None
-        logged = _STEP_PHASE[lines[-1]["step"]]
-        if PHASES.index(logged) > PHASES.index(phase):
-            return (f"the status is {status!r}, but the log's last step was "
-                    f"{lines[-1]['step']} (seq {lines[-1]['seq']}): the result follows the "
-                    "log's route, and a status set back by hand is the owner's to direct")
-        return None
+        last = lines[-1]
+        if PHASES.index(_STEP_PHASE[last["step"]]) <= PHASES.index(phase):
+            return None
+        node = _PHASE_START[phase]
+        target = {"step": node.step}
+        reason = (f"the status is {status!r}, set back by hand behind the log's last step, "
+                  f"{last['step']} (seq {last['seq']}): the status is followed to "
+                  f"{node.label}, where its phase starts")
+        if refusal := entry_refusal(target, self.standing(), directed=True):
+            return _owner(f"{reason}, and {refusal}", choice=target)
+        # No session of the node was named before, so none can have closed unrecorded.
+        result = self.enter(node, target, reason, last, by="owner", fresh=True)
+        # The round's result gives the plan's next round its own reason.
+        if not result.get("reason", "").startswith(reason):
+            result["reason"] = f"{reason}; {result.get('reason', '')}"
+        return result
 
 
 def compute(root: Path, change: str, **seams: Any) -> Result:

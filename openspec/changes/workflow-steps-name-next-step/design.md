@@ -65,9 +65,17 @@ than `triage` of a closeout review); each node declares its exits, the join it
 waits on (the round's triage waits for the owner's reading, the validation, and the
 implementation review), the guards on each edge, each guard naming the step
 that satisfies it (D4), and its entry guards. The computation interprets the table
-in place of the per-phase methods. `make change-graph` renders it as a Mermaid
-diagram, and the diagram in `openspec/specs/change-workflow/architecture.md` is
-held to that rendering by a test, so the documentation cannot drift from the code.
+in place of the per-phase methods. The diagram `openspec/specs/change-workflow/architecture.md`
+shows is laid out by hand, as the repository's other diagrams are: a draw.io source,
+`docs/development/diagrams/change-workflow-graph.drawio`, and its SVG export beside
+it, which embeds the source. A test holds both to the table's boxes and edges,
+whatever their layout — every node with its entry guards, every exit with what it is
+taken on and its guards, written out through the drawing's numbered legend — so the
+documentation cannot drift from the code; `make change-graph` prints the table as a
+Mermaid flowchart to redraw from (69 O1). A generated drawing was rejected: its
+layout could not be controlled enough to be presentable, which is the diagram's
+point; and an inline Mermaid block breaks the repository's convention of draw.io
+diagrams with an SVG render.
 
 A guard is of one of two kinds (21 F1):
 
@@ -108,11 +116,20 @@ The entry guards:
 | `design`, `plan`, `round` / `implement` | the change is not archived | no |
 | `review` `pre-closeout` | the latest validation passed for `HEAD`, or for an ancestor it differs from only in records — after a pre-closeout triage, only in paths under `openspec/` and `docs/` | yes: the owner's direction is its override, as `UNVALIDATED=1` is today |
 | `review` `closeout`, `triage` `closeout`, `archive-cleanup` | the change is archived | no |
-| `triage` of each kind | a review of its kind awaits triage | no |
+| `triage` of each kind | a review of its kind awaits triage, or a validation record numbered after the latest review, which is of its kind and not a design review, whose triage makes no commit a validation reads (68 F1) | no |
 | `done` | reached only by archive cleanup's exit | no: never directed |
 | `validate` | it carries a target that is a node of the table | no |
 
 Closeout has no archive guard, since it is the step that archives.
+
+A triage's guard admits the validation of a fix commit a triage made (68 F1): a
+failed or inconclusive one names the owner, who may judge it environmental and
+direct another validation, or direct a triage of the same kind to fix its failures,
+which names the earlier review again in `triaged` beside the validation. Without it
+that direction would be refused, no review awaiting triage, and the only way to the
+fix would be a session outside the graph. Dropping the path instead, the failures
+waiting for the next round's triage, was rejected: fixing is a triage's work, so the
+next round would start on a commit that failed its validation.
 
 The computation names `validate` always with a `target` (D4): in a round's join,
 the round's triage; as a guard's remedy, the exit it clears; after the owner's
@@ -244,6 +261,17 @@ a skill's defect or an intervention, and an intervention is the owner's (D5). A
 validation naming a target other than the one the computation gave it is such an
 exit. An exit whose target's entry guard is not met names the owner too, with the
 guard (D1).
+
+A run that resolves a merge's conflicts is part of the owner's intervention — a
+merge of `dev` the owner directed — so where the change goes after it is the
+owner's, and it names `{"step": "round"}` deliberately, an exit implementation does
+not declare, which this rule brings to the owner with the run's message saying where
+the change stood (68 F3). Implementation's one declared exit, the round's triage,
+would send a merge between rounds into a round already triaged. Ending the run with
+a question that the owner's direction resolves was rejected: an interactive run
+records no question, and the orchestrating session would answer a question by a
+direction rather than a resume. A `merge` node was rejected too: mechanism for a
+rare intervention, which D5 leaves to the owner rather than to the table.
 
 The guards are today's: `HEAD` validated, with changes' records exempt, or paths
 under `openspec/` and `docs/` from the pre-closeout triage on; a fix committed
@@ -552,8 +580,18 @@ Rejected:
   carries its exit and its `rounds`, which no status can supply (21 F5).
 - A change not yet converted — a log line without the format marker, or records
   with no log — names the owner with the `convert` command (D7).
-- A status edited by hand: the files hold state and prevail on it; an exit or
-  direction that contradicts the status is reported as a `disagreement`, as now.
+- A status edited by hand: the files hold state and prevail on it, so a hand edit
+  changes the state and is followed (69 O2; the owner, seq 78). A status set back
+  into an earlier phase than the log's last step, with no direction of the owner's
+  after that step, is followed as a direction to the node its phase starts at —
+  `design`, `plan`, or the round, since no step runs after closeout — its
+  unwaivable entry guards checked, until that node's step starts, the round once
+  its line is recorded, and the log routes the change again. A status ahead of
+  the log is not followed: a step sets the status it reaches as it finishes, so a
+  status past the step the log names is that step's session closed before it
+  recorded, as the interactive-session bullet above says (21 F5). Following both directions was
+  rejected: an unrecorded plan would go straight to its round, which would ask for
+  the sessions its outcome held.
 - A named target whose guard changed is routed on the current state (D4); one its
   node no longer declares, after a merge of `dev` changed the table, names the
   owner.
@@ -582,6 +620,10 @@ twice. The step table allows every step `printenv CLAUDE_CODE_SESSION_ID`, and n
 broader reading of the environment. An interactive step stays a plain Claude Code
 session under the owner's own permissions; the spec's "an interactive run behaves
 as it does without the wrapper" holds except that it records its outcome.
+
+The review is the exception (69 O5): an interactive review publishes no record — the
+owner pastes it into a triage, which saves it as an external review — and a review
+run's outcome names the record it published, so it has nothing to record.
 
 Rejected:
 

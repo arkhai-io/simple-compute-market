@@ -276,8 +276,9 @@ def test_a_later_direction_that_can_no_longer_be_entered_proposes_nothing(
 
     shown = _convert(root)
 
-    assert any(line.startswith("no direction is proposed:") and "no design review awaits"
-               in line for line in shown)
+    assert any(line.startswith("no direction is proposed:")
+               and "no design review, and no validation after it, awaits" in line
+               for line in shown)
 
 
 def test_a_conversion_after_later_runs_proposes_nothing(tmp_path: Path) -> None:

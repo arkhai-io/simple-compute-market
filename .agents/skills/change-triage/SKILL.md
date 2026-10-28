@@ -210,8 +210,10 @@ For an implementation round, also take:
   A validation record alone — the re-validation of an earlier round's fix commit —
   is triaged only for its `V<n>` failures, each like any finding. No validation
   record alone is routed to triage: the computation brings a failed or
-  inconclusive one to the owner, who may run this triage by hand for its failures,
-  and a passed one clears the guard it remedies. No round view preceded it, so
+  inconclusive one to the owner, who may direct this triage for its failures —
+  the triage's entry guard holds while a validation numbered after the latest
+  review awaits triage — and a passed one clears the guard it remedies. No round
+  view preceded it, so
   no owner's notes are asked for. Its triage file ends "Evidence for the round
   triaged in `<NN-review>.triage.md`.", naming the earlier round's review. A
   triage names at least one review among what it triaged, so its outcome names

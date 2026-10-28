@@ -34,9 +34,10 @@ exit or by the owner's direction, which checks no exit guard. An unwaivable one
 refuses every entry while it is not met (`entry_refusal`); a waivable one takes the
 owner's direction as its override.
 
-`make change-graph` prints the table as a Mermaid diagram (`mermaid`), the diagram
-the change-workflow architecture shows. A durable change to the workflow is a
-change to this table, made as an OpenSpec change. See
+The change-workflow architecture shows the table as a diagram laid out by hand,
+held to the table's boxes and edges (`drawing`); `make change-graph` prints it as a
+Mermaid flowchart (`mermaid`) for whoever redraws it. A durable change to the
+workflow is a change to this table, made as an OpenSpec change. See
 openspec/specs/change-workflow/architecture.md, "Routing is code, with the model as
 backstop".
 """
@@ -301,7 +302,8 @@ def _not_archived(standing: Standing, _: Mapping[str, Any], __: bool) -> str | N
 
 def _awaits_triage(standing: Standing, target: Mapping[str, Any], _: bool) -> str | None:
     kind = target["kind"]
-    return None if kind in standing.awaiting else f"no {kind} review awaits triage"
+    return None if kind in standing.awaiting else (f"no {kind} review, and no validation "
+                                                   "after it, awaits triage")
 
 
 def _carries_target(_: Standing, target: Mapping[str, Any], __: bool) -> str | None:
@@ -318,7 +320,8 @@ def _never_directed(_: Standing, __: Mapping[str, Any], directed: bool) -> str |
 
 NOT_ARCHIVED = EntryGuard("the change is not archived", check=_not_archived)
 ARCHIVED = EntryGuard("the change is archived", check=_archived)
-AWAITS_TRIAGE = EntryGuard("a review of its kind awaits triage", check=_awaits_triage)
+AWAITS_TRIAGE = EntryGuard("a review of its kind, or a validation after it, awaits triage",
+                           check=_awaits_triage)
 CARRIES_TARGET = EntryGuard("it carries a target that is a node", check=_carries_target)
 NEVER_DIRECTED = EntryGuard("reached only by archive cleanup's exit", check=_never_directed)
 # The review checks it itself as it starts (`change_workflow.review`), taking the
@@ -521,8 +524,11 @@ def review_phase(kind: str) -> str | None:
     return declaration.phases[0] if declaration else None
 
 
-# The diagram: the table drawn as a Mermaid flowchart, which the change-workflow
-# architecture shows and a test holds to this rendering.
+# The diagram. The change-workflow architecture shows a drawing laid out by hand,
+# `docs/development/diagrams/change-workflow-graph.drawio` with its SVG export,
+# which a test holds to the table's boxes and edges (`drawing`), whatever its
+# layout. `make change-graph` prints the table as a Mermaid flowchart (`mermaid`),
+# for whoever redraws it.
 
 def _id(node: Node) -> str:
     return node.label.replace(":", "_").replace("-", "_")
@@ -532,16 +538,48 @@ def _remedy(remedy: Node | str) -> str:
     return remedy.label if isinstance(remedy, Node) else remedy
 
 
-def _guard(guard: Guard) -> str:
+def guard_text(guard: Guard) -> str:
+    """A guard as the diagrams write it: its condition, its remedy, and what follows
+    when the remedy has run and it still does not hold."""
     otherwise = f", {guard.otherwise}" if guard.otherwise else ""
     held = " (held)" if guard.held else ""
     return f"{guard.condition} ⇒ {_remedy(guard.remedy)}{otherwise}{held}"
 
 
-def _box(declaration: Declaration) -> str:
-    guards = "".join(f"<br/>entry: {guard.condition}" + (" (waivable)" if guard.waivable else "")
-                     for guard in declaration.entry)
-    return f'    {_id(declaration.node)}["{declaration.node.label}{guards}"]'
+@dataclass(frozen=True)
+class Edge:
+    """An exit as a diagram draws it: from a box to a box or a join, labelled with
+    the record its node supplies a join, what it is taken on, and its guards."""
+
+    source: str
+    target: str
+    supplies: tuple[str, ...]
+    when: str | None
+    guards: tuple[Guard, ...]
+
+    @property
+    def pieces(self) -> tuple[str, ...]:
+        return (*self.supplies, *([self.when] if self.when else []),
+                *map(guard_text, self.guards))
+
+
+def drawing(table: Sequence[Declaration] = TABLE) -> tuple[dict[str, tuple[str, ...]],
+                                                             list[Edge]]:
+    """What any diagram of the table draws: a box for each node, by id, holding its
+    label and its entry guards, and one for each join; and an edge for each exit,
+    entering the join it waits on, then one from each join to its target."""
+    boxes = {_id(d.node): (d.node.label, *(f"entry: {guard.condition}"
+                                           + (" (waivable)" if guard.waivable else "")
+                                           for guard in d.entry)) for d in table}
+    joins = {exit_.join: exit_.target for d in table for exit_ in d.exits if exit_.join}
+    boxes.update({f"join_{_id(target)}": ("join",) for target in joins.values()})
+    edges = [Edge(_id(d.node), f"join_{_id(exit_.target)}" if exit_.join else _id(exit_.target),
+                  tuple(what for what, node in exit_.join.waits_for if node == d.node)
+                  if exit_.join else (), exit_.when, exit_.guards)
+             for d in table for exit_ in d.exits]
+    edges += [Edge(f"join_{_id(target)}", _id(target), (), None, ())
+              for target in joins.values()]
+    return boxes, edges
 
 
 def mermaid(table: Sequence[Declaration] = TABLE) -> str:
@@ -550,20 +588,14 @@ def mermaid(table: Sequence[Declaration] = TABLE) -> str:
     remedy, and a hexagon for each join, which the exits waiting on it enter,
     labelled with the record their node supplies. The same table always renders the
     same text."""
+    boxes, edges = drawing(table)
     lines = ["flowchart TD"]
-    lines += [_box(d) for d in table]
-    joins = {exit_.join: exit_.target for d in table for exit_ in d.exits if exit_.join}
-    lines += [f'    join_{_id(target)}{{{{"join"}}}}' for target in joins.values()]
-    for declaration in table:
-        for exit_ in declaration.exits:
-            supplies = [what for what, node in exit_.join.waits_for
-                        if node == declaration.node] if exit_.join else []
-            label = "<br/>".join([*supplies, *([exit_.when] if exit_.when else []),
-                                  *map(_guard, exit_.guards)])
-            arrow = f'-->|"{label}"|' if label else "-->"
-            target = f"join_{_id(exit_.target)}" if exit_.join else _id(exit_.target)
-            lines.append(f"    {_id(declaration.node)} {arrow} {target}")
-    lines += [f"    join_{_id(target)} --> {_id(target)}" for target in joins.values()]
+    lines += [f'    {id_}{{{{"join"}}}}' if id_.startswith("join_")
+              else f'    {id_}["{"<br/>".join(text)}"]' for id_, text in boxes.items()]
+    for edge in edges:
+        label = "<br/>".join(edge.pieces)
+        arrow = f'-->|"{label}"|' if label else "-->"
+        lines.append(f"    {edge.source} {arrow} {edge.target}")
     return "\n".join(lines) + "\n"
 
 

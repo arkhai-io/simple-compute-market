@@ -469,11 +469,13 @@ def test_reviews_and_validation_await_triage(tmp_path: Path) -> None:
     _check(root, SECOND_DONE)
     _record(root, "01-validation.md", text=_validation())
     _review(root, "02-implementation.md")
+    _record(root, "03-implementation-owner.md")
 
     result = _next(root)
 
     assert result == {"step": "triage", "kind": "implementation",
-                      "reason": "01-validation.md, 02-implementation.md have no triage"}
+                      "reason": "01-validation.md, 02-implementation.md, "
+                                "03-implementation-owner.md have no triage"}
 
 
 def test_a_rounds_triage_whose_outcome_is_not_recorded_is_in_progress(tmp_path: Path) -> None:
@@ -1273,8 +1275,8 @@ def test_a_direction_whose_entry_guard_no_longer_holds_goes_to_the_owner(
 
     result = _next(root)
 
-    assert result["step"] == "owner" and "no pre-closeout review awaits triage" in (
-        result["reason"])
+    assert result["step"] == "owner" and ("no pre-closeout review, and no validation after "
+                                          "it, awaits triage") in result["reason"]
 
 
 # Statuses that wait on the owner, and dependencies.
@@ -1443,6 +1445,21 @@ def test_a_record_of_a_member_the_join_lacks_does_not_stand_for_the_reading(
     assert _next(root, join=join)["step"] == "round-view"
 
 
+def test_the_round_is_read_before_triage_though_its_validation_and_review_ran_first(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _committed_round(root, "01-validation.md")
+    _review(root, "02-implementation.md")
+
+    # Nothing runs beside the view now, so it opens in this checkout.
+    unread = _next(root)
+    _record(root, "03-implementation-owner.md")
+    read = _next(root)
+
+    assert unread["step"] == "round-view" and "workspace" not in unread
+    assert (read["step"], read["kind"]) == ("triage", "implementation")
+
+
 def test_a_join_that_does_not_wait_for_validation_triages_without_it(tmp_path: Path) -> None:
     root = _repository(tmp_path, "in implementation")
     _committed_round(root, "01-implementation-owner.md")
@@ -1457,15 +1474,63 @@ def test_a_join_that_does_not_wait_for_validation_triages_without_it(tmp_path: P
 
 # What the files say over the log, and what cannot be classified.
 
-def test_a_status_set_back_by_hand_is_reported(tmp_path: Path) -> None:
+def test_a_status_set_back_by_hand_is_followed(tmp_path: Path) -> None:
     root = _repository(tmp_path, "in design")
     _planned(root)
 
     result = _next(root)
 
-    # The log's route, and the disagreement for the owner.
-    assert result["step"] == "round"
-    assert "status set back by hand" in result["disagreement"]
+    # The files hold the state: the status, not the log's route, says where the
+    # change is, and its phase starts at design.
+    assert result["step"] == "design" and "set back by hand" in result["reason"]
+    assert "disagreement" not in result
+
+
+@pytest.mark.parametrize("status,step", [("ready for planning", "plan"),
+                                         ("in implementation", "round")])
+def test_a_status_set_back_is_followed_to_where_its_phase_starts(
+        tmp_path: Path, status: str, step: str) -> None:
+    root = _repository(tmp_path, status)
+    _planned(root)
+    _round(root, [[2]])
+    _log(root, "closeout", _done(_to("review", "closeout")))
+
+    result = _next(root)
+
+    assert result["step"] == step and "set back by hand" in result["reason"]
+
+
+def test_a_status_set_back_to_implementation_routes_on_once_its_round_is_recorded(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _planned(root)
+    _log(root, "closeout", _done(_to("review", "closeout")))
+
+    followed = _next(root)
+    _round(root, followed["sections"])
+    started = _next(root)
+
+    assert followed["step"] == "round" and "set back by hand" in followed["reason"]
+    assert "no run of it is logged" not in followed["reason"]
+    assert started["step"] == "implement"
+
+
+def test_a_status_set_back_and_then_directed_follows_the_direction(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in design")
+    _planned(root)
+    _direct(root, "review", kind="design")
+
+    assert (_next(root)["step"], _next(root)["kind"]) == ("review", "design")
+
+
+def test_a_status_set_back_past_the_archive_goes_to_the_owner(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in design", archived=True)
+    _planned(root)
+    _log(root, "closeout", _done(_to("review", "closeout")))
+
+    result = _next(root)
+
+    assert result["step"] == "owner" and "the change is archived" in result["reason"]
 
 
 def test_an_open_round_view_waits_for_the_owner_before_anything_else(tmp_path: Path) -> None:
@@ -2040,7 +2105,7 @@ def test_an_archive_cleanup_that_stopped_waits_for_the_owner(tmp_path: Path) -> 
 
 def test_an_external_implementation_review_counts_for_the_round(tmp_path: Path) -> None:
     root = _repository(tmp_path, "in implementation")
-    _committed_round(root, "01-validation.md")
+    _committed_round(root, "01-validation.md", "03-implementation-owner.md")
     _review(root, "02-implementation-external.md")
 
     assert (_next(root)["step"], _next(root)["kind"]) == ("triage", "implementation")
@@ -2474,6 +2539,26 @@ def test_a_failed_fix_validation_before_the_repeat_review_goes_to_the_owner(
     # is not triaged: the guard it failed names the owner.
     assert (result["step"], result["validation"], result["target"]) == (
         "owner", "failed", {"step": "review", "kind": "implementation"})
+
+
+def test_the_owner_directs_a_failed_fix_validations_triage(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _committed_round(root)
+    _first_pass(root, "01-validation.md", "02-implementation-owner.md")
+    _record(root, "04-validation.md", text=_validation(HEAD, "failed"))
+
+    # The validation after the triaged review meets the triage's entry guard.
+    _direct(root, "triage", "triage the fix's failures", kind="implementation")
+    directed = _in_clone(root)
+    # That triage fixes them, naming the review again beside the validation.
+    _triage(root, "03-implementation.md", "04-validation.md", to=_to("round"))
+    _record(root, "05-validation.md", text=_validation(HEAD))
+    advanced = _in_clone(root)
+
+    assert (directed["step"], directed["kind"]) == ("triage", "implementation")
+    # Its exit's guard is checked again: the fix validated, the next round, which
+    # no plan maps here, is the owner's to agree.
+    assert (advanced["step"], advanced["round"]) == ("owner", ["3"])
 
 
 # The clone found by `clone_of` and the workspace's view read through the clone's

@@ -15,14 +15,17 @@ while unmet, and a waivable one MUST take the owner's direction as its override.
 The change's archive MUST be an unwaivable entry guard of the closeout review, its
 triage, and archive cleanup, and its absence one of design, planning, and
 implementation. A triage node's entry guard MUST be that a review of its kind
-awaits triage. Validation's entry guard MUST be unwaivable: that it carries a
+awaits triage, or a validation record numbered after the latest review, which is
+of its kind and not a design review. Validation's entry guard MUST be unwaivable:
+that it carries a
 target, a node of the table; the target's own entry guards MUST be checked on
 validation's exit, not on its entry. Archive
 cleanup's exit MUST be the terminal node `done`, which has no
 exits and no step, and which no direction reaches. A change to the table MUST be
 made as an OpenSpec change.
 The table MUST be renderable as a diagram, and the diagram the `change-workflow`
-architecture shows MUST be checked against that rendering.
+architecture shows MUST be checked against the table's nodes, exits, joins, and
+guards, whatever its layout.
 
 #### Scenario: The graph is drawn
 
@@ -34,14 +37,21 @@ architecture shows MUST be checked against that rendering.
 
 - **WHEN** a change adds an exit to a node and does not update the diagram in the
   `change-workflow` architecture
-- **THEN** the check comparing that diagram with the rendering fails, naming the
-  difference
+- **THEN** the check comparing that diagram with the table fails, naming the exit
+  it does not draw
 
 #### Scenario: The round's triage waits for its join
 
 - **WHEN** an implementation round's validation has finished and its review and the
   owner's reading have not
 - **THEN** the computation names the steps the join still waits for, and no triage
+
+#### Scenario: A round's validation and review ran before the owner read it
+
+- **WHEN** a change worked in the owner's checkout has its round's validation and
+  implementation review, and no owner record of the round
+- **THEN** the computation names the round view, now that no step runs beside it,
+  and triage only once the owner record exists
 
 #### Scenario: A round's validation starts before its review is published
 
@@ -55,6 +65,15 @@ architecture shows MUST be checked against that rendering.
 
 - **WHEN** archive cleanup ends finished, naming `{"step": "done"}`
 - **THEN** the computation names `done`, with the reason `archived`, and no step runs
+
+#### Scenario: The owner directs the triage of a failed fix validation
+
+- **WHEN** an implementation triage committed a fix and named its exit, the fix
+  commit's validation failed, and the owner directs
+  `{"step": "triage", "kind": "implementation"}`
+- **THEN** the log's writer accepts the direction, since the validation awaits
+  triage after the latest review, and that triage, naming the review again beside
+  the validation, routes on through its exit's guards
 
 #### Scenario: A step's exit meets an unmet entry guard
 
@@ -276,7 +295,8 @@ its own or another agent's agreement with a finding as a disposition.
   the owner tells the orchestrating session they waive it, judging the paths named
 - **THEN** the owner's word is recorded in the workflow log as a decision directing
   archive cleanup, the computation names archive cleanup until it has run, and
-  archive cleanup's own check asks the owner and records the waiver in the ledger
+  archive cleanup's own check finds the direction in the log and records the waiver
+  in the ledger, without asking the owner again
 
 #### Scenario: Closeout finds a comment that needs rewriting
 
@@ -497,8 +517,17 @@ routes on a triage file's `## Next`.
 
 #### Scenario: A status was edited by hand
 
-- **WHEN** a change's status disagrees with its workflow log
-- **THEN** the orchestrating session follows the files and records that it did
+- **WHEN** a change's status was set back by hand into an earlier phase than its
+  workflow log's last step, and no direction of the owner's follows that step
+- **THEN** the computation follows the status, naming the node its phase starts at
+  — design, planning, or the round — with that node's unwaivable entry guards
+  checked, until that node's step starts or the owner directs another
+
+#### Scenario: A status is ahead of the log
+
+- **WHEN** a change's status is past the step its workflow log names
+- **THEN** the computation names that step as in progress, its result carrying a
+  `disagreement` naming the missing outcome
 
 #### Scenario: Triage records another round
 
