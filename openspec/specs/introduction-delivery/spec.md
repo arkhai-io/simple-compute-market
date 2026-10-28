@@ -188,7 +188,8 @@ is scheduled.
 #### Scenario: Operator re-delivers after a failed send
 
 - **WHEN** an operator explicitly requests re-delivery of a revealed introduction
-- **THEN** the configured sinks receive the same introduction again
+- **THEN** the same introduction is sent to the configured sinks again, and the action
+  reports each sink's outcome
 
 #### Scenario: Deletion commits while the first reveal is completing
 
@@ -360,7 +361,7 @@ agreement by shape, and the mechanism receives dispatch as an injected callable.
 
 - **WHEN** an operator re-delivers an already-revealed introduction in a newly
   composing domain
-- **THEN** the sinks receive the material read from the durable reveal
+- **THEN** the material read from the durable reveal is sent to the sinks
 - **AND** no contact data absent from that reveal is delivered
 
 ### Requirement: A webhook delivery can be authenticated by its receiver
