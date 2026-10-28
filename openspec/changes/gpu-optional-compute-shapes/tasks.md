@@ -110,7 +110,7 @@ Files: `domains/bare_metal/src/arkhai_bare_metal/{schema.py,shapes.py}`;
 `domains/bare_metal/storefront/tests/{test_claims.py,test_publication_cycle.py,test_fulfillment_service.py}`;
 `e2e-tests/tests/e2e/roles/scenarios/bare_metal/test_bare_metal_publication.py`.
 
-- [ ] 2.1 Make `BareMetalListing.gpu_count` and `gpu_model` optional (default absent), drop
+- [x] 2.1 Make `BareMetalListing.gpu_count` and `gpu_model` optional (default absent), drop
   `gpu_model` from the non-empty loop, and check D1's rule by building `shape` through the
   compute schema in the validator, so a listing naming one GPU field without the other, or
   no hardware at all, is refused by the shape kit (D7, D1). `claimed_attributes` returns
@@ -121,34 +121,92 @@ Files: `domains/bare_metal/src/arkhai_bare_metal/{schema.py,shapes.py}`;
   `{cpu: …, memory: …}`, its `claimed_attributes` is empty, and its JSON dump has no
   `gpu_count` or `gpu_model` key; the `missing` parametrization keeps `region` refused and
   refuses `gpu_count` alone and `gpu_model` alone.
-- [ ] 2.2 Derivation follows the delta (D7). Unit (`test_shapes.py`): `{units: 1,
+  *Done.* The serializer is a wrap `model_serializer` dropping only a `None` GPU field, so
+  both `model_dump()` and `model_dump(mode="json")` omit it, including the negotiation
+  path's dump that does not pass `exclude_none`; other absent optional fields keep
+  serializing as `null` there (D6's recorded gap). `shape` builds its attributes from
+  `claimed_attributes`. Unit, `domains/bare_metal` `make test`: 194 passed — the GPU-less
+  listing (shape, empty claimed attributes, no GPU key in either dump, round trip), a
+  listing with no hardware refused naming the empty shape, and the parametrization naming
+  `region`, `gpu.count`, and `gpu.model`: the shape kit names the family path, not the flat
+  field.
+- [x] 2.2 Derivation follows the delta (D7). Unit (`test_shapes.py`): `{units: 1,
   vcpu_count: 64, ram_gb: 512}` with no attribute derives `{cpu: {count: 64}, memory:
   {gib: 512}}`; `{units: 1}` alone, `gpu_count: 0`, a GPU count without a model, and a model
   without a count stay unresolvable, each naming its reason. Unit (`test_publication.py`,
   `test_storefront_publication.py`): a GPU-less declaration yields a candidate whose payload
   carries no GPU key; a `{units: 1}`-only declaration is held and reported by name.
-- [ ] 2.3 `whole_machine_claim` refuses a context with no `claimed_attributes` key, or one
+  *Done.* Unit, in the same 194: `test_shapes.py` for each case;
+  `test_publication.py` derives a GPU-less listing from a projected resource and dumps no
+  GPU key; `test_storefront_publication.py` classifies a GPU-less machine as a candidate
+  whose `listing_resource` has no GPU key and whose digest is the GPU-less shape's, and
+  holds `{units: 1}` alone and `gpu_count: 0` naming their reasons beside a readable
+  resource. "Reported" here is the held classification's problems; the cycle's report of a
+  never-readable declaration is the existing `test_a_declaration_never_readable_publishes_nothing`.
+- [x] 2.3 `whole_machine_claim` refuses a context with no `claimed_attributes` key, or one
   that is not a mapping, and accepts an empty mapping, returning one `units` and the offering
   mode with no attribute (D7; delta "A bare-metal listing sells one whole unit"). Unit
   (`test_claims.py`): both cases. Application integration
   (`test_fulfillment_service.py`, through the storefront's fake site): a backed GPU-less
   listing's accepted deal reserves its Physical Resource with a claim carrying no attribute,
   and the site admits it.
-- [ ] 2.4 Application integration (`test_publication_cycle.py`): one publication cycle
+  *Done, at a lower level than planned.* Unit, `domains/bare_metal/storefront` `make test`:
+  506 passed. `test_claims.py`: a missing, `None`, or non-mapping record refused; `{}`
+  accepted, yielding one `units` and the mode; and the site ledger's own admission matcher
+  (`dict_resource_satisfies_claim`) admitting that claim for a GPU-less declaration.
+  `test_fulfillment_service.py` is not application integration: it calls
+  `BareMetalFulfillmentService.begin` directly over recording doubles, with no app and no
+  site admission. It shows a record carrying `{}` reserves the Physical Resource with a
+  claim of one `units` and no attribute, which the same matcher admits. The storefront's
+  loader copies `BareMetalListing.claimed_attributes` into that record
+  (`sqlite_client.py`, `load_bare_metal_fulfillment_context`); the property is unit-tested
+  in 2.1, the loader path for a GPU-less listing is not. The bare-metal storefront has no
+  test that reserves against a real site ledger; the lane has none either (2.6).
+- [x] 2.4 Application integration (`test_publication_cycle.py`): one publication cycle
   over a site projecting a GPU-less machine publishes it, and the registry body the cycle
   sends has no GPU key (D7, D11).
-- [ ] 2.5 System: extend `test_bare_metal_publication.py` with a second whole-host
+  *Done; not application integration.* The module runs the cycle's public API against a
+  real storefront database and held projection state, with the site and the registry
+  replaced by doubles, and its own docstring says it is not integration evidence. The new
+  test publishes a GPU-less machine with no hold, sends a registry body with `vcpu_count`,
+  `ram_gb`, and `region` and no GPU key, stores the listing resource with no GPU key, and
+  sends nothing on an unchanged second cycle. In the storefront's 506.
+- [x] 2.5 System: extend `test_bare_metal_publication.py` with a second whole-host
   declaration `{units: 1, vcpu_count: 64, ram_gb: 512}` and no GPU model, in the advertised
   pool; after one site-projection step and one publication cycle, a buyer query
   `vcpu_count>=64` through the registry's filter vocabulary finds it, `gpu_count>=1` does
   not, and its `listing_resource` carries no GPU key (D11).
-- [ ] 2.6 **Verification checkpoint.** Unit 2.1–2.3; application integration 2.3–2.4. Run
+  *Written; runs at validation.* Stage `05e`, after the override is deleted and before the
+  regionless pool, requiring `reinstated` (the advertised pool advertises again only after
+  stage 05). `_whole_host` and `_declare_whole_host` take a capacity and an optional GPU
+  model. `make test-e2e-unit`: 169 passed (it does not run the scenario).
+- [x] 2.6 **Verification checkpoint.** Unit 2.1–2.3; application integration 2.3–2.4. Run
   `make test` in `domains/bare_metal` and `domains/bare_metal/storefront`, `make
   test-e2e-unit`, and `make check-comment-hygiene`.
   End-to-end: `e2e_bare_metal_publication` (2.5) proves the GPU-less machine's publication
   and discovery; `e2e_bare_metal_mock_deal` and `e2e_bare_metal_introduction` prove GPU
   machines are unchanged. The GPU-less claim is proven at application integration (2.3); no
   further scenario is owed.
+  *Done.* Unit 2.1–2.3; 2.3's service test and 2.4's cycle test are below application
+  integration, as their notes say. `domains/bare_metal` 194 passed;
+  `domains/bare_metal/storefront` 506 passed (its provisioning adapter 16 and buyer 57 also
+  pass under `make -C domains test-bare-metal`); `make test-e2e-unit` 169 passed; `make
+  check-comment-hygiene`, `make check-change`, and `make check-packaging` pass (the
+  storefront's `pyproject.toml` changed only a comment on its test-only `arkhai-kit-site`
+  dependency). Root `make test` passed over sections 1–3.
+  End-to-end, confirmed: `e2e_bare_metal_publication` (stage 05e) proves the GPU-less
+  machine's publication and discovery; `e2e_bare_metal_mock_deal`,
+  `e2e_bare_metal_introduction`, and `e2e_bare_metal_unbacked_introduction` run GPU
+  machines through the changed listing model. No scenario reserves a GPU-less machine, so
+  the GPU-less claim's evidence is the unit tests in 2.3, and the claim reaching a real
+  site's admission is unproven above unit level.
+
+  *Handoff.* A bare-metal storefront test that reserves through a real site ledger does not
+  exist; adding one is the way to lift 2.3 to application integration if review asks.
+  `docs/development/DEPLOYMENT_AND_CONFIG.md` ("Definition documents", the bare-metal
+  declaration bullet) still says `gpu_count` and `gpu_model` are required for bare-metal
+  publication; the promotion record names the quickstart's matching paragraph but not that
+  bullet, so closeout (9.9) should rewrite it too.
 
 ## 3. The compute registry's listing schema requires only `region`
 

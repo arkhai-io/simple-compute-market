@@ -17,6 +17,7 @@ from arkhai_bare_metal import (
     trusted_bare_metal_projection,
 )
 from arkhai_bare_metal.fixtures.publication_view import (
+    build_bare_metal_projected_resource,
     build_bare_metal_publication_view,
 )
 
@@ -105,6 +106,23 @@ def test_publication_only_capabilities_are_accepted_but_never_published():
         generation.resources, backing=BACKED, region="us-west"
     )
     assert (listing.gpu_model, listing.ram_gb) == ("H200", 512)
+
+
+def test_a_machine_without_gpus_yields_a_listing_with_no_gpu_key():
+    resource = build_bare_metal_projected_resource(
+        capacity={"units": 1, "vcpu_count": 64, "ram_gb": 512},
+        attributes={"physical_host_id": "physical-host-1"},
+    )
+    generation = _parse(_projection(_pool("pool-1", resource)))
+
+    (listing,) = available_bare_metal_listings(
+        generation.resources, backing=BACKED, region="us-west"
+    )
+
+    assert (listing.vcpu_count, listing.ram_gb) == (64, 512)
+    assert listing.shape == {"cpu": {"count": 64}, "memory": {"gib": 512}}
+    published = listing.model_dump(mode="json")
+    assert "gpu_count" not in published and "gpu_model" not in published
 
 
 def test_a_resource_whose_capacity_is_not_a_mapping_refuses_the_generation():

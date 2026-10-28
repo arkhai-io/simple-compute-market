@@ -55,8 +55,8 @@ dev = [
     # either.
     "arkhai-bare-metal-buyer>=0.6.0",
     "arkhai-core-buyer>=0.6.0",
-    # The site's own claim predicate, which the claim test checks the storefront's
-    # derived claims against. Test-only.
+    # The site's own claim predicate, which the claim and fulfillment-service
+    # tests check the storefront's derived claims against. Test-only.
     "arkhai-kit-site>=0.10.0",
     # Validates documents against the generated Helm values schema.
     "jsonschema>=4.0",

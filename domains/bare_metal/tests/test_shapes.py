@@ -27,9 +27,23 @@ def test_an_integral_number_of_any_numeric_type_is_a_quantity():
     assert shape == {"gpu": {"count": 8, "model": "H200"}}
 
 
+def test_a_machine_without_gpus_states_no_gpu_family():
+    shape = derive_bare_metal_shape(
+        {"units": 1, "vcpu_count": 64, "ram_gb": 512}, {"physical_host_id": "p-1"}
+    )
+
+    assert shape == {"cpu": {"count": 64}, "memory": {"gib": 512}}
+
+
 @pytest.mark.parametrize(
     ("capacity", "attributes", "reason"),
     [
+        # A declaration stating only the machine has no shape to publish.
+        ({"units": 1}, {}, "a shape must name at least one family"),
+        # Zero is not how a machine states it has no GPUs: it omits them.
+        ({"units": 1, "gpu_count": 0, "vcpu_count": 64}, {}, "gpu.count"),
+        ({"units": 1, "vcpu_count": 64}, {"gpu_model": "H200"}, "gpu.count"),
+        ({"units": 1, "gpu_count": 8, "vcpu_count": 64}, {}, "gpu.model"),
         ({"gpu_count": 8}, {"gpu_model": "H200"}, "capacity.units"),
         ({"units": 0, "gpu_count": 8}, {"gpu_model": "H200"}, "capacity.units"),
         ({"units": True, "gpu_count": 8}, {"gpu_model": "H200"}, "capacity.units"),
