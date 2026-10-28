@@ -8,6 +8,8 @@ production ones; the site and the chain are doubled at their clients.
 
 from __future__ import annotations
 
+import json
+import logging
 from dataclasses import replace
 from datetime import datetime, timezone
 
@@ -336,6 +338,104 @@ async def test_passes_spent_waiting_for_the_lease_do_not_count_as_rejections(
     assert len(chain.string_obligation.submitted) == REJECTION_BOUND
     record = await _record(runtime, obligation_ref)
     assert record.mechanism_state[MANUAL_REASON_KEY] == REJECTED
+
+
+# -- servicing cadence and reporting, through the storefront's routes ---------
+
+
+async def test_a_deal_awaiting_its_lease_is_due_on_each_servicing_cycle(
+    tmp_path,
+) -> None:
+    """A deal whose lease is not yet active is rechecked by the next cycle the
+    administrator steps, not backed off, and publishes once the lease is."""
+    chain = ChainClient(StringObligations(uid=ATTESTATION_UID))
+    runtime, app, obligation_ref = await _settled(
+        tmp_path,
+        site=_Site("provisioning", "provisioning", "active"),
+        chain=chain,
+        escrow=EscrowOnChain(),
+    )
+    assert chain.string_obligation.submitted == []
+
+    async with app.router.lifespan_context(app):
+        async with _storefront_client(app, ADMIN_SIGNER, "admin") as admin:
+            await admin.admin_pause_lifecycle_loops()
+            cycles = [
+                await admin.admin_run_lifecycle_cycle("settlement-servicing")
+                for _ in range(2)
+            ]
+
+    assert [cycle["processed"] for cycle in cycles] == [1, 1]
+    assert len(chain.string_obligation.submitted) == 1
+    assert (await _record(runtime, obligation_ref)).fulfillment_ref == ATTESTATION_UID
+
+
+async def test_a_failing_servicing_step_writes_a_claims_stage_event(
+    tmp_path, caplog
+) -> None:
+    chain = ChainClient(StringObligations(raises=RuntimeError("execution reverted")))
+
+    with caplog.at_level(logging.INFO, logger="stage"):
+        _runtime, _app_, obligation_ref = await _settled(
+            tmp_path, site=_Site("active"), chain=chain, escrow=EscrowOnChain()
+        )
+
+    events = [json.loads(r.getMessage()) for r in caplog.records if r.name == "stage"]
+    retries = [
+        e for e in events if e["stage"] == "claims" and e["event"] == "settlement_retry"
+    ]
+    assert [(e["obligation_ref"], e["operation"]) for e in retries] == [
+        (obligation_ref, "fulfill")
+    ]
+
+
+class _FlakySite(_Site):
+    """A site whose next ``failing_reads`` status reads fail, when the test
+    sets them."""
+
+    def __init__(self, *states: str) -> None:
+        super().__init__(*states)
+        self.failing_reads = 0
+
+    async def get_fulfillment_status(self, fulfillment_id, **request):
+        if self.failing_reads:
+            self.failing_reads -= 1
+            raise ConnectionError("site unreachable")
+        return await super().get_fulfillment_status(fulfillment_id, **request)
+
+
+async def _waited(tmp_path, *, failing_reads: int, timeout: float):
+    site = _FlakySite("active")
+    _runtime, app, _obligation_ref = await _settled(
+        tmp_path, site=site, chain=ChainClient(StringObligations(uid=ATTESTATION_UID)),
+        escrow=EscrowOnChain(),
+    )
+    site.failing_reads = failing_reads
+
+    async with app.router.lifespan_context(app):
+        async with _storefront_client(app, ADMIN_SIGNER, "admin") as admin:
+            await admin.admin_pause_lifecycle_loops()
+            waited = await admin.wait_for_settlement(ESCROW_UID, timeout=timeout)
+    return site, waited
+
+
+async def test_the_settle_wait_reports_ready_through_one_failed_status_read(
+    tmp_path,
+) -> None:
+    site, waited = await _waited(tmp_path, failing_reads=1, timeout=5.0)
+
+    assert site.failing_reads == 0
+    assert waited.ready is True
+    assert waited.last_error is None
+
+
+async def test_a_settle_wait_whose_every_read_fails_reports_the_last_error(
+    tmp_path,
+) -> None:
+    _site, waited = await _waited(tmp_path, failing_reads=10**6, timeout=1.5)
+
+    assert waited.ready is False
+    assert "site unreachable" in (waited.last_error or "")
 
 
 # -- evidence resolution ------------------------------------------------------

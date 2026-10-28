@@ -2712,11 +2712,33 @@ Files:
   and `test_obligation_servicing.py`;
 - `domains/apicredits/storefront/tests/unit/test_settlement_fulfillment.py`.
 
-- [ ] 18.1 Both storefronts compose `on_event`, as VM's
+- [x] 18.1 Both storefronts compose `on_event`, as VM's
   `settlement_composition.py` does (D8.1). Unit: each composition hands the
   worker its callback. Assert the object identity at the constructor, per
   TESTING.md, "Composition-boundary convention".
-- [ ] 18.2 Application integration (bare metal, through its typed clients and the
+
+  Each storefront defines `record_servicing_event`, writing the event as a
+  `claims` stage event as VM's callback does, and hands it to the worker it
+  composes: bare metal's `BareMetalStorefrontRuntime` (`runtime.py`) and
+  API credits' `build_api_credit_settlement_composition`.
+  - API credits: unit (new `tests/unit/test_settlement_events.py`), the
+    callback writes a `claims` `settlement_retry` stage event; and, in
+    `tests/integration/test_settlement_events.py`, the composition
+    `build_api_credit_settlement_composition` builds over a real SQLite
+    database services an obligation naming a mechanism no client serves,
+    and its worker writes exactly one `claims` `settlement_retry` event for
+    the failed `status` step.
+  - Bare metal (`test_obligation_servicing.py`): the runtime's composed
+    worker (`runtime.settlement_worker`), servicing an obligation whose
+    ready step raises, writes one `claims` `settlement_retry` stage event
+    naming the obligation, `fulfill`, and the error.
+
+  Both are shown by behaviour through the worker each composition builds,
+  in place of the plan's identity assertion: the callback is wired inside
+  the composition rather than injected, and the kit worker offers no
+  accessor for it, so identity could be read only from its private
+  attribute.
+- [x] 18.2 Application integration (bare metal, through its typed clients and the
   lifecycle `run-cycle` route):
   - a deal whose lease is not yet active is due again on the next
     servicing cycle, with no backoff, and publishes its evidence once the lease
@@ -2733,7 +2755,35 @@ Files:
   routes pass it through, and application integration shows a wait whose
   every read fails answering `ready: false` with it. `arkhai-core-storefront`
   and `arkhai-core-storefront-client` take their one bump over `dev` here.
-- [ ] 18.3 Bump the bare-metal and API-credit storefronts, and run `make lock`.
+
+  Done as amended: `core_storefront`'s `SettleWaitResponse` and the core
+  client's model gain an optional `last_error`; the VM and API-credit wait
+  routes pass the kit's through, and bare metal's own
+  `BareMetalSettleWaitResponse` gains it (its route validates the kit's
+  answer into it). Application integration (`test_alkahest_lifecycle.py`,
+  a deal settled through the storefront's routes by the typed buyer client,
+  then the typed administrator client):
+  - a deal settled while its lease is `provisioning` (its settle's own
+    servicing step already deferred once) is processed by each of two
+    consecutive `settlement-servicing` `run-cycle` steps (1, 1), the second
+    publishing its evidence digest and binding the attestation as its
+    fulfillment: under the error backoff the first step would already have
+    found it backed off (0); that attempts went uncounted is the library
+    tests', not asserted here;
+  - a deal whose evidence publication is rejected writes a `claims`
+    `settlement_retry` stage event during its settle (through the settle
+    route rather than `run-cycle`, the step being the same worker's);
+  - a settle wait with one failed status read at the site reports ready,
+    with no `last_error`, the failing read consumed;
+  - a settle wait whose every read fails reports `ready: false` and a
+    `last_error` naming the failure.
+  The wait polls at the route service's one-second interval, which bare
+  metal's `settlement_admin_routes` gives a test no seam to shorten, so the
+  last two cases take a second or two of real time and the ready case
+  relies on its second read landing within a five-second deadline. The
+  VM and API-credit routes' pass-through of `last_error` is read, not
+  tested.
+- [x] 18.3 Bump the bare-metal and API-credit storefronts, and run `make lock`.
 
   Amended by section 11 (11.5): bare metal's floor on
   `arkhai-kit-settlement-runtime` rises to `0.6.0`, since its deals depend
@@ -2753,6 +2803,37 @@ Files:
   control. They are therefore evidence for the composition, not for the
   awaiting-delivery cadence, which library and application integration own.
   No scenario is owed.
+
+  Over `dev`, each standing at `dev`'s version: `arkhai-bare-metal-storefront`
+  `0.22.0` → `0.23.0`, `arkhai-apicredits-storefront` `0.16.0` → `0.17.0`,
+  `arkhai-core-storefront` `0.16.0` → `0.17.0`, and
+  `arkhai-core-storefront-client` `0.27.0` → `0.28.0`. Exact pins moved:
+  the VM storefront's on the bare-metal storefront, `kit/capacity-publication`'s
+  on core-storefront (no bump for the pin alone, section 11's judgement),
+  and the provisioning service's on the core client. Floors raised: bare
+  metal's on the settlement runtime (`0.6.0`, amended above) and on the core
+  client (`0.28.0`, its tests reading `last_error`); the VM and API-credit
+  storefronts' on core-storefront (`0.17.0`, whose `last_error` their wait
+  routes set) and on the settlement runtime (`0.6.0`, whose wait polls
+  through a failed read and produces it). `make lock` moved the locks.
+
+  `make test` (full, before the fresh-context fixes) passes; after them the
+  bare-metal storefront 507 and the API-credit storefront 243 pass. `make
+  check-packaging` passes; `make check-change` passes its comment-hygiene
+  and other checks but for the closeout citation section 1 notes. No lane
+  was run.
+
+  Handoff, from the fresh-context check: it found the VM and API-credit
+  floors on the runtime unraised (raised), the checks unrecorded (recorded),
+  API credits' identity test reading a private attribute from a "unit" test
+  building the composition root (replaced by a behavioural composition test
+  in `tests/integration`), the cadence note's counterfactual misstated
+  (corrected), the real-time wait polling unstated (stated), and an import
+  out of order (moved). Declined: the three identical callbacks could live
+  once in `kit/storefront`; D8.1 frames the callback as each storefront's
+  composition, as VM's already was, and moving it is an ownership change
+  this section does not make. Left for triage with section 11's judgement:
+  `kit/capacity-publication`'s exact pin moved without a bump.
 
 ## 19. Bare-metal begin reads the scheduled identity, and a delivery conflict answers 409
 

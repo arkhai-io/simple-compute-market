@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from arkhai_apicredits.settlement import CreditsServiceClient
+from core_storefront.stage_log import stage_event
 from market_alkahest import (
     ALKAHEST_CONFIG_KEY,
     ALKAHEST_MECHANISM_ID,
@@ -299,6 +300,13 @@ def require_coherent_release_model(settlement_config: Any = None) -> None:
     configured_release_model(settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY))
 
 
+def record_servicing_event(event: str, fields: dict[str, Any]) -> None:
+    """Record a servicing worker's event as a ``claims`` stage event, as every
+    storefront composing the worker does, so a failing step is on the deal's
+    record."""
+    stage_event("claims", event, **fields)
+
+
 def build_api_credit_settlement_composition(
     *,
     domain: MarketDomainContract,
@@ -372,6 +380,7 @@ def build_api_credit_settlement_composition(
         repository,
         worker_id=f"api-credit-storefront:{storefront_config.AGENT_ID}",
         interval_seconds=storefront_config.settlement_servicing_interval(),
+        on_event=record_servicing_event,
     )
     composition = ApiCreditsSettlementComposition(
         domain=domain,

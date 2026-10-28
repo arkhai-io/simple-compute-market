@@ -275,6 +275,7 @@ class AdminSettleController:
             provisioning_job_id=waited.get("provisioning_job_id"),
             fulfillment_id=waited.get("fulfillment_id"),
             elapsed_ms=waited["elapsed_ms"],
+            last_error=waited.get("last_error"),
         )
 
 

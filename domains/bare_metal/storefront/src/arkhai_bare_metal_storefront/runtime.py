@@ -13,6 +13,7 @@ from typing import Any
 from core_storefront.auth import AuthError
 from core_storefront.identity_authority import IdentityAuthorityError
 from core_storefront.service_peers import ServicePeerTrust, seed_service_peers
+from core_storefront.stage_log import stage_event
 from market_alkahest import (
     ALKAHEST_CONFIG_KEY,
     AlkahestChainProbe,
@@ -116,6 +117,13 @@ def _status_check_healthy(name: str, value: str) -> bool:
     if name == "alkahest":
         return bool(value) and not value.startswith(("unknown:", "error:"))
     return False
+
+
+def record_servicing_event(event: str, fields: dict[str, Any]) -> None:
+    """Record a servicing worker's event as a ``claims`` stage event, as every
+    storefront composing the worker does, so a failing step is on the deal's
+    record."""
+    stage_event("claims", event, **fields)
 
 
 def _utc_now() -> datetime:
@@ -366,6 +374,7 @@ class BareMetalStorefrontRuntime:
                 self.settlement_repository,
                 worker_id=f"bare-metal-storefront:{self.seller_principal.identifier}",
                 interval_seconds=self.settlement_servicing_interval_seconds,
+                on_event=record_servicing_event,
                 on_ready=on_ready,
                 on_terminal=on_terminal,
             ),
