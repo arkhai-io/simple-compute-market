@@ -1160,6 +1160,18 @@ The branch edits the kit's `settlement_config.py` and bare metal's
   `core/buyer/tests/unit/test_introductions.py` feeds the old 503 detail as a
   canned answer; harmless, since it tests the buyer's reporting of any 503.
 
+  Round 1's validation (66 V1, triaged with 65): the pipeline's
+  `e2e_vm_introduction` failed at `test_04`, whose `market settlement contact
+  introduce` ran the bare-metal buyer's contact group and asked for
+  `BARE_METAL_BUYER_CONFIG`; `test_05` was skipped. The cause is inherited from
+  the merge base, not this section: both domain buyers register a root
+  `settlement` group, and entry-point discovery order decides which one the
+  core app keeps. `unbacked-bare-metal-listings` fixes it on `dev` (core
+  refuses a root command two domains register; bare metal's group moves under
+  `market bare-metal settlement`). Section 7's end-to-end evidence,
+  `e2e_vm_introduction`'s `test_05`, is owed by the first validation after
+  `dev` is merged.
+
 ## 8. The VM storefront's senderless fulfillment callbacks are removed
 
 Delivers the removal of `started`, `usage-started`, `release-started`, and
@@ -1332,6 +1344,18 @@ Shared with the branch:
   production change, so the clause is either dropped from the delta or a
   narrow client is designed; that is the delta's author's to settle (recorded
   in the handoff below).
+
+  Settled by round 1's triage (65 F1): the clause is dropped from the delta's
+  scenario, which now ends "signed by the provisioner under the `service`
+  role". The requirement fixes what crosses the wire, not which client
+  library sends it; the dependency on the full client predates this change
+  and a narrower one is outside its scope. The round's fixes (this note,
+  7.5's V1 note, and the delta's scenario) change only the change's
+  documents. Checks: `make test` (every unit and integration suite) passes;
+  `make check-packaging` and `make check-comment-hygiene` pass; `make
+  check-change` passes but for the closeout citation section 1 notes. The
+  fresh-context check of the diff found one ledger line's lens outside the
+  review vocabulary, corrected; nothing else.
 - [x] 8.6 Bump the VM storefront, `arkhai-core-storefront`, and
   `arkhai-core-storefront-client` by a minor version each, since routes and
   public methods are removed. Run `make lock`.
@@ -1371,7 +1395,8 @@ Shared with the branch:
 
   Handoff, from the fresh-context check:
   - For design (or the delta's next edit): the delta scenario's "without the
-    provisioner depending on the full storefront client" (8.5's note).
+    provisioner depending on the full storefront client" (8.5's note;
+    dropped by round 1's triage, 65 F1).
   - For closeout's promotion (27.9): `docs/development/ARCHITECTURE.md`,
     "Site authority", says deal-scoped fulfillment events are point-to-point
     and retain deal context; under D4 one notification, capacity-released, is
