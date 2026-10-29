@@ -539,8 +539,9 @@ Edits required outside this owned directory (parent coordination, not performed 
 
 **Coordinated status:** ready for implementation after the sibling seam edits.
 The published payments partialPeriod revision is ready for foundation 8.1 vendoring;
-mediation publication remains pending. Exact producer revision is recorded only in
-kit/arkhai-payments/schema/SOURCE.md at vendoring. No further full design round is recommended: the central
+the mediation contract is published too, for foundation 12.1 vendoring. Exact producer revisions are
+recorded only in each kit's schema/SOURCE.md at vendoring. The producer's own acknowledgement fixture is a
+locally framed v2 exchange, so this change's lanes must exercise acknowledgements from shipped SCM traffic. No further full design round is recommended: the central
 changes are settled owner decisions and the remaining choices above are explicit.
 Implementation remains section-gated on the named contract/fixture seams, and
 missing publications/vectors still prohibit published or live qualification claims.
