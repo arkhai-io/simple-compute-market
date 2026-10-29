@@ -43,6 +43,17 @@ SCM MUST derive time rate parts through the agreed-price accessor and lifecycle 
 - **WHEN** the adapter derives the rate part using the foundation codec
 - **THEN** payer notice remains zero and partialPeriod is charged, without a second hidden tail
 
+#### Scenario: All stop and end treatments are explicit
+- **WHEN** the shared codec derives rate/setup parts
+- **THEN** every stop-authority entry and each part end carries partialPeriod
+- **AND** the dispute authority's rate stop entry is {account, notice: PT0S, partialPeriod: chosen}, requiring its stop event to supply treatment
+- **AND** mediation does not require returned on seller entries; that is SCM's preset default
+
+#### Scenario: Setup uses its own term
+- **WHEN** the setup once part ends at activation
+- **THEN** its mechanical mediation mapping uses Agreement start through that part end, not the maximum compute term
+- **AND** a zero-length term is wholly unserved before its end and wholly served from it
+
 #### Scenario: Provisioning starts late
 - **GIVEN** a finite maximum term equal to accepted duration_seconds
 - **WHEN** rate start occurs after Agreement start_utc
@@ -53,10 +64,10 @@ SCM MUST derive time rate parts through the agreed-price accessor and lifecycle 
 The hosted adapter MUST translate lifecycle commands into explicit per-part events with stable operation-derived request identities. It MUST require a matching ActivatedDeliveryRef for rate start, reject key reuse with changed content, and expose unknown outcomes for resolution by verified reads before another monetary delta is issued.
 
 #### Scenario: A start response is lost
-- **GIVEN** delivery's durably keyed start_billing intent with verified activation and provisioning-ready evidence
+- **GIVEN** the end service's sole durably keyed start_billing intent with verified activation and provisioning-ready evidence
 - **WHEN** its response is lost
 - **THEN** the adapter reports unknown and exposes the authority event through read
-- **AND** retry uses the same part, bytes and request identity derived from delivery's supplied operation key, not a separately allocated start
+- **AND** retry uses the same part, bytes and request identity derived from the end service's supplied operation key, while delivery retains only a reference, not a separately allocated start
 
 #### Scenario: Delivery authorizes before starting billing
 - **WHEN** delivery requests authorization to attempt billing start
@@ -79,7 +90,18 @@ SCM MUST derive rate stop treatment through the shared lifecycle codec's settles
 #### Scenario: The contract has no partialPeriod field yet
 - **WHEN** an interim spot preset is offered against a contract supporting only charged behavior
 - **THEN** payer and payee entitlements both commit started_period
-- **AND** last_boundary or stop terms, or an authority policy requiring returned, refuse before publication or acceptance
+- **AND** last_boundary or stop terms refuse before publication or acceptance
+
+#### Scenario: Rate earning follows completed periods or stop
+- **WHEN** a rate period begins
+- **THEN** its amount remains reserved until the period ends or the part stops
+- **AND** a stop prices the partial period under its committed or chosen treatment without SCM clawback
+- **AND** afterStop payout timing is unchanged
+
+#### Scenario: A dispute stop selects its treatment
+- **WHEN** a verified stop is issued under the dispute authority's chosen entry
+- **THEN** its event supplies partialPeriod: payee treatment for exceptional_end, payer treatment for buyer_end, or the operator ruling's stated treatment
+- **AND** SCM observes the effect without computing a compensating reverse
 
 #### Scenario: The stop crosses a period boundary
 - **GIVEN** authority start 0, period 60 and amount 100

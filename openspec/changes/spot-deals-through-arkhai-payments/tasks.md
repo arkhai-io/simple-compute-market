@@ -34,7 +34,8 @@ foundation; this design's D1–D7.
 - [ ] 1.4 Obtain or explicitly gate on published signed snapshot/start/mixed-part
       vectors and partial-reversal-before/after-stop traces. Identify missing
       authority conformance evidence without replacing it with a double claim.
-      Freeze partialPeriod/prorated rounding, setup activation-end representation,
+      Verify required partialPeriod on every stop entry and part end, dispute
+      chosen-entry payloads and the confirmed own-term setup mapping. Freeze
       timestamp precision and per-end partialPeriod/late-start semantics with
       the vendored contract. Unexpressible terms fail closed; never hand-edit
       generated models. The authority, not SCM, computes a returned/prorated
@@ -62,7 +63,9 @@ publication configuration/builders and their focused publication suites.
       Verify malformed pairs, calendar periods, setup opt-out and insufficient lead.
 - [ ] 2.2 Derive setup-once then rate deterministically through the accessor and
       codec. Include rate end, afterStop hold, maxHoldExtension and exact per-part
-      authorities/notices. Keep start payee-only; omit payee stop on on-demand.
+      authorities/notices. Require partialPeriod on every stop entry and part end;
+      dispute rate stop is {account, notice: PT0S, partialPeriod: chosen} and its
+      stop event supplies treatment. Keep start payee-only; omit payee stop on on-demand.
       Verify setup end is activation, and absolute capacity bounds are never
       extended after late activation/start. Map end_partial_period to the end's
       partialPeriod: intended preset returned; recommend explicitly disclosed
@@ -102,8 +105,9 @@ Journal persistence itself belongs to convergence.
       explicit per-part commands with operation-derived stable keys. Require
       ActivatedDeliveryRef after verified site activation for start. Delivery
       authorization remains pure; implement the separate start_billing effect using
-      delivery's supplied stable operation key. Derive per-part keys from it;
-      the servicing journal replays that intent, never a second keyed start. Missing,
+      the end service's sole stable operation key. End service journals key and
+      activated evidence before I/O; delivery stores only its reference. Derive
+      per-part keys from that intent, never a second keyed start. Missing,
       malformed or mismatched evidence refuses before effects. Verify lost response
       and identical retry against the in-process contract fake; changed-content
       key reuse is refused locally.
@@ -120,7 +124,10 @@ Journal persistence itself belongs to convergence.
       value on vendored capability at publication and acceptance; interim spot
       uses charged for payer and payee. Qualify boundary/no-start/terms stops,
       superseded and equal-time requests from authority vectors; compute no
-      local end-correction delta or clawback.
+      local end-correction delta or clawback. Periods stay reserved until their
+      end or part stop; afterStop payout is unchanged. Mediation requires no
+      particular seller rule: returned is the SCM preset default, not admission policy.
+      Verify chosen-entry stop payloads follow payer/payee terms or the operator ruling.
 - [ ] 3.5 Keep exceptional_end filing with the dispute adapter for seller
       non-delivery or unentitled past physical failure, without computing ruling
       amounts. A controlling lawful end before disclosure preserves attribution
@@ -233,16 +240,19 @@ hosted-target evidence.
 - [ ] 6.2 Supply evidence metadata at the adapter/command first-use boundary:
       contract revision, target class/mode, hashes and control trace. Readiness
       gates scenario runs, not a claim that the target was prepared here.
-- [ ] 6.3 Confirm convergence owns the full D8 scenario table, its lane entry
-      points and execution; activation owns hosted four-path qualification.
+- [ ] 6.3 Reference convergence's sole consolidated rate qualification matrix
+      (its design's Scenarios and evidence); do not reproduce it here. Retain
+      spot's prepared fixtures and typed entry points for its executor. Activation
+      owns hosted qualification.
       Use wall-time lanes, short advertised windows and the tooling-owned typed
       due-work barriers/client; report per-authority progress, pending effects and
       blocked dependencies. No lane-wide clock advancement or fabricated completion;
       injected clocks are confined to isolated tooling state-machine tests.
       Activation must list producer snapshot, start and reversal vectors among
       blockers to published qualification; double traces do not satisfy them.
-      Transfer maximum-term, on-demand refusal/self-filing and rotation-overlap
-      rows explicitly, requiring proven physical release/access closure rather
+      Check that the matrix consumes maximum-term, on-demand refusal/self-filing
+      and rotation-overlap preparation; report missing coverage to convergence
+      rather than maintain another matrix. Require physical release/access closure rather
       than a lease_ended intent report. Promote no unrun consumer requirement here.
 - [ ] 6.4 Check the changed imports, comments and public artifacts before code
       review. Move touched local imports to module level where safe, retaining

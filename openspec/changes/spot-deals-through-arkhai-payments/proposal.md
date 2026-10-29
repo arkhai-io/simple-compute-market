@@ -25,7 +25,9 @@ continuation is a separate dependent change.
 - Extend the hosted adapter's command translation, reads and watch source with
   per-part start, pending/final stop, funding and maximum-term observations.
   Expose immutable operation descriptors for caller-owned journals. Started-period
-  treatment is a per-stopper partialPeriod payment term, not a storefront refund.
+  treatment is a required per-stopper partialPeriod payment term, not a storefront
+  refund. Each part end also requires it. The dispute stop entry is chosen and its
+  stop carries treatment; periods are earned at period end or part stop, not start.
   Term end also carries partialPeriod: compute presets use returned. Fail closed
   on unexpressible terms; interim spot commits charged on both sides. Recommend
   explicitly disclosed charged term ends for interim spot/on-demand rate options.
@@ -35,10 +37,11 @@ continuation is a separate dependent change.
   authority, which hosts the pending stop. Never schedule a payment stop locally.
 - Supply setup/rate preset helpers to the terms change's publication adapters.
   Presets are combinations of parts and terms, not runtime classes. Setup ends
-  at activation and its self-penalty returns all for seller non-delivery, none
-  once delivered. A lawful end before disclosure does not itself trigger self-filing.
+  at activation and mediation mechanically maps its unserved share over that
+  part's own term, not the maximum compute term. A lawful end before disclosure does not itself trigger self-filing.
 - Keep delivery authorization pure. Translate the separate post-activation
-  start_billing effect using delivery's stable operation key, not a second start key.
+  start_billing effect using the end service's sole journaled operation key;
+  delivery keeps a reference, not a second start intent.
 - Re-drive the canonical rate buyer-end flow: stop then hint, continue delivery
   during priced notice, and end through authority watch. Keep end_delivery for
   explicit immediate surrender and unreachable-payment-authority buyer_end(at).
