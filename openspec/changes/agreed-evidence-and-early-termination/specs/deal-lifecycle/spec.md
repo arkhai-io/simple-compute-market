@@ -92,6 +92,15 @@ The storefront MUST act on a buyer-authenticated `end_delivery {at}` without a r
 - **WHEN** the buyer repeats an acknowledged `end_delivery` while the site is tearing down
 - **THEN** the response finds the same recorded end and reports current progress rather than released capacity
 
+
+### Requirement: The end-delivery acknowledgement is signed by the Agreement's seller
+
+The storefront MUST sign its response to `end_delivery` with the version 2 response signature under the Agreement's `seller` principal, binding the request identity, status, timestamp and body, so that the buyer's signed request and that response verify against the Agreement alone.
+
+#### Scenario: A dispute authority verifies an acknowledgement
+
+- **WHEN** a dispute authority receives a `buyer_end` case carrying the buyer's `end_delivery` request and the storefront's response
+- **THEN** it verifies both signatures against the Agreement's `buyer` and `seller` principals, with no other key source
 ### Requirement: Adapters translate deal commands into per-part events
 
 A mechanism adapter MUST translate each deal-level command into the events of the parts it affects, and MUST send the authority only per-part events. A part MUST be offered only the events its shape supports; a `once` part has no stop event.
