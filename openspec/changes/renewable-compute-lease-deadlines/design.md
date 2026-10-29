@@ -321,7 +321,8 @@ receipt evidence only; the buyer half owns payment-stop retry while billing cont
 until it lands, with optional buyer_end human triage. Restitution stop entries,
 notice waiver/early release and multiple-stop-entry gates were removed; seller stops
 are entitlements only, and a spot seller's emergency exit is a filing. The focused
-cross-change re-check leaves implementation ready subject to the recorded section gates.
+cross-change re-check settled the design; the campaign index's row is the authoritative
+status, `in design` until this change's own design review has run.
 
 ## Open questions
 

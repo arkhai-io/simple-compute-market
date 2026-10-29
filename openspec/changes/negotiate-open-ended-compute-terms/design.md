@@ -322,8 +322,9 @@ terms-owned default buyer policy, all interim charged term ends refused by defau
 terms-to-materialization/startup closeout cycle. The final owner decision makes the seller's
 exceptional_end a dispute filing, mechanically ruled only when at least the standard
 self-penalty, and keeps buyer_end a buyer-filed case ruled by a person.
-The focused cross-change re-check leaves this change ready for implementation,
-subject to the recorded dependency and section-level gates.
+The focused cross-change re-check settled the design; the campaign index's row is
+the authoritative status (`in design` until this change's own design review has
+run and its triage advances it), and this section does not restate it.
 
 ## Design validation
 

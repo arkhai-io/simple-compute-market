@@ -595,7 +595,7 @@ Design, reconciled onto the lifecycle foundation on 2026-10-29 from the earlier
 `publish-and-preempt-spot-compute` designs, which this change absorbs. Two review
 rounds shaped it: the first fixed the whole-second start rule, the activated
 evidence envelope's contents and the caller-owned journal comparison; the second
-made the setup part conditional on the rate `start`, removed the seller
+removed the seller
 restitution entries and the cooperative storefront payment stop, kept `buyer_end`
 as a person-ruled case and `end_delivery` as receipt-only evidence, and deferred a
 compound payment termination until hosted bonds exist. The option shape,

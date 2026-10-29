@@ -533,9 +533,11 @@ Edits required outside this owned directory (parent coordination, not performed 
 | Activation | Reference the class rule conditionally, include mediation publication when Agreement terms name it, and identify exactly which consumer declaration/artifact is retired, never the tool's proposed selector. |
 | Campaign index / roadmap | Parent updates status/dependencies to the final owner decision (mechanical seller self-penalty only, triaged buyer_end); these files remain outside this worker's authority. |
 
-**Coordinated status:** ready for implementation after the sibling seam edits.
-The published payments partialPeriod revision is ready for foundation 8.1 vendoring;
-the mediation contract is published too, for foundation 12.1 vendoring. Exact producer revisions are
+**Coordinated status:** the campaign index's row is the authoritative status, `in
+design` until this change's own design review has run. The published payments
+partialPeriod revision is ready for foundation 8.1 vendoring; whether the mediation
+contract is published is the foundation's open question, and until it is confirmed the
+mediation double is proposed-only. Exact producer revisions are
 recorded only in each kit's schema/SOURCE.md at vendoring. The producer's own acknowledgement fixture is a
 locally framed v2 exchange, so this change's lanes must exercise acknowledgements from shipped SCM traffic. No further full design round is recommended: the central
 changes are settled owner decisions and the remaining choices above are explicit.
