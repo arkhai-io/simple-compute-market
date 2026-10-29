@@ -2142,14 +2142,38 @@ test code only, before the live bare-metal lane runs. Files:
 - `e2e-tests/tests/e2e/roles/README.md`, whose paragraph on the scenario's inputs gains
   the pinned known-hosts file
 
-- [ ] 11.1 The scenario runs `market bare-metal result`, `access`, and `teardown`, each
+- [x] 11.1 The scenario runs `market bare-metal result`, `access`, and `teardown`, each
       with `--run-id <id>`, the id `buy` printed, and reads each command's JSON
       output, which needs no flag. No `--from`, no `--json`, and no `teardown request`
       or `teardown status` remain. Each argument list is built by one helper function
       per command, so the unit tests read exactly what the scenario runs. The run-id
       resolver recognizes `--run-id <id>`, `--run-id=<id>`, and `--from=<id>`, beside
       the forms it reads today.
-- [ ] 11.2 Teardown repeats `teardown --run-id` and reads its `state`:
+
+      Done, as test code:
+      - **The helper.** `e2e-tests/tests/e2e/roles/helpers/bare_metal_access.py`
+        holds `recovery_command(command, run_id)`, which builds `("bare-metal",
+        <command>, "--run-id", <id>)` for `result`, `access`, and `teardown` alone,
+        and the teardown wait and SSH helpers below. The scenario reads each
+        command's JSON through its existing `_json_result`.
+      - **The run.** The scenario takes the run from `buy`'s own run log
+        (`MarketRun.run_id`) and asserts that `buy` printed the same `run_id`.
+      - **The resolver.** `run_id_from_args` in `buyer_cli.py`, which
+        `BuyerCli._resolve_run_id_from_args` now calls, reads `--from`, `--run`,
+        `--run-id`, and `-r` followed by a value, and `--from=`, `--run=`, and
+        `--run-id=` with one. An option with no value binds nothing.
+      - **Found on the way: the purchase's events.** The scenario expected `buy`'s
+        log to hold `discover`, `negotiation_completed`, and `settlement_submitted`
+        or `settlement_started`, which `buy` never writes; those come from other
+        commands. A real `buy`, run through the bare-metal buyer's run-log test,
+        records `run_started`, `agreement_accepted`, `payment_approved`, and
+        `run_ended`, ending `agreed`. The scenario now checks that sequence and
+        status through `assert_purchase_recorded`, and the buyer's test pins the
+        same sequence on the producer's side (11.4).
+      - **The skip message** for `BARE_METAL.BUY_ARGS` names what `buy` takes: the
+        listing, `--option-id`, `--ssh-public-key`, and `--duration-seconds`. It
+        named output flags `buy` has never had.
+- [x] 11.2 Teardown repeats `teardown --run-id` and reads its `state`:
       - `released` ends the wait in success;
       - `teardown_failed` fails at once, naming the state and its `failure_reason`;
       - any other state continues, at `POLL_INTERVAL_SECONDS`, until
@@ -2158,7 +2182,14 @@ test code only, before the live bare-metal lane runs. Files:
       The command's own errors fail the scenario as they do today. The
       `TERMINAL_TEARDOWN_STATUS` setting is removed. The wait is one function taking
       the command runner and a clock, so its unit test needs no sleep.
-- [ ] 11.3 Every access attempt is a fresh SSH process:
+
+      Done: `wait_for_release(teardown, *, timeout_seconds, poll_interval_seconds,
+      clock, sleep)`. Its first call is the request and the rest observe it, since
+      the command is one idempotent route (`fulfillment_service.teardown`, which
+      ends the lease once and otherwise answers `status`). The scenario passes it
+      `recover("teardown")` and the two existing settings; no
+      `TERMINAL_TEARDOWN_STATUS` remains, and nothing in `settings.toml` named it.
+- [x] 11.3 Every access attempt is a fresh SSH process:
       - `-F none`, `ControlMaster=no`, and `ControlPath=none`;
       - `BatchMode=yes`, `IdentitiesOnly=yes`, `IdentityAgent=none`,
         `PreferredAuthentications=publickey`, `PasswordAuthentication=no`, and
@@ -2170,7 +2201,16 @@ test code only, before the live bare-metal lane runs. Files:
       One classifier reads each attempt: success is exit 0 with the expected output;
       revoked is exit 255 with "Permission denied" for the public key; anything else
       is an error, and the scenario fails rather than counting it as revocation.
-- [ ] 11.4 Unit tests, in `e2e-tests/tests/unit/`:
+
+      Done: `ssh_command` and `classify_ssh`, with every option above and also
+      `ConnectTimeout=10`, `GlobalKnownHostsFile=/dev/null`, so no system-wide
+      known host is trusted, and `UpdateHostKeys=no`, so an attempt never rewrites
+      the pin. The local OpenSSH 8.9 accepted every option in a dry `ssh -G`,
+      which connects to nothing. `StrictHostKeyChecking=accept-new` is gone. The
+      new `bare_metal_known_hosts` fixture skips without the input; the scenario
+      no longer writes a known-hosts file of its own. The first attempt must be
+      accepted, and the one after teardown refused.
+- [x] 11.4 Unit tests, in `e2e-tests/tests/unit/`:
       - each command's argument list parses under the installed bare-metal buyer's
         own Typer command, resolved to its subcommand and parsed without running it,
         and the earlier `--from`, `--json`, and `teardown request` forms are refused
@@ -2186,7 +2226,45 @@ test code only, before the live bare-metal lane runs. Files:
 
       Their level is unit: the scenario's own helpers and the installed command's
       parser, with no stack, network, or purchase.
-- [ ] 11.5 Verification:
+
+      Done, in a new `tests/unit/test_bare_metal_deal_commands.py`, 35 cases:
+      - **The parser.** The installed `market.buyer_domains` entry point
+        `bare-metal` is loaded, registered on a fresh Typer root as the `market`
+        command registers it, and each argument list is parsed down to its leaf
+        command with `make_context`, running nothing. Each recovery command parses
+        with its `run_id`. The scenario's earlier forms — `--from` with `--json`,
+        `teardown request`, `teardown status`, and `--json` alone — are each
+        refused by the same parser, so a regression fails here.
+      - **The resolver**, seven cases, and the run binding: a `MarketRun` built
+        over a temporary run directory takes `buy`'s one new log, and a recovery
+        bound by `--run-id` keeps that run though another log appears beside it.
+      - **The teardown wait**, over scripted answers and a fake clock:
+        `terminating` through `released` in four calls, three two-second waits;
+        `teardown_failed` failing on its second call, naming the reason; and a
+        bound of six seconds failing with the last state.
+      - **SSH.** The argument list carries every option and no `accept-new`, and an
+        access view without its route is refused. Exit 0 with the probe output is
+        accepted, without it is an error. Exit 255 with "Permission denied
+        (publickey)" is refused; a refused connection, a timeout, no route, an
+        unknown or changed host key, and an unresolved name are each an error.
+      - **The purchase's events.** `BUY_EVENTS` and `assert_purchase_recorded`
+        accept the sequence a real `buy` writes, and refuse one with no approval,
+        one ending `exited`, another command's events, and one out of order.
+      - **The producer's side (test only, beyond the plan's file list).** The
+        bare-metal buyer's `test_run_log_recovery.py` now asserts the events its
+        real `buy` recorded are exactly that sequence, ending `agreed`. Its
+        command, persistence, and fakes are unchanged (Section 6).
+
+      **Red.** `HEAD`'s resolver body, run on the new cases, returned no run for
+      `--run-id <id>`, `--run-id=<id>`, and `--from=<id>`; `--from <id>` still
+      resolved. The refused-form cases are the scenario's own earlier argument
+      lists, which the installed parser rejects. The old event expectations are
+      the "another command's events" case. The new helper did not exist before,
+      so its own cases have no behavioural red.
+
+      Fixtures are a documentation address, a synthetic tenant, a zeroed run id,
+      and placeholder key paths, marked as fixture values only.
+- [x] 11.5 Verification:
       - `make -C e2e-tests test-unit` (unit);
       - `make check-packaging`.
 
@@ -2195,6 +2273,26 @@ test code only, before the live bare-metal lane runs. Files:
       live bare-metal lane's scripted path (`design.md`, "Live qualification"). No
       package version changes: `e2e-tests` is a tooling project. Owed by
       validation: none.
+
+      Done:
+      - `make -C e2e-tests test-unit`: exit 0, 208 passed (unit), 35 of them new.
+      - `make -C domains/bare_metal/buyer test`: exit 0, 17 passed, the run-log
+        case among them (CLI component integration, as Section 6 classified it).
+      - The scenario module compiles and collects one test; it was not run.
+      - `make check-packaging`: exit 0, the architecture rules included.
+        `make check-change`, `make check-tasks`, and `make check-comment-hygiene`:
+        passed.
+      - **No production file changed**, so no version, floor, or lock moved.
+
+      **Handoff.**
+      - The section's fresh-context compliance check was not run: this phase runs
+        no subagent or reviewer, and the round's one independent review covers it.
+      - **Not proven here:** that a real storefront answers each lifecycle state
+        as the wait expects, that a real host refuses a revoked key with that
+        message, and the run against a real host. Those are the live bare-metal
+        lane's, on Round 2's validated candidate.
+      - Sections 12 to 14, the VM recipe, are next, in a fresh session. Round 2
+        freezes after Section 14.
 
 ## 12. An x86-64 guest is created from a pinned, verified image
 

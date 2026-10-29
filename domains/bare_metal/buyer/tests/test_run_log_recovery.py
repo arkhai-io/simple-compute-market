@@ -400,6 +400,15 @@ def test_a_deal_bought_is_recovered_from_the_run_log_buy_wrote(
         # records no refreshed trust.
         events = read_run(run_id, signer=_BUYER, profile_id=_PROFILE_ID)
         assert "publisher_trust_refreshed" not in {event["event"] for event in events}
+        # What a completed purchase records, in order, and how its run ends: the
+        # real-host bare-metal deal reads exactly these from the log buy wrote.
+        assert [event["event"] for event in events] == [
+            "run_started",
+            "agreement_accepted",
+            "payment_approved",
+            "run_ended",
+        ]
+        assert events[-1]["status"] == "agreed"
 
         accessed = CliRunner().invoke(cli.bare_metal_app, [
             "access", "--run-id", run_id, "--config", str(config),
