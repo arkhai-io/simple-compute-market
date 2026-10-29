@@ -423,6 +423,23 @@ cooperative payment stop. The buyer's `buyer_end(at)` case and its handling are 
 Both-authorities-down recovery keeps the journal and retry path. The terms change owns the display of a normal stop against
 an immediate surrender, and of billing that continues while a stop is pending.
 
+**The buyer's watchdog.** The honest-crash exposure — the resource lost while the
+seller's storefront is down, the buyer charged until its own stop lands (foundation
+D12) — is bounded from the buyer's side by this change's watchdog in
+`kit/deal-lifecycle-buyer`: once delivery is `available`, the buyer half probes the
+disclosed access on a buyer-configured interval and, when the resource stops
+answering for a configured number of consecutive probes, sends the buyer's ordinary
+entitled stop and `hint` through the flow above, journaling the probe evidence it
+acted on. It sends nothing the buyer could not send by hand, asks nothing new of the
+authority, and turns "until the buyer notices" into one probe interval without seller
+cooperation. What "stops answering" means is the access the storefront disclosed —
+the VM's or bare-metal host's reachability on the disclosed address and credential
+kind — not the buyer's workload; a probe failure is the buyer's observation (foundation
+D9), kept with its instants, and the stop it triggers is reversible by nothing, so the
+default interval and threshold are conservative and the watchdog is opt-in per deal.
+The display names it as the buyer's lever and states that billing runs until the
+stop lands.
+
 ### D7. Servicing declarations and identity rotation
 
 The terms change owns the neutral servicing declaration, the publication and
