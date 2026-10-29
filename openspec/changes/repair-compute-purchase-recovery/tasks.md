@@ -3207,6 +3207,8 @@ pointer from each note they correct.
         Ansible's own splitter, now finds one failure, `vm-check.yml`'s "Get total
         GPU count", which already failed at `99e55949`, is outside this change's
         files and the playbook's imports, and is left as it is.
+        Correction (14.14): it is fixed and imported too, since the operator's
+        host-capacity read runs it.
       - **A structural guard** (unit), beside the audit playbook's, in
         `tests/test_ansible_structure.py`: the playbook refuses first, imports each
         of the six files through `import_role` and nothing dynamically, each named
@@ -3300,6 +3302,41 @@ pointer from each note they correct.
       changed mock fields, which no scenario asserts on. No scenario runs a
       playbook. Owed by validation: the round's full `make test`, the pipeline,
       Helm, and the image inspection in 14.12, on the new candidate.
+- [x] 14.14 S2: `vm-check.yml`'s "Get total GPU count", the task file a host
+      capacity read runs (`GET /api/v1/hosts/{host}/capacity` submits a
+      `check` job), loads, and the parse-only playbook imports it.
+
+      The supervising session accepted, under the owner's delegated judgement, the
+      defect 14.8 found and left: the task's free-form `shell: |` carried "card's"
+      in a bash comment, so Ansible's argument splitter refused the whole task
+      file as it loaded, and every capacity read on a real host would fail before
+      any task ran. It predates this change, as of `99e55949`, and is fixed here
+      because a live VM host's preflight reads its capacity through that route.
+
+      Done:
+      - the comment is reworded with no apostrophe; no executable line, count
+        rule, or API changes;
+      - `vm-management-task-files.yaml` imports `vm-check` through `import_role`
+        after the other six, behind the same refusal, and its header names a
+        capacity check among the runs it covers;
+      - the structural guard of 14.8 lists `vm-check` among the imported files.
+
+      Evidence:
+      - `make -C domains/vms/provisioning/iac validate-playbooks` with ansible-core
+        2.17.14 and 2.19.14 first on `PATH`: on a scratch copy of the tree with the
+        new playbook and `84ac2c117`'s `vm-check.yml`, exit 2 on each, at "Get total
+        GPU count" ("failed at splitting arguments"); on the repository, exit 0 on
+        each, every playbook parsed;
+      - Ansible's own splitter over every free-form `shell` and `command` string of
+        every role in both IaC trees: no failure remains;
+      - `make -C domains/vms/provisioning/iac test`: 127 passed and 2 subtests
+        passed (unit), the script's behaviour test in `test_passthrough_audit.py`
+        among them;
+      - `make check-packaging` and `make check-change`: passed. The role ships in
+        no wheel, so no version, floor, or lock moved.
+
+      Owed by validation: as 14.13, on the candidate this commit makes. Whether
+      the count is right on a host stays the live VM lane's evidence.
 
 ## 15. Closeout
 
@@ -3383,9 +3420,9 @@ change to implementation.
       - `docs/development/TESTING.md`, beside "Chart Render Tests", and
         `domains/vms/provisioning/iac/README.md` "Validation", whose list of syntax
         checks it extends: `make validate-playbooks` parses the `vm-management`
-        role's task files through the parse-only `vm-management-task-files.yaml`,
-        since a syntax check does not follow `include_tasks`; it renders no Jinja
-        and runs nothing (14.8).
+        role's task files, a capacity check's included, through the parse-only
+        `vm-management-task-files.yaml`, since a syntax check does not follow
+        `include_tasks`; it renders no Jinja and runs nothing (14.8, 14.14).
       - `docs/development/DEPLOYMENT_AND_CONFIG.md` "Definition documents", the
         host-inventory paragraph: `public_port=`; every `ssh` host connection,
         through the API or an inventory, at version 2; and a host stored at version

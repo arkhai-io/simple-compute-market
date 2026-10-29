@@ -4,11 +4,12 @@
 #
 # The vm-management role reaches each of its task files through include_tasks,
 # which `ansible-playbook --syntax-check` does not follow, so checking
-# vm-operations.yaml leaves the files a create, a remove, and an undefine run
-# unparsed. This play imports those files statically instead: a static import is
-# parsed when the playbook is, so the syntax check reads every task, keyword, and
-# block in them. It imports through import_role, so each file is parsed as part of
-# the role, with the role's defaults, vars, and files, as it is when the role runs.
+# vm-operations.yaml leaves the files a create, a remove, an undefine, and a
+# capacity check run unparsed. This play imports those files statically instead:
+# a static import is parsed when the playbook is, so the syntax check reads every
+# task, keyword, and block in them. It imports through import_role, so each file
+# is parsed as part of the role, with the role's defaults, vars, and files, as it
+# is when the role runs.
 #
 # Parsing is where some errors only show: Ansible splits a free-form `shell: |`
 # string as module arguments, so one unbalanced quote in it, an apostrophe in a
@@ -60,3 +61,8 @@
       import_role:
         name: ../../roles/vm-management
         tasks_from: vm-undefine
+
+    - name: Parse the capacity check tasks
+      import_role:
+        name: ../../roles/vm-management
+        tasks_from: vm-check

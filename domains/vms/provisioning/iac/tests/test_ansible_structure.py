@@ -158,8 +158,9 @@ class TestPlaybookStructure(unittest.TestCase):
         self.assertFalse(any("include_tasks" in task for task in tasks))
 
     def test_vm_management_task_files_are_imported_for_the_syntax_check(self) -> None:
-        """So that --syntax-check parses the task files a create, a remove, and an
-        undefine run, which the role reaches only through include_tasks.
+        """So that --syntax-check parses the task files a create, a remove, an
+        undefine, and a capacity check run, which the role reaches only through
+        include_tasks.
 
         Each is imported statically and in the role's context, the play refuses to
         run before any import, and `make validate-playbooks` checks it.
@@ -180,7 +181,7 @@ class TestPlaybookStructure(unittest.TestCase):
             imported.append(role["tasks_from"])
         self.assertEqual(sorted(imported), sorted([
             "prerequisites", "vm-create", "gpu-virt-install-retry",
-            "gpu-virt-install-multi-retry", "vm-remove", "vm-undefine",
+            "gpu-virt-install-multi-retry", "vm-remove", "vm-undefine", "vm-check",
         ]))
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
         self.assertIn(f"{path.relative_to(ROOT)} --syntax-check", makefile)
