@@ -1,85 +1,75 @@
 ## Why
 
-The per-period compute products are built in full and switched off. Their billing
-guarantee — *charges after a deal's effective end are reversed before they are
-collected* — rests on a billing horizon the payee advances
-([`settle-ongoing-compute-through-arkhai-payments`](../settle-ongoing-compute-through-arkhai-payments/)
-D5), which the published `arkhai.payments.v1` contract lacks; until the service ships
-it, no production composition declares per-period servicing, so no per-period option
-is published, accepted, or materialized anywhere, and every per-period scenario in the
-lanes runs against the double's proposed contract and is recorded as qualification
-against a proposed contract, never as live evidence.
-
-This is the change that turns the product on, the last of the roadmap goal that sells
-compute by the period until either party stops
-([`ROADMAP.md`, Goal 8](../../../docs/development/ROADMAP.md#goal-8--sell-compute-by-the-period-until-either-party-stops)).
-It is tracked now so the goal's external blocker has a row, and it cannot begin until
-the payments service publishes the horizon.
+The per-period compute product may be qualified against in-lane doubles before
+production can use its required payment semantics. Its external gate is the
+**hosted deployment of the payments contract revision adding per-part authorities
+and hold extensions**, including afterStop holds and partial reversals after stop.
+A published schema alone is not deployment evidence. No billing horizon, vouch,
+minimum spend or backdated payee stop is requested or awaited.
 
 ## What Changes
 
-- Vendor the service's contract revision carrying the horizon — schema and vectors
-  together, through `kit/arkhai-payments/schema/SOURCE.md` as every revision is — and
-  re-verify the in-lane double against the published vectors before anything else:
-  the double's proposed extension was an approximation, and the first task is to find
-  where it was wrong.
-- Adjust the kit's `vouch`, the lapse semantics, and the refusal table to the
-  contract as published; adjust the `refund` kind to whatever post-stop correction the
-  revision carries, or leave it `unsupported` if none.
-- Declare per-period servicing against the `published` contract in both compute
-  compositions' production profiles, retiring the lane-only `proposed` declaration
-  if the revision makes it redundant.
-- Run every per-period scenario in both lanes as live evidence, and the payment
-  scenarios against the service's own test deployment where one is configured; the
-  closeout records them as live evidence, the evidence class the goal's completion
-  criterion names.
-- Update the roadmap's Goal 8 and the index: the goal is complete when this change
-  closes out.
+- Verify the revision and vectors through `kit/arkhai-payments/schema/SOURCE.md`,
+  reusing the foundation's vendoring if already current; do not fork a contract.
+- Requalify the in-lane double and rate-part adapters against the published
+  revision, then verify the intended hosted target actually implements it.
+- Enable the published-contract servicing declaration in both compute production
+  compositions only after the deployment and consumer checks pass. Publication,
+  acceptance and materialization remain fail-closed before this gate.
+- Run the full rate-product scenario matrix in both double-backed lanes and the
+  payment/dispute flows against the intended hosted test deployment with its
+  agreed dispute authority. Keep qualification and live evidence separate.
+- Record activation/rollback operations and update Goal 8 and the campaign index
+  at closeout. No existing deal is silently reinterpreted or moved to a new authority.
 
 ## Capabilities
 
 ### Modified Capabilities
 
-Expected: `settlement-servicing`, `settlement-configuration`, `test-compatibility`.
-`.openspec.yaml` sets `skip_specs` until design adds the deltas.
+- `settlement-configuration`: deployment-qualified production declaration.
+- `test-compatibility`: hosted-deployment evidence distinct from double qualification.
 
 ### New Capabilities
 
-None expected.
+None.
 
-## Non-Goals
+## Dependencies and scope
 
-- Any product change: the terms, the continuation, the delivery path, and preemption
-  are their own changes', built and closed out before this one begins.
-- Capabilities the goal records as welcome rather than required — the effective-time
-  stop, the post-stop refund, the prorated final period, periodic collection — which
-  are taken up where the revision provides them and otherwise stay requests.
+Internal readiness gates: `agreed-evidence-and-early-termination` (per-part lifecycle,
+holds and mediation), `spot-deals-through-arkhai-payments` (rate mechanics, presets,
+publication and notice), `converge-ongoing-compute-leases` (servicing), and
+`discover-open-ended-compute-listings` (discovery). The payment and mediation double
+is supplied by `add-arkhai-payments-lane-double`; unified delivery is a transitive
+servicing dependency. No dependency remains on the superseded settle or publish/
+preempt changes.
 
-## Dependencies and Related Changes
-
-- Depends on `discover-open-ended-compute-listings` (a product anyone can find),
-  `converge-ongoing-compute-leases` (the continuation), and
-  `publish-and-preempt-spot-compute` (preemption).
-- Blocked in design on the payments service publishing the billing horizon; the index
-  row says so, and `settle-ongoing-compute-through-arkhai-payments`' design states the
-  requirement.
+The only additional external capability gate is the hosted deployment of that
+payments revision. Schema/vector verification, credentials, target readiness and
+live execution are the means to verify/use the gate, not new payment primitives.
+This change does not redesign product terms, servicing, adjudication or site policy.
+Any contract divergence requiring a product decision blocks activation and returns
+to the owning change rather than weakening the declared guarantees.
 
 ## Impact
 
-`kit/arkhai-payments`' vendored schema and vectors, the double, both compute
-compositions' production profiles, the lane reports, `ROADMAP.md`, and the index.
+The existing vendored schema/vectors and SOURCE provenance, double conformance,
+both compute compositions' production profiles and generated configuration,
+lane/hosted evidence, and permanent rollout documentation. This is a design-stage
+change; it does not turn on any current deployment.
 
 ## Permanent documentation impact
 
-- [x] `docs/development/ARCHITECTURE.md` — "Settlement servicing", the product on
-- [x] Existing subsystem specification: `settlement-servicing`,
-  `settlement-configuration`, `test-compatibility`
+- [x] `docs/development/ARCHITECTURE.md` — production servicing and authority boundary
+- [x] Existing subsystem specification: `settlement-configuration`, `test-compatibility`
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
 ### Knowledge to promote
 
-- Per-period servicing is declared against the published contract; what the horizon
-  guarantees — `settlement-servicing` spec and architecture companion.
-- The scenario diagrams `converge-ongoing-compute-leases` drew — promoted to
-  `docs/development/diagrams/`.
+The hosted-revision gate and coordinated declaration/rollback go to
+settlement-configuration's spec and architecture companion and
+`docs/development/DEPLOYMENT_AND_CONFIG.md`. Evidence provenance goes to
+test-compatibility's spec/architecture companion. Goal 8 describes held-money
+recovery and buyer stops, not a horizon; its completion record cites actual
+hosted-deployment evidence. Reconciled servicing diagrams are promoted by the
+servicing change, not copied a second time here.
