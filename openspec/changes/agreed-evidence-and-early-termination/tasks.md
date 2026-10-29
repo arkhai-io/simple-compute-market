@@ -107,7 +107,7 @@ by dispute interface", "Evidence is keyed by negotiation" and "A dispute is one 
 - [ ] 2.3 In `kit/deal-lifecycle`, define the payment-adapter and dispute-adapter protocols and
       their tables (payment by negotiation ID, mechanism and arbiter or oracle; dispute by
       `adjudication.dispute.interface`), injected by compositions; the deal-level intent
-      payment command exceptional_end(at) (never a dispute intent), dispute intent buyer_end(at); derivation of each part's stop authorities from entitlements plus
+      seller-adapter command exceptional_end(at) (never a dispute intent, never a payments event kind or field; the adapter emits ordinary payee `stop returned` and `reverse`), dispute intent buyer_end(at); derivation of each part's stop authorities from entitlements plus
       the agreement's dispute authority; operation-key handling (derived idempotency keys for
       part events, filings and appends; local refusal of a retry with changed content); and the
       evidence-store interface keyed by negotiation ID. Include neutral payment-adapter
@@ -404,7 +404,7 @@ cursors under `kit/storefront`'s loop controller, including journaled appends. I
 (watch, cursors, seller half `list`), D8, D9 (seller side), D10 (journaled append, skipped
 closed case) and the requirements "Outcome effects are acted on once", "Protection is what the
 authority reports" (seller view), "Open extensions are observed per ref", "Any party may append
-to a case", "An append to a closed case is skipped", "Filing is not a delivery ruling", "A seller's exceptional end is a payment command", "The seller half lists deals", "Dispute
+to a case", "An append to a closed case is skipped", "Filing is not a delivery ruling", "A seller's exceptional end is a payment-adapter command", "The seller half lists deals", "Dispute
 authorities are named per deal", "Watch replays from a durable cursor per record", "A watch
 cursor advances after its effect is journaled", "End service keeps the earliest final request",
 "End service terminates or truncates, and journals each effect", "The earliest final request
@@ -507,11 +507,12 @@ authority's; this change's suites claim neither). Files: `kit/arkhai-payments/sr
       response is lost", "A ruling discounts a deal" (observation side), "Two outcomes reverse
       the same part" (observation side) and "A held part shows its extension".
 - [ ] 11.2 Route seller refunds through reverse and reconcile unreported commitments.
-      Implement exceptional_end(at) through this payment adapter for once parts: compute
+      Implement exceptional_end(at) in this payment adapter for once parts as ordinary
+      `reverse {part, amount}` events only (no exceptional-end payments field): compute
       unserved share from each mandate term, setup all if undelivered/none after activation,
       stable per-part keys and verified unknown-result recovery. No mediation call. Expose
       counterparty-interest voluntary reverse/early-release operations only when the vendored
-      contract expresses them. Spot extends this adapter for returned stops and rate reversals.
+      contract expresses them. Spot extends this adapter to emit `stop {part, partialPeriod: "returned"}`, immediate and entry-independent, and rate reversals.
       Verify test_seller.py, test_reconciliation.py and adapter library-integration cases for
       an administrator end, delayed report, pre-start deferred execution and crash replay.
 

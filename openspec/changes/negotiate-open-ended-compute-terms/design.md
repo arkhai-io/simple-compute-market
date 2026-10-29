@@ -82,9 +82,11 @@ A payee entitlement means the seller may interrupt; the payment authority enforc
 its notice as a pending stop on that stop authority, not a local schedule.
 On-demand has no payee entitled reclaim entry. The seller can still act in the buyer's
 interest without such an entry: exceptional_end(at) is the seller's payment-adapter
-self-correction, not a dispute. It stops rates now with returned treatment, reverses earnings
-since at and each once part's unserved time share, and awards bonds once supported.
-Setup returns all if undelivered and none after activation. A buyer contesting the account
+self-correction, not a dispute, and the payments service never sees it as one. The adapter sends
+only ordinary payee events: an immediate `stop {part, partialPeriod: returned}` per rate part
+(always permitted to a payee, with or without a stop entry or notice) and `reverse {part, amount}`
+for earnings since at and each once part's unserved time share, with amounts it computes.
+Setup reverses all if undelivered and none after activation; the cause stays in end service's record. A buyer contesting the account
 files a case; mediation triages all cases for a person. There is no compensation enum.
 Entitled rate stops follow the committed per-stopper `settles_through`, computed by the
 payment authority, not a later storefront refund or promise to prorate every end.

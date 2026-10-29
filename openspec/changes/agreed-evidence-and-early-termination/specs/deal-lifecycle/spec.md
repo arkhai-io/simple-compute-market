@@ -372,14 +372,19 @@ SCM MUST NOT depend on mechanical rulings. Filing a case MUST NOT itself change 
 - **WHEN** a buyer's case remains in triage without a ruling
 - **THEN** filing alone changes neither the lease nor payment state in SCM
 
-### Requirement: A seller's exceptional end is a payment command
+### Requirement: A seller's exceptional end is a payment-adapter command
 
-The seller half MUST journal exceptional_end(at) with a delivery end and send it only through its payment adapter. That adapter MUST derive the mandate's per-part self-correction: returned rate stop now regardless of entitlement, reverse earnings since at and unserved once time share, full bond award once supported. Setup MUST return all if undelivered, none after activation. Future at MUST refuse; unknown effects MUST resolve before retry.
+The seller half MUST journal exceptional_end(at) with a delivery end and send it only to its payment adapter; the payments vocabulary MUST NOT contain an exceptional-end event kind or field, and the cause MUST stay in end service's record and the evidence store. The adapter MUST translate it into ordinary payee events: `stop {part, partialPeriod: "returned"}` per rate part, immediate and independent of any stop entry or notice, and `reverse {part, amount}` for earnings since at and each once part's unserved time share, with amounts it computes. Setup MUST reverse all if undelivered, none after activation. Future at MUST refuse; unknown effects MUST resolve before retry.
 
 #### Scenario: An administrator ends a once-only deal
 
 - **WHEN** the seller administrator issues exceptional_end(now) for a hosted once-only deal
 - **THEN** end service records the attributed delivery end and the payment adapter reverses its unserved share with stable keys, without filing a case or awaiting a ruling
+
+#### Scenario: Hardware fails under a payee notice entry
+
+- **WHEN** the seller's hardware fails on a rate deal whose accepted payee entry carries a notice
+- **THEN** the adapter sends an immediate returned stop with no notice and `reverse` events for the amounts it computes, and the payments service receives no cause or exceptional-end field
 
 ### Requirement: The seller corrects ends its terms do not entitle
 
@@ -419,7 +424,7 @@ End service MUST journal required self-correction with its final request and sta
 
 #### Scenario: Replay after restart
 
-- **WHEN** the storefront restarts with an unacknowledged exceptional-end payment effect
+- **WHEN** the storefront restarts with an unacknowledged stop or reverse sent for an exceptional end
 - **THEN** it resolves the same operation key at payments before retrying and files no mediation case
 
 ### Requirement: Lifecycle commands have defined outcomes
