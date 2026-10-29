@@ -3,7 +3,7 @@
 ### Requirement: The payments mandate is derived exactly from the Agreement
 The mandate MUST bind sha256(JCS(agreement)) as deal, sha256(JCS(mandate)) as transaction ID, settlement_params.payer_account as from and selected payee account as to, the published fee policy and nonce arkhai.payments.v1. Once-only options MUST derive one once part for the agreed amount and asset; rate options MUST derive the selected rate and optional setup parts, all with per-part authorities.
 
-Every once hold MUST last at least until its own part end plus adjudication.dispute_window_seconds (prepaid service ends at Agreement term end; delivered setup ends at activation). Approval MUST expire after approval_window. Hosted options MUST NOT carry bond until seller-funded parts are supported. Once-only mandates MUST authorize no start; SCM MUST add the seller's explicit {account: seller, notice: PT0S, partialPeriod: returned} restitution stop entry on every part, subject to the multiple-entry capability gate for spot. Reverse MUST be authorized for seller and the Agreement's dispute authority, whose account MUST come from the option's adjudication.dispute, never Settlement.arkhai_payments configuration. Only that authority MUST be listed under extend, also authorizing lift. Each part MUST carry maxHoldExtension from adjudication.case_hold_max_seconds, null when unbounded. Reverse MAY name a part and an amount up to what it still holds.
+Every once hold MUST last at least until its own part end plus adjudication.dispute_window_seconds (prepaid service ends at Agreement term end; delivered setup ends at activation). Approval MUST expire after approval_window. Hosted options MUST NOT carry bond until seller-funded parts are supported. Once-only mandates without early-termination entitlements MUST authorize no start or stop. Reverse MUST be authorized for seller and the Agreement's dispute authority, whose account MUST come from the option's adjudication.dispute, never Settlement.arkhai_payments configuration. Only that authority MUST be listed under extend, also authorizing lift. Each part MUST carry maxHoldExtension from adjudication.case_hold_max_seconds, null when unbounded. Reverse MAY name a part and an amount up to what it still holds.
 
 Rate authorities and term ends MUST use the deal-lifecycle codec. Optional setup MUST bind a qualified activation trigger and bounded no-activation fallback in the approved mandate; an unexpressible setup contract MUST refuse publication and acceptance.
 
@@ -14,7 +14,7 @@ Rate authorities and term ends MUST use the deal-lifecycle codec. Optional setup
 
 #### Scenario: A once mandate is derived
 - **WHEN** the option has only one once part and no early_termination
-- **THEN** it authorizes no start, includes the seller's explicit PT0S/returned restitution stop entry, authorizes reverse for payee and the option's dispute authority, and extend/lift only for that dispute authority
+- **THEN** it authorizes no start or stop, authorizes reverse for payee and the option's dispute authority, and extend/lift only for that dispute authority
 - **AND** its hold lasts through term end plus dispute window and maxHoldExtension comes from case_hold_max_seconds, null when unbounded
 
 #### Scenario: A hosted option names a bond
@@ -37,18 +37,17 @@ SCM MUST derive time rate parts through the agreed-price accessor and lifecycle 
 - **THEN** both derive setup once followed by rate, with the same amounts, asset, end, afterStop hold, maxHoldExtension and per-part authorities
 - **AND** neither reads Agreement.amount as a direct charge
 
-#### Scenario: On-demand includes only the seller restitution entry
-- **GIVEN** an accepted option with no seller notice-priced early-termination entitlement
-- **WHEN** the buyer checks the mandate
-- **THEN** each part contains the seller's explicit PT0S/returned restitution stop entry and no additional seller stop entry
-- **AND** a missing or changed restitution entry is refused before approval
-- **AND** the mandate does not enforce the seller's no-preemption promise; a buyer case over held money and any supported bond is the remedy
+#### Scenario: On-demand has no seller stop entitlement
+- **GIVEN** an accepted option with no seller early-termination entitlement
+- **WHEN** the buyer checks a mandate containing a seller stop entry
+- **THEN** it refuses that extra authority before approval
+- **AND** the no-preemption promise is enforced by a buyer case over held money and any supported bond, not a guarantee of physical service
 
-#### Scenario: Spot cannot yet express both seller entries
-- **GIVEN** spot's seller notice entry and the unscheduled dependency on several stop entries per account per part
-- **WHEN** the vendored payments contract cannot express and qualify both that entry and the seller's PT0S/returned entry
-- **THEN** the immediate spot stop is unavailable and emergency exit waits out the accepted seller notice
-- **AND** SCM neither replaces the notice entry nor infers a role-based immediate-stop privilege
+#### Scenario: Spot has its accepted notice entry
+- **GIVEN** an accepted spot option with a seller notice entitlement
+- **WHEN** the buyer checks the mandate
+- **THEN** its seller stop entry carries the accepted notice and treatment, without an extra restitution entry
+- **AND** the seller's emergency exit is an exceptional_end filing through the dispute adapter, not its own payment stop
 
 #### Scenario: The rate adapter consumes lifecycle treatment
 - **GIVEN** the deal-lifecycle requirements for stop-authority and term-end treatment
@@ -95,7 +94,7 @@ The hosted adapter MUST translate lifecycle commands into explicit per-part even
 - **AND** it never reports a later local timestamp as the authority's end
 
 ### Requirement: Rate stops consume authority-priced period treatment
-The hosted rate adapter MUST consume the deal-lifecycle stop-authority mapping and capability refusal rules. It MUST observe the winning authority entry rather than compute cooperative end-price corrections. Seller exceptional_end MUST instead use its separate payee self-correction translation.
+The hosted rate adapter MUST consume the deal-lifecycle stop-authority mapping and capability refusal rules. It MUST observe the winning authority entry rather than compute cooperative end-price corrections. Seller exceptional_end MUST instead be filed through the dispute adapter, with no seller-side stop or reverse for that filing.
 
 #### Scenario: The contract has no partialPeriod field yet
 - **WHEN** an interim spot or on-demand preset is offered against a contract supporting only charged behavior
@@ -117,8 +116,8 @@ The hosted rate adapter MUST consume the deal-lifecycle stop-authority mapping a
 
 #### Scenario: A dispute stop selects its treatment
 - **WHEN** a verified stop is issued under the dispute authority's chosen entry
-- **THEN** its event supplies the human ruling's treatment; buyer_end preserves payer notice and payer treatment
-- **AND** exceptional_end is not a dispute intent or ruling
+- **THEN** its event supplies the ruling's treatment; buyer_end is human-ruled and preserves payer notice and payer treatment
+- **AND** exceptional_end is a dispute intent whose at-least-standard payee self-penalty is mediation's only mechanical ruling
 - **AND** SCM observes the effect without computing a compensating reverse
 
 #### Scenario: The stop crosses a period boundary
@@ -154,13 +153,13 @@ The hosted rate adapter MUST consume the deal-lifecycle stop-authority mapping a
 #### Scenario: A lawful end precedes disclosure
 - **GIVEN** a controlling buyer end, entitled authority stop, terms end or ruling before disclosure
 - **WHEN** delivery reports that availability was not reached
-- **THEN** its lawful end attribution is preserved without exceptional_end self-correction merely for non-availability
-- **AND** only seller non-delivery follows the classified self-correction handoff
+- **THEN** its lawful end attribution is preserved without exceptional_end filing merely for non-availability
+- **AND** only seller non-delivery follows the classified dispute-filing handoff
 
 #### Scenario: A site reports an earlier exceptional end
 - **WHEN** the seller learns service ended without an entitlement covering that end
-- **THEN** it submits exceptional_end at the reported instant to its payment adapter
-- **AND** the adapter computes stop-now and reversal effects from the mandate, without filing a case
+- **THEN** it journals exceptional_end at the reported instant and files through the dispute adapter to the Agreement's dispute authority
+- **AND** the seller sends no stop or reverse for that filing
 
 #### Scenario: Start evidence is absent or mismatched
 - **WHEN** rate start has no valid deal-lifecycle activation envelope matching the deal, commitment and activated lease
@@ -208,31 +207,31 @@ The hosted rate adapter MUST implement authorize(phase, evidence) for commit, di
 - **AND** an unknown phase or malformed/cross-deal envelope refuses
 - **AND** a known pending stop bound cannot be crossed using stale evidence
 
-### Requirement: Seller exceptional ends translate to payee self-correction
-The hosted adapter MUST translate the seller's journaled exceptional_end(at) into per-part payee events from the accepted mandate, without a case. It MUST preserve command identity, resolve unknown outcomes before further deltas and avoid double-returning unearned reservations. Future-dated at MUST refuse; pre-start failures MUST journal immediately and act at Agreement start.
+### Requirement: Seller exceptional ends are filed through the dispute adapter
+The seller half MUST file journaled exceptional_end(at) through the dispute adapter to the Agreement's dispute authority, preserving the end-service journal's identity and evidence. It MUST NOT send its own stop or reverse for that filing. Future-dated at MUST refuse; pre-start failures MUST journal immediately and file at Agreement start.
 
-#### Scenario: On-demand service fails with its explicit seller entry
-- **WHEN** exceptional_end is applied for a service failure at at
-- **THEN** the adapter sends stop {part} under the seller's PT0S/returned entry and reverse {part, amount} under its existing reverse authority, reversing each rate part's earned amount since at
-- **AND** no exceptional-end kind or field is sent to payments
-- **AND** once parts reverse their time-unserved share, setup all if undelivered and none if delivered
-- **AND** any supported bond is awarded in full; unsupported bond remains a publication refusal
-- **AND** mediation receives no exceptional_end filing
+#### Scenario: A seller files its emergency exit
+- **GIVEN** seller-caused failure on an on-demand or spot deal
+- **WHEN** the end service records exceptional_end(at)
+- **THEN** the seller files the self-penalty through the dispute adapter, with no seller payment effects or extra restitution stop entry
+- **AND** the cause and kept evidence remain in the end-service record and evidence store
+- **AND** payments receives no exceptional-end event kind or field
 
-#### Scenario: The stop response or reversal response is lost
-- **WHEN** a per-part self-correction event has unknown outcome
-- **THEN** read and identical-key replay resolve it before another amount is computed
-- **AND** held-money shortfalls are surfaced as repair, not invented credits
+#### Scenario: Filing outcome is uncertain
+- **WHEN** the dispute filing response is lost
+- **THEN** the existing journal and identical-key read/retry resolve the outcome
+- **AND** the seller does not fall back to direct payment calls
 
-#### Scenario: The contract cannot express the seller restitution entry
-- **WHEN** the vendored contract cannot express and qualify the explicit seller PT0S/returned entry
-- **THEN** immediate self-correction qualification refuses instead of substituting charged or a dispute filing
+#### Scenario: The mediation self-penalty result is observed
+- **GIVEN** Arkhai mediation's published standard mapping for a payee request at least as strong as the standard
+- **WHEN** the adapter observes the resulting verified authority records
+- **THEN** it reports rate stops now with returned and rate earnings since at reversed, including always-returned on-demand treatment
+- **AND** once parts reflect their time-unserved reversal, with setup all if undelivered and none once delivered, plus any full supported-bond award
+- **AND** SCM does not duplicate mediation's computation or apply a second correction
 
-#### Scenario: Spot emergency exit still needs its notice
-- **GIVEN** the multiple-entry payments dependency has not landed
-- **WHEN** a spot seller applies exceptional_end
-- **THEN** immediate stop is unavailable and its emergency exit waits out its accepted seller notice
-- **AND** correction completion accounts for earnings through the actual authoritative stop
+#### Scenario: The standard package cannot be qualified
+- **WHEN** the dispute intent, published mapping or required returned/chosen-entry contract support is absent or unqualified
+- **THEN** qualification reports the missing dependency without a seller-side stop/reverse substitute
 
 ### Requirement: Rate observations require verified authority state
 The hosted adapter MUST consume the verified snapshot interface before interpreting start, funding, pending stop, stop, extensions, releaseAt or event sequence. It MUST expose per-part changes to lifecycle read/watch without treating a courtesy hint or a missing funding field as an authoritative stop.

@@ -20,13 +20,12 @@ continuation is a separate dependent change.
   Prices come from the agreed-price accessor, not direct reads of Agreement.amount.
 - Derive per-part authorities from early_termination and adjudication:
   payee-only rate start, entitled stop accounts with their priced notice, and the
-  dispute authority's stop/reverse/extend permissions. Add the explicit seller
-  {account: seller, notice: PT0S, partialPeriod: returned} restitution entry on every
-  part. On-demand has only that seller entry: its no-preemption promise is not
-  mandate-enforced; the remedy is a buyer case over held money and any supported bond.
-  Spot's additional immediate entry depends on unscheduled payments support for
-  several stop entries per account per part. Until then emergency exit waits out
-  seller notice. Payments has no implicit role-based privileges or notice waivers.
+  dispute authority's stop/reverse/extend permissions. Seller stop entries exist
+  only for entitlements, such as spot notice; on-demand has none. Its no-preemption
+  promise is enforced by remedy, not the mandate: a buyer case over held money and
+  any supported bond. The seller's emergency exit is an exceptional_end dispute
+  filing, including on spot. There is no restitution entry, implicit favourable
+  stop privilege, multiple-entry gate, notice waiver or payer early release.
   Use part end, {afterStop: dispute_window} and maxHoldExtension.
 - Extend the hosted adapter's command translation, reads and watch source with
   per-part start, pending/final stop, funding and maximum-term observations.
@@ -61,15 +60,19 @@ continuation is a separate dependent change.
 - Re-drive the canonical rate buyer-end flow: stop then hint, continue delivery
   during priced notice, and end through authority watch. Keep end_delivery for
   explicit immediate surrender and unreachable-payment-authority buyer_end(at).
-  End service does not waive payer notice. Receipt-timed payer-priced storefront
-  stop needs an explicit authorizing entry; otherwise it is the buyer half's stop.
-- Translate journaled seller exceptional_end through the payment adapter, not a
-  dispute: stop {part} under the seller's explicit PT0S/returned entry, plus
-  reverse {part, amount} under existing reverse authority; no exceptional-end kind
-  or field enters payments vocabulary. Preserve the gated spot notice fallback,
-  earned-since-at rate reversal,
-  time-unserved once reversal (setup all before delivery, none after) and supported
-  bond award. Keep timing/journaling; refuse unexpressible contract behavior.
+  End_delivery has no at; the storefront signs receipt time as evidence but cannot
+  stop buyer billing. If payments is unreachable, the buyer half journals its stop
+  and retries with the same key; billing runs until it lands. Optional buyer_end
+  goes to human triage with the signed request, receipt and exact Agreement verified
+  against the mandate deal hash; its ruling preserves payer notice and partialPeriod.
+- File journaled seller exceptional_end(at) through the dispute adapter to the
+  Agreement's dispute authority. Never future-date; pre-start failures journal
+  immediately and file at Agreement start. The seller sends no stop or reverse.
+  Consume mediation's only mechanical ruling: an at-least-standard payee self-penalty
+  package of returned rate stops now, earned-since-at reversal, time-unserved once
+  reversal (setup all before delivery, none after) and full bond award once supported.
+  Restore the dispute intent/request vocabulary and published mapping in foundation,
+  rather than calculate or partially apply the package in the payment adapter.
 - Support service-identity overlap and re-anchoring through the foundation's
   verified-snapshot interface. Snapshot-proof verification itself remains owned
   by agreed-evidence-and-early-termination round 2.
@@ -102,8 +105,9 @@ None.
 Implementation gates on:
 
 1. agreed-evidence-and-early-termination: term codec, hosted contract vendoring
-   and once-part adapter, lifecycle commands, evidence stores and verified snapshots
-   (round 2). This change consumes, and does not duplicate, those facilities.
+   and once-part adapter, lifecycle commands, dispute intents and published mediation
+   self-penalty mapping, evidence stores and verified snapshots (round 2). This change
+   consumes, and does not duplicate, those facilities.
 2. negotiate-open-ended-compute-terms: agreed-price accessor and period unit,
    listing bounds, accepted-price carrier and option shape, declaration contract,
    whole-second pre-signature start/identity freeze and publication/acceptance gates. Only those sections gate mechanics; the terms
@@ -136,8 +140,9 @@ a double-backed scenario never qualifies the external payment or dispute authori
 - Snapshot-proof implementation, immediate end_delivery transport/evidence capture
   or mediation rulings (foundation-owned). The rate buyer-end re-drive is in scope.
 - Cooperative corrections to entitled stop pricing, a second seller-command
-  journal, or mediation mapping of exceptional_end. Seller self-correction remains
-  the existing journaled payment-adapter command.
+  journal, or seller-side exceptional-end payment effects. Mediation's published
+  self-penalty mapping is foundation-owned; this change consumes the journaled
+  dispute-filing path without duplicating that computation.
 - Durable once-only identity re-anchoring; those deals must drain before key retirement.
 - Discovery sugar, automated preemption strategy, Alkahest splitter execution,
   API-credit rate servicing, metering other than time, or reserved fixed-interval
