@@ -203,7 +203,8 @@ exit it holds.
 Before any long-running unattended turn — validation, implementation, a review,
 closeout, or a discussion resumed to apply fixes or run checks — tell the owner
 what is running and give `make change-watch CHANGE=<change>` to follow it in
-another terminal, run in the clone for a change worked there. When the owner asks
+another terminal, from the workspace or the clone: run from the workspace, it
+follows a change worked in its clone there. When the owner asks
 for status, read the step's current progress file under `reviews/transcripts/` —
 one line per tool call, its time and what it touched, not the transcript, which you
 read only through the denials report; the harness's task panel does not show

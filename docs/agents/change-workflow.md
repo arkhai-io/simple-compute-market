@@ -185,7 +185,9 @@ cadence is asked about once per round.
 **Following a running step.** The session says when it starts a long unattended
 turn. `make change-watch CHANGE=<change>` follows each step's progress file in
 another terminal — one line per tool call — moving to the next step's as it starts,
-and into the archive when closeout moves the change there.
+and into the archive when closeout moves the change there. Run it from your
+workspace: a change worked in its own clone is followed in the clone, where its
+steps write.
 
 **Answering and taking over.** A step that asks ends its turn with a question; your
 answer, relayed by the orchestrating session, resumes the same session by the

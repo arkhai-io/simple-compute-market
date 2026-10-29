@@ -101,3 +101,36 @@ def test_watch_follows_a_run_into_the_archive(tmp_path: Path) -> None:
     watch(lambda: change_directory(tmp_path, CHANGE) / "reviews", echo=shown.append,
           sleep=tick, polls=3)
     assert shown == ["== 05-closeout.progress", "line 0", "line 1"]
+
+
+def _followed(monkeypatch: pytest.MonkeyPatch, clone: Path | None) -> list[Path]:
+    """The reviews directories `watch` would follow, with the change's clone `clone`."""
+    import change_workflow.cli as cli
+    followed: list[Path] = []
+    monkeypatch.setattr(cli, "clone_of", lambda workspace, change: clone)
+    monkeypatch.setattr(cli, "watch", lambda locate, echo: followed.append(locate()))
+    return followed
+
+
+def test_the_watch_follows_a_change_in_its_clone_from_the_workspace(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The change's directory is on its branch alone, so only the clone has it.
+    workspace, clone = tmp_path / "work", tmp_path / "work.changes" / CHANGE
+    workspace.mkdir()
+    (clone / CHANGES / CHANGE).mkdir(parents=True)
+    followed = _followed(monkeypatch, clone)
+
+    assert main(["watch", CHANGE], root=workspace) == 0
+    assert followed == [clone / CHANGES / CHANGE / "reviews"]
+
+
+def test_the_watch_follows_a_change_without_a_clone_where_it_is_run(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    followed = _followed(monkeypatch, None)
+
+    assert main(["watch", CHANGE], root=tmp_path) == 1
+    assert CHANGE in capsys.readouterr().err
+    (tmp_path / CHANGES / CHANGE).mkdir(parents=True)
+    assert main(["watch", CHANGE], root=tmp_path) == 0
+    assert followed == [tmp_path / CHANGES / CHANGE / "reviews"]
