@@ -86,25 +86,106 @@ fulfillment's teardown fails visibly and its capacity stays held.
 - **WHEN** a VM teardown with no cleanup record finds a rule it cannot attribute to the guest
 - **THEN** the teardown fails naming that rule, and the reservation's capacity stays held
 
-### Requirement: A VM guest matches its host's architecture
+### Requirement: A VM guest is created from a pinned, verified image
 
-A VM create MUST select its guest image, machine type, and firmware for the target
-host's architecture: an `aarch64` host MUST receive an `aarch64` cloud image booted under
-UEFI on the `virt` machine type, and an `x86_64` host an `amd64` image as before. Each
-image MUST be pinned to a dated release and verified against its published checksum
-before use; an image that fails verification MUST fail the create before a domain is
-defined. A create for an architecture no pinned image serves MUST fail before any host
-effect.
+A VM create from scratch MUST use one dated release of its cloud image, named by that
+release's URL and the SHA-256 its published checksum list gives, never a moving latest
+path. It MUST verify the image's SHA-256 before the image backs any disk, whether it
+downloaded the image or found it already on the host, and an image that fails
+verification MUST fail the create before any disk or domain is defined, without being
+used. Only an `x86_64` image is pinned: a create whose target host reports another
+machine architecture MUST fail, naming it, before any host effect.
 
-#### Scenario: A CPU-only VM is created on an aarch64 host
+#### Scenario: A create downloads its pinned image
 
-- **WHEN** a VM create without GPUs runs on an `aarch64` host
-- **THEN** the guest is defined from the pinned `aarch64` image on the `virt` machine with UEFI firmware, and no GPU passthrough is configured
+- **WHEN** a VM create from scratch runs on an `x86_64` host that holds no copy of the pinned image
+- **THEN** it downloads the pinned release, verifies its SHA-256, and only then creates the guest's disk from it
 
 #### Scenario: A downloaded image does not match its checksum
 
 - **WHEN** the image a create downloads does not match its pinned checksum
-- **THEN** the create fails before defining a domain, and the image is not used
+- **THEN** the create fails before defining a disk or a domain, and the image is not used
+
+#### Scenario: An image already on the host does not match its checksum
+
+- **WHEN** a create finds a file at the pinned image's path whose SHA-256 is not the pinned one
+- **THEN** the create fails before defining a disk or a domain, and the file is not used
+
+#### Scenario: The host is not x86-64
+
+- **WHEN** a VM create from scratch targets a host whose machine architecture is not `x86_64`
+- **THEN** the create fails naming the architecture, before any host effect
+
+### Requirement: A host's boot GPU is passed through only by an operator's opt-in
+
+A VM create selecting one GPU for passthrough MUST decide whether a candidate is the
+host's boot GPU, the device the host's console runs on, from that candidate's own
+kernel boot flag, and MUST NOT select the boot GPU unless the pool's operator-owned
+provider configuration sets `vm_passthrough_boot_gpu` true. No job parameter, buyer
+term, or storefront request MUST be able to set it. With it set, the boot GPU MUST be
+eligible only when, at the moment of selection, the host's GPU capability inventory
+lists it as available for passthrough, the kernel reports it bound to the passthrough
+driver, and no defined guest has it attached; the inventory alone MUST NOT make it
+eligible. The create MUST NOT bind or unbind a device. Every part of the create that
+excludes or refuses the boot GPU MUST use the same test and the same setting, and a
+create left with no eligible GPU MUST fail before defining a domain.
+
+#### Scenario: A host's only GPU is its boot GPU and the pool does not opt in
+
+- **WHEN** a GPU VM create runs on a host whose only GPU is its boot GPU, in a pool that does not set `vm_passthrough_boot_gpu`, whatever the capability inventory lists
+- **THEN** no GPU is selected, and the create fails before defining a domain
+
+#### Scenario: The boot GPU is listed first in the host's device listing
+
+- **WHEN** the host's device listing prints each device's slot before its class, and the boot GPU is among the inventory's available devices, in a pool that does not opt in
+- **THEN** the boot GPU is still recognized by its own boot flag and is not selected
+
+#### Scenario: The pool opts in and the boot GPU is prepared
+
+- **WHEN** the pool sets `vm_passthrough_boot_gpu` true, the inventory lists the boot GPU as available, the kernel reports it bound to the passthrough driver, and no guest has it attached
+- **THEN** the create selects the boot GPU and passes it through
+
+#### Scenario: The inventory is stale
+
+- **WHEN** the pool sets `vm_passthrough_boot_gpu` true and the inventory lists the boot GPU as available, but the kernel reports it bound to its host driver, or to no driver
+- **THEN** the boot GPU is not selected, and a create with no other eligible GPU fails before defining a domain
+
+#### Scenario: The pool opts in but another guest holds the boot GPU
+
+- **WHEN** the pool sets `vm_passthrough_boot_gpu` true, but a defined guest has the boot GPU attached
+- **THEN** the boot GPU is not selected
+
+### Requirement: A GPU guest's readiness wait and autostart are set by its pool's operator
+
+A GPU VM create MUST wait for its guest to confirm setup for at most
+`vm_setup_wait_attempts` attempts, `vm_setup_wait_interval_seconds` apart, defaulting
+to 10 and 30, and MUST fail, naming that bound, when the wait runs out; it MUST NOT
+report a guest ready that has not confirmed its setup. Each setting MUST be a positive
+integer, and a value that is not MUST fail the create before any host effect. A
+created guest MUST be set to start on host boot unless `vm_autostart` is false; absent,
+it is true. These settings MUST come only from the pool's operator-owned provider
+configuration, never from a job parameter, a buyer term, or a storefront request, and
+none of them changes what teardown removes.
+
+#### Scenario: A pool states no readiness or autostart setting
+
+- **WHEN** a GPU VM create runs in a pool whose provider configuration sets none of these
+- **THEN** it waits at most ten attempts thirty seconds apart, and sets the guest to start on host boot, as before
+
+#### Scenario: A pool extends the readiness wait
+
+- **WHEN** the pool sets `vm_setup_wait_attempts` to 40 and `vm_setup_wait_interval_seconds` to 15
+- **THEN** the create waits at most forty attempts fifteen seconds apart, and fails naming that bound if setup is not confirmed within it
+
+#### Scenario: A setting is not a positive integer
+
+- **WHEN** the pool sets `vm_setup_wait_attempts` to `0`, a negative number, or text
+- **THEN** the create fails naming the setting, before any host effect
+
+#### Scenario: A pool turns autostart off
+
+- **WHEN** the pool sets `vm_autostart` to false
+- **THEN** the created guest is not set to start on host boot, and its teardown removes the same artifacts as any guest's
 
 ## MODIFIED Requirements
 

@@ -49,16 +49,31 @@ non-standard port, while the buyer reaches the same host through a private netwo
 port 22. The registry records a tenant-facing `public_host`, but no tenant-facing port,
 and the bare-metal path uses neither.
 
-The second qualification target is a CPU-only ARM64 virtual machine on the same kind of
-host. Three findings stand in its way:
+The second qualification target is a GPU-backed virtual machine on an x86-64 host,
+qualified on a physical host of its own, independent of the bare-metal lane's. It was
+first planned as a CPU-only ARM64 guest on the same kind of host as the bare-metal
+lane; the owner superseded that target on 2026-10-29 ("Scope revision" below). Four
+findings stand in the GPU guest's way:
 
-- The compute capability schema requires the `gpu` family, so no VM shape without a
-  GPU can be stated, published, or claimed. Any VM listing carries a GPU dimension,
-  which selects the GPU passthrough path.
-- The VM create recipe hard-codes an amd64 cloud image and passes no architecture,
-  machine type, or firmware.
+- The VM create recipe downloads its x86-64 cloud image from a moving `current` path,
+  with no checksum, and reuses whatever image file is already on the host.
+- The recipe means to keep the host's boot GPU, the one driving its console, from any
+  guest, and offers no way to pass it through even when an operator has bound it for
+  passthrough and it is the host's only GPU. Its detection of the boot GPU is also
+  broken: it scans `lspci -D -vmm` for a `Class:` line and expects the next line to be
+  that device's `Slot:`, but that format prints `Slot:` before `Class:`, so it finds no
+  boot GPU on a real host and the intended exclusion never applies. The capability
+  inventory it trusts may also be stale, still listing a GPU an operator has since
+  returned to its host driver.
+- A GPU guest installs its driver and reboots before it is ready, and the create waits
+  for that through a fixed ten attempts thirty seconds apart. Every created guest is
+  also set to start on host boot, so a guest a teardown has not yet removed would
+  reclaim the GPU after a host reboot.
 - VM teardown fails when a partial create left no cleanup script, and its rule cleanup
   matches guest addresses by prefix, so one guest's removal can touch another's rules.
+
+The CPU-only target's own findings — the compute capability schema requires the `gpu`
+family, and the recipe is amd64-only — are no longer this change's to fix (D7).
 
 Two design reviews on 2026-10-28 shaped the decisions below:
 - The first (`reviews/01-design.md`) and its triage revised D1, D4, D7, and D10, and
@@ -74,6 +89,21 @@ The decisions below are written as settled by those triages. The Round 1
 implementation review's F1 (`reviews/03-implementation-external.md`) reopened D3's
 compatibility: the owner settled that `ssh` is served at version 2 only.
 
+**Scope revision (2026-10-29).** After Sections 2–10 were implemented, the owner settled
+the live lanes' targets and asked for every preflight correction a proper bare-metal
+test needs, with the plan, goal, and records made consistent:
+- The VM lane qualifies a GPU-backed guest on an x86-64 host, and the bare-metal lane
+  a whole GPU machine on another host. The two are physically independent and run in
+  parallel. The CPU-only ARM64 target, and the sequential lanes on one machine it
+  implied, are withdrawn (D7, D10).
+- What the GPU guest needs from this change is the minimum recipe work above: a pinned
+  and verified x86-64 image (D11), a boot-GPU detection that works, with an operator's
+  explicit opt-in to pass the boot GPU through (D12), a bounded readiness wait and an operator-set autostart (D13), and
+  D9's teardown. No GPU marketplace, shape, or pricing work is added.
+- The Round 1 review's F2, F3, and F4 are accepted on that instruction. F2 corrects
+  the promotion record's quickstart destinations, F4 the proposal's Impact, and F3
+  becomes D14, implemented before the live bare-metal lane runs.
+
 ## Goals and non-goals
 
 **Goals.**
@@ -84,11 +114,17 @@ compatibility: the owner settled that `ssh` is served at version 2 only.
 - A failed create that may have left effects is compensated by the same teardown its
   domain already defines, and its capacity returns only once that teardown is proven.
 - A bare-metal run log is recoverable by the commands that read it.
-- A truthful CPU-only ARM64 VM can be sold, delivered, and torn down without GPU
-  passthrough.
+- The real-host bare-metal scenario drives the buyer commands as they ship, and proves
+  revocation only by an authentication refusal.
+- A GPU-backed VM can be created on an x86-64 host from a verified image, with its GPU
+  passed through, and torn down removing only what that guest created.
 
 **Non-goals.**
-- GPU passthrough, and guest or tenant isolation and sanitization.
+- A GPU marketplace, shape, or pricing redesign, and any general change to how the
+  recipe selects GPUs beyond D12's opt-in.
+- Guest or tenant isolation and data sanitization. The live VM lane verifies only that
+  the GPU returns to the host's driver baseline after teardown.
+- CPU-only VM shapes and ARM64 guests (D7).
 - Network or security redesign of VM guests.
 - Marketplace or pricing redesign. The five-minute price refusal is recorded only.
 - Unrelated route and pause defects.
@@ -666,64 +702,49 @@ teardown recovers on its own. The physical-provisioning companion's sentence say
 convergence requeues `teardown_failed` "on its own" is corrected at promotion to say
 what the requeue does and does not do.
 
-### D7. A CPU-only VM shape is sold through a stated shape
+### D7. Withdrawn: a CPU-only VM shape sold through a stated shape
 
-The qualification target is a truthful CPU-only ARM64 VM: no listing may advertise a
-GPU its guest lacks, and no mock stands in for delivery. This change takes the narrowest
-slice of `gpu-optional-compute-shapes` that the target forces, and nothing else from it:
+D7 took the narrowest slice of `gpu-optional-compute-shapes` a CPU-only ARM64 guest
+forced: the compute capability schema requiring no family, and a VM shape stated by a
+pool hint or storefront override omitting `gpu`, published, priced from the flat tiers,
+claimed, and provisioned without one. It also chose an `aarch64` guest image on the
+`virt` machine under UEFI. None of it was implemented.
 
-- the compute capability schema requires no family;
-- a VM shape stated by a pool's `listing_shapes` hint or a storefront override may
-  omit the `gpu` family, and is then declared, published, discovered, negotiated,
-  admitted, scheduled, and provisioned with no GPU;
-- a VM shape that states the `gpu` family still names both count and model;
-- a listing whose shape names no GPU model resolves its terms and family rates from
-  the storefront's override, the pool's flat hint fields, and the flat configured
-  default alone. `resolve_gpu_pricing` and `resolve_family_rates` already do this for
-  a `None` model. No per-GPU-model term or rate applies, so no GPU price is assigned to
-  a CPU-only guest.
-
-What the slice leaves to `gpu-optional-compute-shapes`, unchanged here:
-
-- retiring the host record's GPU fields;
-- what the VM default generator publishes for a pool whose members declare no GPU. The
-  generator keeps yielding nothing for them, and the pool sells only the shapes it
-  states;
-- bare-metal shapes without GPUs. Bare metal keeps requiring the GPU family through its
-  own rules;
-- whether a declaration without GPUs keeps the resource type `compute.gpu`. It does
-  here: the resource type is the site's VM inventory kind, matched by exact equality in
-  admission, scheduling, and feasibility, and never published as a GPU term. Neither
-  the listing model nor the registry filter specification carries it, and every listing
-  field a buyer reads states no GPU;
-- how the registry's compute filters treat a listing that states no `gpu` family.
-  Publication and unfiltered or CPU, memory, and disk queries already work, and a query
-  filtering on a GPU field excludes such a listing as missing. Only the registry
-  filter specification's advisory `required: [gpu_model, region]`, read by the dry-run
-  `validate-publish` alone, misstates it.
-
-Ownership:
-- `gpu-optional-compute-shapes` stays the owner of the remaining items.
-- Its index row lists this change in `Depends on`, gating its planning, and its
-  proposal records the slice this change delivers.
-- Neither change duplicates the other's work.
-- `gpu-optional-compute-shapes` has not started design, so no active design is
-  overtaken.
+The owner withdrew it on 2026-10-29, when the VM lane's target became a GPU-backed
+guest on an x86-64 host ("Scope revision"). A GPU guest needs no shape without a GPU,
+and no ARM64 image. So:
+- the schema and VM stated-shape slice returns to `gpu-optional-compute-shapes`, which
+  owns it with the rest of its scope. Its index row no longer names this change in
+  `Depends on`, and its proposal no longer records the slice as delivered here. Task
+  1.2's confirmation of the split stands as history, corrected there;
+- the `market-composition` and `storefront-publication` deltas, which only D7 wrote,
+  are removed;
+- the planned sections for CPU-only shapes and the `aarch64` recipe are replaced
+  (`tasks.md`, Sections 11–14). D9's teardown repairs, which were planned beside the
+  recipe, are kept;
+- what D7 left open — a declaration without GPUs keeping the resource type
+  `compute.gpu`, and the registry filter's advisory `required` list — is
+  `gpu-optional-compute-shapes`'s again.
 
 ### D8. VM deal terms are pinned for the VM lane
 
-A VM purchase needs a lease long enough to cover guest boot, readiness, buyer SSH, and
-teardown, within a test-mode spending cap set for that lane. Neither the bare-metal
-lane's 360 seconds nor its ten-minute listing maximum carries over. Boot readiness
-alone may take several minutes, and the create waits up to about fifteen minutes for
-it. A finite term of up to 30 minutes is recommended.
+A VM purchase needs a lease long enough to cover guest boot, the GPU driver's install
+and the reboot after it, readiness, buyer SSH, a computation on the GPU, and teardown,
+within a test-mode spending cap set for that lane. Neither the bare-metal lane's 360
+seconds nor its ten-minute listing maximum carries over. The create's own readiness
+wait is bounded by the pool's setting (D13), so the term is chosen to cover that
+bound, measured once on the lane's host before a purchase. A finite term of up to 30
+minutes is recommended.
 
-The VM pool's lease bound and rates are set operationally, through the pool override
-or hint, before a live purchase is authorized. This change adds no code for it.
+The VM pool's lease bound, rates, and readiness wait are set operationally, through
+the pool override, hint, or provider configuration, before a live purchase is
+authorized. This change adds no code for the terms.
 
 ### D9. VM teardown removes only what one guest created, and proves what it cannot find
 
-Two problems are fixed, without redesigning guest networking:
+Two problems are fixed, without redesigning guest networking. Both are required before
+any real guest is created on a lane's host, since a create that fails part-way leaves
+artifacts only this teardown can attribute:
 
 - **Exact matching.** Every firewall and NAT rule a create adds for a guest carries a
   comment naming that guest, and cleanup removes rules by that exact comment. Rules
@@ -745,8 +766,17 @@ Two problems are fixed, without redesigning guest networking:
 
 A whole-host bare-metal deal and a VM on the same machine are admitted by different
 provisioning services. Each storefront trusts its own service, so cross-mode accounting
-by `physical_host_id`, which works within one site, does not span them. The two lanes
-therefore run sequentially, and this change does not redesign cross-site accounting.
+by `physical_host_id`, which works within one site, does not span them. This change
+does not redesign cross-site accounting.
+
+**Lanes on separate machines run in parallel.** The live lanes are qualified on two
+physically independent hosts, so their capacity cannot overlap, and they may run at
+the same time. What they share is this repository's source, its wheelhouse and
+environments, and the images built from them, and changes to those stay serialized:
+neither lane's run rebuilds or reinstalls what the other is running on. Everything
+below applies only where two lanes' sources are one machine: a machine whose physical
+capacity both provisioning services can sell. There, the lanes run one at a time
+under this control.
 
 **The control is the idle lane's durable per-listing pause, bounded by a freeze and
 proven by a drain read-back.** It keeps the retained listing open and published.
@@ -863,79 +893,200 @@ Limits recorded rather than fixed:
   `update_listing`'s signature: it would prove nothing a persisted or application
   test does not.
 
-D10 gates the second lane's live run, never a section of this change.
+D10 gates a lane's live run only where it shares a machine with another lane, and is
+never a section of this change.
 
-## CPU-only VM shapes
+### D11. An x86-64 guest is created from a pinned, verified image
 
-Every point on a real VM purchase that refuses or misreports a GPU-less shape was
-traced through the code, and each was rechecked where a decision rests on it. The slice
-changes these:
+The scratch image a VM create uses is one dated release of the Ubuntu Noble x86-64
+(`amd64`) cloud image, not the moving `current` path:
+- **The pin.** The role names the release's dated URL and the SHA-256 that release's
+  published checksum list gives for the image, in one place. An operator moving the pin
+  to another release verifies that release's signed checksum list before recording
+  its digest; the role carries the digest alone.
+- **Verification before use.** The image's SHA-256 is checked before the image backs any
+  disk: after a download, and equally when a file is already on the host. A mismatch
+  fails the create before any disk or domain is defined, and the file is not used.
+- **The stored name carries the release.** An image left on a host at the old unpinned
+  name is never adopted as the pinned one.
+- **Architecture.** Before any host effect, the create reads the target's machine
+  architecture. Only `x86_64` has a pinned image, so any other fails the create naming
+  it, rather than failing later with an image it cannot boot.
 
-| Point | Today | Change |
-|---|---|---|
-| Compute capability schema (`domains/compute`) | `gpu.count` and `gpu.model` are required, so flattening, unflattening, digest, and splitting a stated shape refuse one without `gpu` | Neither is required. The VM shape rule (`arkhai_vms` canonical shapes) refuses a `gpu` family naming only one of the two |
-| VM listing models (`domains/vms/listings`) | `ComputeResource` requires `gpu_model` and `gpu_count`, and a listing resource is recognised as compute by its `gpu_model` key, so every `Listing` parse of a CPU listing fails | Both fields optional. Compute and token resources are told apart by the token resource's own fields, so a compute resource needs no GPU key |
-| `resource_is_compute` (`domains/vms/listings` pricing) | recognises compute by `gpu_model`, so the capacity claim cannot be built | The same discriminator as the models |
-| `VmListing` (`domains/vms/domain`) | requires `gpu_model` and `gpu_count` | Requires both or neither |
-| Reconciler member usage (`domains/vms/listings`) | drops a member without a positive GPU count before feasibility, so a stated CPU shape is judged infeasible | Keeps every member with a resource type and declared capacity for stated shapes. GPU totals become optional, and are reported only for default generation |
-| Resolved shape GPU accessors and listing reopening (`domains/vms/listings`) | read the GPU count and model by key, which raises for a CPU shape, and order GPU models in a way that fails with an absent model | Absent-tolerant reads. A shape with no GPU model sorts apart from one with |
-| Alkahest compute lease encoding (`domains/vms/settlement`) | would encode an absent model as text | Omits absent GPU fields |
-| VM administrator reservation response (`domains/vms/storefront` admin controller and `capacity_admin_models`; `core/storefront-client` `ReserveCapacityResponse`) | coerces a reservation's GPU count with `or 1`, so a CPU-only hold reports one GPU | `gpu_count` is optional. It is read from the reservation's authoritative `dimensions` when they are present, and is absent when they name no `gpu_count`. The legacy scalar is read only for a row that has no `dimensions` |
+Golden images, which an operator supplies from a bucket path, are unchanged and not
+pinned here. Nothing else about the guest — machine type, firmware, cloud-init — changes.
 
-**The site ledger's scalar mirror is unchanged.** For an explicit, non-empty
-`dimensions` map naming no `gpu_count`, the site stores `units = 0` and keeps
-`dimensions` authoritative (`market_site.ledger`). Admission, holding, release, and
-`_reservation_dimensions` read the dimensions. Only a legacy row with no dimensions
-falls back to the mirror. A CPU-only claim therefore round-trips through admission and
-release holding exactly its vCPU, memory, and disk. This is tested, and nothing generic
-in the ledger is redesigned.
+Alternatives rejected:
+- *Keep `current`.* A create could then boot a guest no one verified, and two creates on
+  one host could boot different images.
+- *Verify the checksum list's signature on every create.* That puts a keyring and a
+  network fetch on every create's path for what is verified once, when the pin moves.
 
-Unchanged, because each already handles a shape without `gpu`:
+### D12. A host's boot GPU is passed through only by an operator's explicit opt-in
 
-- site declaration, admission, and scheduling, which match any declared dimensions and
-  exact resource type;
-- the capacity claim built from the listing;
-- buyer commands and provision terms;
-- registry publication;
-- VM fulfillment, whose requirement delegate sets a GPU count and passthrough only
-  when the reservation reserves GPUs, and maps vCPU, memory, and disk from the
-  reservation or the pool's defaults.
+The recipe means to keep a host's boot GPU, the device whose `boot_vga` is set, from
+every guest, because the host console runs on it. Two things are wrong with that
+today. Its detection finds no boot GPU on a real host: it reads `lspci -D -vmm`
+expecting a device's `Slot:` line after its `Class:` line, while that format prints
+`Slot:` first, so the exclusion silently does nothing and the protection it describes
+does not exist. And it offers no way to pass a boot GPU through, so a host whose only
+GPU is its boot GPU cannot serve a GPU guest however its operator has prepared it.
+Both are fixed together, so the default protects the boot GPU reliably and only an
+operator can lift it.
 
-A CPU shape is priced by the flat tiers, as D7 states.
+- **Detection.** Whether a candidate is the boot GPU is read from that candidate's own
+  sysfs `boot_vga` flag, the kernel's authoritative answer, rather than from a parse
+  across `lspci` fields. Every task of the create that excludes or refuses the boot GPU
+  uses that one test.
+- **The default.** Without the opt-in, the boot GPU is never selected, whatever the
+  capability inventory lists.
+- **The opt-in.** A pool's provider configuration may set `vm_passthrough_boot_gpu:
+  true` in its `extra_vars`; absent, it is false. Only an operator writes provider
+  configuration. No job parameter carries it, and the fulfillment plan already refuses
+  `extra_vars` that would override a job's reserved variables, so neither a buyer's
+  terms nor a storefront's request can set it.
+- **What it permits, judged now.** With it set, the boot GPU is eligible only when all
+  three hold at the moment of selection:
+  - the host's GPU capability inventory lists it as available for passthrough;
+  - the kernel reports it bound to the passthrough driver, `vfio-pci`, now, read from
+    the device's own sysfs driver link. The inventory is a file written earlier and
+    can be stale after an operator returns the GPU to its host driver, so it is never
+    taken alone;
+  - no defined guest has it attached.
 
-Tests that pin the old assumption change with the code. Among them are the compute
-schema's required-field test, the VM schema tests, and the reconciler derivation case
-for a member without GPUs, which keeps its default-generation meaning. No end-to-end
-lane provisions a CPU-only VM. Its system evidence is the live VM lane's qualification,
-kept apart from mock lanes.
+  When the opt-in is set and the inventory lists the boot GPU but the kernel reports
+  another driver, or none, the boot GPU is not eligible, and a create left with no
+  eligible GPU fails before defining a domain, as a create with no available GPU does
+  today. The recipe never binds or unbinds a device itself. The selector's choice
+  among eligible GPUs, the least used, is unchanged.
+- **A supplied device.** A `vm_gpu_device` a job supplies is still replaced by the
+  selector's choice, as today; on a host whose one eligible GPU is the boot GPU, that
+  choice is it.
 
-**The guest recipe.** An `aarch64` host gets an `aarch64` cloud image, pinned to a dated
-release by checksum, booted on the `virt` machine under UEFI. The architecture is the
-host's own, read by the playbook. Nothing is configured per pool. The host
-prerequisites are installed by an operator, not by a playbook:
+Preparing a host for this — moving its console off the GPU, binding the GPU for
+passthrough, and restoring both afterwards — is an operator procedure, reviewed before
+any physical work. This change neither performs nor documents a host's particular
+procedure.
 
-- an `aarch64` QEMU system emulator with KVM;
-- the UEFI firmware for it;
+Alternatives rejected:
+- *Honour any supplied device.* That widens who can choose a GPU and is not needed: the
+  opt-in makes the boot GPU eligible, and the existing selection picks it.
+- *Drop the boot-GPU exclusion.* A host whose console runs on its GPU would lose it to
+  the first guest.
+- *Repair the `lspci` parse.* A per-candidate sysfs flag answers the one question asked
+  without depending on how another tool orders its fields.
+- *Trust the inventory alone.* It can outlive the binding it recorded, and selecting on
+  it would take a GPU the host is driving.
+
+### D13. A GPU guest's readiness wait is bounded by its pool, and its autostart is the operator's
+
+- **The readiness wait.** A GPU guest installs its driver and reboots before it reports
+  setup complete. The create waits for that, today ten attempts thirty seconds apart.
+  A pool's `extra_vars` may set `vm_setup_wait_attempts` and
+  `vm_setup_wait_interval_seconds`, each a positive integer, defaulting to 10 and 30.
+  A value that is not a positive integer fails the create before any host effect. A
+  wait that runs out fails the create, naming the bound, as it does today; no setting
+  reports a guest ready that has not confirmed its setup. Like the opt-in, these come
+  only from the pool's operator-owned provider configuration.
+- **Autostart.** Every created guest is set to start on host boot. A pool's
+  `extra_vars` may set `vm_autostart: false`, and the create then leaves the guest's
+  autostart off; absent, it is true, as today. Teardown is unaffected either way. A
+  lane whose host passes through its only GPU sets it false, so a guest a teardown has
+  not yet removed cannot reclaim the GPU when the host reboots.
+
+Defaults reproduce today's behaviour exactly, so a pool that sets none of these creates
+guests as before. Both are subsystem behaviour, stated as a requirement in the
+`physical-provisioning` delta, "A GPU guest's readiness wait and autostart are set by
+its pool's operator", not only operator documentation.
+
+### D14. The real-host bare-metal scenario drives the buyer commands as they ship
+
+`e2e_bare_metal_deal` is the repository's scripted path to the live bare-metal lane's
+evidence. As written it cannot run (`reviews/03-implementation-external.md`, F3). It is
+corrected, as test code only, before that lane runs:
+
+- **The commands.** `market bare-metal result`, `access`, and `teardown` each take
+  `--run-id <id>`, the id `buy` prints and records, and print JSON with no flag. They
+  take no `--from` and no `--json`, and `teardown` has no `request` or `status`
+  subcommand.
+- **Teardown is one idempotent command.** Its first call asks the site to end the lease
+  and answers the lifecycle's `state`, `terminating`. Each later call re-reads the
+  lifecycle and answers its state as provisioning reports it. `released` is the only
+  terminal success; the storefront records it only on the site's capacity-released
+  callback. `teardown_failed` is a failure. The scenario repeats `teardown --run-id`
+  until `released`, failing at once on `teardown_failed` with the state and its
+  `failure_reason`, and failing when its bounded wait runs out with the last state. It
+  reads `state`, and the configurable terminal status setting is removed, since the
+  terminal state is the storefront's, not the scenario's.
+- **The run id.** The harness's run-id resolver recognizes `--run-id <id>` and
+  `--run-id=<id>`, and `--from=<id>` beside `--from <id>`, so a command reading a run
+  is bound to it.
+- **Fresh SSH.** Every access attempt is a new SSH process that reads no configuration
+  file (`-F none`) and shares no connection (`ControlMaster=no`, `ControlPath=none`),
+  offers only the role's key, and allows public-key authentication alone. It checks
+  the host's key strictly against a known-hosts file the operator supplies with the
+  role's inputs; the scenario skips without one, as it does without the key. An
+  attempt succeeds only by exiting 0 with the expected output. Revocation is proven
+  only by an authentication refusal from that pinned host: SSH exiting 255 with
+  "Permission denied" for the public key. Any other failure — a refused or timed-out
+  connection, an unreachable host, or a host-key mismatch — fails the scenario, never
+  counted as revocation.
+- **No new framework.** The scenario keeps the installed `market` command, the
+  harness's buyer CLI, and the run log, and adds only what these corrections need.
+
+The scenario stays in no lane. Its regression tests are at the lowest level that can
+prove each correction, in `e2e-tests`' unit suite: the real Typer parser of the
+installed bare-metal commands reading each argument list the scenario builds, the
+resolver, the teardown wait over a scripted sequence of answers, and the SSH argument
+list and its outcome classification. None of them runs a purchase. The scenario
+itself runs only in an authorized live run, on the round's validated candidate.
+
+## The x86-64 GPU guest
+
+The recipe changes are D9, D11, D12, and D13, and nothing else. Mock lanes run no
+playbook, so no mock scenario's result is evidence for any of them. Its host prerequisites
+are installed by an operator, not by a playbook:
+
+- an x86-64 QEMU system emulator with KVM;
+- UEFI firmware for it;
 - libvirt and its client;
 - `virt-install`;
 - an ISO image writer;
-- the `default` libvirt network.
+- the `default` libvirt network;
+- for a GPU guest, the host's GPU capability inventory, listing the GPU as available for
+  passthrough once it is bound for it.
 
 The host-setup playbook (`playbooks/host-kit/vm-setup.yaml`) is never run on a host whose
 management access must be preserved. It enables a default-deny firewall, adds bans,
 edits SSH configuration and the boot loader, and reboots unconditionally. The VM README
 says so beside the prerequisites.
 
-**Live VM qualification is outside this change's sections**, and gated separately:
+The guest is reached through the recipe's existing access paths, a relay or a forwarded
+port. This change adds no networking, and which path a lane uses is operational.
 
-- host package installation;
-- a test-mode purchase under pinned VM terms (D8);
-- proof that a real guest booted, by hypervisor identity and guest architecture;
-- buyer SSH into the guest;
-- teardown, refused access afterwards, and restored capacity;
-- the lane conditions (D10).
+## Live qualification
 
-A blocked lane is recorded as blocked, never as passed by a mock lane.
+The two live lanes are outside this change's sections and gated separately. Each is a
+test-mode purchase through the buyer commands, under its own spending cap and terms,
+on its own physical host, and the two may run in parallel (D10). A blocked lane is
+recorded as blocked, never as passed by a mock lane, a container, or a guest without
+the GPU.
+
+- **Bare metal.** The normal buyer identity buys the whole machine, recovers the run
+  through `access`, and connects over SSH on the tenant route. As the tenant it runs a
+  bounded computation on the GPU and checks its result; a driver listing the GPU is
+  not qualification. Teardown reaches `released`, a fresh SSH attempt is refused by
+  authentication, and the machine's capacity is restored. `e2e_bare_metal_deal` (D14)
+  is the scripted path; the GPU computation is the operator's check on the delivered
+  access, with no new API.
+- **VM.** A GPU guest is created on the x86-64 host from the pinned image (D11), its GPU
+  passed through, by the boot-GPU opt-in where that GPU is the host's only one (D12),
+  under a readiness wait and autostart the pool sets (D13). The buyer connects over
+  SSH, runs a bounded computation on the GPU inside the guest, and checks its result.
+  The normal release tears the guest down, removing only its own artifacts (D9); a
+  fresh SSH attempt is refused; the GPU returns to the host's driver baseline; and the
+  capacity is restored. Preparing the host's GPU and restoring it are operator
+  procedures, reviewed before physical work.
 
 ## Coordination with `resolve-compute-family-findings`
 
@@ -964,14 +1115,16 @@ and the plan's remaining sections carry its corrections in `tasks.md`:
 - the VM codec tests, moved unchanged to the VM adapter (Section 5);
 - the scenario rules, now built as typed `MockRuleCreate` models (Section 5);
 - the terminal-state sets, which no longer hold `provisioning_failed` (Section 8);
-- the dead administrator surfaces removed beside the reservation response
-  (Section 12).
+- the dead administrator surfaces removed from the VM storefront's administrator
+  controller. The reservation response's `gpu_count`, which D7's slice would have
+  changed there, is no longer this change's, so this change edits nothing in that
+  controller.
 
 The site's reservation states also changed under D10. The provisioning service
 migrates the retired `provisioning` state to `unmanaged` and `provisioning_failed` to
 `force_released`. The states that hold capacity are therefore `reserved`, `leased`,
 `releasing`, `release_failed`, and `unmanaged`, and D10's read-backs in the runbook use
-those (Section 14.9).
+those (the closeout's promotion).
 
 ## Compatibility, migration, and rollback
 
@@ -983,8 +1136,6 @@ those (Section 14.9).
 - **Wire.**
   - The fulfillment status and result reads are unchanged in shape. A compensated
     aggregate reads `torn_down` with `failure_reason` `create_compensation`.
-  - The VM administrator reservation response's `gpu_count` becomes optional, in the
-    server model and the storefront client's.
 - **Rollback.**
   - No downgrade of `ssh` connections to version 1 is provided or qualified (D3).
   - An older service treats a compensating teardown already recorded as an ordinary
@@ -992,9 +1143,11 @@ those (Section 14.9).
     `provider_reported_failure`, so an in-flight compensation completes and is still
     proven by `torn_down`, without its marker.
   - A `failed` aggregate not yet compensated is left for an operator, as before.
-- **Packaging.** Each changed package bumps its minor version. Dependants' pins are
-  updated, and the locks are refreshed with `make lock` under the repository's uv
-  minimum.
+- **Packaging.** Each changed package bumps its minor version once, against its
+  version on `dev`. Dependants' floors rise only where they use the new behaviour, and
+  the locks are refreshed with `make lock` under the repository's uv minimum. The VM
+  and bare-metal roles ship in no Python package, so a role-only section bumps
+  nothing.
 
 ## Implementation cadence
 
@@ -1009,34 +1162,43 @@ validated before the next starts.
   - the run-log round-trip test (D5).
 
   The payments upgrade is qualified by rebuilding environments, with no code.
-- **Round 2:** compensation of a failed dispatched create (D4): the fulfillment kit's
-  operation and marker, the compute-owned seam and release paths, the convergence
-  write, the VM resume reader, and the idempotent bare-metal reclaim.
-- **Round 3:** the CPU-only VM slice (D7), including the administrator reservation
-  response; the aarch64 guest recipe; and the VM teardown repairs (D9).
+- **Round 2, the preflight candidate:** compensation of a failed dispatched create
+  (D4) — the fulfillment kit's operation and marker, the compute-owned seam and
+  release paths, the convergence write, the VM resume reader, and the idempotent
+  bare-metal reclaim — then the real-host bare-metal scenario's corrections (D14),
+  the pinned x86-64 image (D11), the VM teardown repairs (D9), and the GPU recipe
+  prerequisites (D12, D13).
 - **Closeout.**
+
+Round 2 was planned as D4 alone, with a Round 3 for the CPU-only slice and an
+`aarch64` recipe. The scope revision replaced Round 3's content and folded it, with
+D14, into Round 2, so the round's sections are 7 to 14 and one frozen candidate
+carries both lanes' preflight work. Both live lanes then run, in parallel, on that one
+validated candidate; neither runs on a partial or unreviewed one, and a live run never
+uses a checkout or environment that is being changed.
 
 Round 1's merge of `dev`, between Sections 4 and 5, was resolved in a session of its
 own, by the same role. The writer session that had implemented Sections 2 to 4 could
 not also hold the full read of the guidance that the merge requires. Its sections
 stay as they were recorded. Section 5 continues from the merge.
 
-From that merge on, the owner set the round's test cadence:
+From that merge on, the owner set the test cadence, per frozen round:
 - Focused suites and packaging gate each intermediate commit, sections and merges
-  alike.
-- One full `make test` and one independent implementation review run on each frozen
-  round candidate, Round 1's after Sections 5 and 6.
-- A passing result is reused while its candidate is unchanged.
-- Validation and the live lanes remain required.
+  alike. No intermediate commit owes the full suite, a review, or validation.
+- Once a round's last section is committed, its candidate is frozen. One full
+  `make test`, one independent implementation review, and one validation (local,
+  Helm, and the pipeline) run on that frozen candidate. Round 1's ran after Sections
+  5 and 6; Round 2's run after Section 14, before any live purchase.
+- A passing result is reused while its candidate is unchanged; a fix commit makes a
+  new candidate.
+- The live lanes remain required, and each runs only on a validated candidate.
 
 ## Open questions
 
-- **D7's resource type and registry advisory.** Both stay with
-  `gpu-optional-compute-shapes`. Keeping `compute.gpu` for a declaration without GPUs,
-  and the filter specification's advisory `required` list, are its decisions. This
-  change makes neither, and depends on neither.
-
-D10 is decided above. Its operational conditions are live read-backs, not open design.
+None. D7's open items, the resource type of a declaration without GPUs and the
+registry filter's advisory `required` list, returned with it to
+`gpu-optional-compute-shapes`. D10 is decided above; its operational conditions are
+live read-backs, not open design.
 
 ## Design promotion record
 
@@ -1047,14 +1209,18 @@ closeout, under the heading named.
 |---|---|
 | D1 fact reading, block boundaries, and linkage | `openspec/specs/physical-provisioning/spec.md` ("A create succeeds only with readable delivery evidence", and "A bare-metal reclaim's printed fact is a diagnostic" for the reclaim's result and the job status's authority over teardown, by the archive); rationale in `openspec/specs/physical-provisioning/architecture.md` under "Durable jobs, transient workers" |
 | D2 mocks print the shipped form, rendered for the job, and pipeline scenarios use it | `docs/development/TESTING.md` under "4. System Integration Tests (End-to-End)", beside its paragraph on the compute lanes' mock profile |
-| D3 tenant-facing port | `openspec/specs/physical-provisioning/spec.md` ("The tenant-facing host address falls back to the connection address", for the fallback and the delivery endpoint, and "Host registry records the connection port", for the INI `public_port=` rule, rendering, and the record stored without the field; both by the archive); `openspec/specs/physical-provisioning/architecture.md` under "The host registry owns the connection"; `docs/development/DEPLOYMENT_AND_CONFIG.md` under "Definition documents", in its host-inventory paragraph (`public_port=`; every `ssh` host connection, through the API or an inventory, at version 2; and a host stored at version 1 moved forward by an update or an import, never on its own); `ssh` served at version 2 alone, other versions refused, and a re-registration keeping a protected key: `openspec/specs/physical-provisioning/spec.md` ("Host connections are typed by their implementation's codec", by the archive) and `openspec/specs/physical-provisioning/architecture.md` under "The host registry owns the connection". `docs/development/VALIDATION_RUNBOOK.md`'s host requests state version 2 already (task 3.11). `docs/development/RELEASING.md` is unchanged |
+| D3 tenant-facing port | `openspec/specs/physical-provisioning/spec.md` ("The tenant-facing host address falls back to the connection address", for the fallback and the delivery endpoint, and "Host registry records the connection port", for the INI `public_port=` rule, rendering, and the record stored without the field; both by the archive); `openspec/specs/physical-provisioning/architecture.md` under "The host registry owns the connection"; `docs/development/DEPLOYMENT_AND_CONFIG.md` under "Definition documents", in its host-inventory paragraph (`public_port=`; every `ssh` host connection, through the API or an inventory, at version 2; and a host stored at version 1 moved forward by an update or an import, never on its own); `ssh` served at version 2 alone, other versions refused, and a re-registration keeping a protected key: `openspec/specs/physical-provisioning/spec.md` ("Host connections are typed by their implementation's codec", by the archive) and `openspec/specs/physical-provisioning/architecture.md` under "The host registry owns the connection". `docs/development/VALIDATION_RUNBOOK.md`'s host requests state version 2 already (task 3.11). The bare-metal operator's route: `docs/bare-metal-seller-quickstart.md` under "Define the selected site", whose inventory example gains `public_port=` and whose sentence on `public_host` says the buyer's endpoint is the host record's `public_host` and `public_port`, each falling back to the connection's. The VM operator's: `docs/seller-quickstart.md` under "4. Prepare your KVM hosts", step 2, which says a VM guest's port is its forwarded or relay port, never the host's `public_port`. `docs/development/RELEASING.md` is unchanged |
 | D4 compensating teardown, its marker, and the compute seam | `openspec/specs/fulfillment/spec.md` and `openspec/specs/physical-provisioning/spec.md` (by the archive); `openspec/specs/fulfillment/architecture.md` under "Durable persistence and recovery"; `openspec/specs/physical-provisioning/architecture.md` under "Proof-driven release"; `docs/development/ARCHITECTURE.md` under "Release", whose table's `failed` row splits into compensable and not |
 | D5 run-log round trip | None: a test that qualifies the producer's existing form. No behaviour changes |
 | D6 an exhausted teardown job is not re-run | `openspec/specs/physical-provisioning/architecture.md` under "Proof-driven release", whose `teardown_failed` requeue sentence is corrected |
-| D7 CPU-only VM shapes and flat-tier pricing | `openspec/specs/market-composition/spec.md` ("The compute family shares one capability schema", by the archive); `openspec/specs/storefront-publication/spec.md` ("Every VM listing is a listing shape", "A listing's published shape comes from its source declaration", by the archive); `openspec/specs/storefront-publication/architecture.md` under "Listing shapes and the storefront's authority" and "Shape pricing"; `docs/development/DEPLOYMENT_AND_CONFIG.md` under "Storefront listing shapes and pool overrides", whose shape-constraints bullet says `gpu.count` and `gpu.model` are required |
-| D7 guest recipe and host prerequisites | `openspec/specs/physical-provisioning/spec.md` ("A VM guest matches its host's architecture", by the archive); `domains/vms/provisioning/iac/README.md` under "Prerequisites"; `docs/seller-quickstart.md` under "6. Live KVM provisioning" |
+| D7, withdrawn | None. Nothing was implemented, its two deltas are removed, and its slice is `gpu-optional-compute-shapes`'s again, recorded in that change's proposal and index row |
 | D8 VM lane terms | None: operational configuration, set before a live purchase |
 | D9 VM teardown | `openspec/specs/physical-provisioning/spec.md` ("A VM teardown removes only what its guest created", by the archive) |
-| D10 sequential lanes, pause, drain conditions, and the pause's precondition | `docs/development/VALIDATION_RUNBOOK.md`, a new generic section on running two lanes against one machine in sequence: freeze, pause, read-backs in the site's own states, full projection availability, and the precondition that a refresh or reopen under the same identity keeps the pause; `docs/development/ROADMAP.md` "Payment qualification boundaries", for the pause's limits and coverage gaps |
-| Roadmap currency | `docs/development/ROADMAP.md` "Goal 1 — Consolidate physical-resource authority in the provisioning service" (the real runner's evidence row) and "Goal 2 — Negotiate full compute capability, not GPU count alone" (VM shapes stated without GPUs) |
-| Campaign index currency | `openspec/changes/README.md`: this change's row and the dependency graph line to `gpu-optional-compute-shapes` |
+| D10 lanes on separate machines in parallel; on a shared machine, sequential lanes, pause, drain conditions, and the pause's precondition | `docs/development/VALIDATION_RUNBOOK.md`, a new generic section on running live lanes: lanes on separate machines run in parallel while source, build, and environment changes stay serialized; lanes sharing a machine run in sequence under the freeze, the pause, read-backs in the site's own states, full projection availability, and the precondition that a refresh or reopen under the same identity keeps the pause; `docs/development/ROADMAP.md` "Payment qualification boundaries", for the pause's limits and coverage gaps |
+| D11 a pinned, verified x86-64 guest image | `openspec/specs/physical-provisioning/spec.md` ("A VM guest is created from a pinned, verified image", by the archive); `domains/vms/provisioning/iac/README.md` under "Prerequisites", for the x86-64 host prerequisites, the `vm-setup.yaml` warning, and how an operator moves the pin; `docs/seller-quickstart.md` under "4. Prepare your KVM hosts", step 3, for the host prerequisites |
+| D12 boot-GPU detection, the opt-in, and the live passthrough-binding check | `openspec/specs/physical-provisioning/spec.md` ("A host's boot GPU is passed through only by an operator's opt-in", by the archive); `domains/vms/provisioning/iac/README.md` under "VM Management Operations (vm-management role)", beside the passthrough variables, including that the inventory alone never makes a GPU eligible |
+| D13 the readiness wait and autostart | `openspec/specs/physical-provisioning/spec.md` ("A GPU guest's readiness wait and autostart are set by its pool's operator", by the archive); `domains/vms/provisioning/iac/README.md` under "VM Management Operations (vm-management role)", beside the passthrough variables: the three `extra_vars`, their defaults, and why a host passing through its only GPU sets `vm_autostart` false |
+| D14 the real-host bare-metal scenario | `docs/bare-metal-seller-quickstart.md` under "Release-qualified deal evidence": the role inputs, the pinned known-hosts file among them, `--run-id`, teardown to `released`, and revocation proven only by an authentication refusal. `docs/development/TESTING.md` is unchanged: its sentence on `e2e_bare_metal_deal` stays true |
+| Live qualification of both lanes | None: external evidence, recorded at closeout as live evidence or named blockers (`tasks.md`, the closeout's end-to-end part) |
+| Roadmap currency | `docs/development/ROADMAP.md` "Goal 1 — Consolidate physical-resource authority in the provisioning service" (the real runner's evidence row) and "Payment qualification boundaries". Goal 2 is unchanged: this change no longer sells VM shapes without GPUs |
+| Campaign index currency | `openspec/changes/README.md`: this change's row. The dependency line to `gpu-optional-compute-shapes` and that change's `Depends on` entry were removed with D7's withdrawal |

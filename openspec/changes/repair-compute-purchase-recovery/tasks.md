@@ -34,19 +34,24 @@ Its verification then runs `make check-packaging`, which includes
 
 No output, identifier, address, or key from a real host or purchase enters a test.
 
-**Test cadence (owner's decision, after Section 4).** For the rest of this change:
+**Test cadence (owner's decision, after Section 4), per frozen round.** For the rest
+of this change:
 - Focused suites and packaging gate every intermediate commit, whether a section or a
-  merge of `dev`.
-- The full `make test` and one independent implementation review run once per frozen
-  round candidate. Round 1 runs them after Sections 5 and 6, and they cover the merge.
+  merge of `dev`. No intermediate commit owes the full suite, a review, or validation.
+- Once a round's last section is committed, its candidate is frozen. The full
+  `make test`, one independent implementation review, and one validation run once on
+  that frozen candidate. Round 1 ran them after Sections 5 and 6, covering the merge.
+  Round 2, Sections 7 to 14, is one preflight round: its candidate freezes after
+  Section 14, and both live lanes run on that one validated candidate
+  (`design.md`, "Implementation cadence").
 - A passing result is reused while its candidate is unchanged.
-- Validation, the live lanes, and the owner's approval before merging to `dev` are
-  unchanged.
+- The live lanes, each on a validated candidate, and the owner's approval before
+  merging to `dev` are unchanged.
 
-**End-to-end evidence.** Validation runs the Helm checks and the pipeline on every
-commit. Each section names the scenarios (pytest markers in `e2e-tests/`) that
-exercise it, or says that none does. No section owes evidence from a CI workflow that
-only a push produces.
+**End-to-end evidence.** Validation runs the Helm checks and the pipeline on each
+frozen round candidate. Each section names the scenarios (pytest markers in
+`e2e-tests/`) that exercise it, or says that none does. No section owes evidence from
+a CI workflow that only a push produces.
 
 ## 1. Design
 
@@ -70,6 +75,14 @@ only a push produces.
       phase from the legend's list. It passed when this plan was written. It reads
       no `Notes` text and no proposal, so the proposal's record was checked by
       reading it.
+
+      **Correction after the scope revision of 2026-10-29.** The owner withdrew D7
+      (`design.md`, "Scope revision", D7) before any of its slice was implemented.
+      The split this task confirmed is undone: `gpu-optional-compute-shapes` owns
+      its whole scope again, its proposal no longer records the slice as delivered
+      here, and its index row no longer names this change in `Depends on`. The
+      dependency graph lines to it are removed. This task stays checked as the
+      record of what was confirmed then.
 
 ## 2. Read a printed fact in either form, for the job's action
 
@@ -1414,6 +1427,9 @@ it.
         `--run-id` and no `--json`, and refuse those options. This is left as it is:
         no lane runs it, and fixing it is outside this section. The live
         bare-metal lane uses `--run-id`.
+
+        Correction: the Round 1 review's F3 was accepted, and Section 11 corrects
+        the scenario before the live bare-metal lane runs (`design.md`, D14).
       - Owed by validation: none. No workflow that only a push triggers is owed.
 
       **Coverage classification correction.** The new case exercises the buyer
@@ -2097,208 +2113,296 @@ reclaim tolerates an account its grant never created". Files:
         still owes a real reclaim of an account a failed grant never created, and
         one of a present account under the configured policy.
 
-## 11. A compute shape need not state a GPU
+        Correction after the scope revision: Round 2 also includes Sections 11 to
+        14, so its candidate freezes after Section 14, not after this section.
 
-Delivers D7's schema and VM vocabulary, for the delta requirement "The compute family
-shares one capability schema". Files:
-- `domains/compute/src/arkhai_compute/capability_schema.py`
-- `domains/compute/tests/test_capability_schema.py`
-- `domains/vms/domain/src/arkhai_vms/schema.py`, `capability_shapes.py`, and their
-  tests
-- `domains/vms/listings/src/arkhai_vms_listings/`: models, resources, pricing, and
-  `listing_shapes.py`
+## 11. The real-host bare-metal scenario drives the buyer commands as they ship
 
-- [ ] 11.1 Make `gpu.count` and `gpu.model` not required. The VM shape rule refuses a
-      `gpu` family that names only one of them. Bare metal's own rules are
-      unchanged, and its tests prove it still refuses a shape without `gpu`.
-- [ ] 11.2 Make the listing models and accessors tolerate a missing GPU:
-      - `ComputeResource`'s GPU fields become optional;
-      - compute and token resources are told apart by the token resource's fields,
-        and `resource_is_compute` uses the same test;
-      - `VmListing` requires both GPU fields or neither;
-      - `ResolvedShape`'s GPU accessors tolerate absence.
-- [ ] 11.3 Unit tests:
-      - flattening, unflattening, and the digest of a shape without `gpu`;
-      - a half-stated `gpu` refused;
-      - a CPU listing parsed as compute;
-      - a token listing still parsed as tokens;
-      - the bare-metal refusal kept.
-- [ ] 11.4 Verification:
-      - `make -C domains/compute test` (unit);
-      - `make -C domains/vms/domain test` (unit);
-      - `make -C domains/vms/storefront test-unit`, where the listings package's
-        tests run;
+**Replanned against the scope revision of 2026-10-29** (`design.md`, "Scope revision").
+Sections 11 to 14 below replace the plan's earlier Sections 11 to 13, none of whose tasks
+had been started:
+- the earlier Section 11, "A compute shape need not state a GPU", and Section 12, "The
+  VM storefront publishes, prices, and claims a stated CPU-only shape", are withdrawn
+  with D7, their slice `gpu-optional-compute-shapes`'s again;
+- the earlier Section 13, "An aarch64 guest, and a teardown that removes only its own
+  guest", is split: its `aarch64` recipe is withdrawn, its x86-64 image pin becomes
+  Section 12 (D11), and its teardown repairs Section 13 (D9), unchanged in substance.
+
+Sections 11 to 14 join Sections 7 to 10 in Round 2, one preflight round whose candidate
+freezes after Section 14. The closeout, formerly Section 14, is Section 15.
+
+Delivers D14, the Round 1 review's F3 (`reviews/03-implementation-external.md`), as
+test code only, before the live bare-metal lane runs. Files:
+- `e2e-tests/tests/e2e/roles/scenarios/bare_metal/test_bare_metal_deal.py`
+- a helper the scenario calls for its commands, teardown wait, and SSH, in
+  `e2e-tests/tests/e2e/roles/helpers/`, so the unit suite can test them without
+  collecting the scenario
+- `e2e-tests/tests/e2e/roles/buyer_cli.py` (`BuyerCli._resolve_run_id_from_args`)
+- a new unit module in `e2e-tests/tests/unit/`
+- `e2e-tests/tests/e2e/roles/README.md`, whose paragraph on the scenario's inputs gains
+  the pinned known-hosts file
+
+- [ ] 11.1 The scenario runs `market bare-metal result`, `access`, and `teardown`, each
+      with `--run-id <id>`, the id `buy` printed, and reads each command's JSON
+      output, which needs no flag. No `--from`, no `--json`, and no `teardown request`
+      or `teardown status` remain. Each argument list is built by one helper function
+      per command, so the unit tests read exactly what the scenario runs. The run-id
+      resolver recognizes `--run-id <id>`, `--run-id=<id>`, and `--from=<id>`, beside
+      the forms it reads today.
+- [ ] 11.2 Teardown repeats `teardown --run-id` and reads its `state`:
+      - `released` ends the wait in success;
+      - `teardown_failed` fails at once, naming the state and its `failure_reason`;
+      - any other state continues, at `POLL_INTERVAL_SECONDS`, until
+        `TEARDOWN_TIMEOUT_SECONDS`, after which it fails naming the last state.
+
+      The command's own errors fail the scenario as they do today. The
+      `TERMINAL_TEARDOWN_STATUS` setting is removed. The wait is one function taking
+      the command runner and a clock, so its unit test needs no sleep.
+- [ ] 11.3 Every access attempt is a fresh SSH process:
+      - `-F none`, `ControlMaster=no`, and `ControlPath=none`;
+      - `BatchMode=yes`, `IdentitiesOnly=yes`, `IdentityAgent=none`,
+        `PreferredAuthentications=publickey`, `PasswordAuthentication=no`, and
+        `KbdInteractiveAuthentication=no`, with the role's key;
+      - `StrictHostKeyChecking=yes` against a known-hosts file named by a new role
+        input, `ARKHAI_E2E_BARE_METAL_KNOWN_HOSTS_FILE`, checked before any market
+        effect; the scenario skips without it, as it does without the key.
+
+      One classifier reads each attempt: success is exit 0 with the expected output;
+      revoked is exit 255 with "Permission denied" for the public key; anything else
+      is an error, and the scenario fails rather than counting it as revocation.
+- [ ] 11.4 Unit tests, in `e2e-tests/tests/unit/`:
+      - each command's argument list parses under the installed bare-metal buyer's
+        own Typer command, resolved to its subcommand and parsed without running it,
+        and the earlier `--from`, `--json`, and `teardown request` forms are refused
+        by the same parser;
+      - the run-id resolver, for `--run-id <id>`, `--run-id=<id>`, `--from <id>`,
+        `--from=<id>`, and no run;
+      - the teardown wait over scripted answers: `terminating`, then a teardown
+        state, then `released`; `teardown_failed`; and a timeout;
+      - the SSH argument list carries every option above, and the classifier on an
+        exit 0 with and without the marker, an exit 255 refusal, and a refused
+        connection, a timeout, a host-key mismatch, and an unreachable host, none of
+        which is revocation.
+
+      Their level is unit: the scenario's own helpers and the installed command's
+      parser, with no stack, network, or purchase.
+- [ ] 11.5 Verification:
+      - `make -C e2e-tests test-unit` (unit);
       - `make check-packaging`.
 
-      End-to-end: `e2e_listing_shapes` re-runs its GPU shapes over the changed
-      schema.
+      End-to-end: none. `e2e_bare_metal_deal` is in no lane and is not run here. It
+      runs only in an authorized live run on Round 2's validated candidate, as the
+      live bare-metal lane's scripted path (`design.md`, "Live qualification"). No
+      package version changes: `e2e-tests` is a tooling project. Owed by
+      validation: none.
 
-## 12. The VM storefront publishes, prices, and claims a stated CPU-only shape
+## 12. An x86-64 guest is created from a pinned, verified image
 
-Delivers D7's storefront half ("CPU-only VM shapes"), for the delta requirements
-"Every VM listing is a listing shape" and "A listing's published shape comes from its
-source declaration". Files:
-- `domains/vms/listings/src/arkhai_vms_listings/reconciler.py`
-- `domains/vms/settlement/src/arkhai_vms_settlement/compute_lease.py`
-- `domains/vms/storefront/src/market_storefront/controllers/admin_controller.py` (the
-  reservation response's `gpu_count`)
-- `domains/vms/storefront/src/market_storefront/models/capacity_admin_models.py`
-- `core/storefront-client/src/storefront_client/models.py`
-  (`ReserveCapacityResponse.gpu_count`)
-- `domains/vms/storefront/tests/integration/test_reconciler_derivation.py` and
-  `test_admin_api.py`
-- `kit/site/tests/integration/test_ledger.py` (test only)
+Delivers D11, for the delta requirement "A VM guest is created from a pinned, verified
+image". Files:
+- `domains/vms/provisioning/iac/ansible/roles/vm-management/tasks/vm-create.yml` (the
+  scratch image tasks)
+- the role's `vars/main.yml`, new, for the pin
+- a new role test module in `domains/vms/provisioning/iac/tests/`
 
-The administrator controller is also in `resolve-compute-family-findings`'s plan
-(`_INTERRUPTIBLE_HELD_STATES`). This section edits only the reservation response.
+- [ ] 12.1 The scratch image is one dated release of the Ubuntu Noble x86-64 cloud
+      image:
+      - the pin, the release's dated URL and the SHA-256 its published checksum list
+        gives for the image, is in the role's `vars/main.yml`. Record in this
+        section's notes which release was pinned and that its signed checksum list
+        was verified when the digest was taken;
+      - the image is stored under a name carrying the release;
+      - its SHA-256 is verified before it backs any disk, after a download and when
+        the file is already on the host, and a mismatch fails the create before any
+        disk or domain is defined;
+      - before any host effect, the create reads the target's machine architecture
+        and fails, naming it, on any other than `x86_64`.
 
-**Correction after merging `dev`.** `resolve-compute-family-findings` landed first.
-Its edits to these files:
-- **The controller and `capacity_admin_models.py`.** They lost dead surfaces: the
-  fulfillment, usage, and release event routes and their request models, and a
-  duplicate set of pool-override routes.
-- **`_INTERRUPTIBLE_HELD_STATES`.** It is now `reserved`, `leased`, and `releasing`.
+      Golden images are unchanged.
+- [ ] 12.2 Tests:
+      - **Role structure (unit):** the URL is dated and never `current`; the
+        checksum is stated; verification precedes the `qemu-img create` that uses
+        the image as a backing file, on both the download and the existing-file
+        paths; the architecture check precedes the create's first task that changes
+        the host.
+      - **Behaviour (unit, through `shell_harness`):** wherever the verification or
+        the architecture check is a shell step, it is run with its commands faked: a
+        matching and a mismatching digest, and `x86_64` and another architecture.
+      - `make -C domains/vms/provisioning/iac validate-playbooks`, the playbooks'
+        `--syntax-check`, with the Ansible version recorded.
 
-Neither `ReserveCapacityResponse` changed. `reserve_capacity` still coerces the
-response's `gpu_count` with `or 1`, which 12.2 removes. The files 12.2 names are
-unchanged in their paths.
-
-- [ ] 12.1 Reconciler member usage keeps each member that has a resource type and
-      declared capacity, for stated shapes:
-      - GPU totals are optional, and are reported only for default generation, which
-        is unchanged;
-      - listing reopening and GPU-model ordering tolerate a shape without a model;
-      - the compute lease encoding omits absent GPU fields.
-- [ ] 12.2 The VM administrator reservation response's `gpu_count` becomes optional,
-      in the server model and the storefront client's model:
-      - it is read from the reservation's `dimensions` when they are present, and is
-        absent when they name no `gpu_count`;
-      - it is read from `allocated_gpu_count` only when the reservation has no
-        `dimensions`;
-      - nothing coerces it to one.
-- [ ] 12.3 Update `test_reconciler_derivation.py`'s case for a member without GPUs:
-      it yields nothing under default generation, and serves a stated CPU shape.
-- [ ] 12.4 Library integration in `kit/site`: a claim whose `dimensions` name vCPU,
-      memory, and disk and no `gpu_count` is admitted holding exactly those, with
-      `units` 0 and its `dimensions` authoritative. Its release returns exactly
-      those. Add the case only if `test_ledger.py` does not already prove it, and
-      record which in this section's notes.
-- [ ] 12.5 Application integration, through the storefront's typed client against a
-      site projection:
-      - a pool hint stating `{cpu: {count: 2}, memory: {gib: 2}, storage: {gib: 20}}`,
-        over a member declaring vCPU, RAM, and disk, publishes one listing with no
-        GPU fields;
-      - negotiating it builds a capacity claim requesting exactly those quantities;
-      - per-family rates price it from the flat tiers, and a storefront configuring
-        per-GPU-model terms and rates applies none of them to it;
-      - reserving the CPU-only listing as administrator, through the storefront
-        client's `admin_reserve_capacity`, returns a response with no `gpu_count`.
-- [ ] 12.6 Verification:
-      - `make -C domains/vms/storefront test` (unit and application integration);
-      - `make -C core/storefront-client test` (unit);
-      - `make -C kit/site test` (library integration);
+      Owed outside this section: a real download and a real guest boot are the live
+      VM lane's evidence.
+- [ ] 12.3 Verification:
+      - `make -C domains/vms/provisioning/iac test` (unit);
+      - `make -C domains/vms/provisioning/adapter test` (unit and library
+        integration; its tests read `vm-create.yml`);
       - `make check-packaging`.
 
-      End-to-end:
-      - `e2e_listing_shapes` re-runs for its GPU shapes.
-      - No pipeline lane provisions a CPU-only VM. The live VM lane is the system
-        evidence (`design.md`, "CPU-only VM shapes").
+      End-to-end: the VM mock lanes run no playbook, so the recipe does not reach
+      them. The live VM lane is the system evidence. The role ships in no Python
+      package, so no version changes. Owed by validation: none.
 
-## 13. An aarch64 guest, and a teardown that removes only its own guest
+## 13. A VM teardown removes only its own guest
 
-Delivers D7's guest recipe and D9, for the delta requirements "A VM guest matches its
-host's architecture" and "A VM teardown removes only what its guest created". Files:
-- `domains/vms/provisioning/iac/ansible/roles/vm-management/tasks/`: `vm-create.yml`,
-  `vm-remove.yml` with the cleanup script it generates, and `vm-undefine.yml`
-- new role-structure tests in `domains/vms/provisioning/adapter/tests/unit/`
-- `domains/vms/provisioning/iac/README.md`
+Delivers D9, for the delta requirement "A VM teardown removes only what its guest
+created". It must land before any real guest is created on a lane's host. Files:
+- `domains/vms/provisioning/iac/ansible/roles/vm-management/tasks/vm-create.yml` (the
+  rules a create adds, and the cleanup script it writes)
+- `vm-remove.yml` and, where it removes the same artifacts, `vm-undefine.yml`
+- the role's tests in `domains/vms/provisioning/iac/tests/`, including
+  `test_cleanup_script_relay_teardown.py`'s harness of the cleanup script
 
-- [ ] 13.1 Select the cloud image, machine, and firmware from the target host's
-      architecture:
-      - each architecture's image is pinned to a dated release with its published
-        checksum, and verified before use;
-      - `aarch64` uses `--arch aarch64 --machine virt --boot uefi`;
-      - an architecture with no pinned image fails before any host effect.
-
-      The `x86_64` path keeps its behaviour, except that its image is now pinned and
-      verified.
-- [ ] 13.2 Every firewall and NAT rule a create adds for a guest carries a comment
+- [ ] 13.1 Every firewall and NAT rule a create adds for a guest carries a comment
       naming the guest:
       - the cleanup script removes rules by that exact comment;
       - unmarked rules are removed by the guest's `/32` address, never a prefix;
       - the subnet-wide masquerade rule is left alone.
-- [ ] 13.3 `vm_remove` with no cleanup script:
+- [ ] 13.2 `vm_remove` with no cleanup script:
       - removes what it finds by the guest's name: the domain with its storage and
         firmware variables, the images, the relay proxy block, the DHCP
         reservation, and the marked rules;
       - reports the guest absent only when it finds none of them;
       - fails, naming the artifact, when it finds one it cannot attribute.
-- [ ] 13.4 The VM IaC README lists the host prerequisites (`design.md`, "CPU-only VM
-      shapes"). It warns that `playbooks/host-kit/vm-setup.yaml` must not run on a
-      host whose management access must be preserved.
-- [ ] 13.5 Tests:
-      - **Role-structure unit tests:**
-        - architecture selection;
-        - checksum verification before definition;
-        - the comment on every added rule;
-        - no prefix match in cleanup;
-        - the attribution checks of the missing-script branch.
-      - `ansible-playbook --syntax-check` on the VM operations playbook.
+- [ ] 13.3 Tests:
+      - **Behaviour (unit, through `shell_harness`):** the cleanup script's rule
+        removal, with two guests whose addresses share a prefix, removing only the
+        first guest's rules and never the masquerade rule; and the missing-script
+        branch, where it is shell, finding each artifact, finding none, and finding
+        one it cannot attribute.
+      - **Role structure (unit):** the comment on every rule the create adds; no
+        prefix match in cleanup; the missing-script branch's attribution checks
+        where they are tasks rather than shell.
+      - `make -C domains/vms/provisioning/iac validate-playbooks`.
 
-      Owed outside this section: a real guest boot and teardown on `aarch64` are the
-      live VM lane's evidence.
-- [ ] 13.6 Verification:
-      - `make -C domains/vms/provisioning/adapter test` (unit);
-      - `make -C provisioning/compute/service test`;
+      Owed outside this section: a real partial create's teardown is the live VM
+      lane's evidence.
+- [ ] 13.4 Verification:
+      - `make -C domains/vms/provisioning/iac test` (unit);
+      - `make -C domains/vms/provisioning/adapter test`;
       - `make check-packaging`.
 
-      End-to-end: the VM mock lanes run no playbook, so recipe changes do not reach
-      them. The live VM lane is the system evidence.
+      End-to-end: the VM mock lanes run no playbook. The live VM lane is the system
+      evidence. No version changes. Owed by validation: none.
 
-## 14. Closeout
+## 14. A GPU guest's boot-GPU detection and opt-in, readiness wait, and autostart
+
+Delivers D12 and D13, for the delta requirements "A host's boot GPU is passed through
+only by an operator's opt-in" and "A GPU guest's readiness wait and autostart are set
+by its pool's operator". Files:
+- `domains/vms/provisioning/iac/ansible/roles/vm-management/tasks/vm-create.yml`: the
+  boot-GPU detection, the single-GPU selector, every other task that excludes or
+  refuses the boot GPU, the setup wait, and the autostart task
+- the role's tests in `domains/vms/provisioning/iac/tests/`, beside
+  `test_gpu_attachment_discovery.py`
+- `domains/vms/provisioning/adapter/tests/unit/`, for where the settings come from
+
+- [ ] 14.1 Boot-GPU detection reads each candidate's own sysfs `boot_vga` flag, in place
+      of the `lspci -D -vmm` parse that expects a device's `Slot:` after its `Class:`
+      and so finds none on a real host. Every task that excludes or refuses the boot
+      GPU uses that one test. List those tasks in this section's notes.
+- [ ] 14.2 The opt-in, `vm_passthrough_boot_gpu`, false when absent. Without it the boot
+      GPU is never selected, whatever the inventory lists. With it, the boot GPU is
+      eligible only when, at selection, the capability inventory lists it available,
+      the device's sysfs driver link names `vfio-pci`, and no defined guest has it
+      attached. Another driver, or none, makes it ineligible, and a create left with
+      no eligible GPU fails before defining a domain. Nothing in the role binds or
+      unbinds a device. The selection among eligible GPUs is unchanged.
+- [ ] 14.3 The readiness wait reads `vm_setup_wait_attempts` and
+      `vm_setup_wait_interval_seconds`, defaulting to 10 and 30. A value that is not
+      a positive integer fails the create, naming it, before any host effect, and a
+      wait that runs out fails the create naming the bound, as today.
+- [ ] 14.4 The autostart task runs only when `vm_autostart`, true when absent, is true.
+- [ ] 14.5 Tests:
+      - **Detection and selection (unit, through `shell_harness`):** the selector run
+        with `lspci`, `virsh`, and the device's sysfs files faked. The fake `lspci -D
+        -vmm` prints each record in that format's real field order, `Slot:` before
+        `Class:`, with synthetic devices, documentation-style addresses, and no real
+        model or identifier. Cases:
+        - a host whose only GPU is its boot GPU, listed available by the inventory:
+          excluded without the opt-in — the regression, which the current parse
+          fails;
+        - with the opt-in, bound to `vfio-pci` and unattached: selected;
+        - with the opt-in, the inventory listing it but its driver another, or none:
+          excluded, and the create's no-GPU failure follows — the stale-inventory
+          regression;
+        - with the opt-in, attached to a defined guest: excluded;
+        - a host with a second, non-boot GPU: the other GPU is selected without the
+          opt-in.
+
+        If a sysfs file cannot be faked through the harness, make the path the
+        task reads a variable the test can point at a temporary tree, and record
+        why; prove nothing by structure alone that behaviour can prove.
+      - **Role structure (unit):** every boot-GPU exclusion uses the per-device flag
+        and reads the opt-in; no task binds or unbinds a device; the wait reads its
+        two settings, validates them before the create's first host effect, and
+        keeps its failure; the autostart task's condition.
+      - **The settings' source (unit, VM adapter):** none of the four settings is a
+        job parameter or a fulfillment requirement field, and each reaches the
+        playbook from the pool's `extra_vars` through the fulfillment plan.
+      - `make -C domains/vms/provisioning/iac validate-playbooks`.
+
+      Owed outside this section: a real passthrough of a boot GPU, its readiness on
+      the lane's host, and the GPU's return to the host's driver baseline are the
+      live VM lane's evidence, after the operator's host procedure is reviewed.
+- [ ] 14.6 Verification:
+      - `make -C domains/vms/provisioning/iac test` (unit);
+      - `make -C domains/vms/provisioning/adapter test` (unit and library
+        integration);
+      - `make check-packaging`.
+
+      End-to-end: the VM mock lanes run no playbook, and a mock scenario's result
+      is never evidence for the recipe. The live VM lane is the system evidence. A
+      section changing only the role and tests changes no version. Owed by
+      validation: none.
+
+      This section freezes Round 2's candidate: the round's one full `make test`,
+      one independent implementation review, and one validation follow it, before
+      any live purchase.
+
+## 15. Closeout
 
 The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
 Closeout changes documentation only. A part that would need a code edit returns the
 change to implementation.
 
-- [ ] 14.1 **Comment hygiene.** Run `make check-comment-hygiene`. Any finding, or a
-      comment Sections 2–13 added that still describes history, returns the change
+- [ ] 15.1 **Comment hygiene.** Run `make check-comment-hygiene`. Any finding, or a
+      comment Sections 2–14 added that still describes history, returns the change
       to implementation.
-- [ ] 14.2 **Import placement.** Confirm that every import Sections 2–13 added is at
+- [ ] 15.2 **Import placement.** Confirm that every import Sections 2–14 added is at
       module level, or carries a verified reason to stay local.
-- [ ] 14.3 **Documentation compliance.** Re-check D1–D10 against `openspec/README.md`'s
+- [ ] 15.3 **Documentation compliance.** Re-check D1–D14 against `openspec/README.md`'s
       placement rules and `design.md`'s promotion record.
-- [ ] 14.4 **Narrative compression.** Compress these task notes to final behaviour,
+- [ ] 15.4 **Narrative compression.** Compress these task notes to final behaviour,
       material evidence, deferred work, and destinations.
-- [ ] 14.5 **Roadmap currency**, in `docs/development/ROADMAP.md`:
+- [ ] 15.5 **Roadmap currency**, in `docs/development/ROADMAP.md`:
       - Under "Goal 1 — Consolidate physical-resource authority in the provisioning
         service", the gap row "The real runner reports no structured
         terminal-failure evidence…" notes that successful results are read in
         either callback form. It stays open for failure classification.
-      - Under "Goal 2 — Negotiate full compute capability, not GPU count alone", the
-        current state notes that VM shapes stated without GPUs are sold.
       - Under "Payment qualification boundaries", record the gaps this change leaves
         open:
         - D6's exhausted teardown job;
-        - D10's operational precondition, that a refresh or reopen under the same
-          identity keeps a listing's pause;
+        - where two lanes share a machine, D10's operational precondition, that a
+          refresh or reopen under the same identity keeps a listing's pause;
         - D10's limits: successor listings are created unpaused, no permanent
           requirement states per-listing pause semantics, no test closes a paused
           listing by reconciliation and reopens it, and bare metal has no test of a
           paused listing refusing an opening;
-        - `gpu-optional-compute-shapes`'s remaining scope.
+        - the live lanes' state at closeout, as evidence or as named blockers.
+      - "Goal 2 — Negotiate full compute capability, not GPU count alone" is
+        unchanged: D7 is withdrawn, and `gpu-optional-compute-shapes` owns its scope.
       - Name the update in `design.md`'s promotion record.
-- [ ] 14.6 **Campaign index currency.** Update this change's row in
+- [ ] 15.6 **Campaign index currency.** Update this change's row in
       `openspec/changes/README.md` to `in closeout`, with notes stating what is true
-      at closeout, and keep the dependency graph line to
-      `gpu-optional-compute-shapes`. That row's `Depends on` stays until archive
-      cleanup. Run `make check-change-index`, and name the update in the promotion
-      record.
-- [ ] 14.7 **Packaging.** Run `make check-packaging` and
+      at closeout. Confirm that no dependency line or `Depends on` entry names this
+      change, since D7's were removed with its withdrawal. Run
+      `make check-change-index`, and name the update in the promotion record.
+- [ ] 15.7 **Packaging.** Run `make check-packaging` and
       `make check-architecture-change CHANGE=repair-compute-purchase-recovery`. Run
       `make check-agent-skills` only if the change touched `.agents/`, `.claude/`, or
       `.codex/`; it is not planned to.
-- [ ] 14.8 **End-to-end pipeline.** Record the pipeline run and its result:
+- [ ] 15.8 **End-to-end pipeline.** Record the pipeline run and its result:
       - the bare-metal lane's `e2e_bare_metal_mock_deal` and
         `e2e_bare_metal_payment_deal`;
       - the VM lane's `e2e_deal`, `e2e_deal_buyer_cli`, `e2e_listing_shapes`,
@@ -2306,10 +2410,17 @@ change to implementation.
         default.
 
       Record the live lanes' qualification separately, as live evidence or as named
-      blockers, never as pipeline evidence. The live lanes are the real bare-metal
-      and CPU-only ARM64 VM test purchases, each run under D10's operational
-      conditions.
-- [ ] 14.9 **Promotion**, per `design.md`'s promotion record:
+      blockers, never as pipeline evidence (`design.md`, "Live qualification"):
+      - the bare-metal lane, a whole GPU machine bought through the buyer commands,
+        `e2e_bare_metal_deal` or its commands, a bounded GPU computation by the
+        tenant, teardown to `released`, a fresh SSH refusal, and restored capacity;
+      - the VM lane, a GPU guest on an x86-64 host from the pinned image, a bounded
+        GPU computation inside the guest, the normal release, a fresh SSH refusal,
+        the GPU back at the host's driver baseline, and restored capacity.
+
+      The two run on separate hosts, in parallel; D10's conditions apply only to a
+      lane sharing a machine.
+- [ ] 15.9 **Promotion**, per `design.md`'s promotion record:
       - `docs/development/ARCHITECTURE.md` "Release": the table's `failed` row splits
         into compensable and not.
       - `openspec/specs/physical-provisioning/architecture.md`:
@@ -2324,46 +2435,50 @@ change to implementation.
           and does not re-run it (D6).
       - `openspec/specs/fulfillment/architecture.md` "Durable persistence and
         recovery": the compensating teardown and its marker.
-      - `openspec/specs/storefront-publication/architecture.md` "Listing shapes and
-        the storefront's authority" and "Shape pricing": stated shapes without GPUs,
-        and flat-tier pricing.
       - `docs/development/TESTING.md` "4. System Integration Tests (End-to-End)":
         mock output prints the shipped form for the job, and the VM scenarios use
         the default.
-      - `docs/development/DEPLOYMENT_AND_CONFIG.md`:
-        - "Definition documents", the host-inventory paragraph: `public_port=`;
-          every `ssh` host connection, through the API or an inventory, at version
-          2; and a host stored at version 1 moved forward by an update or an import;
-        - "Storefront listing shapes and pool overrides": the shape-constraints
-          bullet, corrected for VM shapes stated without the `gpu` family.
-      - `domains/vms/provisioning/iac/README.md` "Prerequisites": the aarch64 host
-        prerequisites and the `vm-setup.yaml` warning.
-      - `docs/seller-quickstart.md` "6. Live KVM provisioning": the tenant-facing
-        route and aarch64 hosts.
-      - `docs/development/VALIDATION_RUNBOOK.md`, a new generic section on running two
-        lanes against one machine in sequence (D10):
-        - the freeze and the per-listing pause;
-        - read-backs in the site's states, `reserved`, `provisioning`, `leased`,
-          `releasing`, `release_failed`, and `unmanaged`, with `provisioning_failed`
-          read as terminal;
+      - `docs/development/DEPLOYMENT_AND_CONFIG.md` "Definition documents", the
+        host-inventory paragraph: `public_port=`; every `ssh` host connection,
+        through the API or an inventory, at version 2; and a host stored at version
+        1 moved forward by an update or an import.
+      - `docs/bare-metal-seller-quickstart.md`:
+        - "Define the selected site": the inventory example with `public_port=`, and
+          the sentence on `public_host` rewritten to the buyer's endpoint the host
+          record states, each field falling back to the connection's;
+        - "Release-qualified deal evidence": the scenario's inputs, the pinned
+          known-hosts file among them, `--run-id`, teardown to `released`, and
+          revocation proven only by an authentication refusal.
+      - `docs/seller-quickstart.md` "4. Prepare your KVM hosts": in step 2, that a
+        VM guest's port is its forwarded or relay port, never the host's
+        `public_port`; in step 3, the x86-64 host prerequisites.
+      - `domains/vms/provisioning/iac/README.md`:
+        - "Prerequisites": the x86-64 host prerequisites, how an operator moves the
+          image pin, and the `vm-setup.yaml` warning;
+        - "VM Management Operations (vm-management role)": `vm_passthrough_boot_gpu`,
+          `vm_setup_wait_attempts`, `vm_setup_wait_interval_seconds`, and
+          `vm_autostart`, beside the passthrough variables.
+      - `docs/development/VALIDATION_RUNBOOK.md`, a new generic section on running
+        live lanes (D10):
+        - lanes on separate machines run in parallel, with source, build, and
+          environment changes serialized;
+        - lanes sharing a machine run in sequence, under the freeze and the
+          per-listing pause;
+        - read-backs in the site's held states, `reserved`, `leased`, `releasing`,
+          `release_failed`, and `unmanaged` (`HELD_RESERVATION_STATES`), naming
+          neither retired state;
         - each member's full `available` mapping compared with its `capacity`
           mapping;
         - every accepted deal drained, with no refund taken as proof;
         - the precondition that a refresh or reopen under the same identity keeps
           the pause.
-
-        Correction after merging `dev`: the provisioning service now migrates the
-        retired states. A `provisioning` reservation becomes `unmanaged`, and a
-        `provisioning_failed` one becomes `force_released`. The site's held states
-        are `reserved`, `leased`, `releasing`, `release_failed`, and `unmanaged`
-        (`HELD_RESERVATION_STATES`). The runbook names those, and names neither
-        retired state.
       - `openspec/specs/README.md`: no new capability or companion, so no edit.
         Confirm it.
       - Complete the promotion record.
-- [ ] 14.10 **Documentation citations.** Run
+- [ ] 15.10 **Documentation citations.** Run
       `make check-doc-citations CHANGE=repair-compute-purchase-recovery`, then
       `openspec validate repair-compute-purchase-recovery --strict`.
-- [ ] 14.11 **Archival.** Run `openspec archive repair-compute-purchase-recovery -y`,
-      which merges the deltas into `openspec/specs/`. The deltas were not promoted by
-      hand, so `--skip-specs` is not used.
+- [ ] 15.11 **Archival.** Run `openspec archive repair-compute-purchase-recovery -y`,
+      which merges the `physical-provisioning` and `fulfillment` deltas into
+      `openspec/specs/`. The deltas were not promoted by hand, so `--skip-specs` is
+      not used.
