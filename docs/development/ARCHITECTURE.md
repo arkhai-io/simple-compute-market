@@ -622,8 +622,8 @@ unreadable configured term stops startup instead.
 A pool may legitimately publish nothing — its members declare nothing its shapes
 fit, or nothing its default generates from — provided its operator can easily
 discover why. So every such outcome is reported in the storefront's system status
-rather than left silent: a VM pool that states no shapes and whose members declare
-no GPUs, an unresolvable bare-metal declaration, a candidate with no settlement
+rather than left silent: a VM pool that states no shapes and has enabled members,
+none declaring GPUs, an unresolvable bare-metal declaration, a candidate with no settlement
 option, and an infeasible stated shape each name their site and pool there.
 
 The same test applies to settlement. A candidate left with no settlement option is

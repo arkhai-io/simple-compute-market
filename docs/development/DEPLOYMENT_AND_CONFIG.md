@@ -953,10 +953,10 @@ shapes: for VM, one GPU-only shape per count, per GPU model, generated from the
 members that declare GPUs. A shape need not state GPUs: `{cpu: {count: 8},
 memory: {gib: 32}}` sells a VM without GPUs, on any member with the vCPUs and
 memory free, a GPU host included. The VM default generates no shape from a member
-declaring no GPUs, so a VM pool whose members declare none publishes nothing until
-it states `listing_shapes`, on its hint or a storefront override; the storefront
-reports such a pool once, by site and pool, in system status
-(`publication_derivation`, reason `listing_shapes_required`). A shape is a
+declaring no GPUs, so a VM pool that has enabled members, none declaring GPUs,
+publishes nothing until it states `listing_shapes`, on its hint or a storefront
+override; the storefront reports such a pool once, by site and pool, in system
+status (`publication_derivation`, reason `listing_shapes_required`). A shape is a
 commitment: the reservation holds every quantity it states. A dimension it omits
 is outside the listing's and the reservation's commitment: fulfillment may supply
 it from the pool's configured VM defaults (`default_vm_ram`, `default_vm_vcpus`,

@@ -262,9 +262,9 @@ A machine without GPUs omits `gpu_count` and `gpu_model` from its declaration;
 the two are stated together or not at all. Its pool then states the shapes it
 sells, such as `listing_shapes: {vm: [{cpu: {count: 8}, memory: {gib: 32}}]}`,
 because the VM default generates GPU shapes only: a VM pool that states no
-shapes and whose members declare no GPUs publishes nothing, and the storefront's
-system status names it (`listing_shapes_required`). A stated shape without GPUs
-may also land on a GPU host's spare vCPUs and memory.
+shapes and has enabled members, none declaring GPUs, publishes nothing, and the
+storefront's system status names it (`listing_shapes_required`). A stated shape
+without GPUs may also land on a GPU host's spare vCPUs and memory.
 
 ## 4. Prepare your KVM hosts
 

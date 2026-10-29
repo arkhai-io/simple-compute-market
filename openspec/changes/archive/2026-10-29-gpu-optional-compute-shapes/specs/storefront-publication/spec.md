@@ -13,10 +13,12 @@ declaration that omits the quantity a domain's default shapes are enumerated by 
 GPU count) MUST yield no default shape, and a declaration that declares that quantity as zero
 likewise yields none; neither is reported on its own account. A VM member that declares no
 GPUs remains a member: it is judged for every shape its pool states, like any other member.
-A pool that states no listing shapes and none of whose enabled members declares a positive
-GPU count MUST yield no listing and MUST be reported once in the storefront's system status,
-naming the site and pool and saying that the VM default generates GPU shapes only and that the
-pool must state its listing shapes. A declaration whose quantity is malformed, or a projected
+A pool that states no listing shapes, has at least one enabled member, and none of whose
+enabled members declares a positive GPU count MUST yield no listing and MUST be reported once
+in the storefront's system status, naming the site and pool and saying that the VM default
+generates GPU shapes only and that the pool must state its listing shapes. A pool with no
+enabled member is not reported on this account, since stating shapes would not change what it
+publishes. A declaration whose quantity is malformed, or a projected
 member that does not state its resource kind, MUST be treated as unresolvable and reported:
 it yields no new listing and its existing listings are held. In a fungible pool one
 unresolvable member holds every listing derived from the pool, because which shapes its
@@ -41,8 +43,8 @@ second time in a separate published field.
 
 #### Scenario: A pool whose members declare no GPUs states no shapes
 
-- **WHEN** a pool states no listing shapes and none of its enabled members declares a GPU
-  count
+- **WHEN** a pool states no listing shapes and has enabled members, none of which declares a
+  GPU count
 - **THEN** no VM listing is derived from it, listings previously derived from its default
   shapes close, and system status reports the pool once, saying it must state its listing
   shapes
