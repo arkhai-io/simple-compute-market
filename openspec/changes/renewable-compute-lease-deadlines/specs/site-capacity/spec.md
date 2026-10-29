@@ -22,7 +22,7 @@ On first commit, the site MUST set renew_by_utc to max(committed_at_utc, lease_s
 #### Scenario: The pool was shortened below the accepted deadline
 
 - **WHEN** a deal accepted with an 1800-second deadline is committed after the pool's deadline was lowered to 900, or after the pool stopped enforcing one
-- **THEN** the site refuses the commit without using capacity, and the storefront classifies the refusal as seller failure before dispatch
+- **THEN** the site refuses the commit, the storefront classifies the refusal as seller failure before dispatch with no provisioning issued, and the reservation it already holds is released through the storefront's no-dispatch release path rather than left to its expiry
 
 #### Scenario: A commit is retried after the pool policy changes
 

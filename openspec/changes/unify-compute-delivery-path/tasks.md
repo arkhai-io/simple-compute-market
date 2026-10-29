@@ -236,8 +236,12 @@ pass. New persisted scenarios remain subject to the explicit approval gate above
 - [ ] 4.3 Drive crash/restart at every adjacent delivery checkpoint and every
       external intent/acknowledgement gap with deterministic controls. Drive a crash
       before activation until the site's awaiting-activation expiry, recover and
-      observe physical release plus the journaled exceptional-end dispute filing. Keep
-      authority-application results distinct from local command evidence.
+      observe physical release plus the journaled exceptional-end dispute filing. Drive
+      the site's refusal of a commit for an accepted delivery deadline the pool no longer
+      grants: the seller failure is recorded, no dispatch is issued, the reservation
+      already held is released through the no-dispatch path, and a crash between the
+      refusal and the release's acknowledgement recovers without a second reservation.
+      Keep authority-application results distinct from local command evidence.
 - 4.4 Rate qualification is not this change's: the activate/start/disclose race and
       the post-activation start refusal and never-disclosed recovery are rows 4 and 8
       of `converge-ongoing-compute-leases`' rate-servicing matrix, run there in both

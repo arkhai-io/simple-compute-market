@@ -45,7 +45,9 @@ The names do not imply an active renewal operation: only activation ships here.
   is its ceiling: the site refuses a commit whose accepted deadline exceeds what the
   pool now grants, or that carries one where the pool now enforces none, since the
   seller cannot ask its site for more time than the site gives — a refusal that
-  delivery classifies as seller failure before dispatch, using no capacity. A pool
+  delivery classifies as seller failure before dispatch: no provisioning occurs, and the
+  reservation the storefront already holds is released through the foundation's
+  no-dispatch path (unify D5), not by the site on refusal. A pool
   lengthened after acceptance changes nothing for the deal; a pool shortened below an
   accepted deal's value refuses that deal rather than reclaiming it early, and the
   listing republishes with the new value. A commit carrying no accepted deadline (a
