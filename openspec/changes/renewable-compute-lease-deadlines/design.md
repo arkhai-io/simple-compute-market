@@ -102,7 +102,7 @@ then cannot undo it. No database lock spans a provider call.
 elapsed deadline is allowed while the row remains unclaimed; it is a capacity fact
 and not delivery — the lifecycle classifies a deal whose buyer could not use the
 resource by the accepted deadline as non-delivery whatever the site's phase, and
-starts no billing on it (foundation D8). Refusing it merely
+starts no new billing on it (foundation D8). Refusing it merely
 because a watchdog poll has not happened would turn poll latency into an eviction.
 The agreed end remains an independent bound, so activation never extends service
 past it. On a tie between activation deadline and term end, report ordinary term

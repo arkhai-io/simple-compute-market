@@ -449,7 +449,7 @@ End service MUST fix min(accepted start, failure-observation time) with never-de
 
 ### Requirement: Cause classification is owned by end service
 
-End service MUST classify evidence as lawful (entitled buyer/payee stop, terms/exhaustion, ruling or surrender), seller failure (unentitled withdrawal, provisioning/start failure, activation lapse or established non-delivery), or pending. Non-delivery MUST be established when `available` is not durably recorded by the earlier of the Agreement's term end and `delivery_deadline_seconds` after the later of the commitment instant and `start_utc`, whether or not the term continues and whatever the site's activation phase; end service MUST refuse billing start on such a deal. It MUST correlate site reports with controlling requests. Classification MUST follow verified evidence and entitlement, not arrival order or event kind; admission refusal or a later clock/payee stop MUST NOT erase earlier non-delivery or alone create a penalty.
+End service MUST classify evidence as lawful (entitled buyer/payee stop, terms/exhaustion, ruling or surrender), seller failure (unentitled withdrawal, provisioning/start failure, activation lapse or established non-delivery), or pending. Non-delivery MUST be established when `available` is not durably recorded by the earlier of the Agreement's term end and `delivery_deadline_seconds` after the later of the commitment instant and `start_utc`, whether or not the term continues and whatever the site's activation phase; end service MUST refuse a new billing start on such a deal, and a `start` the payment authority accepted before the deadline MUST stand as history, the deal being seller non-delivery whose remedy is the seller's `exceptional_end` filing and the authority's ruling, not a local reversal. It MUST correlate site reports with controlling requests. Classification MUST follow verified evidence and entitlement, not arrival order or event kind; admission refusal or a later clock/payee stop MUST NOT erase earlier non-delivery or alone create a penalty.
 
 #### Scenario: A site report confirms a lawful end
 
@@ -464,7 +464,12 @@ End service MUST classify evidence as lawful (entitled buyer/payee stop, terms/e
 #### Scenario: The site activates in time but the buyer cannot use the resource by the deadline
 
 - **WHEN** the site activates the lease at 12:29 against a 12:30 deadline and the storefront records `available` only after 12:30, or never
-- **THEN** the deal is seller non-delivery at 12:30, `begin_billing` is refused, no rate part starts, and the seller half files `exceptional_end`; the site's activation is a capacity fact the lifecycle does not treat as delivery
+- **THEN** the deal is seller non-delivery at 12:30 and the seller half files `exceptional_end(at = 12:30)`; a `begin_billing` not yet sent is refused and no new rate part starts; the site's activation is a capacity fact the lifecycle does not treat as delivery
+
+#### Scenario: Billing started seconds before the deadline and availability failed
+
+- **WHEN** the payment authority accepts the payee's `start` at 12:29:58 against a 12:30 deadline and the storefront crashes before recording `available`, recovering at 12:40
+- **THEN** the accepted start stands as history and is not refused after the fact; the deal is seller non-delivery at 12:30, access is never granted, the resource is ended through end service, and the seller half files `exceptional_end(at = 12:30)`, whose standard ruling stops the rate part returned and reverses what it earned since `at`
 
 ### Requirement: Pending correction resolves in the same journal
 
