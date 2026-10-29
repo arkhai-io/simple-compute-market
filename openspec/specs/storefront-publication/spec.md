@@ -1095,12 +1095,15 @@ Nothing in publication verifies that shape against hardware, and this requiremen
 claim that it does.
 
 Derivation MUST NOT substitute a value for a quantity a declaration does not carry. A
-declaration that omits the quantity a domain enumerates listings by (for VM, the quantity its
-default shapes are enumerated by) MUST yield no
-listing, and the omission MUST be reported to the operator naming the declaration. A
-declaration that declares that quantity as zero MUST yield no listing without a
-report. A declaration whose quantity is malformed, or a projected member that does not state its
-resource kind, MUST be treated as unresolvable and reported:
+declaration that omits the quantity a domain's default shapes are enumerated by (for VM, the
+GPU count) MUST yield no default shape, and a declaration that declares that quantity as zero
+likewise yields none; neither is reported on its own account. A VM member that declares no
+GPUs remains a member: it is judged for every shape its pool states, like any other member.
+A pool that states no listing shapes and none of whose enabled members declares a positive
+GPU count MUST yield no listing and MUST be reported once in the storefront's system status,
+naming the site and pool and saying that the VM default generates GPU shapes only and that the
+pool must state its listing shapes. A declaration whose quantity is malformed, or a projected
+member that does not state its resource kind, MUST be treated as unresolvable and reported:
 it yields no new listing and its existing listings are held. In a fungible pool one
 unresolvable member holds every listing derived from the pool, because which shapes its
 members are feasible for cannot be decided without it; in a specific-resource pool it holds
@@ -1117,13 +1120,23 @@ second time in a separate published field.
 
 #### Scenario: A declaration omits the enumerated quantity
 
-- **WHEN** a source declaration carries no GPU count
-- **THEN** no VM listing is derived from it, listings previously derived from it close, and the operator is told which declaration omits it
+- **WHEN** a pool states no listing shapes and one of its enabled members declares a GPU
+  count and model while another carries no GPU count
+- **THEN** the default shapes come from the GPU member, and nothing is reported about the
+  member that carries no GPU count
+
+#### Scenario: A pool whose members declare no GPUs states no shapes
+
+- **WHEN** a pool states no listing shapes and none of its enabled members declares a GPU
+  count
+- **THEN** no VM listing is derived from it, listings previously derived from its default
+  shapes close, and system status reports the pool once, saying it must state its listing
+  shapes
 
 #### Scenario: A declaration declares zero
 
 - **WHEN** a source declaration declares a GPU count of zero
-- **THEN** no VM listing is derived from it and no report is made
+- **THEN** it yields no default shape and no report is made about it
 
 #### Scenario: An unbacked listing's published quantity does not move
 
@@ -1374,9 +1387,10 @@ pool's enabled members, one shape per GPU count from one to the largest declared
 among that model's members that the storefront's configured default admits for that model,
 choosing those counts from the admissibility kit's admissible values rather than generating
 and filtering. With no configured default every such count is admitted. Each such shape MUST
-declare the GPU family only. Every VM shape MUST name a GPU count and a GPU model. A fungible
-VM pool MUST publish one listing per feasible shape. A specific-resource VM pool MUST publish
-one listing per member per shape that member is feasible for.
+declare the GPU family only, and a member declaring no GPU count and model yields none. A VM
+shape MAY state no GPUs; a shape stating no GPUs is published only from a stated list. A
+fungible VM pool MUST publish one listing per feasible shape. A specific-resource VM pool MUST
+publish one listing per member per shape that member is feasible for.
 
 **Commitment.** A VM listing MUST publish every quantity and attribute its shape declares,
 flattened through the domain's schema, and MUST NOT publish a quantity its shape does not
@@ -1428,6 +1442,20 @@ unit").
 - **WHEN** a VM shape declares GPU count, GPU model, and vCPU count but no memory family
 - **THEN** its listing publishes no `ram_gb`, its capacity claim requests no memory, and any
   memory provisioned for the resulting VM is the site's to decide
+
+#### Scenario: A pool states a shape with no GPUs
+
+- **WHEN** a pool's hint states `{cpu: {count: 16}, memory: {gib: 64}}` and a member without
+  GPUs is feasible for it
+- **THEN** its listing publishes `vcpu_count: 16` and `ram_gb: 64` and no GPU field, and its
+  capacity claim requests vCPUs and memory and no GPU
+
+#### Scenario: A GPU host's spare capacity sells as a VM without GPUs
+
+- **WHEN** a pool states a shape with no GPUs and its only member is a GPU host whose
+  declared vCPU and memory fit the shape
+- **THEN** the shape is published from that member, and its reservations consume the host's
+  vCPU and memory and none of its GPUs
 
 #### Scenario: A stated shape carries constraints
 
@@ -1820,13 +1848,16 @@ and the shared capability-shape utility:
 - its attributes MUST be the declared attributes the schema names;
 - no other declared attribute is shape input.
 
+A machine without GPUs declares no GPU count and no GPU model, and its shape states no GPUs.
+
 A declaration that cannot be read this way MUST be treated as unresolvable: it yields no new
 listing, its existing listing is held, and the publication run reports it naming the
 declaration. That covers:
 
 - a capacity dimension outside the schema;
-- a quantity that is not a positive integer;
-- a missing GPU count or GPU model;
+- a quantity that is not a positive integer, including a GPU count of zero;
+- a GPU count without a GPU model, or a GPU model without a GPU count;
+- a declaration stating no dimension other than `units`;
 - a `units` dimension other than exactly one.
 
 Publication-only data the site copies into the bare-metal view MUST NOT be a source of shape
@@ -1841,6 +1872,13 @@ bare metal MUST be reported as not applicable.
   the attribute `gpu_model: H200`
 - **THEN** its listing's shape is `{gpu: {count: 8, model: H200}, memory: {gib: 2048}}`
 
+#### Scenario: A Physical Resource declares no GPUs
+
+- **WHEN** a Physical Resource declares capacity `{units: 1, vcpu_count: 64, ram_gb: 512}` and
+  no GPU model
+- **THEN** its listing's shape is `{cpu: {count: 64}, memory: {gib: 512}}`, and the listing
+  publishes no GPU field
+
 #### Scenario: Two Physical Resources declare the same dimensions
 
 - **WHEN** two Physical Resources in one pool declare identical dimensions
@@ -1851,6 +1889,11 @@ bare metal MUST be reported as not applicable.
 - **WHEN** a Physical Resource declares a GPU count but no `gpu_model` attribute
 - **THEN** no listing is derived from it, any listing previously derived from it is held,
   and the run names the declaration and the missing field
+
+#### Scenario: A declaration states only the machine
+
+- **WHEN** a Physical Resource declares capacity `{units: 1}` and nothing else
+- **THEN** no listing is derived from it, and the run names the declaration
 
 #### Scenario: Hardware stated only for publication
 
@@ -1918,12 +1961,15 @@ candidate, and MUST close through source reconciliation. It MUST NOT be reopened
 
 A capacity-backed bare-metal listing MUST be held by exclusive allocation of one unit
 of its Physical Resource. Its capacity claim MUST request exactly one `units` and MUST
-carry its shape's attributes, so that admission matches the published attributes. Its
-shape's quantities describe what that unit contains, and MUST NOT be requested
-dimension by dimension. An unbacked bare-metal listing constructs no capacity claim.
+carry exactly the attributes its shape states, so that admission matches the published
+attributes; a shape stating no attribute yields a claim carrying none, which still selects
+its Physical Resource. Its shape's quantities describe what that unit contains, and MUST NOT
+be requested dimension by dimension. An unbacked bare-metal listing constructs no capacity
+claim.
 
 The claimed attributes MUST come from the storefront's trusted record of the accepted
-listing, never from buyer input.
+listing, never from buyer input. A trusted record that carries no claimed attributes at all,
+rather than an empty set of them, MUST refuse the claim.
 
 #### Scenario: A declaration changes model after acceptance
 
@@ -1931,6 +1977,13 @@ listing, never from buyer input.
   `gpu_model: H200`, and its Physical Resource's declaration is changed to another model
   before reservation
 - **THEN** the site refuses the reservation
+
+#### Scenario: A machine without GPUs is reserved
+
+- **WHEN** a buyer accepts a capacity-backed bare-metal listing whose shape states no
+  attribute
+- **THEN** its claim requests one `units` of its Physical Resource with no attribute, and the
+  site admits it
 
 #### Scenario: An unbacked listing is accepted
 

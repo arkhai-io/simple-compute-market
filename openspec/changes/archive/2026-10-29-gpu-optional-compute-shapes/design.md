@@ -297,6 +297,49 @@ Two rounds.
   claim building, the recheck and opening, delivery facts, the admin reserve response, and
   the VM lane's GPU-less listing-shapes scenario through settlement.
 
+## Implementation notes
+
+What implementation settled within the decisions above, and what it declined, kept here
+so the task notes record only behaviour and evidence.
+
+- **D6, one rule with extension adapters.** The rule is `payload_resource_type` in
+  `arkhai_vms_listings.models`, which `Resource.parse_from_dict`, `resource_is_compute`,
+  and `format_resource` call. The adapter registry keeps third-party adapters selectable,
+  so its rule is a registered `resource_type`, else an adapter whose `discriminator_key`
+  the payload carries, else compute; the compute adapter's key is `None`. Over the
+  built-in adapters that is the same rule, so D6's "one rule" holds while an extension
+  adapter can still select itself. An empty mapping is not compute, so an order with no
+  `listing_resource` is still refused. One reader, `arkhai_vms.vm_listing_resource_shape`,
+  builds a flat resource's shape through `unflatten_shape`, reading a `None` value as
+  absent; `VmListing` and `ComputeResource` both call it.
+- **D5, the migration chain.** A fresh database creates `hosts` from the model and then
+  runs the whole chain, so two earlier entries tolerate a table with no GPU column:
+  `20260804_001` adds `gpu_model` only where `gpu_count` exists, and `20260921_004`
+  returns where `hosts` has no `gpu_count`, since such a table holds no legacy count. The
+  rebuild is `_rebuild_hosts_from_model`, shared with `20261023_002`, which on a database
+  that had not applied it drops the GPU columns itself. The drop is
+  `20261028_002_hosts_drop_gpu_columns`, ordered after `dev`'s `20261028_001`; a database
+  that recorded it under an earlier id runs it again and changes nothing.
+  `hollow-pre-floor-provisioning-migrations` meets the two guards.
+- **D9, the admin reserve.** The route reports `gpu_count` from the reservation's
+  `allocated_gpu_count`, or `null` when that is zero or absent; the server and client
+  models are `int | None`. The release and fulfillment-event responses keep reporting the
+  site's answer, 0 included, since D9 names only the reserve response and those hold a
+  site's answer.
+- **D2, what is not reported.** A pool whose members declare a GPU count but no model
+  predates this change and is not reported; the delta does not ask for it.
+- **Versions.** Every published package whose wheel the change alters takes one minor bump
+  against `dev`, per `RELEASING.md`'s versioning policy, with lower bounds raised where a
+  consumer needs the new behaviour; a package `dev` had bumped from the same base was
+  bumped again from `dev`'s version at the merge. `arkhai-core-registry` is not bumped:
+  the filter spec is copied into its image, not built into its wheel.
+- **Declined.** Moving the provisioning service's chain-running migration tests out of
+  `tests/unit`, the listings package's reconciler tests out of the VM storefront's suite,
+  and `test_listing_source_check.py`'s cases out of `tests/unit`: existing arrangements
+  this change did not introduce. Rewording `_migrate_hosts_gpu_model`'s first paragraph,
+  which describes that historical step at its point in the chain. A dry-run preview before
+  the end-to-end stage's publication cycle, which no stage of that module takes.
+
 ## Risks and trade-offs
 
 - A stated CPU-only shape in a pool of GPU hosts consumes their vCPU and memory, which can

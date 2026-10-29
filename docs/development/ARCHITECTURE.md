@@ -619,6 +619,13 @@ shape stated twice with different constraints — close, alone, while the pool's
 listings publish. A storefront's own configuration is its operator's input, so an
 unreadable configured term stops startup instead.
 
+A pool may legitimately publish nothing — its members declare nothing its shapes
+fit, or nothing its default generates from — provided its operator can easily
+discover why. So every such outcome is reported in the storefront's system status
+rather than left silent: a VM pool that states no shapes and whose members declare
+no GPUs, an unresolvable bare-metal declaration, a candidate with no settlement
+option, and an infeasible stated shape each name their site and pool there.
+
 The same test applies to settlement. A candidate left with no settlement option is
 classified by the mechanisms of the clauses it could publish — its pool's override,
 else the configured clauses, after admissibility for its backing. While any of those
