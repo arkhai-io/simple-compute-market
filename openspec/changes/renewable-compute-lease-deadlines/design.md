@@ -53,7 +53,14 @@ The names do not imply an active renewal operation: only activation ships here.
   capacity safeguard. `committed_at_utc` is the deal's commitment instant the storefront
   supplies with the commit — the payment authority's record of the buyer's approval on a hosted
   deal, the mechanism's commitment act otherwise. The site refuses an anchor after its
-  own clock, so a storefront cannot lengthen the deadline by sitting on an approved deal.
+  own clock and can verify nothing else about it: it knows no payment mechanism, so the
+  anchor is the storefront's word. The site's deadline is therefore the seller's own
+  capacity safeguard — it reclaims a lease its storefront never activated — and not the
+  buyer's guarantee of the accepted deadline; a storefront that sits on an approved deal
+  and supplies a later anchor lengthens its physical deadline, not its promise. The
+  buyer's deadline is judged by the dispute authority from the payment authority's own
+  approval record and the Agreement, and the storefront's journaled commit, with the
+  anchor it supplied, is evidence against it where the two disagree.
   This protects a forward reservation without expiring it before its admitted start;
   unify defers dispatch/activation/access until that start (no early lead time).
 - Activation is one conditional transition from `leased` and
@@ -110,8 +117,10 @@ max(commitment instant, lease start) within which the site activates the lease. 
 also the buyer's term: the storefront publishes the pool's effective value as the
 option's `lifecycle.delivery_deadline_seconds` (foundation D5), under the same name,
 and the site enforces exactly what was accepted, bounded by its own current policy
-(D1), so the activation deadline is a promise the buyer read and the dispute authority
-can check, not a seller-internal timer. It is not money or a minimum spend. The two
+(D1), from an anchor it cannot verify. The site's deadline is the seller's safeguard
+against its own storefront's absence; the promise the buyer read is checked by the
+dispute authority against the payment authority's approval record, which the buyer
+holds. It is not money or a minimum spend. The two
 readings of the tag — publication's and commit's — can differ when an operator edits
 it between them; the accepted value wins where the pool still grants it, and the
 commit is refused where it does not, so no deal is silently given more time than it
