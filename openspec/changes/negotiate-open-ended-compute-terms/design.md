@@ -100,6 +100,14 @@ Polling/watchdog/teardown budgets are seller recommendations, not another term.
 Adjudication must use an accepted authority and satisfy its advertised minimums.
 Unsupported/malformed terms and unknown versions fail closed in the shared codec.
 
+The shipped buyer acceptance policy is one object this change owns, so publication
+evaluates every recurring option against it and reports the result where the seller
+looks: the derivation log and the seller's listing diagnostics name each term a
+default buyer refuses — an on-demand option with no premature-stop penalty, a payee
+or term-end treatment other than `last_boundary` — as "a default buyer refuses this
+option: <term>". The option still publishes; a seller who prices no penalty is told,
+not stopped, and can see why no default buyer takes the offer.
+
 Resolve seller preferences through override > pool hint > configured default,
 keyed per offered preset like its rate. These are seller choices, not a protocol
 requirement to price identically. Recommendation: shipped recurring presets have
@@ -195,6 +203,8 @@ Both CLIs show class, recurring charge/period or total, separate setup once char
 initial reserve (not spend), maximum end/horizon, payer/payee entitlements, notice,
 per-stopper and term-end `settles_through` treatment, premature-stop penalty amount/asset and capped remedy, dispute authority/window/
 case-hold cap and evidence retention. Values come from the selected option, not a stored class. Asking rate keeps its stated unit.
+The seller's side of the same display is the default-buyer refusal diagnostic (D3), so
+seller and buyer read one policy.
 
 Explain rate start as a journaled effect after lease activation, distinct from buyer
 credential disclosure; explain each stopper's started-period charge/return/proration,
