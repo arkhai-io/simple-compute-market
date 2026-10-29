@@ -39,6 +39,10 @@ foundation; this design's D1–D7.
       Verify explicit partialPeriod on rate stop entries and rate ends on the
       returned-capable revision, dispute chosen-entry payloads, and the qualified
       setup activation trigger/full-return fallback. Once ends have no partialPeriod.
+      Gate spot's second seller stop entry on unscheduled payments support for several
+      stop entries per account per part, including schema, selection semantics and
+      producer vectors. Until qualified, immediate spot stop is unavailable and
+      emergency exit waits out seller notice; do not invent a wire selector.
       Record absent treatment fields and fixed charged dispute-stop semantics on
       the interim revision; it cannot qualify returned exceptional_end. Freeze
       timestamp precision and per-end partialPeriod/late-start semantics with
@@ -72,7 +76,11 @@ publication configuration/builders and their focused publication suites.
       authorities/notices. On the returned-capable revision require partialPeriod
       on rate stop entries and rate ends, never once ends;
       dispute rate stop is {account, notice: PT0S, partialPeriod: chosen} and its
-      stop event supplies treatment. Keep start payee-only; omit payee preemption entries on on-demand.
+      stop event supplies treatment. Keep rate start payee-only. Add the explicit
+      seller {account: seller, notice: PT0S, partialPeriod: returned} restitution
+      entry on every part, including once; on-demand has only that seller entry.
+      Spot retains its notice entry and gates its additional immediate entry on 1.4.
+      No payment role heuristic grants stop, notice waiver or payer early release.
       Verify setup end is activation, and absolute capacity bounds are never
       extended after late activation/start. Map early_termination.settles_through
       through the foundation codec to end.partialPeriod: preset last_boundary;
@@ -85,7 +93,10 @@ publication configuration/builders and their focused publication suites.
       Consume the terms-owned buyer acceptance policy: by default refuse payee
       entitlement or term end unless settles_through is last_boundary, naming the
       offending term. Verify explicit buyer opt-in can accept started_period;
-      do not mistake an exact mandate match for policy acceptance.
+      do not mistake an exact mandate match for policy acceptance. Check the explicit
+      seller restitution entry, rejecting absent or altered authorization. Do not
+      claim on-demand prevents preemption: exercise the buyer case over held money
+      and any supported bond as the remedy.
 - [ ] 2.4 Supply setup-bearing on-demand/spot presets with explicit setup pricing
       and seller opt-out, gated on the qualified linked rate-start trigger and
       bounded no-activation fallback. Until qualified, refuse setup presets;
@@ -152,7 +163,8 @@ Journal persistence itself belongs to convergence.
       Verify human rulings state treatment; buyer_end preserves payer notice and
       treatment. Exceptional_end is not a dispute intent or mechanical ruling.
 - [ ] 3.5 Translate journaled exceptional_end in this hosted payment adapter:
-      unconditional returned payee stop of every rate part now, reversal of each
+      stop {part} under the explicit seller PT0S/returned entry, plus existing
+      reverse {part, amount} (no exceptional-end payments kind or field); reversal of each
       rate part's earned amount since at, time-unserved once shares (setup all
       before delivery, none after), and full supported-bond award. Keep existing
       triggers and timing: never future-dated; pre-start failure journals now and
@@ -160,9 +172,12 @@ Journal persistence itself belongs to convergence.
       resolve unknowns and already-applied effects before another delta, without
       double-returning reservations. A lawful pre-disclosure end retains attribution
       without self-correction merely for non-availability. Qualify on-demand with
-      no payee entitlement and stop/reverse response-loss recovery. Refuse
-      qualification when unconditional returned stop is unexpressible; no mediation
-      fallback, second mapping or new correction journal. Surface held shortfall.
+      only its explicit seller restitution entry and stop/reverse response-loss
+      recovery. Gate spot's immediate path on multiple-entry support; until then
+      submit its existing notice stop and reconcile earnings through actual stop
+      before completion. Refuse immediate-path qualification when the explicit
+      returned entry is unexpressible; no mediation fallback, second mapping or
+      new correction journal. Surface held shortfall.
 - [ ] 3.6 Implement the pure rate authorize hook for commit/dispatch/start/disclose
       under D4's phase table and settlement-servicing delta. Return reason,
       operation identity and verified provenance with allow/refuse/pending. Verify
@@ -221,9 +236,10 @@ second preemption endpoint or a local payment-stop scheduler.
       stop. Keep explicit end-now-regardless and unreachable-authority
       end_delivery/buyer_end(at) paths distinct. Preserve signed evidence and
       report stop, delivery and case progress separately. Consume receipt-timed
-      end_delivery without a buyer at field: storefront journals payee stop for
-      payer at receipt plus payer notice with payer treatment even through outages;
-      seller policy may waive notice. Buyer_end is human triage and preserves
+      end_delivery without a buyer at field: storefront journals receipt-plus-payer-
+      notice stop with payer treatment only where an explicit entry authorizes it,
+      retrying through outages; otherwise it is the buyer half's stop/retry. End
+      service never waives payer notice. Buyer_end is human triage and preserves
       priced notice, never an automatic acknowledgement ruling. Coordinate terms display.
 - [ ] 4.6 Verify the foundation-owned VM admin route delegates notice for accepted
       payee entitlement and exceptional_end otherwise; request a foundation fix

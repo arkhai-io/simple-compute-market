@@ -51,5 +51,6 @@ The buyer half MUST normally submit rate stop at the payment authority and send 
 #### Scenario: The payment authority cannot be reached
 - **WHEN** the buyer invokes end but payment stop is unknown or unavailable
 - **THEN** signed end_delivery receipt and buyer_end(at) case evidence/retry are used
-- **AND** end_delivery has no at field; the seller signs receipt time and journals the cooperative stop at receipt plus payer notice with payer treatment, retrying through outages
+- **AND** end_delivery has no at field; the seller signs receipt time and journals a receipt-plus-payer-notice stop with payer treatment only where an explicit mandate entry authorizes that action, retrying through outages
+- **AND** otherwise stop remains the buyer half's action and retry obligation; end service never waives payer notice
 - **AND** any buyer_end ruling preserves payer notice and treatment; no signed acknowledgement triggers a mechanical ruling

@@ -69,8 +69,8 @@ The buyer may dispute an untrue payee assertion of activation through a case.
 
 | Preset | Parts | Entitlements |
 |---|---|---|
-| On-demand | setup once by default + time rate (setup contract gated) | payer; no payee preemption entry |
-| Spot | setup once by default + time rate (setup contract gated) | payer and payee with priced notice |
+| On-demand | setup once by default + time rate (setup contract gated) | payer notice entry; seller PT0S/returned restitution entry only |
+| Spot | setup once by default + time rate (setup contract gated) | payer and seller priced notice; seller's additional PT0S/returned entry gated on multiple-entry support |
 | Reserved | once for committed term | existing once semantics |
 
 No class flag is persisted or used for dispatch. One pool may publish on-demand
@@ -110,8 +110,14 @@ SCM implements no compensating refund.
 
 The foundation owns per-part authority derivation from the common codec. This
 change adds the rate-specific start permission, period, reservation and end fields:
-start is payee-only; on-demand grants no payee preemption entry. Stop entries carry the entitled
-party's notice_seconds and the partialPeriod mapped from settles_through (D5).
+start is payee-only. SCM adds {account: seller, notice: PT0S, partialPeriod: returned}
+on every part for restitution, visible to the buyer's exact mandate check.
+On-demand has only that seller entry, not a separate notice-priced seller entitlement.
+The payments service sees accounts and mandate authorizations, not seller/buyer roles
+or an implicit judgement about whose interests an action serves. Normal stop entries
+carry the entitled party's notice_seconds and the partialPeriod mapped from
+settles_through (D5). Spot needs both its seller notice entry and this immediate
+entry; the gated dependency and interim emergency treatment are specified in D3.
 On the returned-capable revision every rate stop entry and rate end carries
 explicit partialPeriod; once ends carry no such field. On the interim revision
 these fields are absent and the vector-qualified fixed charged semantics apply,
@@ -122,7 +128,8 @@ permissions remain payee and dispute authority. Setup uses the foundation's once
 permissions and activation end, without rate start or period arithmetic.
 Recommendation: deterministic ordering is setup when present, then rate.
 
-There is one notice per party, the accepted entitlement's notice_seconds. The
+Each normal notice entry uses the accepted entitlement's notice_seconds; the
+seller's separate restitution entry uses PT0S. The
 codec has no exposure_seconds or stop+exposure value. Seller polling/watchdog/
 teardown budgets remain local operational recommendations, not another payment
 term or hidden tail. Reserve-ahead funds service until exhaustion; it does not
@@ -142,12 +149,24 @@ maxHoldExtension, optional per-part end (partialPeriod required for rate ends on
 the returned-capable revision), {afterStop: d} holds,
 start/stop with optional part, stop with optional at, and extend/lift. Its stop time is
 max(at ?? now, now + senderNotice) for entitled stops at authority receipt;
-never backdated. The revised contract must also permit unconditional payee stop
-in the payer's interest with returned and payee waiver of payer notice, plus
-payer waiver of the held-money dispute window. These are authority capabilities,
-not entries granting self-interested on-demand preemption. Earliest
+never backdated. There is no implicit role-based or buyer-favourable stop privilege,
+no payee waiver of payer notice, and no payer early-release waiver. Each stop must
+be authorized by an explicit mandate entry; reverse uses the existing reverse
+authority. Earliest
 pending stop wins and cannot be withdrawn. The adapter sends explicit part IDs
 even where whole-transaction shorthand exists.
+
+Gated payments dependency (not yet scheduled): spot needs several stop entries for
+one account on one part, preserving both the seller's priced notice entry and its
+PT0S/returned restitution entry. Producer schema, entry-selection semantics and
+vectors must qualify that combination before SCM enables an immediate spot stop;
+SCM must not invent a wire selector. Until it lands, a spot seller's immediate stop
+is unavailable and its emergency exit waits out its accepted notice. The owner may
+choose a different fallback later; this plan does not silently replace the notice
+entry. On-demand's single seller entry permits an immediate stop, so the mandate
+does not enforce a promise not to preempt: the remedy is a buyer case over held money
+and any supported bond. Interim charged-only fixtures prove only their named
+mechanics and cannot qualify the returned restitution entry.
 
 Per-part snapshots expose started, stop, pendingStop, extensions and releaseAt,
 alongside rate progress and causal sequence. Approval reserves the first batch,
@@ -289,8 +308,8 @@ Verified stop records determine treatment:
 | Payer or payee stop | That authority entry's partialPeriod |
 | Exhaustion (terms) | fundedThrough boundary; no partial period |
 | Absolute part end (terms) | The end's own partialPeriod; compute preset returned, recommended interim charged |
-| Seller exceptional_end | Unilateral payee stop now with returned, even without entitlement; payment adapter reverses earnings since at; not a dispute |
-| Cooperative end_delivery | Payee stops for payer at receipt plus payer notice with payer treatment; journal/retry through outages; seller may waive notice |
+| Seller exceptional_end | Adapter sends stop {part} under the seller's explicit PT0S/returned entry and reverse {part, amount}; spot immediate stop remains gated, otherwise its notice applies; not a dispute |
+| Cooperative end_delivery | Receipt plus payer notice and payer treatment, only under an explicit entry authorizing the storefront to do so; otherwise buyer-half stop; no notice waiver |
 | Dispute-authority stop/effects | Each human ruling states treatment on its chosen entry; buyer_end realizes payer notice and treatment; interim fixed charged semantics remain a qualification gate |
 | Superseded or equal-time competing request | Use the authority's recorded winning stop and entry; never local arrival order |
 | Unknown cause or ambiguous winning entry | Surface unsupported/unknown state; no inferred monetary action |
@@ -307,17 +326,23 @@ Seller-caused unentitled ends or earlier physical failures use journaled
 exceptional_end(at) through this payment adapter, not the dispute adapter. Keep
 the existing triggers, timing and end-service journal: never future-date at;
 pre-start failures journal immediately and act at Agreement start. The adapter
-computes per-part effects from the accepted mandate: stop every rate part now
-with returned regardless of entitlement, reverse each rate part's earnings since
-at, reverse each once part's time-unserved share (setup all if undelivered, none
-if delivered), and award any bond in full once supported. This translation is
+computes per-part effects from the accepted mandate: send stop {part} under the
+seller's explicit PT0S/returned entry and reverse {part, amount} under the existing
+reverse authority. Reverse each rate part's earnings since at and each once part's
+time-unserved share (setup all if undelivered, none if delivered), and award any
+bond in full once supported. Spot's immediate stop needs the D3 multiple-entry
+dependency; until available, its emergency exit waits out seller notice and the
+journal must account for earnings through the actual authoritative stop before
+calling correction complete. exceptional_end remains SCM lifecycle vocabulary,
+never a payments event kind or field. This translation is
 self-correction, not a second mediation mapping. Read verified held earnings and
 already-applied descriptors before computing remaining reversals; stop/reverse
 keys are derived from the one journaled command. Unknown outcomes resolve before
 another delta. Returned stop treatment and reversal must not double-return the
 same unearned/reserved amount. A missing producer vector or an interim contract
-that cannot express the unconditional returned payee stop blocks qualification of
-this path; it is never silently charged or sent to mediation. Released-money
+that cannot express the explicit returned seller entry blocks qualification of
+this immediate path; it is never silently charged or sent to mediation. The gated
+spot fallback is the seller's existing notice, not an inferred immediate privilege. Released-money
 shortfalls surface repair/case progress, not invented local credits. The buyer
 may still dispute the seller's account by filing a case.
 
@@ -363,8 +388,11 @@ stop and discloses that service is surrendered before paid notice expires.
 If the payment authority cannot be reached, retain the foundation's end_delivery
 plus buyer_end(at) case path and kept signed acknowledgement. end_delivery has
 no buyer-supplied at: the storefront signs its receipt time and journals the
-cooperative payee stop at receipt plus payer notice using payer treatment, even
-through a payments outage; it may waive notice by seller policy. A buyer_end
+cooperative stop at receipt plus payer notice using payer treatment only where an
+explicit mandate entry authorizes the storefront to submit that stop; it retries
+through a payments outage. Otherwise stop remains the buyer half's action, pending
+retry/recovery, not an unauthorized seller event. Ending service never waives payer
+notice, and the seller's PT0S/returned entry is not this payer-priced action. A buyer_end
 case carries the exact Agreement, verified against the mandate deal hash, and
 human triage realizes the payer's stop at at with the payer's notice/treatment.
 No acknowledgement triggers a mechanical ruling or permits skipping notice. Both-authorities-down
@@ -470,7 +498,8 @@ those blockers or enable published production servicing.
 - An extra once fee labelled a minimum: setup is additive, not usage drawdown.
 - Backdated/effective-time payee stop: past exceptional ends use payee stop-now plus reverse through the payment adapter.
 - Local notice-stop scheduling: it dies with the storefront; pending stops belong at the authority.
-- Payee self-interested preemption on on-demand: there is no entitlement; unconditional payee stops in the buyer's interest remain possible.
+- Claiming the on-demand mandate prevents seller preemption: its seller PT0S/returned entry can stop service; a buyer case over held money and any supported bond is the remedy.
+- Implicit buyer-favourable payment privileges, payee notice waiver or payer early release: authorizations come only from explicit mandate entries.
 - Payer start or start at approval: start is the payee's responsibility after provisioning; an early start is disputable.
 - Reverse-before-stop as a safety rule: afterStop holds preserve reversal after stop.
 - Unsupported post-stop refund journal: reverse already works after stop while held; paid-out money is outside that primitive.
@@ -496,6 +525,9 @@ Section-level gates, not whole-change archival cycles:
   waits on the other's consumer evidence. Materialization's payments identity/mode
   check is owned here; convergence alone owns startup. Terms 3.3/5.8 must consume,
   not gate their archive on, the later materialization/startup evidence.
+- Multiple stop entries for one account per part are an unscheduled payments
+  dependency for spot's additional immediate restitution entry. Until qualified,
+  spot emergency exit uses seller notice; there is no inferred immediate stop.
 - In-process contract fakes gate kit library integration; runnable lane doubles gate
   only lane evidence, not pure derivation. No kit imports the double tooling.
 - Convergence consumes these mechanics and owns funding timers, persisted rate
@@ -504,7 +536,9 @@ Section-level gates, not whole-change archival cycles:
 
 Archive order for the shared “The payments mandate is derived exactly from the
 Agreement” requirement is foundation, then spot. Spot's MODIFIED text is a superset
-of the foundation's once clauses plus its rate/setup branch; later codec changes
+of the reconciled once clauses plus its rate/setup branch, including the explicit
+seller restitution entry on every part (once has no start, not a blanket no-stop rule);
+later codec changes
 must be carried into both before archive. Rate buyer-end behavior has one owner:
 the deal-lifecycle requirement here; buyer-orchestration references that requirement.
 The foundation owns codec mapping and the neutral activated-evidence envelope;
@@ -525,7 +559,11 @@ paired period/reserve_ahead_seconds and a supported unit; make buyer-orchestrati
 reference the rate buyer-end owner; point lane-double rate execution to convergence.
 The mediation changes follow settled policy: no exceptional_end intent/mapping,
 no mechanical buyer_end ruling, exact Agreement in the case. End_delivery has no at;
-its signed receipt drives the cooperative journaled payee stop. No new implementation
+its signed receipt drives a cooperative journaled stop only under an authorizing
+entry, otherwise the buyer half's stop. Reconcile the foundation's once no-stop
+clauses and all authority examples with the explicit seller restitution entry;
+record multiple stop entries per account/part as an unscheduled payments dependency,
+not an implemented capability. No new implementation
 or live qualification is claimed by these design edits.
 
 First use before convergence uses lane-only approval/command fixtures: delivery

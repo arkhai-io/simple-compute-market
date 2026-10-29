@@ -20,8 +20,13 @@ continuation is a separate dependent change.
   Prices come from the agreed-price accessor, not direct reads of Agreement.amount.
 - Derive per-part authorities from early_termination and adjudication:
   payee-only rate start, entitled stop accounts with their priced notice, and the
-  dispute authority's stop/reverse/extend permissions. On-demand grants no self-interested payee preemption entitlement; payee actions
-  in the buyer's interest remain unconditional.
+  dispute authority's stop/reverse/extend permissions. Add the explicit seller
+  {account: seller, notice: PT0S, partialPeriod: returned} restitution entry on every
+  part. On-demand has only that seller entry: its no-preemption promise is not
+  mandate-enforced; the remedy is a buyer case over held money and any supported bond.
+  Spot's additional immediate entry depends on unscheduled payments support for
+  several stop entries per account per part. Until then emergency exit waits out
+  seller notice. Payments has no implicit role-based privileges or notice waivers.
   Use part end, {afterStop: dispute_window} and maxHoldExtension.
 - Extend the hosted adapter's command translation, reads and watch source with
   per-part start, pending/final stop, funding and maximum-term observations.
@@ -56,8 +61,13 @@ continuation is a separate dependent change.
 - Re-drive the canonical rate buyer-end flow: stop then hint, continue delivery
   during priced notice, and end through authority watch. Keep end_delivery for
   explicit immediate surrender and unreachable-payment-authority buyer_end(at).
+  End service does not waive payer notice. Receipt-timed payer-priced storefront
+  stop needs an explicit authorizing entry; otherwise it is the buyer half's stop.
 - Translate journaled seller exceptional_end through the payment adapter, not a
-  dispute: unconditional returned payee stops, earned-since-at rate reversal,
+  dispute: stop {part} under the seller's explicit PT0S/returned entry, plus
+  reverse {part, amount} under existing reverse authority; no exceptional-end kind
+  or field enters payments vocabulary. Preserve the gated spot notice fallback,
+  earned-since-at rate reversal,
   time-unserved once reversal (setup all before delivery, none after) and supported
   bond award. Keep timing/journaling; refuse unexpressible contract behavior.
 - Support service-identity overlap and re-anchoring through the foundation's
