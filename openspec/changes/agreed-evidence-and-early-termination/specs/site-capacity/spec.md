@@ -2,7 +2,7 @@
 
 ### Requirement: Lease end intent is recorded with its transition
 
-The site MUST record an immutable `lease_ended` event atomically with every transition establishing a lease's intended end, before teardown. It MUST carry stable event identity, reservation and site identities, effective instant, cause, source state, caller or failure reason when applicable, and the claimed deadline and its phase when a site deadline caused the end. The cause set MUST admit causes a site deadline adds without changing the event contract. Expiry, termination, direct release, release failure and force-release MUST be covered; a repeated transition MUST NOT create another event.
+The site MUST record an immutable `lease_ended` event atomically with every transition establishing a lease's intended end, before teardown. It MUST carry stable event identity, reservation and site identities, effective instant, cause, source state, caller or failure reason when applicable, and the claimed deadline and its phase when a site deadline caused the end.
 
 #### Scenario: An undelivered reservation ends directly
 
@@ -23,3 +23,12 @@ The site MUST record an immutable `lease_ended` event atomically with every tran
 
 - **WHEN** a caller repeats a termination whose ending transition has already committed
 - **THEN** the existing event identity and payload remain unchanged
+
+### Requirement: Every ending transition records one event
+
+Expiry, termination, direct release, release failure and force-release MUST each record a `lease_ended` event, and a repeated transition MUST NOT create another. The cause set MUST admit causes a site deadline adds without changing the event contract.
+
+#### Scenario: Force-release is repeated
+
+- **WHEN** an operator force-releases the same lease twice
+- **THEN** one `lease_ended` event exists, and the second call returns it

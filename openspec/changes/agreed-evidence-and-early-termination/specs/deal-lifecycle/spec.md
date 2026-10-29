@@ -386,12 +386,21 @@ A `dispute` and an `append` MUST carry an idempotency key derived from the comma
 
 ### Requirement: The buyer half hides the mechanism
 
-On VM and bare-metal deals the buyer half MUST offer `submit` and `read(negotiation_id)` without the caller branching on mechanism. `read` MUST return the deal's lifecycle state, each part's open extensions, its authority events and its cases where an adapter exists, and MUST return the storefront's delivery progress and obtained signed site reports independently. When the mechanism has no adapter the authority view MUST be explicitly `rejected`, naming the mechanism, without suppressing the delivery view or inventing authority state.
+On VM and bare-metal deals the buyer half MUST offer `submit` and `read(negotiation_id)` without the caller branching on mechanism. `read` MUST return the deal's lifecycle state, each part's open extensions, its authority events and its cases where an adapter exists, and MUST return the storefront's delivery progress and obtained signed site reports independently.
 
 #### Scenario: A buyer reads a deal with no lifecycle adapter
 
 - **WHEN** a buyer reads an Alkahest deal through the buyer half
 - **THEN** the authority view is `rejected`, naming the mechanism, and the storefront delivery view still returns recorded end progress and any obtained site-signed reports
+
+### Requirement: A read without an adapter still shows delivery
+
+When the mechanism has no adapter the buyer half's `read` MUST return the authority view explicitly `rejected`, naming the mechanism, without suppressing the delivery view or inventing authority state.
+
+#### Scenario: An Alkahest deal is read
+
+- **WHEN** the buyer reads a deal whose mechanism has no lifecycle adapter
+- **THEN** the authority view is `rejected` naming the mechanism, and delivery progress and site reports are returned
 
 ### Requirement: The seller half lists deals
 
@@ -552,7 +561,7 @@ End service MUST durably keep final requests with stable source identities, acto
 
 ### Requirement: Site end reports are kept and returned to the buyer
 
-The storefront MUST authenticate a `lease_ended` report against the reservation's configured site peer, deduplicate by event identity, retain the exact signed bytes, and submit a final request with its instant and cause. The buyer-authenticated lifecycle read MUST return those bytes and proof verbatim beside end-service attribution and physical progress. A missing push MUST be recoverable from the authenticated lease read. Site reports MUST NOT be treated as payment authority records or proof of capacity return.
+The storefront MUST authenticate a `lease_ended` report against the reservation's configured site peer, deduplicate by event identity, retain the exact signed bytes, and submit a final request with its instant and cause. The buyer-authenticated lifecycle read MUST return those bytes and proof verbatim beside end-service attribution and physical progress.
 
 #### Scenario: A report is pushed twice and then read
 
@@ -568,6 +577,15 @@ The storefront MUST authenticate a `lease_ended` report against the reservation'
 
 - **WHEN** a valid report records an intended end and `release_failed`
 - **THEN** the end is recorded with that cause, but status still reports incomplete physical recovery and listings do not reopen
+
+### Requirement: Site end reports are recoverable and not authority records
+
+A `lease_ended` report whose push was missed MUST be recoverable from the authenticated lease read. Site reports MUST NOT be treated as payment authority records or proof of capacity return.
+
+#### Scenario: A report is not a stop
+
+- **WHEN** the storefront holds a site-signed `lease_ended` report for a hosted deal
+- **THEN** it sends no payment command because of the report alone, and capacity stays unavailable until the release guard allows it
 
 ### Requirement: End service terminates or truncates, and journals each effect
 
@@ -608,7 +626,7 @@ A party MUST keep evidence as exact bytes in a store separate from replay state,
 
 ### Requirement: Each party keeps its commitment envelopes and authority records
 
-The buyer MUST keep the seller's signed acceptance with its proof headers and exact body before committing. The seller MUST keep the buyer's signed message the agreement rests on: the buyer's opening or counteroffer the seller accepted, or the buyer's acceptance of a seller counter; an administrative acceptance MUST be kept with its administrator as author. Both MUST keep the peer messages they sent or received, including the signed end-delivery acknowledgement, the authority records they receive and site-signed end reports they obtain. Site reports MUST remain evidence rather than authority records. End service's requests and effect journal MUST follow the same retention rule.
+The buyer MUST keep the seller's signed acceptance with its proof headers and exact body before committing. The seller MUST keep the buyer's signed message the agreement rests on: the buyer's opening or counteroffer the seller accepted, or the buyer's acceptance of a seller counter; an administrative acceptance MUST be kept with its administrator as author.
 
 #### Scenario: A buyer accepts
 
@@ -624,6 +642,17 @@ The buyer MUST keep the seller's signed acceptance with its proof headers and ex
 
 - **WHEN** an administrator accepts a negotiation on the seller's behalf
 - **THEN** the store keeps the buyer's signed message the acceptance answered and records the administrator as the accepting author
+
+### Requirement: End service's records are retained as evidence
+
+Both parties MUST keep the peer messages they sent or received, including the signed end-delivery acknowledgement, the authority records they receive and the site-signed end reports they obtain.
+
+End service's final requests and effect journal MUST be retained under the same rule as the commitment envelopes, and site reports MUST be kept as evidence rather than authority records.
+
+#### Scenario: The journal outlives the deal
+
+- **WHEN** a deal's evidence is retained
+- **THEN** its final requests and effect journal are retained with it
 
 ### Requirement: Envelopes are captured at the signed transport boundary
 

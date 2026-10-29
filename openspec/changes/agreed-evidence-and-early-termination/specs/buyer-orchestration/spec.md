@@ -32,7 +32,7 @@ The typed storefront client MUST settle an Agreement-settled deal with `settle_a
 
 ### Requirement: The buyer's end is backed by its own stop or a case
 
-On a deal with buyer-stoppable rate parts, the buyer half's end command MUST issue the buyer's `stop` at the payment authority before it sends `end_delivery`. When the payment authority's answer is `unknown` or the authority is unreachable, it MUST still send `end_delivery` and MUST file `buyer_end(at)` with the agreement's dispute authority, carrying the signed request and the storefront's signed response as evidence; a filing the dispute authority cannot receive MUST be journaled and retried under its idempotency key.
+On a deal with buyer-stoppable rate parts, the buyer half's end command MUST issue the buyer's `stop` at the payment authority before it sends `end_delivery`. When the payment authority's answer is `unknown` or the authority is unreachable, it MUST still send `end_delivery` and MUST file `buyer_end(at)` with the agreement's dispute authority, carrying the signed request and the storefront's signed response as evidence.
 
 #### Scenario: The payment authority is down
 
@@ -49,9 +49,18 @@ On a deal with buyer-stoppable rate parts, the buyer half's end command MUST iss
 - **WHEN** the payment authority accepts the buyer's stop
 - **THEN** the buyer half sends `end_delivery` and files nothing
 
+### Requirement: A buyer end filing survives an absent dispute authority
+
+A `buyer_end` filing the dispute authority cannot receive MUST be journaled and retried under its idempotency key.
+
+#### Scenario: A retry after restart
+
+- **WHEN** the buyer half restarts with a journaled, unacknowledged `buyer_end` filing
+- **THEN** it files under the same idempotency key and the authority records one case
+
 ### Requirement: Compute buyers end delivery through the canonical lifecycle client
 
-The VM and bare-metal buyer end commands MUST use the lifecycle client's `end_delivery(negotiation_id, at)` through the buyer half, with the accepted buyer's profile signer and storefront trust. `market bare-metal teardown` MUST remain the bare-metal verb over this shared client, not a domain-only transport. The client MUST verify signed responses and keep exact request and acknowledgement envelopes and any site-signed reports returned by lifecycle reads. Progress MUST distinguish delivery acknowledgement, payment-stop outcome and any case.
+The VM and bare-metal buyer end commands MUST use the lifecycle client's `end_delivery(negotiation_id, at)` through the buyer half, with the accepted buyer's profile signer and storefront trust. `market bare-metal teardown` MUST remain the bare-metal verb over this shared client, not a domain-only transport.
 
 #### Scenario: A bare-metal buyer tears down
 
@@ -72,6 +81,15 @@ The VM and bare-metal buyer end commands MUST use the lifecycle client's `end_de
 
 - **WHEN** the buyer's lifecycle read returns a site-signed `lease_ended` report
 - **THEN** the buyer stores its exact bytes and proof even if it has no independently trusted site identity to verify it, without treating it as a payment authority record
+
+### Requirement: The buyer client keeps and reports its end evidence
+
+The client MUST verify signed responses and keep exact request and acknowledgement envelopes and any site-signed reports returned by lifecycle reads. Progress MUST distinguish delivery acknowledgement, payment-stop outcome and any case.
+
+#### Scenario: An end with an unknown stop
+
+- **WHEN** the storefront acknowledges `end_delivery` and the payment stop's answer is `unknown`
+- **THEN** the buyer sees delivery acknowledged, the stop unknown and the filed case, and keeps both signed envelopes
 
 ### Requirement: Buyer lifecycle actions go through the buyer half
 
