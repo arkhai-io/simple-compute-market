@@ -43,7 +43,7 @@ A ruling's outcome MUST be a list of consequences, each a payment effect on one 
 
 ### Requirement: Requests are intents or interface requests
 
-A case's requested outcome MUST be either a deal-level intent SCM issues, at least `exceptional_end(at)`, or an interface request the dispute adapter built or validated. The dispute adapter MUST map an intent into its interface's request or reject it as unsupported. The generic lifecycle kits MUST NOT contain any interface's request vocabulary, and the lifecycle layer MUST NOT compute per-part effects for a request.
+A case's requested outcome MUST be either a deal-level intent SCM issues, at least `exceptional_end(at)` and `buyer_end(at)`, or an interface request the dispute adapter built or validated. The dispute adapter MUST map an intent into its interface's request or reject it as unsupported. The generic lifecycle kits MUST NOT contain any interface's request vocabulary, and the lifecycle layer MUST NOT compute per-part effects for a request.
 
 #### Scenario: A buyer requests a refund for an outage
 
