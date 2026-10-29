@@ -4,7 +4,7 @@
 
 Both compute buyers MUST display the derived product class, quote with unit,
 separate setup once charge, initial reserve, maximum term/end, selected horizon,
-payer/payee entitlements and notices, exposure and adjudication/retention terms
+payer/payee entitlements, notices, `settles_through` and adjudication/retention terms
 before approval. They MUST distinguish reserve from spend, start from observed
 delivery, and authority guarantees from cooperative seller behavior. They MUST NOT
 present reserve-ahead as a dishonest-seller billing cap.
@@ -12,8 +12,14 @@ present reserve-ahead as a dishonest-seller billing cap.
 #### Scenario: On-demand approval
 
 - **WHEN** a buyer approves a payer-only recurring option with a setup once part
-- **THEN** the display says on-demand, separately shows setup and recurring charge, and states payer notice/exposure without granting the payee a stop right
-- **AND** it explains the buyer's authority stop/case and kept-evidence backstop
+- **THEN** the display says on-demand, separately shows setup and recurring charge, and states payer notice and started-period treatment without granting the payee a stop right
+- **AND** it explains stop-then-hint with service through the effective stop, explicit end-now-regardless, the authority stop/case and kept-evidence backstop
+
+#### Scenario: Payee treatment is displayed faithfully
+
+- **WHEN** a buyer selects an interim spot option with `settles_through: started_period` for both parties
+- **THEN** the display says both stops charge the started period, not that seller preemption returns it
+- **AND** setup's own activation end and undelivered-only return are shown separately
 
 ### Requirement: Recurring purchase may omit a horizon
 

@@ -18,7 +18,7 @@ do not express these products across mechanisms or bound them by an absolute dat
 - Keep listing-level `max_duration_seconds` and add `available_until_utc`, through
   hints, storefront overrides and configured defaults. For an unnamed recurring
   horizon, at the resolved start, `max_term_seconds = duration_seconds =
-  min(max_duration, available_until - start)` over stated finite bounds. Reserved
+  floor(min(max_duration, available_until - start) / period) * period` over stated finite bounds. Reserved
   deals must also satisfy both bounds.
 - Publish one listing per existing capacity/shape identity with separately priced
   options for its billing/entitlement combinations. Omit unbounded recurring
@@ -27,7 +27,7 @@ do not express these products across mechanisms or bound them by an absolute dat
   on one composition-owned servicing declaration. Preserve servicing of accepted
   deals even when new offers are disabled.
 - Both buyer CLIs show class, unit-bearing price, setup once charge, reserve,
-  maximum term, entitlements/notices, exposure and adjudication/retention terms.
+  whole-period maximum term, entitlements/notices, per-stopper `settles_through` billing treatment and adjudication/retention terms.
   Buyer guarantees rest on authority records and kept signed bytes.
 - Drop bare metal's minimum-spend gate. Presets use an honestly named setup `once`
   part beside the rate by default; sellers may refuse churners in negotiation policy.

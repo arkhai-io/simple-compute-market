@@ -19,6 +19,11 @@ explicit raw negotiation hooks MUST fail the repository check.
 - **WHEN** an accepted two-hour prepaid Agreement at that rate is recovered
 - **THEN** the accessor returns 5,000,000 total from the accepted option
 
+#### Scenario: Publication is repriced before materialization
+
+- **WHEN** the pool rate changes after signed acceptance but before mandate derivation or restart recovery
+- **THEN** the accessor and buyer check use the acceptance-bound rate structure and selected option, and the agreed price does not change
+
 #### Scenario: A consumer bypasses the accessor
 
 - **WHEN** a price consumer directly reads Agreement amount outside a declared raw negotiation hook
@@ -26,17 +31,17 @@ explicit raw negotiation hooks MUST fail the repository check.
 
 ### Requirement: Compute horizons bind both seller bounds
 
-Reserved selections MUST name a positive duration satisfying both listing bounds.
-Recurring selections MAY omit a horizon; their default MUST be the minimum of the
-positive relative bound and absolute availability minus resolved start, considering
-only stated bounds. Accepted `duration_seconds` and `early_termination.max_term_seconds`
-MUST be equal, positive and finite. An explicit shorter horizon MUST bind both;
-expired or excessive selections MUST be refused before acceptance.
+Reserved duration MUST be positive and fit both bounds. Recurring horizons MAY be omitted; default is the least stated relative bound or absolute availability minus resolved start. Accepted duration/max term MUST equal that default or a shorter selection, rounded down to positive whole periods. Acceptance MUST refuse expired, excessive or sub-period selections.
 
 #### Scenario: Absolute bound is earlier
 
 - **WHEN** max duration is 48 hours, availability is 20 hours after resolved start and a recurring buyer names no horizon
 - **THEN** the signed selection binds duration and max term to 20 hours
+
+#### Scenario: Maximum term is not a whole period
+
+- **WHEN** the effective seller bound or shorter buyer horizon is 125 seconds for a 60-second period
+- **THEN** duration and max term bind 120 seconds before signature, never 125 or 180
 
 #### Scenario: Reserved term exceeds availability
 

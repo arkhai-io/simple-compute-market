@@ -108,7 +108,7 @@ A mechanism adapter MUST translate each deal-level command into the events of th
 
 ### Requirement: Lifecycle terms are part of the selected option
 
-A settlement option MAY carry `adjudication` (`version`, `dispute`, `dispute_window_seconds`, `case_hold_max_seconds`), `early_termination` (`version`, `entitlements` keyed by `payer` or `payee` with `notice_seconds` and `settles_through`, `exposure_seconds`, `max_term_seconds`), and `bond` (`version`, `amount`, reserved until a mechanism can hold a seller-funded stake) in its `params`. The shared codec MUST decode them, so they are part of the Agreement bytes and the option ID.
+A settlement option MAY carry `adjudication` (`version`, `dispute`, `dispute_window_seconds`, `case_hold_max_seconds`), `early_termination` (`version`, `entitlements` keyed by `payer` or `payee` with `notice_seconds` and `settles_through`, `max_term_seconds`), and `bond` (`version`, `amount`, reserved until a mechanism can hold a seller-funded stake) in its `params`. The shared codec MUST decode them, so they are part of the Agreement bytes and the option ID.
 
 #### Scenario: A term changes the option ID
 
@@ -163,12 +163,12 @@ An unknown `version`, initiator key, or `settles_through` value, a `dispute` who
 
 ### Requirement: Term values agree with the Agreement and the seller's budget
 
-`max_term_seconds` MUST equal the Agreement's `duration_seconds`. A mechanism with a reserve-ahead parameter MUST have it at least `exposure_seconds`. A storefront MUST refuse, at publication and at acceptance, an option whose `exposure_seconds` is below its polling interval plus its configured watchdog and teardown budget, and MUST refuse a configuration change that would put an active deal over its exposure.
+`max_term_seconds` MUST equal the Agreement's `duration_seconds`. Seller servicing-budget diagnostics MUST NOT introduce another notice or publication/acceptance refusal. `exposure_seconds` and `stop+exposure` MUST be rejected as retired codec values.
 
-#### Scenario: Exposure is below the servicing budget
+#### Scenario: Reserve is below the servicing budget
 
-- **WHEN** a storefront polls every 290 seconds with a 60-second teardown budget and an option declares 300 seconds of exposure
-- **THEN** it refuses to publish the option and names the budget and the declared exposure
+- **WHEN** a storefront polls every 290 seconds with a 60-second teardown budget and the seller chooses a 300-second reserve
+- **THEN** it warns about the budget without inventing a paid tail or stopping lifecycle loops
 
 #### Scenario: Maximum term disagrees with the Agreement
 
@@ -184,14 +184,43 @@ An adapter MUST make each initiator with an entitlement a `stop` authority of th
 - **WHEN** an option's `early_termination` has a `payer` entitlement only
 - **THEN** the payer and the dispute authority are the only stop authorities, and the payee is not one
 
+### Requirement: Each party has one priced stop notice
+
+The adapter MUST carry each party's entitlement `notice_seconds` unchanged into its stop-authority entry beside `partialPeriod`. It MUST NOT add another tail. The dispute authority's notice MUST be zero; its treatment MUST follow the accepted authority policy.
+
+#### Scenario: A payer's notice is zero
+
+- **WHEN** the selected payer entitlement has zero notice
+- **THEN** its mandate stop authority has zero notice regardless of the seller's polling or teardown budget
+
+### Requirement: Started-period treatment is a committed payment term
+
+The codec MUST map `settles_through` values `started_period`, `last_boundary`, `stop` to payments `partialPeriod` values `charged`, `returned`, `prorated` respectively. Publication and buyer acceptance MUST refuse values the vendored contract cannot express or the selected authority policy refuses. SCM MUST NOT substitute a storefront-computed started-period refund.
+
+#### Scenario: Returned treatment is not expressible
+
+- **WHEN** a spot option names payee `last_boundary` but the vendored contract supports only charged periods
+- **THEN** publication and acceptance refuse it; interim spot offers must explicitly name `started_period` for both parties
+
+#### Scenario: Stop authorities use one notice
+
+- **WHEN** an entitlement has `notice_seconds: 0` and `settles_through: started_period`
+- **THEN** its stop entry has zero notice and charged treatment, with no exposure tail
+
 ### Requirement: The dispute window sets the earliest payout
 
-Each payment adapter MUST derive holds under which each amount a part holds pays out no earlier than the part's end plus `adjudication.dispute_window_seconds`. A `once` part's end MUST be the Agreement's term end, `start_utc + duration_seconds`; a rate part's end MUST be its stop, or the term end if it is not stopped. The window MUST NOT be shorter than the dispute authority's advertised minimum. SCM MUST NOT refuse a filing for being after the window; that is the dispute authority's policy.
+Each payment adapter MUST derive holds under which each amount a part holds pays out no earlier than the part's end plus `adjudication.dispute_window_seconds`. A prepaid `once` part MUST end at the Agreement term end; a setup `once` part at activation; a rate part at its stop or term end. The window MUST NOT be shorter than the dispute authority's advertised minimum. SCM MUST NOT refuse a filing for being after the window; that is the dispute authority's policy.
 
 #### Scenario: A once deal's hold is derived
 
 - **WHEN** a hosted mandate is derived for a deal whose term ends at 13:00 with a one-day window
-- **THEN** its `once` part has `end` 13:00 and hold `{afterStop: P1D}`, so it pays out no earlier than 13:00 the next day, or one day after an earlier stop
+- **THEN** its `once` part has `end` 13:00 and hold `{afterStop: P1D}`, so it pays out no earlier than 13:00 the next day
+
+#### Scenario: A setup part ends at activation
+
+- **WHEN** a deal activates with a setup `once` part and a one-day dispute window
+- **THEN** setup pays out no earlier than one day after activation, independently of the maximum running term
+- **AND** setup publication is refused until the vendored contracts express its activation-anchored end
 
 #### Scenario: A rate part stops early
 
@@ -341,6 +370,11 @@ When end service learns of a delivery end that no final request it issued and no
 
 - **WHEN** provisioning fails for a committed hosted deal before `start`
 - **THEN** the seller half files `exceptional_end` at the deal's start, and the buyer need not file
+
+#### Scenario: Delivery fails before a future start
+
+- **WHEN** a committed deal fails delivery before its future Agreement start
+- **THEN** end service records the physical end and self-filing intent atomically now, defers submission of `exceptional_end(Agreement.start_utc)` until that instant, and replays it under the same key after restart without resuming delivery
 
 #### Scenario: An entitled end is not filed
 
@@ -514,12 +548,17 @@ A `watch` cursor MUST advance only after the event's effect is journaled: by end
 
 ### Requirement: Lifecycle routes are authenticated per role
 
-The VM and bare-metal storefronts MUST expose the seller half's `submit`, `read`, and `list` through the administrator-principal contract. The VM and bare-metal storefronts MUST expose a buyer route for `commit`, `hint`, and `end_delivery`, keyed by negotiation ID and authenticated as the negotiation's buyer principal, with signed responses. The storefront MUST NOT relay a buyer's authority command.
+VM and bare-metal storefronts MUST expose seller `submit/read/list` under the administrator-principal contract and buyer `commit/hint/end_delivery` under the negotiation's buyer principal, keyed by negotiation ID with signed responses. Buyer authority commands MUST NOT be relayed. VM admin interrupt MUST submit the notice stop when the accepted option entitles the payee, and file `exceptional_end` otherwise.
 
 #### Scenario: Another principal sends commit
 
 - **WHEN** a principal other than the negotiation's buyer sends `commit` for it
 - **THEN** the storefront rejects it without reading the authority
+
+#### Scenario: The admin interrupt route uses an entitlement
+
+- **WHEN** an administrator interrupts a spot deal whose accepted option grants the payee a stop entitlement
+- **THEN** the route submits the notice stop through the seller half and delivery follows the authority's effective stop, without a self-penalty filing
 
 #### Scenario: The admin interrupt route ends a hosted deal
 
@@ -589,7 +628,7 @@ A `lease_ended` report whose push was missed MUST be recoverable from the authen
 
 ### Requirement: End service terminates or truncates, and journals each effect
 
-When *T* is now or past, end service MUST terminate the lease; otherwise it MUST truncate it to *T* at one-second precision or finer. Each effect MUST be journaled with a stable operation identity and retried under that identity until done. A shortfall in the exposure budget at runtime MUST only warn and MUST NOT stop the lifecycle loops.
+When *T* is now or past, end service MUST terminate the lease; otherwise it MUST truncate it to *T* at one-second precision or finer. Each effect MUST be journaled with a stable operation identity and retried under that identity until done. A shortfall in the seller's servicing budget at runtime MUST only warn and MUST NOT stop the lifecycle loops.
 
 #### Scenario: A stop arrives after its effective time
 
@@ -614,6 +653,24 @@ End service MUST record a deal's earliest final request whether or not a lease e
 
 - **WHEN** the storefront restarts after recording a final request for an unprovisioned deal
 - **THEN** after restart the deal still does not start delivery
+
+### Requirement: Admission shares the end-service transaction and revision
+
+End service MUST provide `admit(negotiation_id, phase, expected_revision) → admitted | ended(T), revision` using the caller's storefront database session. A durable revision/CAS MUST order reservation, dispatch, activation and credential authorization against end recording. Stale revisions MUST retry admission without authorizing effects.
+
+#### Scenario: A credential authorization races an end
+
+- **WHEN** an end is recorded after a delivery worker reads the revision but before it authorizes credentials
+- **THEN** its stale admission fails and the worker retries against the recorded end, including after restart
+
+### Requirement: End recording and required self-filing are one operation
+
+End service MUST provide `record_end(final_request, self_filing_intent?)`, atomically journaling the final request and any required self-filing intent in the caller's storefront transaction. An earlier buyer, terms or ruling end MUST NOT cause a seller self-penalty merely because admission is refused.
+
+#### Scenario: A crash separates recording from filing
+
+- **WHEN** the storefront crashes after `record_end` commits but before sending its required filing
+- **THEN** restart replays the same intent under its stable operation key; neither half is lost
 
 ### Requirement: Evidence is keyed by negotiation
 

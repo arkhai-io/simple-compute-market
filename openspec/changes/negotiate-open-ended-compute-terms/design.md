@@ -49,7 +49,7 @@ Both policies/reference quotes, buyer caps/display, VM amount checks, mandate
 derivation and buyer mandate checks use it. Additional setup pricing is explicit,
 not hidden in the recurring quote. At 2,500,000 USD/6 per hour and 10,000 bps,
 two-hour prepaid is 5,000,000 total; PT15M is 625,000 per period; PT1M is 41,667.
-Recovery uses the accepted option, not a newly enabled mechanism/current option.
+Recovery and buyer mandate checks use the signed-acceptance-bound rate structure and selected option, never a current or registry-cached listing. `negotiation-driven-capacity-resize` task 2.1a's carrier decision gates this accessor: retain the bound structure or its verifiable digest in accepted evidence before approval.
 
 A fail-closed repository check refuses direct `Agreement.amount` reads outside the
 accessor and declared raw negotiation hooks. Cover actual attribute/mapping reads
@@ -64,9 +64,13 @@ implementation that rejects every repository reader found during migration.
 
 Keep the foundation's exact shapes and names:
 
-- `early_termination = {version, entitlements, exposure_seconds, max_term_seconds}`;
+- `early_termination = {version, entitlements, max_term_seconds}`;
   entitlements keyed by `payer`/`payee`, each `{notice_seconds, settles_through}`.
-  Keep `stop+exposure` for payer and `stop` for payee.
+  Foundation D5 owns the `settles_through` mapping: `started_period` ↔ charged,
+  `last_boundary` ↔ returned, `stop` ↔ prorated. Presets choose payer charged and
+  payee returned; until the vendored contract expresses returned, spot explicitly
+  offers charged on both sides. Publication and acceptance fail closed on any
+  unsupported treatment. `exposure_seconds` and `stop+exposure` are retired.
 - `adjudication = {version, dispute, dispute_window_seconds, case_hold_max_seconds}`;
   `dispute = {interface, origin, account, record_key, params}`.
 - `bond` stays reserved where the mechanism cannot hold a seller-funded stake.
@@ -77,13 +81,13 @@ On-demand has no payee stop authority. Hardware withdrawal without entitlement i
 `exceptional_end(at)`, a dispute requesting the standard self-penalty: stop now and
 reverse the unserved share since `at`, awarding any bond in full. That reversal
 also replaces prepaid `refund_unused`; there is no compensation enum. Permitted
-rate stops follow the rate adapter's started-period rules, not a promise to prorate
-every end.
+rate stops follow the committed per-stopper `settles_through`, computed by the
+payment authority, not a later storefront refund or promise to prorate every end.
 
 Hosted once options carry adjudication but no early_termination: no part is
 stoppable. Recurring presets carry payer and optionally payee entitlement. Buyer
-notice is offered/priced and may be zero; exposure is separate and covers the
-polling/watchdog/teardown budget. `reserve_ahead_seconds >= exposure_seconds`.
+notice is offered/priced and may be zero; it is the only paid stop tail.
+Polling/watchdog/teardown budgets are seller recommendations, not another term.
 Adjudication must use an accepted authority and satisfy its advertised minimums.
 Unsupported/malformed terms and unknown versions fail closed in the shared codec.
 
@@ -112,10 +116,12 @@ derivation with a diagnostic, not a guessed default.
 
 At resolved `start_utc`, let `B = min(positive max_duration_seconds,
 available_until_utc - start_utc)` over stated bounds. Default recurring selection
-binds `duration_seconds = max_term_seconds = B`. If one bound is absent use the
-other. Require positive finite whole seconds; never round up past an absolute
-bound. An explicit shorter buyer horizon binds both fields to that value; a longer
-or expired selection is refused. Every reserved duration must fit both bounds.
+binds `duration_seconds = max_term_seconds = floor(B / period_seconds) * period_seconds`.
+If one bound is absent use the other. Require at least one whole period and never
+round up past an absolute bound. Round an explicit shorter buyer horizon down by
+the same rule, show the effective horizon before signature, and refuse a longer,
+expired or sub-period selection. Exhaustion and part end use charged treatment;
+a maximum term must therefore never end mid-period. Every reserved duration must fit both bounds.
 
 The selected option's max term and Agreement duration must agree before signature
 and commitment. A decision gate with the foundation/rate builder resolves how an
@@ -155,18 +161,22 @@ publication/acceptance gates. Exercise all three doors independently.
 ### D7. Display what the authority can enforce
 
 Both CLIs show class, recurring charge/period or total, separate setup once charge,
-initial reserve (not spend), maximum end/horizon, payer/payee entitlements and notice,
-exposure, dispute authority/window/case-hold cap and evidence retention. Values come
+initial reserve (not spend), maximum end/horizon, payer/payee entitlements, notice
+and `settles_through` treatment, dispute authority/window/case-hold cap and evidence retention. Values come
 from the selected option, not a stored class. Asking rate keeps its stated unit.
 
-Explain billing at payee start versus observed delivery, the started-period charge,
-buyer notice versus exposure, authority-hosted pending stops and adjudication for
+Explain rate start as a journaled effect after lease activation, distinct from buyer
+credential disclosure; explain each stopper's started-period charge/return/proration,
+the one priced notice, authority-hosted pending stops and adjudication for
 unentitled loss of service. Reserve-ahead is not a dishonest-seller billing cap.
 Holds last through stop plus dispute window and accepted case extensions. Keep
 signed evidence through at least the window after the latest delivery end, last
 payout or case close. Cooperative sellers self-file for failed/non-started delivery;
-the buyer's stop/case is its backstop. Normal buyer end is payment-authority stop
-then `end_delivery`; failure uses `buyer_end(at)` and kept request/ack evidence.
+the buyer's stop/case is its backstop. Normal buyer end submits payment-authority stop then a hint: nonzero notice keeps
+service until the effective stop is watched. `end_delivery` means end now regardless;
+payment outage uses it plus `buyer_end(at)` and kept request/ack evidence. Setup ends
+at activation, pays out one dispute window later and is fully returned for an
+undelivered deal but not after delivery.
 
 ### D8. Churn is seller pricing/policy, not a protocol gate
 
@@ -208,9 +218,14 @@ also require the registry carrier chain; hosted deployment gates activation, not
 implementation against an in-lane double. Site lapse choices are seller policy,
 not buyer protocol guarantees.
 
+## Goal 8 review triage
+
+No standalone review of this terms change was supplied this round. Applied the terms-facing findings from spot external F1/F9/F10/F12 and convergence external F6: foundation-owned `settles_through` values and fail-closed expressibility, one notice without exposure, whole-period horizon rounding, accepted pricing evidence, truthful stop-and-hint and setup display. Rejected: a seller-only started-period refund, because only a committed payment term survives an adversarial seller and independent dispute execution. No new product choice is supplied here; final start/bound/option-identity resolution remains the explicit pre-acceptance gate in D5, rather than a silently chosen protocol amendment.
+
 ## Design validation
 
-On 2026-10-29, pinned OpenSpec 1.14.0 strict validation and
+On 2026-10-29, pinned OpenSpec 1.14.0 and installed `openspec` strict validation
+passed without long-requirement warnings, and
 `make check-change CHANGE=negotiate-open-ended-compute-terms` passed, including
 comment hygiene, agent skills, citations, task structure and the current change
 index. `placement-probe.md` records the partial carriage experiment; the full codec check

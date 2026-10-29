@@ -9,7 +9,9 @@ added by this reconciliation.
 
 - [ ] 1.1 Reverify `negotiation-driven-capacity-resize`'s landed multiplier contract
   against `core/src/market_core/schemas.py` and `core/tests/unit/test_rate_helpers.py`.
-  Record scalar, rounding and amount-range behavior before migrating readers.
+  Record scalar, rounding and amount-range behavior before migrating readers. Resolve resize task
+  2.1a's accepted rate-structure carrier before recovery/mandate reads; retain its bound evidence,
+  never substitute a current listing after restart or repricing.
 - [ ] 1.2 With `agreed-evidence-and-early-termination`, once `kit/deal-lifecycle` exists,
   add a regression test that both objects round-trip through hosted and `kit/alkahest`
   option params, splitter service terms and both buyer commitment checks by the same
@@ -51,7 +53,8 @@ added by this reconciliation.
   uses each storefront's typed client and real persistence to prove the cached-option
   refusal has no acceptance side effect.
 - [ ] 3.2 In both negotiation runtimes/policies, resolve start/bounds before final
-  signature according to section 1's identity decision, bind equal duration/max term,
+  signature according to section 1's identity decision, round the effective horizon down to whole periods,
+  bind equal duration/max term,
   refuse expired/excessive horizons and missing reserved duration. Remove only VM's
   round-zero fallback here. Unit targets: domain terms/policy suites;
   app integration: `domains/vms/storefront/tests/integration/test_buyer_selection_negotiation.py`
@@ -67,7 +70,8 @@ added by this reconciliation.
 ## 4. Buyer first use and focused validation
 
 - [ ] 4.1 Update both buyer CLIs and policies: optional recurring horizon, required
-  reserved duration and D7's display of class/price unit/setup/reserve/terms. Use
+  reserved duration and D7's display of class/price unit/setup/reserve/terms, including
+  per-stopper `settles_through`, effective whole-period horizon and stop-then-hint semantics. Use
   accepted codec values; never promise a reserve-ahead loss cap. Unit targets:
   `domains/vms/buyer/tests/test_buy_resume_cli.py`, `test_explain_cli.py` and
   `domains/bare_metal/buyer/tests`. Integration verifies displayed/approved values

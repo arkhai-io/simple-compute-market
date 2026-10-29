@@ -54,9 +54,9 @@ alk = module("kit/alkahest/src/market_alkahest/schemas.py", "probe_alk")
 terms = {
     "early_termination": {
         "version": 1,
-        "entitlements": {"payer": {"notice_seconds": 0, "settles_through": "stop+exposure"},
-                         "payee": {"notice_seconds": 120, "settles_through": "stop"}},
-        "exposure_seconds": 300, "max_term_seconds": 86400},
+        "entitlements": {"payer": {"notice_seconds": 0, "settles_through": "started_period"},
+                         "payee": {"notice_seconds": 120, "settles_through": "last_boundary"}},
+        "max_term_seconds": 86400},
     "adjudication": {
         "version": 1,
         "dispute": {"interface": "arkhai.mediation.v1",

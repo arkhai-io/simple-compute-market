@@ -32,7 +32,7 @@ The typed storefront client MUST settle an Agreement-settled deal with `settle_a
 
 ### Requirement: The buyer's end is backed by its own stop or a case
 
-On a deal with buyer-stoppable rate parts, the buyer half's end command MUST issue the buyer's `stop` at the payment authority before it sends `end_delivery`. When the payment authority's answer is `unknown` or the authority is unreachable, it MUST still send `end_delivery` and MUST file `buyer_end(at)` with the agreement's dispute authority, carrying the signed request and the storefront's signed response as evidence.
+For buyer-stoppable rate parts, normal end MUST submit `stop` then a `hint`; delivery continues until the effective stop is watched. `end_delivery` MUST remain available for explicit end-now-regardless. An unknown or unreachable payment authority MUST cause `end_delivery` plus a `buyer_end(at)` filing with the signed request and seller acknowledgement.
 
 #### Scenario: The payment authority is down
 
@@ -47,7 +47,7 @@ On a deal with buyer-stoppable rate parts, the buyer half's end command MUST iss
 #### Scenario: The stop is accepted
 
 - **WHEN** the payment authority accepts the buyer's stop
-- **THEN** the buyer half sends `end_delivery` and files nothing
+- **THEN** the buyer half sends a hint and files nothing; delivery continues through any priced payer notice until the effective stop is watched
 
 ### Requirement: A buyer end filing survives an absent dispute authority
 
@@ -74,8 +74,8 @@ The VM and bare-metal buyer end commands MUST use the lifecycle client's `end_de
 
 #### Scenario: The storefront is down
 
-- **WHEN** a buyer's rate-part stop is accepted but the storefront cannot receive `end_delivery`
-- **THEN** the command reports the accepted stop and unacknowledged delivery request separately and does not claim the resource was torn down
+- **WHEN** a buyer's rate-part stop is accepted but the storefront cannot receive the hint
+- **THEN** the command reports the accepted stop and unacknowledged hint separately and does not claim the resource was torn down
 
 #### Scenario: The buyer obtains a site report
 
