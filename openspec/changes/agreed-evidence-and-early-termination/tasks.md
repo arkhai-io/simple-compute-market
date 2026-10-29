@@ -19,10 +19,12 @@ Wire and persistence breaks, all forward-only (design.md, D5 and "Rollout"): opt
 mandate hash and test vector changes in section 8; `[Settlement.arkhai_payments].dispute_authority`
 is rejected from section 3; `[Settlement.alkahest]`'s two release flags are migrated in section 4.
 
-Paths: `src/` abbreviates each package's source root. "Payments test double" is the double at
-the `kit/arkhai-payments` client boundary, and "mediation test double" the one section 12 adds
-at the `kit/arkhai-mediation` boundary (`docs/development/TESTING.md`, "Private Service
-Dependencies"). The hosted rate-part
+Paths: `src/` abbreviates each package's source root. "Payments test double" and "mediation
+test double" are the runnable HTTP doubles `add-arkhai-payments-lane-double` owns, at the
+`kit/arkhai-payments` and `kit/arkhai-mediation` boundaries (`docs/development/TESTING.md`,
+"Private Service Dependencies"). This change supplies the contracts, clients, adapters and
+signing fixtures they are built against: sections 1–2, 8.1, 9.1 and 12.1 precede the
+corresponding double, and sections 11 and 12's library-integration tests follow it. The hosted rate-part
 four-path e2e against the payments service's public test deployment is owned by
 `spot-deals-through-arkhai-payments` (design.md, D15). Sections that change existing deal paths
 name the existing scenarios that must keep passing. The buyer-termination fold additionally
@@ -462,12 +464,12 @@ evidence where a payments target is reachable.
 ## 12. Arkhai mediation dispute kit
 
 Delivers `kit/arkhai-mediation`, the first dispute kit: the `arkhai.mediation.v1` adapter, its
-client, the vendored contract and the mediation test double. Implements D4, D6 ("Adapters"), D10
+client and the vendored contract, with signing fixtures for the mediation test double. Implements D4, D6 ("Adapters"), D10
 and the design's "Arkhai mediation" dependency items as the client side, and the requirements
 "Disputes are per agreement and separate from payment", "Requests are intents or interface
 requests" (mapping), "A filing's outcome is the authority's answer", "A late case moves no
 paid-out money" (client side) and "Dispute writes are idempotent". Files: new
-`kit/arkhai-mediation` (`schema/SOURCE.md`, adapter, client, test double),
+`kit/arkhai-mediation` (`schema/SOURCE.md`, adapter, client, signing fixtures),
 `docs/development/ARCHITECTURE.toml` (`[[disputes]]` row).
 
 - [ ] 12.1 Vendor the `arkhai.mediation.v1` contract as published, or, until it is, a draft
@@ -485,7 +487,7 @@ paid-out money" (client side) and "Dispute writes are idempotent". Files: new
 
 - [ ] 12.3 Map `buyer_end(at)` through the mediation adapter's published request vocabulary,
       preserving the signed buyer request and seller acknowledgement as evidence. Files:
-      `kit/arkhai-mediation` adapter, contract and double. Gate: section 2.4 and the confirmed
+      `kit/arkhai-mediation` adapter and contract. Gate: section 2.4 and the confirmed
       mediation contract for live use. Verify: library-integration targets for unavailable
       authority/retry, mechanically accepted acknowledgement evidence and non-acknowledged
       cases remaining the authority's policy, never SCM applying money effects.

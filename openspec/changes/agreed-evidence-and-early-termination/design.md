@@ -236,7 +236,7 @@ The seller CLI, the strategy runner, a dry-run planner built on `read` and `list
 | `kit/deal-lifecycle` | Foundation library, on the contracts | Term codec and semantics, payment and dispute adapter protocols and their tables, evidence-store interface |
 | `kit/deal-lifecycle-client` | Client | Typed client for the routes |
 | `kit/deal-lifecycle-buyer` | Buyer-side library, a new kit area | The buyer half (dispatch, case building around the dispute adapter's requests, `commit`, `hint` and the end command), the buyer's evidence store, its prune command and case export; the domain buyer stage injects the lifecycle client |
-| `kit/arkhai-mediation` | Dispute kit, on the foundation library | The `arkhai.mediation.v1` dispute adapter, its client, the vendored contract and its test double; reads the authority's origin, account and record key from the Agreement |
+| `kit/arkhai-mediation` | Dispute kit, on the foundation library | The `arkhai.mediation.v1` dispute adapter, its client, the vendored contract and signing fixtures (the runnable double is `add-arkhai-payments-lane-double`'s); reads the authority's origin, account and record key from the Agreement |
 | `kit/deal-servicing` | Storefront-side library, beside `kit/capacity-publication` | End service, funding timers, `watch` loops and cursors, the storefront's evidence store |
 
 Mechanism kits and dispute kits depend on the foundation library and the contracts only. A dispute kit is a new kind beside mechanism kits in `ARCHITECTURE.md`'s "Kit areas": the one kit that speaks one dispute interface, depended on only by specializations and compositions. It names no payment mechanism, since compatibility is the authority's advertisement and reaches SCM as data. `ARCHITECTURE.toml` gains a `[[disputes]]` table registering each interface and its kit beside `[[mechanisms]]`, and "Scope" says a kit holds nothing, exactly one mechanism, or exactly one dispute interface. `scripts/architecture.py` loads the table, grants each interface to its kit, adds interface tokens to the vocabulary check, and refuses a kit scoped to both a mechanism and a dispute interface; without that, the rule D4 relies on would go unchecked. The buyer-side area is new: its kits are composed by buyers, never by a storefront or a site, and may depend on foundation libraries and contracts only; the lifecycle client they need is injected by the domain buyer stage. The buyer composition passes the evidence-store root, beside the buyer profile, so the kit does not depend on core buyer. `ARCHITECTURE.md`'s kit areas gain both. `watch` loops run under `kit/storefront`'s loop controller. Their cursors are lifecycle observation state, not a payment ledger, so "Marketplace roles hold no payment ledger" is amended to say so. The domain supplies lease and teardown effects through a narrow port, so a later merge of the VM and bare-metal domains does not entangle the kits with either.
@@ -428,7 +428,7 @@ Two rounds, one session each:
 
 ## Dependencies on the hosted payments service
 
-To be confirmed against the payments contract and vendored through `kit/arkhai-payments/schema/SOURCE.md`. Items gate implementation, not planning; the test double implements the confirmed contract.
+To be confirmed against the payments contract and vendored through `kit/arkhai-payments/schema/SOURCE.md`. Items gate implementation, not planning; `add-arkhai-payments-lane-double`'s test double implements the confirmed contract.
 
 This change. Checked against the published contract with the payments service's maintainers:
 
