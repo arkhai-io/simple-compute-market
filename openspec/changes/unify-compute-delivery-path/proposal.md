@@ -29,7 +29,9 @@ This is the delivery portion of Goal 8 in
   exhausted window takes the undelivered path.
 - A future-start deal commits at settlement and waits for its accepted start before
   dispatch, activation, billing and access. The site's activation deadline is
-  anchored at the later of commit and lease start, plus the allowance.
+  anchored at the later of the deal's commitment instant and lease start, plus the
+  option's published `delivery_deadline_seconds`, which delivery supplies as the anchor
+  and the site enforces from its pool.
 - Every compute lease, whatever its payment structure or mechanism, is activated by
   reservation identity, adopting the current end (a verified earlier truncation
   included). There is no periodic lease renewal here; the site owns the
@@ -149,7 +151,7 @@ to its current site end before billing; genuine seller non-delivery durably reac
 the classified end-and-filing operation while lawful ends keep their attribution; no
 locally ended deal discloses access, exact authenticated retries included; restart
 recovers each effect without a replacement resource. Reserved VM and bare-metal
-deals prove activation beyond the pool allowance, expiry before activation proves
+deals prove activation beyond the delivery deadline, expiry before activation proves
 recovery plus the journaled exceptional-end filing, and API-credit delivery is
 unchanged. Rate-path qualification is convergence's; no prepaid result proves it.
 

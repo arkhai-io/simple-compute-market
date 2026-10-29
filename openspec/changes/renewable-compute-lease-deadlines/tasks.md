@@ -8,7 +8,7 @@ dependency lands rather than preserving a forbidden import to fit this plan.
 ## 1. Dependency and contract gates
 
 - [ ] 1.1 Verify `inject-site-pool-authority` has landed its session-scoped pool-facts
-  port. Add the resolved provisioning allowance through that port; do not import
+  port. Add the resolved delivery deadline through that port; do not import
   the pool authority into `kit/site`. Reconfirm provider declaration ownership and
   any relocated pool package paths with the landed implementation.
 - [ ] 1.2 Before event integration, verify `agreed-evidence-and-early-termination`
@@ -28,21 +28,21 @@ dependency lands rather than preserving a forbidden import to fit this plan.
   first/site-off rollout and explicitly enabled owned-lane drives. Hosted operators
   independently confirm readiness; public records never include hosted identifiers.
 
-## 2. Allowance declaration and validation
+## 2. Delivery-deadline declaration and validation
 
 - [ ] 2.1 Extend `kit/resource-pools-contracts/src/market_resource_pools_contracts/hints.py`
-  with the positive-integer `provisioning_allowance_seconds` tag and strict parsing.
+  with the positive-integer `delivery_deadline_seconds` tag and strict parsing.
   Extend pool write validation in `kit/resource-pools` (or its landed owner) so
   create/replace/patch/import and validate-only use the same provider support rule.
   Missing means provider default; null/zero/malformed values do not disable it.
-- [ ] 2.2 Pass provider allowance declarations as plain data from the compute
+- [ ] 2.2 Pass provider delivery-deadline declarations as plain data from the compute
   composition in `provisioning/compute/service/src/compute_provisioning_service/container.py`;
   set recommended VM/bare-metal defaults of 1800/7200 seconds and state them in
   `provisioning/compute/service/src/compute_provisioning_service/seed/pools.yaml`.
   Keep the API-credits composition's provider declaration empty. Existing pool
   rows need no data backfill; their absent overrides resolve the provider default.
   Add/configure `activation_deadlines_enabled` false in the compute composition;
-  effective pool facts resolve no allowance while off without disabling support or
+  effective pool facts resolve no delivery deadline while off without disabling support or
   validation. Snapshot only new commits when enabled; turning it off never clears
   an existing deadline. Document deployment and caller qualification ownership.
 - [ ] 2.3 Validate at the lowest meaningful level: parsing in the existing hints
@@ -60,11 +60,12 @@ dependency lands rather than preserving a forbidden import to fit this plan.
   leaving existing rows null, with the due-query index. Existing active leases
   must not become awaiting activation during upgrade.
 - [ ] 3.2 Extend `kit/site/src/market_site/ledger.py` commit to snapshot the resolved
-  allowance inside the same transaction, require a finite end where one resolves,
-  and set the provisional deadline from max(commit_time, lease_start_utc). Recommit preserves it. Add
+  delivery deadline inside the same transaction, require a finite end where one resolves,
+  and set the provisional deadline from max(committed_at_utc, lease_start_utc), refusing a
+  commitment instant after the site's clock. Recommit preserves it. Add
   activation from `leased` / `awaiting_activation` to `active`, setting the deadline
   to the current agreed end without a caller-supplied time. Active retries return
-  unchanged; no-allowance/legacy leases return unchanged. All other states refuse.
+  unchanged; no-deadline/legacy leases return unchanged. All other states refuse.
 - [ ] 3.3 Update truncation to cap the deadline and the due query to select the
   earlier of deadline and agreed end. Return the observed end/deadline/phase and
   cause to expiry. Claim all those values with `leased` state before release
@@ -74,12 +75,12 @@ dependency lands rather than preserving a forbidden import to fit this plan.
   models in `http_models.py`, `router.py` and the site client in
   `kit/site-client/src/market_site_client/client.py` for activation and lease
   inspection. Use existing service authentication and exact response verification;
-  request bodies carry no billing kind, funded-through time or allowance override.
+  request bodies carry no billing kind, funded-through time or delivery-deadline override.
 - [ ] 3.5 Run `make -C kit/site test` and `make -C kit/site-client test`. Integration
   jurisdiction is the public ledger API with a real embedded database: extend
   `kit/site/tests/integration/test_ledger.py` for the two claim orderings,
   elapsed-but-unclaimed activation, retry after truncation, full-window admission,
-  no-allowance behavior and non-resurrection. Cover forward-start commits, switch-off
+  no-deadline behavior and non-resurrection. Cover forward-start commits, switch-off
   new commits, enabled new commits and unchanged already-snapshotted deadlines. Use deterministic two-session controls,
   not sleeps. Migration behavior belongs in the compute service's existing
   migration integration suite, with new tests subject to maintainer approval.
@@ -109,9 +110,9 @@ dependency lands rather than preserving a forbidden import to fit this plan.
   watchdog. Commit the reproducible setup/entry point with the implementation.
   Explicitly enable the switch in the owned site-only fixture, not in deployment
   defaults; prove off leaves null fields. Observe a future-start commit surviving
-  until max(commit,start)+allowance and commit -> awaiting activation -> activation
+  until max(commitment,start)+delivery_deadline_seconds and commit -> awaiting activation -> activation
   to the current agreed end (including prior truncation/lost acknowledgement) -> survival
-  past allowance, and a separate unactivated lease -> claimed expiry -> guarded
+  past the delivery deadline, and a separate unactivated lease -> claimed expiry -> guarded
   release. Readiness must pass before network scenarios. Hand this setup to the
   delivery-path owner; no storefront or payment service is needed for the site trace.
 - [ ] 4.5 Before pre-closeout review, check comment hygiene and touched import
@@ -150,7 +151,7 @@ implementation. Follow `openspec/README.md#plan-closeout-requirements` in this o
   bare-metal and API-credit complete-deal scenarios (`test_full_deal.py`,
   `test_bare_metal_mock_deal.py`, `test_credits_payment_deal.py` under
   `e2e-tests/tests/e2e/roles/scenarios/`). Coordinate activation-specific traces with
-  `unify-compute-delivery-path`: the traces for a reserved deal surviving allowance
+  `unify-compute-delivery-path`: the traces for a reserved deal surviving the delivery deadline
   after activation, pre-activation crash expiry and unchanged quota holds transfer
   to unify tasks 4.2 and 4.3 and do not block renewable's archive. Record those
   transferred validations as unrun here, not passed. Missing readiness for this
@@ -180,7 +181,7 @@ No promotion yet: this is the implementation plan, not implemented architecture.
 | Accepted decision | Permanent location after implementation |
 |---|---|
 | D1–D2 deadline, activation, claim and admission | `openspec/specs/site-capacity/spec.md`, `openspec/specs/site-capacity/architecture.md`; capacity reservation in `docs/development/ARCHITECTURE.md` |
-| D3 allowance support/default/override validation | `openspec/specs/resource-pool-management/spec.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
+| D3 delivery-deadline support/default/override validation | `openspec/specs/resource-pool-management/spec.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
 | D5 watchdog, lease-end intent and proven-release distinction | `openspec/specs/physical-provisioning/spec.md`; recovery workers in `docs/development/ARCHITECTURE.md` |
 | D5 typed activation and inspection | `openspec/specs/compute-provisioning-contract/spec.md` |
 | D4 deferred renewal | Not promoted; retained in archived design with its revisit condition |

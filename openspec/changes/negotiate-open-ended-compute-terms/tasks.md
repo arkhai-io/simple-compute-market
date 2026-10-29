@@ -37,7 +37,10 @@ added by this reconciliation.
   and tier precedence in the package unit suites; no network or lease changes here.
 - [ ] 2.3 In both storefront publication adapters, emit separately priced options on
   existing listing identities using the foundation codec and injected preset helper; include
-  premature_stop_penalty, recommended on-demand default 24 periods' price with seller override.
+  premature_stop_penalty, recommended on-demand default 24 periods' price with seller override,
+  and `delivery_deadline_seconds` from the pool's effective value, read like the bound hints, on
+  every compute option (none when the pool enforces none; the diagnostic names the refusal). Apply D5's
+  runway inequality to the default horizon and report a failing default as a close reason.
   Missing hosted helper omits recurring candidates. Omit unbounded
   recurring candidates with diagnostics. Consume, do not redo, the foundation's
   Alkahest release-model migration. Unit targets: both domain suites and
@@ -57,7 +60,9 @@ added by this reconciliation.
 - [ ] 3.2 In both negotiation runtimes/policies, resolve start/bounds before final
   signature per D5, resolving the horizon into `duration_seconds`; require whole-second recurring starts,
   refusing fractional values without rewriting accepted bytes; bind equal duration/max term
-  without rounding, require at least one whole period for recurring horizons, and
+  without rounding, require at least one whole period for recurring horizons, refuse a
+  recurring horizon that fails D5's runway inequality naming the minimum that passes
+  (verify: "The horizon leaves no runway"), and
   refuse expired/excessive horizons and missing reserved duration. Carry term-end
   `settles_through` into payments `end.partialPeriod` through the foundation codec;
   compute presets use returned and fail closed until vendored. Interim recommendation:
@@ -79,8 +84,9 @@ added by this reconciliation.
 - [ ] 4.1 Update both buyer CLIs and policies: optional recurring horizon, required
   reserved duration and D7's display of class/price unit/setup/reserve/terms, including
   per-stopper and term-end `settles_through`, premature-stop penalty amount/asset/cap,
-  recommended default acceptance refusal of on-demand without positive penalty (explicit buyer
-  opt-out), unrounded effective horizon and
+  the delivery deadline as seconds after approval, recommended default acceptance refusal of
+  on-demand without positive penalty and of any compute option without a delivery deadline
+  (explicit buyer opt-out), unrounded effective horizon and
   stop-then-hint semantics. Use
   accepted codec values; never promise a reserve-ahead loss cap. Unit targets:
   `domains/vms/buyer/tests/test_buy_resume_cli.py`, `test_explain_cli.py` and

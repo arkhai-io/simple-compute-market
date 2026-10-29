@@ -100,7 +100,7 @@ by dispute interface", "Evidence is keyed by negotiation" and "A dispute is one 
 - [ ] 2.2 Create `kit/deal-lifecycle` (foundation library, on the contracts) with the term codec
       for `adjudication` (`dispute` as `{interface, origin, account, record_key, params}`),
       `early_termination` (no `exposure_seconds`; entitlements' and term end's `settles_through`
-      values and `partialPeriod` mapping per D5, plus nonnegative minor-unit decimal-string `premature_stop_penalty`, absent/zero meaning none) and reserved `bond`; malformed and bounded-term refusal
+      values and `partialPeriod` mapping per D5, plus nonnegative minor-unit decimal-string `premature_stop_penalty`, absent/zero meaning none), positive-integer `delivery_deadline_seconds` (the "Delivery has a deadline" semantics; the compute builders in `negotiate-open-ended-compute-terms` emit it from the pool's tag) and reserved `bond`; malformed and bounded-term refusal
       (`case_hold_max_seconds` a nonnegative integer or `null`, minimums from an authority's
       advertisement copy); and the semantics table. Verify: unit tests for each refusal in the
       "Malformed terms are refused" and "Dispute timing terms are bounded" scenarios, and that
@@ -449,7 +449,10 @@ market-composition's "Marketplace roles hold no payment ledger". Files: new `kit
       Own `record_end(final_request, filing_intent? | pending_classification?)`, journaling both atomically in that session;
       stale revisions retry admission and cannot authorize work. Add the pending-classification slot
       and resolve_correction(source_ref, expected_revision, evidence, classification, filing_intent?)
-      atomic resolution in the same journal; use D8's closed evidence-based classification,
+      atomic resolution in the same journal; use D8's closed evidence-based classification
+      with non-delivery at the earlier of the term end and `delivery_deadline_seconds` after
+      the later of the commitment instant and `start_utc` (verify: "The seller activates after
+      the delivery deadline inside a long term"),
       preserving earlier never-delivered failures despite later clock/payee stops. Supply the neutral delivery
       authorization protocol and versioned secret-free evidence envelope from D6. End service
       alone exposes begin_billing(operation_key, activated_delivery_ref) and journals billing-start key/evidence before I/O; accept delivery's stable operation key

@@ -21,6 +21,14 @@ do not express these products across mechanisms or bound them by an absolute dat
   horizon, at the resolved start, `duration_seconds =
   min(max_duration, available_until - start)` over stated finite bounds, without
   rounding and with at least one whole period. Reserved deals must also satisfy both bounds.
+  A recurring horizon must also leave the runway: its term end is no earlier than the
+  latest permitted approval plus `delivery_deadline_seconds` plus one period, checked at
+  derivation for the default horizon and at acceptance for a buyer's, which is refused
+  with the minimum that passes.
+- Publish the pool's `delivery_deadline_seconds` as the option's
+  `lifecycle.delivery_deadline_seconds` on every compute option, under the same name
+  the site enforces; a pool enforcing none yields no term, which the default buyer
+  refuses and the seller-side diagnostic names.
 - Publish one listing per existing capacity/shape identity with separately priced
   options for its billing/entitlement combinations. Omit unbounded recurring
   candidates without suppressing valid reserved ones.
@@ -28,7 +36,7 @@ do not express these products across mechanisms or bound them by an absolute dat
   on one composition-owned servicing declaration. Preserve servicing of accepted
   deals even when new offers are disabled.
 - Both buyer CLIs show class, unit-bearing price, setup once charge, reserve,
-  maximum term, entitlements/notices, per-stopper and term-end `settles_through`
+  maximum term, the delivery deadline, entitlements/notices, per-stopper and term-end `settles_through`
   billing treatment and adjudication/retention terms. Compute term ends use
   `last_boundary` mapped to payments `end.partialPeriod: returned`, failing closed
   until vendored. Interim recommendation: an absolute end with a charged final
@@ -70,6 +78,8 @@ None. The lifecycle codec and its common semantics belong to the foundation chan
   Alkahest release-model migration and common projections, before wire edits.
 - `negotiation-driven-capacity-resize`: reverify its landed multiplier contract
   before implementing the accessor.
+- `renewable-compute-lease-deadlines`: defines the pool's `delivery_deadline_seconds`
+  tag publication reads; the value is published and enforced under one name.
 - Rate-servicing change: freeze `period`, `reserve_ahead_seconds`, setup pricing and
   the servicing declaration with the accessor's unit contract. Rate materialization
   depends on its adapter, not merely the presence of these terms.

@@ -38,8 +38,12 @@ Keep the original design's nullable `renew_by_utc` and `renewal_phase` fields.
 The names do not imply an active renewal operation: only activation ships here.
 `lease_end_utc` keeps meaning the agreed end and moves only through truncation.
 
-- On first commit with a resolved allowance, record `awaiting_activation` and
-  `renew_by_utc = max(commit_time, lease_start_utc) + provisioning_allowance_seconds`.
+- On first commit with a resolved delivery deadline, record `awaiting_activation` and
+  `renew_by_utc = max(committed_at_utc, lease_start_utc) + delivery_deadline_seconds`,
+  where `committed_at_utc` is the deal's commitment instant the storefront supplies
+  with the commit — the payment authority's record of the buyer's approval on a hosted
+  deal, the mechanism's commitment act otherwise. The site refuses an anchor after its
+  own clock, so a storefront cannot lengthen the deadline by sitting on an approved deal.
   This protects a forward reservation without expiring it before its admitted start;
   unify defers dispatch/activation/access until that start (no early lead time).
 - Activation is one conditional transition from `leased` and
@@ -55,9 +59,9 @@ The names do not imply an active renewal operation: only activation ships here.
 - Admission always accounts against the agreed window. The earlier activation
   deadline does not free capacity for a future reservation before release succeeds.
 - Migration leaves both fields null on existing leases. A pool resolving no
-  allowance records neither field; its leases continue to expire only at their end.
+  delivery deadline records neither field; its leases continue to expire only at their end.
   An activation call on such a lease returns it unchanged. This is not a billing
-  classification. **Recommendation:** a pool resolving an allowance requires a
+  classification. **Recommendation:** a pool resolving a delivery deadline requires a
   finite end at commit; unsupported open-ended use is refused rather than creating
   an unbounded activation.
 
@@ -89,12 +93,17 @@ freeing capacity while a create is in flight or teardown is unproven. It must be
 carried through direct release, deferred release and failure paths, not checked
 only after a provider action.
 
-### D3. Provider-declared provisioning allowance, read through the pool port
+### D3. Provider-declared delivery deadline, read through the pool port
 
-`provisioning_allowance_seconds` is a Resource Pool policy tag: allowance after
-max(commit time, lease start) to activation, not money, minimum spend, a listing term or a buyer SLA.
+`delivery_deadline_seconds` is a Resource Pool policy tag: the seconds after
+max(commitment instant, lease start) within which the site activates the lease. It is
+also the buyer's term: the storefront publishes the pool's effective value as the
+option's `lifecycle.delivery_deadline_seconds` (foundation D5), under the same name,
+and the site enforces exactly what was published, so the activation deadline is a
+promise the buyer read and the dispute authority can check, not a seller-internal
+timer. It is not money or a minimum spend.
 Each provider declares, as plain composition-supplied data, whether it supports
-an allowance and its default. Compute providers `vm.ansible` and
+a delivery deadline and its default. Compute providers `vm.ansible` and
 `bare_metal.ansible` declare one; the API-credits provider declares none.
 
 **Recommendation:** initial defaults are 1800 seconds for VM and 7200 seconds for
@@ -106,7 +115,7 @@ on committed leases.
 **Recommended validation:** a supporting provider's pool may override the default
 with a positive integer number of seconds. Absence means use the provider default, not disable protection;
 zero, negatives, booleans, fractional values and null are refused at create,
-replace, patch and document import. A provider declaring none resolves no allowance
+replace, patch and document import. A provider declaring none resolves no delivery deadline
 and refuses an explicit override. Validation-only and applying writes agree and
 imports remain atomic. Commit snapshots the resolved duration into its deadline;
 later pool edits do not alter existing leases.
@@ -115,18 +124,20 @@ later pool edits do not alter existing leases.
 `activation_deadlines_enabled`, default false. Provider support/defaults and pool
 validation remain declared even while disabled; an invalid override never becomes
 valid because the switch is off. The injected pool-facts port resolves no effective
-allowance while disabled, so new leases retain null deadline/phase. This is an
+delivery deadline while disabled, so new leases retain null deadline/phase. This is an
 operator composition setting, not a pool tag or caller-supplied commit flag. Enabling
 applies only to new commits; disabling does not clear deadlines already snapshotted.
 
 The session-scoped pool-facts port from `inject-site-pool-authority` supplies the
-effective allowance in the commit transaction. The site does not import the pool
+effective delivery deadline in the commit transaction. The site does not import the pool
 authority or infer a provider from a domain or billing kind. API-credit quota holds
 therefore receive no deadline by the same generic rule, with no site exemption.
 If the dependency stalls, reconsider the port contract with its owner; passing a
-storefront-selected allowance is not an authorized fallback.
+storefront-selected delivery deadline is not an authorized fallback. The storefront
+supplies the anchor instant, a fact of the deal like the window; the duration is the
+pool's alone, and publication reads it through the same port.
 
-An allowance overrun enters ordinary guarded release. The storefront supplies
+A delivery-deadline overrun enters ordinary guarded release. The storefront supplies
 classified failure evidence to the foundation's single end-plus-optional-filing
 operation. The foundation owns cause classification and the financial intent's
 fixed timing basis. Consume D8's pre-start exception (journal now, act at accepted
@@ -137,7 +148,7 @@ or-stronger self-penalty request, not buyer_end, which goes to human triage. The
 computes no financial instant/amount and its report is not a refund prerequisite.
 The caller supplies verified buyer/ruling/payment evidence for classification;
 term clock or payee stop alone does not erase established non-delivery. Rate billing
-starts after ready evidence and activation in unify; allowance authorizes no billing.
+starts after ready evidence and activation in unify; the deadline authorizes no billing.
 
 ### D4. Renewal and renewal-lapse policy are deferred seller options
 
@@ -209,7 +220,12 @@ delivery. Delivery admission must also honor an expiry claim that wins activatio
   foundation records this alternative and its required dispute-authority recording,
   not a new site capability.
 - Minimum-spend requirement — churn is the seller's pricing/acceptance choice;
-  a setup `once` part is the recommended default, not a site allowance rule.
+  a setup `once` part is the recommended default, not a site delivery-deadline rule.
+- A seller-internal deadline the buyer never reads (this design's first form, replaced
+  2026-10-29) — a buyer could not tell a short horizon from an undeliverable one, and a
+  seller activating late inside a long term had not failed; the pool's tag is now the
+  value the option publishes, under one name, and the deadline's anchor is the deal's
+  commitment instant rather than the storefront's own commit time.
 - Storefront-local scheduled stop — authority-hosted pending stops survive a dead
   storefront; the site deadline schedules neither notice nor billing.
 - One monotonic deadline from commit — activation may need to move the provisional
@@ -222,9 +238,9 @@ delivery. Delivery admission must also honor an expiry claim that wins activatio
   outside transactions; compare-and-set claims provide the race boundary.
 - Clock-only activation refusal — makes watchdog latency evict a resource whose
   expiry has not been claimed; claim order decides.
-- Commercial flag on commit — the provider/pool allowance is sufficient and leaves
+- Commercial flag on commit — the provider/pool delivery deadline is sufficient and leaves
   the site independent of billing shape.
-- Site-wide allowance, reuse of hold TTL, or no deadline until billing starts —
+- Site-wide delivery deadline, reuse of hold TTL, or no deadline until billing starts —
   ignores provider differences or leaves the commit-to-delivery gap unbounded.
 - Storefront-selected grace as buyer protection — no seller-local lapse policy
   supplies an authority-backed billing guarantee; the whole renewal policy is deferred.
@@ -232,7 +248,7 @@ delivery. Delivery admission must also honor an expiry claim that wins activatio
 ## Implementation cadence and gates
 
 One site-focused implementation round after `inject-site-pool-authority`: schema,
-allowance validation/provider declarations, activation, conditional expiry and typed
+delivery-deadline validation/provider declarations, activation, conditional expiry and typed
 views. Reservation acknowledgement-gap qualification consumes only
 `capacity-reservation-lifecycle-hardening`'s negotiation-keyed exact-request
 reservation-idempotency slice, not its whole implementation or archive; site-local
@@ -254,7 +270,7 @@ protection or proves campaign readiness. This avoids a whole-change dependency c
 
 The unify review's 01 F3 / 02 F1 are resolved by reservation-only activation and
 explicit truncation/lost-acknowledgement scenarios. Its 01 F4 / 02 F2 are resolved
-by the max(commit,start) deadline anchor, zero early-dispatch lead time at the
+by the max(commitment,start) deadline anchor, zero early-dispatch lead time at the
 caller, and foundation-owned valid pre-start command journaling (act at accepted start). Its 02 F4 is
 resolved by the off-by-default composition switch and unify-owned final enablement.
 The owner additionally fixes the distinction between site end intent and proven

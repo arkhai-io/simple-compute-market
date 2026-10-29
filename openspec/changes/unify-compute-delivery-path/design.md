@@ -123,8 +123,10 @@ activation, billing start and disclosure occur no earlier than
 durable wake time and the retry owner D1 records, and rechecks admission on wake,
 so hardware is never used outside the admission window; a nonzero lead time would
 need explicitly accounted capacity, not a timer. The renewable change anchors the
-activation deadline at `max(commit_time, lease_start_utc) + allowance`. Available
-never means early access. Settlement after the end enters D5, without guessing
+activation deadline at `max(committed_at_utc, lease_start_utc) + delivery_deadline_seconds`,
+the deal's commitment instant that delivery supplies with the site commit and the
+option's published deadline, which the site reads from its pool under the same name.
+Available never means early access. Settlement after the end enters D5, without guessing
 which party caused the lateness.
 
 Reservation acknowledgement-gap recovery uses the negotiation-keyed exact-request

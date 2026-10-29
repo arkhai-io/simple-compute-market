@@ -31,7 +31,13 @@ explicit raw negotiation hooks MUST fail the repository check.
 
 ### Requirement: Compute horizons bind both seller bounds
 
-Reserved duration MUST be positive and fit both bounds. Recurring horizons MAY be omitted; default is the least stated relative bound or absolute availability minus resolved start. Accepted duration/max term MUST equal that default or a shorter selection without rounding, and MUST include at least one whole period. Acceptance MUST refuse expired, excessive or sub-period selections.
+Reserved duration MUST be positive and fit both bounds. Recurring horizons MAY be omitted; default is the least stated relative bound or absolute availability minus resolved start. Accepted duration/max term MUST equal that default or a shorter selection without rounding, and MUST include at least one whole period. Acceptance MUST refuse expired, excessive or sub-period selections. For a recurring option, acceptance MUST also refuse a horizon whose term end is earlier than `max(floor(accepted_at) + approval_window, start_utc) + delivery_deadline_seconds + period`, naming the minimum horizon that passes, and derivation MUST apply the same inequality to the default horizon so that no advertised recurring option fails it at its default selection.
+
+#### Scenario: The horizon leaves no runway
+
+- **WHEN** a buyer proposes a 15-minute horizon on an option with a 15-minute period, a 15-minute approval window and a 1200-second delivery deadline
+- **THEN** acceptance refuses with the minimum horizon of 50 minutes
+- **AND** a 50-minute proposal is accepted and a buyer approving at the last permitted instant still receives one whole period after the deadline
 
 #### Scenario: Absolute bound is earlier
 

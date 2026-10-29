@@ -1,32 +1,37 @@
 ## ADDED Requirements
 
-### Requirement: Commit snapshots an activation deadline when the pool resolves an allowance
+### Requirement: Commit snapshots an activation deadline when the pool resolves a delivery deadline
 
-On first commit, an effective pool-resolved allowance MUST set renew_by_utc to max(commit_time, lease_start_utc) plus that allowance and renewal_phase to awaiting_activation. Such a commit MUST require a finite end. Recommit MUST preserve both fields. No effective allowance and migrated existing leases MUST retain null fields and end-only expiry.
+On first commit, an effective pool-resolved delivery deadline MUST set renew_by_utc to max(committed_at_utc, lease_start_utc) plus that deadline, where committed_at_utc is the deal's commitment instant supplied with the commit and MUST NOT be later than the site's commit time, and renewal_phase to awaiting_activation. Such a commit MUST require a finite end. Recommit MUST preserve both fields. No effective delivery deadline and migrated existing leases MUST retain null fields and end-only expiry.
 
 #### Scenario: A compute reservation is committed
 
-- **WHEN** a reservation in a pool resolving a provisioning allowance is first committed with a finite agreed end
-- **THEN** the site records the provisional deadline from max(commit time, lease start) and the awaiting-activation phase without receiving payment terms
+- **WHEN** a reservation in a pool resolving a delivery deadline is first committed with a finite agreed end
+- **THEN** the site records the provisional deadline from max(commitment instant, lease start) and the awaiting-activation phase without receiving payment terms
+
+#### Scenario: A storefront supplies a future commitment instant
+
+- **WHEN** a commit carries a commitment instant later than the site's clock
+- **THEN** the site refuses the commit
 
 #### Scenario: A commit is retried after the pool policy changes
 
-- **WHEN** a committed reservation is committed again after its pool allowance changes
+- **WHEN** a committed reservation is committed again after its pool delivery deadline changes
 - **THEN** its original deadline, phase and agreed window remain unchanged
 
-#### Scenario: An existing lease or quota hold has no allowance
+#### Scenario: An existing lease or quota hold has no delivery deadline
 
-- **WHEN** the site migrates an existing lease or commits a quota hold whose pool resolves no allowance
+- **WHEN** the site migrates an existing lease or commits a quota hold whose pool resolves no delivery deadline
 - **THEN** its deadline and phase are null and its previous expiry semantics remain unchanged
 
 #### Scenario: A protected pool receives an unbounded commit
 
-- **WHEN** a pool resolving an allowance is asked to commit with no finite end
+- **WHEN** a pool resolving a delivery deadline is asked to commit with no finite end
 - **THEN** the site refuses without committing the lease
 
 #### Scenario: A future lease starts after commit
 
-- **WHEN** a lease starting at 12:00 commits at 10:00 with a 30-minute allowance
+- **WHEN** a lease starting at 12:00 is committed at 10:00, commitment instant 10:00, with a 30-minute delivery deadline
 - **THEN** its provisional deadline is 12:30, not 10:30
 - **AND** its agreed window and admission accounting are unchanged
 

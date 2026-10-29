@@ -4,6 +4,7 @@
 
 Both compute buyers MUST display the derived product class, quote with unit,
 separate setup once charge, initial reserve, maximum term/end, selected horizon,
+the delivery deadline as seconds after approval within which the resource is active,
 payer/payee entitlements, notices, per-stopper and term-end `settles_through`, premature-stop penalty amount/asset/cap, and adjudication/retention terms
 before approval.
 
@@ -44,7 +45,7 @@ The buyer's acceptance policy MUST by default refuse an option whose payee entit
 
 ### Requirement: Default acceptance requires an on-demand seller penalty
 
-Buyer acceptance policy SHOULD refuse an on-demand option without positive early_termination.premature_stop_penalty and SHOULD expose explicit buyer opt-out. It MUST display the selected value and explain that an unentitled seller end forfeits at most earned amounts still held after unearned-money refunds; an entitled notice stop pays none. In a buyer case a person applies the remedy.
+Buyer acceptance policy SHOULD refuse an on-demand option without positive early_termination.premature_stop_penalty and a compute option without `delivery_deadline_seconds`, and SHOULD expose explicit buyer opt-out for each. It MUST display the selected value and explain that an unentitled seller end forfeits at most earned amounts still held after unearned-money refunds; an entitled notice stop pays none. In a buyer case a person applies the remedy.
 
 #### Scenario: An on-demand option has no penalty
 

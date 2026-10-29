@@ -16,7 +16,8 @@ held money and kept signed bytes, not on a deadline inside the seller's site.
 
 - Add a nullable lease deadline and activation phase beside `lease_end_utc`. Commit
   sets `awaiting_activation` only when the composition safeguard is enabled, with
-  deadline max(commit time, lease start) plus the pool's provisioning allowance.
+  deadline max(commitment instant, lease start) plus the pool's `delivery_deadline_seconds`,
+  the same value the storefront publishes as the option's term.
   Existing leases retain null fields and their current behavior.
 - Add an idempotent activation transition. Every compute deal activates to its
   current agreed end, regardless of payment mechanism or billing shape. There is no renewal operation in this change.
@@ -25,16 +26,16 @@ held money and kept signed bytes, not on a deadline inside the seller's site.
   an elapsed deadline may still be activated until expiry claims it.
 - Keep admission accounting against the agreed window, not the activation deadline.
   Truncation remains earlier-only and caps the deadline with the end.
-- Let each provider declare its provisioning allowance default, overridden by a
+- Let each provider declare its delivery-deadline default, overridden by a
   validated pool policy tag. Compute providers declare one; API-credit quota holds
-  resolve none. Read the allowance through the injected pool-authority port.
+  resolve none. Read the delivery deadline through the injected pool-authority port.
 - Expose the deadline, phase and active instant, and extend the signed `lease_ended`
   record with `activation_deadline_lapsed` and the deadline that caused the claim.
   This records intended lease end, not proven physical completion or authority to
   move money. Guarded release supplies the separate completion fact.
 - Ship the explicit compute composition setting `activation_deadlines_enabled`
   false. Provider support/default validation stays active. The injected port resolves
-  no effective allowance while off; enabling affects only new commits and never
+  no effective delivery deadline while off; enabling affects only new commits and never
   backfills legacy leases. Unify owns deployed enablement after compatible callers.
 
 Renewal and the site's `reclaim` / bounded `grace` / `continue` lapse policy are
@@ -47,7 +48,7 @@ held earnings; hosted bond award is reserved.
 ### Modified Capabilities
 
 - `site-capacity`: commit deadline, activation, expiry claim and admission rules.
-- `resource-pool-management`: provider-declared provisioning allowance and validation.
+- `resource-pool-management`: provider-declared delivery deadline and validation.
 - `physical-provisioning`: watchdog enforcement and lease-end intent evidence.
 - `compute-provisioning-contract`: typed activation and lease inspection.
 
@@ -82,7 +83,7 @@ None.
   for those callers. Deploy storefronts first, then the site off, qualify all paths,
   then enable. Legacy null-phase delivery tolerates absent activation support only
   with a verified legacy view; protected leases without activation require repair. Its complete-deal evidence proves activated leases survive
-  the allowance, undelivered leases expire, and API credits remain unchanged.
+  the delivery deadline, undelivered leases expire, and API credits remain unchanged.
 - `capacity-reservation-lifecycle-hardening` owns hold expiry indexing on the same
   table. Coordinate migration order; use a separate lease-deadline due query/index.
   Index coordination is not a behavior dependency. Reservation acknowledgement-gap
@@ -116,7 +117,7 @@ recorded deferred option, not an implementation task.
 
 - D1–D2: activation, null compatibility, agreed-window accounting and expiry claims
   to `openspec/specs/site-capacity/spec.md` and its architecture companion.
-- D3: allowance declaration/validation to
+- D3: delivery deadline declaration/validation to
   `openspec/specs/resource-pool-management/spec.md` and
   `docs/development/DEPLOYMENT_AND_CONFIG.md`.
 - D5: watchdog, signed lease-end intent and separate proven-release facts to

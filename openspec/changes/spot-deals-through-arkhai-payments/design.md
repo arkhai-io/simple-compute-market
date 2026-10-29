@@ -81,6 +81,10 @@ kept if they stop and returned only if the seller never delivers.
 | Spot | setup `once` by default + time rate | payer `{notice_seconds: 0, settles_through: started_period}`; payee with its priced notice |
 | Reserved | `once` for the committed term | existing `once` semantics |
 
+Every preset also carries `lifecycle.delivery_deadline_seconds`, the pool's value the
+site enforces (terms D3; renewable D3); the preset helper takes it as an input beside
+adjudication and emits no compute option without it.
+
 The shipped presets price the payer's notice at zero: a buyer who stops is charged
 to the started period and nothing after, and a seller who wants a payer tail
 prices it as a number the buyer sees before accepting. Both recurring presets carry

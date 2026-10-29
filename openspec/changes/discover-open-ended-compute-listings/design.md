@@ -46,7 +46,10 @@ Use these exact common fields, read through the shared codec from the option's `
 - `adjudication.dispute.interface` and `adjudication.dispute.account`;
 - `early_termination.premature_stop_penalty`: integer minor units in the option asset,
   zero if absent; compare only within the same asset-correlated option. A positive
-  filter is candidate discovery, not proof of buyer acceptance or held-money recovery.
+  filter is candidate discovery, not proof of buyer acceptance or held-money recovery;
+- `delivery_deadline_seconds`: the option's published delivery deadline, missing when
+  the option carries none, so a buyer can filter for "active within N of approval" by
+  comparison, like the payee notice; missing is not zero.
 
 For a valid option without early_termination, entitlement presence projects false;
 missing notice is not zero. Malformed/unsupported terms fail validation, not fallback

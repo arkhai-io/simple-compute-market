@@ -72,7 +72,7 @@ Do not change provisioning's physical aggregate schema to hold commercial state.
       bare-metal materialization tests, covering late settlement and missing duration.
       Commit forward reservations at settlement, persist wake at accepted start, and
       defer dispatch/activation/billing/disclosure until then. Verify restart before
-      wake and the max(commit,start)+allowance deadline with renewable. Keep pre-dispatch
+      wake and the max(commitment,start)+delivery_deadline_seconds deadline with renewable. Keep pre-dispatch
       work awaiting-delivery in the existing mechanism runtime journal (Alkahest
       each cycle; hosted payment reconciliation), not deferred. Drive a future-start
       Alkahest deal through restart to availability without buyer polling.
@@ -223,14 +223,14 @@ parallel deployment script. Do not change publication's servicing gate to make a
 pass. New persisted scenarios remain subject to the explicit approval gate above.
 
 - [ ] 4.1 Prepare reproducible, checkout-owned VM and bare-metal lane targets with
-      deterministic public development personas, seeded pool allowance and complete
+      deterministic public development personas, seeded pool delivery deadline and complete
       deal entry points. Record exact startup/ready/stop commands and target selectors;
       inspect selectors before seeding or teardown. Use the existing lane readiness
       check and stop on not-ready. No private service credentials or raw private logs
       enter the repository.
 - [ ] 4.2 Explicitly enable activation_deadlines_enabled in owned lane setup only,
       leaving repository/operator defaults off. Drive a reserved deal in each domain through activation, then beyond the
-      provisioning allowance but before Agreement end, observing the site's active
+      delivery deadline but before Agreement end, observing the site's active
       instant and unchanged end. Drive settlement delayed within and beyond the
       absolute window. Record exact deal/lease evidence and outcomes, not just health.
 - [ ] 4.3 Drive crash/restart at every adjacent delivery checkpoint and every

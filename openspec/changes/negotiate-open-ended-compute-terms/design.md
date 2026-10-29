@@ -78,6 +78,16 @@ Keep the foundation's exact shapes and names:
   `dispute = {interface, origin, account, record_key, params}`.
 - `premature_stop_penalty` is a nonnegative integer amount in the option asset's minor units, encoded as a canonical decimal string; absent/zero means none. It applies to an unentitled seller end, including a spot emergency without notice, not an entitled notice stop. Recommendation: on-demand presets default to 24 periods' price (calculated through the agreed-price accessor), and buyer default acceptance refuses on-demand without a positive penalty because the buyer benefits and enforces it, like partialPeriod. Expose seller override and explicit buyer opt-out; never silently downgrade the default.
 - `bond` stays reserved where the mechanism cannot hold a seller-funded stake.
+- `delivery_deadline_seconds` is the pool's effective `delivery_deadline_seconds` tag
+  (`renewable-compute-lease-deadlines` D3), read from the pool at derivation like the
+  bound hints and published under the same name on every compute option, recurring or
+  once; the site enforces exactly that value from the deal's commitment instant
+  (foundation D5, "Delivery has a deadline"). A pool that enforces no deadline
+  yields an option without the term, and the default buyer refuses a compute option
+  without it — the buyer benefits and enforces it, with an explicit opt-out — so the
+  derivation log and listing diagnostics name it like the penalty: "a default buyer
+  refuses this option: no delivery deadline". Changing the pool's value changes
+  future options' IDs, never a committed deal's deadline.
 
 A payee entitlement means the seller may interrupt; the payment authority enforces
 its notice as a pending stop on that stop authority, not a local schedule.
@@ -144,6 +154,23 @@ round the horizon. Bind an explicit shorter buyer horizon unchanged, show the
 effective horizon before signature, and refuse a longer, expired or sub-period
 selection. Every reserved duration must fit both bounds.
 
+**The runway.** A horizon must leave room to deliver after the latest approval the
+option permits. At acceptance the seller requires, for a recurring option,
+
+    start_utc + duration_seconds ≥ max(floor(accepted_at) + approval_window, start_utc)
+                                   + delivery_deadline_seconds + period
+
+and refuses otherwise, naming the minimum horizon that passes, so the buyer can
+re-propose; derivation applies the same inequality to the default horizon *B*, so a
+listing never advertises a recurring option whose default selection the seller would
+refuse, and reports a failing *B* as a derivation close reason beside the F13
+diagnostics. A reserved option needs no runway: its term end is its one delivery
+instant and the deadline bounds it from the other side. The three quantities have
+three owners — `approval_window` and `period` are settlement parameters,
+`delivery_deadline_seconds` is the lifecycle term the pool feeds — and the check is
+the only place they meet; a buyer that approves at the last permitted instant gets
+its period, and no timing the Agreement permits is a seller breach.
+
 Rate billing starts at activation, potentially later than the Agreement start,
 while the payments end is absolute: horizon rounding cannot align that end to a
 billing boundary. Foundation D5 therefore gives the term end its own
@@ -197,7 +224,8 @@ remain disabled in deployed compositions until their consumer gates pass.
 ### D7. Display what the authority can enforce
 
 Both CLIs show class, recurring charge/period or total, separate setup once charge,
-initial reserve (not spend), maximum end/horizon, payer/payee entitlements, notice,
+initial reserve (not spend), maximum end/horizon, the delivery deadline ("active within
+N of your approval, or the seller has not delivered"), payer/payee entitlements, notice,
 per-stopper and term-end `settles_through` treatment, premature-stop penalty amount/asset and capped remedy, dispute authority/window/
 case-hold cap and evidence retention. Values come from the selected option, not a stored class. Asking rate keeps its stated unit.
 The seller's side of the same display is the default-buyer refusal diagnostic (D3), so
@@ -235,6 +263,8 @@ the rate change derives it.
 ## Rejected alternatives
 
 - Stored class: it can disagree with selected terms.
+- Horizon admission by period count alone (this design's first form, replaced 2026-10-29): one period is a billing floor, not room to deliver; a buyer approving at the end of its window inside a one-period horizon left the seller a term it could not deliver and a self-penalty for it.
+- A delivery deadline kept seller-internal: the buyer could not compute the runway, and late activation inside a long term was no failure.
 - `interruption {seller_may_interrupt, notice_seconds, compensation}`: duplicates the shared codec.
 - Lifecycle terms inside the settlement mechanism's parameters: the parties' rights read by lifecycle adapters placed in a dictionary the mechanism owns, under a name that says the wrong thing (D4; foundation D5).
 - Payee notice entry on on-demand: grants the seller a priced reclaim. On-demand carries no seller stop entry, so won't-preempt is enforced by remedy, a buyer case and the bond, and the seller's exit is the mechanically ruled exceptional_end filing.

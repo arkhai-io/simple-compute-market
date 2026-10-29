@@ -13,8 +13,8 @@ shortcut. Listing-level policy copies would misrepresent mixed-option listings.
   by `store-registry-listings-as-published`.
 - Consume the foundation codec's common option projections:
   `early_termination.payer`, `early_termination.payee`,
-  `early_termination.payee.notice_seconds`, `adjudication.dispute.interface` and
-  `adjudication.dispute.account`. Do not add `interruption.*` or mechanism-owned
+  `early_termination.payee.notice_seconds`, `delivery_deadline_seconds`,
+  `adjudication.dispute.interface` and `adjudication.dispute.account`. Do not add `interruption.*` or mechanism-owned
   aliases for these fields.
 - Keep billing period under the rate registration's namespace,
   `arkhai_payments.period`; approval expiry is `arkhai_payments.approval_window`,
