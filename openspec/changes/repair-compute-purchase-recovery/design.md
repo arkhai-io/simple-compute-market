@@ -128,7 +128,8 @@ test needs, with the plan, goal, and records made consistent:
 - Network or security redesign of VM guests.
 - Marketplace or pricing redesign. The five-minute price refusal is recorded only.
 - Unrelated route and pause defects.
-- Retiring the host record's GPU fields.
+- Retiring the host record's GPU fields. `gpu-optional-compute-shapes` retired them on
+  `dev`, and this branch merged that ("Coordination with `gpu-optional-compute-shapes`").
 - A general teardown-retry redesign.
 - Any change to the payments kit or the payments service.
 - A cross-site accounting redesign, or a generic change to the site ledger's scalar
@@ -366,8 +367,9 @@ to be kept:
     which is refused. A host with a protected key and no `key_path` keeps that key: a
     protected key the submission neither resubmits nor replaces with a file is
     carried forward from the stored row as opaque ciphertext, never read or
-    decrypted. Pool, enabled state, and GPU description are untouched unless the
-    update states them.
+    decrypted. Pool and enabled state are untouched unless the update states them.
+    A host record describes no hardware on `dev` since `gpu-optional-compute-shapes`,
+    so an update states no GPU description either.
   - An inventory import (`POST /api/v1/hosts/import`), which upserts each entry it
     names at version 2 with the key the entry names; for a host whose key is a file,
     an entry naming the same file is the alternative to the update. An entry stating
@@ -726,6 +728,13 @@ and no ARM64 image. So:
   `compute.gpu`, and the registry filter's advisory `required` list — is
   `gpu-optional-compute-shapes`'s again.
 
+`gpu-optional-compute-shapes` then landed on `dev` and was archived on 2026-10-29,
+delivering its whole scope, CPU-only VM and bare-metal shapes included; this branch
+merged it ("Coordination with `gpu-optional-compute-shapes`"). The withdrawal stands:
+this change delivers none of that work, and the qualification targets above still
+require a GPU. The record this branch had added to that change's active proposal was
+dropped with the archive, which came from `dev` and never named this change.
+
 ### D8. VM deal terms are pinned for the VM lane
 
 A VM purchase needs a lease long enough to cover guest boot, the GPU driver's install
@@ -846,8 +855,10 @@ idle side.
    It never stands in for any of these. A refund alone is never proof of a drain.
 6. **Site drained.** At the idle lane's site, two read-backs must both hold:
    - **No held reservation.** No reservation for the machine is in `reserved`,
-     `provisioning`, `leased`, `releasing`, `release_failed`, or `unmanaged`, the
-     states the site counts as holding capacity.
+     `leased`, `releasing`, `release_failed`, or `unmanaged`, the states the site
+     counts as holding capacity. The site's `HELD_RESERVATION_STATES`
+     (`kit/site/src/market_site/db.py`) is the authority for that list; the retired
+     states are not among them ("Coordination with `resolve-compute-family-findings`").
    - **Full availability.** In the site's resource-pool projection, every member on
      the machine has an `available` mapping equal to its declared `capacity` mapping,
      dimension by dimension.
@@ -1128,6 +1139,42 @@ migrates the retired `provisioning` state to `unmanaged` and `provisioning_faile
 `releasing`, `release_failed`, and `unmanaged`, and D10's read-backs in the runbook use
 those (the closeout's promotion).
 
+## Coordination with `gpu-optional-compute-shapes`
+
+`dev` advanced after Round 2's candidate froze, by three commits:
+`gpu-optional-compute-shapes`, a change-workflow command following a change's clone, and
+a CI change running each of `make test`'s targets as its own job. This branch merged
+`dev` at `1f157a17d` before any live run, so both lanes qualify code that holds both
+changes. The merge changed no decision above:
+
+- **Host records.** `dev` retired the host record's `gpu_count` and `gpu_model` from the
+  host API, the INI inventory format, and the database. D3's `public_port=` sits beside
+  them in the INI parser, which keeps D3's rule, a malformed `ansible_port=` or
+  `public_port=` rejecting its entry, and reads no GPU variable. The host requests in
+  the validation runbook, the issue-discovery tool's local phase, and the e2e helpers
+  state `ssh` version 2 and no GPU field.
+- **The VM listing-shapes scenario.** `dev` added a stage buying a shape without GPUs,
+  whose create rule printed a fixed create fact naming a guest that is not the job's
+  and stating no status, in the JSON `var:` form. Under D1 that create yields no
+  evidence. The rule keeps its match and identity and drops the output, as D1's
+  "The VM pipeline scenarios use that default" requires, so the create reads the
+  per-job default.
+- **Specifications.** `dev` changed "Host inventory is connection identity" and "Host
+  writes declare no capacity" in `physical-provisioning`, and added "A host record
+  describes no hardware". This change's delta modifies none of them, and every
+  requirement it modifies is unchanged on `dev`, so the delta needed no edit and the
+  archive keeps both changes' text.
+- **Versions.** Both branches had taken the same next minor of
+  `arkhai-compute-provisioning-ansible` (0.5.0), `arkhai-compute-provisioning` (0.22.0),
+  the provisioning service (0.20.0), and the VM storefront (0.24.0), for different
+  work. Measured against `dev`, as `RELEASING.md`'s versioning policy measures a bump,
+  this change's bump of each is the next minor above `dev`'s: 0.6.0, 0.23.0, 0.21.0,
+  and 0.25.0. Floors that need this change's behaviour rise with them: both adapters'
+  and the service's on the Ansible kit to `>=0.6.0`, for `read_fact` and `public_port`,
+  and the service's on the family kit to `>=0.23.0`, for compensation. The fulfillment
+  kit (0.6.0) and the two adapters (0.12.0 and 0.16.0) were already above `dev`'s and
+  are unchanged.
+
 ## Compatibility, migration, and rollback
 
 - **No schema migration.** `public_port` lives in the connection envelope's public
@@ -1195,11 +1242,19 @@ From that merge on, the owner set the test cadence, per frozen round:
   new candidate.
 - The live lanes remain required, and each runs only on a validated candidate.
 
+Round 2's frozen candidate, Section 14's commit, passed its full local run and its
+pipeline, and was reviewed. Before its Helm part ran, `dev` advanced
+("Coordination with `gpu-optional-compute-shapes`"). The merge of `dev` and the fixes
+for the review's accepted findings are made in one writer session, gated by focused
+suites and packaging, and together make Round 2's new candidate. That candidate takes
+the round's one full `make test`, the review's amendment, and validation again before
+either live purchase; the earlier candidate's passes are not reused for it.
+
 ## Open questions
 
 None. D7's open items, the resource type of a declaration without GPUs and the
 registry filter's advisory `required` list, returned with it to
-`gpu-optional-compute-shapes`. D10 is decided above; its operational conditions are
+`gpu-optional-compute-shapes`, which settled them when it landed. D10 is decided above; its operational conditions are
 live read-backs, not open design.
 
 ## Design promotion record
@@ -1215,7 +1270,7 @@ closeout, under the heading named.
 | D4 compensating teardown, its marker, and the compute seam | `openspec/specs/fulfillment/spec.md` and `openspec/specs/physical-provisioning/spec.md` (by the archive); `openspec/specs/fulfillment/architecture.md` under "Durable persistence and recovery"; `openspec/specs/physical-provisioning/architecture.md` under "Proof-driven release"; `docs/development/ARCHITECTURE.md` under "Release", whose table's `failed` row splits into compensable and not |
 | D5 run-log round trip | None: a test that qualifies the producer's existing form. No behaviour changes |
 | D6 an exhausted teardown job is not re-run | `openspec/specs/physical-provisioning/architecture.md` under "Proof-driven release", whose `teardown_failed` requeue sentence is corrected |
-| D7, withdrawn | None. Nothing was implemented, its two deltas are removed, and its slice is `gpu-optional-compute-shapes`'s again, recorded in that change's proposal and index row |
+| D7, withdrawn | None. Nothing was implemented, its two deltas are removed, and its slice is `gpu-optional-compute-shapes`'s again. That change delivered it and is archived; its archived proposal and index row, from `dev`, do not name this change |
 | D8 VM lane terms | None: operational configuration, set before a live purchase |
 | D9 VM teardown | `openspec/specs/physical-provisioning/spec.md` ("A VM teardown removes only what its guest created", by the archive) |
 | D10 lanes on separate machines in parallel; on a shared machine, sequential lanes, pause, drain conditions, and the pause's precondition | `docs/development/VALIDATION_RUNBOOK.md`, a new generic section on running live lanes: lanes on separate machines run in parallel while source, build, and environment changes stay serialized; lanes sharing a machine run in sequence under the freeze, the pause, read-backs in the site's own states, full projection availability, and the precondition that a refresh or reopen under the same identity keeps the pause; `docs/development/ROADMAP.md` "Payment qualification boundaries", for the pause's limits and coverage gaps |

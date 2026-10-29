@@ -21,7 +21,6 @@ from e2e_harness.settings import settings
 from tests.e2e.roles.scenarios.vms.host_registry import (
     E2E_DYNAMIC_HOST,
     E2E_FUNGIBLE_HOSTS,
-    E2E_HOST_GPU_COUNT,
     provision_e2e_executor,
     refresh_storefront_projections,
 )
@@ -192,10 +191,7 @@ class TestComputeDynamicListings:
                 "sla": "99.0",
             },
         )
-        assert (host.gpu_count or 0) >= E2E_HOST_GPU_COUNT, (
-            f"executor host {E2E_DYNAMIC_HOST} reports {host.gpu_count} GPU(s); "
-            f"this scenario reserves up to {E2E_HOST_GPU_COUNT}"
-        )
+        assert host.host_id == E2E_DYNAMIC_HOST
 
         sites = refresh_storefront_projections(storefront_admin_client)
         _declare_pool_sla(storefront_admin_client, DYNAMIC_POOL_ID)
@@ -234,9 +230,9 @@ class TestComputeDynamicListings:
 
         dynamic_state.executor_host_registered = True
         log.info(
-            "[dynamic] executor host %s registered (gpus=%s); projections "
+            "[dynamic] executor host %s registered; projections "
             "confirmed for %s; deprecated cardinality key reported for %s",
-            E2E_DYNAMIC_HOST, host.gpu_count, sorted(sites), DYNAMIC_POOL_ID,
+            E2E_DYNAMIC_HOST, sorted(sites), DYNAMIC_POOL_ID,
         )
 
     def test_01_creates_slice_listings(
@@ -374,20 +370,15 @@ class TestFungibleComputeDynamicListings:
                 },
             ))
 
-        for host in hosts:
-            assert (host.gpu_count or 0) >= E2E_HOST_GPU_COUNT, (
-                f"executor host {host.host_id} reports {host.gpu_count} GPU(s); "
-                f"this scenario reserves up to {E2E_HOST_GPU_COUNT} from one member"
-            )
+        assert [host.host_id for host in hosts] == list(E2E_FUNGIBLE_HOSTS)
 
         sites = refresh_storefront_projections(storefront_admin_client)
         _declare_pool_sla(storefront_admin_client, FUNGIBLE_POOL_ID)
 
         fungible_state.supply_declared = True
         log.info(
-            "[fungible] executor hosts %s registered (gpus=%s each); "
-            "projections confirmed for %s",
-            list(E2E_FUNGIBLE_HOSTS), E2E_HOST_GPU_COUNT, sorted(sites),
+            "[fungible] executor hosts %s registered; projections confirmed for %s",
+            list(E2E_FUNGIBLE_HOSTS), sorted(sites),
         )
 
     def test_01_creates_one_pool_listing_set(

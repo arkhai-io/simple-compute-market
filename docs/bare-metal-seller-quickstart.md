@@ -278,9 +278,14 @@ machine contains, under the compute family's names: `gpu_count`, `vcpu_count`,
 `ram_gb`, and `disk_gb`. `attributes.gpu_model` names its GPU. The listing
 publishes those values where the compute registry's filters read them, so a
 buyer asking for `gpu_model=H200 gpu_count>=8` finds it. `gpu_count` and
-`gpu_model` are required; the other quantities are optional. A capacity key
-outside those names, a `units` other than one, or a missing GPU count or model
-holds the machine's listing and is reported by name.
+`gpu_model` are stated together or not at all: a machine without GPUs omits
+both, publishes no GPU key, and is found by a buyer bounding `vcpu_count` or
+`ram_gb` but by no query bounding a GPU field. Every quantity is optional, but a
+declaration must state at least one besides `units`. A capacity key outside
+those names, a `units` other than one, a quantity that is not a positive integer
+(`gpu_count: 0` included), a GPU count without a model or a model without a
+count, or a declaration stating nothing besides `units` holds the machine's
+listing and is reported by name.
 
 The URL path's Physical Resource id, the `host_id`, and `physical_host_id` are
 separate fields with the exact values shown by their roles. `host_id` is the

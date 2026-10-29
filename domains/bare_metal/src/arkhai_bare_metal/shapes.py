@@ -58,7 +58,10 @@ def derive_bare_metal_shape(
 
     Refuses, naming each reason: a ``units`` dimension other than exactly one; a
     capacity dimension the compute schema does not define; a quantity that is
-    not a positive integer; and a missing GPU count or model.
+    not a positive integer, a GPU count of zero included; a GPU count without a
+    GPU model, or a model without a count; and a declaration stating nothing
+    besides ``units``. A machine without GPUs declares neither GPU field, and
+    its shape states no GPUs.
     """
     problems: list[str] = []
     units = _integral(declared_capacity.get(UNITS_DIMENSION))

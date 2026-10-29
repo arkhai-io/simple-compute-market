@@ -60,8 +60,6 @@ def parse_inventory_ini(
             InventoryHost(
                 host_id=entry["host_id"],
                 connection=connection,
-                gpu_count=entry["gpu_count"],
-                gpu_model=entry.get("gpu_model"),
                 pool_id=entry["pool_id"],
             )
         )
@@ -76,14 +74,12 @@ def _parse_entries(ini_text: str) -> list[dict]:
     section names groups; neither lists hosts, and both are skipped.
 
     Returns a list of ``{"host_id", "ssh_host", "public_host", "ssh_user",
-    "ssh_port", "public_port", "gpu_count", "gpu_model", "pool_id",
-    "ansible_ssh_private_key_file"}`` dicts. Entries missing ``ansible_host`` or ``ansible_user`` are skipped
+    "ssh_port", "public_port", "pool_id", "ansible_ssh_private_key_file"}``
+    dicts. Entries missing ``ansible_host`` or ``ansible_user`` are skipped
     with a warning.
 
     Variable mapping:
         ``ansible_port=``                 → ``ssh_port`` (int, default 22)
-        ``gpus=``                         → ``gpu_count`` (int, default 0)
-        ``gpu_model=``                    → ``gpu_model`` (str, default None)
         ``public_host=``                  → ``public_host`` (tenant-facing addr)
         ``public_port=``                  → ``public_port`` (tenant-facing port, int)
         ``ansible_ssh_private_key_file=`` → preserved verbatim
@@ -126,17 +122,10 @@ def _parse_entries(ini_text: str) -> list[dict]:
             )
             continue
 
-        # A malformed gpus= degrades to 0: it describes the host and sells
-        # nothing, so a wrong value only misreports. A malformed ansible_port=
-        # or public_port= instead skips the entry, because substituting a
-        # fallback would turn an operator's typo into a host that cannot be
-        # reached at all — a failure that looks like a network problem rather
-        # than a bad inventory line.
-        try:
-            gpu_count = int(host_vars.get("gpus", 0))
-        except ValueError:
-            gpu_count = 0
-
+        # A malformed ansible_port= or public_port= skips the entry, because
+        # substituting a fallback would turn an operator's typo into a host
+        # that cannot be reached at all — a failure that looks like a network
+        # problem rather than a bad inventory line.
         malformed = next(
             (
                 key
@@ -164,8 +153,6 @@ def _parse_entries(ini_text: str) -> list[dict]:
             "ssh_user": ssh_user,
             "ssh_port": ssh_port,
             "public_port": public_port,
-            "gpu_count": gpu_count,
-            "gpu_model": host_vars.get("gpu_model"),
             # A non-empty pool_id= names a pool, an empty one unplaces the
             # host, and no pool_id says nothing: an existing host stays where
             # it is, so an older inventory never unplaces it.

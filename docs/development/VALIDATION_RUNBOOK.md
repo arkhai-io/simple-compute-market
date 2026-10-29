@@ -372,7 +372,7 @@ Register mock `kvm1` if provisioning returns `{"hosts":[]}`:
 ```bash
 curl -sf -X POST http://localhost:8081/api/v1/hosts/ \
   -H 'Content-Type: application/json' \
-  -d '{"host_id":"kvm1","connection":{"kind":"ssh","version":2,"public":{"ssh_host":"127.0.0.1","ssh_user":"appuser","key_path":"/home/appuser/.ssh/id_ed25519"}},"gpu_count":1,"enabled":true}' | jq
+  -d '{"host_id":"kvm1","connection":{"kind":"ssh","version":2,"public":{"ssh_host":"127.0.0.1","ssh_user":"appuser","key_path":"/home/appuser/.ssh/id_ed25519"}},"enabled":true}' | jq
 ```
 
 ## 10. Failure Diagnostics
@@ -1002,7 +1002,7 @@ command -v ansible-playbook
 
 cat >.scm-local/gcp/kvm-hosts.ini <<EOF
 [kvm_hosts]
-${KVM_HOST_ALIAS} ansible_host=${KVM_EXTERNAL_IP} ansible_user=ubuntu ansible_ssh_private_key_file=${APP_REPO}/.scm-local/gcp/scm-kvm-operator_ed25519 gpus=0
+${KVM_HOST_ALIAS} ansible_host=${KVM_EXTERNAL_IP} ansible_user=ubuntu ansible_ssh_private_key_file=${APP_REPO}/.scm-local/gcp/scm-kvm-operator_ed25519
 EOF
 
 ssh_ready=0
@@ -1107,7 +1107,6 @@ cat >/tmp/scm-gcp-host.json <<EOF
       "key_path":"/home/appuser/.ssh/id_ed25519"
     }
   },
-  "gpu_count":0,
   "enabled":true
 }
 EOF
@@ -1131,8 +1130,7 @@ if [ "$register_status" = "409" ]; then
           \"ssh_user\":\"ubuntu\",
           \"key_path\":\"/home/appuser/.ssh/id_ed25519\"
         }
-      },
-      \"gpu_count\":0
+      }
     }" | jq
 
   curl -sf -X POST "http://localhost:8081/api/v1/hosts/${KVM_HOST_ALIAS}/enable" | jq

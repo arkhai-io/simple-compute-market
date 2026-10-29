@@ -94,8 +94,8 @@ once carried is withdrawn (D7).
   reports it bound for passthrough, never on a possibly stale inventory alone. A
   pool's operator may set the GPU guest's readiness wait and autostart, validated
   before any host effect. Defaults keep today's wait and autostart.
-- **CPU-only shapes and `aarch64` guests (D7): withdrawn.** Their slice returns to
-  `gpu-optional-compute-shapes`.
+- **CPU-only shapes and `aarch64` guests (D7): withdrawn.** Their slice returned to
+  `gpu-optional-compute-shapes`, which has since delivered it on `dev` and is archived.
 - **Payments.** No code change. Environments are rebuilt from the wheelhouse.
 
 ## Capabilities
@@ -133,7 +133,8 @@ None.
   purchase at some rates is recorded only. No payments kit or service change.
 - Unrelated route, publication, and trading-pause defects.
 - Everything of `gpu-optional-compute-shapes`, the schema and VM stated-shape slice
-  included.
+  included, and its retirement of the host record's GPU fields. This branch merged it
+  from `dev` (`design.md`, "Coordination with `gpu-optional-compute-shapes`").
 - Re-running a teardown job whose own retries are exhausted (D6).
 - Cross-site accounting of one machine sold by two provisioning services. The live
   lanes run on separate machines; where two lanes share one, they run one at a time,
@@ -176,8 +177,10 @@ None.
     tests);
   - the host registration requests in `docs/development/VALIDATION_RUNBOOK.md` and
     `tools/issue-discovery`'s local phase configuration, which state `ssh` version 2.
-  - Each changed package bumps its minor version once against `dev`. Dependants'
-    floors and locks are refreshed where they use the new behaviour.
+  - Each changed package bumps its minor version once against `dev`, to the next
+    minor above `dev`'s own where `dev` has already taken one (`design.md`,
+    "Coordination with `gpu-optional-compute-shapes`"). Dependants' floors and locks
+    are refreshed where they use the new behaviour.
 - **Wire and persistence:**
   - The `ssh` connection envelope moves to version 2, which adds the optional
     `public_port`, and version 2 is the only version served. A submission at version
@@ -195,9 +198,11 @@ None.
 ## Dependencies and Related Changes
 
 - No change gates this one.
-- `gpu-optional-compute-shapes` owns all of its scope. This change was planned to
-  deliver its schema and VM stated-shape slice, and withdrew it unimplemented (D7); its
-  index row no longer names this change in `Depends on`.
+- `gpu-optional-compute-shapes` owns all of its scope, and is archived. This change was
+  planned to deliver its schema and VM stated-shape slice, and withdrew it
+  unimplemented (D7). Neither change depends on the other. This branch merged `dev`
+  after it landed, reconciling the INI parser and one VM scenario with it (`design.md`,
+  "Coordination with `gpu-optional-compute-shapes`").
 - `resolve-compute-family-findings` plans edits to files this change also edits:
   `lease_lifecycle.py`, `fulfillment_convergence.py`, the VM storefront's
   `admin_controller.py`, and the VM codec tests, which it moves. The edits touch

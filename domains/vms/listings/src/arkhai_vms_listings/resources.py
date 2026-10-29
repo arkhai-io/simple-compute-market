@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import Any, Final, Protocol
 
 from arkhai_vms_listings.models import (
+    COMPUTE_RESOURCE_TYPE,
+    TOKEN_RESOURCE_TYPE,
     ComputeResource,
     ERC20TokenMetadata,
     TokenResource,
@@ -12,11 +14,16 @@ from market_alkahest.token import resolve_token_cached
 
 
 class ResourceAdapter(Protocol):
-    """Adapter interface for mapping between network dicts and domain schemas."""
+    """Adapter interface for mapping between network dicts and domain schemas.
+
+    ``discriminator_key`` is a key whose presence selects the adapter for a
+    payload naming no registered ``resource_type``; the compute adapter has
+    none, because it takes every payload no other adapter selects.
+    """
 
     resource_type: Final[str]
     domain_type: Final[type]
-    discriminator_key: Final[str]
+    discriminator_key: Final[str | None]
 
     def from_dict(self, data: dict[str, Any]) -> Any:
         """Network dict (A2A) -> Python schema."""
@@ -29,9 +36,10 @@ class ResourceAdapter(Protocol):
 
 @dataclass(frozen=True)
 class ComputeGpuResourceAdapter:
-    resource_type: str = "compute.gpu"
+    resource_type: str = COMPUTE_RESOURCE_TYPE
     domain_type: type = ComputeResource
-    discriminator_key: str = "gpu_model"
+    # No key recognises compute: a slice without GPUs carries no GPU field.
+    discriminator_key: str | None = None
 
     def from_dict(self, data: dict[str, Any]) -> ComputeResource:
         """
@@ -48,9 +56,9 @@ class ComputeGpuResourceAdapter:
 
 @dataclass(frozen=True)
 class TokenErc20ResourceAdapter:
-    resource_type: str = "token.erc20"
+    resource_type: str = TOKEN_RESOURCE_TYPE
     domain_type: type = TokenResource
-    discriminator_key: str = "token"
+    discriminator_key: str | None = "token"
 
     def from_dict(self, data: dict[str, Any]) -> TokenResource:
         """Convert a network dict to a TokenResource — strict address-only.
@@ -141,8 +149,12 @@ def parse_resource_from_dict(data: Any) -> Any:
     """Parse a network dict (A2A payload) to a Python schema.
 
     - Non-dict values (including existing domain instances) are returned as-is.
-    - Prefers explicit ``resource_type`` field; falls back to discriminator_key
-      heuristics for backward compatibility.
+    - An explicit, registered ``resource_type`` selects its adapter.
+    - Otherwise an adapter whose ``discriminator_key`` the payload carries
+      selects itself, as ``token`` selects the token adapter.
+    - Any other mapping is compute, whose validation refuses one whose fields
+      state no shape. Over the built-in adapters this is
+      ``payload_resource_type``'s rule.
     """
     if not isinstance(data, dict):
         return data
@@ -153,14 +165,11 @@ def parse_resource_from_dict(data: Any) -> Any:
         if adapter is not None:
             return adapter.from_dict(data)
 
-    # Fallback: heuristic matching via discriminator_key
     for adapter in _RESOURCE_TYPE_TO_ADAPTER.values():
-        if adapter.discriminator_key in data:
+        if adapter.discriminator_key is not None and adapter.discriminator_key in data:
             return adapter.from_dict(data)
 
-    raise ValueError(
-        f"Cannot determine resource type from dict keys: {list(data.keys())}"
-    )
+    return _RESOURCE_TYPE_TO_ADAPTER[COMPUTE_RESOURCE_TYPE].from_dict(data)
 
 
 # Register built-in adapters.

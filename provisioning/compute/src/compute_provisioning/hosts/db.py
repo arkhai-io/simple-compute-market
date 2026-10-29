@@ -1,9 +1,10 @@
 """The host registry's persistence: one row per registered host.
 
 The table keeps its name, ``hosts``. A row holds the host's identity, pool,
-enabled state, descriptive GPU fields, and its connection as an envelope: the kind,
-its version, the public fields, and the protected values exactly as the kind's
-codec produced them. No column holds secret material in any other form.
+enabled state, and its connection as an envelope: the kind, its version, the
+public fields, and the protected values exactly as the kind's codec produced
+them. No column holds secret material in any other form, and none describes the
+machine's hardware, which its capacity declaration alone states.
 """
 
 from __future__ import annotations
@@ -39,10 +40,6 @@ class Host(Base):
     connection_version = Column(Integer, nullable=False, default=1, server_default="1")
     connection_public = Column(JSON, nullable=False, default=dict)
     connection_protected = Column(JSON, nullable=False, default=dict)
-    gpu_count = Column(Integer, nullable=False, default=0)
-    # Descriptive hardware identity (e.g. "H100"), matched by equality.
-    # Nullable: a host with no GPU has none to report.
-    gpu_model = Column(String, nullable=True)
     enabled = Column(Boolean, nullable=False, default=True)
     pool_id = Column(String, ForeignKey(ResourcePool.__table__.c.id), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

@@ -119,10 +119,10 @@ def test_pre_cutover_vm_lease_backfills_and_tears_down_to_release():
     with engine.begin() as connection:
         connection.execute(text(
             "INSERT INTO hosts (host_id, connection_kind, connection_version, "
-            "connection_public, connection_protected, gpu_count, enabled, pool_id) "
+            "connection_public, connection_protected, enabled, pool_id) "
             "VALUES ('kvm1', 'ssh', 1, '{\"ssh_host\": \"10.0.0.1\", \"ssh_user\": "
             "\"root\", \"ssh_port\": 22, \"public_host\": null, \"key_path\": "
-            "\"/keys/id_ed25519\"}', '{}', 0, 1, 'default')"
+            "\"/keys/id_ed25519\"}', '{}', 1, 'default')"
         ))
         connection.execute(text(
             "INSERT INTO capacity_reservations (capacity_reservation_id, units, state) "

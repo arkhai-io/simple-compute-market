@@ -10,8 +10,10 @@ it, following the one listing through a close and a reopen at the registry. It
 then prices the machine: the pool declares an asking rate, a storefront override
 replaces it and its lease bound, and deleting the override restores the pool's.
 Each change refreshes the same listing in place, and a buyer finds it by rate
-through the registry's filter vocabulary. Finally it declares a pool that states
-no region and observes it held.
+through the registry's filter vocabulary. It then declares a machine without
+GPUs in the same pool, which publishes no GPU key and which a buyer finds by
+vCPUs and not by GPUs. Finally it declares a pool that states no region and
+observes it held.
 
 The storefront's loops are held for the module, so every transition here is
 invoked by the scenario: wherever the site changes, the scenario steps the
@@ -53,6 +55,8 @@ REGION = "us-west"
 # contains, which the listing publishes where the compute filters read it.
 WHOLE_HOST_CAPACITY = {"units": 1, "gpu_count": 8, "ram_gb": 2048}
 GPU_MODEL = "H200"
+# A machine without GPUs declares neither GPU field.
+CPU_HOST_CAPACITY = {"units": 1, "vcpu_count": 64, "ram_gb": 512}
 # The shape a whole-host declaration reads as, which an asking rate is keyed by.
 MACHINE_SHAPE = derive_bare_metal_shape(WHOLE_HOST_CAPACITY, {"gpu_model": GPU_MODEL})
 RATE_QUERY = "asking_rate_asset=usd asking_rate_period=hour"
@@ -70,6 +74,7 @@ class PublicationState:
     reinstated: bool = False
     priced: bool = False
     overridden: bool = False
+    cpu_listing_id: str = ""
     regionless_pool: str = ""
 
 
@@ -115,24 +120,34 @@ def _refreshed_fields(report: dict[str, Any], listing_id: str) -> list[str]:
     return sorted(refresh["fields"])
 
 
-def _whole_host(resource_id: str) -> dict[str, Any]:
+def _whole_host(resource_id: str, *, gpu_model: str | None = GPU_MODEL) -> dict[str, Any]:
     """A whole-host declaration's attributes: the GPU model admission matches,
-    the accounting facts the site reads, and the bare-metal view's switch."""
-    return {
-        "gpu_model": GPU_MODEL,
+    unless the machine has no GPUs, the accounting facts the site reads, and
+    the bare-metal view's switch."""
+    attributes: dict[str, Any] = {
         "physical_host_id": f"physical-{resource_id}",
         "allocation_mode": "exclusive",
         "bare_metal_publication": {"enabled": True, "access_methods": ["ssh"]},
     }
+    if gpu_model is not None:
+        attributes["gpu_model"] = gpu_model
+    return attributes
 
 
-async def _declare_whole_host(capacity_client, resource_id: str, pool_id: str) -> None:
+async def _declare_whole_host(
+    capacity_client,
+    resource_id: str,
+    pool_id: str,
+    *,
+    capacity: dict[str, Any] = WHOLE_HOST_CAPACITY,
+    gpu_model: str | None = GPU_MODEL,
+) -> None:
     await capacity_client.register_resource(
         resource_id,
         pool_id=pool_id,
         host_id=f"machine-{resource_id}",
-        capacity=dict(WHOLE_HOST_CAPACITY),
-        attributes=_whole_host(resource_id),
+        capacity=dict(capacity),
+        attributes=_whole_host(resource_id, gpu_model=gpu_model),
     )
 
 
@@ -398,6 +413,46 @@ class TestStage05d_DeleteTheOverride:
         listing = bare_metal_registry.get_listing(state.listing_id)
         assert listing.listing_resource["asking_rate"]["amount"] == "12.50"
         assert listing.status == "open"
+
+
+class TestStage05e_MachineWithoutGpus:
+    def test_05e_a_machine_without_gpus_publishes_and_only_a_cpu_query_finds_it(
+        self,
+        bare_metal_site_capacity,
+        bare_metal_storefront_admin,
+        bare_metal_registry,
+        state: PublicationState,
+    ):
+        """A whole host declaring vCPUs and memory and no GPU field publishes
+        no GPU key; a buyer bounding vCPUs finds it, and one bounding GPUs does
+        not, through the registry's own filter vocabulary."""
+        # The advertised pool advertises again only once it was reinstated.
+        require_state(state, "reinstated")
+        resource_id = f"bm-cpu-host-{state.run}"
+        asyncio.run(
+            _declare_whole_host(
+                bare_metal_site_capacity,
+                resource_id,
+                state.advertised_pool,
+                capacity=CPU_HOST_CAPACITY,
+                gpu_model=None,
+            )
+        )
+
+        report = _step_after_the_site_changed(bare_metal_storefront_admin)
+
+        (ours,) = [
+            item
+            for item in _actions(report, "publish")
+            if item["source"]["physical_resource_id"] == resource_id
+        ]
+        assert ours["status"] == "published", ours
+        state.cpu_listing_id = str(ours["listing_id"])
+        resource = bare_metal_registry.get_listing(state.cpu_listing_id).listing_resource
+        assert (resource["vcpu_count"], resource["ram_gb"]) == (64, 512)
+        assert "gpu_count" not in resource and "gpu_model" not in resource
+        assert state.cpu_listing_id in _found(bare_metal_registry, "vcpu_count>=64")
+        assert state.cpu_listing_id not in _found(bare_metal_registry, "gpu_count>=1")
 
 
 class TestStage06_RegionlessPool:

@@ -135,7 +135,7 @@ def test_listing_service_validates_offer_through_injected_domain() -> None:
         settlement_composition_provider=lambda: object(),
     )
 
-    with pytest.raises(ValueError, match="listing_resource must include gpu_model"):
+    with pytest.raises(ValueError, match="gpu.model: is required"):
         service._parse_listing_resource_and_escrows(
             CreateListingRequest(
                 listing_resource={"gpu_count": 1, "offering_mode": "vm"},

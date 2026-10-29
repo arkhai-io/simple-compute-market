@@ -16,13 +16,15 @@ _REQUIRED_COMPUTE_KEYS = (
     "gpu_model",
 )
 
-# Every VM listing is GPU compute -- ComputeGpuResourceAdapter is the
-# only resource adapter this domain registers (domains/vms/listings/src/arkhai_vms_listings/resources.py),
-# so this is a domain constant rather than a field the order schema
-# carries. Must match what capacity registration actually advertises
-# (kit/site's CapacityBucket.resource_type for VM resources), or the
-# claim's resource_type constraint would reject every resource that
-# exists.
+# The resource type is the category a claim matches by equality, not a
+# statement of which dimensions it requests: every VM declaration is
+# ``compute.gpu`` whether or not it declares GPUs, so every VM claim names it,
+# and a shape stating no GPUs can land on any member that fits it, a GPU host's
+# spare vCPU and memory included. A domain constant rather than a field the
+# order schema carries; it must match what capacity registration records for
+# VM resources, or the claim's resource_type constraint would reject every
+# resource that exists. See openspec/specs/site-capacity/spec.md,
+# "Resource-pool projection metadata".
 _VM_RESOURCE_TYPE = "compute.gpu"
 _VM_OFFERING_MODE = "vm"
 

@@ -254,9 +254,17 @@ want to keep. Declarations a document does not name are left as they are. Every
 declared attribute is published to storefronts. `DEPLOYMENT_AND_CONFIG.md`'s
 "Capacity definitions" describes the document's rules in full.
 
-A host's GPU count and model are descriptive and never change what is sold:
-editing a host's inventory line leaves its declaration as it is. Change the
-declaration instead.
+A host record describes how to reach a machine, never its hardware: editing a
+host's inventory line leaves its declaration as it is. Change the declaration
+instead.
+
+A machine without GPUs omits `gpu_count` and `gpu_model` from its declaration;
+the two are stated together or not at all. Its pool then states the shapes it
+sells, such as `listing_shapes: {vm: [{cpu: {count: 8}, memory: {gib: 32}}]}`,
+because the VM default generates GPU shapes only: a VM pool that states no
+shapes and has enabled members, none declaring GPUs, publishes nothing, and the
+storefront's system status names it (`listing_shapes_required`). A stated shape
+without GPUs may also land on a GPU host's spare vCPUs and memory.
 
 ## 4. Prepare your KVM hosts
 
@@ -310,15 +318,16 @@ them before it starts.
    again (`POST /api/v1/hosts/import`) or register the host (`POST
    /api/v1/hosts`). A host that is only in the file is refused at dispatch.
 
-   An inventory line's `gpus=` and `gpu_model=` are stored on the host and
-   declare nothing: neither applying the inventory nor `POST /api/v1/hosts`
-   creates a capacity declaration. Declare each host's capacity yourself, as
-   "Declaring capacity" describes, naming the host's `host_id`. A host that
-   existed when its site upgraded to declared capacity received a declaration
-   derived from its GPUs then (`resource_id` and `host_id` both the host's name,
-   `capacity` `{gpu_count: <gpus>}`, `gpu_model` as an attribute, in the host's
-   pool); that declaration is an ordinary one, and stays reservable if the code
-   is rolled back.
+   A host line describes how to reach the machine, not its hardware: `gpus=` and
+   `gpu_model=`, like any variable the service does not read, are ignored, and
+   neither applying the inventory nor `POST /api/v1/hosts` creates a capacity
+   declaration. Declare each host's capacity yourself, as "Declaring capacity"
+   describes, naming the host's `host_id`. A host that existed when its site
+   upgraded to declared capacity received a declaration derived from its GPUs
+   then (`resource_id` and `host_id` both the host's name, `capacity`
+   `{gpu_count: <gpus>}`, `gpu_model` as an attribute, in the host's pool); that
+   declaration is an ordinary one, and stays reservable if the code is rolled
+   back.
    The provisioning image bakes the inventory in at build time — rebuild
    after edits:
 

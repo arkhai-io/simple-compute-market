@@ -231,6 +231,22 @@ def test_repo_default_spec_loads() -> None:
     assert spec.schema_identity.version >= 1
 
 
+def test_the_compute_listing_resource_requires_only_its_region() -> None:
+    """A machine without GPUs states neither GPU field, so neither is required,
+    and the GPU filters fail on a missing value. The schema identity names the
+    listing vocabulary, which is unchanged."""
+    spec = load_filter_spec()
+
+    assert spec.version == 7
+    assert spec.schema_identity is not None
+    assert (spec.schema_identity.id, spec.schema_identity.version) == ("compute.market", 2)
+    listing_resource = spec.listing_shape["properties"]["listing_resource"]
+    assert listing_resource["required"] == ["region"]
+    by_name = {declaration.name: declaration for declaration in spec.filters}
+    assert by_name["gpu_model"].on_missing == "fail"
+    assert by_name["gpu_count_min"].on_missing == "fail"
+
+
 def test_repo_api_credits_spec_loads() -> None:
     """The second filter specification packaged in the image is valid."""
     repo_root = Path(__file__).resolve().parents[4]

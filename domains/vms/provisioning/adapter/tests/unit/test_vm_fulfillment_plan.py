@@ -221,6 +221,22 @@ class TestSizingPrecedence:
         assert (prepared.parameters["vm_ram"], prepared.parameters["vm_vcpus"]) == (2048, 3)
         assert prepared.parameters["vm_disk_size"] == "30G"
 
+    def test_a_reservation_without_a_gpu_count_provisions_no_gpu(self):
+        prepared = _create(
+            _plan(), resource=_resource(dimensions={"vcpu_count": 8, "ram_gb": 32})
+        )
+
+        assert prepared.parameters["vm_vcpus"] == 8
+        # Stored unset, as every sizing field nothing commits is.
+        assert prepared.parameters["vm_gpu_count"] is None
+        assert prepared.parameters["gpu_provisioned"] is None
+
+    def test_a_reservation_with_a_gpu_count_provisions_its_gpus(self):
+        prepared = _create(_plan(), resource=_resource(dimensions={"gpu_count": 2}))
+
+        assert prepared.parameters["vm_gpu_count"] == 2
+        assert prepared.parameters["gpu_provisioned"] is True
+
     def test_sizing_is_left_unset_when_neither_specifies_it(self):
         prepared = _create(_plan())
 

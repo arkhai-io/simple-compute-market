@@ -9,7 +9,7 @@ dependencies = [
     "arkhai-core>=0.4.0",
     "arkhai-kit-config",
     "arkhai-compute-provisioning>=0.20.0",
-    "arkhai-compute-provisioning-ansible>=0.5.0",
+    "arkhai-compute-provisioning-ansible>=0.6.0",
     "arkhai-vms-provisioning-operator-client>=0.10.0",
     "arkhai-vms>=0.6.0",
     "arkhai-kit-resource-pools>=0.3.0",

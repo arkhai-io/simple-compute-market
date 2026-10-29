@@ -999,10 +999,11 @@ capacity declaration only where its connection is used: at dispatch.
 
 #### Scenario: Host record carries a legacy capacity column
 
-- **WHEN** a host record still holds a capacity value from before capacity
-  declarations existed
-- **THEN** capacity projection does not read it and the projected capacity comes from
-  the declared capacity resource for that Physical Resource
+- **WHEN** a database still holds host capacity values from before capacity declarations
+  existed
+- **THEN** capacity projection does not read them, the projected capacity comes from the
+  declared capacity resource for that Physical Resource, and the ordered migrations drop the
+  values
 
 #### Scenario: Host inventory is inspected for capacity authority
 
@@ -1061,7 +1062,7 @@ inventory file.
 
 ### Requirement: Host writes declare no capacity
 
-A compute provisioner MUST NOT create a capacity declaration from a host record on any host write: not when host inventory is applied from an INI document, whether seeded at startup or submitted through the host import API, and not when a host is created or updated through the individual host API. A host's GPU count and model are descriptive and MUST NOT affect capacity. Capacity MUST be declared only through capacity registration, a capacity-definitions document, or capacity import. The ordered migration derived a declaration once for host records with a positive legacy GPU count present at upgrade.
+A compute provisioner MUST NOT create a capacity declaration from a host record on any host write: not when host inventory is applied from an INI document, whether seeded at startup or submitted through the host import API, and not when a host is created or updated through the individual host API. Capacity MUST be declared only through capacity registration, a capacity-definitions document, or capacity import. The ordered migration derived a declaration once for host records with a positive legacy GPU count present at upgrade.
 
 A host MUST be treated as already declared when any declaration names it as its
 `host_id`, which is also the only rule the capacity projection uses to correlate
@@ -1069,9 +1070,8 @@ declarations to hosts.
 
 #### Scenario: Deployment configured only through host inventory
 
-- **WHEN** a provisioner applies host inventory carrying GPU counts from an INI
-  document, at startup or through the host import API, and no capacity declarations
-  exist
+- **WHEN** a provisioner applies host inventory from an INI document, at startup or through
+  the host import API, and no capacity declarations exist
 - **THEN** the hosts are registered, no capacity declaration is created for them, and
   the capacity projection contains no entry for them
 
@@ -1084,10 +1084,15 @@ declarations to hosts.
 
 #### Scenario: Operator declaration and legacy host value disagree
 
-- **WHEN** a host carries a GPU count and an operator has declared different
-  capacity for the same Physical Resource
-- **THEN** the operator's declaration is retained unchanged and the host's value does
-  not affect it
+- **WHEN** a host held a legacy GPU count and an operator has declared different capacity
+  for the same Physical Resource
+- **THEN** the operator's declaration is retained unchanged, and dropping the host's GPU
+  columns does not affect it
+
+#### Scenario: A host has no GPUs
+
+- **WHEN** host inventory is applied for a machine without GPUs
+- **THEN** no declaration is created for it, as for any host
 
 #### Scenario: A declaration's resource id differs from its host
 
@@ -1097,14 +1102,9 @@ declarations to hosts.
 
 #### Scenario: A host is created through the individual host API
 
-- **WHEN** an operator creates a host with a GPU count through the individual host API
+- **WHEN** an operator creates a host through the individual host API
 - **THEN** no declaration is created, and the host's capacity is declared through the
   capacity administration surface
-
-#### Scenario: A host has no GPUs
-
-- **WHEN** host inventory is applied for a host whose GPU count is zero
-- **THEN** no declaration is created for it, as for any host
 
 ### Requirement: Capacity definitions are imported from a mounted document
 
@@ -2142,6 +2142,37 @@ letters and digits, is not at most 32 characters starting with a letter.
 - **WHEN** an operator creates a VM named so that its login exceeds 32 characters
 - **THEN** the request is refused with 422 naming the rule, and no job is submitted
 
+### Requirement: A host record describes no hardware
+
+A host record MUST NOT carry a GPU count, a GPU model, or any other description of the
+machine's hardware: a Physical Resource's hardware is stated only by its capacity
+declaration. The host API's create, update, and response models MUST NOT define such a field,
+and a request carrying `gpu_count` or `gpu_model` MUST be accepted with those fields ignored,
+as any field the models do not define is. The INI inventory format MUST NOT read `gpus=` or
+`gpu_model=`; like any variable it does not read, they are ignored without a warning. The
+provisioning service's ordered migrations MUST drop the host table's GPU columns after the
+migration that derived declarations from them.
+
+#### Scenario: A host is created with GPU fields
+
+- **WHEN** an operator creates a host through the host API with a body carrying `gpu_count`
+  and `gpu_model`
+- **THEN** the host is created, and neither its stored record nor its response carries a GPU
+  field
+
+#### Scenario: An inventory line carries GPU variables
+
+- **WHEN** host inventory is applied from an INI line carrying `gpus=8 gpu_model=H200`
+- **THEN** the host is registered from its connection fields and its pool, and nothing is
+  recorded or reported for the GPU variables
+
+#### Scenario: An existing database is upgraded
+
+- **WHEN** the ordered migrations run against a database whose hosts carry GPU counts and
+  models
+- **THEN** every host keeps its identity, connection, pool, and enabled state, and the host
+  table has no GPU column
+
 ## Evidence
 
 - Bare-metal obligation servicing resolved from the accepted Agreement: `domains/bare_metal/storefront/tests/test_obligation_servicing.py` and `test_app_composition.py`.
@@ -2153,7 +2184,8 @@ letters and digits, is not at most 32 characters starting with a letter.
 - VM sizing precedence (committed reservation, pool default, unset), relay access-path selection, and teardown from the lease: `domains/vms/provisioning/adapter/tests/unit/test_vm_fulfillment_plan.py` (`TestSizingPrecedence`, `TestRelayAccessPath`, `TestTeardown`); the delivered credentials and endpoint: `provisioning/compute/service/tests/integration/test_fulfillment_api.py::TestStatusAndResultQueries`.
 - Relay administration, token confidentiality, rebinding, and definition-document reconciliation: `domains/vms/provisioning/adapter/tests/integration/test_relay_administration.py`, `test_relay_port_allocator.py`, and `test_relay_port_leases.py`, over VM's own schema; through the canonical client, `provisioning/compute/service/tests/integration/test_relays_api.py`; the service's importer and migrations, `provisioning/compute/service/tests/integration/test_definition_document_digest.py` and `test_relay_migrations.py`, plus `provisioning/compute/service/tests/unit/services/test_definition_document_restart_safety.py`.
 - Relay ports held through fulfillment convergence, including a failed creation, and the reservation-released predicate reconciliation is given: `provisioning/compute/service/tests/integration/test_fulfillment_convergence.py`; their return with a reservation's capacity: `provisioning/compute/tests/integration/test_release.py` and `kit/site/tests/integration/test_ledger.py`.
-- Host writes declaring no capacity — an INI import and the startup inventory seed carrying `gpus=`, placed and unplaced, a host created and updated through the host API, and an operator's declaration surviving a re-import: `provisioning/compute/service/tests/integration/test_host_writes_declare_no_capacity_api.py` and `test_capacity_api.py`; the upgrade derivation: `provisioning/compute/service/tests/unit/test_legacy_host_capacity_migration.py`.
+- Host writes declaring no capacity — an INI import and the startup inventory seed, placed and unplaced, an inventory line carrying `gpus=` and `gpu_model=`, a host created and updated through the host API, and an operator's declaration surviving a re-import: `provisioning/compute/service/tests/integration/test_host_writes_declare_no_capacity_api.py` and `test_capacity_api.py`; the upgrade derivation: `provisioning/compute/service/tests/unit/test_legacy_host_capacity_migration.py`.
+- A host record describing no hardware — the host models ignoring `gpu_count` and `gpu_model` and serializing neither: `provisioning/compute/contracts/tests/unit/test_contracts.py`; the INI parser ignoring `gpus=` and `gpu_model=`: `provisioning/compute/ansible/tests/unit/test_inventory.py`; no write recording a GPU field: `provisioning/compute/tests/integration/test_host_authority.py`; a host created and updated with GPU fields through the typed client, its stored row holding no GPU column: `provisioning/compute/service/tests/integration/test_hosts_api.py`; the column drop keeping every other value, leaving declarations and a fresh database alone, and rerunning as a no-op: `provisioning/compute/service/tests/integration/test_host_gpu_columns_drop_migration.py`.
 - A VM job's playbook frozen at preparation, the pool's own or the service's `vm_playbook_path`, for create and teardown, and refused with neither: `domains/vms/provisioning/adapter/tests/unit/test_vm_fulfillment_plan.py`; through the typed client for a pool stating none: `provisioning/compute/service/tests/integration/test_fulfillment_api.py`; an omitted or null pool playbook stored and a blank one refused: `domains/vms/provisioning/adapter/tests/integration/test_ansible_pool_config_handler.py` and `provisioning/compute/service/tests/integration/test_pools_api.py`; the `ansible_pool_configs` rebuild: `provisioning/compute/service/tests/integration/test_vm_pool_config_migration.py`.
 - A bare-metal grant and reclaim carrying the configured playbook, and the codec passing it to the plan: `domains/bare_metal/provisioning/adapter/tests/test_bare_metal_fulfillment_plan.py` and `test_bare_metal_codec.py`; through the composed service: `provisioning/compute/service/tests/integration/test_bare_metal_mock_profile.py`.
 - `vm_playbook_path` resolution and refusal of the retired `playbook_path` in a profile and the environment layer: `provisioning/compute/service/tests/unit/test_config.py` and `test_worker.py`; through the app's lifespan: `provisioning/compute/service/tests/integration/test_retired_settings_startup.py`; the chart's renamed value and refused key: `helm/charts/provisioning/tests/test_render.py`.

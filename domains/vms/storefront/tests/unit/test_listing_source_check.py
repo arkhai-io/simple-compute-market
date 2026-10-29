@@ -7,6 +7,7 @@ from datetime import timedelta
 import pytest
 from dynaconf import Dynaconf
 
+from arkhai_vms import vm_listing_resource_shape
 from market_capacity_publication import CAPACITY_BUCKET, RESOURCE_POOL, PublicationBinding
 from market_resource_pools_contracts.backing import BACKED, UNBACKED
 from market_policy.listing_source import ListingSourceVerdict
@@ -106,9 +107,7 @@ async def _bind(repository, binding, listing):
                 "site_id": binding.site_id,
                 "pool_id": resource["pool_id"],
                 "capacity_backing": backing,
-                "listing_shape": {
-                    "gpu": {"count": resource["gpu_count"], "model": resource["gpu_model"]}
-                },
+                "listing_shape": vm_listing_resource_shape(resource),
             },
         ),
         status="open",
@@ -263,6 +262,72 @@ async def test_a_site_whose_capacity_cannot_be_read_confirms_nothing(repository)
     )
 
     assert result.outcome == "unverifiable"
+
+
+_CPU_SHAPE = {"cpu": {"count": 16}, "memory": {"gib": 64}}
+
+
+def _cpu_pool(*, ram_gb=512):
+    """A pool stating one shape without GPUs over a member declaring none."""
+    capacity = {"vcpu_count": 64, "ram_gb": ram_gb}
+    return {
+        "pool_id": "pool-a",
+        "pool_metadata": {
+            "enabled": True,
+            "policy_tags": {
+                **_TAGS,
+                "listing_cardinality_mode": "fungible",
+                "region": "us-east",
+                "listing_shapes": {"vm": [_CPU_SHAPE]},
+            },
+        },
+        "resources": [
+            {
+                "physical_resource_id": "pool-a-c1", "resource_type": "compute.gpu",
+                "enabled": True,
+                "capacity": capacity,
+                "available": dict(capacity),
+                "attributes": {"region": "us-east"},
+            }
+        ],
+    }
+
+
+def _cpu_listing():
+    return {
+        "listing_id": "pool-a-cpu",
+        "listing_resource": {
+            "offering_mode": "vm",
+            "pool_id": "pool-a",
+            "vcpu_count": 16,
+            "ram_gb": 64,
+            "region": "us-east",
+        },
+    }
+
+
+async def test_a_listing_without_gpus_whose_source_still_serves_it_is_confirmed(repository):
+    result = await _check(
+        repository,
+        {"site-a": [_cpu_pool()]},
+        PublicationBinding("site-a", "vm", "pool-a", BACKED),
+        _cpu_listing(),
+        _Capacity({}),
+    )
+
+    assert result == ListingSourceVerdict("matches")
+
+
+async def test_a_listing_without_gpus_whose_member_shrank_below_it_is_refused(repository):
+    result = await _check(
+        repository,
+        {"site-a": [_cpu_pool(ram_gb=32)]},
+        PublicationBinding("site-a", "vm", "pool-a", BACKED),
+        _cpu_listing(),
+        _Capacity({}),
+    )
+
+    assert result.outcome == "declared_mismatch"
 
 
 # -- The source-confirmation window -------------------------------------------

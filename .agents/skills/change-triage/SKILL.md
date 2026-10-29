@@ -498,7 +498,7 @@ triage's exit among those its node declares:
 |---|---|---|---|
 | a design review | `{"step": "plan"}` | `{"step": "review", "kind": "design"}` | `{"step": "design"}` |
 | an implementation round | the plan's next round, `{"step": "round"}`; once every section before closeout is checked, `{"step": "review", "kind": "pre-closeout"}` | `{"step": "review", "kind": "implementation"}` | `{"step": "plan"}` or `{"step": "design"}` |
-| a pre-closeout review | `{"step": "closeout"}` | `{"step": "review", "kind": "pre-closeout"}` | `{"step": "plan"}` or `{"step": "design"}` |
+| a pre-closeout review | the merge of the branch the change lands on, `{"step": "merge"}` | `{"step": "review", "kind": "pre-closeout"}` | `{"step": "plan"}` or `{"step": "design"}` |
 | a closeout review | `{"step": "archive-cleanup"}` | `{"step": "review", "kind": "closeout"}` | none: an archived change has no earlier phase |
 
 An implementation round's triage may instead name sections out of the plan's order,
@@ -517,8 +517,10 @@ What follows is the computation's, from that exit
 that satisfies one not yet met: after a design review, planning; after an
 implementation round, validation of the fix commit, then the next planned round or
 the pre-closeout review, once that validation passed; after a pre-closeout review,
-closeout once a validation clears `HEAD`, which one of an ancestor does when
-`HEAD` changes only paths under `openspec/` and `docs/` since it; after a closeout
+the merge of the branch the change lands on into its own (`change-merge`), whose
+own exits validate the
+merged `HEAD`, the triage's fixes with it, before closeout or a review of the
+merge; after a closeout
 review, archive cleanup, after a validation of `HEAD` when a path outside
 `openspec/` and `docs/` changed since the commit it reviewed. Another review of the
 same kind follows the fix commit's validation for an implementation or
@@ -543,7 +545,7 @@ contradict its status misleads every agent that reads the index — then run
 |---|---|
 | `design` | `ready for planning` |
 | `implementation` | unchanged — implementation reviews after a section do not close the phase |
-| `pre-closeout` | `ready for closeout` — only once the latest validation is `passed` and names `HEAD`, or an ancestor from which `HEAD` changes only paths under `openspec/` and `docs/`, unless the owner overrides it |
+| `pre-closeout` | unchanged — the merge before closeout follows, and sets `ready for closeout` as it advances |
 | `closeout` | unchanged — `in closeout` until archive cleanup writes `archived` |
 
 Whichever exit it names, a triage of any kind then commits what it changed

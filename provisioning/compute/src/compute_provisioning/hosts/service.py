@@ -5,9 +5,9 @@ lookup made immediately before execution, and applying an imported inventory. It
 knows no connection kind: a submitted connection is validated, and its secrets
 protected, by the kind's codec, and what it stores is the resulting envelope.
 
-A host is connection identity and placement, never capacity: no host write
-declares anything a site sells, whatever GPU count or model the host describes.
-Capacity is declared through the site's own administration.
+A host is connection identity and placement, never capacity or hardware: no
+host write declares anything a site sells, and a host records nothing about the
+machine's hardware. Both are declared through the site's own administration.
 
 Every ordinary read returns a ``HostResponse``, which names each protected value
 and its scheme but never carries its ciphertext; the persistence row never leaves
@@ -81,8 +81,6 @@ class InventoryHost:
 
     host_id: str
     connection: ConnectionSubmission
-    gpu_count: int = 0
-    gpu_model: Optional[str] = None
     pool_id: Optional[str] | Literal[PoolUnstated.POOL_UNSTATED] = POOL_UNSTATED
 
 
@@ -97,8 +95,6 @@ def _view(host: Host) -> HostResponse:
             public=dict(connection.public),
             protected=connection.protected_schemes(),
         ),
-        gpu_count=host.gpu_count,
-        gpu_model=host.gpu_model,
         enabled=host.enabled,
         pool_id=host.pool_id,
         created_at=host.created_at,
@@ -163,13 +159,7 @@ class HostAuthority:
     def register_host(self, data: HostCreate) -> HostResponse:
         """Register a host in the pool it names, or unplaced when it names none."""
         connection = self._build(data.connection, previous=None)
-        host = Host(
-            host_id=data.host_id,
-            gpu_count=data.gpu_count,
-            gpu_model=data.gpu_model,
-            enabled=data.enabled,
-            pool_id=data.pool_id,
-        )
+        host = Host(host_id=data.host_id, enabled=data.enabled, pool_id=data.pool_id)
         host.set_connection(connection)
         with self._session_factory() as db:
             if data.pool_id is not None:
@@ -191,10 +181,6 @@ class HostAuthority:
                 host.set_connection(
                     self._build(data.connection, previous=host.connection())
                 )
-            if data.gpu_count is not None:
-                host.gpu_count = data.gpu_count
-            if data.gpu_model is not None:
-                host.gpu_model = data.gpu_model
             if data.enabled is not None:
                 host.enabled = data.enabled
             if "pool_id" in data.model_fields_set:
@@ -218,8 +204,7 @@ class HostAuthority:
         pool places or moves its host and one stating ``None`` unplaces it,
         through the pool-change hooks, as an update does; an entry stating none
         leaves an existing host's pool alone and creates a new host unplaced. A
-        hook's refusal rolls back the whole inventory. An entry's GPU count and
-        model are recorded on the host as description and declare no capacity.
+        hook's refusal rolls back the whole inventory.
         """
         if not entries:
             logger.warning("apply_inventory: no host entries to apply")
@@ -246,8 +231,6 @@ class HostAuthority:
                     )
                     if stated:
                         self._move_to_pool(db, host, entry.pool_id)
-                host.gpu_count = entry.gpu_count
-                host.gpu_model = entry.gpu_model
                 applied.append(entry.host_id)
             db.commit()
 

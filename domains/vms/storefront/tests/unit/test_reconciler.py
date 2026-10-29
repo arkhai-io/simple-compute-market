@@ -11,16 +11,20 @@ import pytest
 from market_site.projections import resource_pool_projection
 from arkhai_vms_listings.pricing_resolution import GpuPricingFields
 from arkhai_vms_listings.reconciler import (
+    POOL_SHAPES_REQUIRED_MESSAGE,
     PoolHintResolutionSettings,
+    _GPU_COUNT_MALFORMED,
     _fungible_availability_from_buckets,
     _member_available_units,
     _projected_resource_usage,
     listing_pool_key,
     listing_resource_key,
+    site_derivation_entries,
     vm_override_view,
 )
 from tests._reconciler_cases import (
     _BIG,
+    _FEASIBILITY,
     _SMALL_SHAPE,
     _SiteDerivationReport,
     _TOKEN,
@@ -1163,3 +1167,182 @@ class TestStorefrontOverrideTier:
 
         assert [shape.shape for shape in row["listing_shapes"]] == [_SMALL_SHAPE]
         assert row["pricing_by_model"]["H100"].max_duration_seconds == 900
+
+
+# A VM shape stating no GPUs, and a member declaring vCPU and memory and no GPU.
+_CPU_SHAPE = {"cpu": {"count": 16}, "memory": {"gib": 64}}
+_CPU_HOST = {"vcpu_count": 64, "ram_gb": 512}
+
+
+def _gpu_less_member(resource_id, *, capacity=_CPU_HOST, available=None):
+    member = _member(resource_id, capacity=capacity, available=available)
+    member["attributes"] = {"region": "us-east"}
+    return member
+
+
+class TestMembersAndShapesWithoutGpus:
+    """A member's GPU count is no precondition for membership; a shape stating
+    no GPUs is judged on the dimensions it declares."""
+
+    @pytest.mark.parametrize("capacity", [_CPU_HOST, {**_CPU_HOST, "gpu_count": 0}])
+    def test_a_member_declaring_no_gpus_uses_none(self, capacity):
+        usage = _projected_resource_usage(
+            {"physical_resource_id": "cpu-1", "resource_type": "compute.gpu", "capacity": capacity},
+            site_id="site-a",
+            member_availability=None,
+        )
+        assert (usage.resource_id, usage.total, usage.available) == ("cpu-1", 0, 0)
+
+    @pytest.mark.parametrize("count", [-1, "eight", True])
+    def test_a_malformed_count_is_still_unresolvable(self, count):
+        usage = _projected_resource_usage(
+            {"physical_resource_id": "res-1", "resource_type": "compute.gpu",
+             "capacity": {"gpu_count": count}},
+            site_id="site-a",
+            member_availability=None,
+        )
+        assert usage == _GPU_COUNT_MALFORMED
+
+    def test_a_member_without_gpus_is_feasible_for_a_stated_shape_without_gpus(self):
+        pool = _shaped_pool("cpu", [_gpu_less_member("cpu-1")], shapes=[_CPU_SHAPE])
+
+        (row,), report, holds = _override_rows(pool)
+
+        assert [shape.shape for shape in row["feasible_shapes"]] == [_CPU_SHAPE]
+        assert holds == set() and report.infeasible_shapes == {}
+
+    def test_a_gpu_hosts_spare_capacity_is_feasible_for_a_shape_without_gpus(self):
+        pool = _shaped_pool("gpu", [_member("m1", capacity=_BIG)], shapes=[_CPU_SHAPE])
+
+        (row,), _report, _holds = _override_rows(pool)
+
+        (shape,) = row["feasible_shapes"]
+        assert shape.shape == _CPU_SHAPE
+        # The claim its reservations would send requests the host's vCPU and
+        # memory and none of its GPUs.
+        claim = _FEASIBILITY.claim(
+            {"pool_id": "gpu", "region": "us-east", **shape.quantities}
+        )
+        assert claim["dimensions"] == {"vcpu_count": 16, "ram_gb": 64}
+        assert "gpu_model" not in claim
+
+    def test_a_backed_shape_whose_members_free_memory_is_below_it_is_not_published(self):
+        short = _gpu_less_member("cpu-1", available={"vcpu_count": 64, "ram_gb": 32})
+        pool = _shaped_pool("cpu", [short], shapes=[_CPU_SHAPE])
+
+        (row,), report, _holds = _override_rows(pool)
+
+        assert row["feasible_shapes"] == ()
+        (finding,) = report.infeasible_shapes["cpu"]
+        assert finding["not_feasible_against"] == "available"
+
+    def test_a_malformed_count_beside_a_member_without_gpus_holds_the_pool(self):
+        malformed = _member("bad", capacity={"gpu_count": "eight"})
+        pool = _shaped_pool("cpu", [_gpu_less_member("cpu-1"), malformed], shapes=[_CPU_SHAPE])
+
+        rows, _report, holds = _override_rows(pool)
+
+        assert rows == []
+        assert ("pool", "site-a", "cpu") in holds
+
+    def test_a_mixed_pools_gpu_and_gpu_less_shapes_each_resolve_their_rates(self):
+        pool = _shaped_pool(
+            "mixed", [_member("m1", capacity=_BIG)], shapes=[_TWO_GPU_SHAPE, _CPU_SHAPE]
+        )
+        pool["pool_metadata"]["policy_tags"]["pricing"] = {
+            "gpu": {"H100": {"rates": _rate("80"), "settlements": ["h100-clause"]}},
+            "cpu": {"rates": _rate("0.5")},
+            "memory": {"rates": _rate("0.05")},
+        }
+
+        (row,), _report, holds = _override_rows(
+            pool,
+            hint_resolution=PoolHintResolutionSettings(
+                gpu_pricing_flat_default=GpuPricingFields(settlements=["flat-clause"]),
+            ),
+        )
+
+        assert holds == set()
+        assert list(row["pricing_by_model"]) == [None, "H100"]
+        assert row["pricing_by_model"]["H100"].settlements == ["h100-clause"]
+        assert row["pricing_by_model"][None].settlements == ["flat-clause"]
+        assert set(row["family_rates_by_model"]["H100"]) == {"gpu", "cpu", "memory"}
+        assert set(row["family_rates_by_model"][None]) == {"cpu", "memory"}
+
+    def test_a_pool_priced_only_per_gpu_model_leaves_a_shape_without_gpus_no_terms(self):
+        pool = _shaped_pool("gpu", [_member("m1", capacity=_BIG)], shapes=[_CPU_SHAPE])
+        pool["pool_metadata"]["policy_tags"]["pricing"] = {
+            "gpu": {"H100": {"rates": _rate("80"), "settlements": ["h100-clause"]}},
+        }
+
+        (row,), _report, _holds = _override_rows(pool)
+
+        # With nothing above the per-model tier, publication finds no settlement
+        # option for the shape and refuses it as ``no_settlement_option``.
+        assert row["pricing_by_model"][None].settlements is None
+        assert row["family_rates_by_model"][None] == {}
+
+
+class TestThePoolReport:
+    """A pool stating no shapes whose members declare no GPUs is reported once."""
+
+    def test_a_gpu_member_beside_one_without_gpus_yields_the_gpu_defaults_and_no_report(self):
+        pool = _shaped_pool(
+            "mixed", [_member("g", capacity={"gpu_count": 2}), _gpu_less_member("c")]
+        )
+
+        (row,), report, _holds = _override_rows(pool)
+
+        assert sorted(shape.gpu_count for shape in row["feasible_shapes"]) == [1, 2]
+        assert report.pools_without_default_shapes == set()
+        assert site_derivation_entries(report.as_dict()) == []
+
+    def test_a_pool_whose_members_declare_no_gpus_and_states_no_shapes_is_reported_once(self):
+        pool = _shaped_pool("cpu", [_gpu_less_member("c1"), _gpu_less_member("c2")])
+
+        (row,), report, holds = _override_rows(pool)
+
+        assert row["feasible_shapes"] == ()
+        assert holds == set()
+        assert site_derivation_entries(report.as_dict()) == [
+            (
+                "report",
+                {
+                    "pool_id": "cpu",
+                    "reason": "listing_shapes_required",
+                    "message": POOL_SHAPES_REQUIRED_MESSAGE,
+                },
+            )
+        ]
+        assert "GPU shapes only" in POOL_SHAPES_REQUIRED_MESSAGE
+        assert "listing_shapes" in POOL_SHAPES_REQUIRED_MESSAGE
+
+    def test_a_zero_count_beside_a_gpu_member_yields_nothing_and_no_report(self):
+        pool = _shaped_pool(
+            "mixed",
+            [_member("g", capacity={"gpu_count": 1}), _member("z", capacity={"gpu_count": 0})],
+        )
+
+        (row,), report, _holds = _override_rows(pool)
+
+        assert [shape.gpu_count for shape in row["feasible_shapes"]] == [1]
+        assert site_derivation_entries(report.as_dict()) == []
+
+    def test_a_pool_whose_only_member_declares_zero_is_reported_as_the_pool(self):
+        pool = _shaped_pool("zero", [_member("z", capacity={"gpu_count": 0})])
+
+        _rows, report, _holds = _override_rows(pool)
+
+        assert report.pools_without_default_shapes == {"zero"}
+
+    def test_a_pool_stating_shapes_is_not_reported(self):
+        pool = _shaped_pool("cpu", [_gpu_less_member("c1")], shapes=[_CPU_SHAPE])
+
+        _rows, report, _holds = _override_rows(pool)
+
+        assert report.pools_without_default_shapes == set()
+
+    def test_a_pool_with_no_enabled_member_is_not_reported(self):
+        _rows, report, _holds = _override_rows(_shaped_pool("empty", []))
+
+        assert report.pools_without_default_shapes == set()

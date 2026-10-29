@@ -126,8 +126,6 @@ class BareMetalComputeDealDriver:
                         "key_path": "/dev/null",
                     },
                 ),
-                gpu_count=WHOLE_HOST_CAPACITY["gpu_count"],
-                gpu_model=GPU_MODEL,
                 enabled=True,
                 pool_id=self.pool_id,
             )

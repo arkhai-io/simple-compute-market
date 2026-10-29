@@ -162,6 +162,28 @@ allow = [
 deny = ["Bash(make lock*)", "Bash(git commit*)", "Bash(git add*)",
         "Bash(docker push*)", "Bash(helm push*)"]
 
+# The merge brings the branch the change lands on into its branch after its
+# pre-closeout triage. It resolves every conflict and repairs what that branch's
+# changes broke in the change's own code, so it has implementation's rules, and
+# fetches and merges a branch of the remote that has it: origin, or, in a clone,
+# the owner's workspace. A merge stopped at its conflicts stays in progress for the
+# owner; it is never aborted.
+[steps.merge]
+skill = "change-merge"
+models = [{ harness = "claude", model = "claude-opus-5-5", effort = "high" }]
+allow = [
+  "Edit", "Write", "Task",
+  "Bash(git fetch origin *)", "Bash(git fetch workspace *)",
+  "Bash(git merge --no-edit origin/*)", "Bash(git merge --no-edit workspace/*)",
+  "Bash(make check-*)", "Bash(make test*)", "Bash(make -C * test*)", "Bash(make lock*)",
+  "Bash(make dist*)", "Bash(make -C * dist*)", "Bash(make reinit*)", "Bash(uv run pytest *)",
+  "Bash(uv run --no-project --with pytest pytest *)", "Bash(uv sync*)",
+  "Bash(git add *)", "Bash(git commit *)", "Bash(git mv *)", "Bash(git rm *)",
+  "Bash(make typecheck*)", "Bash(make push-branch)", "Bash(make helm-values-schema)",
+  "Bash(make init*)", "Bash(make -C * init*)", "Bash(make validate-*)", "Bash(helm version*)",
+]
+deny = ["Bash(make run-e2e*)", "Bash(git merge --abort*)", "Bash(git merge --quit*)"]
+
 # Closeout changes documentation only; a part that needs code returns the change
 # to implementation.
 [steps.closeout]

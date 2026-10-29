@@ -157,7 +157,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal"
-version = "0.13.0"
+version = "0.14.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-compute" },
@@ -167,7 +167,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal-0.13.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal-0.14.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -191,18 +191,18 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-capability-shape" },
 ]
 wheels = [
-    { path = "arkhai_compute-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_compute-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-compute-provisioning"
-version = "0.22.0"
+version = "0.23.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
@@ -215,12 +215,12 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning-0.22.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning-0.23.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-compute-provisioning-ansible"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning" },
@@ -230,12 +230,12 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning_ansible-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning_ansible-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-compute-provisioning-client"
-version = "0.9.0"
+version = "0.9.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
@@ -245,12 +245,12 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning_client-0.9.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning_client-0.9.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-compute-provisioning-contracts"
-version = "0.11.0"
+version = "0.12.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -258,12 +258,12 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning_contracts-0.11.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning_contracts-0.12.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-compute-provisioning-service"
-version = "0.20.0"
+version = "0.21.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -319,11 +319,11 @@ dev = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.9" },
     { name = "arkhai-bare-metal-provisioning-adapter", marker = "extra == 'adapters'", specifier = ">=0.12.0" },
-    { name = "arkhai-compute-provisioning", specifier = ">=0.22.0" },
-    { name = "arkhai-compute-provisioning-ansible", specifier = ">=0.5.0" },
-    { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.11.0" },
+    { name = "arkhai-compute-provisioning", specifier = ">=0.23.0" },
+    { name = "arkhai-compute-provisioning-ansible", specifier = ">=0.6.0" },
+    { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.12.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
-    { name = "arkhai-core-storefront-client", specifier = "==0.28.0" },
+    { name = "arkhai-core-storefront-client", specifier = "==0.29.0" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-fulfillment", specifier = ">=0.6.0" },
     { name = "arkhai-kit-identity", specifier = "==0.4.0" },
@@ -407,25 +407,25 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-storefront-client"
-version = "0.28.0"
+version = "0.29.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_core_storefront_client-0.28.0-py3-none-any.whl" },
+    { path = "arkhai_core_storefront_client-0.29.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-capability-admissibility"
-version = "0.1.0"
+version = "0.1.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-capability-shape" },
 ]
 wheels = [
-    { path = "arkhai_kit_capability_admissibility-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_capability_admissibility-0.1.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -441,10 +441,10 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-capability-shape"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../../.dist" }
 wheels = [
-    { path = "arkhai_kit_capability_shape-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_capability_shape-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -592,7 +592,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms"
-version = "0.7.0"
+version = "0.8.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-compute" },
@@ -603,7 +603,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms-0.7.0-py3-none-any.whl" },
+    { path = "arkhai_vms-0.8.0-py3-none-any.whl" },
 ]
 
 [[package]]
