@@ -4,7 +4,7 @@
 
 Both compute buyers MUST display the derived product class, quote with unit,
 separate setup once charge, initial reserve, maximum term/end, selected horizon,
-the delivery deadline as seconds after approval within which the resource is active,
+the delivery deadline as seconds after approval within which the resource is available to the buyer,
 payer/payee entitlements, notices, per-stopper and term-end `settles_through`, premature-stop penalty amount/asset/cap, and adjudication/retention terms
 before approval.
 

@@ -99,7 +99,10 @@ call; the next pass reevaluates. A matching claim begins `releasing`; activation
 then cannot undo it. No database lock spans a provider call.
 
 **The deadline is enforced by the claim, not by the clock.** Activation after an
-elapsed deadline is allowed while the row remains unclaimed. Refusing it merely
+elapsed deadline is allowed while the row remains unclaimed; it is a capacity fact
+and not delivery — the lifecycle classifies a deal whose buyer could not use the
+resource by the accepted deadline as non-delivery whatever the site's phase, and
+starts no billing on it (foundation D8). Refusing it merely
 because a watchdog poll has not happened would turn poll latency into an eviction.
 The agreed end remains an independent bound, so activation never extends service
 past it. On a tie between activation deadline and term end, report ordinary term
@@ -113,7 +116,7 @@ only after a provider action.
 ### D3. Provider-declared delivery deadline, read through the pool port
 
 `delivery_deadline_seconds` is a Resource Pool policy tag: the seconds after
-max(commitment instant, lease start) within which the site activates the lease. It is
+max(commitment instant, lease start) within which the site activates the lease, the site's reclaim rule for a lease never activated. It is
 also the buyer's term: the storefront publishes the pool's effective value as the
 option's `lifecycle.delivery_deadline_seconds` (foundation D5), under the same name,
 and the site enforces exactly what was accepted, bounded by its own current policy

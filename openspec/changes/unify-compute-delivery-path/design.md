@@ -289,7 +289,11 @@ start, and before billing start and availability. The request names only the
 reservation. The site's returned end is validated against the immutable commit end
 or a verified earlier end recorded by end service: an unexplained mismatch is
 repair-required; a valid earlier truncation is adopted, never extended to the
-original Agreement end. The active instant is the site's fact. Unknown
+original Agreement end. The active instant is the site's fact, and not the deal's delivery: the accepted
+delivery deadline is met by the storefront's durable `available` record, so a deal
+past its deadline without it is non-delivery whatever the site's phase, and end
+service refuses `begin_billing` on it — a late activation is adopted and ended through
+D5, never started. Unknown
 acknowledgements are journaled and retried under the same identity; an expiry
 claimed first refuses activation and enters D5. A truncation before activation, or
 between a lost acknowledgement and its retry, survives unchanged. Activation never

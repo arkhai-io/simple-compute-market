@@ -127,7 +127,7 @@ The payment-adapter protocol MUST send a stop only under a stop entry the mandat
 
 ### Requirement: Lifecycle terms are part of the selected option
 
-A settlement option MUST state its `price` (`asset`, `rates`; absent on a rateless option), its `settlement` (a `schema` naming the mechanism, with that schema's own parameters flat beside it, none named `schema`), and optionally its `lifecycle`, which MAY carry adjudication (version, dispute, dispute_window_seconds, case_hold_max_seconds), early_termination (version, payer/payee entitlements with notice_seconds/settles_through, term-end settles_through, premature_stop_penalty), `delivery_deadline_seconds` (a positive integer: the seconds after the later of the commitment instant and the Agreement start within which the resource is active) and reserved bond (version, amount). A compute option MUST carry the `delivery_deadline_seconds` its site enforces and MUST omit it where the site enforces none; a default buyer MUST refuse a compute option without it, with an explicit opt-out. The option ID MUST be the hash of the canonical payload of `price`, `settlement` and `lifecycle`, omitting `lifecycle` when absent. The shared codec MUST decode `lifecycle` as Agreement bytes and option identity; no settlement mechanism's model may own its keys; bond MUST remain reserved until a mechanism can hold seller-funded stake.
+A settlement option MUST state its `price` (`asset`, `rates`; absent on a rateless option), its `settlement` (a `schema` naming the mechanism, with that schema's own parameters flat beside it, none named `schema`), and optionally its `lifecycle`, which MAY carry adjudication (version, dispute, dispute_window_seconds, case_hold_max_seconds), early_termination (version, payer/payee entitlements with notice_seconds/settles_through, term-end settles_through, premature_stop_penalty), `delivery_deadline_seconds` (a positive integer: the seconds after the later of the commitment instant and the Agreement start within which the resource is available to the buyer, as the storefront's durable `available` record) and reserved bond (version, amount). A compute option MUST carry the `delivery_deadline_seconds` its site enforces and MUST omit it where the site enforces none; a default buyer MUST refuse a compute option without it, with an explicit opt-out. The option ID MUST be the hash of the canonical payload of `price`, `settlement` and `lifecycle`, omitting `lifecycle` when absent. The shared codec MUST decode `lifecycle` as Agreement bytes and option identity; no settlement mechanism's model may own its keys; bond MUST remain reserved until a mechanism can hold seller-funded stake.
 
 #### Scenario: A term changes the option ID
 
@@ -444,7 +444,7 @@ End service MUST fix min(accepted start, failure-observation time) with never-de
 
 ### Requirement: Cause classification is owned by end service
 
-End service MUST classify evidence as lawful (entitled buyer/payee stop, terms/exhaustion, ruling or surrender), seller failure (unentitled withdrawal, provisioning/start failure, activation lapse or established non-delivery), or pending. Non-delivery MUST be established at the earlier of the Agreement's term end and `delivery_deadline_seconds` after the later of the commitment instant and `start_utc`, whether or not the term continues. It MUST correlate site reports with controlling requests. Classification MUST follow verified evidence and entitlement, not arrival order or event kind; admission refusal or a later clock/payee stop MUST NOT erase earlier non-delivery or alone create a penalty.
+End service MUST classify evidence as lawful (entitled buyer/payee stop, terms/exhaustion, ruling or surrender), seller failure (unentitled withdrawal, provisioning/start failure, activation lapse or established non-delivery), or pending. Non-delivery MUST be established when `available` is not durably recorded by the earlier of the Agreement's term end and `delivery_deadline_seconds` after the later of the commitment instant and `start_utc`, whether or not the term continues and whatever the site's activation phase; end service MUST refuse billing start on such a deal. It MUST correlate site reports with controlling requests. Classification MUST follow verified evidence and entitlement, not arrival order or event kind; admission refusal or a later clock/payee stop MUST NOT erase earlier non-delivery or alone create a penalty.
 
 #### Scenario: A site report confirms a lawful end
 
@@ -453,8 +453,13 @@ End service MUST classify evidence as lawful (entitled buyer/payee stop, terms/e
 
 #### Scenario: The seller activates after the delivery deadline inside a long term
 
-- **WHEN** a thirty-day deal with `delivery_deadline_seconds` 1800 is approved at 12:00 and the resource is not active at 12:30
+- **WHEN** a thirty-day deal with `delivery_deadline_seconds` 1800 is approved at 12:00 and the resource is not available to the buyer at 12:30
 - **THEN** end service classifies the end as seller non-delivery at 12:30, not a lawful end, and the seller half files `exceptional_end` with that basis although the term continues
+
+#### Scenario: The site activates in time but the buyer cannot use the resource by the deadline
+
+- **WHEN** the site activates the lease at 12:29 against a 12:30 deadline and the storefront records `available` only after 12:30, or never
+- **THEN** the deal is seller non-delivery at 12:30, `begin_billing` is refused, no rate part starts, and the seller half files `exceptional_end`; the site's activation is a capacity fact the lifecycle does not treat as delivery
 
 ### Requirement: Pending correction resolves in the same journal
 
