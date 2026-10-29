@@ -562,6 +562,48 @@ def test_publication_reaches_every_configured_registry(monkeypatch, tmp_path):
     assert client.urls == [REGISTRY_URL, second]
 
 
+#: Development-only registry token; it authorizes nothing anywhere.
+REGISTRY_TOKEN = "dev-only-registry-token-not-a-secret"
+
+
+def test_a_registry_token_in_the_secret_overlay_reaches_publication(monkeypatch, tmp_path):
+    """The overlay's ``[registry.auth]`` is composed into the registry
+    configuration publication and status open their clients from, keyed by the
+    normalized URL whatever spelling the overlay used."""
+    configured = _configured_runtime(
+        monkeypatch,
+        tmp_path,
+        secrets=f'[registry.auth]\n"HTTP://Registry.Test:8080/" = "{REGISTRY_TOKEN}"\n',
+    ).registry_configuration
+
+    assert dict(configured.auth) == {REGISTRY_URL: REGISTRY_TOKEN}
+    assert REGISTRY_TOKEN not in repr(configured)
+
+
+def test_a_storefront_with_no_registry_token_sends_none(monkeypatch, tmp_path):
+    assert dict(_configured_runtime(monkeypatch, tmp_path).registry_configuration.auth) == {}
+
+
+def test_a_registry_token_naming_no_configured_registry_is_refused_at_startup(
+    monkeypatch, tmp_path
+):
+    """Spec scenario: "A bare-metal registry pin or token names no configured
+    registry"."""
+    with pytest.raises(BareMetalStartupError) as refused:
+        _configured_runtime(
+            monkeypatch,
+            tmp_path,
+            secrets=(
+                '[registry.auth]\n'
+                f'"http://registry-typo.test:8080" = "{REGISTRY_TOKEN}"\n'
+            ),
+        )
+
+    message = str(refused.value)
+    assert "[registry.auth]" in message and "http://registry-typo.test:8080" in message
+    assert REGISTRY_TOKEN not in message
+
+
 def test_publication_clauses_that_do_not_compile_are_refused_at_startup(
     monkeypatch, tmp_path
 ):
@@ -933,6 +975,13 @@ def _unpinned_registry(document: dict) -> dict:
     return document
 
 
+def _pin_for_no_registry(document: dict) -> dict:
+    document["registry"]["authorities"]["http://elsewhere.test:8080"] = dict(
+        document["registry"]["authorities"][REGISTRY_URL]
+    )
+    return document
+
+
 def _no_mechanism(document: dict) -> dict:
     document["Settlement"] = {"schema_version": 1, "priority": []}
     return document
@@ -963,6 +1012,9 @@ def _site_with_two_peers(document: dict) -> dict:
         pytest.param(_without_registry, "no registry to publish to", id="no registry"),
         pytest.param(_unpinned_registry, r"\[registry.authorities\] must pin exactly",
                      id="a registry without its pin"),
+        pytest.param(_pin_for_no_registry,
+                     r"unexpected=\['http://elsewhere.test:8080'\]",
+                     id="a pin naming no configured registry"),
         pytest.param(_no_mechanism, "no settlement mechanism is enabled", id="no mechanism"),
         pytest.param(_no_site, "no site to publish from", id="no site"),
         pytest.param(_site_without_peer, "site 'site-a' is bound to no service peer",
@@ -977,7 +1029,8 @@ async def test_a_storefront_that_cannot_publish_refuses_to_start(
     """Application startup: the real app and its lifespan, composing from the
     configuration files. Each refusal names its problem, and nothing durable or
     running exists afterwards: no database file, no installed storefront, so no
-    loop. Spec scenarios: "A bare-metal storefront has no registry", "A site has
+    loop. Spec scenarios: "A bare-metal storefront has no registry", "A
+    bare-metal registry pin or token names no configured registry", "A site has
     no service peer"."""
     database = tmp_path / "storefront.db"
     write_configuration(monkeypatch, tmp_path, broken(publishable_configuration(database)))

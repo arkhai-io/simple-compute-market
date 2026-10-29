@@ -208,7 +208,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal-storefront"
-version = "0.24.0"
+version = "0.25.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-bare-metal" },
@@ -242,7 +242,7 @@ dependencies = [
     { name = "uvicorn" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal_storefront-0.24.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal_storefront-0.25.0-py3-none-any.whl" },
 ]
 
 [[package]]

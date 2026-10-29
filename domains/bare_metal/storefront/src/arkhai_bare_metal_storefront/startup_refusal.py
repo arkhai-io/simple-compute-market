@@ -32,11 +32,13 @@ class BareMetalStartupError(RuntimeError):
 def _registry_problems(settings: BareMetalStorefrontSettings) -> list[str]:
     if not settings.registry.urls:
         return ["no registry to publish to: [registry].urls is empty"]
-    try:
-        settings.registry_authorities()
-    except BareMetalConfigurationError as exc:
-        return [str(exc)]
-    return []
+    problems = []
+    for resolve in (settings.registry_authorities, settings.registry_auth):
+        try:
+            resolve()
+        except BareMetalConfigurationError as exc:
+            problems.append(str(exc))
+    return problems
 
 
 def _settlement_problems(settings: BareMetalStorefrontSettings) -> list[str]:

@@ -166,10 +166,19 @@ class RegistryAuthoritySettings(_Section):
 
 
 class RegistrySettings(_Section):
-    """``[registry]``: every registry the storefront publishes to, each pinned."""
+    """``[registry]``: every registry the storefront publishes to, each pinned.
+
+    ``auth`` maps a registry's URL to the bearer token a registry that gates
+    writes requires, sent beside the storefront's signature, never in place of
+    it. It is secret, so it belongs in the Secret overlay, and the chart's
+    values schema refuses it in public configuration.
+    """
 
     urls: list[str] = Field(default_factory=list)
     authorities: dict[str, RegistryAuthoritySettings] = Field(default_factory=dict)
+    auth: dict[str, str] = Field(
+        default_factory=dict, repr=False, json_schema_extra={"secret": True}
+    )
 
 
 class CapacitySettings(_Section):
@@ -386,6 +395,29 @@ class BareMetalStorefrontSettings(_Section):
                 authority=pin.authority, principals=principals
             )
         return authorities
+
+    def registry_auth(self) -> dict[str, str]:
+        """Each ``[registry.auth]`` token by its normalized registry URL.
+
+        A token must name a configured registry: one naming none, by a typo or
+        a stale URL, would otherwise be dropped silently and its registry's
+        writes refused. An empty token is no token. Refusals name the URL and
+        never the token.
+        """
+        urls = {normalize_registry_url(url) for url in self.registry.urls}
+        tokens: dict[str, str] = {}
+        for raw_url, token in self.registry.auth.items():
+            url = normalize_registry_url(raw_url)
+            if url in tokens:
+                raise BareMetalConfigurationError(
+                    f"[registry.auth] names {url!r} twice"
+                )
+            if url not in urls:
+                raise BareMetalConfigurationError(
+                    f"[registry.auth] names {url!r}, which is not one of [registry].urls"
+                )
+            tokens[url] = token
+        return {url: token for url, token in tokens.items() if token}
 
 
 def settings_source() -> Dynaconf:

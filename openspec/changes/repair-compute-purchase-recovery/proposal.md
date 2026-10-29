@@ -97,6 +97,12 @@ once carried is withdrawn (D7).
 - **CPU-only shapes and `aarch64` guests (D7): withdrawn.** Their slice returned to
   `gpu-optional-compute-shapes`, which has since delivered it on `dev` and is archived.
 - **Payments.** No code change. Environments are rebuilt from the wheelhouse.
+- **Registry bearer token on bare metal (S5).** The bare-metal storefront reads
+  `[registry.auth]`, a URL-to-token map from its Secret overlay, and sends each
+  registry its own token beside its signature, on publication and on its status
+  read, as the VM storefront does; a token naming no configured registry refuses
+  startup. Without it a registry that gates writes refuses the live lane's
+  listing.
 
 ## Capabilities
 
@@ -115,6 +121,9 @@ once carried is withdrawn (D7).
   - the GPU guest's operator-set readiness wait and autostart.
 - `fulfillment`: the `failed` → `teardown_dispatch_pending` edge and the compensating
   teardown operation.
+- `storefront-publication`: a bare-metal storefront refuses to start on a registry pin
+  or `[registry.auth]` token naming no configured registry, or one registry's token
+  stated twice (S5).
 
 ### New Capabilities
 
@@ -131,7 +140,9 @@ None.
   password posture of guests are unchanged.
 - Marketplace, pricing, or payment redesign. The buyer's refusal of a five-minute
   purchase at some rates is recorded only. No payments kit or service change.
-- Unrelated route, publication, and trading-pause defects.
+- Unrelated route, publication, and trading-pause defects. The bare-metal
+  storefront's dropped registry token (S5) is not unrelated: it stops the live
+  bare-metal lane from publishing to a registry that gates writes.
 - Everything of `gpu-optional-compute-shapes`, the schema and VM stated-shape slice
   included, and its retirement of the host record's GPU fields. This branch merged it
   from `dev` (`design.md`, "Coordination with `gpu-optional-compute-shapes`").
@@ -168,6 +179,9 @@ None.
     composition, and integration tests);
   - `domains/vms/storefront` (the fulfillment resume reader);
   - `domains/bare_metal/buyer` (test only);
+  - `domains/bare_metal/storefront` (`[registry.auth]`, its composition into
+    publication and status) and `helm/charts/bare-metal-storefront`'s generated
+    values schema, which refuses the token in public configuration (S5);
   - `domains/apicredits/storefront` (test only: its settlement coordinator tests wait
     for the coordinator's own task to finish, which the full suite needed; no runtime
     change);
@@ -220,7 +234,8 @@ None.
 ## Permanent documentation impact
 
 - [x] `docs/development/ARCHITECTURE.md`
-- [x] Existing subsystem specification: `physical-provisioning`, `fulfillment`
+- [x] Existing subsystem specification: `physical-provisioning`, `fulfillment`,
+  `storefront-publication`
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 

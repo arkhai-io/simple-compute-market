@@ -127,7 +127,8 @@ test needs, with the plan, goal, and records made consistent:
 - CPU-only VM shapes and ARM64 guests (D7).
 - Network or security redesign of VM guests.
 - Marketplace or pricing redesign. The five-minute price refusal is recorded only.
-- Unrelated route and pause defects.
+- Unrelated route and pause defects. S5, below, is a publication defect brought in
+  because it blocks the live bare-metal lane.
 - Retiring the host record's GPU fields. `gpu-optional-compute-shapes` retired them on
   `dev`, and this branch merged that ("Coordination with `gpu-optional-compute-shapes`").
 - A general teardown-retry redesign.
@@ -1184,6 +1185,51 @@ changes. The merge changed no decision above:
   kit (0.6.0) and the two adapters (0.12.0 and 0.16.0) were already above `dev`'s and
   are unchanged.
 
+## S5: the bare-metal storefront's registry bearer token
+
+A registry may gate writes behind a bearer token, which a storefront sends beside its
+signed request, never in its place. The VM storefront reads `[registry.auth]`, a map
+from registry URL to token, and passes it to publication's client and its status
+probe. The bare-metal storefront read no such key: its typed `[registry]` section had
+none, so the loader ignored a token stated in the Secret overlay, and neither its
+publication nor its status client was given one. A registry that gates writes would
+refuse every listing of the live bare-metal lane. Found from a synthetic overlay,
+after Section 14, and accepted as necessary preflight.
+
+- **Configuration.** `[registry].auth` is typed, secret, and kept out of the settings'
+  representation; the chart's generated values schema refuses it in public
+  configuration, so it is stated in the Secret overlay. Its URL keys are normalized as
+  `[registry].urls` are. A token naming no configured registry, or one registry twice,
+  refuses startup, naming the URL and never the token: a mistyped key would otherwise
+  drop the token silently, which is this defect again. An empty token is no token.
+- **Composition.** The resolved map reaches the registry configuration the runtime
+  builds, kept out of its representation. Publication's fan-out passes it to the
+  shared multi-registry client, which already sends each registry its own token by
+  normalized URL; status's signed health read sends each registry its own.
+- **Unchanged.** Request signatures, the registries' response pins, every registry's
+  policy, and the VM storefront.
+- **The normative home.** A storefront's refusals to start are enumerated by cause in
+  `storefront-publication`'s "A storefront that cannot publish refuses to start". The
+  change's delta modifies it, keeping all of it, with a sentence and a scenario for the
+  bare-metal storefront alone: a registry pin or `[registry.auth]` token naming no
+  configured registry, or one registry's token stated twice, refuses startup naming the
+  table and the URL and never the token. The pin case predates S5 and had no scenario.
+  The VM storefront, which ignores a token for no configured registry, gains no
+  obligation.
+- **Status and publication resolve a token alike.** Status's health read looks a token
+  up through the shared normalizing lookup publication's fan-out uses, so the two agree
+  whatever spelling a key arrives in, not only for the normalized map the runtime builds.
+
+A focused independent review of the frozen S5 diff raised both of the last two points,
+F1 and F2, and found it otherwise sound. The supervising session accepted both under the
+owner's delegated judgement, and judged that the narrow corrections need no further
+review round; `tasks.md` 14.18 records them.
+
+Alternatives rejected:
+- *Ignore a token naming no configured registry, as the VM storefront does.* That
+  keeps the silent drop for a mistyped URL, the failure this fixes.
+- *A token in public configuration.* The values schema already refuses it, as for VM.
+
 ## Compatibility, migration, and rollback
 
 - **No schema migration.** `public_port` lives in the connection envelope's public
@@ -1286,6 +1332,7 @@ closeout, under the heading named.
 | D11 a pinned, verified x86-64 guest image | `openspec/specs/physical-provisioning/spec.md` ("A VM guest is created from a pinned, verified image", by the archive); `domains/vms/provisioning/iac/README.md` under "Prerequisites", for the x86-64 host prerequisites, the `vm-setup.yaml` warning, and how an operator moves the pin; `docs/seller-quickstart.md` under "4. Prepare your KVM hosts", step 3, for the host prerequisites |
 | D12 boot-GPU detection, the opt-in, and the live passthrough-binding check | `openspec/specs/physical-provisioning/spec.md` ("A host's boot GPU is passed through only by an operator's opt-in", by the archive); `domains/vms/provisioning/iac/README.md` under "VM Management Operations (vm-management role)", beside the passthrough variables, including that the inventory alone never makes a GPU eligible |
 | S3 the relay proxy wait reads the client's status body whatever its label | `domains/vms/provisioning/iac/README.md` under "VM Management Operations (vm-management role)": the wait's readiness rule and what it retries or refuses |
+| S5 the bare-metal storefront's `[registry.auth]` | `openspec/specs/storefront-publication/spec.md` ("A storefront that cannot publish refuses to start", by the archive: a bare-metal registry pin or token naming no configured registry, or a token stated twice); `docs/development/DEPLOYMENT_AND_CONFIG.md` under "Storefront startup and site trust", whose list of refusals gains that one for bare metal, and under "Bare-metal role configuration": `[registry.auth]` in the Secret overlay, one token per configured registry URL, sent beside the signature on publication and status alike |
 | D13 the readiness wait and autostart | `openspec/specs/physical-provisioning/spec.md` ("A GPU guest's readiness wait and autostart are set by its pool's operator", by the archive); `domains/vms/provisioning/iac/README.md` under "VM Management Operations (vm-management role)", beside the passthrough variables: the three `extra_vars`, their defaults, and why a host passing through its only GPU sets `vm_autostart` false |
 | D14 the real-host bare-metal scenario | `docs/bare-metal-seller-quickstart.md` under "Release-qualified deal evidence": the role inputs, the pinned known-hosts file among them, `--run-id`, teardown to `released`, and revocation proven only by an authentication refusal. `docs/development/TESTING.md` is unchanged: its sentence on `e2e_bare_metal_deal` stays true |
 | The role's task files parsed by the repository's syntax check (Round 2 review F1, `tasks.md` 14.8 and 14.14) | `docs/development/TESTING.md`, beside "Chart Render Tests", and `domains/vms/provisioning/iac/README.md` under "Validation": `validate-playbooks` parses the `vm-management` task files, a capacity check's included, through a parse-only playbook importing them in the role's context, what a syntax check does not show, and that a free-form `shell` string's unbalanced quote fails its task file as it loads |
