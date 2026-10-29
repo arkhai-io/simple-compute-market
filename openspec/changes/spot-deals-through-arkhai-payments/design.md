@@ -4,7 +4,7 @@
 
 The merged lifecycle design is the frame: commitment ends protocol; later
 authority records and kept signed bytes are evidence. Terms retain
-early_termination {version, entitlements, max_term_seconds}
+early_termination {version, entitlements, max_term_seconds, settles_through}
 and adjudication. Both are option params (the foundation's negotiated terms, and the terms change's D4); payment
 derivation consumes the common codec, not another mechanism-specific copy.
 
@@ -46,21 +46,31 @@ populate it from an explicitly configured setup price, and refuse an incomplete
 preset rather than inventing an amount. This is an additional once charge, not
 max(setup, usage). Sellers may opt out. It is visible before approval and bound
 into the option ID. On successfully delivered lawful preemption it remains earned;
-seller non-delivery is handled by exceptional_end, including the setup part.
-A controlling lawful end before disclosure is not seller non-delivery: preserve
-its attribution and do not self-file merely because availability was not reached.
-The setup part's end is activation (provisioning), not the maximum compute term;
-it pays out one dispute window after activation. Mediation maps the setup once
-part mechanically over its own term, from Agreement start to activation, rather
-than over the maximum compute term. A zero-length part term is wholly unserved
-before its end and wholly served from it. This is the confirmed mapping, not a
-request for special setup triage; foundation still vendors the coherent contract
-and vectors before publication. No local refund substitutes for that contract.
+seller non-delivery is handled by the payment adapter's exceptional_end self-correction, including the setup part.
+A controlling lawful end before disclosure preserves its attribution, not seller fault.
+The setup part's term ends at activation (provisioning), not the maximum compute
+term, and pays out one dispute window later. The payment adapter reverses all of
+setup for undelivered deals and none for delivered deals on exceptional_end.
+
+Recommendation (03 F3 / 04 F5): represent setup as conditional on the associated
+rate part's payee start, the seller's disputable assertion of activation. That
+same authority event anchors setup's end. Before that event, setup stays reserved
+and cannot pay out. If a lawful rate stop or absolute term end wins before start,
+the authority returns setup in full and records a terminal unserved setup part;
+its cancellation instant anchors terminality and draining, not an earned charge.
+The first start/stop/end winner at the authority decides this race. Thus a lawful
+pre-activation cancellation creates neither a charge nor seller-fault attribution.
+The accepted mandate must name the linked rate part, start trigger and bounded
+fallback at approval. This is a contract/vector gate, not permission for SCM to
+mutate an immutable end or invent a local refund. Until expressible and qualified,
+setup-bearing presets refuse publication/acceptance; explicit seller setup opt-out
+provides the interim rate-only preset. A once end has no rate partialPeriod.
+The buyer may dispute an untrue payee assertion of activation through a case.
 
 | Preset | Parts | Entitlements |
 |---|---|---|
-| On-demand | setup once by default + time rate | payer; no payee stop |
-| Spot | setup once by default + time rate | payer and payee with priced notice |
+| On-demand | setup once by default + time rate (setup contract gated) | payer; no payee preemption entry |
+| Spot | setup once by default + time rate (setup contract gated) | payer and payee with priced notice |
 | Reserved | once for committed term | existing once semantics |
 
 No class flag is persisted or used for dispatch. One pool may publish on-demand
@@ -75,8 +85,10 @@ hold = {afterStop: dispute_window} and
 maxHoldExtension = case_hold_max_seconds. Accepted duration_seconds equals
 max_term_seconds; listing bounds already limit that term to
 min(max_duration, available_until - start). Starting late never extends that bound.
-Recommendation (01 F4): rate publication/acceptance requires whole-second
-Agreement start timestamps under the integer-second payment wire. Preserve signed
+Recommendation (01 F4 / 04 F7): the terms runtime resolves a whole-second
+Agreement start before rate signature under the integer-second payment wire;
+materialization enforces the same backstop. Publication validates the supported
+precision policy, since it has no Agreement start yet. Preserve signed
 Agreement bytes; reject fractional rate starts instead of silently rounding them
 up past capacity bounds. Existing once-only fractional timestamp handling remains
 unchanged.
@@ -88,22 +100,23 @@ returns the incomplete [70,130) period, and still ends delivery at 120. Do not
 round maximum terms down or move the absolute end. Exhaustion needs no separate
 partial-period policy: fundedThrough is a period boundary under reserve-ahead.
 
-Recommendation: bind end_partial_period explicitly in the rate option params,
-using charged/returned/prorated, and map it to the payment end's partialPeriod.
-The intended preset is returned. Until the end field is vendored, publish spot
-and on-demand rate options only with an explicit charged end treatment if that
-is the vendored contract's actual semantics. Disclose the final partial-period
-charge before acceptance; never silently downgrade returned to charged.
-Publication and acceptance fail closed on an unexpressible end treatment. Contract/schema vectors gate the exact
-wire representation; SCM implements no compensating refund.
+Derive end.partialPeriod exclusively from early_termination.settles_through using
+the foundation codec: started_period/charged, last_boundary/returned, stop/prorated.
+There is no second end-treatment option parameter. The intended preset is
+last_boundary. Until returned is expressible, every interim rate offer, including
+on-demand, explicitly commits started_period at term end and discloses the final
+partial-period charge. Publication and acceptance refuse unexpressible terms;
+SCM implements no compensating refund.
 
 The foundation owns per-part authority derivation from the common codec. This
 change adds the rate-specific start permission, period, reservation and end fields:
-start is payee-only; on-demand grants no payee stop. Stop entries carry the entitled
+start is payee-only; on-demand grants no payee preemption entry. Stop entries carry the entitled
 party's notice_seconds and the partialPeriod mapped from settles_through (D5).
-Every stop entry and every part's end carries an explicit partialPeriod; none
-relies on an omitted-field default. Derive the dispute authority's rate stop entry
-as {account, notice: PT0S, partialPeriod: chosen}; a stop under that entry carries
+On the returned-capable revision every rate stop entry and rate end carries
+explicit partialPeriod; once ends carry no such field. On the interim revision
+these fields are absent and the vector-qualified fixed charged semantics apply,
+including dispute stops; chosen-entry treatment is unavailable. On the
+returned-capable revision derive the dispute authority's rate stop entry as {account, notice: PT0S, partialPeriod: chosen}; a stop under that entry carries
 its own charged/returned/prorated treatment. Only that authority extends/lifts holds. Reverse
 permissions remain payee and dispute authority. Setup uses the foundation's once
 permissions and activation end, without rate start or period arithmetic.
@@ -125,9 +138,14 @@ The revised contract has per-part authorities
 {stop: [{account, notice, partialPeriod}], reverse, extend, start} (start on rate
 parts). Until partialPeriod is vendored, only its expressible charged semantics
 may be offered; D5 defines that fail-closed interim. Other fields include
-maxHoldExtension, optional per-part end with required partialPeriod, {afterStop: d} holds,
+maxHoldExtension, optional per-part end (partialPeriod required for rate ends on
+the returned-capable revision), {afterStop: d} holds,
 start/stop with optional part, stop with optional at, and extend/lift. Its stop time is
-max(at ?? now, now + senderNotice) at authority receipt; never backdated. Earliest
+max(at ?? now, now + senderNotice) for entitled stops at authority receipt;
+never backdated. The revised contract must also permit unconditional payee stop
+in the payer's interest with returned and payee waiver of payer notice, plus
+payer waiver of the held-money dispute window. These are authority capabilities,
+not entries granting self-interested on-demand preemption. Earliest
 pending stop wins and cannot be withdrawn. The adapter sends explicit part IDs
 even where whole-transaction shorthand exists.
 
@@ -166,7 +184,9 @@ Extend the hosted payment adapter, not the conditional-escrow port. Lifecycle
 submit {negotiation_id, kind, operation_key, at, payload} translates to explicit
 per-part events with stable derived keys including operation and part. Outcomes
 remain accepted/rejected/pending/unknown; read resolves unknown before another
-monetary delta. Same key with different content is a local refusal. Actor
+monetary delta. The caller's durable journal rejects same-key changed-content reuse before I/O;
+the stateless adapter compares the supplied journaled descriptor/digest to its
+new descriptor, with authority request_id_reused as the backstop. Actor
 credentials, not possession of a handle, authorize commands.
 
 Provide rate start with activated-delivery evidence, entitled stop (seller
@@ -176,16 +196,17 @@ After activation, the separate start_billing effect uses the end service's
 immutable billing-start identity. End service alone journals that key and activated
 evidence before I/O; delivery retains a reference, not another start intent.
 This adapter derives per-part request identities from the end-service-owned key
-and replays it without allocating another independently keyed start. Recommendation (02 F7): the neutral
-ActivatedDeliveryRef contains the
-negotiation, commitment, reservation and fulfillment identities, the site's
-verified activation record reference/instant and a provisioning-ready evidence
-digest, without credentials. The shared delivery path produces it; convergence
-passes it through the adapter protocol under the end service's effect key. Missing, malformed or
-mismatched references refuse start before an authority call.
+and replays it without allocating another independently keyed start. Consume the versioned secret-free activated-delivery envelope owned by
+kit/deal-lifecycle; do not define ActivatedDeliveryRef in the mechanism kit.
+The foundation envelope must include the verified site activation record reference
+and instant as well as negotiation, commitment, reservation/fulfillment identities
+and the validated ready-evidence digest. Shared delivery produces it; convergence
+passes it through under the end-service effect key. The hosted adapter checks its
+version, bindings and activation evidence against the accepted mandate. Missing,
+malformed or mismatched evidence refuses start before an authority call.
 The end service's start journal replays its sole durable intent/key, adopts unknown
 start from authority records on recovery, and ends the resource if start fails.
-If a lawful end already controls, retain its attribution without self-filing;
+If a lawful end already controls, retain its attribution without self-correction;
 only seller non-delivery follows the classified exceptional_end handoff. Admission/disclosure
 races and durable journals belong to convergence, not the adapter.
 
@@ -204,9 +225,29 @@ of partial success from the code. hold_matured means the target is no longer
 locally achievable: surface the shortfall and case path, not an endlessly retried
 unsupported refund. No post-release refund command or journal kind is introduced.
 
+#### Pure rate authorization (04 F3)
+
+Spot implements authorize(phase, evidence); convergence composes it with physical
+admission and journals effects. Results carry allow/refuse/pending, reason,
+operation identity and verified evidence/authority sequence references. No phase
+starts billing. Unknown phases or malformed/cross-deal evidence refuse. Missing,
+unreachable, unverifiable or regressing authority state is pending, never allow.
+
+| Phase | Rate decision over verified, deal-bound evidence |
+|---|---|
+| commit | Allow an exact, verified approved mandate whose approval was timely; refuse incompatible or terminal commitment. An expired unapproved mandate cannot become a commitment; approval expiry never invalidates an already approved deal. |
+| dispatch / start (physical activation) | Allow valid commitment, reserved initial funding and no effective stop/absolute end at or before now. Future pending stop allows only until its effective time. Refuse a verified effective stop/end or exhaustion. Missing pre-start fundedThrough alone is not exhaustion: use verified initial reservation; without it pending. |
+| disclose | Allow only after verified rate start bound to the journaled billing-start intent and still-valid funding, with no effective stop/end. An unstarted or unresolved start is pending; a definitive start refusal or effective end refuses. |
+
+A phase invoked at a pending stop's effective instant must refresh authority state;
+stale evidence never authorizes work past a known bound. These are payment
+choices only: availability, deadlines and dispatch/disclosure races remain with
+the neutral composition and domain, without reading hosted part fields there.
+
 ### D5. Started-period treatment is enforced by the payment authority
 
-The common codec's entitlement settles_through maps one-to-one to the stop entry:
+The foundation codec owns the settles_through mapping for stop entries and
+term ends; the rate adapter consumes it. For reference:
 
 | SCM value | Payment partialPeriod | In-progress period |
 |---|---|---|
@@ -225,11 +266,11 @@ A buyer may explicitly loosen that policy. Consume that policy here; do not
 implement another acceptance-policy owner in the rate adapter.
 
 Until the returned-capable contract revision is vendored, publication and acceptance
-refuse every unexpressible value. The interim spot offer explicitly commits
-started_period on both entitlements and, when only charged end is expressible,
+refuse every unexpressible value. The interim rate offer (spot or on-demand) explicitly commits
+started_period on each present entitlement and, when only charged end is expressible,
 on the term end too. Default buyers refuse it: disclosure alone does not override
 their acceptance policy. Any interim scenario must configure its buyer to accept
-started_period for every affected term, including a charged term end. Spot reaches
+started_period for every affected term, including a charged term end. Rate offers reach
 default buyers only once the vendored revision expresses returned on seller stops
 and term ends. No storefront refund restores a missing payment term.
 
@@ -248,7 +289,9 @@ Verified stop records determine treatment:
 | Payer or payee stop | That authority entry's partialPeriod |
 | Exhaustion (terms) | fundedThrough boundary; no partial period |
 | Absolute part end (terms) | The end's own partialPeriod; compute preset returned, recommended interim charged |
-| Dispute-authority stop/effects | chosen entry requires the stop's own partialPeriod; exceptional_end follows payee treatment, buyer_end follows payer treatment, operator ruling states its own; no SCM compensating correction |
+| Seller exceptional_end | Unilateral payee stop now with returned, even without entitlement; payment adapter reverses earnings since at; not a dispute |
+| Cooperative end_delivery | Payee stops for payer at receipt plus payer notice with payer treatment; journal/retry through outages; seller may waive notice |
+| Dispute-authority stop/effects | Each human ruling states treatment on its chosen entry; buyer_end realizes payer notice and treatment; interim fixed charged semantics remain a qualification gate |
 | Superseded or equal-time competing request | Use the authority's recorded winning stop and entry; never local arrival order |
 | Unknown cause or ambiguous winning entry | Surface unsupported/unknown state; no inferred monetary action |
 
@@ -260,11 +303,23 @@ separate effects; SCM neither absorbs them into end pricing nor computes a
 cumulative target. Removing that target also removes the cross-actor read/compute/
 reverse race, not merely its duplicate-retry symptom.
 
-Seller-caused unentitled ends or earlier physical failures use journaled exceptional_end(at)
-through the dispute adapter. The authority realizes past ends with stop-now plus
-reverse; SCM does not compute ruling amounts, backdate stops or maintain a second
-financial end. Existing voluntary reverse commands remain, but are not automatic
-end corrections.
+Seller-caused unentitled ends or earlier physical failures use journaled
+exceptional_end(at) through this payment adapter, not the dispute adapter. Keep
+the existing triggers, timing and end-service journal: never future-date at;
+pre-start failures journal immediately and act at Agreement start. The adapter
+computes per-part effects from the accepted mandate: stop every rate part now
+with returned regardless of entitlement, reverse each rate part's earnings since
+at, reverse each once part's time-unserved share (setup all if undelivered, none
+if delivered), and award any bond in full once supported. This translation is
+self-correction, not a second mediation mapping. Read verified held earnings and
+already-applied descriptors before computing remaining reversals; stop/reverse
+keys are derived from the one journaled command. Unknown outcomes resolve before
+another delta. Returned stop treatment and reversal must not double-return the
+same unearned/reserved amount. A missing producer vector or an interim contract
+that cannot express the unconditional returned payee stop blocks qualification of
+this path; it is never silently charged or sent to mediation. Released-money
+shortfalls surface repair/case progress, not invented local credits. The buyer
+may still dispute the seller's account by filing a case.
 
 ### D6. Seller notice is one command at the authority
 
@@ -290,9 +345,9 @@ pendingStop during notice. A seller may hint after acting, but push notice and a
 live storefront are not safety dependencies.
 
 On-demand refusal identifies exceptional_end for actual seller non-delivery,
-not an override stop or an automatic filing on refusal. Lawful ends before
-disclosure retain their cause without self-filing. The foundation-owned VM admin interrupt route submits
-notice when the accepted option grants payee entitlement; it files exceptional_end
+not a self-interested override or automatic self-correction on refusal. Lawful ends before
+disclosure retain their cause without self-correction. The foundation-owned VM admin interrupt route submits
+notice when the accepted option grants payee entitlement; it submits exceptional_end self-correction
 only otherwise. Alkahest splitter execution and defects remain outside this work.
 
 ### D6a. Rate buyer-end re-drive preserves priced notice
@@ -306,29 +361,38 @@ notice may use the same flow. Explicit end-now-regardless sends end_delivery aft
 stop and discloses that service is surrendered before paid notice expires.
 
 If the payment authority cannot be reached, retain the foundation's end_delivery
-plus buyer_end(at) case path and kept signed acknowledgement. Both-authorities-down
+plus buyer_end(at) case path and kept signed acknowledgement. end_delivery has
+no buyer-supplied at: the storefront signs its receipt time and journals the
+cooperative payee stop at receipt plus payer notice using payer treatment, even
+through a payments outage; it may waive notice by seller policy. A buyer_end
+case carries the exact Agreement, verified against the mandate deal hash, and
+human triage realizes the payer's stop at at with the payer's notice/treatment.
+No acknowledgement triggers a mechanical ruling or permits skipping notice. Both-authorities-down
 recovery remains the foundation journal/retry path. This is not a new peer route
 or a change to the immediate-only end_delivery contract. Terms owns displaying
 normal stop versus immediate surrender.
 
 ### D7. Servicing declarations and identity rotation
 
-The terms change owns the declaration contract, publication/acceptance doors and
-proposed-profile validation. This change consumes that validated contract at
+The terms change owns the neutral declaration contract, publication/acceptance
+doors and proposed-profile validation. Spot layers payments identity/mode checks
+on that validation at materialization. This change consumes that validated contract at
 materialization and refuses absent declarations even for accepted-but-unmaterialized
 work. Convergence owns rate startup/recovery and continuation registration;
 activation owns published production switch-on after hosted deployment. Disabling
 new publication must not abandon already materialized deals. Hosted enablement is a separate deployment gate.
 
 The lane-only proposed declaration binds the fixture payments identity to the
-configured `SERVICE_IDENTITY` in test mode (`livemode = false`). Materialization
-consumes the terms-owned validation and refuses mismatched identities, live mode
+configured `SERVICE_IDENTITY` in test mode (`livemode = false`). The mechanism-specific materialization check layers on neutral declaration
+validation and refuses mismatched identities, live mode
 or production use; it never queries private control/status routes to establish trust.
 
 Configuration may list current and retiring service identities with retirement
 dates. During overlap an old receipt remains verifiable and a fresh snapshot under
 the current identity can re-anchor a running deal. Through the foundation verifier,
-the current snapshot attests its embedded old receipt; verify binding to persisted
+the verifier accepts current/retiring identities with validity windows and a
+caller-supplied minimum sequence, and the current snapshot attests its embedded
+old receipt; verify binding to persisted
 mandate, parties, mode and sequence. Durably store it as new approval evidence
 before removing dependence on the retiring key; keep original signed bytes for
 disputes. Stale/rollback snapshots cannot restore a retired trust anchor.
@@ -354,9 +418,18 @@ Keep target identity/mode, hashes and control trace with results. Only the exter
 service's suite qualifies its ledger and payouts. Examples/fixtures use USD/6;
 production reads the Agreement asset.
 
+| Scenario / prepared entry point | Executor | Evidence boundary |
+|---|---|---|
+| Derivation, authorize phases, setup trigger/fallback, self-correction; adapter/vector targets | Spot focused kit suites | Pinned-vector support; published conformance only for published bytes |
+| Buyer stop/hint, seller preempt, setup/rate approval fixtures | Spot CLI/application first use | Command mechanics against named published/proposed contract |
+| Delivered on-demand/spot, due-work barriers, release/access closure; convergence matrix | Convergence | Published/proposed qualification as target permits |
+| Hosted four-path qualification | Activation | Live evidence only from deployed authorities |
+
 Unit/vector targets prove derivation, partialPeriod edges and exact event bytes.
-Kit library integration uses in-process fakes generated from the same contract
-vectors to prove retry/unknown resolution; kits do not depend on runnable tooling.
+Kit library integration uses the single clock-injected payments authority engine
+in kit/arkhai-payments fixtures directly; HTTP tooling wraps that same engine with
+controls and mediation composition. Contract vectors qualify the engine. This
+proves retry/unknown resolution without a kit dependency on runnable tooling.
 HTTP doubles serve lane/e2e qualification. Application integration proves seller
 auth, Agreement binding, CLI delegation and both-domain preset integration. Smoke is readiness/auth only. E2e proves
 cross-service effects, not arithmetic permutations.
@@ -378,7 +451,7 @@ Spot keeps its prepared entry points: the rate/setup preset and approval fixture
 the typed buyer-end and seller notice/preempt commands, and adapter start/read
 seams. Convergence executes those surfaces when its consumer is composed;
 activation owns hosted execution. Preparation and focused adapter/CLI evidence
-are not duplicate cross-service qualification. Prepared interim spot scenarios
+are not duplicate cross-service qualification. Prepared interim rate scenarios (including on-demand)
 must name their buyer's explicit started_period acceptance configuration for the
 payee entitlement and any charged term end. Keep default-policy refusal and
 returned-capable acceptance observations distinct; convergence owns execution.
@@ -395,9 +468,9 @@ those blockers or enable published production servicing.
 - Renewable site deadlines as buyer payment protection: site/storefront are both the seller; activation/renewal policy is a seller-value decision elsewhere.
 - Required minimum spend or a service request for it: churn is priced by setup or refused through seller policy.
 - An extra once fee labelled a minimum: setup is additive, not usage drawdown.
-- Backdated/effective-time payee stop: past ends use the dispute authority's stop-now plus reverse.
+- Backdated/effective-time payee stop: past exceptional ends use payee stop-now plus reverse through the payment adapter.
 - Local notice-stop scheduling: it dies with the storefront; pending stops belong at the authority.
-- Payee stop on every on-demand part: it contradicts the absence of a payee entitlement.
+- Payee self-interested preemption on on-demand: there is no entitlement; unconditional payee stops in the buyer's interest remain possible.
 - Payer start or start at approval: start is the payee's responsibility after provisioning; an early start is disputable.
 - Reverse-before-stop as a safety rule: afterStop holds preserve reversal after stop.
 - Unsupported post-stop refund journal: reverse already works after stop while held; paid-out money is outside that primitive.
@@ -415,14 +488,45 @@ Section-level gates, not whole-change archival cycles:
 
 - Foundation codec/authority derivation, vendoring and verified snapshots gate rate
   derivation/reads; its round-2 proof implementation is not duplicated.
-- Terms accessor, accepted pricing carrier (resize 2.1a), bounds and declaration
-  contract gate sections 2–3. Terms alone owns generic publication emission;
-  this change supplies its rate/setup preset helper and materialization door.
+- Terms tasks 1.3 (shape/start identity freeze), 2.1 (accessor), 2.2 (bounds),
+  3.1 (declaration) and 3.2 (whole-second start resolution before signature) gate
+  sections 2–3, plus the accepted pricing carrier (resize 2.1a). Terms alone owns
+  generic publication emission via an injected preset-helper interface; this
+  change supplies the helper before rate emission can be enabled. Neither archive
+  waits on the other's consumer evidence. Materialization's payments identity/mode
+  check is owned here; convergence alone owns startup. Terms 3.3/5.8 must consume,
+  not gate their archive on, the later materialization/startup evidence.
 - In-process contract fakes gate kit library integration; runnable lane doubles gate
   only lane evidence, not pure derivation. No kit imports the double tooling.
 - Convergence consumes these mechanics and owns funding timers, persisted rate
   re-anchoring and the complete lane matrix. Its archival is not a prerequisite
   here. Activation owns hosted four-path execution, not this change.
+
+Archive order for the shared “The payments mandate is derived exactly from the
+Agreement” requirement is foundation, then spot. Spot's MODIFIED text is a superset
+of the foundation's once clauses plus its rate/setup branch; later codec changes
+must be carried into both before archive. Rate buyer-end behavior has one owner:
+the deal-lifecycle requirement here; buyer-orchestration references that requirement.
+The foundation owns codec mapping and the neutral activated-evidence envelope;
+this change owns hosted rate authorize and per-part exceptional_end computation.
+
+## Second-review recommendations and integration requests
+
+03 F3 / 04 F5's conditional setup trigger and no-activation full return are
+recommendations supplied here, gated on producer contract/vectors; rate-only opt-out
+is the interim, not a silent downgrade. 04 F15 uses caller-owned journal comparison
+with a supplied descriptor/digest, not hidden adapter storage. Both choices minimize
+new state and preserve adversarial payment-authority guarantees.
+
+Before advancement the integrator must reconcile the terms tasks/delta and index
+Notes with the section gates above; add activation reference/instant and the
+rotation verifier inputs to the foundation interfaces; fix its rate example with
+paired period/reserve_ahead_seconds and a supported unit; make buyer-orchestration
+reference the rate buyer-end owner; point lane-double rate execution to convergence.
+The mediation changes follow settled policy: no exceptional_end intent/mapping,
+no mechanical buyer_end ruling, exact Agreement in the case. End_delivery has no at;
+its signed receipt drives the cooperative journaled payee stop. No new implementation
+or live qualification is claimed by these design edits.
 
 First use before convergence uses lane-only approval/command fixtures: delivery
 must fail closed without the rate hook. It proves pending authority stop, not a
@@ -445,9 +549,9 @@ All entries are planned destinations, not claims of implemented current behavior
 
 | Accepted decision | Permanent location |
 |---|---|
-| D1–D2 rate derivation, presets and exact check | openspec/specs/settlement-servicing/spec.md; openspec/specs/storefront-publication/spec.md and architecture.md |
+| D1–D2 rate derivation, gated setup activation/cancellation, presets and exact check | openspec/specs/settlement-servicing/spec.md; openspec/specs/storefront-publication/spec.md and architecture.md |
 | D3 external contract context | openspec/specs/deal-lifecycle/architecture.md, External authorities |
-| D4–D5 operation identity and authority-enforced partialPeriod | openspec/specs/settlement-servicing/spec.md and architecture.md |
+| D4–D5 pure rate authorization, versioned-envelope consumption, operation identity, authority-priced partialPeriod and payee exceptional-end translation | openspec/specs/settlement-servicing/spec.md and architecture.md |
 | D6–D6a seller notice, buyer rate-end re-drive and CLI | deal-lifecycle spec.md (foundation-created; [delta](specs/deal-lifecycle/spec.md)) and architecture.md; docs/development/ARCHITECTURE.md, Release |
 | D7 declarations and rotation | openspec/specs/settlement-configuration/spec.md; openspec/specs/settlement-servicing/spec.md; docs/development/DEPLOYMENT_AND_CONFIG.md |
 | D8 vectors and evidence classes | openspec/specs/test-compatibility/spec.md and architecture.md; kit/arkhai-payments/README.md |

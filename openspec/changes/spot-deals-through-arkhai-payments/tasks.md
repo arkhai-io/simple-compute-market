@@ -23,19 +23,24 @@ foundation; this design's D1–D7.
       and vector hashes. Do not edit generated models to mimic an unvendored contract.
 - [ ] 1.2 Confirm negotiate-open-ended-compute-terms supplies the price accessor
       with its period unit, common term shape, listing bounds and two front-door
-      servicing gates. Freeze period plus reserve_ahead_seconds and the recommended
+      servicing gates. Gate on terms 1.3/2.1/2.2/3.1/3.2 and D5's start/identity
+      resolution before signature, including whole-second rate starts. Freeze period plus reserve_ahead_seconds and the recommended
       setup_amount shape with that consumer. Require the accepted rate-structure
       carrier/digest from negotiation-driven-capacity-resize gate 2.1a; refuse an
       unresolved pricing reference rather than read the current listing.
-- [ ] 1.3 Freeze operation descriptors, ActivatedDeliveryRef, verified rate
+- [ ] 1.3 Freeze operation descriptors, consume the foundation-owned versioned
+      activation envelope (including site activation reference/instant), verified rate
       observations and rate re-anchoring output for convergence. Foundation
       in-process contract fakes cover kit library integration; the HTTP lane
       doubles gate only lane/e2e execution. No kit depends on runnable tooling.
 - [ ] 1.4 Obtain or explicitly gate on published signed snapshot/start/mixed-part
       vectors and partial-reversal-before/after-stop traces. Identify missing
       authority conformance evidence without replacing it with a double claim.
-      Verify required partialPeriod on every stop entry and part end, dispute
-      chosen-entry payloads and the confirmed own-term setup mapping. Freeze
+      Verify explicit partialPeriod on rate stop entries and rate ends on the
+      returned-capable revision, dispute chosen-entry payloads, and the qualified
+      setup activation trigger/full-return fallback. Once ends have no partialPeriod.
+      Record absent treatment fields and fixed charged dispute-stop semantics on
+      the interim revision; it cannot qualify returned exceptional_end. Freeze
       timestamp precision and per-end partialPeriod/late-start semantics with
       the vendored contract. Unexpressible terms fail closed; never hand-edit
       generated models. The authority, not SCM, computes a returned/prorated
@@ -56,20 +61,22 @@ publication configuration/builders and their focused publication suites.
 
 - [ ] 2.1 Add paired period/reserve_ahead_seconds validation, fixed-unit/positive
       constraints, optional setup_amount, the finite term requirement and
-      explicit end_partial_period, whole-second rate Agreement start and
+      early_termination.settles_through as the only term-end input, whole-second
+      rate Agreement start at materialization and
       partialPeriod capability check. Reject fractional rate starts rather than
       rewriting signed Agreement bytes; once-only rounding stays unchanged.
       Keep approval_window distinct from adjudication.
       Verify malformed pairs, calendar periods, setup opt-out and insufficient lead.
 - [ ] 2.2 Derive setup-once then rate deterministically through the accessor and
       codec. Include rate end, afterStop hold, maxHoldExtension and exact per-part
-      authorities/notices. Require partialPeriod on every stop entry and part end;
+      authorities/notices. On the returned-capable revision require partialPeriod
+      on rate stop entries and rate ends, never once ends;
       dispute rate stop is {account, notice: PT0S, partialPeriod: chosen} and its
-      stop event supplies treatment. Keep start payee-only; omit payee stop on on-demand.
+      stop event supplies treatment. Keep start payee-only; omit payee preemption entries on on-demand.
       Verify setup end is activation, and absolute capacity bounds are never
-      extended after late activation/start. Map end_partial_period to the end's
-      partialPeriod: intended preset returned; recommend explicitly disclosed
-      charged for interim spot/on-demand when only charged is expressible.
+      extended after late activation/start. Map early_termination.settles_through
+      through the foundation codec to end.partialPeriod: preset last_boundary;
+      explicitly disclosed started_period for interim spot/on-demand when only charged is expressible.
       Refuse unsupported terms rather than round term durations or downgrade.
 - [ ] 2.3 Extend the buyer's exact mandate check for mixed parts, ordering, price,
       asset, hold, cap and stop authorities. Verify explicit zero payer notice is
@@ -79,11 +86,18 @@ publication configuration/builders and their focused publication suites.
       entitlement or term end unless settles_through is last_boundary, naming the
       offending term. Verify explicit buyer opt-in can accept started_period;
       do not mistake an exact mandate match for policy acceptance.
-- [ ] 2.4 Supply default setup-bearing on-demand/spot presets with explicit setup
-      pricing and seller opt-out. Bind setup and rate terms into option identity.
-      Do not invent a setup amount or impose a bare-metal minimum-spend gate.
+- [ ] 2.4 Supply setup-bearing on-demand/spot presets with explicit setup pricing
+      and seller opt-out, gated on the qualified linked rate-start trigger and
+      bounded no-activation fallback. Until qualified, refuse setup presets;
+      explicit setup opt-out permits rate-only interim presets. Verify initial
+      reservation cannot pay out before activation and lawful cancellation before
+      activation returns setup in full with terminal authority provenance, not
+      seller-fault attribution. Bind all terms into option identity; invent no
+      amount or bare-metal minimum-spend gate.
 - [ ] 2.5 Supply the preset helper to the terms-owned VM/bare-metal publication
-      adapters; do not implement generic option emission a second time. Prove
+      adapters through their injected preset-helper interface; helper availability
+      gates rate emission, not the terms change's archive. Do not implement generic
+      option emission a second time. Prove
       accepted option plus bound rate structure survive repricing before
       materialization/restart; preserve reserved/API-credit once behavior.
 - [ ] 2.6 Add the materialization servicing-declaration gate: refuse undeclared
@@ -107,14 +121,15 @@ Journal persistence itself belongs to convergence.
 
 - [ ] 3.1 Translate rate start, entitled stop/notice and partial reverse into
       explicit per-part commands with operation-derived stable keys. Require
-      ActivatedDeliveryRef after verified site activation for start. Delivery
+      the foundation's versioned activation envelope after verified site activation. Delivery
       authorization remains pure; implement the separate start_billing effect using
       the end service's sole stable operation key. End service journals key and
       activated evidence before I/O; delivery stores only its reference. Derive
       per-part keys from that intent, never a second keyed start. Missing,
       malformed or mismatched evidence refuses before effects. Verify lost response
       and identical retry against the in-process contract fake; changed-content
-      key reuse is refused locally.
+      key reuse is refused by caller journal comparison; pass its descriptor/digest
+      to the stateless adapter for comparison, with authority refusal as backstop.
 - [ ] 3.2 Expose verified per-part start/pendingStop/stop, funded-through, extension
       refs, releaseAt and event ordering to lifecycle read/watch. Verify exhaustion
       and maximum-term causes, missing pre-start funding as unknown, and refusal to
@@ -126,20 +141,36 @@ Journal persistence itself belongs to convergence.
 - [ ] 3.4 Map settles_through to partialPeriod through the foundation codec:
       started_period/charged, last_boundary/returned, stop/prorated. Gate each
       value on vendored capability at publication and acceptance; interim spot
-      uses charged for payer and payee. Qualify boundary/no-start/terms stops,
+      and on-demand use fixed charged semantics on all present entries and ends,
+      with absent wire fields and no chosen-entry payload support. Qualify boundary/no-start/terms stops,
       superseded and equal-time requests from authority vectors; compute no
       local end-correction delta or clawback. Periods stay reserved until their
       end or part stop; afterStop payout is unchanged. Mediation requires no
       particular seller rule. Negotiation decides treatment; SCM seller presets
       offer last_boundary, and the terms-owned buyer policy refuses other payee
       or term-end treatments by default, with an explicit buyer override.
-      Verify chosen-entry stop payloads follow payer/payee terms or the operator ruling.
-- [ ] 3.5 Keep exceptional_end filing with the dispute adapter for seller
-      non-delivery or unentitled past physical failure, without computing ruling
-      amounts. A controlling lawful end before disclosure preserves attribution
-      and does not self-file solely because delivery never became available. No automatic lawful
-      notice reverse, target API or correction-obligation journal remains.
-      Independent discounts and ruling effects are not end-pricing credits.
+      Verify human rulings state treatment; buyer_end preserves payer notice and
+      treatment. Exceptional_end is not a dispute intent or mechanical ruling.
+- [ ] 3.5 Translate journaled exceptional_end in this hosted payment adapter:
+      unconditional returned payee stop of every rate part now, reversal of each
+      rate part's earned amount since at, time-unserved once shares (setup all
+      before delivery, none after), and full supported-bond award. Keep existing
+      triggers and timing: never future-dated; pre-start failure journals now and
+      acts at Agreement start. Derive per-part identities from the one command;
+      resolve unknowns and already-applied effects before another delta, without
+      double-returning reservations. A lawful pre-disclosure end retains attribution
+      without self-correction merely for non-availability. Qualify on-demand with
+      no payee entitlement and stop/reverse response-loss recovery. Refuse
+      qualification when unconditional returned stop is unexpressible; no mediation
+      fallback, second mapping or new correction journal. Surface held shortfall.
+- [ ] 3.6 Implement the pure rate authorize hook for commit/dispatch/start/disclose
+      under D4's phase table and settlement-servicing delta. Return reason,
+      operation identity and verified provenance with allow/refuse/pending. Verify
+      absent/unreachable/unverified/regressing evidence, wrong phase/deal, initial
+      reservations without fundedThrough, future versus effective stop, exhaustion,
+      unknown start and disclose-before-start with the shared clock-injected
+      in-process authority engine. Convergence composes this hook; it must not
+      interpret hosted fields or implement the payment decision itself.
 
 Validation: unit derivation/serialization cases, shared vector conformance and
 library integration with in-process contract fakes for unknown retry, per-stopper
@@ -167,20 +198,21 @@ second preemption endpoint or a local payment-stop scheduler.
 - [ ] 4.2 Surface verified pendingStop in lifecycle read/list. Preserve an earlier
       buyer stop, immutable retry identity and the authority's notice minimum.
       On-demand refusal points to exceptional_end only for seller non-delivery,
-      not an override payment stop or automatic filing after a lawful end.
+      not a self-interested override or automatic self-correction after a lawful end.
 - [ ] 4.3 Add the typed notice method and recommended deals preempt CLI verb to
       both domains, taking negotiation ID, operation key and optional --at.
       Delegate through lifecycle submit and its existing seller authentication.
       Output authority status/time, including unknown; do not report local
       command acceptance as an authoritative scheduled end.
 - [ ] 4.4 Prepare committed first-use configuration/examples for both domains
-      under the lane profile, with default setup price, paired on-demand/spot
-      options, explicit authority entries, test mode and double selector. Document
+      under the lane profile, with paired on-demand/spot options, explicit authority
+      entries, test mode and double selector. Use explicit setup opt-out for the
+      interim; include priced setup fixtures only on a qualified setup revision. Document
       one runnable invocation per domain that lands on its preemption surface.
       Before convergence, use lane-only approval/command fixtures and assert
       delivery refuses without the rate hook; do not commit/deliver an unserviced
       live rate option. This fixture is the explicit lane-only door exception.
-      Any interim spot fixture must explicitly configure its buyer to accept
+      Any interim spot or on-demand fixture must explicitly configure its buyer to accept
       started_period on the payee entitlement and any charged term end. Include
       default-buyer refusal as a separate observation; returned-capable fixtures
       may use default buyers only once the matching contract is vendored.
@@ -188,7 +220,11 @@ second preemption endpoint or a local payment-stop scheduler.
       service during nonzero payer notice, and end through watch at effective
       stop. Keep explicit end-now-regardless and unreachable-authority
       end_delivery/buyer_end(at) paths distinct. Preserve signed evidence and
-      report stop, delivery and case progress separately. Coordinate terms display.
+      report stop, delivery and case progress separately. Consume receipt-timed
+      end_delivery without a buyer at field: storefront journals payee stop for
+      payer at receipt plus payer notice with payer treatment even through outages;
+      seller policy may waive notice. Buyer_end is human triage and preserves
+      priced notice, never an automatic acknowledgement ruling. Coordinate terms display.
 - [ ] 4.6 Verify the foundation-owned VM admin route delegates notice for accepted
       payee entitlement and exceptional_end otherwise; request a foundation fix
       rather than implement a second entitlement switch here.
@@ -211,7 +247,8 @@ lane profile configuration under e2e-tests/config. Foundation evidence stores an
 convergence persist outputs through their existing ports.
 
 - [ ] 5.1 Consume the terms-owned proposed-declaration validator at materialization,
-      including its lane target and test-mode binding; do not duplicate it.
+      for neutral lane/target validation; layer the payments-specific identity and
+      livemode check here rather than assigning it to that neutral validator.
       Bind the lane-only proposed declaration's fixture payments identity to configured
       SERVICE_IDENTITY with livemode=false; refuse mismatch or production/live use.
       Keep published production enablement with activate-per-period-compute-servicing,
@@ -219,7 +256,10 @@ convergence persist outputs through their existing ports.
 - [ ] 5.2 Add configured retiring identities with retirement dates alongside the
       current identity. Return a fresh current-key snapshot as re-anchoring
       evidence only after foundation verification of mandate, parties, mode and
-      sequence; embedded old receipt is attested by that snapshot.
+      sequence; embedded old receipt is attested by that snapshot. Gate on the
+      foundation verifier accepting identity sets with validity windows, embedded
+      receipt attestation and a caller-supplied minimum sequence; do not implement
+      a parallel proof verifier.
 - [ ] 5.3 Integrate durable anchor replacement via the evidence-store port while
       keeping original bytes; expose dependent/unanchored deals for convergence's
       status. Refuse stale-anchor rollback and mode-change re-anchoring. Document
@@ -250,7 +290,7 @@ hosted-target evidence.
 - [ ] 6.2 Supply evidence metadata at the adapter/command first-use boundary:
       contract revision, target class/mode, hashes and control trace. Readiness
       gates scenario runs, not a claim that the target was prepared here.
-      Record the buyer acceptance-policy configuration for interim spot evidence;
+      Record buyer acceptance-policy configuration for interim spot/on-demand evidence;
       an opted-in buyer is not evidence of acceptance by default buyers.
 - [ ] 6.3 Reference convergence's sole consolidated rate qualification matrix
       (its design's Scenarios and evidence); do not reproduce it here. Retain
@@ -262,7 +302,7 @@ hosted-target evidence.
       injected clocks are confined to isolated tooling state-machine tests.
       Activation must list producer snapshot, start and reversal vectors among
       blockers to published qualification; double traces do not satisfy them.
-      Check that the matrix consumes maximum-term, on-demand refusal/self-filing
+      Check that the matrix consumes maximum-term, on-demand refusal/self-correction
       and rotation-overlap preparation; report missing coverage to convergence
       rather than maintain another matrix. Require physical release/access closure rather
       than a lease_ended intent report. Promote no unrun consumer requirement here.
@@ -325,7 +365,9 @@ change to implementation and review.
       (Kit areas, Settlement servicing and Release),
       docs/development/DEPLOYMENT_AND_CONFIG.md (servicing and identity overlap),
       and openspec/specs/README.md capability index as needed. Complete this
-      change's design-promotion record. Archive writes delta-covered spec.md files
+      change's design-promotion record. Preserve the shared mandate requirement's
+      once clauses and archive after the foundation; promote rate buyer-end only
+      in deal-lifecycle, referenced by buyer-orchestration. Archive writes delta-covered spec.md files
       for settlement-servicing, settlement-configuration, storefront-publication,
       deal-lifecycle and test-compatibility.
 - [ ] 7.10 **Documentation citations.** Run

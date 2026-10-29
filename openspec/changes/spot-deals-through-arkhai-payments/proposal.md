@@ -20,21 +20,24 @@ continuation is a separate dependent change.
   Prices come from the agreed-price accessor, not direct reads of Agreement.amount.
 - Derive per-part authorities from early_termination and adjudication:
   payee-only rate start, entitled stop accounts with their priced notice, and the
-  dispute authority's stop/reverse/extend permissions. On-demand has no payee stop.
+  dispute authority's stop/reverse/extend permissions. On-demand grants no self-interested payee preemption entitlement; payee actions
+  in the buyer's interest remain unconditional.
   Use part end, {afterStop: dispute_window} and maxHoldExtension.
 - Extend the hosted adapter's command translation, reads and watch source with
   per-part start, pending/final stop, funding and maximum-term observations.
   Expose immutable operation descriptors for caller-owned journals. Started-period
   treatment is a required per-stopper partialPeriod payment term, not a storefront
-  refund. Each part end also requires it. The dispute stop entry is chosen and its
-  stop carries treatment; periods are earned at period end or part stop, not start.
+  refund. On the returned-capable revision each rate end requires it (once ends
+  do not), and the dispute stop entry is chosen with treatment in each stop event.
+  Interim treatment fields are absent and vector-qualified fixed charged semantics
+  apply, including dispute stops. Periods earn at period end or part stop, not start.
   Term end also carries partialPeriod: compute presets use returned. Fail closed
-  on unexpressible terms; interim spot commits charged on both sides. Recommend
+  on unexpressible terms; interim rate options commit started_period on all present entitlements. Recommend
   explicitly disclosed charged term ends for interim spot/on-demand rate options.
   Negotiation decides accepted treatment. Seller presets offer last_boundary;
   the terms-owned buyer policy by default refuses other payee or term-end
-  treatments. Interim spot therefore requires explicit buyer acceptance of
-  started_period for those terms and cannot reach default buyers until returned
+  treatments. Interim spot and on-demand therefore require explicit buyer acceptance of
+  started_period for every affected term and cannot reach default buyers until returned
   is expressible in the vendored contract.
 - Add the seller half's notice command through the existing seller-authenticated,
   negotiation-keyed lifecycle submit; a typed client method and a deals preempt
@@ -42,14 +45,21 @@ continuation is a separate dependent change.
   authority, which hosts the pending stop. Never schedule a payment stop locally.
 - Supply setup/rate preset helpers to the terms change's publication adapters.
   Presets are combinations of parts and terms, not runtime classes. Setup ends
-  at activation and mediation mechanically maps its unserved share over that
-  part's own term, not the maximum compute term. A lawful end before disclosure does not itself trigger self-filing.
-- Keep delivery authorization pure. Translate the separate post-activation
+  at activation through a qualified rate-start-linked trigger; until qualified,
+  setup-bearing presets refuse and sellers may explicitly opt out. A lawful
+  pre-activation stop returns setup in full without seller-fault attribution.
+- Implement the hosted rate authorize hook for commit/dispatch/start/disclose,
+  consuming the foundation's versioned activation envelope; convergence composes it.
+  Keep delivery authorization pure. Translate the separate post-activation
   start_billing effect using the end service's sole journaled operation key;
   delivery keeps a reference, not a second start intent.
 - Re-drive the canonical rate buyer-end flow: stop then hint, continue delivery
   during priced notice, and end through authority watch. Keep end_delivery for
   explicit immediate surrender and unreachable-payment-authority buyer_end(at).
+- Translate journaled seller exceptional_end through the payment adapter, not a
+  dispute: unconditional returned payee stops, earned-since-at rate reversal,
+  time-unserved once reversal (setup all before delivery, none after) and supported
+  bond award. Keep timing/journaling; refuse unexpressible contract behavior.
 - Support service-identity overlap and re-anchoring through the foundation's
   verified-snapshot interface. Snapshot-proof verification itself remains owned
   by agreed-evidence-and-early-termination round 2.
@@ -85,8 +95,8 @@ Implementation gates on:
    and once-part adapter, lifecycle commands, evidence stores and verified snapshots
    (round 2). This change consumes, and does not duplicate, those facilities.
 2. negotiate-open-ended-compute-terms: agreed-price accessor and period unit,
-   listing bounds, accepted-price carrier and option shape, declaration contract and
-   publication/acceptance gates. Only those sections gate mechanics; the terms
+   listing bounds, accepted-price carrier and option shape, declaration contract,
+   whole-second pre-signature start/identity freeze and publication/acceptance gates. Only those sections gate mechanics; the terms
    change must not wait for this change's door-3 evidence to archive.
 3. The foundation's in-process contract fakes gate kit library integration.
    add-arkhai-payments-lane-double supplies HTTP doubles, wall-time typed due-work
@@ -115,7 +125,9 @@ a double-backed scenario never qualifies the external payment or dispute authori
   policy, provisioning or teardown implementation.
 - Snapshot-proof implementation, immediate end_delivery transport/evidence capture
   or mediation rulings (foundation-owned). The rate buyer-end re-drive is in scope.
-- Automatic end-correction reversals or a seller-command correction journal.
+- Cooperative corrections to entitled stop pricing, a second seller-command
+  journal, or mediation mapping of exceptional_end. Seller self-correction remains
+  the existing journaled payment-adapter command.
 - Durable once-only identity re-anchoring; those deals must drain before key retirement.
 - Discovery sugar, automated preemption strategy, Alkahest splitter execution,
   API-credit rate servicing, metering other than time, or reserved fixed-interval

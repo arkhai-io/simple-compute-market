@@ -1,34 +1,27 @@
 ## ADDED Requirements
 
 ### Requirement: Rate-part qualification names contract and authority evidence
-SCM's rate-part qualification MUST use the lane-double-owned classes Qualification against the published contract, Qualification against a proposed contract, and Live evidence. It MUST record revision/content hashes, mode and target class, and MUST NOT present double-backed scenarios as proof of the external authority's ledger, payouts or mechanical rulings.
+Rate-part qualification MUST use the test-compatibility evidence classes Qualification against the published contract, Qualification against a proposed contract, and Live evidence. It MUST record revision/content hashes, mode and target class, and MUST NOT present double-backed mechanics as proof of external authority ledger, payout or adjudication behavior.
 
-#### Scenario: The lane runs against a proposed contract
-- **WHEN** rate mechanics pass against the in-lane payment and mediation doubles
-- **THEN** the result is labelled qualification against a proposed contract
-- **AND** it makes no hosted readiness or live authority claim
+#### Scenario: Mechanics run against a proposed contract
+- **WHEN** rate adapter mechanics pass against contract fakes or lane doubles of proposed bytes
+- **THEN** evidence identifies the proposed revision and makes no hosted-readiness or live-authority claim
 
 #### Scenario: Required authority vectors are absent
-- **WHEN** producer-published signed pre-start/post-start snapshot, start or partial reversal vectors are unavailable
-- **THEN** the corresponding authority-conformance claim is recorded as unproven
-- **AND** activation lists these as blockers to published qualification rather than relabelling double-generated traces as published vectors
-
-#### Scenario: Notice or term work becomes due in a lane
-- **WHEN** a rate scenario waits for notice or maximum-term effects
-- **THEN** it uses wall time and tooling-owned typed due-work barriers with per-authority progress, pending effects and blocked dependencies
-- **AND** future work remains pending and blocked effects do not count as completion
-- **AND** injected or advanced clocks are limited to isolated tooling state-machine tests
+- **WHEN** producer-published signed pre-start/post-start snapshot, start, setup-trigger/fallback or partial reversal vectors are unavailable
+- **THEN** the corresponding authority-conformance claim remains unproven
+- **AND** double-generated traces do not replace producer evidence
 
 #### Scenario: The adapter is tested without lane services
 - **WHEN** kit rate integration tests run
-- **THEN** they exercise the contract fake and verified vector fixtures without starting lane HTTP tooling
+- **THEN** they exercise the shared clock-injected payments authority engine and verified vector fixtures without starting lane HTTP tooling
 
-#### Scenario: Interim spot uses a non-default buyer policy
-- **WHEN** a prepared interim spot scenario offers started_period on the payee entitlement or term end
-- **THEN** it explicitly configures and records buyer acceptance of started_period for every affected term
-- **AND** its result does not claim default-buyer acceptance; default policy refusal is a separate observation
+#### Scenario: Interim fixtures disclose non-default policy
+- **WHEN** a spot or on-demand command fixture offers started_period on an entitlement or term end rejected by default buyer policy
+- **THEN** its committed setup explicitly configures buyer acceptance for every affected term
+- **AND** focused fixture validation records default-policy refusal separately
 
-#### Scenario: Consumer behavior is not yet composed
+#### Scenario: Command first use precedes continuation
 - **WHEN** adapter or notice first use succeeds before rate continuation is installed
-- **THEN** evidence claims only command/authority mechanics and delivery fails closed without the rate hook
-- **AND** no both-lane release or hosted qualification is claimed
+- **THEN** evidence claims only command/authority mechanics and delivery refuses without the rate hook
+- **AND** no both-lane release, due-work completion or hosted qualification is claimed
