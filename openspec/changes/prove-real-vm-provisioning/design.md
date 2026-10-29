@@ -370,7 +370,14 @@ evidence `relay-vm-access-without-a-dashboard` needs to close.
     (the IOMMU kernel arguments among it), the rescue boot entry, and the
     GPU-detection service.
   - *The audit decides binding.* Binding still happens only after the reboot, from
-    an assessable audit's bindable addresses, exactly as before.
+    an assessable audit's bindable addresses, exactly as before. It runs only
+    where the passthrough configuration ran (found in implementation): binding
+    writes its list into a directory the configuration creates and applies it
+    through the `vfio-bind` unit the configuration installs, so on a host
+    prepared without it the bind phase would fail preparation rather than bind
+    nothing. Skipping the configuration, under `auto` without a GPU or under
+    `disabled`, does not undo an earlier one: a unit an earlier preparation
+    enabled stays enabled.
 
   The audit cannot be the boot gate: with the IOMMU disabled it reports nothing
   assessable and no GPUs, and enabling the IOMMU is one of the gated steps, so a GPU

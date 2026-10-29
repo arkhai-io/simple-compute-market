@@ -1,5 +1,8 @@
 from pathlib import Path
+import re
 import unittest
+
+import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -264,6 +267,45 @@ class VmManagementContractTests(unittest.TestCase):
         next_idx = text.find("\n- name:", idx + 1)
         block = text[idx:next_idx] if next_idx != -1 else text[idx:]
         self.assertNotIn("no_log", block)
+
+
+#: `virt-install` as a command word: not part of a file name such as
+#: `gpu-virt-install-retry.yml` or of a variable such as `virt_install_success`.
+_VIRT_INSTALL = re.compile(r"(?<![\w-])virt-install(?![\w.-])")
+
+
+class VmCreationRequestsKvmTests(unittest.TestCase):
+    """A VM is never created under software emulation."""
+
+    def test_every_virt_install_names_kvm(self) -> None:
+        commands = 0
+        findings = []
+        for path in sorted(TASKS.glob("*.yml")):
+            lines = _read(path).splitlines()
+            for number, line in enumerate(lines):
+                text = line.strip()
+                if text.startswith("#") or text.startswith("- name:"):
+                    continue
+                if not _VIRT_INSTALL.search(text):
+                    continue
+                commands += 1
+                following = lines[number + 1].strip() if number + 1 < len(lines) else ""
+                if text != "virt-install \\" or following != "--virt-type kvm \\":
+                    findings.append(f"{path.name}:{number + 1}: {text!r}")
+        self.assertGreater(commands, 0, "no virt-install command found")
+        self.assertEqual(findings, [])
+
+    def test_a_create_refuses_a_host_without_kvm_before_anything_else(self) -> None:
+        """Before anything is created for the guest: its first two tasks."""
+        tasks = yaml.safe_load(_read(VM_CREATE))
+        stat, refusal = tasks[0], tasks[1]
+        self.assertEqual(stat["stat"], {"path": "/dev/kvm"})
+        self.assertEqual(stat["register"], "kvm_device")
+        self.assertEqual(stat["delegate_to"], "{{ target_host }}")
+        self.assertIn("KVM is unavailable", refusal["fail"]["msg"])
+        self.assertEqual(
+            refusal["when"], ['vm_action == "create"', "not kvm_device.stat.exists"]
+        )
 
 
 if __name__ == "__main__":

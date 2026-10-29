@@ -195,20 +195,28 @@ Files: `domains/vms/provisioning/iac/ansible/playbooks/host-kit/vm-setup.yaml`;
 `domains/vms/provisioning/iac/tests/` (`test_ansible_structure.py`,
 `test_vm_management_contracts.py`, and a new presence test using `shell_harness.py`).
 
-- [ ] 3.1 `vm-setup.yaml` defaults `vm_image_type` to `scratch`; `golden` stays
+- [x] 3.1 `vm-setup.yaml` defaults `vm_image_type` to `scratch`; `golden` stays
       selectable by `image_setup_type`. `single-tenant/vm-operations.yaml` is not
       changed: the service always passes the image setup type. (D9c; scenarios "A host
       is prepared without options", "The operator names the golden image")
-- [ ] 3.2 Validate `gpu_passthrough` (`auto`, `enabled`, `disabled`; default `auto`) as
+      Every golden step (`system-packages.yml`'s gcloud and Packer installs,
+      `golden-image-build.yml`) is already conditioned on `vm_image_type == "golden"`.
+- [x] 3.2 Validate `gpu_passthrough` (`auto`, `enabled`, `disabled`; default `auto`) as
       the role's first task, failing with the value named before anything on the host
       changes. (D9b; scenario "The override names an unknown value")
-- [ ] 3.3 Fail before any host mutation when `/proc/cpuinfo` shows neither `vmx` nor
+      An `assert` in `main.yml`, tagged `always` so a tag-limited run still makes
+      it; the default is in `defaults/main.yml`.
+- [x] 3.3 Fail before any host mutation when `/proc/cpuinfo` shows neither `vmx` nor
       `svm`, as a read-only precondition at the start of the role, replacing
       `kvm-setup.yml`'s `ignore_errors` check; after the KVM modules load in
       `kvm-setup.yml`, fail when `/dev/kvm` is absent. Both messages say hardware
       virtualization is unavailable and why. (D9a; scenario "A host without
       virtualization extensions")
-- [ ] 3.4 Add a GPU-presence task file that reads PCI class and vendor from sysfs,
+      The probe (`grep -qwE '(vmx|svm)'`, `changed_when: false`) and its `fail` are
+      the second and third tasks of `main.yml`, tagged `always`. `kvm-setup.yml`'s
+      nested-virtualization tasks no longer test the probe's result, since the
+      role cannot reach them without it.
+- [x] 3.4 Add a GPU-presence task file that reads PCI class and vendor from sysfs,
       needing no IOMMU, and sets presence when a display or 3D controller (`0300`,
       `0302`) has vendor `10de` or `1002`. In `main.yml`, include `gpu-passthrough.yml`,
       `rescue-boot-entry.yml`, and `gpu-detection-service.yml` when `gpu_passthrough` is
@@ -219,11 +227,30 @@ Files: `domains/vms/provisioning/iac/ansible/playbooks/host-kit/vm-setup.yaml`;
       configuration (it reports nothing with the IOMMU off). (D9b; scenarios "A host
       has no GPU", "A GPU host's IOMMU starts disabled", "The operator forces
       passthrough configuration")
-- [ ] 3.5 Pass `--virt-type kvm` on every `virt-install` invocation in the
+      `tasks/gpu-presence.yml` sets `gpu_present` and `gpu_passthrough_configured`;
+      its include and its `apply` are tagged `always`. Correction to "binding is
+      unchanged": the `gpu-bind.yml` include now carries the same condition.
+      Ungated, it would fail every GPU-less host: its bind-list `copy` writes into
+      `/etc/vfio-bind`, which only `gpu-passthrough.yml` creates (the unit restart
+      and enable are already skipped when nothing is bindable), contradicting the
+      scenario "A host has no GPU" ("preparation otherwise completes"). Where
+      passthrough is configured, binding is still exactly what the post-reboot
+      audit finds bindable. Skipping configuration does not undo an earlier one:
+      on a host an earlier preparation configured, an enabled `vfio-bind` unit
+      stays enabled and its list replays at the reboot. Recorded in `design.md`
+      D9b, the `physical-provisioning` delta ("attempted only where this
+      configuration is applied"), and the proposal's Impact list. The play's
+      closing notes and the audit's report say whether passthrough applies; the
+      reboot stays unconditional, its message no longer naming the IOMMU.
+- [x] 3.5 Pass `--virt-type kvm` on every `virt-install` invocation in the
       `vm-management` role, the GPU retry path included, and fail a create before
       `virt-install` when `/dev/kvm` is absent, naming KVM as unavailable. (D9a;
       scenario "KVM disappears after preparation")
-- [ ] 3.6 Unit: structural tests that `vm-setup.yaml`'s default is `scratch`; that the
+      Nine invocations across `vm-create.yml` (4), `gpu-virt-install-retry.yml`,
+      `gpu-virt-install-multi.yml` (2), and `gpu-virt-install-multi-retry.yml` (2).
+      The KVM check is `vm-create.yml`'s first two tasks, delegated to the target
+      host, before anything is created for the guest.
+- [x] 3.6 Unit: structural tests that `vm-setup.yaml`'s default is `scratch`; that the
       override check and the virtualization precondition precede every task that
       changes the host; that the three passthrough includes carry the D9b condition;
       that every `virt-install` command in the role names `--virt-type kvm`; and that
@@ -231,10 +258,32 @@ Files: `domains/vms/provisioning/iac/ansible/playbooks/host-kit/vm-setup.yaml`;
       `shell_harness.py` over a fake sysfs: an NVIDIA `0300` and an AMD `0302` device are
       presence; an ASPEED BMC (`1a03`, `0300`), a QEMU emulated VGA (`1234`, `0300`),
       and a host with no display device are not. (D9)
-- [ ] 3.7 Verification: `make -C domains/vms/provisioning/iac validate` (inventory,
+      Unit, `test_ansible_structure.py` (`TestHostPreparationFailsClosed`): the
+      scratch default; the override check, the CPU probe, and its refusal as
+      `main.yml`'s tasks 0–2, tagged `always`, before the first include; the four
+      gated includes (gpu-bind included) after the presence include, whose own
+      and `apply` tags are `always`; the decision expression read verbatim; the
+      default `auto`; and `kvm-setup.yml`'s `/dev/kvm` check after its last
+      `modprobe`. The decision expression is checked as text, not evaluated: the
+      project's tests run without Ansible or Jinja, and that a tag-limited run
+      behaves is read from the tags, not run. Unit, `test_vm_management_contracts.py`
+      (`VmCreationRequestsKvmTests`): every line naming `virt-install` as a
+      command word, outside comments and task names, is `virt-install \` followed
+      by `--virt-type kvm \`; the KVM stat and refusal are `vm-create.yml`'s first
+      two tasks. Unit, `test_gpu_presence.py`: the five listed cases, plus no PCI
+      devices, an NVIDIA audio function alone (not a GPU), a GPU beside a BMC, and
+      a `bash -n` parse.
+- [x] 3.7 Verification: `make -C domains/vms/provisioning/iac validate` (inventory,
       playbook syntax, tests); `make test`.
       End-to-end: none in the pipeline — the mock profile runs no playbook. Section 8's
       live run exercises 3.1, 3.3, 3.4, and 3.5 on a GPU-less host.
+      `make test-provisioning-iac` (the IaC suite, unit): 82 passed, before and
+      after the review fixes. `make test`: passed (before the review fixes, which
+      touched only the IaC project's YAML wording and tests, rerun above). `make
+      check-packaging`: passed. Not run: `validate`'s inventory and `--syntax-check` parts — Ansible
+      is not installed in this environment, and running `make -C` on the IaC
+      directory was refused here; no CI workflow runs them either. End-to-end
+      markers confirmed: none. No CI workflow beyond the pipeline is owed.
 
 ## 4. The real-provisioning target description
 

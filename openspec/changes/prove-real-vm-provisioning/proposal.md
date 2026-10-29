@@ -94,8 +94,10 @@ None.
   scenario module, the target settings model, the `.example` profile and its ignore
   rule, the SSH helper, GPU-less helper support, marker registration, README.
 - `domains/vms/provisioning/iac/ansible/`: `vm-setup.yaml` default,
-  `roles/vm-setup/tasks/{kvm-setup,main,gpu-passthrough,rescue-boot-entry,gpu-detection-service}.yml`,
-  `roles/vm-management/tasks/vm-create.yml`, and their IaC tests.
+  `roles/vm-setup/defaults/main.yml`, `roles/vm-setup/tasks/{main,kvm-setup}.yml`
+  and a new `gpu-presence.yml` (the passthrough includes, binding's among them, are
+  conditioned in `main.yml`; the audit's report wording), the `vm-management`
+  role's `vm-create.yml` and `gpu-virt-install-*.yml`, and their IaC tests.
 - `docs/development/TESTING.md`, `docs/development/VALIDATION_RUNBOOK.md`, host-kit
   and seller documentation that states the preparation default.
 - No wire, persistence, chart, or image change. Existing mock lanes keep their

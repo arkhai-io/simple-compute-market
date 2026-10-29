@@ -213,6 +213,7 @@
     - name: Execute virt-install with selected GPUs (scratch/base image)
       shell: |
         virt-install \
+          --virt-type kvm \
           --name {{ vm_name }} \
           --ram {{ vm_ram }} \
           --disk path=/var/lib/libvirt/images/{{ vm_name }}.qcow2,format=qcow2 \
@@ -238,6 +239,7 @@
     - name: Execute virt-install with selected GPUs (golden image)
       shell: |
         virt-install \
+          --virt-type kvm \
           --name {{ vm_name }} \
           --ram {{ vm_ram }} \
           --disk path=/var/lib/libvirt/images/{{ vm_name }}.qcow2,format=qcow2 \

@@ -191,6 +191,18 @@ class TestPlaybookStructure(unittest.TestCase):
                 self.assertEqual(task.get("changed_when"), False, task.get("name"))
 
 
+def _included(task: dict) -> str:
+    """The task file an `include_tasks` task names, or an empty string."""
+    spec = task.get("include_tasks")
+    return spec if isinstance(spec, str) else (spec or {}).get("file", "")
+
+
+def _tags(tags) -> list:
+    if tags is None:
+        return []
+    return [tags] if isinstance(tags, str) else list(tags)
+
+
 class TestPassthroughSequencing(unittest.TestCase):
     """Binding must never be reachable from a boot nobody is watching.
 
@@ -253,13 +265,11 @@ class TestPassthroughSequencing(unittest.TestCase):
 
     def test_the_bind_phase_runs_after_the_reboot(self) -> None:
         tasks = self._tasks("main.yml")
-        names = []
-        for task in tasks:
-            if not isinstance(task, dict):
-                continue
-            spec = task.get("include_tasks")
-            included = spec if isinstance(spec, str) else (spec or {}).get("file", "")
-            names.append(("reboot" if "reboot" in task else included) or "")
+        names = [
+            "reboot" if "reboot" in task else _included(task)
+            for task in tasks
+            if isinstance(task, dict)
+        ]
         reboot = names.index("reboot")
         bind = names.index("gpu-bind.yml")
         self.assertLess(reboot, bind, "gpu-bind.yml runs before the IOMMU reboot")
@@ -290,6 +300,117 @@ class TestPassthroughSequencing(unittest.TestCase):
         )
         self.assertIn("blacklist_host_gpu_drivers", source)
         self.assertIn("rejectattr('bindable') | list | length) == 0", source)
+
+
+class TestHostPreparationFailsClosed(unittest.TestCase):
+    """A host is refused before it changes, and its boot changes only for a GPU.
+
+    Host preparation must fail on a host that cannot run KVM before it
+    configures anything, refuse an override value it does not know, and leave
+    the boot configuration of a host with no GPU as it was.
+    """
+
+    PASSTHROUGH_INCLUDES = (
+        "gpu-passthrough.yml",
+        "rescue-boot-entry.yml",
+        "gpu-detection-service.yml",
+        "gpu-bind.yml",
+    )
+
+    def _main(self) -> list:
+        path = ANSIBLE / "roles/vm-setup/tasks/main.yml"
+        return [t for t in yaml.safe_load(path.read_text(encoding="utf-8")) if isinstance(t, dict)]
+
+    def _index(self, tasks: list, predicate) -> int:
+        return next(i for i, task in enumerate(tasks) if predicate(task))
+
+    def test_host_preparation_defaults_to_the_scratch_image(self) -> None:
+        path = ANSIBLE / "playbooks/host-kit/vm-setup.yaml"
+        (play,) = yaml.safe_load(path.read_text(encoding="utf-8"))
+        image = play["vars"]["vm_image_type"]
+        self.assertIn("image_setup_type", image)
+        self.assertIn("default('scratch')", image)
+
+    def test_the_override_defaults_to_presence(self) -> None:
+        path = ANSIBLE / "roles/vm-setup/defaults/main.yml"
+        defaults = yaml.safe_load(path.read_text(encoding="utf-8"))
+        self.assertEqual(defaults["gpu_passthrough"], "auto")
+
+    def test_the_preconditions_precede_every_change_to_the_host(self) -> None:
+        tasks = self._main()
+        override = self._index(tasks, lambda t: "assert" in t)
+        self.assertEqual(
+            set(tasks[override]["assert"]["that"]),
+            {"gpu_passthrough in ['auto', 'enabled', 'disabled']"},
+        )
+        self.assertIn("gpu_passthrough", tasks[override]["assert"]["fail_msg"])
+        probe = self._index(
+            tasks, lambda t: "shell" in t and "/proc/cpuinfo" in str(t["shell"])
+        )
+        self.assertIn("vmx|svm", tasks[probe]["shell"])
+        self.assertIs(tasks[probe]["changed_when"], False)
+        refusal = self._index(
+            tasks, lambda t: "fail" in t and "cpu_virt_support" in str(t.get("when"))
+        )
+        self.assertIn("Hardware virtualization is unavailable", tasks[refusal]["fail"]["msg"])
+        # The override check is the role's first task and the CPU check follows
+        # it; the first include, system packages, installs software.
+        first_include = self._index(tasks, lambda t: "include_tasks" in t)
+        self.assertEqual((override, probe, refusal), (0, 1, 2))
+        self.assertLess(refusal, first_include)
+        for index in (override, probe, refusal):
+            self.assertIn("always", _tags(tasks[index].get("tags")), tasks[index]["name"])
+
+    def test_passthrough_configuration_follows_the_presence_decision(self) -> None:
+        tasks = self._main()
+        presence = self._index(tasks, lambda t: _included(t) == "gpu-presence.yml")
+        # Both tags: the include's own makes a tag-limited run include it, and
+        # `apply` makes its tasks run there, so the decision every gated
+        # include below reads is always made.
+        self.assertIn("always", _tags(tasks[presence].get("tags")))
+        self.assertIn(
+            "always", _tags(tasks[presence]["include_tasks"]["apply"].get("tags"))
+        )
+        for name in self.PASSTHROUGH_INCLUDES:
+            index = self._index(tasks, lambda t, name=name: _included(t) == name)
+            self.assertLess(presence, index, f"{name} is included before presence is decided")
+            self.assertEqual(
+                tasks[index].get("when"), "gpu_passthrough_configured | bool", name
+            )
+
+    def test_the_presence_decision_honours_the_override(self) -> None:
+        path = ANSIBLE / "roles/vm-setup/tasks/gpu-presence.yml"
+        tasks = yaml.safe_load(path.read_text(encoding="utf-8"))
+        (decision,) = [t for t in tasks if "set_fact" in t]
+        expression = " ".join(decision["set_fact"]["gpu_passthrough_configured"].split())
+        self.assertEqual(
+            expression,
+            "{{ gpu_passthrough == 'enabled' or (gpu_passthrough == 'auto' and "
+            "(gpu_presence_probe.stdout | trim) == 'true') }}",
+        )
+        (probe,) = [t for t in tasks if "shell" in t]
+        self.assertIs(probe["changed_when"], False)
+
+    def test_kvm_setup_refuses_a_host_without_a_kvm_device(self) -> None:
+        path = ANSIBLE / "roles/vm-setup/tasks/kvm-setup.yml"
+        tasks = yaml.safe_load(path.read_text(encoding="utf-8"))
+        # The CPU's extensions are checked once, as the role's precondition; a
+        # second probe here could only disagree with it.
+        self.assertEqual(
+            [t["name"] for t in tasks if "vmx" in str(t.get("shell", ""))], []
+        )
+        loaded = max(
+            i for i, t in enumerate(tasks) if "modprobe" in str(t.get("shell", ""))
+        )
+        stat = self._index(
+            tasks, lambda t: (t.get("stat") or {}).get("path") == "/dev/kvm"
+        )
+        refusal = self._index(
+            tasks, lambda t: "fail" in t and "kvm_device" in str(t.get("when"))
+        )
+        self.assertLess(loaded, stat)
+        self.assertLess(stat, refusal)
+        self.assertIn("Hardware virtualization is unavailable", tasks[refusal]["fail"]["msg"])
 
 
 if __name__ == "__main__":

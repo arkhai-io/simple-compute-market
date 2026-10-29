@@ -272,7 +272,8 @@
          'GPUs found: ' ~ (passthrough_audit.gpus | length),
          'Bindable GPUs: ' ~ (passthrough_audit.gpus | selectattr('bindable') | list | length)]
         + (passthrough_audit.gpus | map('to_json') | list)
-        + ['Rescue boot entry: "' ~ rescue_boot_entry_title ~ '" — select it from the'
+        + ['Rescue boot entry, on a host prepared with passthrough: "'
+           ~ rescue_boot_entry_title ~ '" — select it from the'
            ~ ' console to boot with no device bound to vfio-pci.']
       }}
   tags:
