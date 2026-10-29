@@ -16,7 +16,7 @@ Production compositions MUST NOT declare rate servicing until the hosted deploym
 
 ### Requirement: Activation requalifies the owned payment and lifecycle contracts
 
-Activation MUST requalify foundation/spot's payment and dispute contracts, not implement pricing. Observations MUST cover per-stopper/term-end treatment, fail-closed terms, activation-before-start, setup once end, exceptional_end filing and sole mechanical payee self-penalty. Buyer_end MUST remain human-triaged; buyer half MUST own payment stops and outage retry. No storefront end-pricing correction MAY replace an unsupported term.
+Activation MUST requalify foundation/spot's payment and dispute contracts, not implement pricing. Observations MUST cover per-stopper/term-end treatment, fail-closed terms, activation-before-start, the setup once end at the later of the Agreement start and approval, exceptional_end filing and sole mechanical payee self-penalty. Buyer_end MUST remain human-triaged; buyer half MUST own payment stops and outage retry. No storefront end-pricing correction MAY replace an unsupported term.
 
 #### Scenario: Published schema cannot express returned
 

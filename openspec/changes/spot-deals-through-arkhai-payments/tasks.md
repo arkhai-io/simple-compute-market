@@ -88,8 +88,8 @@ publication configuration/builders and their focused publication suites.
       entries only for accepted entitlements: spot notice, none on on-demand.
       Derive no restitution entry or implicit favourable-payee stop privilege;
       once-only options without early-termination entitlements authorize no start/stop.
-      Verify setup end is activation, and absolute capacity bounds are never
-      extended after late activation/start. Map early_termination.settles_through
+      Verify setup's end is the later of the Agreement start and approval, and absolute
+      capacity bounds are never extended after late activation/start. Map early_termination.settles_through
       through the foundation codec to end.partialPeriod: preset last_boundary;
       explicitly disclosed started_period for interim spot/on-demand when only charged is expressible.
       Refuse unsupported terms rather than round term durations or downgrade.

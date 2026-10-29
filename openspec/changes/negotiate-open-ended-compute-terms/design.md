@@ -166,14 +166,19 @@ selection. Every reserved duration must fit both bounds.
 **The runway.** A horizon must leave room to deliver after the latest approval the
 option permits. At acceptance the seller requires, for a recurring option,
 
-    start_utc + duration_seconds ≥ max(floor(accepted_at) + approval_window, start_utc)
+    start_utc + duration_seconds ≥ max(approval expiry, start_utc)
                                    + delivery_deadline_seconds + period
 
-and refuses otherwise, naming the minimum horizon that passes, so the buyer can
-re-propose; derivation applies the same inequality to the default horizon *B*, so a
-listing never advertises a recurring option whose default selection the seller would
-refuse, and reports a failing *B* as a derivation close reason beside the F13
-diagnostics. A reserved option needs no runway: its term end is its one delivery
+where the approval expiry is the mandate's own, `floor(accepted_at) + approval_window`
+by the foundation's settlement rule — the authority's exact expiry instant, not an
+approximation of it — and refuses otherwise, naming the minimum horizon that passes,
+so the buyer can re-propose. Derivation applies the same inequality to the default
+horizon *B* at publication and reports a failing *B* as a derivation close reason
+beside the F13 diagnostics; that keeps a fresh listing from advertising a default the
+seller would refuse, and no more: the absolute availability bound shrinks while a
+listing stays published, so a default that passed at publication can fail later, and
+acceptance-time revalidation is the safeguard, refusing with the minimum as for any
+other stale bound. A reserved option needs no runway: its term end is its one delivery
 instant and the deadline bounds it from the other side. The three quantities have
 three owners — `approval_window` and `period` are settlement parameters,
 `delivery_deadline_seconds` is the lifecycle term the pool feeds — and the check is
