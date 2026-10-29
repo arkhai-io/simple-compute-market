@@ -40,8 +40,9 @@ under `e2e-tests/.github/workflows/` that GitHub never runs.
   access mode to expect — from a typed settings section an environment owner renders
   into an ignored profile file, registers the pool, host, and GPU-less capacity
   declaration itself, runs the canonical compute deal through to an active lease,
-  proves the buyer's SSH access, expires the lease, and proves the VM is gone and
-  access has ended.
+  proves the buyer's SSH access with the negotiated key and the refusal of an
+  unrelated one, expires the lease, and proves the VM is gone from the host's VM list
+  and access has ended. A failed run truncates its lease so the guest is torn down.
 - The canonical deal's shared stages split at their mock gates, so the real lane
   subclasses every stage it can and the mock lanes' stage lists name their mock-only
   stages explicitly. The mock gates move off the shared driver protocol onto one only
@@ -68,8 +69,8 @@ None.
   real-provisioning lane; a real-provisioning VM scenario and its target
   description.
 - `physical-provisioning`: hardware virtualization is required by host preparation
-  and VM creation; passthrough boot configuration follows the audit; host
-  preparation's default image.
+  and VM creation; passthrough boot configuration follows GPU presence and binding
+  follows the audit; host preparation's default image.
 
 ## Non-Goals
 
@@ -126,8 +127,8 @@ None.
   proves → `docs/development/TESTING.md` and `openspec/specs/test-compatibility/spec.md`.
 - Shared stages split at mock gates; mock gates are a separate driver part →
   `openspec/specs/test-compatibility/spec.md`.
-- Hardware virtualization required; passthrough boot configuration follows the
-  audit; scratch default → `openspec/specs/physical-provisioning/spec.md`, with the
+- Hardware virtualization required; passthrough boot configuration follows GPU
+  presence and binding follows the audit; scratch default → `openspec/specs/physical-provisioning/spec.md`, with the
   operator procedure in `docs/development/VALIDATION_RUNBOOK.md`.
 - Goal 1 gap "no end-to-end lane provisions for real" closes →
   `docs/development/ROADMAP.md`.

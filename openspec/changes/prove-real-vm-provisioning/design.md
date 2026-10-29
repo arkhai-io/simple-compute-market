@@ -72,8 +72,9 @@ whose raw calls predate signed admin principals.
 ## Goals and non-goals
 
 Goals: a scenario that proves, against a real KVM host, that a GPU-less VM deal is
-provisioned by the real Ansible path, reachable by its buyer with the delivered
-access and only with it, and removed with its access ended when the lease expires;
+provisioned by the real Ansible path, reachable by its buyer with the delivered access
+and the negotiated key while an unrelated public key is refused, and removed with its
+access ended when the lease expires;
 host preparation that fails closed on a host that cannot run KVM and leaves a
 GPU-less host's boot configuration alone.
 
@@ -125,7 +126,8 @@ D6), so the one deal takes everything the host sells and the shape checks (D7)
 compare the guest against it. Rendering hardware totals would ask for a guest holding
 all of the host's memory and disk.
 
-The scenario validates the section with a typed model before any stage runs: a
+The scenario validates the section with a typed model before any stage runs and
+before anything is written to the stack, fixture setup included (10 F5): a
 missing or misspelled field fails with a message naming it rather than falling back
 to a default, an unknown `version` is refused rather than interpreted, and
 `access.mode` is an enum whose version 1 admits only `direct`. The model's fields are
@@ -156,6 +158,18 @@ differs (`HostUpdate.connection`), not only its pool reconciled, so a stack surv
 an earlier run never sends the create to a stale address; and the registered host's
 public connection is checked against the target before any deal stage runs.
 
+The VM scenarios' module-autouse `_ensure_provisioning_host_registered` registers a
+stub `kvm1` host for the mock lanes. The real module overrides it with a fixture of
+the same name that registers nothing, so the only host the real lane writes is the
+target's (10 F5). Its setup fixtures depend on the validated target (D1) and the
+VM-execution check (D4a), so a run without its profile, with a malformed target, or
+against a mocked service writes nothing to the stack.
+
+The registrations follow the VM scenario convention: they are left in place, and the
+next run's registration reconciles them (10 F6). Pools are disabled, never deleted,
+hosts are disabled, never deleted, and the site has no operation that retracts a
+declaration; idempotency here is that a rerun reconciles, not that a run removes.
+
 ### D3. The scenario's credentials are the local profile's
 
 The scenario signs as the principals of the `local` profile and reaches services on
@@ -169,11 +183,11 @@ profile: convergence and the lease watchdog are held for the module, and each
 transition the lane asserts is triggered by a stage. Where a mock lane releases a job
 gate and drains, the real lane polls `get_job` until the job is terminal, bounded by
 a named timeout sized for a real create (cloud image fetch, guest install, the
-cloud-init reboot), then advances. It asserts what mocks cannot prove: the service is
-not mocked, the create and teardown jobs ran and succeeded, the buyer's access
-works, the VM no longer exists on the host once its capacity is released, and access
-has ended. Intermediate states the mock lanes prove under their gates are left to
-them.
+cloud-init reboot), then advances. It asserts what mocks cannot prove: the service's
+VM execution is not mocked, the create and teardown jobs ran and succeeded, the
+buyer's access works, the VM no longer exists on the host once its capacity is
+released, and access has ended. Intermediate states the mock lanes prove under their
+gates are left to them.
 
 **Finding the jobs.** The fulfillment path surfaces no executor job id, so the real
 lane correlates through the fulfillment's `capacity_reservation_id`, which the status
@@ -182,13 +196,37 @@ lane correlates through the fulfillment's `capacity_reservation_id`, which the s
 
 - The create-job poll lists the reservation's jobs and requires exactly one, on the
   target host; it polls that job to terminal, requires `succeeded`, and records its
-  id, which 09c then also checks the lease's `create_job_id` equals.
+  id, which 09c then also checks the lease's `create_job_id` equals, and the guest's
+  `vm_name` from its result.
 - The teardown-job poll, once teardown is dispatched, lists the reservation's jobs
   and requires exactly one besides the create job, on the target host, and polls it
   the same way.
 - No match fails naming the reservation and the fulfillment's state; several
   matches fail listing them; a failed job fails with its error and its
   `get_job_logs` output; a timeout fails with the job's last status and its logs.
+
+**Observing the guest's absence (10 F2).** A succeeded teardown job reports what the
+playbook did, and a refused connection is as consistent with a running guest whose
+forward or key was removed; neither shows the guest gone. Once the teardown job has
+succeeded, the lane submits a host-scoped `list_vms` job on the target host through
+the VM operator client, polls it within the same bound, and requires a succeeded job
+with a well-formed list in which the recorded `vm_name` is absent. A failed list job
+or a missing list fails the check. The refused delivered access stays a separate
+assertion: it proves access ended, not that the guest is gone.
+
+**When the run fails (10 F6).** A failure after the create leaves a guest on a real
+host, and every later stage, 10a and 11b among them, skips on its missing
+prerequisite. A finalizer in the real module, when the run dispatched a fulfillment
+and its own teardown did not complete, truncates this deal's lease through the site
+and advances the held workers, so the provisioning service tears the guest down
+through its own lease lifecycle; the test layer reimplements no teardown. It then
+looks for the teardown job and the guest's absence as above, and where it cannot
+confirm removal — no lease because the fulfillment never reached `active`, a failed or
+timed-out teardown, the guest still listed — it fails the run naming the fulfillment,
+reservation, create and teardown job ids, guest name, and host, for an operator to
+recover by hand. Only then are the module's worker holds released. The real module
+never uses `release_reserved_resources`: `admin_release_reservations` is fleet-wide,
+and would return the host's capacity to the market while its guest still runs.
 
 Where the existing operator interface proves insufficient for a check the lane
 needs, the provisioning service may gain an operation for it; the job list is the
@@ -209,27 +247,42 @@ create release-and-drain plus the shared advance to `active`; 10a a teardown-gat
 arm plus the shared expiry; 11b a teardown release-and-drain plus the shared
 completion and release. 08c, whose assertions are about the mock rule, becomes
 mock-only. The real lane inserts its own create-job and teardown-job polls (D4) where
-the mock lanes release. `Stage00e_ProvisioningMockMode` stays mock-only and the real
-lane adds its own not-mocked check.
+the mock lanes release. `Stage00e_ProvisioningMockMode` stays mock-only.
+
+The real lane's own first check reads `execution.executors` and requires the entry for
+offering mode `vm` with `mocked=false`; an absent or mocked entry fails naming the
+reported executors, before any registration or deal mutation (10 F3). It cannot invert
+00e: `execution.mocked` is true only when every composed executor is the mock, so a
+service with a real bare-metal executor and a mocked VM one reports `false`. A
+per-mode entry suffices because the VM bundle composes one executor for every VM
+action (`build_vm_adapter_bundle`), so create, list, and teardown are mocked or real
+together.
 
 08b and 11a stay shared. Neither calls a gate, and the states they assert —
 `dispatching` after settlement, `tearing_down` after the dispatching cycle — hold
 because convergence is held for the module and only a stage's explicit advance
-observes a provider's outcome; a real job finishing moves neither. 08b's prerequisite
-becomes `_evaluate_settle_passed` instead of the mock-only `_provision_job_evaluated`,
-and its message says the fulfillment is dispatched and not yet converged. In the
-mock lanes a failure at 08c then no longer skips 08b; the gate stays asserted by the
-mock-only stages around it.
+observes a provider's outcome; a real job finishing moves neither. 08b's message
+says the fulfillment is dispatched and not yet converged.
+
+08b submits settlement, so it must still skip when the preflight before it fails
+(10 F1). Its prerequisite becomes a readiness field, `_settle_preflight_passed`,
+written by the stage immediately before it in every lane, in place of the mock-only
+`_provision_job_evaluated`: in the mock lanes 08c writes it once its assertions pass,
+which keeps today's failure path; in the real lane a real-only preflight after 08a
+writes it once the settlement preview's chosen host (`_evaluate_settle_host_id`) is
+the target's `host_id`, so the deal cannot settle onto another registered host. Each
+lane has one producer of the field and 08b consumes it, as the stage unit tests
+require.
 
 The resulting orders:
 
 - **Mock lanes:** 07 escrow → create-gate arm → 07b → 08a → 08c → 08b → create
   release-and-drain → 09a advance to `active` → 09b → 09c → teardown-gate arm → 10a
   expiry → 10b → 11a → teardown release-and-drain → 11b completion and release.
-- **Real lane:** the same shared stages, with its not-mocked check in place of 00e, a
-  create-job poll between 08b and 09a, the SSH access stages (D7) after 09c, a
-  teardown-job poll between 11a and 11b, and the VM-gone and access-ended checks
-  after 11b.
+- **Real lane:** the same shared stages, with its VM-execution check in place of 00e,
+  its settlement preflight between 08a and 08b, a create-job poll between 08b and
+  09a, the SSH access stages (D7) after 09c, a teardown-job poll between 11a and 11b,
+  and the VM-gone (`list_vms`) and access-ended checks after 11b.
 
 The gate methods (`create_rule_id`, `teardown_rule_id`, `arm_*`, `release_*`,
 `evaluate_create_job`) move from `ComputeDealDriver` to a `MockGates` part that only
@@ -265,6 +318,13 @@ mock lanes keep their GPU shapes. Convention: `test_listing_shapes.py`
   `MemTotal` is within a named tolerance of the negotiated `ram_gb` in GiB; the root
   disk is at least the negotiated `disk_gb`; and a second, unrelated key is refused. The tolerance
   starts strict and is loosened only on evidence.
+- **What the refused key proves (10 F4).** That the delivered account's
+  `authorized_keys` admits the negotiated key and not an arbitrary one — not that
+  the negotiated key is the only way in. The scratch guest also enables password
+  authentication and root login and carries root and tenant passwords, which
+  `BatchMode=yes` never tries; this scenario neither exercises nor claims anything
+  about them. Making guest access key-only is a product change to what delivery
+  promises, not part of proving the current path.
 - **Keys.** The scenario generates an ed25519 key pair per run, owner-only, with the
   `cryptography` package, and negotiates its public half.
 - **Host key.** Trust on first use per run: `StrictHostKeyChecking=accept-new`

@@ -35,6 +35,12 @@ at the gate, and its gate-free part stays shared.
 - **THEN** it does so in a mock-only stage, through its driver's mock-gate part, between
   the shared stages it surrounds
 
+#### Scenario: The preflight before settlement fails
+
+- **WHEN** the lane's last stage before settlement — the mock rule's evaluation in a
+  mock lane, the check of the previewed host in a real lane — fails
+- **THEN** the shared settlement stage skips and submits nothing
+
 #### Scenario: A real lane runs the canonical deal
 
 - **WHEN** a lane delivers through a real host
@@ -58,12 +64,14 @@ at the gate, and its gate-free part stays shared.
 
 A VM scenario MUST exist that runs the canonical compute deal against a provisioning
 service outside its mock profile and a real KVM host, and proves what the mock profile
-cannot: that the service is not mocked; that the create and teardown jobs ran and
-succeeded; that the buyer, holding only the key it negotiated, reaches the VM with the
-delivered access as the delivered user and finds the negotiated vCPU count, memory
-within a stated tolerance, and at least the negotiated disk; that another key is
-refused; and that once the lease expires and its capacity is released the VM no longer
-exists on the host and the delivered access no longer connects.
+cannot: that the service's VM execution is not mocked; that the create and teardown
+jobs ran and succeeded; that the buyer, with the key it negotiated, reaches the VM with
+the delivered access as the delivered user and finds the negotiated vCPU count, memory
+within a stated tolerance, and at least the negotiated disk; that an unrelated public
+key is refused for the delivered user; and that once the lease expires and its
+capacity is released the host's VM list no longer names the guest and the delivered
+access no longer connects. It makes no claim about the guest's other configured
+credentials.
 
 The scenario MUST register the pool, executor host, and capacity declaration it deals
 on from its target description, and MUST be able to deal on a shape that declares no
@@ -71,7 +79,13 @@ GPUs. It MUST keep every worker hold and explicit advance that exists outside th
 profile, and MUST wait for a real job, found through its fulfillment's capacity
 reservation, by reading its state, within a stated bound, where a mock lane would
 release a gate. It MUST register the host with the connection its target describes,
-replacing the connection of a host an earlier run left behind. It MUST generate the buyer's key for the run and
+replacing the connection of a host an earlier run left behind, and MUST write nothing
+to the stack before its target is validated and its VM execution is found real. It
+MUST NOT submit settlement unless the settlement preview chose the target host. When
+it fails after a fulfillment is dispatched and before its own teardown completes, it
+MUST truncate that deal's lease so the provisioning service tears the guest down, and
+MUST fail naming the fulfillment, reservation, jobs, guest, and host where removal is
+not confirmed; it MUST NOT release reservations beyond its own. It MUST generate the buyer's key for the run and
 MUST trust the guest's host key on first use for the run only, failing if a later
 connection in the run presents another. It belongs to no default lane and MUST skip,
 naming the profile it needs, when no target description is present.
@@ -83,28 +97,44 @@ naming the profile it needs, when no target description is present.
   buyer's connection with the delivered access shows the delivered user, the negotiated
   vCPU count, memory within tolerance, and at least the negotiated disk
 
-#### Scenario: Only the negotiated key is admitted
+#### Scenario: An unrelated key is refused
 
-- **WHEN** the scenario connects to the delivered VM with a key it did not negotiate
+- **WHEN** the scenario connects to the delivered VM as the delivered user with a public
+  key it did not negotiate
 - **THEN** the connection is refused
 
 #### Scenario: Teardown removes the VM and its access
 
 - **WHEN** the lease is expired and the watchdog and convergence cycles are advanced
   until its capacity is released
-- **THEN** the teardown job has succeeded, the VM no longer exists on the host, and the
-  delivered access fails to connect within the stated bound
+- **THEN** the teardown job has succeeded, a VM list job on the host succeeds without
+  naming the guest the create job reported, and the delivered access fails to connect
+  within the stated bound
 
-#### Scenario: The service is mocked
+#### Scenario: The run fails with a guest on the host
 
-- **WHEN** the provisioning service answers from its mock profile
-- **THEN** the scenario fails at its first stage rather than reporting mock delivery as
-  real
+- **WHEN** a stage fails after the fulfillment is dispatched and before the scenario's
+  own teardown completes
+- **THEN** the scenario truncates that deal's lease so the provisioning service tears
+  the guest down, and fails naming the fulfillment, reservation, jobs, guest, and host
+  where it cannot confirm the guest's removal
+
+#### Scenario: The settlement preview chooses another host
+
+- **WHEN** the settlement preview chooses a host other than the target's
+- **THEN** the scenario does not submit settlement
+
+#### Scenario: The service's VM execution is mocked
+
+- **WHEN** the provisioning service reports no VM executor, or reports it mocked
+- **THEN** the scenario fails at its first check, before any registration or deal
+  mutation, rather than reporting mock delivery as real
 
 #### Scenario: No target is present
 
 - **WHEN** the run does not select the target profile, or its file is absent
-- **THEN** the scenario skips with a message naming the profile and file it needs
+- **THEN** the scenario skips with a message naming the profile and file it needs,
+  having written nothing to the stack
 
 ### Requirement: A real-provisioning target is a typed, versioned settings section
 
