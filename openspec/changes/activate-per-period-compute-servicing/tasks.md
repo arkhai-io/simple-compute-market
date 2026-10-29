@@ -1,10 +1,11 @@
 # Tasks — activate deployment-qualified per-period servicing
 
-Pending implementation plan. The sole external contract capability gate is the
-hosted deployment of the payments revision adding per-part authorities and hold
-extensions, with support for every offered stop term. Non-charged partialPeriod
-terms wait for their revision; a supported charged/charged subset need not. No
-additional payment capability is requested. Product implementation remains in its owning changes.
+Pending implementation plan. Hosted deployment must support per-part authorities,
+hold extensions and every required stop entry/term. Negotiated charged/charged
+terms do not waive on-demand's required seller PT0S/returned entry. Spot immediate
+restitution also waits on unscheduled several-stop-entries-per-account/part support;
+until then its emergency exit uses seller notice. This change gates, but does not
+schedule, that payments dependency. Product implementation stays with its owners.
 
 ## 1. Internal readiness and hosted revision gate
 
@@ -33,17 +34,22 @@ additional payment capability is requested. Product implementation remains in it
       terms with their own partialPeriod and no rounding, chosen dispute-stop entry,
       period-end/part-stop earning and {for} payout anchoring, activation-before-start,
       setup once end at activation and full-undelivered/zero-delivered self-correction.
-      exceptional_end is payment-adapter returned stops plus per-part reversals,
+      SCM exceptional_end maps to stop {part} under explicit buyer-checked seller
+      PT0S/returned entries and reverse {part, amount} under existing authority,
+      without any payments exceptional-end kind/field or implicit role permission,
       never a dispute filing; no mechanical mediation rulings remain. buyer_end
       is human triage with payer notice/treatment; the exact Agreement is carried
       in the case and verified against the mandate deal hash.
       Never add a storefront end-refund correction. A required product decision
       returns to its owning change. Kit tests use the kit-owned clock-injected authority engine directly, while HTTP
       doubles wrap it with controls and mediation; no kit depends on tooling.
-      Requalify payee stop without entitlement (returned), payee waiver of payer
-      notice, payer early release of held money and payee reverse/refund under the
-      foundation contract. These are counterparty-beneficial actions, not new
-      self-interested entitlements.
+      Verify on-demand seller has only the immediate entry and non-preemption is
+      remedied by buyer case/held money/bond, not enforced by the mandate. Gate spot's
+      several stop entries per account/part on the unscheduled payments dependency:
+      before support immediate stop is unavailable and emergency waits out notice.
+      No payee waiver of payer notice or payer early release. Cooperative end_delivery
+      uses buyer receipt-plus-notice treatment only where a mandate entry authorizes
+      the storefront's dispute-free action; otherwise the buyer half must stop.
 
 ## 2. Reproducible qualification and target preparation
 
@@ -72,7 +78,7 @@ additional payment capability is requested. Product implementation remains in it
 - [ ] 3.1 Run both-domain live complete deals and the hosted payment/dispute matrix
       in design D4: activation then start, priced payer stop plus hint, authority
       partialPeriod billing, setup once, seller notice surviving storefront
-      absence, exhaustion/read-before-timer-end, payment-adapter exceptional_end,
+      absence, exhaustion/read-before-timer-end, explicit-entry seller stop/reverse,
       receipt-timed cooperative stop during outage, human-triaged buyer_end, case extend/lift
       and partial reverse after stop. Use supported test controls for uncertainty/
       restart; annotate races/outages qualified only in the double. Every required

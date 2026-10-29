@@ -8,6 +8,12 @@ Lane absence/crash arrows mean pause/resume; durable restart is integration evid
 Buyer client, end service (physical P / authority-work F), site, payment authority
 and dispute authority are separate lifelines. Numbered arrows give scenario order;
 self-arrows are local transitions. A diagram is design, not evidence of a run.
+`exceptional_end` labels persisted SCM intent only; payments receives authorized
+per-part stop/reverse, never an exceptional-end field. Restitution examples require
+explicit buyer-checked seller PT0S/returned entries. Spot's immediate entry remains
+gated on unscheduled multi-entry payments support; until then emergency waits out
+seller notice. Cooperative end_delivery uses buyer treatment only where authorized;
+otherwise the buyer half must stop payments, with no seller notice waiver.
 
 | # | Diagram | Guarantee |
 |---|---|---|

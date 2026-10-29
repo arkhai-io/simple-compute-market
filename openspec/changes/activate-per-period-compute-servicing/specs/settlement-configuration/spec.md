@@ -26,17 +26,24 @@ Activation MUST requalify foundation/spot's terms and payment-adapter contracts,
 #### Scenario: A seller corrects an exceptional end
 
 - **WHEN** an unentitled end is corrected through the payment adapter
-- **THEN** hosted records show unconditional returned stops, rate reversals since at, once unserved-share reversals and any full bond award, without an exceptional-end dispute case
+- **THEN** hosted records show stop per part under buyer-checked seller PT0S/returned entries and reverse per part/amount under existing authority for rate earnings since at, once unserved shares and any full bond award, with no exceptional-end payments kind/field or dispute case
 
-#### Scenario: Counterparty-beneficial actions are available
+#### Scenario: Restitution requires mandate authorization
 
-- **WHEN** hosted qualification exercises foundation's party-action contract
-- **THEN** payee stop without entitlement returns the partial period, payee may waive payer notice, payer may release held money early and payee may reverse held money, without replacing dispute-authority entries
+- **WHEN** hosted qualification exercises on-demand seller restitution
+- **THEN** every part has the explicit seller PT0S/returned stop entry visible to buyer checking, with no implicit role-based permission, payee waiver of payer notice or payer early release
+- **AND** the seller holds only that stop entry; non-preemption is remedied by buyer case over held money and the bond, not enforced by the mandate
+
+#### Scenario: Spot multi-entry support is unavailable
+
+- **WHEN** payments cannot represent several stop entries per account per part
+- **THEN** spot's immediate seller stop remains an unscheduled gated dependency and emergency exit waits out seller notice; activation must not claim immediate restitution
 
 #### Scenario: Cooperative stop is journaled while payments is down
 
 - **WHEN** end_delivery reaches the storefront during payment outage
-- **THEN** the signed receipt time governs delivery end and the retained seller command later stops billing at receipt plus payer notice with payer partialPeriod, subject to seller notice waiver
+- **THEN** signed receipt time governs delivery end and, only where an entry authorizes the storefront's dispute-free action, it journals a cooperative stop with buyer receipt-plus-notice treatment and payer partialPeriod, without notice waiver
+- **AND** absent that authorization, stopping payments remains the buyer half's job
 
 ### Requirement: Rate activation preserves existing commitment servicing
 

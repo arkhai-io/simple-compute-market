@@ -53,10 +53,16 @@ and converge 4. Neither implementation waits for the other's archive. The campai
 index must record this in Notes, not retain a whole-change archive cycle. Double
 runnable sections gate scenario execution only. Reverify contracts at each section
 handoff. Hosted enablement belongs to activate-per-period-compute-servicing.
+SCM corrections require explicit buyer-checked seller PT0S/returned stop entries
+and existing reverse authority, not role-beneficial payments permissions. Spot's
+several stop entries per account/part remain an unscheduled gated payments
+dependency: until supported its emergency exit waits out seller notice.
 
 This change owns no payment arithmetic, mandate codec, authority policy, buyer-half
 implementation, site renewal or hosted deployment. Started-period settlement is
-expressed by payment terms, not corrected locally. Each party has one priced notice. Servicing latency and reserve-ahead sizing are seller
+expressed by payment terms, not corrected locally. Notice belongs to the selected
+explicit stop entry; no waiver or payer early release is assumed. Servicing latency
+and reserve-ahead sizing are seller
 risk recommendations, not buyer billing promises or codec gates.
 
 ## Impact

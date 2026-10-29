@@ -18,22 +18,31 @@ primitive and changes no accepted deal's authority or terms.
 
 ## Decisions
 
-### D1. One external contract capability gate
+### D1. Hosted contract and gated multi-entry support
 
 The gate is the hosted deployment of the payments revision with per-part
 authorities and hold extensions, including support for every offered stop term.
-Per-stopper partialPeriod is required when offering returned/prorated terms, not
-an unconditional delay to a charged/charged product. Verify the vendored contract: payee-only start after lease activation on rate parts, stop authority
+Every required returned/prorated entry needs partialPeriod support, including
+on-demand seller restitution; negotiated charged/charged terms do not remove that
+gate. Spot's interim notice-only configuration cannot claim immediate restitution. Verify the vendored contract: payee-only start after lease activation on rate parts, stop authority
 notices hosted as pending stops, per-stopper started-period treatment, afterStop
-dispute-window holds, partial reverse before and after stop, and per-case extend/lift. The on-demand mandate has no payee stop entitlement;
-unentitled seller exits use payment-adapter exceptional_end: unconditional payee
-returned stops, rate reversals since at, once unserved-share reversals and any full
-bond award. No exceptional_end dispute filing or mechanical ruling is involved.
-Requalify foundation's counterparty-beneficial payment actions: payee stop without
-an entitlement always returns the partial period, payee may waive payer notice,
-payer may release held money early, and payee may reverse/refund held money.
-Dispute authority actions still use its own entries; these party actions do not
-grant a unilateral self-interested exit.
+dispute-window holds, partial reverse before and after stop, and per-case extend/lift.
+Payments knows accounts and mandate authorizations, not buyer/seller roles or
+implicit beneficial actions. SCM derives a buyer-visible stop entry on every part,
+`{account: seller, notice: PT0S, partialPeriod: returned}`. SCM exceptional_end is
+implemented as `stop {part}` under that entry plus `reverse {part, amount}` under
+existing reverse authority: rate earnings since at, once unserved shares and any
+full bond award. No exceptional-end kind/field exists in payments; no dispute filing
+or mechanical ruling is involved. No payee notice waiver or payer early release
+is assumed. Dispute authority actions still require its own entries.
+
+On-demand gives the seller only the immediate entry. Its non-preemption promise
+is not mandate-enforced; buyer case over held money and the bond supplies the remedy.
+Spot requires both seller notice and immediate entries, hence several stop entries
+per account per part: an unscheduled, gated payments dependency. Until supported,
+spot immediate stop is unavailable and emergency exit waits out its notice unless
+the owner decides otherwise. Activation cannot label that fallback immediate
+restitution or enable the gated capability without published and hosted evidence.
 
 A deployment must demonstrate those semantics, not merely advertise a version.
 The vendored snapshot schema/proof and vectors are checked through the existing
@@ -43,10 +52,13 @@ off. Do not silently adapt away authority, notice, partialPeriod or hold require
 SCM started_period/last_boundary/stop map to charged/returned/prorated respectively.
 Unsupported offered terms fail closed. Until the partialPeriod revision is
 vendored, spot offers only charged on both sides, never a corrective storefront
-refund. That supported charged/charged subset may activate if all other gates pass
+refund. That supported negotiated charged/charged subset may activate if all required
+entries and other gates pass
 and the buyer explicitly accepts started_period for payee and charged term ends.
-Entitled seller-stop treatment is negotiated; exceptional_end always returns the
-partial period independently of that entitlement. Client
+Negotiated spot seller-stop treatment remains separate from SCM's explicit
+PT0S/returned restitution entry; the latter cannot be assumed while multi-entry
+support is gated. On-demand's required returned entry is not waived by interim
+charged negotiated terms. Client
 presets prefer payer charged/payee returned, and default buyers refuse payee or
 term-end treatment other than last_boundary. Each absolute term end has its own
 partialPeriod, without term rounding; exhaustion is period-boundary aligned.
@@ -121,20 +133,23 @@ are published-contract qualification, not live evidence. Hosted runs exercise th
 same payment-boundary transitions with real authority responses: activation then start,
 payer stop with priced notice and hint (delivery continues until effective stop),
 per-stopper partial-period billing, seller notice surviving storefront absence, exhaustion,
-payment-adapter exceptional_end, human-triaged buyer_end with signed acknowledgement, case
+explicit-entry seller stop/reverse correction, human-triaged buyer_end with signed acknowledgement, case
 extension/lift and partial reverse after stop, including restart and lost-response
 recovery where the target's supported test controls allow it.
 
 On end_delivery the storefront signs receipt time (no buyer at) and journals its
-cooperative stop at receipt plus payer notice with payer partialPeriod, including
-during payment outage; seller policy may waive notice. Verify this separately from
+cooperative stop with buyer treatment at receipt plus payer notice and payer
+partialPeriod only where an entry authorizes that dispute-free storefront action,
+including journaling through outage. No notice waiver; otherwise the buyer half
+must stop payments. Verify this separately from
 the buyer's stop-first path and human buyer_end case. At funding expiry verify the
 payment read: renewal replaces the timer, exhaustion is an authority end, only
 unreachable/unverifiable evidence permits a bare-timer end and later correction.
 
 For nonzero notice, end_delivery is explicit end-now or the unreachable-payment
 authority fallback, not the normal immediate follow-up to payer stop. Operator
-VM interrupt uses entitled payee notice when granted, exceptional_end otherwise.
+VM interrupt uses seller notice for spot while multi-entry support is gated;
+on-demand uses its explicit PT0S/returned entry and existing reverse authority.
 Setup-part and earlier-evidence checks must observe authority-calculated remedies,
 not local end-correction arithmetic. Runnable doubles qualify lanes; kit tests keep
 the kit-owned clock-injected authority engine directly and no tooling dependency;
@@ -160,8 +175,10 @@ live scenario is a blocker, not a caveat that closes the change.
 
 Internal gates are the foundation, spot mechanics/publication, servicing and
 discovery changes. Scenario tooling comes from the payment/mediation double.
-The sole external capability gate is the hosted revision in D1. Activation must
-not wait on the superseded settle or publish/preempt change directories.
+External gates are the hosted revision and, for spot immediate seller restitution,
+the unscheduled multi-entry support in D1. Until supported, spot emergency uses
+seller notice; do not claim immediate stop. Activation must not wait on the
+superseded settle or publish/preempt change directories.
 Implementation tasks distinguish the actual prepared target and readiness from
 these task-required environments; no ignored worktree-only setup is sufficient.
 

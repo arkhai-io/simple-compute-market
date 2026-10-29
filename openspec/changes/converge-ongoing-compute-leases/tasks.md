@@ -9,7 +9,9 @@ before code starts; no superseded Goal 8 change is an implementation gate.
 - [ ] 1.1 Confirm `agreed-evidence-and-early-termination` supplies lifecycle commands,
       read/list/watch, per-record cursors, evidence stores, end-service admission,
       buyer stop/end_delivery/buyer_end and mediation request mapping (buyer_end only).
-      Verify payment-adapter exceptional_end, receipt-timed cooperative stops,
+      Verify SCM exceptional_end maps only to explicit authorized stop/reverse
+      messages (no payments exceptional-end kind/field), receipt-timed cooperative
+      stops only where authorized, without payer notice waiver or early release,
       record_end's none/intent/pending_classification correction slot and atomic
       resolve_correction(end_revision, intent|discharged, evidence_ref). Foundation
       owns these neutral interfaces and start journal before unify consumes them. Record exact
@@ -17,7 +19,11 @@ before code starts; no superseded Goal 8 change is an implementation gate.
 - [ ] 1.2 Confirm spot supplies verified rate authorize/start_billing adapter operations,
       per-stopper and term-end partialPeriod mapping without term rounding, afterStop holds
       and rotation re-anchoring. Foundation supplies the neutral adapter protocol
-      and source-classified seller self-correction. Verify shared semantic effect keys
+      and source-classified seller self-correction. Verify buyer-checked explicit
+      seller PT0S/returned entries on every part, existing reverse authority and no
+      implicit role-beneficial authorization. Gate spot's several stop entries per
+      account/part on the unscheduled payments dependency; until supported its
+      emergency uses seller notice, never an immediate stop. Verify shared semantic effect keys
       and a version/vector-bound payment-adapter correction capability for prior
       reversals, bond awards and overlapping runner/storefront revisions; no
       exceptional_end dispute mapping or mechanical mediation ruling remains. Unify tasks 1–3 supply the path,
@@ -89,7 +95,10 @@ before code starts; no superseded Goal 8 change is an implementation gate.
 - [ ] 3.2 Consume foundation's classified payment self-correction journal for
       unentitled site/operator/failed delivery, with unchanged never-future timing.
       Consume its receipt-timed cooperative stop for end_delivery (payer notice and
-      partialPeriod), journaled even during outage. Add timer classification via
+      partialPeriod), journaled even during outage only when an entry authorizes
+      that dispute-free storefront action; otherwise the buyer half stops. No notice
+      waiver. Map SCM correction to seller-entry stop and existing-authority reverse,
+      not an exceptional-end payments message. Add timer classification via
       foundation's atomic resolution interface. Resolve unknown original effects
       before revision work; consume the payment adapter's qualified overlapping/
       revision correction capability and shared semantic keys. Exercise adoption of
@@ -129,8 +138,10 @@ before code starts; no superseded Goal 8 change is an implementation gate.
 
 - [ ] 4.1 Extend e2e-tests/tests/e2e/roles/scenarios and shared stages with D's full
       rate matrix (0–11), executing spot's prepared entry points and recording maximum
-      term plus on-demand refused entitled notice/payment-adapter exceptional_end
-      explicitly. Rows 7/9 record interim non-default buyer acceptance, separate
+      term plus on-demand explicit seller PT0S/returned stop and existing-authority
+      reversals, buyer checking and case/bond remedy (not mandate-enforced
+      non-preemption). Qualify spot's notice-only emergency fallback while its
+      multi-entry payments dependency is gated. Rows 7/9 record interim non-default buyer acceptance, separate
       default-policy refusal and returned-capable acceptance once vendored. Drop once-only
       activation duplication (unify owns it). Gate on readiness and coherent UTC/skew
       checks; consume typed due-work barriers with per-authority watermarks, pending

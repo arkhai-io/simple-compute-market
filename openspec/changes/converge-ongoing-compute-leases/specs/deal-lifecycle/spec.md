@@ -102,7 +102,7 @@ Rate servicing MUST keep verified funded-through as a replaceable timer, never s
 #### Scenario: An outage concealed a top-up
 
 - **WHEN** a bare timer ended service at T during an outage and verified recovery shows billing continued past T
-- **THEN** foundation resolve_correction atomically journals exceptional_end(T) through the payment adapter and financial work stays unresolved until verified effects complete
+- **THEN** foundation resolve_correction atomically journals SCM exceptional_end(T); the adapter maps it to authorized stop/reverse messages only, and financial work stays unresolved until verified effects complete
 
 #### Scenario: Classification cannot be verified
 
@@ -143,10 +143,21 @@ Recovery MUST use a seller export, original authority-bound credentials and a du
 - **THEN** watch discovers the payment effects, matching semantic identities are adopted and no effect is duplicated under a different caller key
 - **AND** different correction bases use qualified overlapping/revision reconciliation or remain repair required, never a speculative extra reversal or duplicate exceptional-end case
 
-#### Scenario: The option grants no payee entitlement
+#### Scenario: On-demand restitution uses explicit authority
 
 - **WHEN** an operator requests emergency recovery for an on-demand deal
-- **THEN** the payment adapter uses unconditional payee returned stops and exceptional-end reversals, not entitled notice or a dispute filing
+- **THEN** the adapter sends stop per part under the buyer-checked seller PT0S/returned entry and reverse per part/amount under existing reverse authority, with no exceptional-end payments field or implicit role-based permission
+- **AND** the mandate does not enforce non-preemption; a buyer case over held money and the bond supplies the remedy
+
+#### Scenario: Spot immediate stop support is gated
+
+- **WHEN** payments cannot represent several stop entries per account per part
+- **THEN** spot's seller immediate-stop dependency stays gated and emergency exit waits out seller notice, rather than inventing an immediate entitlement
+
+#### Scenario: Cooperative stop lacks authorization
+
+- **WHEN** end_delivery reaches the storefront but no entry authorizes its dispute-free stop using the buyer's treatment
+- **THEN** delivery ends at signed receipt time but the buyer half must stop payments; the storefront neither waives payer notice nor substitutes the seller restitution entry
 
 ### Requirement: Rotation evidence has a durable servicing consumer
 

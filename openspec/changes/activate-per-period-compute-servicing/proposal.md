@@ -7,7 +7,9 @@ and hold extensions**, including afterStop holds and partial reversals after sto
 and support for the stop terms actually offered. Unsupported started-period terms fail closed; the
 payment authority computes them, never a storefront corrective refund. A supported
 charged/charged subset may ship before partialPeriod is vendored only with explicit
-buyer-policy opt-in for payee and charged term ends; returned/prorated offers await their contract support.
+buyer-policy opt-in for payee and charged term ends, and only if every required
+entry is supported. On-demand's explicit seller PT0S/returned restitution entry
+still requires returned support; spot immediate restitution stays gated separately.
 A published schema alone is not deployment evidence. No
 minimum spend or backdated payee stop is requested or awaited.
 
@@ -48,9 +50,12 @@ is supplied by `add-arkhai-payments-lane-double`; unified delivery is a transiti
 servicing dependency. No dependency remains on the superseded settle or publish/
 preempt changes.
 
-The only additional external capability gate is the hosted deployment of that
-payments revision. Schema/vector verification, credentials, target readiness and
-live execution are the means to verify/use the gate, not new payment primitives.
+The external capability gates include hosted deployment of that payments revision
+and, for spot immediate seller restitution, support for several stop entries per
+account per part. The latter is an unscheduled gated payments dependency; until it
+lands spot emergency exit waits out seller notice and immediate stop is unavailable. Schema/vector verification, credentials, target readiness and
+live execution verify/use those gates; this change does not schedule the missing
+multi-entry payments work.
 This change does not redesign product terms, servicing, adjudication or site policy.
 Any contract divergence requiring a product decision blocks activation and returns
 to the owning change rather than weakening the declared guarantees.

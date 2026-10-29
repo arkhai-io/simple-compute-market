@@ -166,15 +166,28 @@ evidence_ref)` for this transition and for earlier evidence after an end, with n
 synthetic second final request or second journal. Physical work does not await
 classification.
 
-The seller's `exceptional_end(at)` is payment-adapter self-correction, not a dispute
-or self-filing. The adapter stops every rate part now with returned partialPeriod,
-reverses rate earnings since at and each once part's unserved share by its own term,
-and awards any bond in full. Setup ends at activation: all returned if undelivered,
-none if delivered. Foundation owns never-future timing, including pre-start intents
-journaled immediately and executed at Agreement start. Keep prior triggers and
-stable effect identities. An entitled operator withdrawal uses its notice;
-unentitled emergency uses this correction, with no invented entitlement. A buyer
-may still contest the seller's account through an independently filed case.
+The seller's `exceptional_end(at)` is an SCM correction intent, not a payment
+operation, dispute or self-filing. Payments knows accounts, money movement and
+mandate lifecycle authorizations, not buyer/seller roles or implicit beneficial
+actions. SCM mandate derivation adds an explicit stop entry on every part,
+`{account: seller, notice: PT0S, partialPeriod: returned}`, visible to the buyer's
+mandate check. The adapter sends `stop {part}` under that entry and
+`reverse {part, amount}` under the existing reverse authority: rate earnings since
+at, each once part's unserved share by its own term, and any full bond award.
+No exceptional-end kind or field is sent to payments. Setup ends at activation:
+all returned if undelivered, none if delivered. Foundation owns never-future timing,
+including pre-start intents journaled immediately and executed at Agreement start.
+Keep prior triggers and stable effect identities.
+
+On-demand grants the seller only this immediate entry, not an entitled-notice
+entry. The mandate cannot enforce the seller's promise not to preempt; a buyer case
+over held money and the bond is the remedy. A spot seller needs both its negotiated
+notice entry and the immediate entry. Several stop entries per account per part
+are an unscheduled, gated payments dependency, not an existing primitive or an
+implementation commitment here. Until supported, spot has no immediate seller stop;
+emergency exit waits out its notice unless the owner decides otherwise. Do not
+synthesize a second entitlement or advertise immediate restitution for that spot
+configuration. Keep unresolved correction work visible.
 
 Earlier evidence creates a revision-bound payment correction, not a new exceptional-end
 case or an append-as-amendment assumption. Resolve unknown original effects before
@@ -189,7 +202,7 @@ gate based on SCM adapter qualification, not a new payment-service primitive,
 local ruling or dispute-adapter capability. Convergence qualifies its
 composition; foundation/spot own the contract and hosted implementation.
 
-Partial-period pricing, one notice per party and term-end treatment remain
+Partial-period pricing, explicit stop-entry notices and term-end treatment remain
 foundation/spot-owned payment terms; normal stops need no local corrective reverse.
 The explicit exceptional-end reversals above are self-correction, not a second
 pricing implementation in end service. Holds and case extensions remain authoritative
@@ -207,11 +220,14 @@ and the unreachable-payment-authority path with buyer_end(at) evidence. Keep exa
 site reports and signed acknowledgements through foundation ingestion/read.
 
 On `end_delivery` the storefront signs its own receipt time (the request has no
-`at`), ends delivery there, and journals its cooperative payment stop for receipt
-plus the payer's notice using the payer's partialPeriod, even if payments is down.
-It may waive notice by seller policy. This consumes foundation's payment-adapter
-command/journal; a buyer that sends only the peer message no longer keeps paying
-indefinitely. Buyer stop-first remains preferred; buyer_end is a human-triaged case,
+`at`) and ends delivery there. Its cooperative stop uses the buyer's own treatment
+at receipt plus payer notice with payer partialPeriod, never a notice waiver or
+the seller's immediate restitution entry. Journal/retry that dispute-free path,
+including through payment outage, only where a mandate entry authorizes the
+storefront to issue it. Otherwise stopping payments remains the buyer half's job;
+a peer message alone is not a payment stop. Consume foundation's payment-adapter
+command/journal without inferring authority from favourable effects. Buyer
+stop-first remains preferred; buyer_end is a human-triaged case,
 not a mechanical ruling. The case carries the exact Agreement verified against the
 mandate's deal hash, not a required payment attachment.
 
@@ -264,8 +280,10 @@ for returned/prorated support.
 ## Scenarios and evidence
 
 This change is the single owner of the rate-servicing lane matrix. Execute spot's
-prepared entry points, including maximum term and on-demand entitled-notice refusal
-followed by payment-adapter exceptional_end; spot records preparation, not duplicate qualification.
+prepared entry points, including maximum term and on-demand seller restitution
+through its explicit entry; spot records preparation, not duplicate qualification.
+Qualify the spot multi-entry dependency separately: before support, an emergency
+uses the notice entry and cannot claim immediate stop.
 Unify owns once-only activation expiry and the path seam; its consumer-dependent
 rate qualification uses this matrix after the section handoff in D1.
 
@@ -281,7 +299,7 @@ rate qualification uses this matrix after the section handoff in D1.
 | 7 | Spot notice then earlier payer stop | authority hosts pending stop during absence; earliest wins, authority partial-period terms |
 | 8 | Activated and started but never disclosed | disclosure fails, self-correction at deal start, buyer-case backstop |
 | 9 | Maximum term | absolute authority end with its own partialPeriod, including late start and a mid-period end; physical recovery, no exceptional_end |
-| 10 | On-demand seller emergency | entitled notice refused, unconditional payee returned stop and exceptional_end reversals accepted through payment adapter; no dispute filing |
+| 10 | On-demand seller emergency | only explicit seller PT0S/returned entry is present and buyer-checked; stop/reverse messages have no exceptional-end field; buyer case/bond remedies preemption, not mandate prevention |
 | 11 | Identity rotation overlap | old receipt verified during overlap, current snapshot re-anchors the running rate deal before retirement, exact old bytes retained; once-only dependencies drain; revoked/stale anchors and livemode changes refused |
 
 The nine diagram pairs illustrate cases 0–8; cases 9–11 extend the qualification
@@ -342,8 +360,12 @@ The collector must reconcile the prerequisite-owned contracts before implementat
   add pending classification and atomic later correction resolution (D5); remove the
   executable funding-timer requirement/scenarios owned here. Expose the qualified
   payment-correction descriptor/capability contract consumed by D5/D6, not a dispute
-  netting feature. Apply receipt-time cooperative stops and Agreement-in-case policy.
-- Spot: implement authorize/start_billing and exceptional_end in the payment adapter;
+  netting feature. Apply receipt-time cooperative stops only through explicit
+  authorization, never notice waiver; otherwise the buyer half stops payments.
+  Keep exceptional_end solely SCM vocabulary and cases Agreement-bound.
+- Spot: implement authorize/start_billing and SCM correction-to-stop/reverse mapping;
+  require explicit seller restitution entries and buyer checks, gate several stop
+  entries per account/part, and retain notice-only emergency fallback until supported;
   produce re-anchoring evidence consumed here. Keep only kit/vector qualification,
   not duplicate rate-lane time/evidence-class requirements.
 - Unified delivery: name foundation protocol, spot interpretation and convergence
@@ -353,7 +375,9 @@ The collector must reconcile the prerequisite-owned contracts before implementat
 
 Recommendations supplied for 03 F1 / 04 F6/F12 are the read-only seller export,
 immutable caller-retained envelope, shared semantic correction-effect identities
-and version/vector-bound overlapping/revision reconciliation. These add no payment
-primitive. Missing safe correction evidence blocks that work with repair required.
+and version/vector-bound overlapping/revision reconciliation. Recovery identities/reconciliation add no payment primitive. Spot's distinct
+multi-stop-entry dependency remains unscheduled and gated; until it lands,
+emergency stop waits out seller notice. Missing safe correction evidence blocks
+that work with repair required.
 Keep this change in design for a coordinated review of the changed payment path
 and recovery/journal interfaces; the parent chooses advancement and edits the index.

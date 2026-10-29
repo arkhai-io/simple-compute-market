@@ -7,7 +7,7 @@ VM and bare-metal lanes MUST execute the rate-servicing matrix against the runna
 #### Scenario: The full matrix runs
 
 - **WHEN** either compute lane qualifies rate servicing
-- **THEN** it covers baseline, payment-outage buyer end, absent-storefront withdrawal, interrupted effects, stop/disclosure races, rate activation expiry, exhaustion/hidden top-up, notice/earlier payer stop, start without disclosure, absolute maximum term with its own treatment, on-demand refused entitled notice followed by payment-adapter exceptional_end, and identity-rotation overlap/re-anchoring
+- **THEN** it covers baseline, payment-outage buyer end, absent-storefront withdrawal, interrupted effects, stop/disclosure races, rate activation expiry, exhaustion/hidden top-up, notice/earlier payer stop, start without disclosure, absolute maximum term with its own treatment, on-demand explicit seller-entry stop/reverse with buyer case/bond remedy, spot notice-only emergency while multi-entry support is gated, and identity-rotation overlap/re-anchoring
 - **AND** it records both completion facts and authority/evidence references for every row, including read-before-end on last-poll top-up and outage-only bare-timer correction
 
 #### Scenario: Interim spot needs explicit buyer policy
