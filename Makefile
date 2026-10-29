@@ -989,7 +989,6 @@ check-change: ## Run a change's closing checks — comment hygiene, agent skills
 	@python3 scripts/check_change.py "$(CHANGE)"
 
 change-watch: ## Follow the progress of an OpenSpec change's steps as they run, moving to each new step's progress file as it starts; Ctrl+C stops (CHANGE=<change>)
-	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
 	@python3 scripts/run_change_step.py watch "$(CHANGE)"
 
 change-clone: ## Create a change's own clone beside the owner's workspace, or finish one left incomplete, and start its bootstrap in the background; run in the workspace (CHANGE=<change> [BRANCH=feat/<change>] [FROM=dev])

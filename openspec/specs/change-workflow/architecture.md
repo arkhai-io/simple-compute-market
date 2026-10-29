@@ -182,7 +182,9 @@ steps.
 The wrapper writes each run's event stream to a transcript under `reviews/` and a
 progress file of one line per tool call, so whether a long step is stuck can be
 read rather than waited out; `make change-watch` follows the progress files as each
-step starts, into the archive when closeout moves the change there.
+step starts, into the archive when closeout moves the change there. Run from the
+workspace, it follows a change worked in its own clone in that clone, since the
+workspace receives the clone's records only when archive cleanup copies them.
 
 ## Routing is code, with the model as backstop
 
