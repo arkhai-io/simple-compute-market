@@ -16,13 +16,13 @@ Arkhai payments' first product is spot, interruptible deals paid from prepaid cr
 ## Dependencies
 
 - `agreed-evidence-and-early-termination` (design): the lifecycle terms, the lifecycle kits and their hosted adapter, end service, and the evidence store this change implements against.
-- Payments service `rate-parts`: rate parts with per-part periods and reservation ahead, a stop lifecycle, and the snapshot fields below.
+- The payments service's rate-part contract: rate parts with per-part periods and reservation ahead, a stop lifecycle, and the snapshot fields below.
 - `route-settlement-by-mechanism` (archived 2026-10-09): the continuation lives in the VM payment seller stage.
 - Snapshot verification. SCM verifies only the receipt embedded in a transaction snapshot, not the snapshot's own proof (`settle-through-arkhai-payments` design, R9). Funded-through times and stop events are snapshot state, so they are read only through the snapshot-proof verification `agreed-evidence-and-early-termination` adds ahead of `watch`.
 
 ## Payments contract this builds on
 
-The payments service's `rate-parts` contract settles the seller-side needs below:
+The payments service's rate-part contract settles the seller-side needs below:
 - `fundedThrough` per transaction in the signed snapshot: the earliest current reservation across rate parts. The VM stage's teardown deadline is `min(fundedThrough, stop effective time)`.
 - `reserveAhead` is a required per-part Duration term. The VM option params declare it as at least the clause's `exposure_seconds` (polling, watchdog and teardown); the option builder and buyer validation enforce that, and the SDK supplies a default.
 - The stop carries an effective time, a cause (payer, payee, authority or terms) and settled amounts. No stop is backdated; a stop is future-dated only by the sender's notice period, applied by the service. A stop ends the part it names; the payments service's whole-transaction stop is a filed defect this change depends on.

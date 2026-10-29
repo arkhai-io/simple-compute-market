@@ -4,14 +4,14 @@ Planned 2026-10-27 from the design advanced by the eighth design round
 (`reviews/15-design.triage.md`, `reviews/16-design-external.triage.md`). Depends on no open
 change for design or planning. Implementation depends on two external contracts (design.md,
 "Dependencies on the hosted payments service"): the payments service's next contract revision
-(`hosted-dispute-lifecycle`: hold extensions, per-part start/stop and authorities with notice
+(hold extensions, per-part start/stop and authorities with notice
 durations, per-part `end` and `afterStop` holds, one re-vendor) gates section 8, and the `arkhai.mediation.v1`
 contract gates live use of section 12's adapter but not its implementation against the test
 double.
 
 Sections follow the design's implementation cadence. Sections 1–7 are round 1 (foundation,
-wire and buyer side); section 8 joins round 1, since that contract revision is available at `arkhai-payments`
-`7712a5e0` to vendor into `kit/arkhai-payments/schema/`; sections
+wire and buyer side); section 8 joins round 1, since that contract revision is published and ready to vendor
+into `kit/arkhai-payments/schema/`; sections
 9–15 are round 2 (seller servicing and domain wiring); section 16 is the closeout.
 
 Wire and persistence breaks, all forward-only (design.md, D5 and "Rollout"): options carrying
@@ -271,8 +271,7 @@ lifecycle deal.
 
 ## 8. Hosted mandates, buyer mandate check and hosted option builders
 
-Gated: starts once the payments contract revision is vendored, from `arkhai-payments`
-`7712a5e0892e155e3e181a330ef39b08d63e8bae` (schema and vectors together), and
+Gated: starts once the payments contract revision is vendored (schema and vectors together) and
 identified in `kit/arkhai-payments/schema/SOURCE.md`; until then every derived hosted mandate
 fails the vendored schema. Delivers per-part authority and hold derivation from the terms, the
 buyer's mandate check, hosted option builders that emit lifecycle terms, and the API-credit

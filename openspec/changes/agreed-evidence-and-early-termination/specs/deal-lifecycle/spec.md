@@ -302,13 +302,46 @@ A party's request against itself MUST be an ordinary `dispute`, with no kind of 
 
 ### Requirement: A seller's exceptional end is an intent
 
-The seller half's exceptional-end command MUST file `exceptional_end(now)` with the agreement's dispute authority through its dispute adapter, carrying no per-part amounts computed by the storefront.
+The seller half's exceptional-end command MUST file `exceptional_end(at)` with the agreement's dispute authority through its dispute adapter, with `at` no later than now and no per-part amounts computed by the storefront.
 
 #### Scenario: An administrator files an exceptional end
 
 - **WHEN** an administrator files an exceptional end on a hosted `once` deal
 - **THEN** the dispute adapter maps `exceptional_end(now)` into its interface's request, and the filing carries no per-part amounts
 
+### Requirement: The seller files ends its terms do not entitle
+
+When end service learns of a delivery end that no final request it issued and no entitlement covers, such as a site withdrawing a resource or a delivery that fails or never starts, the seller half MUST file `exceptional_end(at)` on a deal whose Agreement names a dispute authority, with `at` the instant service ended, or the deal's start when it never began.
+
+#### Scenario: A withdrawal is reported late
+
+- **WHEN** a site withdraws a hosted VM at 14:00 and the storefront learns of it at 16:01
+- **THEN** the seller half files `exceptional_end(14:00)`, and the storefront sends no payment event of its own for the end
+
+#### Scenario: Delivery never starts
+
+- **WHEN** provisioning fails for a committed hosted deal before `start`
+- **THEN** the seller half files `exceptional_end` at the deal's start, and the buyer need not file
+
+#### Scenario: An entitled end is not filed
+
+- **WHEN** a buyer's stop, the maximum term, exhaustion or a ruling ends a deal
+- **THEN** the seller half files nothing
+
+#### Scenario: The storefront crashes after recording the end
+
+- **WHEN** the storefront records a late-discovered end and crashes before filing
+- **THEN** on restart the journal replays the filing under its original idempotency key
+
+
+### Requirement: Self-filed ends survive a crash
+
+The seller half MUST journal a self-filed `exceptional_end` with the end it reports, so that a crash between them replays the filing under its original idempotency key.
+
+#### Scenario: Replay after restart
+
+- **WHEN** the storefront restarts with a journaled, unacknowledged self-filed end
+- **THEN** it files under the same idempotency key and the authority records one case
 ### Requirement: Lifecycle commands have defined outcomes
 
 `submit` MUST take a command `{negotiation_id, kind, operation_key, at, payload}`, never an event. Its outcome MUST be `accepted` with the counterpart's records, `rejected` with its reason, `pending`, or `unknown`; a `dispute`'s outcome is the dispute authority's. An `unknown` outcome MUST be resolved by `read`. Each part event's idempotency key MUST derive from the operation key; a retry with the same key and different content MUST be rejected locally.
