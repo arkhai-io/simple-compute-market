@@ -581,7 +581,7 @@ Status after coordination: ready for implementation with section-level contract 
 On 2026-10-29, all nine Goal 8 changes pass both
 `bunx @fission-ai/openspec@1.14.0 validate <change> --strict` and
 `openspec validate <change> --strict`, without warnings. MODIFIED-target informational
-notices for unify/convergence are covered by foundation-first and renewable-before-
+notices for unify/convergence are covered by foundation-first and activation-change-before-
 unify archive order. `make check-change CHANGE=<change>` passes all checks except
 the expressly accepted future `openspec/specs/deal-lifecycle/architecture.md`
 citation in foundation, spot and convergence. The same strict/check-change runs

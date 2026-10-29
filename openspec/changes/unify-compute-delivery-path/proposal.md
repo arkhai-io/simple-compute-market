@@ -34,9 +34,9 @@ This is the delivery portion of Goal 8 in
   and the site enforces from its pool.
 - Every compute lease, whatever its payment structure or mechanism, is activated by
   reservation identity, adopting the current end (a verified earlier truncation
-  included). There is no periodic lease renewal here; the site owns the
-  awaiting-activation deadline under `renewable-compute-lease-deadlines`, as
-  seller-side risk management rather than a buyer guarantee.
+  included). The transition is `activate-compute-leases-at-the-site`'s; there is no periodic lease
+  renewal here, and the awaiting-activation deadline is
+  `renewable-compute-lease-deadlines`', which lands after this change.
 - The path calls `authorize_delivery(deal, phase)` before `commit`, `dispatch`,
   `start` and `disclose`, with servicing-owned decisions and delivery-held
   references. The prepaid hook takes no financial action, and every deal still
@@ -89,9 +89,6 @@ This is the delivery portion of Goal 8 in
   reservation, skew and refusal contract unchanged; credential-capable routes re-run
   without retained bodies. Unify archives before `redesign-authenticated-requests`,
   which generalizes the same declaration in a superset delta.
-- `resource-pool-management`: the post-qualification compute composition default,
-  superseding the renewable change's off-by-default introduction, which archives
-  first.
 - `physical-provisioning`: verified bare-metal lifecycle adoption and read-only
   legacy progress, with malformed-evidence and source-revalidation refusal retained.
 - `vm-storefront-fulfillment`: composes the family path; preserves delivery priority
@@ -99,8 +96,8 @@ This is the delivery portion of Goal 8 in
   commit while lease ends stay with end service.
 
 `fulfillment` keeps provider-neutral execution and no commercial delivery state.
-`physical-provisioning`'s activation primitive is specified by
-`renewable-compute-lease-deadlines`. The lifecycle final-request and exceptional-end
+The site's activation primitive is specified by
+`activate-compute-leases-at-the-site`. The lifecycle final-request and exceptional-end
 filing requirements belong to `agreed-evidence-and-early-termination`.
 
 ## Non-Goals
@@ -120,20 +117,20 @@ filing requirements belong to `agreed-evidence-and-early-termination`.
 ## Dependencies and Acceptance Boundary
 
 - Depends on `agreed-evidence-and-early-termination` — its seller half, end-service
-  admission, journaled dispute-filing interface, neutral delivery protocols and
-  pre-start command policy — and on `renewable-compute-lease-deadlines` — its
-  activation half and signed site-end report — as whole changes. Buyer termination
-  is part of the former. The renewable change transitively waits on
-  `inject-site-pool-authority`.
+  admission, journaled dispute-filing interface, neutral delivery protocols,
+  pre-start command policy and signed site-end report — and on
+  `activate-compute-leases-at-the-site` — the activation phase, transition and typed contract —
+  as whole changes. Buyer termination is part of the former. Neither waits on
+  `inject-site-pool-authority`; the deadline change that does lands after this one.
 - Sections 1–2 of the plan need only the negotiation-keyed reservation-idempotency
   slice of `capacity-reservation-lifecycle-hardening`. The HTTP lane drives in tasks
   3.3 and 4.3 need `add-arkhai-payments-lane-double`; library integration uses the
   shared clock-injected payments engine in kit-owned fixtures, which the HTTP double
   wraps, with no dependency on runnable tooling.
-- The renewable change ships its compute composition safeguard off. This change owns
-  final enablement: compatible storefronts deploy first, then the site with the
-  safeguard off, then every caller is qualified, then the default changes for new
-  commits. Verified legacy null-phase views stay compatible; protected leases
+- `renewable-compute-lease-deadlines` ships its compute composition safeguard off and
+  owns its enablement, after this change has wired every caller: compatible
+  storefronts deploy first, then the site with the safeguard off, then every caller is
+  qualified, then the default changes for new commits. Verified legacy null-phase views stay compatible; protected leases
   without working activation are repair-required.
 - This change lands before `converge-ongoing-compute-leases`, which depends on it and
   owns the rate hook and the whole rate qualification matrix. The prepaid path and

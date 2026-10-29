@@ -178,8 +178,9 @@ change, and an interim charged-subset declaration is recorded as current state.
 
 ## Dependency and execution gates
 
-Internal gates are the foundation, spot mechanics/publication, servicing and
-discovery changes. Scenario tooling comes from the payment/mediation double.
+Internal gates are the foundation, spot mechanics/publication, servicing,
+discovery and the delivery-deadline change, whose site enforcement of the published
+term is part of what this change qualifies. Scenario tooling comes from the payment/mediation double.
 The external payments capability gate is the hosted revision in D1; no several-
 stop-entries dependency remains. Mediation self-penalty and human buyer_end mapping
 are internal prerequisites, not extra payments primitives. Activation must not wait on the

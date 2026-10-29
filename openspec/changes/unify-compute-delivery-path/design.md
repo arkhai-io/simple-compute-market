@@ -286,18 +286,15 @@ claimed first refuses activation and enters D5. A truncation before activation, 
 between a lost acknowledgement and its retry, survives unchanged. Activation never
 changes the reservation's end.
 
-**Staged enablement.** The renewable change ships the compute composition's
-safeguard switch off while provider support and default validation remain. This
-change owns enablement, after every storefront and recovery caller is deployed:
-compatible storefronts first, then the updated site with the switch off, then
-qualification of every caller in explicitly enabled owned lanes, then the
-repository's compute-composition default changes for new commits. The renewable
-change introduces the setting in
-`provisioning/compute/service/src/compute_provisioning_service/container.py` and its
-configuration owner (paths to be reverified); the plan's section 4 owns that
-post-qualification edit. Hosted operators enable only after their own
-caller-readiness gate, and public records state readiness, never private target
-identifiers. Existing null-phase leases stay null.
+**Staged enablement.** The activation transition this change wires is
+`activate-compute-leases-at-the-site`'s and carries no deadline. The deadline, its pool policy and
+the compute composition's `activation_deadlines_enabled` switch are
+`renewable-compute-lease-deadlines`', which lands after this change and owns its own
+enablement once every caller this change wires is deployed: compatible storefronts
+first, then the updated site with the switch off, then qualification of every caller
+in explicitly enabled owned lanes, then the repository's compute-composition default.
+This change leaves every caller activating through the typed contract so that
+enablement needs no caller edit. Existing null-phase leases stay null.
 
 For a verified legacy null-phase leased view, activation is a no-op; an absent
 activation route is tolerated only with that verified legacy view or capability. An
@@ -351,9 +348,10 @@ ordering, not another cache.
   evidence envelope, the revision-bearing admission, `record_end` and
   `begin_billing`, and the cause and timing semantics. Servicing alone journals
   authorization decisions; delivery retains references.
-- `renewable-compute-lease-deadlines`, whole: activation, conditional expiry and the
-  report extension; it transitively requires `inject-site-pool-authority`. This
-  change owns the final deployed enablement of the safeguard.
+- `activate-compute-leases-at-the-site`, whole: the activation phase, transition and typed
+  contract every caller here activates through. `renewable-compute-lease-deadlines`
+  — the deadline, its pool policy and the switch — lands after this change and owns
+  the safeguard's enablement; it is not a dependency of this change.
 - `capacity-reservation-lifecycle-hardening`: only its negotiation-keyed reserve
   replay slice, which gates sections 1–2 of the plan.
 - `add-arkhai-payments-lane-double`: HTTP lane qualification in the plan's tasks
@@ -381,8 +379,8 @@ enum and the evidence-gated no-financial-action for current Alkahest;
 `kit-owned-listing-and-fulfillment-lifecycles` places its calling convergence in
 `domains/compute/delivery` or above and keeps obligation discovery there.
 
-Archive order: foundation, then renewable, then unify for the site, event and
-default overlap; unify before `redesign-authenticated-requests` for identity. Every
+Archive order: foundation and the activation change, then unify, then renewable for
+the deadline and its default; unify before `redesign-authenticated-requests` for identity. Every
 later MODIFIED block retains all clauses and scenarios its predecessors keep, and
 implementation re-diffs against the then-current permanent requirement, not an
 earlier design snapshot. No whole-change dependency cycle exists in this order.
@@ -439,7 +437,6 @@ Planned destinations, not current-state documentation:
 | D1 additive adoption, credential retirement, downgrade refusal | `vm-storefront-fulfillment` and `physical-provisioning` specs and architectures; compute-delivery spec and architecture |
 | D2 windows and future starts; D3 ports; D4 checkpoints and recovery | compute-delivery spec and architecture; fulfillment architecture (boundary only) |
 | D5 caller classification | compute-delivery spec and architecture; reference to deal-lifecycle policy |
-| D6 post-qualification default (archived after renewable's off-by-default introduction) | `resource-pool-management` spec; deployment configuration |
 | D6 activation and enablement; D7 access and replay | compute-delivery spec and architecture; `vm-storefront-fulfillment`; `docs/development/DEPLOYMENT_AND_CONFIG.md`; `ARCHITECTURE.md` authority and results sections |
 | D7 retry declaration and retained proof/refusal contract | `marketplace-identity` spec; `ARCHITECTURE.md` authentication boundary |
 | Capability index | `openspec/specs/README.md` adds compute-delivery |

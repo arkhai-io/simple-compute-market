@@ -1,4 +1,4 @@
-# Design — compute lease activation deadlines
+# Design — compute lease delivery deadlines
 
 ## Context
 
@@ -9,15 +9,18 @@ compute's lease lifecycle begins release and performs provider work outside the
 ledger transaction. API credits commits quota holds with no lease end.
 
 A storefront that dies before delivery can therefore hold compute capacity until
-the maximum term. An activation deadline closes that seller-internal gap. After
-activation, storefront liveness remains the seller's risk: an operating resource
-is not reclaimed simply because storefront bookkeeping has stopped.
+the maximum term. A delivery deadline on the unactivated lease closes that gap, and
+the same number is the buyer's term. After activation, storefront liveness remains
+the seller's risk: an operating resource is not reclaimed simply because storefront
+bookkeeping has stopped. The activation phase and transition the deadline is written
+against are `activate-compute-leases-at-the-site`'s, which lands first and reads no pool policy; this
+change writes the deadline at commit and expires the lease that never activates.
 
 The lifecycle frame is `agreed-evidence-and-early-termination`: commitment makes
 the agreement binding; end service realizes the earliest final request, and money
 moves only at the payment and dispute authorities. A site's signed statement is
 kept evidence, not a new authority record. These authority boundaries and the
-activation-only scope are settled.
+deadline-only scope are settled.
 
 ## Goals / Non-Goals
 
@@ -25,18 +28,19 @@ activation-only scope are settled.
 and expiry race safely; keep payment classifications out of the site; leave old
 leases and API-credit quota holds unchanged.
 
-**Non-goals:** renewal of active leases, lease extension, payment
-or refund operations, buyer-facing provisioning promises, and delivery caller wiring.
+**Non-goals:** the activation phase, transition and typed contract (`activate-compute-leases-at-the-site`), renewal of active leases, lease extension, payment
+or refund operations, and delivery caller wiring.
 This is a recommended cooperative seller implementation, not a protocol requirement
 that a buyer may assume an arbitrary seller obeys.
 
 ## Decisions
 
-### D1. A lease deadline beside the agreed end, with an activation phase
+### D1. The deadline written at commit
 
-Keep the original design's nullable `renew_by_utc` and `renewal_phase` fields.
-The names do not imply an active renewal operation: only activation ships here.
-`lease_end_utc` keeps meaning the agreed end and moves only through truncation.
+The nullable `renew_by_utc` and `renewal_phase` columns, the `active` phase and the
+activation transition are `activate-compute-leases-at-the-site`'s (its D1). This change writes
+`awaiting_activation` and the deadline into them at commit; activation, as that change
+defines it, replaces the deadline with the agreed end.
 
 - On first commit with a resolved delivery deadline, record `awaiting_activation` and
   `renew_by_utc = max(committed_at_utc, lease_start_utc) + delivery_deadline_seconds`,
@@ -65,30 +69,22 @@ The names do not imply an active renewal operation: only activation ships here.
   anchor it supplied, is evidence against it where the two disagree.
   This protects a forward reservation without expiring it before its admitted start;
   unify defers dispatch/activation/access until that start (no early lead time).
-- Activation is one conditional transition from `leased` and
-  `awaiting_activation` to `active`. It replaces the deadline, earlier or later,
-  with the reservation's current `lease_end_utc`. **Every deal activates to that
-  end**, including reserved, on-demand, spot and Alkahest. The request names the reservation, not a payment fact or target time.
-- Activation retried in `leased` / `active` returns the current lease unchanged.
-  Commit retried in either phase likewise leaves the original deadline and phase
-  unchanged. Activation from `releasing`, terminal, failed-release or operator-owned
-  states is refused without a write: it cannot resurrect a lease.
+- Commit retried in either phase leaves the original deadline and phase unchanged;
+  activation (`activate-compute-leases-at-the-site` D1) replaces the deadline, earlier or later,
+  with the reservation's current `lease_end_utc`.
 - Truncation caps a non-null deadline to the new end. The due instant is the earlier
   of the agreed end and a non-null deadline. After activation those instants coincide.
 - Admission always accounts against the agreed window. The earlier activation
   deadline does not free capacity for a future reservation before release succeeds.
-- Migration leaves both fields null on existing leases. A pool resolving no
-  delivery deadline records neither field; its leases continue to expire only at their end.
-  An activation call on such a lease returns it unchanged. This is not a billing
-  classification. **Recommendation:** a pool resolving a delivery deadline requires a
+- A pool resolving no delivery deadline records neither field; its leases continue
+  to expire only at their end, and activation leaves them as the activation change
+  says. This is not a billing classification. **Recommendation:** a pool resolving a delivery deadline requires a
   finite end at commit; unsupported open-ended use is refused rather than creating
   an unbounded activation.
 
-The phase is not a reservation state. `awaiting_activation` avoids reviving the
-retired `provisioning` state. Fulfillment's active instant remains the site fact
-recorded when the resource becomes usable; activation does not move that instant
-on retry. `unify-compute-delivery-path` orders activation with its delivery and
-access-disclosure gates for every caller and recovery path.
+`unify-compute-delivery-path` orders activation with its delivery and
+access-disclosure gates for every caller and recovery path, and wires every caller
+before this change's switch is enabled.
 
 ### D2. Expiry claims the deadline and phase it read
 
@@ -212,7 +208,7 @@ seller until the agreed end or a recovered end-service action. None is a buyer
 guarantee. Renewal must be justified by a separate operator's concrete needs before
 this trade-off is reintroduced.
 
-### D5. Lease-end intent evidence and lease inspection
+### D5. Lease-end intent evidence
 
 The foundation supplies the signed `lease_ended` record and durable outbox; this
 change adds `activation_deadline_lapsed`. The record carries the reservation/deal
@@ -223,9 +219,9 @@ not a fabricated instant of proven VM teardown. A term end that wins the due
 comparison keeps its ordinary cause. Retrying the event preserves its identity
 and signed content; the evidence store keeps the original bytes.
 
-The site and compute lease views expose `renew_by_utc`, `renewal_phase`
-and the existing active instant. No renewal-lapse policy is exposed because none
-is implemented. End service may consume the site's report as a local final request
+The site and compute lease views (`activate-compute-leases-at-the-site` D2) already expose
+`renew_by_utc`, `renewal_phase` and the active instant; this change adds nothing to
+them and exposes no renewal-lapse policy, because none is implemented. End service may consume the site's report as a local final request
 with actor, cause and source; the payment/dispute adapters still own all financial
 actions. This cause does not require an event before the seller files for failed
 delivery. Delivery admission must also honor an expiry claim that wins activation.
@@ -263,6 +259,10 @@ delivery. Delivery admission must also honor an expiry claim that wins activatio
   outside transactions; compare-and-set claims provide the race boundary.
 - Clock-only activation refusal — makes watchdog latency evict a resource whose
   expiry has not been claimed; claim order decides.
+- Shipping the activation transition in this change (its first form, split
+  2026-10-29) — the transition reads no pool and four changes need it before the
+  pool-authority port lands; it is `activate-compute-leases-at-the-site` and this change
+  depends on it.
 - Commercial flag on commit — the provider/pool delivery deadline is sufficient and leaves
   the site independent of billing shape.
 - Site-wide delivery deadline, reuse of hold TTL, or no deadline until billing starts —
@@ -272,18 +272,17 @@ delivery. Delivery admission must also honor an expiry claim that wins activatio
 
 ## Implementation cadence and gates
 
-One site-focused implementation round after `inject-site-pool-authority`: schema,
-delivery-deadline validation/provider declarations, activation, conditional expiry and typed
-views. Reservation acknowledgement-gap qualification consumes only
+One site-focused implementation round after `inject-site-pool-authority` and
+`activate-compute-leases-at-the-site`: delivery-deadline validation/provider declarations, the
+commit snapshot, conditional expiry and the lapse cause. Reservation acknowledgement-gap qualification consumes only
 `capacity-reservation-lifecycle-hardening`'s negotiation-keyed exact-request
 reservation-idempotency slice, not its whole implementation or archive; site-local
 activation work can proceed before that integration gate. Event integration waits for `agreed-evidence-and-early-termination`'s signed
-record/outbox. `unify-compute-delivery-path` then wires activation and supplies the
-cross-service delivery evidence. No dependency on a rate-part contract revision is introduced. Renewable ships `activation_deadlines_enabled`
-false. Unify owns enablement after compatible storefronts deploy first, the updated
-site deploys with protection off, and every commit/recovery caller is qualified
-in explicitly enabled owned lanes. Unify then changes the repository composition
-default; hosted operators independently confirm readiness. Public evidence records
+record/outbox. `unify-compute-delivery-path` lands before this change and has wired
+every caller through the activation change's contract, so this change owns its own
+enablement: it ships `activation_deadlines_enabled` false, qualifies every already
+wired commit and recovery caller in explicitly enabled owned lanes, then changes the
+repository composition default; hosted operators independently confirm readiness. Public evidence records
 readiness and public release versions, not hosted target identifiers.
 New storefronts treat verified null-phase legacy leases as already active/no-op;
 absence of an activation route is tolerated only with a verified legacy view.
@@ -336,13 +335,11 @@ the landed dependency interfaces. D4's policy choices remain explicitly deferred
 
 | Accepted decision | Destination |
 |---|---|
-| D1, D2 | `openspec/specs/site-capacity/spec.md` and `openspec/specs/site-capacity/architecture.md`; capacity reservation in `docs/development/ARCHITECTURE.md` |
+| D1, D2 deadline, claim and admission | `openspec/specs/site-capacity/spec.md` and `openspec/specs/site-capacity/architecture.md`; capacity reservation in `docs/development/ARCHITECTURE.md` |
 | D3 | `openspec/specs/resource-pool-management/spec.md`; pool policy configuration in `docs/development/DEPLOYMENT_AND_CONFIG.md` |
 | D5 watchdog/event | `openspec/specs/physical-provisioning/spec.md`; recovery workers in `docs/development/ARCHITECTURE.md` |
-| D5 typed activation/view | `openspec/specs/compute-provisioning-contract/spec.md` |
 | D4 deferred renewal | Remains in this change; not promoted as current behavior |
 
-Directory naming recommendation: retain `renewable-compute-lease-deadlines` as the
-stable campaign identifier while naming the active proposal activation-only. A
-rename would require edits to sibling changes and campaign documents without
-changing the acceptance boundary.
+Directory naming: `renewable-compute-lease-deadlines` stays the campaign identifier
+while the active proposal is the delivery deadline alone; a rename would touch every
+sibling without changing the acceptance boundary.

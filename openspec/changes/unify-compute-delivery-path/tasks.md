@@ -9,8 +9,9 @@ are later amended.
 - Before sections 1–3 execute: land `agreed-evidence-and-early-termination`'s seller
   half, final-request admission, joint end/filing journal and end-domain port;
   neutral delivery authorization/effect protocols and opaque evidence envelope;
-  land `renewable-compute-lease-deadlines`' activation half with its composition
-  safeguard off (transitively gated by `inject-site-pool-authority`).
+  land `activate-compute-leases-at-the-site`'s phase, transition and typed contract. The
+  deadline change (`renewable-compute-lease-deadlines`) lands after this one and is
+  not a gate.
   Sections 1–2 also require the negotiation-keyed exact-request reserve replay slice
   of `capacity-reservation-lifecycle-hardening`, not its whole implementation.
   Do not recreate missing dependency interfaces locally. Preserve the VM recovery/admission baseline from
@@ -228,34 +229,28 @@ pass. New persisted scenarios remain subject to the explicit approval gate above
       inspect selectors before seeding or teardown. Use the existing lane readiness
       check and stop on not-ready. No private service credentials or raw private logs
       enter the repository.
-- [ ] 4.2 Explicitly enable activation_deadlines_enabled in owned lane setup only,
-      leaving repository/operator defaults off. Drive a reserved deal in each domain through activation, then beyond the
-      delivery deadline but before Agreement end, observing the site's active
-      instant and unchanged end. Drive settlement delayed within and beyond the
+- [ ] 4.2 Drive a reserved deal in each domain through activation, observing the site's
+      active instant and unchanged end; supply the commitment instant and accepted
+      deadline with the site commit as deal facts, which the deadline change later
+      reads. Drive settlement delayed within and beyond the
       absolute window. Record exact deal/lease evidence and outcomes, not just health.
 - [ ] 4.3 Drive crash/restart at every adjacent delivery checkpoint and every
-      external intent/acknowledgement gap with deterministic controls. Drive a crash
-      before activation until the site's awaiting-activation expiry, recover and
-      observe physical release plus the journaled exceptional-end dispute filing. Drive
-      the site's refusal of a commit for an accepted delivery deadline the pool no longer
-      grants: the seller failure is recorded, no dispatch is issued, the reservation
-      already held is released through the no-dispatch path, and a crash between the
-      refusal and the release's acknowledgement recovers without a second reservation.
-      Keep authority-application results distinct from local command evidence.
+      external intent/acknowledgement gap with deterministic controls. Drive a site
+      commit refusal classified as seller failure before dispatch: the failure is recorded,
+      no dispatch is issued, the reservation already held is released through the
+      no-dispatch path, and a crash between the refusal and the release's
+      acknowledgement recovers without a second reservation (the deadline-caused refusal
+      and the awaiting-activation expiry are `renewable-compute-lease-deadlines`' drives,
+      consuming this classification). Keep authority-application results distinct from local command evidence.
 - 4.4 Rate qualification is not this change's: the activate/start/disclose race and
       the post-activation start refusal and never-disclosed recovery are rows 4 and 8
       of `converge-ongoing-compute-leases`' rate-servicing matrix, run there in both
       domains against the in-lane doubles once that change composes the rate hook.
       This change retains only its non-rate delivery qualification (4.2, 4.3, 4.6);
       live authority qualification remains with activation.
-- [ ] 4.5 After 4.2/4.3 qualify every commit/recovery caller, change the repository's
-      compute-composition activation_deadlines_enabled default introduced by renewable
-      in `provisioning/compute/service/src/compute_provisioning_service/container.py`
-      and its configuration owner (reverify relocated paths). Document storefront-first,
-      site-off rollout and hosted operators' independent caller-readiness gate in
-      `docs/development/DEPLOYMENT_AND_CONFIG.md`. Record public artifact versions/
-      readiness only, no hosted target identifiers. Off remains an explicit override
-      for new commits and never clears existing deadlines.
+- 4.5 Safeguard enablement is not this change's: `renewable-compute-lease-deadlines`
+      ships `activation_deadlines_enabled`, qualifies the callers this change wired in
+      enabled owned lanes, and changes the composition default.
 - [ ] 4.6 Run the relevant complete-deal markers in the ready lanes:
       `e2e_deal`, `e2e_deal_buyer_cli`, `e2e_bare_metal_mock_deal`,
       `e2e_bare_metal_payment_deal` and `e2e_credits_payment_deal` as configured;
@@ -305,15 +300,16 @@ implementation, including a comment/import repair. Follow
       Fulfillment, Fulfillment status and results, Release), plus
       `docs/development/DEPLOYMENT_AND_CONFIG.md` for staged safeguard enablement,
       verified legacy compatibility and downgrade refusal. Archive promotes the
-      VM, physical-provisioning, resource-pool-management and marketplace-identity deltas. Complete each row of the design-promotion record with its exact
+      VM, physical-provisioning and marketplace-identity deltas. Complete each row of the design-promotion record with its exact
       destination/heading; reference the owning lifecycle/site contracts without
       reintroducing their requirements.
 - [ ] 5.10 **Documentation citations:** run
       `make check-doc-citations CHANGE=unify-compute-delivery-path`, then the pinned
       `bunx @fission-ai/openspec@1.14.0 validate unify-compute-delivery-path --strict`
       and `make check-change CHANGE=unify-compute-delivery-path`; resolve all failures.
-- [ ] 5.11 **Archival:** archive after foundation and renewable, preserving their
-      physical-provisioning event/watchdog clauses. Archive unify before
+- [ ] 5.11 **Archival:** archive after the foundation and `activate-compute-leases-at-the-site`,
+      preserving the foundation's physical-provisioning event clauses; renewable archives
+      after this change. Archive unify before
       redesign-authenticated-requests; its later identity MODIFIED block must retain
       this declaration. If order reverses, re-diff unify as a superset first. Re-diff
       every MODIFIED block against then-current permanent specs, retaining all clauses

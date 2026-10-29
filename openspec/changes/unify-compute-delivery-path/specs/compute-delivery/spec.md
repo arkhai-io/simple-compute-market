@@ -39,7 +39,7 @@ Capacity MAY be committed at settlement before the Agreement start. Dispatch, ac
 - **WHEN** a 12:00 Agreement commits at 10:00
 - **THEN** it remains waiting-for-delivery until 12:00 without dispatch or early access
 - **AND** recovery repeats the same commit and wake time
-- **AND** the site's provisional deadline is anchored by the activation-deadline contract
+- **AND** the commitment instant and accepted delivery deadline it supplies with the site commit are the deal's, so a deadline the site later writes is anchored by them
 
 ### Requirement: Delivery authorization is a decision separate from billing effects
 
@@ -152,14 +152,14 @@ Before billing start and availability, every compute delivery MUST invoke reserv
 - **WHEN** activation succeeds, its acknowledgement is lost and end service then truncates
 - **THEN** retry adopts the current shorter end without extension or a replacement lease
 
-#### Scenario: A reserved lease survives allowance
+#### Scenario: An activated lease runs to its end
 
-- **WHEN** a reserved lease activates and its former provisional deadline passes before its current end
-- **THEN** it remains active to its recorded end without renewal
+- **WHEN** a reserved lease activates
+- **THEN** it remains active to its recorded end without renewal, whatever deadline preceded activation
 
-### Requirement: Safeguard enablement follows compatible callers
+### Requirement: Every caller activates through the typed contract
 
-This change MUST enable the compute composition's activation safeguard only after all delivery and recovery callers are deployed and qualified. A verified null-phase legacy leased view MUST use unchanged legacy behavior. Missing activation support MUST be tolerated only for that verified legacy case; non-null or unknown phase without working activation MUST be repair-required.
+Every delivery and recovery caller MUST activate through the site's typed activation contract, so that the activation safeguard `renewable-compute-lease-deadlines` later enables needs no caller edit. A verified null-phase legacy leased view MUST use unchanged legacy behavior. Missing activation support MUST be tolerated only for that verified legacy case; non-null or unknown phase without working activation MUST be repair-required.
 
 #### Scenario: Storefronts upgrade before the site
 

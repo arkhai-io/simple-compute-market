@@ -11,7 +11,7 @@ and `converge-ongoing-compute-leases` leave it and adds the spec deltas.
 
 To be verified when the change is designed.
 
-- `renewable-compute-lease-deadlines` gives every compute lease an activation deadline
+- `renewable-compute-lease-deadlines` gives every compute lease a delivery deadline, on the activation phase `activate-compute-leases-at-the-site` adds,
   at commit, recorded in `renew_by_utc` with phase `awaiting_activation`, replaced
   once at activation; it records renewal and the lapse policy as deferred options.
 - The rate servicing loop (`converge-ongoing-compute-leases`) runs physical work and
