@@ -1,20 +1,39 @@
 ## ADDED Requirements
 
-### Requirement: Rate servicing scenarios qualify both compute lanes
+### Requirement: One rate-servicing matrix qualifies both compute lanes
 
-VM and bare-metal lanes MUST exercise the nine convergence scenarios against the in-lane payment and mediation doubles, pausing loops and advancing explicit effects. Evidence MUST distinguish proposed-contract qualification, published-contract qualification and live evidence. Each scenario MUST observe physical progress, financial work and kept evidence independently; a double run MUST NOT be labelled live evidence.
+VM and bare-metal lanes MUST execute the rate-servicing matrix against the runnable payment and mediation doubles, including spot's prepared entry points. Each row MUST record physical progress, financial work and kept evidence separately. Reports MUST distinguish proposed-contract, published-contract and live provenance; no double run MUST be labelled live.
 
-#### Scenario: Convergence scenario matrix runs
+#### Scenario: The full matrix runs
 
-- **WHEN** rate servicing is qualified in either compute lane
-- **THEN** its report covers baseline, payment-outage buyer end, absent-storefront site withdrawal, filing/ruling crash replay, stop/disclosure races, activation expiry, exhaustion, authority-hosted notice and start-without-delivery, recording both completion facts and authority/evidence references
+- **WHEN** either compute lane qualifies rate servicing
+- **THEN** it covers baseline, payment-outage buyer end, absent-storefront withdrawal, interrupted effects, stop/disclosure races, rate activation expiry, exhaustion/hidden top-up, notice/earlier payer stop, start without disclosure, maximum term and on-demand refused payee stop followed by exceptional_end
+- **AND** it records both completion facts and authority/evidence references for every row
 
-#### Scenario: A stop outlives the storefront
+#### Scenario: A notice outlives servicing
 
-- **WHEN** the lane records a seller notice at the double and pauses the storefront beyond its effective time
-- **THEN** the double applies the stop without another seller call, and resumed end service adopts that authority record
+- **WHEN** the lane records seller notice and pauses the storefront loop past its effective time
+- **THEN** the double stops without another seller call and resumed watch adopts the resulting record
 
-#### Scenario: Late evidence follows an uncertain effect
+### Requirement: Lane interruption is not durable restart evidence
 
-- **WHEN** a filing or correction acknowledgement is lost and earlier site evidence is later received
-- **THEN** restart resolves the original operation, appends the new evidence under a stable identity and never applies a duplicate correction
+Lane scenarios MUST use pause/resume and uncertain-response controls for cross-service convergence. Durable restart MUST be proven at integration level by rebuilding the production application over the same database in both compute domains. Pause/resume MUST NOT be reported as process restart; bare-metal lanes MUST retain their no-service-restart boundary.
+
+#### Scenario: A filing response is lost
+
+- **WHEN** a lane loses a filing response and resumes servicing
+- **THEN** it proves same-operation cross-service resolution, not durability across process restart
+
+#### Scenario: Production application is rebuilt
+
+- **WHEN** integration rebuilds after a journaled final request or partially applied ruling
+- **THEN** the original operations/cursors and completion history recover without duplicate effects
+
+### Requirement: Rate lanes use coherent real time
+
+Cross-service rate scenarios MUST run the doubles in wall-clock mode with short fixture periods/deadlines and bounded readiness/event waits. Setup MUST check clock skew and wait budgets and fail on incoherence before scenarios. Double clock jumps MUST NOT outrun storefront/site clocks. Deterministic injected-clock expiry/race permutations MUST remain library-integration evidence, not a new lane clock API.
+
+#### Scenario: Funding and site deadlines are observed
+
+- **WHEN** the lane waits for authority funding expiry or a site activation deadline
+- **THEN** all peers use real UTC instants and event-bounded waits, without a future-dated filing caused by an isolated double clock jump

@@ -3,7 +3,11 @@
 The per-period compute product may be qualified against in-lane doubles before
 production can use its required payment semantics. Its external gate is the
 **hosted deployment of the payments contract revision adding per-part authorities
-and hold extensions**, including afterStop holds and partial reversals after stop.
+and hold extensions**, including afterStop holds and partial reversals after stop,
+and support for the stop terms actually offered. Unsupported started-period terms fail closed; the
+payment authority computes them, never a storefront corrective refund. A supported
+charged/charged subset may ship before partialPeriod is vendored if the selected
+dispute authority permits it; returned/prorated offers await their contract support.
 A published schema alone is not deployment evidence. No billing horizon, vouch,
 minimum spend or backdated payee stop is requested or awaited.
 
@@ -16,8 +20,9 @@ minimum spend or backdated payee stop is requested or awaited.
 - Enable the published-contract servicing declaration in both compute production
   compositions only after the deployment and consumer checks pass. Publication,
   acceptance and materialization remain fail-closed before this gate.
-- Run the full rate-product scenario matrix in both double-backed lanes and the
-  payment/dispute flows against the intended hosted test deployment with its
+- Re-run convergence's consolidated rate-product matrix (including prepared spot
+  entry points, distinct integration restart evidence and coherent real-time lanes)
+  in both double-backed lanes and run the payment/dispute flows against the intended hosted test deployment with its
   agreed dispute authority. Keep qualification and live evidence separate.
 - Record activation/rollback operations and update Goal 8 and the campaign index
   at closeout. No existing deal is silently reinterpreted or moved to a new authority.

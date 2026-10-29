@@ -2,8 +2,9 @@
 
 Pending implementation plan. The sole external contract capability gate is the
 hosted deployment of the payments revision adding per-part authorities and hold
-extensions. No horizon capability is requested. Product implementation remains
-in the dependent changes, not this activation change.
+extensions, with support for every offered stop term. Non-charged partialPeriod
+terms wait for their revision; a supported charged/charged subset need not. No
+horizon capability is requested. Product implementation remains in its owning changes.
 
 ## 1. Internal readiness and hosted revision gate
 
@@ -19,16 +20,24 @@ in the dependent changes, not this activation change.
       an older deployed target leaves this gate blocked.
 - [ ] 1.3 Re-run the vendored vectors against the double and
       `kit/arkhai-payments/tests`; verify per-part start/stop/reverse authorities,
-      notice scheduling, afterStop holds, partial reverse before/after stop and
+      notice scheduling and charged/returned/prorated mapping (SCM started_period/
+      last_boundary/stop), afterStop holds, partial reverse before/after stop and
       extend/lift. Requalify mediation adapter compatibility with the same revision.
       Classify divergences by owner; repair compatibility without weakening product
-      guarantees. A required product decision returns to its owning change.
+      guarantees. Verify fail-closed unsupported partialPeriod terms (charged/charged
+      only until vendored, and only if dispute policy permits), whole-period maximum
+      terms, activation-before-start,
+      setup once end at activation and full-undelivered/zero-delivered self-penalty.
+      Never add a storefront end-refund correction. A required product decision
+      returns to its owning change. Kit tests use vector-derived in-process fakes.
 
 ## 2. Reproducible qualification and target preparation
 
 - [ ] 2.1 Run both compute lanes against the payment/mediation doubles using the
       existing scenario runner under `e2e-tests/tests/e2e/roles/scenarios`. Include
-      the nine servicing cases and spot rate/notice/declaration coverage. Record
+      convergence's full rate matrix including spot's prepared entry points and
+      declaration coverage; reuse its coherent-real-time and integration-restart
+      evidence boundaries, not a second qualification matrix. Record
       published-contract qualification separately from historical proposed results.
 - [ ] 2.2 Retire a proposed runtime extension only once no required scenario needs
       it. Retain evidence provenance as D2 recommends. Validate fail-closed behavior
@@ -47,7 +56,8 @@ in the dependent changes, not this activation change.
 ## 3. Hosted evidence and production enablement
 
 - [ ] 3.1 Run both-domain live complete deals and the hosted payment/dispute matrix
-      in design D4: start, priced payer stop, seller notice surviving storefront
+      in design D4: activation then start, priced payer stop plus hint, authority
+      partialPeriod billing, setup once, seller notice surviving storefront
       absence, exhaustion, exceptional_end, acknowledged buyer_end, case extend/lift
       and partial reverse after stop. Use supported test controls for uncertainty/
       restart; annotate races/outages qualified only in the double. Every required
@@ -118,7 +128,7 @@ All destinations are planned until implementation closeout.
 
 | Accepted decision | Permanent location |
 |---|---|
-| D1 hosted per-part/hold-extension revision gate, no horizon | settlement-configuration spec/architecture; ARCHITECTURE settlement servicing |
+| D1 hosted per-part/hold gate and offered partialPeriod support, no horizon | settlement-configuration spec/architecture; ARCHITECTURE settlement servicing |
 | D2 vector conformance and honest evidence provenance | test-compatibility spec/architecture |
 | D3 owned-target preparation, production declaration and rollback | settlement-configuration spec/architecture; docs/development/DEPLOYMENT_AND_CONFIG.md |
 | D4 live versus qualification matrix and completion | test-compatibility spec/architecture; docs/development/ROADMAP.md Goal 8 |

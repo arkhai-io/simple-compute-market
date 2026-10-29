@@ -2,7 +2,7 @@
 
 ### Requirement: Production rate servicing requires a qualified hosted revision
 
-Production compositions MUST NOT declare rate-part servicing until the intended hosted deployment implements the vendored payments revision with per-part authorities and hold extensions. Qualification MUST verify authority-hosted stop notice, afterStop holds, partial reverse after stop and case extend/lift through real authority responses. No billing horizon, payee vouch, minimum-spend primitive or backdated payee stop is a prerequisite.
+Production compositions MUST NOT declare rate servicing until the hosted deployment supports the vendored per-part authority/hold revision and every offered stop term. Qualification MUST verify pending notices, offered partial-period billing, afterStop holds, post-stop partial reverse and extend/lift through real responses. A supported charged/charged subset MAY activate before partialPeriod is vendored if dispute policy permits; other terms MUST fail closed.
 
 #### Scenario: Schema is published but target is older
 
@@ -13,6 +13,20 @@ Production compositions MUST NOT declare rate-part servicing until the intended 
 
 - **WHEN** hosted behavior and consumer conformance pass for the required revision
 - **THEN** VM and bare-metal production compositions may declare published-contract rate servicing and enforce the declaration at all three doors
+
+### Requirement: Partial-period qualification cannot use local end corrections
+
+Activation MUST verify SCM started_period, last_boundary and stop map to authority charged, returned and prorated respectively. Unsupported terms MUST fail closed. Before the revision is vendored spot MUST offer only charged/charged, not a corrective end refund. Setup once MUST end at activation and its self-penalty MUST return all when undelivered and none after delivery.
+
+#### Scenario: Published schema cannot express returned
+
+- **WHEN** a preset asks for payee last_boundary but the vendored contract cannot encode it
+- **THEN** publication and acceptance refuse the term rather than rely on a later storefront reversal
+
+#### Scenario: Delivery activates successfully
+
+- **WHEN** setup completes and the lease activates
+- **THEN** rate start follows activation, setup once ends there and pays one dispute window later
 
 ### Requirement: Rate activation preserves existing commitment servicing
 

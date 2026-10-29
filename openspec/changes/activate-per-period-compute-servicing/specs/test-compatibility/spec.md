@@ -11,7 +11,7 @@ Activation evidence MUST distinguish proposed-contract qualification, published-
 
 #### Scenario: Hosted effects are observed
 
-- **WHEN** live start, priced payer stop, seller notice, exhaustion, exceptional_end, acknowledged buyer_end, case extension/lift and partial reversal after stop are exercised
+- **WHEN** live activation-before-start, priced payer stop plus hint, per-stopper partial-period billing, setup once, seller notice, exhaustion, exceptional_end, acknowledged buyer_end, case extension/lift and partial reversal after stop are exercised
 - **THEN** the report records actual authority effects, physical recovery and kept evidence, identifies the deployed revision using public-safe provenance, and names any controlled outage/race that was tested only in the double
 
 #### Scenario: Required live target is unavailable

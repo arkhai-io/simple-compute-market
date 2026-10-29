@@ -1,6 +1,8 @@
 # Rate-part servicing scenarios
 
-Nine reconciled sequence diagrams illustrate [the design](../design.md#scenarios-and-evidence).
+Nine sequence diagrams illustrate cases 0–8 of [the design](../design.md#scenarios-and-evidence).
+The qualification matrix also includes maximum term and the on-demand emergency.
+Lane absence/crash arrows mean pause/resume; durable restart is integration evidence.
 Buyer client, end service (physical P / authority-work F), site, payment authority
 and dispute authority are separate lifelines. Numbered arrows give scenario order;
 self-arrows are local transitions. A diagram is design, not evidence of a run.
@@ -10,7 +12,7 @@ self-arrows are local transitions. A diagram is design, not evidence of a run.
 | 0 | [On-demand baseline](00-on-demand-baseline.svg) | authority stop and physical recovery earn separate facts |
 | 1 | [Payments-down buyer end](01-buyer-cancel-payments-down.svg) | signed end_delivery acknowledgement supports buyer_end; physical work is independent |
 | 2 | [Site withdrawal, storefront absent](02-site-withdraws-storefront-dead.svg) | buyer stop/case and held money, then seller self-filing on recovery; no horizon cap |
-| 3 | [Crash during case effects](03-crash-during-case-effects.svg) | stable case/effect keys, partial reverse after stop, late evidence append |
+| 3 | [Crash during case effects](03-crash-during-case-effects.svg) | stable case/effect keys, partial reverse after stop, revised filing with prior effects |
 | 4 | [Stop before disclosure](04-payer-stop-before-disclosure.svg) | local end blocks disclosure; remote observation has a measured window |
 | 5 | [Activation expiry](05-prepaid-activation-deadline-expires.svg) | failed delivery files exceptional_end at start, including once-part consequences |
 | 6 | [Funding/exhaustion](06-funds-exhausted.svg) | renewable local timer, not speculative lease truncation |
@@ -21,4 +23,5 @@ Each SVG is rendered from its adjacent `.drawio` XML and embeds that exact edita
 source in its content attribute. Update source and regenerate the rendering
 together; never edit the SVG alone. At servicing closeout, promote the pairs to
 `docs/development/diagrams/` and cite them from settlement-servicing's architecture
-companion. Activation does not promote a second copy.
+companion's cross-reference to deal-lifecycle, which owns end-service behavior.
+Activation does not promote a second copy.
