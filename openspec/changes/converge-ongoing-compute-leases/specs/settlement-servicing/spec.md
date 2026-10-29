@@ -21,7 +21,7 @@ End service MUST service physical effects and authority work independently, phys
 
 ### Requirement: Rate-part completion distinguishes delivery from authority work
 
-End service MUST persist physical and financial completion separately. Physical completion requires site end evidence, proof that nothing was dispatched, or an explicitly labelled seller-authenticated manual recovery acknowledgement. Unknown dispatched work MUST be adopted and ended. Financial completion MUST require confirmed terminal part state and resolved end-related cases, effects and corrections with no pending or unknown operation; it MUST NOT follow from physical completion or an accepted filing alone.
+End service MUST persist physical and financial completion separately. Physical completion requires site end evidence, proof of no dispatch, or labelled authenticated manual recovery; unknown dispatched work MUST first be adopted and ended. Financial completion requires confirmed terminal parts and resolved end-related cases, effects and corrections with no pending or unknown operation. Neither physical completion nor filing acceptance alone proves financial completion.
 
 #### Scenario: A lease ends before its case is ruled
 
