@@ -1994,14 +1994,33 @@ reclaim tolerates an account its grant never created". Files:
 - `domains/bare_metal/provisioning/adapter/tests/test_bare_metal_codec.py` (the
   role-variable test class)
 
-- [ ] 10.1 Before key removal or locking, the reclaim checks whether the tenant
+- [x] 10.1 Before key removal or locking, the reclaim checks whether the tenant
       account exists. When it does not:
       - it skips key removal and locking;
       - it reports `account_present: false` in its fact;
       - it creates nothing.
 
       An existing account is handled as today, under each policy.
-- [ ] 10.2 Tests:
+
+      Done, in the role's `main.yml`:
+      - **The lookup.** A reclaim first runs `getent passwd <account>` on the
+        target, as an argv command with no shell and no `become`. It changes
+        nothing (`changed_when: false`), and fails the reclaim on any exit but 0
+        (found) and 2 (no such name). A `set_fact` records
+        `bare_metal_account_present` from it.
+      - **The gate.** All four tasks that touch the account are skipped when it is
+        absent: key revocation, the key-only `authorized_keys` removal, the lock,
+        and the delete. The lock's `user: state: present` is the one that would
+        have created the account. Each task's other conditions, and so each
+        policy's handling of a present account, are unchanged.
+      - **The fact.** The reclaim fact gains `account_present`, beside
+        `account_locked` and `account_deleted`.
+      - **Beyond the plan's files: the mock.** D2 has the mock print what the role
+        prints. The adapter's default reclaim output now prints `account_present`
+        as `"true"`, since a default reclaim stands for a delivered grant's. A case
+        needing an absent account arms a rule. The adapter is already 0.12.0 in
+        this change, so it is not bumped again.
+- [x] 10.2 Tests:
       - role-structure unit tests that the existence check precedes every task
         reading the account, and that the reclaim fact carries `account_present`;
       - `ansible-playbook --syntax-check` on the access playbook;
@@ -2010,12 +2029,73 @@ reclaim tolerates an account its grant never created". Files:
       Owed outside this section: running the role against a host that lacks the
       account is the live lane's evidence. No repository suite runs a playbook
       against a host.
-- [ ] 10.3 Verification:
+
+      Done:
+      - **Role structure (unit), `TestReclaimOfAnAbsentAccount`** in
+        `test_bare_metal_codec.py`, beside the role-variable class. It splits the
+        role into its top-level tasks and checks:
+        - the lookup runs `getent passwd` on the account, changes nothing, takes no
+          `become`, runs on the target, and fails on any exit but 0 and 2;
+        - the four reclaim tasks that use `authorized_key`, `file`, or `user` all
+          follow the lookup and are gated on its result;
+        - the lock, which states `present`, is gated;
+        - the presence is recorded after the lookup and before any of those
+          tasks;
+        - the reclaim fact carries `account_present`.
+
+        Red: against `HEAD`'s role the five fail and the module's other 42 pass.
+        Green: 47.
+      - **The codec (unit).** A reclaim fact with `account_present`,
+        `account_locked`, and `account_deleted` all `false`, as the role prints
+        its booleans, is the result unchanged, in the shipped and JSON forms and
+        under each policy. The codec did not change, so this passed before too.
+      - **The mock (unit).** The default reclaim reports `account_present`.
+      - **`--syntax-check`.** `ansible-playbook --syntax-check` on
+        `playbooks/node-access.yaml` passed on ansible-core 2.19.14 under the
+        packaged `ansible.cfg`, run once from an isolated tool environment outside
+        the repository, and on the workstation's ansible 2.10.8. Neither is a
+        repository suite: no target in the repository runs this playbook's syntax
+        check, and the adapter's environment has no Ansible.
+      - **A local run, outside the repository and not kept.** The new role was run
+        on ansible-core 2.19.14 under the packaged configuration, against the
+        local machine over a local connection, for a synthetic account confirmed
+        absent before and after. Under each of the three policies it exited 0,
+        printed `account_present`, `account_locked`, and `account_deleted` as
+        `false`, and created no account. The adapter's codec read each printed
+        fact as linked, with no mismatch. `HEAD`'s role, run the same way under
+        the default policy with `become` disabled, failed at the key task with
+        "Failed to lookup user", the historical failure. A present account was
+        not exercised locally, since that would change this machine. This is
+        corroboration, not a host-lane result.
+- [x] 10.3 Verification:
       - `make -C domains/bare_metal/provisioning/adapter test` (unit);
       - `make check-packaging`.
 
       End-to-end: the bare-metal mock lane runs no playbook. The live bare-metal
       lane is the system evidence.
+
+      Done:
+      - `make -C domains/bare_metal/provisioning/adapter test`: 88 passed (unit).
+      - **The changed mock's consumers.** After `make dist` and the service's
+        `reinit`, `test_bare_metal_mock_profile.py` and
+        `test_lease_release_api.py` passed 23 (application integration through
+        the typed clients under the mock profile, with direct-storage setup in
+        the second). The service's whole suite was not re-run: only the mock's
+        reclaim fact gained a field, which nothing reads.
+      - **Packaging.** No version changed: the adapter is already bumped once in
+        this change, and the role ships in no Python package. `make lock` changed
+        nothing. `make check-packaging`, `make check-change`, `make check-tasks`,
+        and `make check-comment-hygiene`: passed.
+      - **End-to-end, confirmed.** `e2e_bare_metal_mock_deal` and
+        `e2e_bare_metal_payment_deal` read the mock's default reclaim, which now
+        prints `account_present`; nothing asserts on it. No lane runs the role.
+        Owed by validation: none.
+
+      **Handoff.**
+      - The section's fresh-context compliance check was not run, as in Section 9.
+      - Round 2's implementation sections are complete. The live bare-metal lane
+        still owes a real reclaim of an account a failed grant never created, and
+        one of a present account under the configured policy.
 
 ## 11. A compute shape need not state a GPU
 

@@ -79,6 +79,29 @@
   delegate_to: "{{ target_host }}"
   when: node_action == "node_grant_access"
 
+# A reclaim may compensate a grant that failed before it created the tenant
+# account. Every reclaim task below reads or writes that account, and the key
+# module fails looking it up, while the lock task's `state: present` would
+# create it. So the reclaim looks the account up first, without creating
+# anything, and with no account it removes nothing and reports it absent. getent
+# exits 2 for a name it does not know; any other failure fails the reclaim.
+- name: Look up the bare-metal tenant account before reclaim
+  ansible.builtin.command:
+    argv:
+      - getent
+      - passwd
+      - "{{ bare_metal_ssh_user }}"
+  register: bare_metal_account_lookup
+  changed_when: false
+  failed_when: bare_metal_account_lookup.rc not in [0, 2]
+  delegate_to: "{{ target_host }}"
+  when: node_action == "node_reclaim_access"
+
+- name: Record whether the bare-metal tenant account exists
+  set_fact:
+    bare_metal_account_present: "{{ bare_metal_account_lookup.rc == 0 }}"
+  when: node_action == "node_reclaim_access"
+
 - name: Revoke bare-metal tenant SSH public key when provided
   ansible.posix.authorized_key:
     user: "{{ bare_metal_ssh_user }}"
@@ -89,6 +112,7 @@
   delegate_to: "{{ target_host }}"
   when:
     - node_action == "node_reclaim_access"
+    - bare_metal_account_present | bool
     - (bare_metal_reclaim_policy | default('remove_lease_key')) in ["remove_lease_key", "lock_user"]
     - bare_metal_ssh_public_key | default('') | trim != ''
 
@@ -100,6 +124,7 @@
   delegate_to: "{{ target_host }}"
   when:
     - node_action == "node_reclaim_access"
+    - bare_metal_account_present | bool
     - (bare_metal_reclaim_policy | default('remove_lease_key')) == "remove_lease_key"
     - bare_metal_ssh_public_key | default('') | trim == ''
 
@@ -115,6 +140,7 @@
   failed_when: false
   when:
     - node_action == "node_reclaim_access"
+    - bare_metal_account_present | bool
     - (bare_metal_reclaim_policy | default('remove_lease_key')) == "lock_user"
 
 - name: Delete bare-metal tenant account after reclaim
@@ -128,6 +154,7 @@
   failed_when: false
   when:
     - node_action == "node_reclaim_access"
+    - bare_metal_account_present | bool
     - (bare_metal_reclaim_policy | default('remove_lease_key')) == "delete_user"
 
 - name: Get current timestamp for bare-metal node access action
@@ -179,6 +206,7 @@
       timestamp: "{{ node_access_timestamp.stdout }}"
       host: "{{ target_host }}"
       status: "success"
+      account_present: "{{ bare_metal_account_present | bool }}"
       account_locked: "{{ bare_metal_lock_result.changed | default(false) }}"
       account_deleted: "{{ bare_metal_delete_result.changed | default(false) }}"
   when:

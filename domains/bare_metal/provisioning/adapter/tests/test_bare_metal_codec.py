@@ -274,6 +274,31 @@ def test_a_reclaim_reports_its_fact(render) -> None:
     assert outcome.result.value == fact
 
 
+@pytest.mark.parametrize("render", [shipped_output, json_output], ids=["shipped yaml", "json"])
+@pytest.mark.parametrize("policy", ["remove_lease_key", "lock_user", "delete_user"])
+def test_a_reclaim_of_an_account_never_created_reports_it_absent(render, policy) -> None:
+    """A reclaim compensating a grant that never created its account succeeds,
+    printing ``account_present: false`` with nothing locked or deleted, as the
+    role prints its booleans; the fact is the reclaim's result unchanged."""
+    fact = _fact(
+        NODE_RECLAIM_ACCESS_ACTION,
+        reclaim_policy=policy,
+        host="bm-node-1",
+        account_present=False,
+        account_locked=False,
+        account_deleted=False,
+    )
+    del fact["port"]
+
+    params = _grant(action=NODE_RECLAIM_ACCESS_ACTION, reclaim_policy=policy)
+
+    outcome = _interpret(params, render(_RECLAIM_FACT, fact))
+
+    assert outcome.result.result_kind == "bare_metal_access"
+    assert outcome.result.value == fact
+    assert outcome.result.value["account_present"] is False
+
+
 @pytest.mark.parametrize(
     "changes,named",
     [
@@ -348,3 +373,78 @@ class TestAccessPlaybookContract:
         for name in ("executor_action", "executor_target", "host_id"):
             assert name in self.playbook
             assert name in rendered
+
+
+def _role_tasks(role: str) -> list[tuple[str, str]]:
+    """Each top-level task of the role, as its name and its whole text, in order."""
+    blocks = re.split(r"^- name: ", role, flags=re.MULTILINE)[1:]
+    return [(block.splitlines()[0].strip(), block) for block in blocks]
+
+
+class TestReclaimOfAnAbsentAccount:
+    """The reclaim looks its tenant account up before anything touches it.
+
+    A compensating reclaim may run for a grant that never created the account:
+    the key module then fails looking the user up, and the lock task's
+    ``state: present`` would create the account. These read the role's task
+    list; running it against a host that lacks the account is a live lane's
+    evidence.
+    """
+
+    tasks = _role_tasks(TestAccessPlaybookContract.role)
+    lookup = "Look up the bare-metal tenant account before reclaim"
+    gate = "bare_metal_account_present | bool"
+
+    def _index(self, name: str) -> int:
+        return [task for task, _ in self.tasks].index(name)
+
+    def _account_tasks(self) -> list[tuple[int, str, str]]:
+        """Every reclaim task that reads or writes the tenant account or its home."""
+        return [
+            (index, name, body)
+            for index, (name, body) in enumerate(self.tasks)
+            if 'node_action == "node_reclaim_access"' in body
+            and re.search(r"^  (ansible\.posix\.authorized_key|file|user):", body, re.MULTILINE)
+        ]
+
+    def test_the_lookup_reads_the_account_and_creates_nothing(self) -> None:
+        body = dict(self.tasks)[self.lookup]
+
+        assert "ansible.builtin.command:" in body
+        assert "- getent\n" in body and "- passwd\n" in body
+        assert '"{{ bare_metal_ssh_user }}"' in body
+        assert "changed_when: false" in body
+        # getent exits 2 for a name it does not know; any other failure fails.
+        assert "failed_when: bare_metal_account_lookup.rc not in [0, 2]" in body
+        assert "become" not in body
+        assert 'delegate_to: "{{ target_host }}"' in body
+
+    def test_every_task_touching_the_account_follows_the_lookup_and_needs_it(self) -> None:
+        lookup = self._index(self.lookup)
+        account_tasks = self._account_tasks()
+
+        # Key revocation, authorized_keys removal, lock, and delete.
+        assert len(account_tasks) == 4
+        for index, name, body in account_tasks:
+            assert index > lookup, name
+            assert self.gate in body, name
+
+    def test_the_lock_that_would_create_the_account_is_gated(self) -> None:
+        name = "Lock bare-metal tenant account after reclaim"
+        body = dict(self.tasks)[name]
+
+        assert "state: present" in body
+        assert self.gate in body
+
+    def test_the_presence_is_recorded_from_the_lookup_before_it_is_read(self) -> None:
+        name = "Record whether the bare-metal tenant account exists"
+        body = dict(self.tasks)[name]
+
+        assert self._index(self.lookup) < self._index(name)
+        assert "bare_metal_account_present: \"{{ bare_metal_account_lookup.rc == 0 }}\"" in body
+        assert all(self._index(name) < index for index, _, _ in self._account_tasks())
+
+    def test_the_reclaim_fact_reports_whether_the_account_was_present(self) -> None:
+        body = dict(self.tasks)["Create JSON data structure for node_reclaim_access action"]
+
+        assert 'account_present: "{{ bare_metal_account_present | bool }}"' in body

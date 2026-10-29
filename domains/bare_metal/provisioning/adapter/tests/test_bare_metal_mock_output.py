@@ -122,6 +122,7 @@ async def test_default_reclaim_reports_the_reclaim_and_its_policy() -> None:
     assert outcome.result.value["action"] == NODE_RECLAIM_ACCESS_ACTION
     assert outcome.result.value["status"] == "success"
     assert outcome.result.value["reclaim_policy"] == "lock_user"
+    assert outcome.result.value["account_present"] == "true"
 
 
 @pytest.mark.asyncio

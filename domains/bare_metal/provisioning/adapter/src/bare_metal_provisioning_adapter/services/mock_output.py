@@ -51,9 +51,12 @@ def bare_metal_mock_output(playbook: MockPlaybook) -> str:
         data["host"] = (host.ssh_host if host is not None else None) or params.host_id
         data["port"] = str((host.ssh_port if host is not None else None) or 22)
     else:
+        # A default reclaim stands for one of a delivered grant, so its account
+        # was present; a reclaim of an account never created arms a rule.
         data.update(
             reclaim_policy=params.reclaim_policy or DEFAULT_BARE_METAL_RECLAIM_POLICY,
             host=params.host_id,
+            account_present="true",
             account_locked="false",
             account_deleted="false",
         )
