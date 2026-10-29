@@ -103,7 +103,9 @@ revisions before code starts; `unify-compute-delivery-path` lands before this ch
       stops, rate reversals since at, time-based once refunds, then the premature-stop
       penalty capped by earned amounts still held, across parts in mandate order; bond award
       stays reserved for hosted bonds. Matrix row 10 must prove an on-demand emergency
-      pays it and entitled spot notice pays none. Add timer classification via foundation's atomic filing resolution.
+      pays it at both ends of the cap — the stated amount late in a deal, the setup charge
+      alone minutes after activation, zero with no setup charge — and entitled spot notice
+      pays none. Add timer classification via foundation's atomic filing resolution.
       Resolve unknown original filings before revised requests; consume the dispute
       adapter's qualified revision mapping and prior-ruling netting, not local
       monetary deltas or append-as-amendment. Adopt equivalent runner cases under

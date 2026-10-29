@@ -76,7 +76,7 @@ Keep the foundation's exact shapes and names:
   unsupported treatment. `exposure_seconds` and `stop+exposure` are retired.
 - `adjudication = {version, dispute, dispute_window_seconds, case_hold_max_seconds}`;
   `dispute = {interface, origin, account, record_key, params}`.
-- `premature_stop_penalty` is a nonnegative integer amount in the option asset's minor units, encoded as a canonical decimal string; absent/zero means none. It applies to an unentitled seller end, including a spot emergency without notice, not an entitled notice stop. Recommendation: on-demand presets default to 24 periods' price (calculated through the agreed-price accessor), and buyer default acceptance refuses on-demand without a positive penalty because the buyer benefits and enforces it, like partialPeriod. Expose seller override and explicit buyer opt-out; never silently downgrade the default.
+- `premature_stop_penalty` is a nonnegative integer amount in the option asset's minor units, encoded as a canonical decimal string; absent/zero means none. It applies to an unentitled seller end, including a spot emergency without notice, not an entitled notice stop. Recommendation: on-demand presets default to 24 periods' price (calculated through the agreed-price accessor), and buyer default acceptance refuses on-demand without a positive penalty because the buyer benefits and enforces it, like partialPeriod. Expose seller override and explicit buyer opt-out; never silently downgrade the default. The number is a ceiling, not a guarantee: the remedy takes `min(penalty, earned amounts still held)` after the refunds, and early in a deal what is earned and held is the setup charge alone — an on-demand VM pulled minutes after activation, with its started period returned, leaves nothing else to take, and zero with no setup charge. A seller-funded stake that makes the ceiling collectible is the reserved `bond` term (foundation D5), not this change's.
 - `bond` stays reserved where the mechanism cannot hold a seller-funded stake.
 - `delivery_deadline_seconds` is the pool's effective `delivery_deadline_seconds` tag
   (`renewable-compute-lease-deadlines` D3), read from the pool at derivation like the
@@ -226,8 +226,10 @@ remain disabled in deployed compositions until their consumer gates pass.
 Both CLIs show class, recurring charge/period or total, separate setup once charge,
 initial reserve (not spend), maximum end/horizon, the delivery deadline ("active within
 N of your approval, or the seller has not delivered"), payer/payee entitlements, notice,
-per-stopper and term-end `settles_through` treatment, premature-stop penalty amount/asset and capped remedy, dispute authority/window/
-case-hold cap and evidence retention. Values come from the selected option, not a stored class. Asking rate keeps its stated unit.
+per-stopper and term-end `settles_through` treatment, the premature-stop penalty as
+"up to N, taken from what the seller has earned and not yet been paid — at the start of a
+deal, the setup charge" with its worst case (nothing earned, nothing taken) stated rather
+than implied, dispute authority/window/case-hold cap and evidence retention. Values come from the selected option, not a stored class. Asking rate keeps its stated unit.
 The seller's side of the same display is the default-buyer refusal diagnostic (D3), so
 seller and buyer read one policy.
 
