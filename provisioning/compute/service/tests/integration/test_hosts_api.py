@@ -23,6 +23,7 @@ from compute_provisioning_ansible import ssh_connection
 
 from compute_provisioning_client import ComputeProvisioningError
 import pytest
+from sqlalchemy import text
 
 from .conftest import ProvisioningClients, TEST_CONNECTION_KEY
 from compute_provisioning_contracts import (
@@ -49,8 +50,31 @@ def _connection(**changes):
 _SAMPLE_HOST = HostCreate(
     host_id="kvm1",
     connection=ssh_connection(ssh_host="10.0.0.1", ssh_user="ubuntu", key_path="/home/appuser/.ssh/id_ed25519"),
-    gpu_count=2,
 )
+
+
+class _HostCreateWithGpus(HostCreate):
+    """A create body carrying ``gpu_count`` and ``gpu_model``: the typed client
+    serializes the fields this subclass defines, so they reach the service."""
+
+    gpu_count: int
+    gpu_model: str
+
+
+class _HostUpdateWithGpus(HostUpdate):
+    """An update body carrying the GPU fields, as ``_HostCreateWithGpus``."""
+
+    gpu_count: int
+    gpu_model: str
+
+
+def _stored_row(session_factory, host_id: str) -> dict:
+    """Every column of one host's row in the application's database."""
+    with session_factory() as db:
+        return dict(db.execute(
+            text("SELECT * FROM hosts WHERE host_id = :id"), {"id": host_id}
+        ).mappings().one())
+
 
 _SAMPLE_INI = (
     "[kvm_hosts]\n"
@@ -82,7 +106,6 @@ class TestRegisterHost:
         assert host.host_id == "kvm1"
         assert host.connection.public["ssh_host"] == "10.0.0.1"
         assert host.connection.public["ssh_user"] == "ubuntu"
-        assert host.gpu_count == 2
         assert host.enabled is True
 
     async def test_register_appears_in_list(self, client_and_queue):
@@ -103,7 +126,8 @@ class TestRegisterHost:
 
         assert refused.value.status_code == 409
         assert _SAMPLE_HOST.host_id in str(refused.value)
-        assert (await client.family.get_host(_SAMPLE_HOST.host_id)).gpu_count == 2
+        first = await client.family.get_host(_SAMPLE_HOST.host_id)
+        assert first.connection.public["ssh_host"] == "10.0.0.1"
 
     async def test_register_host_client_contract(self, client_and_queue):
         """register_host return value is a typed HostResponse — contract enforced."""
@@ -113,22 +137,25 @@ class TestRegisterHost:
         assert host.host_id == _SAMPLE_HOST.host_id
         assert host.connection.public["ssh_host"] == _SAMPLE_HOST.connection.public["ssh_host"]
 
-    async def test_register_with_gpu_model_round_trips_through_the_real_api(
-        self, client_and_queue,
+    async def test_a_host_created_with_gpu_fields_records_and_returns_none(
+        self, client_and_queue, session_factory,
     ):
+        """A host describes no hardware: a body carrying ``gpu_count`` and
+        ``gpu_model`` creates the host, and neither its stored record, its
+        response, nor a later read carries a GPU field."""
         client, _ = client_and_queue
-        host = await client.family.register_host(HostCreate(
-            host_id="kvm1", connection=ssh_connection(ssh_host="10.0.0.1", ssh_user="ubuntu", key_path="/home/appuser/.ssh/id_ed25519"),
-            gpu_count=8, gpu_model="H100",
-        ))
-        assert host.gpu_model == "H100"
-        fetched = await client.family.get_host("kvm1")
-        assert fetched.gpu_model == "H100"
+        body = _HostCreateWithGpus(
+            **_SAMPLE_HOST.model_dump(), gpu_count=8, gpu_model="H100"
+        )
 
-    async def test_register_without_gpu_model_leaves_it_absent(self, client_and_queue):
-        client, _ = client_and_queue
-        host = await _register(client)  # _SAMPLE_HOST sets no gpu_model
-        assert host.gpu_model is None
+        created = await client.family.register_host(body)
+        fetched = await client.family.get_host("kvm1")
+
+        assert created.host_id == fetched.host_id == "kvm1"
+        assert fetched.connection.public["ssh_host"] == "10.0.0.1"
+        # The typed client parses every response through ``HostResponse``, which
+        # defines no GPU field, so absence is proven on the stored row itself.
+        assert not {"gpu_count", "gpu_model"} & set(_stored_row(session_factory, "kvm1"))
 
 
 class TestGetHost:
@@ -161,13 +188,19 @@ class TestUpdateHost:
         host = await client.family.get_host("kvm1")
         assert host.connection.public["ssh_user"] == "root"
 
-    async def test_update_gpu_model_round_trips_through_the_real_api(self, client_and_queue):
+    async def test_an_update_carrying_gpu_fields_applies_the_rest(
+        self, client_and_queue, session_factory,
+    ):
         client, _ = client_and_queue
         await _register(client)
-        updated = await client.family.update_host("kvm1", HostUpdate(gpu_model="A100"))
-        assert updated.gpu_model == "A100"
-        fetched = await client.family.get_host("kvm1")
-        assert fetched.gpu_model == "A100"
+
+        updated = await client.family.update_host(
+            "kvm1", _HostUpdateWithGpus(enabled=False, gpu_count=8, gpu_model="A100")
+        )
+
+        assert updated.enabled is False
+        assert (await client.family.get_host("kvm1")).enabled is False
+        assert not {"gpu_count", "gpu_model"} & set(_stored_row(session_factory, "kvm1"))
 
     async def test_update_unknown_host_raises_404(self, client_and_queue):
         client, _ = client_and_queue
@@ -276,9 +309,9 @@ class TestHostPlacement:
         client, _ = client_and_queue
         await _register(client, _SAMPLE_HOST.model_copy(update={"pool_id": "default"}))
 
-        updated = await client.family.update_host("kvm1", HostUpdate(gpu_model="A100"))
+        updated = await client.family.update_host("kvm1", HostUpdate(enabled=False))
 
-        assert (updated.pool_id, updated.gpu_model) == ("default", "A100")
+        assert (updated.pool_id, updated.enabled) == ("default", False)
 
     async def test_an_explicit_null_unplaces_the_host(self, client_and_queue):
         client, _ = client_and_queue
@@ -403,7 +436,7 @@ class TestSshPort:
         await client.family.register_host(HostCreate(
             host_id="kvm1", connection=_connection(ssh_port=6000),
         ))
-        updated = await client.family.update_host("kvm1", HostUpdate(gpu_model="A100"))
+        updated = await client.family.update_host("kvm1", HostUpdate(enabled=False))
         assert updated.connection.public["ssh_port"] == 6000
 
     async def test_the_port_appears_in_the_list_response(self, client_and_queue):

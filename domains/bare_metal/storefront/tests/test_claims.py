@@ -22,10 +22,16 @@ def test_the_offering_mode_is_the_accepted_options():
     assert claim["offering_mode"] == "bare_metal"
 
 
-@pytest.mark.parametrize("context", [{}, {"claimed_attributes": {}}, {"claimed_attributes": "H200"}])
-def test_a_context_naming_no_attributes_is_refused(context):
+@pytest.mark.parametrize("context", [{}, {"claimed_attributes": "H200"}, {"claimed_attributes": None}])
+def test_a_record_carrying_no_claimed_attributes_is_refused(context):
     with pytest.raises(ClaimAttributesMissing):
         whole_machine_claim(context)
+
+
+def test_a_machine_without_gpus_claims_one_unit_and_no_attribute():
+    claim = whole_machine_claim({"claimed_attributes": {}})
+
+    assert claim == {"dimensions": {"units": 1}, "offering_mode": "bare_metal"}
 
 
 # -- the claim against the site's own admission matcher ---------------------
@@ -65,6 +71,16 @@ def test_the_site_refuses_the_claim_once_the_declared_model_changed():
 def test_the_site_refuses_the_claim_once_the_machine_is_taken():
     taken = {"units": 0, "gpu_count": 8, "ram_gb": 2048}
     assert dict_resource_satisfies_claim(_declaration(available=taken), _claim()) is False
+
+
+def test_the_site_admits_a_claim_with_no_attribute_for_a_machine_without_gpus():
+    declaration = {
+        **_declaration(available={"units": 1, "vcpu_count": 64, "ram_gb": 512}),
+        "attributes": {"physical_host_id": "physical-host-1"},
+    }
+    claim = {**whole_machine_claim({"claimed_attributes": {}}), "resource_id": "resource-1"}
+
+    assert dict_resource_satisfies_claim(declaration, claim) is True
 
 
 def test_hardware_quantities_are_not_requested():

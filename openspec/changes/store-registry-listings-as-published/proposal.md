@@ -42,6 +42,10 @@ Either way the requirement is the same and is stated in this change's delta: a
 field the registry accepts is stored and served, and a field it will not store is
 refused at publish.
 
+Either way the delta also brings `registry-discovery`'s "Schema-driven listing
+validation" into line with the chosen option. Today that requirement says an ordinary
+publish validates against the listing shape, which the publish route does not do.
+
 ## Capabilities
 
 ### New Capabilities

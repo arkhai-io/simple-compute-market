@@ -72,7 +72,9 @@ the session, and every turn ends with an outcome matching
   that target's guards again from the record. In a round's join the target is the
   round's triage, which triages the record's failures with the round; as a guard's
   remedy, or after the owner's direction, a passed validation leads to its target
-  and a failed or inconclusive one to the owner. Say in `message` what the record
+  and a failed or inconclusive one to the owner — but a failed validation of the
+  merged `HEAD`, the remedy of the merge's guards, leads back to the merge, which
+  repairs what the merge broke. Say in `message` what the record
   found and what it leaves for triage.
 
 ## Running interactively

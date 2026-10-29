@@ -27,7 +27,6 @@ from tests.e2e.roles.helpers.compute_deal_stages import DURATION_HOURS
 from tests.e2e.roles.scenarios.vms.host_registry import (
     E2E_DEAL_HOST,
     E2E_DEAL_POOL_ID,
-    E2E_HOST_GPU_COUNT,
     provision_e2e_executor,
     refresh_storefront_projections,
 )
@@ -102,10 +101,6 @@ class VmComputeDealDriver:
             },
         )
         assert host.host_id == E2E_DEAL_HOST
-        assert (host.gpu_count or 0) >= E2E_HOST_GPU_COUNT, (
-            f"executor host {E2E_DEAL_HOST} reports {host.gpu_count} GPU(s); "
-            f"scenarios reserve up to {E2E_HOST_GPU_COUNT}"
-        )
         refresh_storefront_projections(self.storefront_admin_client)
 
     def provision_terms(self) -> dict[str, Any]:

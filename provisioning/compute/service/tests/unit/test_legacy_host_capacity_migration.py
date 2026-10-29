@@ -18,9 +18,10 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from compute_provisioning_service.db.migrations import apply_schema_migrations
+from compute_provisioning_service.db.migrations import MIGRATIONS, apply_schema_migrations
 
 _PREVIOUS_SCHEMA = Path(__file__).parent / "fixtures" / "schema_through_20260911_001.sql"
+_ENTRY = "20260921_004_legacy_host_capacity_declarations"
 
 
 def _engine():
@@ -101,24 +102,27 @@ def test_hosts_with_gpus_and_no_declaration_are_declared():
 
 
 def test_host_rows_are_not_changed():
-    """Run the chain, then run this entry again from the state just before
-    it, so the comparison isolates what it writes."""
+    """Run the chain up to this entry, then this entry alone, so the
+    comparison isolates what it writes; later entries drop the host's GPU
+    columns."""
     engine = _engine()
-    apply_schema_migrations(engine)
+    position = [migration.id for migration in MIGRATIONS].index(_ENTRY)
     with engine.begin() as connection:
-        connection.execute(text(
-            "DELETE FROM schema_migrations "
-            "WHERE id = '20260921_004_legacy_host_capacity_declarations'"
-        ))
-        connection.execute(text(
-            "DELETE FROM capacity_buckets WHERE backing_resource_id IN ('kvm1', 'kvm4')"
-        ))
+        for migration in MIGRATIONS[position:]:
+            connection.execute(
+                text("INSERT INTO schema_migrations (id) VALUES (:id)"), {"id": migration.id}
+            )
+    apply_schema_migrations(engine)
     hosts_before = _host_rows(engine)
 
-    apply_schema_migrations(engine)
+    MIGRATIONS[position].apply(engine)
 
     assert _host_rows(engine) == hosts_before
-    assert {"kvm1", "kvm4"} <= set(_resources(engine))
+    with engine.begin() as connection:
+        declared = connection.execute(text(
+            "SELECT backing_resource_id FROM capacity_buckets"
+        )).scalars().all()
+    assert {"kvm1", "kvm4"} <= set(declared)
 
 
 def test_rerunning_changes_nothing():

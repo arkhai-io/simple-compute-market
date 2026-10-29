@@ -66,12 +66,16 @@ class ResolvedShape:
     attributes: Mapping[str, str]
 
     @property
-    def gpu_count(self) -> int:
-        return int(self.quantities["gpu_count"])
+    def gpu_count(self) -> int | None:
+        """The shape's GPU count, or ``None`` when it states no GPUs."""
+        count = self.quantities.get("gpu_count")
+        return None if count is None else int(count)
 
     @property
-    def gpu_model(self) -> str:
-        return str(self.attributes["gpu_model"])
+    def gpu_model(self) -> str | None:
+        """The shape's GPU model, or ``None`` when it states no GPUs."""
+        model = self.attributes.get("gpu_model")
+        return None if model is None else str(model)
 
 
 @dataclass(frozen=True)

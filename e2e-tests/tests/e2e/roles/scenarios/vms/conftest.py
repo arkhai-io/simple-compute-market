@@ -550,7 +550,6 @@ def _ensure_provisioning_host_registered(provisioning_client):
             kind="ssh",
             public={"ssh_host": "127.0.0.1", "ssh_user": "stub", "key_path": "/tmp/stub-e2e-key"},
         ),
-        gpu_count=1,
         enabled=True,
     )
     try:

@@ -138,7 +138,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal"
-version = "0.13.0"
+version = "0.14.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-compute" },
@@ -148,7 +148,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal-0.13.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal-0.14.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -194,13 +194,13 @@ dev = [{ name = "pytest", specifier = ">=8.3.4,<10.0.0" }]
 
 [[package]]
 name = "arkhai-compute"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-capability-shape" },
 ]
 wheels = [
-    { path = "arkhai_compute-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_compute-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -279,21 +279,21 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-capability-admissibility"
-version = "0.1.0"
+version = "0.1.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-capability-shape" },
 ]
 wheels = [
-    { path = "arkhai_kit_capability_admissibility-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_capability_admissibility-0.1.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-capability-shape"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../../.dist" }
 wheels = [
-    { path = "arkhai_kit_capability_shape-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_capability_shape-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]

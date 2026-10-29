@@ -398,7 +398,9 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
     host_migration_columns = {
         column["name"] for column in inspector.get_columns("hosts")
     }
-    assert "gpu_model" in host_migration_columns
+    # A host describes no hardware: the GPU columns an old table carried are
+    # gone once the chain has run.
+    assert not {"gpu_count", "gpu_model"} & host_migration_columns
     replay_columns = {
         column["name"]
         for column in inspector.get_columns("provisioning_replay_reservations")
@@ -500,6 +502,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "20261023_002_hosts_pool_optional",
         "20261027_001_vm_fulfillment_request_carries_no_connectivity",
         "20261028_001_retired_reservation_states",
+        "20261028_002_hosts_drop_gpu_columns",
     }
 
 
@@ -529,7 +532,7 @@ def test_run_migrations_is_idempotent():
     assert ansible_columns.count("idempotency_key") == 1
     assert host_columns.count("connection_public") == 1
     assert host_columns.count("pool_id") == 1
-    assert host_columns.count("gpu_model") == 1
+    assert host_columns.count("gpu_model") == 0
     ansible_pool_config_columns = [
         column["name"] for column in inspector.get_columns("ansible_pool_configs")
     ]

@@ -7,6 +7,7 @@ reject a resource of the wrong kind rather than silently ranking it.
 
 from __future__ import annotations
 
+from arkhai_vms_listings.models import Listing
 from arkhai_vms_listings.resources import ComputeGpuResourceAdapter
 
 from market_storefront.services.vm_job_spec_service import (
@@ -55,3 +56,32 @@ def test_claim_names_resource_type_even_for_a_pinned_resource_id():
     assert claim["resource_id"] == "res-1"
     assert "pool_id" not in claim
     assert claim["resource_type"] == _VM_RESOURCE_TYPE
+
+
+def _gpu_less_order():
+    order = _order(resource_id=None, vcpu_count=8, ram_gb=32)
+    del order["listing_resource"]["gpu_model"]
+    del order["listing_resource"]["gpu_count"]
+    return order
+
+
+def test_a_listing_without_gpus_claims_its_vcpus_and_memory_and_no_gpu():
+    claim = compute_capacity_claim_from_order(_gpu_less_order())
+
+    assert claim == {
+        "offering_mode": "vm",
+        "resource_type": "compute.gpu",
+        "pool_id": "pool-1",
+        "region": "California, US",
+        "dimensions": {"vcpu_count": 8, "ram_gb": 32},
+    }
+
+
+def test_a_listing_without_gpus_claims_alike_from_its_parsed_model():
+    order = _gpu_less_order()
+    order["listing_resource"]["sla"] = 99.0
+    order["listing_resource"] = Listing.model_validate(order).listing_resource
+
+    claim = compute_capacity_claim_from_order(order)
+
+    assert claim == compute_capacity_claim_from_order(_gpu_less_order())

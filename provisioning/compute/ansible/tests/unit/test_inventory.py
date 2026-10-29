@@ -34,7 +34,7 @@ def test_every_host_entry_becomes_a_host_whatever_its_section() -> None:
 
     assert sorted(hosts) == ["bm1", "kvm1", "kvm2", "ungrouped1"]
     kvm1 = hosts["kvm1"]
-    assert (kvm1.gpu_count, kvm1.gpu_model, kvm1.pool_id) == (2, "H100", "gpu")
+    assert kvm1.pool_id == "gpu"
     assert kvm1.connection.kind == "ssh"
     assert kvm1.connection.public["ssh_port"] == 2201
     assert kvm1.connection.public["public_host"] == "203.0.113.1"
@@ -58,6 +58,19 @@ def test_a_pool_is_named_cleared_or_left_unstated() -> None:
     assert hosts["placed"].pool_id == "gpu"
     assert hosts["cleared"].pool_id is None
     assert hosts["unstated"].pool_id is POOL_UNSTATED
+
+
+def test_gpu_variables_are_ignored_like_any_unread_variable(caplog) -> None:
+    """A host describes no hardware: ``gpus=`` and ``gpu_model=``, malformed or
+    not, parse to the same host as a line without them, with nothing logged."""
+    line = "kvm1 ansible_host=10.0.0.1 ansible_user=root pool_id=gpu"
+
+    with caplog.at_level("DEBUG"):
+        described = parse_inventory_ini(f"[hosts]\n{line} gpus=8 gpu_model=H200\n")
+        malformed = parse_inventory_ini(f"[hosts]\n{line} gpus=x\n")
+
+    assert described == malformed == parse_inventory_ini(f"[hosts]\n{line}\n")
+    assert caplog.records == []
 
 
 def test_variables_and_children_sections_list_no_hosts() -> None:

@@ -967,6 +967,14 @@ triage: round-view-closed ## Open a fresh Claude Code session triaging an OpenSp
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
 	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) triage "$(CHANGE)"$(STEP_GRANTS),claude "/change-triage $(CHANGE)")
 
+# The branch a change lands on, which the merge before closeout brings in: the one
+# it was branched from, dev unless the owner names another.
+MERGE_FROM = $(or $(strip $(FROM)),dev)
+
+merge: round-view-closed ## Open a fresh Claude Code session merging the branch an OpenSpec change lands on into its branch once its pre-closeout review is triaged, resolving the conflicts and repairing what that branch's changes broke (CHANGE=<change> [FROM=<branch>, default dev] [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
+	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
+	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) merge "$(CHANGE)" --arguments 'from $(subst ','\'',$(MERGE_FROM))'$(STEP_GRANTS),claude "/change-merge $(CHANGE) from $(MERGE_FROM)")
+
 closeout: round-view-closed ## Open a fresh Claude Code session closing out an OpenSpec change, archiving it last; resumes one archived but not committed (CHANGE=<change> [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
 	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) closeout "$(CHANGE)"$(STEP_GRANTS),claude "/change-closeout $(CHANGE)")

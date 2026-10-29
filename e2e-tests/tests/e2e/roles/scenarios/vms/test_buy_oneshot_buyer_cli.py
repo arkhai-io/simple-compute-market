@@ -46,7 +46,6 @@ from tests.e2e.roles.buyer_cli import MarketRun
 from tests.e2e.roles.scenarios.vms.host_registry import (
     E2E_BUY_HOST,
     E2E_BUY_POOL_ID,
-    E2E_HOST_GPU_COUNT,
     provision_e2e_executor,
     refresh_storefront_projections,
 )
@@ -266,17 +265,13 @@ class TestStageB1a_ExecutorHostRegistry:
             },
         )
         assert host.host_id == E2E_BUY_HOST
-        assert (host.gpu_count or 0) >= E2E_HOST_GPU_COUNT, (
-            f"executor host {E2E_BUY_HOST} reports {host.gpu_count} GPU(s); "
-            f"scenarios reserve up to {E2E_HOST_GPU_COUNT}"
-        )
 
         sites = refresh_storefront_projections(storefront_admin_client)
 
         deal_state._executor_host_registered = True
         log.info(
-            "[B1a] Executor host %s registered (gpus=%s); projections confirmed for %s",
-            E2E_BUY_HOST, host.gpu_count, sorted(sites),
+            "[B1a] Executor host %s registered; projections confirmed for %s",
+            E2E_BUY_HOST, sorted(sites),
         )
 
 

@@ -47,7 +47,7 @@ def _ledger(*, held: bool) -> CapacityLedgerService:
     PoolBase.metadata.create_all(bind=engine)
     sessions = sessionmaker(bind=engine)
     with sessions() as db, db.begin():
-        for pool_id in ("gpu-a", "hint-region", "spec"):
+        for pool_id in ("gpu-a", "hint-region", "spec", "cpu"):
             db.add(ResourcePool(id=pool_id, label=pool_id, provider="test", enabled=True,
                                 policy_tags=dict(_TAGS)))
     ledger = CapacityLedgerService(
@@ -64,10 +64,19 @@ def _ledger(*, held: bool) -> CapacityLedgerService:
         resource_id="spec-1", pool_id="spec", host_id="h3",
         attributes={"gpu_model": "A100", "region": "eu"},
         capacity={"gpu_count": 2, "ram_gb": 64})
+    # A machine without GPUs: a VM declaration states vCPU and memory alone.
+    ledger.register_resource(
+        resource_id="c-1", pool_id="cpu", host_id="h4",
+        attributes={"region": "us-east"}, capacity={"vcpu_count": 64, "ram_gb": 512})
     if held:
         assert ledger.reserve(
             claim={"offering_mode": "vm", "resource_type": "compute.gpu", "resource_id": "a-1",
                    "dimensions": {"gpu_count": 6, "ram_gb": 400}},
+            ttl_seconds=3600,
+        )
+        assert ledger.reserve(
+            claim={"offering_mode": "vm", "resource_type": "compute.gpu", "resource_id": "c-1",
+                   "dimensions": {"ram_gb": 480}},
             ttl_seconds=3600,
         )
     return ledger
@@ -92,8 +101,11 @@ def _member(ledger, resource_id):
 
 
 def _listing(pool_id, *, model="H100", region="us-east", resource_id=None, **quantities):
-    listing = {"pool_id": pool_id, "gpu_model": model, "region": region,
+    """A listing's fields; ``model=None`` is a shape stating no GPUs."""
+    listing = {"pool_id": pool_id, "region": region,
                "offering_mode": "vm", "capacity_backing": "backed", **quantities}
+    if model is not None:
+        listing["gpu_model"] = model
     if resource_id:
         listing["resource_id"] = resource_id
     return listing
@@ -117,6 +129,13 @@ _CASES = [
      _listing("spec", model="A100", region="eu", resource_id="spec-1", gpu_count=1, ram_gb=32)),
     ("a specific resource of another model", "spec-1",
      _listing("spec", model="H100", region="eu", resource_id="spec-1", gpu_count=1)),
+    ("no GPUs, on a GPU host's spare vCPU and memory", "a-1",
+     _listing("gpu-a", model=None, vcpu_count=16, ram_gb=64)),
+    ("no GPUs, on a member without GPUs", "c-1",
+     _listing("cpu", model=None, vcpu_count=16, ram_gb=64)),
+    ("no GPUs, memory beyond availability", "c-1",
+     _listing("cpu", model=None, vcpu_count=16, ram_gb=500)),
+    ("GPUs, on a member without GPUs", "c-1", _listing("cpu", gpu_count=1)),
 ]
 _IDS = [case[0] for case in _CASES]
 

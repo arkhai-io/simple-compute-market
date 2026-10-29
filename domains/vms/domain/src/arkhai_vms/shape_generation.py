@@ -7,7 +7,9 @@ come out. GPU-count enumeration is the default implementation.
 
 The default declares the GPU family only. Every other dimension is left to
 the site, which provisions it from its configured defaults, so a default shape
-commits to nothing its members' declarations do not state.
+commits to nothing its members' declarations do not state. A member declaring
+no GPUs yields no default shape: a CPU slice has no natural unit to enumerate,
+so a pool selling VMs without GPUs states its shapes.
 
 A generated shape is nobody's statement, so it carries no constraints of its
 own: its admissibility policy is the storefront's configured default alone,

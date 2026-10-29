@@ -50,8 +50,6 @@ def _host(host_id: str, pool_id: str | None) -> HostCreate:
     return HostCreate(
         host_id=host_id,
         connection=ssh_connection(ssh_host="10.0.0.1", ssh_user="ubuntu", key_path="/keys/id"),
-        gpu_count=4,
-        gpu_model="H200",
         pool_id=pool_id,
     )
 

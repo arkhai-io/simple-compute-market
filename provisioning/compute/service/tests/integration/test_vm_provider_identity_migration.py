@@ -40,8 +40,8 @@ def test_vm_identity_migration_changes_only_provider_names_and_is_idempotent(tmp
         # to contact on a public network.
         connection.execute(text(
             "INSERT INTO hosts (host_id, connection_kind, connection_version, "
-            "connection_public, connection_protected, gpu_count, enabled, pool_id) "
-            "VALUES ('host-1', 'ssh', 1, :public, '{}', 1, 1, 'default')"
+            "connection_public, connection_protected, enabled, pool_id) "
+            "VALUES ('host-1', 'ssh', 1, :public, '{}', 1, 'default')"
         ), {"public": json.dumps({"ssh_host": "203.0.113.10", "ssh_user": "stub"})})
         for identifier, provider in (("vm", "ansible"), ("bare-metal", "bare_metal.ansible")):
             connection.execute(text(

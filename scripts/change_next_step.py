@@ -13,7 +13,7 @@ log, and whether a round view is open, and prints one JSON object:
   of the plan's order), `implement` (with its `sections`), `round-view`,
   `validate` (with the `target` it is for), `review` (with its `kind`),
   `validate-and-review` (with the review's `kind` and the validation's `target`),
-  `triage` (with the `kind` of review it triages), `closeout`, or
+  `triage` (with the `kind` of review it triages), `merge`, `closeout`, or
   `archive-cleanup`; a step named as the remedy of a guard on an exit carries that
   exit as its `target`; for a change in its own clone, a `round-view`, or a
   validation or review that runs beside the owner's reading (`reading`), names the
@@ -99,7 +99,7 @@ from round_view import RoundError, View, open_view  # noqa: E402
 from change_workflow import graph  # noqa: E402
 from change_workflow.common import ORCHESTRATOR, STEPS, StepError  # noqa: E402
 from change_workflow.graph import (CLOSEOUT, CLOSEOUT_REVIEW, DESIGN, DONE,  # noqa: E402
-                                   IMPLEMENTATION_REVIEW, IMPLEMENTATION_TRIAGE, PHASES,
+                                   IMPLEMENTATION_REVIEW, IMPLEMENTATION_TRIAGE, MERGE, PHASES,
                                    ROUND, ROUND_JOIN, ROUND_VIEW, VALIDATE, Join, Node,
                                    Standing, TargetError, entry_refusal, node_of)
 from change_workflow.graph import owner as _owner  # noqa: E402
@@ -122,8 +122,8 @@ _TASK = re.compile(r"^\s*- \[(?P<done>[ xX])\] "
                    r"(?P<number>(?P<section>[0-9]+[A-Za-z]?)\.[0-9]+\b)?")
 # Where a log line's step sits among the phases, for comparing with the status.
 _STEP_PHASE = {"design": "design", "plan": "planning", "implement": "implementation",
-               "validate": "implementation", "triage": None, "review": None,
-               "closeout": "closeout", "archive-cleanup": "closeout"}
+               "validate": "implementation", "merge": "implementation", "triage": None,
+               "review": None, "closeout": "closeout", "archive-cleanup": "closeout"}
 # The node each phase a status can be set back to starts at, which the status is
 # followed to; no step runs after closeout, so no status is set back behind it.
 _PHASE_START = {"design": DESIGN, "planning": graph.PLAN, "implementation": ROUND}
@@ -599,10 +599,13 @@ class Computation:
             # The change's state is half merged until the merge concludes, so
             # nothing read from it can route; a restarted orchestrating session
             # would otherwise run a step over the conflicts.
+            if asked := self.merge_waiting():
+                return asked
             return _owner("a merge is in progress in this checkout: its conflicts are "
-                          "resolved — the workflow's files by the orchestrating session, "
-                          "code by the owner or an implementation run — and the merge "
-                          "concluded before the change is routed", merging=True)
+                          "resolved — by the merge step that started it, or, for a merge "
+                          "the owner asked for, the workflow's files by the orchestrating "
+                          "session and code by the owner or an implementation run — and the "
+                          "merge concluded before the change is routed", merging=True)
         state.view = self._view(self.root)
         try:
             self.read()
@@ -633,6 +636,24 @@ class Computation:
             if waiting := self.bootstrapping(result):
                 return waiting
         return result
+
+    def merge_waiting(self) -> Result | None:
+        """The merge step's run, when it is the log's last run and waits on the owner
+        with its merge in progress: a conflict it asks about, resumed by its `seq`.
+        Only the log is read, which the merge leaves untouched while it is in
+        progress."""
+        try:
+            log = read_log(log_path(self.root, self.state.change))
+        except (ChangeNotFound, StepError):
+            return None
+        decisions = [e for e in log if e.get("outcome") == ORCHESTRATOR]
+        last = next((e for e in reversed(log) if e.get("step") in STEPS), None)
+        if (last is None or last.get("step") != MERGE.step
+                or last["seq"] in {e.get("resolves") for e in decisions}
+                or not (waiting := _waiting(last, read=last["seq"] in
+                                            {e.get("reads") for e in decisions}))):
+            return None
+        return {**waiting, "seq": last["seq"], "merging": True}
 
     def read(self) -> None:
         """Read the change's files and log into the state: its directory, index row,
@@ -1355,12 +1376,14 @@ class Computation:
                    and e.get("resolves") == run.get("seq")
                    and isinstance(e.get("next"), Mapping) for e in self.state.log)
 
-    def validated(self, why: str, exempt: Callable[[str], bool] = is_record) -> Result | None:
+    def validated(self, why: str, exempt: Callable[[str], bool] = is_record,
+                  failed: Node | None = None) -> Result | None:
         """None when the latest validation passed for `HEAD`, or for an ancestor it
         differs from only in `exempt` paths, changes' records by default. Otherwise
-        validation, when the latest record describes another commit; or the owner,
-        when it describes `HEAD` and did not pass — an `inconclusive` result is
-        missing evidence, never a pass."""
+        validation, when the latest record describes another commit; `failed`, when
+        given and the record describes `HEAD` and failed; or the owner, when it
+        describes `HEAD` and did not pass — an `inconclusive` result is missing
+        evidence, never a pass."""
         head = self.state.head
         reviews = self.state.directory / "reviews"
         if head is None:
@@ -1370,6 +1393,10 @@ class Computation:
             return {"step": "validate", "reason": f"{why}: {problem}"}
         record = latest_validation(reviews)
         result = validation_result(record) if record else None
+        if result == "failed" and record is not None and failed is not None:
+            return failed.result(f"{why}, and {record.name} of HEAD failed: the "
+                                 f"{failed.label} step repairs what it found",
+                                 validation=result)
         if result != "passed":
             # Nothing the owner records clears it: a validation that passes does, or
             # the owner's direction past it, which checks no exit guard.

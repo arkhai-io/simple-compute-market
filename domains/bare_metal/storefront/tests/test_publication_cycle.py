@@ -1157,6 +1157,30 @@ async def test_a_listing_publishes_its_shape_where_the_compute_schema_reads_it(d
     assert json.loads(envelope)["shape_digest"].startswith("capability-shape.v1:")
 
 
+async def test_a_machine_without_gpus_publishes_with_no_gpu_key(db):
+    cpu_only = member(
+        "r1", "pool-1", capacity={"units": 1, "vcpu_count": 64, "ram_gb": 512}, attributes={}
+    )
+    storefront = Storefront(db, {"site-a": Site(pool("pool-1", cpu_only))})
+
+    report = await storefront.run()
+
+    assert actions(report, "hold") == []
+    assert storefront.listing("site-a", "pool-1", "r1")[1] == "open"
+    ((operation, _, _, sent),) = storefront.registries.sent
+    body = sent["listing_resource"]
+    assert operation == "publish"
+    assert (body["vcpu_count"], body["ram_gb"], body["region"]) == (64, 512, "us-west")
+    assert "gpu_count" not in body and "gpu_model" not in body
+    listing_id = storefront.listing("site-a", "pool-1", "r1")[0]
+    stored = json.loads(storefront.stored(listing_id)["listing_resource"])
+    assert "gpu_count" not in stored and "gpu_model" not in stored
+
+    await storefront.run()
+
+    assert storefront.registries.operations() == []
+
+
 async def test_a_corrected_declaration_closes_and_publishes_a_successor(db):
     site = Site(pool("pool-1", member("r1", "pool-1")))
     storefront = Storefront(db, {"site-a": site})

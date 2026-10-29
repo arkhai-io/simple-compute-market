@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-kit-capability-admissibility"
-version = "0.1.0"
+version = "0.1.1"
 description = "Which capability shapes a seller will sell for a listing: inline shape constraints, tiered resolution, and whole-shape evaluation"
 requires-python = ">=3.12,<3.14"
 license = "MIT"
@@ -8,7 +8,7 @@ license = "MIT"
 # pool administration all read listing shapes through this, so it must pull
 # nothing else in with it.
 dependencies = [
-    "arkhai-kit-capability-shape>=0.2.0",
+    "arkhai-kit-capability-shape>=0.3.0",
 ]
 
 [build-system]

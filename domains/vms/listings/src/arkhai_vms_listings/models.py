@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from enum import Enum
 import re
 from typing import Any, Union
@@ -11,11 +12,34 @@ from pydantic import (
     model_validator,
 )
 
+from arkhai_vms import VM_CAPABILITY_SCHEMA, vm_listing_resource_shape
 from market_alkahest.schemas import AcceptedEscrow, EscrowDemand
 
 from market_alkahest.token import ERC20TokenMetadata
 from market_identity import Identity
 from market_resource_pools_contracts.backing import CapacityBackingLabel
+
+#: The resource types a VM listing resource payload may name explicitly.
+COMPUTE_RESOURCE_TYPE = "compute.gpu"
+TOKEN_RESOURCE_TYPE = "token.erc20"
+
+
+def payload_resource_type(data: Mapping[str, Any]) -> str:
+    """Which resource a VM listing resource payload is, by the one dispatch rule.
+
+    An explicit ``resource_type`` naming a VM resource type decides; otherwise a
+    payload carrying ``token`` is a token resource, and any other mapping is a
+    compute resource. A compute payload is not recognised by a GPU field, since
+    a slice without GPUs carries none: whether its fields state a shape is
+    compute validation's to decide, not dispatch's. ``parse_from_dict``,
+    ``resource_is_compute``, and the buyer CLI's ``format_resource`` apply it;
+    the adapter registry's ``parse_resource_from_dict`` reduces to it over the
+    built-in adapters and lets another registered adapter select itself.
+    """
+    explicit = data.get("resource_type")
+    if explicit in (COMPUTE_RESOURCE_TYPE, TOKEN_RESOURCE_TYPE):
+        return explicit
+    return TOKEN_RESOURCE_TYPE if "token" in data else COMPUTE_RESOURCE_TYPE
 
 # =============================================================================
 # Domain Model Class Hierarchy
@@ -142,10 +166,8 @@ class ComputeDomainResource(Resource):
         Converts dictionary payloads into the appropriate Resource subclass:
         - If data is already a Resource instance → returns it unchanged
         - If data is a JSON string → deserializes it first, then dispatches
-        - If dict contains 'token' key → returns TokenResource (takes precedence)
-        - If dict contains 'gpu_model' key → returns ComputeResource
-        - If dict contains both keys → returns TokenResource (token takes precedence)
-        - If dict contains neither key → raises ValueError
+        - A dict is dispatched by ``payload_resource_type``: a TokenResource or
+          a ComputeResource
         - If data is not a dict and not a Resource → returns data unchanged
 
         Args:
@@ -156,8 +178,8 @@ class ComputeDomainResource(Resource):
             Resource instance (TokenResource, ComputeResource, or existing Resource)
 
         Raises:
-            ValueError: If data is a dict but doesn't contain required keys for
-                        any resource type
+            ValueError: If data is a dict its resource refuses, including a
+                        compute mapping whose fields state no shape
         """
         # If already a Resource instance, return it unchanged
         if isinstance(data, Resource):
@@ -176,17 +198,11 @@ class ComputeDomainResource(Resource):
         if not isinstance(data, dict):
             return data
 
-        # TokenResource takes precedence if both keys are present
-        if "token" in data:
+        if payload_resource_type(data) == TOKEN_RESOURCE_TYPE:
             data = dict(data)  # copy to avoid mutating caller input
-            data["token"] = cls._resolve_token_metadata(data["token"])
+            data["token"] = cls._resolve_token_metadata(data.get("token"))
             return TokenResource(**data)
-        elif "gpu_model" in data:
-            return ComputeResource(**data)
-        raise ValueError(
-            "Resource dict must have either 'token' (TokenResource) "
-            "or 'gpu_model' (ComputeResource) key"
-        )
+        return ComputeResource(**data)
 
 
 def _parse_uint256_str(v: Any, field_name: str) -> int | None:
@@ -289,12 +305,15 @@ class ComputeResource(ComputeDomainResource):
     )
 
     # ---- Slice fields (per-listing; the seller's split of the host) ----
-    gpu_model: str = Field(
-        description="GPU model identifier. The indexer's filter-spec.yaml "
-        "is the authoritative vocabulary; the storefront accepts "
-        "any string."
+    gpu_model: str | None = Field(
+        default=None,
+        description="GPU model identifier, absent when the slice has no GPUs. "
+        "The indexer's filter-spec.yaml is the authoritative vocabulary; the "
+        "storefront accepts any string.",
     )
-    gpu_count: int = Field(description="Number of GPUs in this slice")
+    gpu_count: int | None = Field(
+        default=None, description="Number of GPUs in this slice; absent when it has none"
+    )
     sla: float = Field(description="The SLA of this slice")
     region: str = Field(
         description="Geographic region of the slice (matches host region)"
@@ -385,14 +404,32 @@ class ComputeResource(ComputeDomainResource):
         ),
     )
 
+    @model_validator(mode="after")
+    def _validate_shape(self) -> "ComputeResource":
+        # The slice's shape is read through the compute schema, so a GPU count
+        # without a model, a model without a count, or a slice stating no
+        # quantity at all is refused by the shape kit, not by a rule restated
+        # here.
+        vm_listing_resource_shape(
+            {
+                field.flat_name: getattr(self, field.flat_name)
+                for field in VM_CAPABILITY_SCHEMA.fields
+            }
+        )
+        return self
+
     @model_serializer(mode="wrap")
-    def _omit_unpriced_rate(self, handler: Any) -> Any:
-        # Omitted rather than null so a rateless listing publishes no field
-        # (the compute schema types it as an object) and a withdrawn rate
-        # refreshes in place to a listing without one.
+    def _omit_absent_fields(self, handler: Any) -> Any:
+        # Omitted rather than null: a rateless listing publishes no field (the
+        # compute schema types it as an object) and a withdrawn rate refreshes
+        # in place to a listing without one; a slice without GPUs publishes no
+        # GPU key, since the compute schema types a present ``gpu_model`` as a
+        # string and a null would state a value the shape does not.
         data = handler(self)
-        if isinstance(data, dict) and data.get("asking_rate") is None:
-            data.pop("asking_rate", None)
+        if isinstance(data, dict):
+            for name in ("asking_rate", "gpu_count", "gpu_model"):
+                if data.get(name) is None:
+                    data.pop(name, None)
         return data
 
 

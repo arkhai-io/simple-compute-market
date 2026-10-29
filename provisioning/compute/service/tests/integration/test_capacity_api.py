@@ -500,8 +500,7 @@ async def test_site_resource_pools_projection_surfaces_region_sla_pricing_policy
 
     with container.session_factory()() as db:
         db.add(_host_row(
-            host_id="kvm1", gpu_count=8, gpu_model="H200",
-            pool_id="hetzner-eu",
+            host_id="kvm1", pool_id="hetzner-eu",
         ))
         db.commit()
 
@@ -827,7 +826,7 @@ async def test_site_resource_pools_projection_omits_pool_views_with_no_defaults(
 
     with container.session_factory()() as db:
         db.add(_host_row(
-            host_id="kvm1", gpu_count=8, pool_id="default",
+            host_id="kvm1", pool_id="default",
         ))
         db.commit()
 
@@ -872,7 +871,7 @@ async def test_site_capacity_projection_version_endpoints_through_the_real_clien
 
     with container.session_factory()() as db:
         db.add(_host_row(
-            host_id="kvm-version-test", gpu_count=4, pool_id="version-pool",
+            host_id="kvm-version-test", pool_id="version-pool",
         ))
         db.commit()
     await capacity.register(
@@ -981,17 +980,17 @@ async def test_the_resource_pool_projection_publishes_declarations_not_hosts(
     capacity: CapacityApi, client_and_queue,
 ):
     """A declaration is projected, with live availability; a host is not,
-    whatever GPUs it describes or however it was written. Written through the
+    however it was written. Written through the
     canonical clients, read through SiteCapacityClient.resource_pool_projection."""
     provisioning_client, _ = client_and_queue
     await provisioning_client.host_import.import_hosts_from_text(
         "[kvm_hosts]\n"
         "kvm1  ansible_host=10.0.0.1  ansible_user=ubuntu  "
-        "ansible_ssh_private_key_file=/keys/id  gpus=4  gpu_model=H200  pool_id=default\n",
+        "ansible_ssh_private_key_file=/keys/id  pool_id=default\n",
         ssh_key_type="path",
     )
     await provisioning_client.family.register_host(HostCreate(
-        host_id="kvm2", connection=ssh_connection(ssh_host="10.0.0.2", ssh_user="ubuntu", key_path="/keys/id"), gpu_count=8,
+        host_id="kvm2", connection=ssh_connection(ssh_host="10.0.0.2", ssh_user="ubuntu", key_path="/keys/id"),
     ))
     assert await capacity.admin.list_resources() == []
     await capacity.register(
@@ -1097,9 +1096,8 @@ async def test_a_declaration_naming_no_host_reaches_the_resource_pool_projection
     visible to storefronts with its declared shape, and no entry carries host
     connection identity. Registered and read through the canonical clients."""
     provisioning_client, _ = client_and_queue
-    # The host record carries a GPU model; the declaration naming it does not.
     await provisioning_client.family.register_host(HostCreate(
-        host_id="kvm1", connection=ssh_connection(ssh_host="10.0.0.1", ssh_user="ubuntu", public_host="203.0.113.10", key_path="/keys/id"), gpu_model="H100",
+        host_id="kvm1", connection=ssh_connection(ssh_host="10.0.0.1", ssh_user="ubuntu", public_host="203.0.113.10", key_path="/keys/id"),
     ))
     await capacity.register(
         "no-host", pool_id="default",
@@ -1120,7 +1118,7 @@ async def test_a_declaration_naming_no_host_reaches_the_resource_pool_projection
     assert set(resources) == {"no-host", "hosted"}
     assert resources["no-host"]["capacity"] == {"gpu_count": 2, "ram_gb": 64}
     assert resources["no-host"]["attributes"] == {"gpu_model": "H200"}
-    # A value only the host record holds never fills an undeclared attribute.
+    # A declaration's attributes are its own; none comes from the host it names.
     assert resources["hosted"]["attributes"] == {}
     for row in resources.values():
         assert "host_id" not in row["attributes"]

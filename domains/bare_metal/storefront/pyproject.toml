@@ -1,13 +1,13 @@
 [project]
 name = "arkhai-bare-metal-storefront"
-version = "0.23.1"
+version = "0.24.0"
 license = "MIT"
 description = "Seller-side storefront composition for the Arkhai bare-metal domain."
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "arkhai-compute-provisioning-contracts>=0.11.0",
     "arkhai-kit-resource-pools-contracts>=0.2.0",
-    "arkhai-bare-metal>=0.13.0",
+    "arkhai-bare-metal>=0.14.0",
     "arkhai-kit-delivery==0.2.1",
     "arkhai-kit-delivery-apprise==0.1.1",
     "arkhai-kit-contact-exchange==0.4.0",
@@ -55,9 +55,13 @@ dev = [
     # either.
     "arkhai-bare-metal-buyer>=0.6.0",
     "arkhai-core-buyer>=0.6.0",
-    # The site's own claim predicate, which the claim test checks the storefront's
-    # derived claims against. Test-only.
+    # The site's own claim predicate, which the claim and fulfillment-service
+    # tests check the storefront's derived claims against, and its capacity
+    # router and ledger, which the site-reservation integration test reserves
+    # and commits a deal's claim through. Test-only.
     "arkhai-kit-site>=0.10.0",
+    # The in-memory database that test's site ledger runs over. Test-only.
+    "sqlalchemy>=2.0",
     # Validates documents against the generated Helm values schema.
     "jsonschema>=4.0",
 ]

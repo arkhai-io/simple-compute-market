@@ -6,6 +6,9 @@ from pydantic import ValidationError
 import compute_provisioning_contracts as contracts
 from compute_provisioning_contracts import (
     PROVISIONING_ROUTE_CONTRACTS,
+    HostCreate,
+    HostResponse,
+    HostUpdate,
     LeaseTermination,
     resolve_provisioning_route,
 )
@@ -144,3 +147,42 @@ def test_no_contract_registers_a_lease():
     """No route writes a lease: commit records its window, provisioning its
     target at activation, and the lease lifecycle its release."""
     assert not hasattr(contracts, "LeaseRegistration")
+
+
+_GPU_FIELDS = {"gpu_count": 8, "gpu_model": "H200"}
+_CONNECTION = {"kind": "ssh", "public": {"ssh_host": "192.0.2.1"}}
+
+
+@pytest.mark.parametrize(
+    "model, body",
+    [
+        (HostCreate, {"host_id": "kvm1", "connection": _CONNECTION}),
+        (HostUpdate, {"enabled": False}),
+        (
+            HostResponse,
+            {
+                "host_id": "kvm1",
+                "connection": {"kind": "ssh", "version": 1, "public": {}},
+                "enabled": True,
+                "pool_id": None,
+                "created_at": "2026-10-28T00:00:00Z",
+                "updated_at": "2026-10-28T00:00:00Z",
+            },
+        ),
+    ],
+    ids=["create", "update", "response"],
+)
+def test_a_host_model_ignores_gpu_fields(model, body):
+    """A host describes no hardware: a body still carrying the GPU fields
+    parses, and the model exposes and serializes neither."""
+    parsed = model.model_validate({**body, **_GPU_FIELDS})
+
+    assert parsed == model.model_validate(body)
+    assert not set(_GPU_FIELDS) & set(type(parsed).model_fields)
+    assert not set(_GPU_FIELDS) & set(parsed.model_dump(mode="json"))
+
+
+def test_an_update_carrying_only_gpu_fields_sets_nothing():
+    """An update naming only the GPU fields sets no field, so it changes
+    nothing on the host."""
+    assert HostUpdate.model_validate(_GPU_FIELDS).model_fields_set == set()

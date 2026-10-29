@@ -15,6 +15,7 @@ from arkhai_vms import (
     VmTerms,
     make_vm_provision_terms,
     normalize_vm_provision_terms,
+    vm_listing_resource_shape,
 )
 
 
@@ -63,9 +64,45 @@ def test_vm_schema_models_validate_current_payload_shapes() -> None:
     assert result.kind == VM_PROVISION_KIND
 
 
-def test_vm_listing_requires_compute_identity() -> None:
-    with pytest.raises(ValidationError, match="listing_resource must include gpu_model"):
-        VmListing.model_validate({"gpu_count": 1})
+def test_a_vm_listing_without_gpus_validates() -> None:
+    listing = VmListing.model_validate({
+        "vcpu_count": 8,
+        "ram_gb": 32,
+        "sla": 0.99,
+        "region": "California, US",
+    })
+
+    assert "gpu_count" not in listing.listing_resource
+    assert vm_listing_resource_shape(listing.listing_resource) == {
+        "cpu": {"count": 8},
+        "memory": {"gib": 32},
+    }
+
+
+def test_a_gpu_field_stated_as_none_states_nothing() -> None:
+    listing = VmListing.model_validate({
+        "gpu_count": None,
+        "gpu_model": None,
+        "vcpu_count": 8,
+        "region": "California, US",
+    })
+
+    assert vm_listing_resource_shape(listing.listing_resource) == {"cpu": {"count": 8}}
+
+
+@pytest.mark.parametrize(
+    ("resource", "reason"),
+    [
+        ({"gpu_model": "H200", "vcpu_count": 8}, "gpu.count: is required"),
+        ({"gpu_count": 1, "vcpu_count": 8}, "gpu.model: is required"),
+        ({"sla": 0.99, "region": "California, US"}, "a shape must name at least one family"),
+        ({"gpu_count": 0, "gpu_model": "H200"}, "gpu.count: must be a positive integer"),
+    ],
+    ids=["model-alone", "count-alone", "no-quantity", "zero-gpus"],
+)
+def test_a_vm_listing_whose_fields_form_no_shape_is_refused(resource, reason) -> None:
+    with pytest.raises(ValidationError, match=reason):
+        VmListing.model_validate(resource)
 
 
 def test_vm_message_accepts_provision_terms_carrier() -> None:

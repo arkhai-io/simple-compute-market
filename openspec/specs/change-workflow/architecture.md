@@ -22,8 +22,8 @@ reads every finding and decides every design question.
 ## Leaf skills from one source
 
 Each step is its own skill (`change-design`, `change-plan`, `change-review`,
-`change-triage`, `change-implement`, `change-validate`, `change-closeout`,
-`change-archive-cleanup`). A step does one thing and stops, so its failure modes are
+`change-triage`, `change-implement`, `change-validate`, `change-merge`,
+`change-closeout`, `change-archive-cleanup`). A step does one thing and stops, so its failure modes are
 visible on their own. The owner may start any step by hand; `change-orchestrate`
 starts them in turn, and is built on the leaf skills rather than replacing them, so
 a step the orchestrating session runs and a step the owner runs are the same step.
@@ -369,8 +369,9 @@ the return leads to is a round of its own, read, validated, and reviewed afresh 
 even a rework of the returned round's own sections, which under the returned round
 would reach the next round unread and unreviewed. A declined return is the owner's
 to settle, since the triage it ended no longer says what follows. A triage with
-nothing to dispose of advances without the owner. An implementation or pre-closeout round advances only on a
-`passed` validation of its final commit, and after a closeout review a correction
+nothing to dispose of advances without the owner. An implementation round, and the
+merge before closeout, advance only on a `passed` validation of their final commit,
+and after a closeout review a correction
 outside `openspec/` and `docs/` is validated before archive cleanup, so a code
 correction reaches the merge validated unless the owner waives it. The owner's own look at the pull request before merging is outside
 the workflow.
@@ -817,6 +818,51 @@ next phase as its exit, or the owner directs one. Planning starts only after the
 design review's triage advances it,
 so a review that redirects the design never discards a plan; a design question
 planning exposes returns the change to design.
+
+## The merge before closeout
+
+A change is reviewed against the branch it was branched from — `dev`, usually — as
+it stood then, and lands on that branch as it stands when it merges, and between
+the two the branch moves. A merge of it made whenever the owner thinks of it can fall after the pre-closeout review, where no
+step owns what it breaks: implementation has no section for it and triage no review
+of it, so a failed validation of the merge reaches the owner with nowhere to go. So
+the merge is a step of the graph, after the pre-closeout triage and before
+closeout, and closeout is reached only through it: the validation before closeout is
+then a validation of the change merged with what it lands on.
+
+Git merges text, not meaning. Code the change added that calls what that branch
+renamed or
+removed merges without a conflict and fails only when it runs, and end-to-end
+scenarios fail only in the pipeline, which no local suite stands in for. So the
+merge reconciles the change's own code with the branch's changes, not only its
+conflicts,
+and a failed validation of the merged `HEAD` routes back to the merge, which holds
+what each side changed, rather than to the owner; an inconclusive one, being missing
+evidence, still goes to the owner.
+
+Most merges are mechanical — locks, index rows, version bumps — so the merge is not
+a review round of its own. It judges what it needs, and its default is the cheapest
+safe route, taken without asking: closeout after a passing validation of the merged
+`HEAD`. Each costlier or riskier deviation is the owner's to confirm: another
+pre-closeout review, when the merge changed what the change does, and closeout
+without that validation, which is the owner's direction past the guard as any
+waiver is. After a review of the merge, its triage advances to the merge again,
+which finds the branch merged, or merges what it gained meanwhile.
+
+Which branch a change lands on is not recorded anywhere the workflow reads: a clone
+is created from a branch but does not keep its name. So the skill merges the branch
+its invocation names and assumes none, and `make merge` names `dev` unless the
+owner gives `FROM=<branch>`; a change branched from another branch is merged from
+it on the owner's word.
+
+The merge sits in the implementation phase, since it may change code, and sets
+`ready for closeout` as it advances only when the merged `HEAD` is already
+validated; closeout accepts a row still `in implementation` once the computation
+names it, as it did when a triage advanced before its fix was validated. A merge of
+the branch at any other time stays the owner's intervention, and does not replace this
+one.
+
+## Closeout and archival
 
 Closeout and archival are one phase. Closeout writes the documents OpenSpec does not
 synchronize, then archives the change, which merges its deltas into

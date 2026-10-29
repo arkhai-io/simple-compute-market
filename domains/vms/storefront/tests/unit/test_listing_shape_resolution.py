@@ -86,6 +86,19 @@ class TestStatedShapes:
         assert len(_resolve(_hint(shape, shape)).listings) == 1
 
 
+class TestShapesWithoutGpus:
+    def test_a_stated_shape_without_gpus_resolves_with_no_gpu_fields(self):
+        shape = {"cpu": {"count": 16}, "memory": {"gib": 64}}
+        (listing,) = _resolve(_hint(shape)).listings
+        assert (listing.shape.gpu_count, listing.shape.gpu_model) == (None, None)
+        assert dict(listing.shape.quantities) == {"vcpu_count": 16, "ram_gb": 64}
+        assert dict(listing.shape.attributes) == {}
+
+    def test_a_gpu_shape_still_names_its_count_and_model(self):
+        resolved = resolve_shape({"gpu": {"count": 2, "model": "H100"}})
+        assert (resolved.gpu_count, resolved.gpu_model) == (2, "H100")
+
+
 class TestConfiguredDefault:
     def test_a_listing_narrows_the_configured_default(self):
         resolution = _resolve(

@@ -482,6 +482,51 @@ async def _seed_dynamic_listing_pool_rows(
         )
 
 
+async def _seed_gpu_less_listing(db: SQLiteClient, *, site_id: str = "default") -> None:
+    """One open listing of a shape stating no GPUs, bound to its resource.
+
+    Its escrow and token addresses are deterministic development values that
+    must never be used on a public network.
+    """
+    await db.upsert_listing(
+        listing_id="listing-cpu",
+        status="open",
+        created_at="2026-01-01T00:00:00",
+        updated_at="2026-01-01T00:00:00",
+        listing_resource={
+            "resource_id": "pool-cpu-1",
+            "vcpu_count": 8,
+            "ram_gb": 32,
+            "region": "California, US",
+            "sla": 99.0,
+            "offering_mode": "vm",
+        },
+        accepted_escrows=[{
+            "chain_name": "anvil",
+            "escrow_address": "0x" + "11" * 20,
+            "literal_fields": {"token": "0x" + "22" * 20},
+            "rates": [{"field": "amount", "per": "hour", "value": "100"}],
+        }],
+        demands=[],
+        fulfillment_resource=None,
+        max_duration_seconds=3600,
+        storefront_url="http://seller",
+        seller_principal=_TEST_SELLER_PRINCIPAL,
+    )
+    await db.record_listing_binding(
+        binding=prepare_vm_listing_binding(
+            listing_id="listing-cpu",
+            candidate={
+                "capacity_backing": "backed",
+                "site_id": site_id,
+                "pool_id": "pool-cpu-1",
+                "resource_id": "pool-cpu-1",
+                "listing_shape": {"cpu": {"count": 8}, "memory": {"gib": 32}},
+            },
+        )
+    )
+
+
 def _fake_pool_site():
     fake = FakeSite(deliverable_modes={"vm"})
     fake.add_resource(
@@ -553,6 +598,34 @@ class TestFulfillmentEvents:
             3: "closed",
             4: "closed",
         }
+
+    async def test_admin_reserve_capacity_of_a_listing_without_gpus_reports_no_gpu_count(
+        self, client
+    ):
+        c, db = client
+        await _seed_gpu_less_listing(db)
+        fake = FakeSite(deliverable_modes={"vm"})
+        fake.add_resource(
+            "pool-cpu-1", 0,
+            attributes={"region": "California, US"},
+            capacity={"vcpu_count": 64, "ram_gb": 512},
+        )
+
+        async with site_capacity(fake, project_pool_modes=True):
+            response = await c.admin_reserve_capacity(
+                required_attributes={
+                    "resource_id": "pool-cpu-1",
+                    "dimensions": {"vcpu_count": 8, "ram_gb": 32},
+                },
+                listing_id="listing-cpu",
+                escrow_uid="manual-escrow-cpu",
+            )
+
+        assert response.capacity_reservation_id
+        assert response.pool_id == "pool-cpu-1"
+        assert response.gpu_count is None
+        (reservation,) = fake.reservations.values()
+        assert reservation["dimensions"] == {"vcpu_count": 8, "ram_gb": 32}
 
     async def test_admin_reserve_capacity_for_a_mapped_listing_pins_to_its_site(
         self, client,

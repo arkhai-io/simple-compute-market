@@ -57,12 +57,14 @@ def test_the_step_table_names_each_step() -> None:
 
 
 def test_each_step_runs_on_the_models_its_work_needs() -> None:
-    """Design, triage, implementation, and closeout on Opus at high effort; validation
-    and archive cleanup on Sonnet at medium; the review on Codex, then Claude."""
+    """Design, triage, implementation, the merge, and closeout on Opus at high effort;
+    validation and archive cleanup on Sonnet at medium; the review on Codex, then
+    Claude."""
     models = {name: rules.models for name, rules in load_steps().items()}
 
     assert models == {"design": (OPUS,), "plan": (OPUS,), "triage": (OPUS,),
-                      "implement": (OPUS,), "closeout": (OPUS,), "validate": (SONNET,),
+                      "implement": (OPUS,), "merge": (OPUS,), "closeout": (OPUS,),
+                      "validate": (SONNET,),
                       "archive-cleanup": (SONNET,),
                       "review": (Model("codex", "gpt-6-sol", "high"), OPUS)}
 
@@ -118,7 +120,7 @@ PUSHES = ["git push origin HEAD", "make push-branch", "uv run git push",
           "uv run bash -c 'git push'", "make run-e2e", "docker push registry/image",
           "helm push chart.tgz oci://registry", "make push-branch FORCE=1",
           "git -C ../workspace push"]
-COMMITTING = {"design", "plan", "implement", "triage", "closeout", "archive-cleanup"}
+COMMITTING = {"design", "plan", "implement", "triage", "merge", "closeout", "archive-cleanup"}
 
 
 def test_each_committing_step_pushes_only_through_the_guarded_push() -> None:
@@ -236,6 +238,24 @@ def test_archive_cleanup_may_write_only_the_index_and_its_pull_request_draft() -
     assert _allows_edit(rules, "Edit", "openspec/changes/README.md")
     assert not _allows_edit(rules, "Write", f"{archived}/specs/pools/spec.md")
     assert not any(rule.startswith("Write(") for rule in rules.allow)
+
+
+def test_the_merge_merges_a_fetched_branch_and_never_abandons_a_merge() -> None:
+    """Whichever branch the change lands on, from origin or, in a clone, the owner's
+    workspace; a merge stopped at its conflicts stays in progress for the owner, so
+    nothing the step may run abandons it or moves the branch."""
+    rules = load_steps()["merge"]
+
+    for remote, branch in (("origin", "dev"), ("origin", "release/2.1"),
+                           ("workspace", "feat/prerequisite")):
+        assert _allows(rules, f"git fetch {remote} {branch}")
+        assert _allows(rules, f"git merge --no-edit {remote}/{branch}")
+    assert _allows(rules, "make lock") and _allows(rules, "git commit -m x")
+    for command in ("git merge --abort", "git merge --quit", "git merge origin/main",
+                    "git merge --no-edit HEAD~3", "git pull origin dev",
+                    "git checkout --theirs uv.lock", "git reset --hard ORIG_HEAD",
+                    "make run-e2e"):
+        assert not _allows(rules, command), command
 
 
 def test_every_step_may_compute_the_next_step_and_read_the_log() -> None:

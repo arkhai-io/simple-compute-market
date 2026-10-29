@@ -734,13 +734,14 @@ against declared supply have shapes; the market core MUST NOT carry it.
 
 - **Schema.** Flattening MUST be driven by a schema the owning domain supplies. For each
   family field the schema states whether it is a quantity or an attribute, whether it is
-  required, and its flat name. The utility MUST NOT contain any domain's family or field
-  names.
+  required, and its flat name. A required field MUST be required only in a shape that names
+  its family: a shape that omits the family states nothing about it. The utility MUST NOT
+  contain any domain's family or field names.
 - **Digest.** The canonical digest MUST be taken over the family-grouped form, so changing a
   schema's flat names does not change a shape's digest.
-- **Refusals.** A shape naming a family or field its schema does not define, missing a
-  required field, or carrying a value of the wrong kind MUST be refused with the offending
-  path named.
+- **Refusals.** A shape naming a family or field its schema does not define, naming a family
+  without one of that family's required fields, or carrying a value of the wrong kind MUST be
+  refused with the offending path named.
 - **Inverse.** The utility MUST build a family-grouped shape from flat quantities and
   attributes through a schema, as the exact inverse of flattening, refusing every flat name
   the schema does not define and every problem flattening would refuse.
@@ -764,6 +765,16 @@ against declared supply have shapes; the market core MUST NOT carry it.
 
 - **WHEN** a shape names a field the supplied schema does not define
 - **THEN** flattening refuses it and names the family and field
+
+#### Scenario: A shape omits a family whose fields are required
+
+- **WHEN** a shape names no field of a family whose fields its schema marks required
+- **THEN** the utility accepts it, and its flattening carries nothing for that family
+
+#### Scenario: A shape names a family without one of its required fields
+
+- **WHEN** a shape names a family but omits a field the schema marks required in it
+- **THEN** the utility refuses it, naming the missing `family.field`
 
 #### Scenario: Structure is checked without a schema
 
@@ -791,11 +802,31 @@ that every compute domain binds. The VM and bare-metal domains MUST NOT each def
 and neither MUST obtain the schema by importing the other. The package MUST depend only on
 the standard library and the capability-shape foundation kit.
 
+No family of the compute schema is required. The `gpu` family's `count` and `model` MUST
+both be required within it, so a compute shape states a GPU count and model together or
+states no GPUs, and every compute shape carries at least one quantity.
+
 #### Scenario: Two compute domains flatten one shape
 
 - **WHEN** the VM and bare-metal domains each flatten `{gpu: {count: 8, model: H200}, memory: {gib: 2048}}`
 - **THEN** both produce `gpu_count: 8`, `ram_gb: 2048`, and `gpu_model: H200` through the
   same schema object
+
+#### Scenario: A shape states no GPUs
+
+- **WHEN** the compute schema validates `{cpu: {count: 8}, memory: {gib: 32}}`
+- **THEN** the shape is accepted and flattens to `vcpu_count: 8` and `ram_gb: 32` with no
+  attribute
+
+#### Scenario: A shape states a GPU model without a count
+
+- **WHEN** the compute schema validates `{gpu: {model: H100}, cpu: {count: 8}}`
+- **THEN** the shape is refused, naming `gpu.count` as required
+
+#### Scenario: A shape states a GPU count without a model
+
+- **WHEN** the compute schema validates `{gpu: {count: 2}}`
+- **THEN** the shape is refused, naming `gpu.model` as required
 
 #### Scenario: The bare-metal storefront binds the schema
 

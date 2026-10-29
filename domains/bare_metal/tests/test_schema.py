@@ -160,15 +160,47 @@ def test_bare_metal_listing_refuses_a_field_beside_its_shape():
         )
 
 
-@pytest.mark.parametrize("missing", ["region", "gpu_count", "gpu_model"])
-def test_bare_metal_listing_requires_region_and_gpu(missing):
+@pytest.mark.parametrize(
+    ("missing", "named"),
+    [
+        ("region", "region"),
+        # One GPU field without the other is refused by the compute schema,
+        # which names the field the GPU family lacks.
+        ("gpu_count", "gpu.count"),
+        ("gpu_model", "gpu.model"),
+    ],
+)
+def test_a_listing_missing_its_region_or_one_gpu_field_is_refused(missing, named):
     fields = {key: value for key, value in LISTING_HARDWARE.items() if key != missing}
-    with pytest.raises(ValidationError, match=missing):
+    with pytest.raises(ValidationError, match=named):
         BareMetalListing(
             capacity_backing="backed",
             **DELIVERY_TERMS,
             **fields,
         )
+
+
+def test_a_listing_stating_no_hardware_is_refused():
+    with pytest.raises(ValidationError, match="at least one family"):
+        BareMetalListing(capacity_backing="backed", **DELIVERY_TERMS, region="us-east")
+
+
+def test_a_machine_without_gpus_is_listed_with_no_gpu_key():
+    listing = BareMetalListing(
+        capacity_backing="backed",
+        **DELIVERY_TERMS,
+        region="us-east",
+        vcpu_count=64,
+        ram_gb=512,
+    )
+
+    assert listing.shape == {"cpu": {"count": 64}, "memory": {"gib": 512}}
+    assert listing.claimed_attributes == {}
+    for dumped in (listing.model_dump(mode="json"), listing.model_dump()):
+        assert "gpu_count" not in dumped
+        assert "gpu_model" not in dumped
+        assert dumped["vcpu_count"] == 64
+    assert BareMetalListing.model_validate(listing.model_dump(mode="json")) == listing
 
 
 def test_a_listing_digests_as_the_shape_stated_by_hand():

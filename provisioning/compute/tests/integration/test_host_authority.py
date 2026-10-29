@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 from market_resource_pools.db import Base as PoolsBase
 from market_resource_pools.db import ResourcePool
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -105,7 +105,7 @@ def test_no_ordinary_read_carries_a_protected_value(authority) -> None:
     reads = [authority.register_host(HostCreate(host_id="h1", connection=_connection(token="s3cret")))]
     reads.append(authority.get_host("h1"))
     reads.extend(authority.list_hosts(enabled_only=False))
-    reads.append(authority.update_host("h1", HostUpdate(gpu_count=2)))
+    reads.append(authority.update_host("h1", HostUpdate(enabled=True)))
     reads.append(authority.disable_host("h1"))
     reads.append(authority.enable_host("h1"))
     reads.extend(authority.apply_inventory(
@@ -152,13 +152,33 @@ def test_an_update_without_the_secret_keeps_the_stored_one(authority) -> None:
 
 def test_updates_leave_omitted_fields_alone(authority) -> None:
     authority.register_host(
-        HostCreate(host_id="h1", connection=_connection(), gpu_count=2, gpu_model="H100")
+        HostCreate(host_id="h1", connection=_connection("192.0.2.20"), pool_id="gpu")
     )
 
-    host = authority.update_host("h1", HostUpdate(gpu_count=4))
+    host = authority.update_host("h1", HostUpdate(enabled=False))
 
-    assert (host.gpu_count, host.gpu_model) == (4, "H100")
-    assert authority.update_host("h1", HostUpdate(gpu_model="A100")).gpu_model == "A100"
+    assert (host.enabled, host.pool_id) == (False, "gpu")
+    assert host.connection.public["address"] == "192.0.2.20"
+
+
+def test_no_write_records_a_gpu_field(authority, session_factory) -> None:
+    """A host describes no hardware: create, update, and import write rows with
+    no GPU column, and a request parsed from a body carrying the GPU fields is
+    applied as if they were absent. The request models drop the fields before
+    the authority sees them, and an inventory entry cannot carry them."""
+    gpu_fields = {"gpu_count": 8, "gpu_model": "H200"}
+    authority.register_host(HostCreate.model_validate(
+        {"host_id": "h1", "connection": _connection(), **gpu_fields}
+    ))
+    authority.update_host("h1", HostUpdate.model_validate({**gpu_fields, "enabled": False}))
+    authority.apply_inventory([InventoryHost(host_id="h2", connection=_connection("192.0.2.11"))])
+
+    with session_factory() as db:
+        rows = db.execute(text("SELECT * FROM hosts ORDER BY host_id")).mappings().all()
+    assert [(row["host_id"], bool(row["enabled"])) for row in rows] == [
+        ("h1", False), ("h2", True),
+    ]
+    assert not set(gpu_fields) & {column for row in rows for column in row}
 
 
 def test_hosts_name_existing_pools_and_a_move_runs_its_hooks(authority, moves) -> None:
@@ -291,21 +311,21 @@ def test_listing_filters_disabled_hosts_and_searches_by_id(authority) -> None:
         authority.disable_host("missing")
 
 
-def test_an_inventory_upserts_its_hosts_and_records_their_gpus(authority) -> None:
+def test_an_inventory_upserts_its_hosts_and_leaves_the_rest(authority) -> None:
     authority.register_host(HostCreate(host_id="untouched", connection=_connection()))
     entries = [
-        InventoryHost(host_id="kvm1", connection=_connection(), gpu_count=2, pool_id="gpu"),
+        InventoryHost(host_id="kvm1", connection=_connection(), pool_id="gpu"),
         InventoryHost(host_id="kvm2", connection=_connection("192.0.2.11")),
     ]
 
     first = authority.apply_inventory(entries)
     again = authority.apply_inventory(
-        [InventoryHost(host_id="kvm1", connection=_connection("192.0.2.99"), gpu_count=4)]
+        [InventoryHost(host_id="kvm1", connection=_connection("192.0.2.99"))]
     )
 
     assert [h.host_id for h in first] == ["kvm1", "kvm2"]
     assert again[0].connection.public["address"] == "192.0.2.99"
-    assert (again[0].gpu_count, again[0].pool_id) == (4, "gpu")
+    assert again[0].pool_id == "gpu"
     assert authority.get_host("untouched") is not None
 
 
@@ -331,7 +351,7 @@ def test_a_hook_refusing_an_inventory_move_applies_nothing(
     """The import is one transaction: one refused move leaves every host it
     names as it was, including hosts it would have created or reconnected."""
     authority.apply_inventory(
-        [InventoryHost(host_id="kvm1", connection=_connection("192.0.2.10"), gpu_count=1)]
+        [InventoryHost(host_id="kvm1", connection=_connection("192.0.2.10"))]
     )
     with session_factory() as db:
         db.add(ResourcePool(id="refused", label="refused", provider="test", policy_tags={}))
@@ -343,13 +363,12 @@ def test_a_hook_refusing_an_inventory_move_applies_nothing(
             InventoryHost(
                 host_id="kvm1",
                 connection=_connection("192.0.2.99"),
-                gpu_count=8,
                 pool_id="refused",
             ),
         ])
 
     kvm1 = authority.get_host("kvm1")
-    assert (kvm1.pool_id, kvm1.gpu_count) == (None, 1)
+    assert kvm1.pool_id is None
     assert kvm1.connection.public["address"] == "192.0.2.10"
     assert authority.get_host("kvm2") is None
 

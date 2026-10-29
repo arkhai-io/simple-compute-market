@@ -7,19 +7,29 @@ import re
 from fractions import Fraction
 from typing import Any
 
-from arkhai_vms_listings.models import Listing
+from arkhai_vms_listings.models import (
+    COMPUTE_RESOURCE_TYPE,
+    ComputeResource,
+    Listing,
+    payload_resource_type,
+)
 
 
 def resource_is_compute(resource: Any) -> bool:
-    """True when the resource represents compute rather than tokens."""
+    """True when the resource represents compute rather than tokens.
+
+    A mapping is judged by ``payload_resource_type``, the rule resource parsing
+    dispatches by, so a compute slice without GPUs is compute here too. An empty
+    mapping describes no resource, so it is not compute.
+    """
     if isinstance(resource, str):
         try:
             resource = json.loads(resource)
         except Exception:
             return False
     if isinstance(resource, dict):
-        return "gpu_model" in resource
-    return hasattr(resource, "gpu_model")
+        return bool(resource) and payload_resource_type(resource) == COMPUTE_RESOURCE_TYPE
+    return isinstance(resource, ComputeResource)
 
 
 def extract_compute_from_order(order: dict[str, Any]) -> dict[str, Any]:
