@@ -85,7 +85,7 @@ Non-goals are in `proposal.md`.
 ### D1. The target is a typed settings section in an ignored profile file
 
 The scenario reads its target from a `REAL_VM_TARGET` section of the e2e settings,
-loaded from `e2e-tests/config/config-real-vm-target.yml` when the run selects the
+loaded from `config-real-vm-target.yml` in the e2e config directory when the run selects the
 `real-vm-target` profile (`ACTIVE_PROFILES=local,real-vm-target`). An environment
 owner renders that file and places it in the config directory. The repository
 commits `config-real-vm-target.yml.example`, carrying obviously fictitious values,
@@ -419,6 +419,17 @@ Two rounds, one session each.
   marker registration, and the D11 documentation. Its validation is a run against a
   real host; the evidence recorded here is the scenario's result, the access checks'
   output, and the teardown checks, with no environment identifiers.
+
+Round 2's real-host run cannot be part of the pipeline or of a change validation:
+validation runs the lanes and the Helm namespace, where the real lane has no target
+and skips. Round 2 therefore ends with a live-verification section in the
+`[log]` form `relay-vm-access-without-a-dashboard` and
+`never-strand-the-host-on-passthrough` use: each item states its acceptance, and the
+owner supplies the run's output, already free of addresses, project, cluster,
+namespace, and host names, for checking against it here. Until it is supplied the
+change is `blocked in implementation` on that external input. The pipeline's result
+is evidence for round 2 only in that every lane still passes and the real lane skips
+naming its profile.
 
 ## Risks and trade-offs
 
