@@ -287,7 +287,8 @@ Withdrawing the declaration disables new deals only, and existing commitments ke
 their servicing and evidence. Servicing against the proposed contract is lane-only.
 Production activation verifies the hosted per-part, notice and hold revision and
 support for the stop terms actually offered through its own deployment gate; a
-permitted charged/charged subset need not wait for returned or prorated support.
+permitted charged/charged subset need not wait for returned or prorated support,
+though activation's closeout, and the goal's, does.
 
 ## Scenarios and evidence
 

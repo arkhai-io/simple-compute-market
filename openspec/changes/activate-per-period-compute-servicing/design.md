@@ -28,7 +28,9 @@ terms fail closed; SCM started_period/last_boundary/stop map to charged/returned
 prorated. An interim spot charged/charged subset may activate only if every other
 gate passes and the buyer explicitly accepts started_period for payee and charged
 term ends. Default buyers still prefer payer charged/payee returned and refuse
-payee or term-end treatment other than last_boundary. Absolute term ends have their
+payee or term-end treatment other than last_boundary, so the interim declaration
+does not close this change: closeout requires the `partialPeriod` revision deployed
+and a default buyer taking an on-demand offer live on the shipped presets. Absolute term ends have their
 own partialPeriod without rounding; exhaustion is period-boundary aligned.
 
 Requalify foundation's exceptional_end dispute intent, mediation request vocabulary
@@ -172,8 +174,10 @@ Live reports name the observed authority effects, physical recovery, evidence
 kept and remaining cases/holds separately. Do not claim a race/outage was tested
 live if it was only controlled in the double; report each row's provenance and
 unrun cause. The goal's activation acceptance requires both-domain live complete
-deals and the hosted payment/dispute acceptance matrix; an unavailable required
-live scenario is a blocker, not a caveat that closes the change.
+deals and the hosted payment/dispute acceptance matrix, with at least one live
+on-demand deal taken by a default buyer on the shipped presets' returned term end;
+an unavailable required live scenario is a blocker, not a caveat that closes the
+change, and an interim charged-subset declaration is recorded as current state.
 
 ## Rejected alternatives
 
