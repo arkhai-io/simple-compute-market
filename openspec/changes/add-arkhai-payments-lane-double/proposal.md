@@ -27,9 +27,14 @@ lane, not a cooperative storefront masquerading as an authority.
   sufficient seller self-penalty and an acknowledged `buyer_end(at)`, and sends
   everything else to controllable triage. Only the authority double applies a
   ruling's effects at the payment double.
-- Keep mid-scenario control routes: exhaustion, snapshot sequence/provenance faults,
-  delay/drop/refusal, independent outages and signing-identity rotation. Add a
-  deterministic clock and triage/effect-retry controls rather than sleeps.
+- Keep mid-scenario control routes through a tooling-owned typed client: exhaustion,
+  snapshot sequence/provenance faults, delay/drop/refusal, independent outages,
+  signing-identity rotation and triage/effect retry. Lane services use wall time
+  and due-work barriers; isolated tooling tests use injectable deterministic time.
+- Use explicit lane-only HTTPS origins, a public development CA and fixture bearer
+  auth; keep published clients' production transport/auth checks intact. Production
+  composition refuses lane settings and identities. Add the double's own timer,
+  classifier, retry and isolation suites as required work, not deferred approval.
 - Wire lane-scoped targets, accounts, credentials and authority advertisements into
   the existing VM, bare-metal and API-credit lanes. Existing bare-metal and credits
   payment scenarios stop skipping; later compute lifecycle scenarios reuse the same
@@ -56,18 +61,22 @@ None. These are test collaborators, not new production authorities.
   primitives. Its schema/model work gates this change's corresponding published
   mode, not design. A pinned draft permits proposed-only qualification until then.
 - This change alone owns the executable payment and mediation doubles and their
-  controls. The foundation change consumes them in adapter integration tests; its
-  section 12 does not build another mediation double. Design D7 gives the precise
-  non-cyclic implementation gates and requested coordination edits.
-- `spot-deals-through-arkhai-payments` consumes both doubles for rate-part client
-  integration and compute scenarios; it owns production rate arithmetic and adapters.
+  controls. Kits keep vector-generated in-process contract fakes for unit and
+  library-integration tests; they never depend on the tool. Its own tests exercise
+  real clients, while lanes consume the runnable services. Foundation section 12
+  does not build another executable double. Design D7 gives the section-level gates.
+- `spot-deals-through-arkhai-payments` consumes both doubles for compute lane
+  scenarios, retaining kit contract fakes for rate-part client integration; it owns production rate arithmetic and adapters.
 - `activate-per-period-compute-servicing` compares the doubles with the vendored
   publication and qualifies the ready hosted deployment before claiming live
-  servicing. Hosted deployment is not a gate on building or using lane doubles.
+  servicing. Producer snapshot/start/reversal vectors also gate published
+  qualification; until available, affected scenarios report proposed qualification.
+  Hosted deployment is not a gate on building or using lane doubles.
 
 ## Non-Goals
 
-Production payment/dispute services, production derivation or verification changes,
+Production payment/dispute services, production derivation or cryptographic
+verification changes (the lane-only configuration refusal guard is in scope),
 new payment primitives, bonds before the contract supports them, automated decisions
 beyond the mediation contract's two mechanical classes, and live provider or ledger
 qualification. Seller site deadlines and churn/pricing policy are not protocol

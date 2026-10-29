@@ -7,14 +7,18 @@ production adapters and their contract/fixture prerequisites remain in
 
 ## Dependency gates and first use
 
-- Foundation sections 1–2 supply lifecycle interfaces; 8.1 supplies the payments
-  revision/models/vectors; 9.1 supplies the shared snapshot fixture/frame seam; 12.1
-  supplies the mediation published or explicitly draft schema/models and record
-  fixture seam. Confirm these per boundary before building its corresponding mode.
-  Missing publication/vectors permits pinned proposed-only work, not published claims.
-- Foundation 11.1/12.2 adapter integration consumes these doubles after they exist;
-  it is not a prerequisite to constructing them. Coordinate ownership edits in D7
-  before implementation so a second mediation double is not assigned elsewhere.
+- Foundation sections 1–2 supply lifecycle interfaces; 8.1 supplies payments
+  schemas/models/vectors; 9.1 supplies the shared snapshot fixture/frame seam;
+  12.1 supplies the published/draft mediation schema. Extract 12.2's models and
+  record-signing fixtures into a prerequisite subtask. Gate buyer_end on the shared
+  acknowledgement signing/verification primitive owned by 13.1 and consumed by 7.5,
+  with the 2.4 response model. Confirm each prerequisite before its HTTP surface.
+- Foundation 7.4/11.1/12.2/14.2 and spot kit tests use in-process contract fakes
+  generated from the same kit vectors; they do not depend on this tool (D-H).
+  The tool's tests and lane/system-integration runs consume its HTTP services.
+  Land foundation prerequisites first, then this change, then lane consumers;
+  foundation's remaining rounds can finish independently with contract fakes.
+  Missing producer vectors permits pinned proposed-only work, not published claims.
 - `spot-deals-through-arkhai-payments` owns production rate arithmetic/adapters and
   compute scenarios. `converge-ongoing-compute-leases` consumes the controls for end
   service/rate servicing. `activate-per-period-compute-servicing` owns later hosted
@@ -26,19 +30,22 @@ production adapters and their contract/fixture prerequisites remain in
 
 New paths below are planned deliverables, not citations to existing implementation.
 Within the new tooling root `tools/authority-lane-doubles`, filenames are relative to
-that root. Test work adapts existing kept suites first. New acceptance tests require
-maintainer approval of the stated property and system; this plan is not that approval.
-Until granted, use temporary deterministic diagnostics and report the missing coverage
-rather than expanding the suite implicitly.
+that root. Test work adapts existing kept suites first. The owner authorizes the
+new double's own timer/hold, mechanical-classifier, effect-resume and control-isolation
+coverage below (02 F10); it is required for implementation, not a deferred approval.
+No unrelated consumer acceptance suite is authorized by this design triage.
 
 ## 1. Package, contract provenance and signed frames
 
-- [ ] 1.1 Confirm the foundation gates and request D7's ownership edits in its design
-      and tasks. Record the exact published/draft schema and vector hashes for each
+- [ ] 1.1 Confirm D7's remaining foundation coordination edits and prerequisite
+      extracts (02 F3/F11), rather than requesting already-applied ownership edits.
+      Record the exact published/draft schema and vector hashes for each
       service. Refuse published readiness for any required unpublished surface; pin
       proposed candidates and a difference manifest without reintroducing dropped
-      primitives. Files: new tooling contract manifests/candidate data under
-      `src/authority_lane_doubles/contracts/`; consume, do not fork, kit SOURCE files.
+      primitives. Files: new tooling contract selectors/manifests under
+      `src/authority_lane_doubles/contracts/` selectors and difference manifests;
+      schemas/candidate bytes/vectors stay solely in the owning kit with publication
+      status and hashes in SOURCE. Consume those exact bytes (02 F5).
 - [ ] 1.2 Add the tooling `pyproject.toml`, `uv.lock`, `Makefile`, `Dockerfile` and
       `src/authority_lane_doubles/` package with separate payments and mediation
       entry points. Declare every imported kit distribution. Reuse kit fixture APIs;
@@ -47,12 +54,15 @@ rather than expanding the suite implicitly.
 - [ ] 1.3 Add deterministic lane-only identities, accounts, initial balances and
       authority advertisement fixtures to the tool. Label all credential material
       public development-only, never for a public network. Keep production defaults
-      empty. Expose health/status with contract metadata outside signed wire frames.
+      empty. Expose health/status with contract metadata outside signed wire frames;
+      before explicit mode/seed selection report not-ready. Compare required consumer
+      SOURCE hashes in published readiness and fail setup by name on mismatch.
 
 Verification: static schema validation and existing kit vector targets
 `make -C kit/arkhai-payments check-vectors` and the foundation's mediation vector
 suite when available; shared receipt/snapshot signing reproduces the pinned vectors.
-Library integration uses real HTTP clients to read both services' initial state.
+The tool's library-integration suite uses real HTTP clients with injected transports
+to read both services' initial state; kit suites keep their vector-generated fakes.
 Packaging: new tool build/reinit/typecheck targets, `make check-packaging`.
 Missing producer vectors are recorded as published-qualification gates, not passing
 conformance evidence.
@@ -67,32 +77,42 @@ conformance evidence.
 - [ ] 2.2 Add the target revision's per-part start, stop with notice and pending-stop
       maturity, absolute end, funding exhaustion and funded-through observations.
       Use the pinned rate-period arithmetic from start, including mixed once/rate
-      mandates where supported; do not conflate transaction approval with start.
+      mandates where supported. Apply each stopper's partialPeriod in the authority,
+      one notice from notice_seconds, charged exhaustion/part ends and whole-period
+      maximum terms. Until expressible, fail closed on unsupported values and use
+      charged for both spot parties. Setup ends at activation with its window,
+      returning all only when undelivered under self-penalty (D-A/D-B/D-D).
+      Do not conflate transaction approval with start.
       Keep no payee stop on on-demand mandates and no horizon/vouch route.
 - [ ] 2.3 Add held-money partial reverse before/after stop, afterStop payout timing,
       independent extend refs and lift, caps and contract refusal codes. Preserve
       idempotent results across lost responses. Share one state engine between HTTP
-      and controls; do not grow a second rate simulator in FakePaymentsClient.
+      and controls; kit contract fakes follow shared vectors, not an independent
+      hand-maintained rate simulator.
 
-Verification: extend existing `kit/arkhai-payments/tests/test_client.py` setup to use
-HTTP where it meaningfully covers transport; keep existing `test_receipt_fixture.py`
-and `test_receipts.py` framing assertions. Deterministic library-integration drive:
-start/stop authorization, notice firing with no storefront, two overlapping case
-holds, partial reversal before/after stop and response-loss replay. Candidate new
-coverage for approval: the payment double's timer/hold state machine preserves the
-selected contract across clock advance and idempotent retries. No full hosted ledger
-qualification is claimed.
+Verification: keep existing kit `test_client.py`, `test_receipt_fixture.py` and
+`test_receipts.py` on kit-owned contract fakes/vectors. In the new tool's
+`tests/test_payments.py`, drive real clients through HTTP transports and prove
+start/stop authorization, partialPeriod outcomes, notice firing without a storefront,
+setup maturity, overlapping case holds, reversal before/after stop and response-loss
+replay. Required unit state-machine coverage uses an injected clock for timer/hold
+transitions and idempotent retries; required library integration covers signed HTTP
+records from the same state engine (02 F10). No hosted ledger qualification is claimed.
 
 ## 3. Mediation HTTP double
 
 - [ ] 3.1 Add new tooling `src/authority_lane_doubles/mediation.py`: authenticated
       file/append/read/watch, registry-approval scope fixture, per-agreement signed
       sequence/cursors across cases, closed-case refusal and per-write idempotency.
-      Use the foundation's mediation models and record-signing fixture.
+      Use the foundation's mediation models and record-signing fixture. Known,
+      authorized agreements with no cases read as a signed empty record at cursor
+      zero; unknown agreements/readers receive named refusals.
 - [ ] 3.2 Implement authority-owned filing extensions over payment HTTP: per-part
       held/not-held/pending/error results, stable case/part keys, and payout-race
-      handling. Read the committed Agreement and derive effects in the authority
-      tool, never in the marketplace dispute adapter.
+      handling. Add `src/authority_lane_doubles/authority_payments_client.py` using
+      kit-generated models for authority HTTP calls (02 F14), not an invented
+      production-party client. Read the committed Agreement and derive effects in
+      the authority tool, never in the marketplace dispute adapter.
 - [ ] 3.3 Implement the two mechanical classes only: sufficient seller self-penalty
       and buyer_end with a verified, deal-bound storefront acknowledgement. Realize
       past ends as stop-now plus reverse. Queue everything else for triage with a
@@ -103,20 +123,20 @@ qualification is claimed.
       a delivery end distinct from a discount. Make case discovery/record watch work
       after a party outage without imposing order across authority records.
 
-Verification: foundation section 12.2's mediation client library-integration suite
-consumes this double, including two cases, mixed held/not-held results, lost filing
-response, closed-before-append and repeated claimant evidence. Deterministic HTTP
-first-use drive files seller exceptional_end, acknowledged buyer_end, unacknowledged
-buyer triage, an invalid-acknowledgement triage and interrupted effect application;
-read signed records through the real client. Candidate new coverage for approval:
-mediation's mechanical classifier verifies the acknowledgement binding and rejects
-weaker self-penalties; its effect journal resumes without duplicate payment effects.
+Verification: foundation 12.2 uses its kit contract fake. The tool's required
+`tests/test_mediation.py` library integration drives real clients for two cases,
+mixed held/not-held, lost filing response, closed-before-append, empty record and
+repeated evidence. Required `tests/test_mechanical_rulings.py` unit coverage proves
+self-penalty sufficiency and acknowledgement signature/deal/time binding; HTTP
+integration files seller exceptional_end, acknowledged buyer_end and absent/invalid
+ack triage. Required `tests/test_effect_recovery.py` interrupts effect application
+and proves resume without duplicates or another case's lift (02 F10).
 These are interface simulation results, not live mediation acceptance.
 
 ## 4. Lane-only controls and deterministic time
 
 - [ ] 4.1 Add new tooling `src/authority_lane_doubles/controls.py`: explicit lane
-      enablement, scoped run reset, injected clocks/barriers, exhaustion, snapshot
+      enablement, scoped run reset, wall-time due-work barriers, exhaustion, snapshot
       replay/sequence/provenance faults, per-operation refusals and delayed/dropped
       responses including after commit, independent authority outage, key overlap,
       triage and effect pause/resume. Separate record corruption from normal valid
@@ -124,13 +144,22 @@ These are interface simulation results, not live mediation acceptance.
 - [ ] 4.2 Keep controls on lane-private networks with no host port, unavailable
       outside the lane profile. Make faults run/transaction/case scoped. Rotation
       controls must not change client trust or patch a committed record key.
+- [ ] 4.3 Add tooling-owned versioned `control_contracts.py` models/route contract,
+      typed `control_client.py` and isolated HTTP `harness.py` for this tool's suite.
+      Explicit initialization supplies seed/modes; ordinary kit tests do not use
+      the harness. Refuse unsupported versions, unknown references and omitted/empty
+      mutation target sets without creating scope. Reset names only its owned run.
+      Barrier results expose per-authority watermarks, pending work and blocked
+      dependencies, never claim completion while effects are blocked (01 F2/02 F12).
+      Use wall time and short windows in lanes; injectable time is test-only (02 F4).
 
-Verification: use real HTTP calls and temporary diagnostics to advance notice/hold
-races without sleeps and replay an operation after lost acknowledgement. Adapt the
-existing lane Compose checks in `scripts/tests/test_lane_compose.py` to assert the
-new overlay's isolation with their kept topology assertions. Candidate new coverage
-for approval: isolated controls cannot mutate another run and clock barriers expose
-all due authority transitions for the scenario's selected instant.
+Verification: required `tests/test_controls.py` unit/library-integration coverage
+uses the typed client to prove scope/version refusals, deterministic initialization,
+teardown, lost-response replay and truthful blocked barriers. Inject time only in
+the isolated tool state-machine suite. Lane calls drain due work against wall time,
+with bounded observable progress rather than sleeps or a fictitious lane clock.
+Adapt existing `scripts/tests/test_lane_compose.py` assertions for private controls
+and isolated stores. A barrier must not mutate another run (02 F10).
 
 ## 5. Wire lanes and prepare repeatable first use
 
@@ -138,30 +167,48 @@ all due authority transitions for the scenario's selected instant.
       Update `Makefile`'s lane image/environment targets and `e2e-tests/Makefile`'s
       three Compose file sets, log and down targets so one image supplies separately
       addressed services per lane and cleanup removes their state. Do not add these
-      services to default or hosted stacks.
+      services to default or hosted stacks. Provide HTTPS origins/certificates with
+      Compose-service SANs and a lane-only public development CA; explicitly mount
+      trust through SSL_CERT_FILE only in lane participants. No host control port.
 - [ ] 5.2 Add lane payment/dispute profiles under `e2e-tests/config` and role fixtures
       through existing configuration generation. Wire service identities, fixture
       credentials, seeded accounts and authority advertisements, including accepted
       Dispute/DisputeCredential identity entries where lifecycle is composed. Preserve
-      API-credit compatibility without claiming it now services disputes.
+      API-credit compatibility without claiming it now services disputes. Use
+      fixture bearer credentials through api_key_env, development_auth=false and
+      livemode=false; preserve existing non-loopback HTTPS and auth checks. Add a
+      composition guard in role config loaders, payments `settlement_config.py` and
+      planned mediation config, refusing lane settings/identities outside the explicit
+      lane profile. This is a configuration guard, not relaxed client validation.
+      Export the fixture SERVICE_IDENTITY for spot's test-only proposed declaration
+      binding; never infer trust from a private status route (02 F2/F8).
 - [ ] 5.3 Adapt `e2e-tests/tests/e2e/roles/helpers/payments.py` and existing payment
       scenario setup/reporting for target kind, contract hashes and evidence class;
       add authority readiness checks only where required by the selected scenario.
       Use a missing-setting failure for lane-owned credentials, not a blocked skip.
       Preserve explicit external-target selection without fallback to a double.
+      Apply the foundation's target-naming/readiness rule and this change's single
+      evidence-class definition; reject published-mode consumer hash mismatch.
+      Pass explicit lane-CA SSL contexts to trust_env=false readiness probes, and
+      supply service-name NO_PROXY for real clients that retain trust_env. Prove
+      both readiness and signed requests succeed without disabling verification.
 - [ ] 5.4 Run the existing bare-metal and credits payment deal surfaces from clean
       committed setup; verify they run rather than skip against the default lane
       target and clean up after both success and an injected failure. Prepare the
-      VM lane's same authority setup for the rate changes without claiming their
-      future compute scenarios already exist. Capture reproducible commands and
+      VM lane's same authority setup for the rate changes, claiming only service
+      health/readiness here, not a VM payment scenario (02 F15). First verify real
+      config construction and a signed client request between containers over TLS
+      with fixture bearer auth; prove production rejects the lane tuple (02 F2).
+      Capture reproducible commands and
       contract/evidence metadata; stop every owned service after trying it.
 
 Verification levels/targets:
 - Unit: `e2e-tests/tests/unit/test_payments_helper.py` and
   `test_payment_compensation.py` for retained setup/cleanup assertions;
   `scripts/tests/test_lane_compose.py` for retained lane topology.
-- Library/application integration: actual HTTP clients to both doubles; foundation
-  sections 11/12 adapter suites after dependency gates land; no production authority
+- Library/application integration: actual HTTP clients to both doubles in the
+  tool-owned suites after prerequisite gates land; foundation/spot adapter
+  suites use their own contract fakes. No production authority
   internals or new API-credit dispute behavior.
 - Smoke: Compose health/readiness and a signed read at each required authority before
   mutating a scenario. A down target reports environment setup, not product evidence.
@@ -200,10 +247,13 @@ implementation rather than being hidden in closeout edits. Follow
 - [ ] 6.8 Confirm end-to-end pipeline evidence for existing payment deals and changed
       VM wiring, with scenario results and contract classes. Name unavailable
       prerequisites as blockers with their owner and mark gated assertions unrun;
+      VM evidence in this change is health/readiness only;
       proposed qualification is not live evidence.
 - [ ] 6.9 Promote D1–D7 to `openspec/specs/test-compatibility/architecture.md`,
       `docs/development/TESTING.md` and `e2e-tests/README.md` as the design-promotion
-      record specifies; archive synchronizes the normative test-compatibility delta.
+      record specifies; replace TESTING.md's blank-target pipeline description with
+      lane-default behavior and retained explicit external-target gating. Archive
+      synchronizes the normative test-compatibility delta.
       Keep the capability index current. Record no repository-wide architecture
       change because production layers/authorities are unchanged.
 - [ ] 6.10 Run `make check-doc-citations CHANGE=add-arkhai-payments-lane-double`,
