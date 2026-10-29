@@ -64,8 +64,9 @@ None.
 Depends on `agreed-evidence-and-early-termination` (lifecycle and adapter
 contracts), `spot-deals-through-arkhai-payments` (rate mechanics) and
 `unify-compute-delivery-path` (the delivery path, hook seam, activation and
-undelivered handoff), each as a whole change. Scenario execution needs the runnable
-payment and mediation doubles from `add-arkhai-payments-lane-double`. Hosted
+undelivered handoff) and `add-arkhai-payments-lane-double` (the runnable payment and
+mediation doubles every matrix row runs in, from the first section), each as a whole
+change. Hosted
 enablement is `activate-per-period-compute-servicing`'s.
 
 The seller's exceptional end is a journaled dispute filing, not a direct payment
