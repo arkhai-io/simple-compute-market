@@ -1,1 +1,0 @@
-{"review": "design", "finding": "D2", "section": null, "lens": "correctness", "basis": "judgement", "severity": null, "agent_position": "the started period is charged in full on every end and disclosed", "owner_disposition": "a seller-caused end reverses the started period before the stop", "summary": "seller-caused ends charge completed periods only (round 4, F13.2 A)"}
