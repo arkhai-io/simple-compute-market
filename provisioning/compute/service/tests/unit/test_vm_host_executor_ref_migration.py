@@ -19,12 +19,10 @@ from sqlalchemy.pool import StaticPool
 
 from compute_provisioning_service.db.database import run_migrations
 from compute_provisioning_service.db.migrations import (
+    _drop_columns_via_table_rebuild,
     _migrate_capacity_reservations_vm_host_to_executor_ref,
+    _validate_sql_identifier,
 )
-
-_PLAYBOOK_PATH = "/configured/playbook.yaml"
-_INVENTORY_GROUP = "legacy_hosts"
-
 
 def _sqlite_memory_engine():
     return create_engine(
@@ -39,11 +37,7 @@ def _bootstrap_engine_with_legacy_vm_host_column():
     back via raw SQL and populated -- simulating an already-deployed
     database from before this migration existed."""
     engine = _sqlite_memory_engine()
-    run_migrations(
-        engine,
-        default_playbook_path=_PLAYBOOK_PATH,
-        default_inventory_group=_INVENTORY_GROUP,
-    )
+    run_migrations(engine)
     with engine.begin() as connection:
         connection.execute(text(
             "ALTER TABLE capacity_reservations ADD COLUMN vm_host VARCHAR"
@@ -151,11 +145,7 @@ class TestVmHostBackfill:
         """A database created fresh from the current ORM model never had
         vm_host at all -- the migration must not error."""
         engine = _sqlite_memory_engine()
-        run_migrations(
-            engine,
-            default_playbook_path=_PLAYBOOK_PATH,
-            default_inventory_group=_INVENTORY_GROUP,
-        )
+        run_migrations(engine)
         # No exception, and it's already covered by run_migrations's own
         # invocation of this migration during bootstrap above -- calling
         # it again here proves the explicit no-op path too.
@@ -178,11 +168,7 @@ class TestPublicRunMigrationsEntrypointAppliesTheBackfill:
         # added back -- the actual schema shape such a database would
         # have had.
         engine = _sqlite_memory_engine()
-        run_migrations(
-            engine,
-            default_playbook_path=_PLAYBOOK_PATH,
-            default_inventory_group=_INVENTORY_GROUP,
-        )
+        run_migrations(engine)
         with engine.begin() as connection:
             connection.execute(text(
                 "DELETE FROM schema_migrations "
@@ -198,11 +184,7 @@ class TestPublicRunMigrationsEntrypointAppliesTheBackfill:
             ))
 
         # The public entrypoint, not the private migration function.
-        run_migrations(
-            engine,
-            default_playbook_path=_PLAYBOOK_PATH,
-            default_inventory_group=_INVENTORY_GROUP,
-        )
+        run_migrations(engine)
 
         row = _row(engine, "r-public")
         assert "vm_host" not in row
@@ -282,10 +264,6 @@ class TestTableRebuildPreservesIndexesAndConstraints:
         )
 
     def test_rebuild_refuses_a_table_with_triggers_or_views(self):
-        from compute_provisioning_service.db.migrations import (
-            _drop_columns_via_table_rebuild,
-        )
-
         engine = _sqlite_memory_engine()
         with engine.begin() as connection:
             connection.execute(text(
@@ -384,10 +362,6 @@ class TestTableRebuildPreservesIndexesAndConstraints:
         assert "vm_host" not in row
 
     def test_refuses_to_drop_every_column(self):
-        from compute_provisioning_service.db.migrations import (
-            _drop_columns_via_table_rebuild,
-        )
-
         engine = _sqlite_memory_engine()
         with engine.begin() as connection:
             connection.execute(text(
@@ -397,10 +371,6 @@ class TestTableRebuildPreservesIndexesAndConstraints:
             _drop_columns_via_table_rebuild(engine, "only_one_column", ["junk"])
 
     def test_rejects_an_unsafe_table_name(self):
-        from compute_provisioning_service.db.migrations import (
-            _drop_columns_via_table_rebuild,
-        )
-
         engine = _bootstrap_engine_with_legacy_vm_host_column()
         with pytest.raises(ValueError, match="Not a safe SQL identifier"):
             _drop_columns_via_table_rebuild(
@@ -408,10 +378,6 @@ class TestTableRebuildPreservesIndexesAndConstraints:
             )
 
     def test_rejects_an_unsafe_column_name(self):
-        from compute_provisioning_service.db.migrations import (
-            _drop_columns_via_table_rebuild,
-        )
-
         engine = _bootstrap_engine_with_legacy_vm_host_column()
         with pytest.raises(ValueError, match="Not a safe SQL identifier"):
             _drop_columns_via_table_rebuild(
@@ -419,10 +385,6 @@ class TestTableRebuildPreservesIndexesAndConstraints:
             )
 
     def test_validator_accepts_ordinary_identifiers_and_rejects_others(self):
-        from compute_provisioning_service.db.migrations import (
-            _validate_sql_identifier,
-        )
-
         assert _validate_sql_identifier("capacity_reservations") == "capacity_reservations"
         assert _validate_sql_identifier("_leading_underscore") == "_leading_underscore"
         for unsafe in (

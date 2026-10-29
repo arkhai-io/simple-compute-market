@@ -14,9 +14,11 @@ import pytest
 from arkhai_vms import make_vm_provision_terms
 from core_buyer.registry_config import RegistryAuthority
 from identity_helpers import BUYER_SIGNER, seller_principals, accepted_alkahest_agreement
+from market_alkahest.plans import escrow_terms_to_settlement_obligation
+from market_alkahest.schemas import EscrowTerms
 from market_core.schemas import (
     EscrowProposal,
-    EscrowTerms,
+    SettlementPlan,
 )
 from registry_client import FilterSpecResponse
 
@@ -462,6 +464,15 @@ def _agree_negotiate_factory(price: int = 100):
 
         provision_terms = kwargs.get("provision_terms")
         escrow_proposal = kwargs.get("escrow_proposal")
+        # The seller's plan commits to the escrow `_stub_build_escrow_terms`
+        # derives, so the buyer's plan check passes.
+        (terms,) = _stub_build_escrow_terms(
+            escrow_proposal, {}, price, provision_terms.duration_seconds
+        )
+        obligation = escrow_terms_to_settlement_obligation(terms.model_dump(mode="json"))
+        plan = SettlementPlan.model_validate(
+            {"obligations": [obligation.model_dump(mode="json")]}
+        )
         return NegotiationOutcome(
             status="agreed",
             agreed_amount=price,
@@ -478,6 +489,7 @@ def _agree_negotiate_factory(price: int = 100):
             ),
             accepted_provision_terms=provision_terms,
             accepted_escrow_proposal=escrow_proposal,
+            settlement_plan=plan,
         )
 
     return fake

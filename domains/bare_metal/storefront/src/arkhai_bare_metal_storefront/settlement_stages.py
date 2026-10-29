@@ -29,11 +29,6 @@ from market_arkhai_payments import (
     Refunded,
     SignedReceipt,
 )
-from market_contact_exchange import (
-    MECHANISM as CONTACT_MECHANISM,
-)
-from market_contact_exchange import SQLiteIntroductionStore
-from market_core import SettlementEvidence
 from market_core.schemas import (
     Agreement,
     EscrowProposal,
@@ -42,8 +37,6 @@ from market_core.schemas import (
     derive_settlement_option_id,
 )
 from market_identity import Identity
-
-from .settlement_evidence import EvidencePayload
 
 ALKAHEST_MECHANISM = "alkahest.v1"
 
@@ -353,8 +346,9 @@ async def verify_alkahest(
             "Alkahest settlement is not configured", status_code=503
         )
     existing = await service.db.load_escrow(escrow_uid=escrow_uid)
-    terms, listing = await service.physical_terms(thread, request.negotiation_id)
-    agreed_amount = thread["agreed_price"]
+    # The machine the deal delivers must still be the one its listing names;
+    # what the escrow must fund is the committed plan's, checked below.
+    await service.physical_terms(thread, request.negotiation_id)
     if request.buyer_evm_address is None:
         raise SettlementRequestError("Alkahest settlement requires buyer_evm_address")
     proposal = EscrowProposal.model_validate(thread.get("buyer_escrow_proposal"))
@@ -442,16 +436,13 @@ async def verify_alkahest(
     try:
         matched_index = await service.verify_escrow(
             escrow_uid=escrow_uid,
-            seller_wallet=service.seller_wallet or "",
-            agreed_price=int(agreed_amount),
-            agreed_duration_seconds=terms.duration_seconds,
-            listing=listing,
+            settlement_plan=committed,
             alkahest_client=client,
             chain_name=proposal.chain_name,
-            alkahest_address_config_path=service.chain_config_paths.get(
+            escrow_address=proposal.escrow_address,
+            address_book=service.chain_config_paths.get(
                 proposal.chain_name,
             ),
-            escrow_proposal=proposal,
         )
     except SettlementRequestError:
         raise
@@ -534,13 +525,6 @@ async def verify_alkahest(
     )
 
 
-async def verify_contact(service: Any, **kwargs: Any) -> Any:
-    raise SettlementRequestError(
-        "contact exchange settles through the authenticated introductions surface",
-        status_code=400,
-    )
-
-
 async def revalidate_payment(
     service: Any,
     thread: Mapping[str, Any],
@@ -609,20 +593,18 @@ async def revalidate_alkahest(
             f"settlement chain {proposal.chain_name!r} is unavailable",
             status_code=503,
         )
-    terms, listing = await service.physical_terms(thread, record["negotiation_id"])
+    await service.physical_terms(thread, record["negotiation_id"])
     try:
+        # Against the plan committed at acceptance, as settlement verified it.
         matched_index = await service.verify_escrow(
             escrow_uid=record["settlement_ref"],
-            seller_wallet=service.seller_wallet,
-            agreed_price=int(thread["agreed_price"]),
-            agreed_duration_seconds=terms.duration_seconds,
-            listing=listing,
+            settlement_plan=thread.get("settlement_plan"),
             alkahest_client=client,
             chain_name=proposal.chain_name,
-            alkahest_address_config_path=service.chain_config_paths.get(
+            escrow_address=proposal.escrow_address,
+            address_book=service.chain_config_paths.get(
                 proposal.chain_name,
             ),
-            escrow_proposal=proposal,
         )
     except SettlementRequestError:
         raise
@@ -636,20 +618,6 @@ async def revalidate_alkahest(
         or matched_index != obligation.obligation_index
     ):
         raise SettlementRequestError("stored escrow source matches another obligation")
-
-
-async def revalidate_contact(
-    service: Any,
-    thread: Mapping[str, Any],
-    record: Mapping[str, Any],
-    *,
-    delivery_started: bool = False,
-) -> None:
-    reveal = await SQLiteIntroductionStore(service.db.db_path).load(
-        record["settlement_ref"]
-    )
-    if reveal is None or reveal.agreement_ref != record["negotiation_id"]:
-        raise SettlementRequestError("introduction has not been revealed")
 
 
 class ObligationServicing(Protocol):
@@ -688,7 +656,13 @@ class SellerStage:
     ``fulfils_through_capacity`` declares whether the deal provisions the
     listed machine through site capacity, so admission, evidence, and which
     options an unbacked listing may publish follow the entry rather than a
-    separate declaration. It is required, so an entry cannot omit it. ``refund`` is the seller-initiated reversal
+    separate declaration. ``completes_outside_settlement`` declares whether a
+    deal through the entry completes outside settlement and fulfillment, so
+    that it has no settle, delivery, or refund operation: the settle and
+    fulfillment routes answer such a deal from it, and the entry has no
+    ``verify`` or ``revalidate``. It is not ``fulfils_through_capacity``,
+    since a mechanism may settle without delivering through capacity. Both are
+    required, so an entry cannot omit either. ``refund`` is the seller-initiated reversal
     of an accepted deal and ``reconcile`` advances an accepted deal without
     its buyer; an entry without them refunds or converges through its own
     mechanism path. ``servicing`` builds the entry's obligation servicing over
@@ -704,9 +678,10 @@ class SellerStage:
 
     settles_from_agreement: ClassVar[bool] = False
     registration_factory: Callable[[], Any]
-    verify: Callable[..., Any]
-    revalidate: Callable[..., Any]
+    verify: Callable[..., Any] | None
+    revalidate: Callable[..., Any] | None
     fulfils_through_capacity: bool
+    completes_outside_settlement: bool = field(kw_only=True)
     refund: Callable[..., Any] | None = None
     reconcile: Callable[..., Any] | None = None
     servicing: Callable[[Any], ObligationServicing | None] | None = None
@@ -722,9 +697,9 @@ class AlkahestStage(SellerStage):
     """The Alkahest entry, which also declares the release models it delivers.
 
     ``release_models`` names, from ``market_alkahest.RELEASE_MODELS``, the
-    conditions a bare-metal escrow may be released under. Composition refuses a
-    configured ``[Settlement.alkahest]`` model outside them, so a listing never
-    advertises a condition its deal could not honour.
+    conditions a bare-metal escrow may be released under. A configured
+    ``[Settlement.alkahest]`` model outside them makes Alkahest unready, so a
+    listing never advertises a condition its deal could not honour.
     """
 
     release_models: frozenset[str] = field(kw_only=True)
@@ -745,25 +720,12 @@ class PaymentStage(SellerStage):
 
 @dataclass(frozen=True, slots=True)
 class ContactStage(SellerStage):
-    @staticmethod
-    async def record_reveal(db: Any, *, negotiation_id: str, obligation_ref: str) -> None:
-        thread = await db.load_negotiation_thread_row(negotiation_id=negotiation_id)
-        if thread is None or not thread.get("agreement_bytes"):
-            raise ValueError("accepted introduction Agreement is unavailable")
-        await db.save_bare_metal_settlement_evidence(
-            SettlementEvidence(
-                negotiation_id=negotiation_id,
-                mechanism=CONTACT_MECHANISM,
-                settlement_ref=obligation_ref,
-                status="settlement_verified",
-                evidence=EvidencePayload(
-                    agreement_sha256=hashlib.sha256(
-                        thread["agreement_bytes"]
-                    ).hexdigest(),
-                    source={"obligation_ref": obligation_ref},
-                ).model_dump(mode="json"),
-            )
-        )
+    """The contact-exchange entry: a deal completes by its introduction reveal.
+
+    The reveal is the contact-exchange kit's own record, read from its
+    introduction store, so the entry records no settlement evidence and has no
+    settle operation or recovery gate.
+    """
 
 
 def legacy_alkahest_option(

@@ -49,6 +49,15 @@ def test_what_the_builders_produce_validates():
         (lambda row: row["resources"][0].pop("resource_type"), "resource_type"),
         (lambda row: row["resources"][0].update(resource_type=None), "resource_type"),
         (lambda row: row["resources"][0].update(resource_type=" "), "resource_type"),
+        (lambda row: row["resources"][0].update(publication_view_problems={}), "problems"),
+        (
+            lambda row: row["resources"][0].update(publication_view_problems={"v.1": []}),
+            "problems",
+        ),
+        (
+            lambda row: row["resources"][0].update(publication_view_problems={"v.1": "no"}),
+            "problems",
+        ),
     ],
 )
 def test_a_response_a_consumer_could_not_derive_from_is_refused(damage, message):
@@ -57,6 +66,19 @@ def test_a_response_a_consumer_could_not_derive_from_is_refused(damage, message)
 
     with pytest.raises(AssertionError, match=message):
         validate_resource_pool_projection(projection)
+
+
+def test_a_member_carries_the_view_problems_it_is_built_with():
+    member = build_projected_resource(
+        "m1", publication_view_problems={"bare_metal.v2": ("names no host",)}
+    )
+    projection = build_resource_pool_projection(
+        [build_resource_pool_row("p", resources=[member])]
+    )
+
+    validate_resource_pool_projection(projection)
+    assert member["publication_view_problems"] == {"bare_metal.v2": ["names no host"]}
+    assert "publication_view_problems" not in build_projected_resource("m2")
 
 
 def test_a_pool_with_an_unregistered_label_is_built_for_consumer_tests():

@@ -44,7 +44,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
         with:
-          version: "0.11.17"
+          version: "0.12.19"
       # Every lane needs it: the dev chain's baked state is generated against Anvil.
       - uses: foundry-rs/foundry-toolchain@v1
         with:
@@ -78,7 +78,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
         with:
-          version: "0.11.17"
+          version: "0.12.19"
       # Every lane needs it: the dev chain's baked state is generated against Anvil.
       - uses: foundry-rs/foundry-toolchain@v1
         with:
@@ -112,7 +112,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
         with:
-          version: "0.11.17"
+          version: "0.12.19"
       # Every lane needs it: the dev chain's baked state is generated against Anvil.
       - uses: foundry-rs/foundry-toolchain@v1
         with:

@@ -34,7 +34,7 @@ from market_resource_pools_contracts import (
     PoolValidateResponse,
     PoolValidationProblem,
 )
-from .db import DEFAULT_POOL_ID, ResourcePool
+from .db import ResourcePool
 
 
 class PoolNotFoundError(Exception):
@@ -215,6 +215,40 @@ class ResourcePoolService:
                     f"pool '{pool_id}' {problem.tag}: {problem.message}"
                     for pool_id, problem in problems
                 )
+            )
+
+    def stored_provider_problems(self, db: Session) -> list[tuple[str, str]]:
+        """Every stored pool, enabled or not, whose provider no handler serves.
+
+        Handlers are fixed by the composition and every write refuses an
+        unknown provider, so such a row was written by a build registering
+        other handlers, or from outside the service's write paths. Its records
+        are still read, so a disabled pool counts.
+        """
+        return [
+            (pool.id, pool.provider)
+            for pool in db.query(ResourcePool).order_by(ResourcePool.id).all()
+            if pool.provider not in self._handlers
+        ]
+
+    def require_served_stored_providers(self) -> None:
+        """Raise naming every stored pool whose provider no handler serves.
+
+        Run at service start: such a pool cannot be read, exported, or
+        fulfilled, and no pool document can repair it, since a document cannot
+        change a pool's provider.
+        """
+        with self._session_factory() as db:
+            problems = self.stored_provider_problems(db)
+        if problems:
+            registered = ", ".join(f"'{name}'" for name in sorted(self._handlers)) or "none"
+            raise PoolValidationError(
+                "stored resource pools name providers no registered handler serves: "
+                + "; ".join(
+                    f"pool '{pool_id}' provider '{provider}'"
+                    for pool_id, provider in problems
+                )
+                + f" (registered providers: {registered})"
             )
 
     def list_pools(
@@ -412,7 +446,6 @@ class ResourcePoolService:
 
         definitions: list[PoolDefinition] = []
         seen: set[str] = set()
-        declared_ids: set[str] = set()
         for index, entry in enumerate(entries):
             base = f"pools[{index}]"
             if not isinstance(entry, dict):
@@ -448,7 +481,6 @@ class ResourcePoolService:
                 entry_valid = False
                 pool_id = None
             else:
-                declared_ids.add(pool_id)
                 if pool_id in seen:
                     problems.append(
                         PoolValidationProblem(
@@ -613,14 +645,6 @@ class ResourcePoolService:
                     )
                 )
 
-        if DEFAULT_POOL_ID not in declared_ids:
-            problems.append(
-                PoolValidationProblem(
-                    path="pools",
-                    code="missing_default_pool",
-                    message=f"authoritative pool definitions must include '{DEFAULT_POOL_ID}'",
-                )
-            )
         return DocumentValidationResult(tuple(definitions), tuple(problems))
 
     @staticmethod

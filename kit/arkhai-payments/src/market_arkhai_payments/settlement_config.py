@@ -58,6 +58,9 @@ class ArkhaiPaymentsConfig(BaseModel):
     dispute_authority: str | None = None
     api_key_env: str | None = None
     development_auth: bool = False
+    # The service mode whose receipts this role accepts. Live payments services
+    # sign livemode=true; test and development services sign false.
+    livemode: bool = False
     # Buyer role only: deposit the exact Agreement with the approval. Off by
     # default because the Agreement discloses both parties and provision terms
     # to the payments service, and a deposit cannot be withdrawn.
@@ -180,7 +183,9 @@ def _loopback_origin(value: str) -> bool:
 
 
 def _blocker(code: str, message: str) -> ReadinessBlocker:
-    return ReadinessBlocker(code=code, message=message)
+    # Readiness never contacts the payments service, so nothing it reports is a
+    # reachability blocker.
+    return ReadinessBlocker(code=code, message=message, kind="configuration")
 
 
 async def arkhai_payments_preflight(

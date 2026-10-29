@@ -6,7 +6,8 @@ named:
 
 - a retired setting it still states: a renamed one, which would otherwise run
   at a default the operator did not choose, or a removed one, which the
-  storefront no longer honours (`market_storefront.retired_settings`);
+  storefront no longer honours (`market_storefront.retired_settings`), or a
+  retired Alkahest address-book key, which nothing reads any more;
 - a configuration under which it could never publish, because a storefront
   that only services deals it has already accepted is not a supported
   deployment: no registry to publish to, or one without its authority pin; no
@@ -14,10 +15,10 @@ named:
   exactly one service peer.
 
 Terms that a pool's override or hint may supply instead of the storefront's
-defaults -- its settlement clauses among them -- are not checked here: a pool
-that resolves none is held and reported by publication. See the requirement
-"A storefront that cannot publish refuses to start" in
-openspec/specs/storefront-publication/spec.md.
+defaults -- its settlement clauses among them -- are not checked here:
+publication refuses, closing any open listing, a candidate whose pool resolves
+no settlement clause. See the requirement "A storefront that cannot publish
+refuses to start" in openspec/specs/storefront-publication/spec.md.
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ from market_storefront.utils.config import (
     configured_capacity_sites,
     get_registry_authorities,
     get_service_peer_configs,
+    retired_address_book_problems,
     settings,
     settlement_config_mapping,
 )
@@ -51,14 +53,23 @@ class StorefrontStartupError(RuntimeError):
 
 def retired_setting_problems(source: Dynaconf | None = None) -> list[str]:
     """Name each renamed or removed setting the configuration still states,
-    in any spelling, with what replaces it."""
+    in any spelling, with what replaces it, the retired Alkahest address-book
+    keys among them."""
 
     active = settings if source is None else source
     return [
         retired_setting_explanation(key)
         for key in (*RENAMED_SETTINGS, *REMOVED_SETTINGS)
         if active.get(key) is not None
-    ]
+    ] + retired_address_book_problems(active)
+
+
+def refuse_retired_address_book_keys(source: Dynaconf | None = None) -> None:
+    """Refuse a retired Alkahest address-book key by name, under the retired
+    settings heading, before anything resolves the settlement section."""
+    problems = retired_address_book_problems(settings if source is None else source)
+    if problems:
+        raise StorefrontStartupError(f"{RETIRED_SETTINGS_HEADING}: " + "; ".join(problems))
 
 
 def _registry_problems(source: Dynaconf) -> list[str]:
@@ -126,6 +137,7 @@ __all__ = [
     "RETIRED_SETTINGS_HEADING",
     "StorefrontStartupError",
     "publication_startup_problems",
+    "refuse_retired_address_book_keys",
     "require_publishable_storefront",
     "retired_setting_problems",
 ]

@@ -386,10 +386,18 @@ class JobEngine:
             ):
                 return
 
-            # The job runs only against the registered host it names; a host
-            # with no record fails it before any executor runs, because there is
-            # no fallback inventory.
-            host = self._host_lookup(job.host_id) if job.host_id else None
+            # The job runs only against the registered host it names; a job
+            # naming none, or a host with no record, fails before any executor
+            # runs, because there is no fallback inventory. A stored job names
+            # no host when nothing in it identified a physical host.
+            if not job.host_id:
+                self._fail(
+                    db, job,
+                    "job names no host, so it cannot be dispatched; submit it again "
+                    "naming a registered host",
+                )
+                return
+            host = self._host_lookup(job.host_id)
             if host is None:
                 self._fail(
                     db, job,

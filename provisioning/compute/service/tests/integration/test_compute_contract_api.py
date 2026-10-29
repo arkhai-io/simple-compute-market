@@ -10,6 +10,8 @@ from compute_provisioning_client import (
     ComputeProvisioningError,
 )
 from compute_provisioning_contracts import LeaseState
+from market_fulfillment import SettlementRecord, SettlementRecordState
+from market_site.db import ReservationState
 from market_site.ledger import ALLOCATION_MODE_EXCLUSIVE
 
 from compute_provisioning_service.main import app
@@ -99,12 +101,8 @@ async def test_a_lease_retains_its_action_target_alongside_the_mode(
 async def test_the_lease_view_serializes_every_reachable_reservation_state():
     """Every ``ReservationState`` member projects onto a ``LeaseState``, and a
     freshly registered lease, raw state ``"leased"``, reads as ``"active"``."""
-    from market_site.db import ReservationState
-
     expected = {
         "reserved": LeaseState.PENDING,
-        "provisioning": LeaseState.PENDING,
-        "provisioning_failed": LeaseState.PROVISIONING_FAILED,
         "leased": LeaseState.ACTIVE,
         "releasing": LeaseState.RELEASING,
         "released": LeaseState.RELEASED,
@@ -133,16 +131,11 @@ def _create_fulfillment_aggregate(
 ) -> None:
     """Persist a real `SettlementRecord` for the client-contract tests below.
 
-    The original test only monkeypatched
-    `FulfillmentOrchestrator.begin_fulfillment_teardown` and never
-    exercised the real aggregate at all, so it could not have caught a
-    routing, serialization, or state-machine regression in the endpoint
-    itself -- only that the client reaches *some* handler. This helper
-    lets the tests below drive the real orchestrator instead.
+    The tests drive the real orchestrator through the endpoint rather than
+    patching `FulfillmentOrchestrator.begin_fulfillment_teardown`: a patched
+    orchestrator would show only that the client reaches *some* handler, not
+    the endpoint's routing, serialization, or state-machine behavior.
     """
-
-    from market_fulfillment import SettlementRecord, SettlementRecordState
-
     session_factory = _container_module.resolved_session_factory
     with session_factory() as db:
         db.add(
@@ -188,8 +181,6 @@ async def test_begin_fulfillment_teardown_client_drives_the_real_aggregate_idemp
     assert first.fulfillment_id == fulfillment_id
     assert first.state == "teardown_dispatch_pending"
     assert repeated.state == "teardown_dispatch_pending"
-
-    from market_fulfillment import SettlementRecord
 
     with _container_module.resolved_session_factory() as db:
         record = db.get(SettlementRecord, reservation["capacity_reservation_id"])

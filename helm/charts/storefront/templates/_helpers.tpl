@@ -34,6 +34,22 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+Labels for this chart's Helm test pod. Every workload selector in the release
+requires app.kubernetes.io/name, so a test pod carries the release's other
+labels but never that one: selecting a workload's pods by its selector, as
+`kubectl logs -l` or `kubectl logs deploy/...` does, never returns a test pod.
+*/}}
+{{- define "storefront.testLabels" -}}
+helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: test
+{{- end }}
+
+{{/*
 Resolve the full image reference for the agents container.
 Supports an optional global.imageRepository passed down from the parent.
 */}}
@@ -51,24 +67,6 @@ Supports an optional global.imageRepository passed down from the parent.
 {{- else -}}
 {{- printf "%s:%s" $name .Values.image.tag -}}
 {{- end -}}
-{{- end }}
-
-{{/*
-Compose the HTTP RPC URL from global.rpc.host and global.rpc.port.
-Mirrors the definition in the root chart's _helpers.tpl.
-*/}}
-{{- define "rpc.url" -}}
-{{- $scheme := .Values.global.rpc.scheme | default "http" -}}
-{{- printf "%s://%s:%d" $scheme .Values.global.rpc.host (int .Values.global.rpc.port) -}}
-{{- end }}
-
-{{/*
-Compose the WebSocket RPC URL from global.rpc.host and global.rpc.port.
-Agents connect to Anvil over WebSocket for event subscriptions.
-*/}}
-{{- define "rpc.wsUrl" -}}
-{{- $scheme := ternary "wss" "ws" (eq (.Values.global.rpc.scheme | default "http") "https") -}}
-{{- printf "%s://%s:%d" $scheme .Values.global.rpc.host (int .Values.global.rpc.port) -}}
 {{- end }}
 
 {{/*
@@ -95,6 +93,64 @@ Argument: dict with `root` and `agent`.
 {{- define "storefront.agentBaseUrl" -}}
 {{- $svc := include "storefront.agentFullname" . -}}
 {{- printf "http://%s:%d/" $svc (int .agent.port) -}}
+{{- end }}
+
+{{/*
+A values file's `null` removes what it names, whether or not Helm's merge removed
+it: under the supported Helm release, a parent's `null` for a subchart is dropped
+only where the subchart's own defaults define the key, and every agent and every
+key under one comes from the parent or an overlay. So the chart removes them
+itself before any template reads an agent, and an agent renders as it would had
+the removed key never been stated. See openspec/specs/deployment-state/spec.md,
+"A storefront chart passes service configuration through".
+
+`storefront.dropNulls`: remove, in place, every key whose value is `null` from the
+mapping `.`, at every depth, inside list elements too. A list element is a value
+rather than a key, so a `null` element stays.
+*/}}
+{{- define "storefront.dropNulls" -}}
+{{- if kindIs "map" . -}}
+  {{- range $key, $value := . -}}
+    {{- if kindIs "invalid" $value -}}
+      {{- $_ := unset $ $key -}}
+    {{- else -}}
+      {{- include "storefront.dropNulls" $value -}}
+    {{- end -}}
+  {{- end -}}
+{{- else if kindIs "slice" . -}}
+  {{- range $item := . -}}
+    {{- include "storefront.dropNulls" $item -}}
+  {{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+`storefront.agents`: the chart's agents with every `null` removed, set by name into
+the mapping `into`: a `null` agent is dropped, and each other agent is a copy with
+its `null` keys removed at every depth. An agent map naming no agent once they are
+removed is refused, as the values schema refuses an empty one: a release running no
+storefront agent disables the storefront instead. An agent stating no port or no
+identity, once its nulls are removed, is refused naming it: the chart has neither to
+default to, and every agent's container, probes, Service, and credential use them.
+Argument: dict with `root` (the chart root) and `into` (an empty dict).
+*/}}
+{{- define "storefront.agents" -}}
+{{- $into := .into -}}
+{{- range $name, $entry := (.root.Values.agents | default dict) -}}
+  {{- if not (kindIs "invalid" $entry) -}}
+    {{- $agent := deepCopy $entry -}}
+    {{- include "storefront.dropNulls" $agent -}}
+    {{- range $key := list "port" "identity" -}}
+      {{- if not (hasKey $agent $key) -}}
+        {{- fail (printf "storefront agent %s states no %s" $name $key) -}}
+      {{- end -}}
+    {{- end -}}
+    {{- $_ := set $into $name $agent -}}
+  {{- end -}}
+{{- end -}}
+{{- if not $into -}}
+  {{- fail "storefront agents names no agent once its nulls are removed; a release runs at least one, or sets the umbrella's storefront.enabled false to run none" -}}
+{{- end -}}
 {{- end }}
 
 {{/*
@@ -210,15 +266,6 @@ Argument: dict with `agent` (name), `path` (dotted, for the message), `value`.
 {{- end }}
 
 {{/*
-Whether the agent uses the release's internal registry: its configuration
-names no registry URLs. Returns "true" or "".
-*/}}
-{{- define "storefront.usesInternalRegistry" -}}
-{{- $registry := include "storefront.foldedMap" (dict "doc" (.agent.config | default dict) "name" "registry") | fromJson -}}
-{{- if not (include "storefront.foldedKey" (dict "doc" $registry "name" "urls")) -}}true{{- end -}}
-{{- end }}
-
-{{/*
 The first registry URL the agent's storefront uses: the first configured URL,
 else the internal registry's.
 */}}
@@ -262,14 +309,14 @@ storefront's loader reads them. Returns "true" or "".
 Render the per-agent public storefront document, `storefront.json`.
 
 The agent's `config` is the storefront's own configuration and passes through
-unchanged: the chart supplies no service default and does not validate the
-service's settings, which the storefront does at startup. The chart adds only
-what the release knows — the agent's port, its Service URL, the internal
-registry and provisioning URLs, a default capacity site, and the database path
-under the persistence mount — and, except for the port, only where the
-configuration does not state it. It refuses a release whose parts disagree.
-See openspec/specs/deployment-state/spec.md, "A storefront chart passes
-service configuration through".
+with its `null` keys removed (`storefront.agents` removes them). The chart
+supplies no service default and does not validate the service's settings, which
+the storefront does at startup. The chart adds only what the release knows — the
+agent's port, its Service URL, the internal registry and provisioning URLs, a
+default capacity site, and the database path under the persistence mount — and,
+except for the port, only where the configuration does not state it. It refuses
+a release whose parts disagree. See openspec/specs/deployment-state/spec.md, "A
+storefront chart passes service configuration through".
 
 Keys are matched case-insensitively at every level, as the storefront's loader
 matches them, so a check cannot be bypassed by spelling a key differently, and

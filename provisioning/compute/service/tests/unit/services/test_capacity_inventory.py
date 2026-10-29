@@ -5,7 +5,8 @@ specific-resource bare-metal pool, projected with the inventory views
 production composes. The projection of each must equal its frozen expectation
 exactly: that equality is the contractual regression evidence for the
 projection's shape. Each domain's own view rules are tested beside its
-projection; this module proves the neutral rules and the merge.
+projection; this module proves the neutral rules, the pool context each view
+is given, and the merge of views and their problems.
 """
 
 from types import SimpleNamespace
@@ -14,7 +15,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from bare_metal_provisioning_adapter.inventory_views import BareMetalPublicationViews
-from compute_provisioning import InventoryViews, compose_inventory_views
+from compute_provisioning import InventoryViews, ResourceViews, compose_inventory_views
 from vm_provisioning_adapter.db import AnsiblePoolConfig
 from compute_provisioning_service.services.capacity_inventory import (
     load_capacity_pool_metadata,
@@ -24,6 +25,7 @@ from arkhai_bare_metal.fixtures.publication_view import (
     validate_bare_metal_publication_view,
 )
 from market_resource_pools import ResourcePool
+from market_resource_pools_contracts.backing import BACKED, UNBACKED
 from market_site.projections import resource_pool_projection
 from vm_provisioning_adapter.inventory_views import AnsiblePoolDefaultsViews
 
@@ -37,8 +39,39 @@ VIEWS = compose_inventory_views(
 NO_VIEWS = InventoryViews()
 
 
-def _project(declarations, views=VIEWS):
-    return load_capacity_resource_inventory(declarations, views)
+def _declared_pool(pool_id, *, provider="ansible", backing="backed", modes=("vm",)):
+    """A stored pool row with both declarations, as every write requires."""
+    return _pool(
+        id=pool_id,
+        provider=provider,
+        policy_tags={
+            "advertisable_modes": list(modes),
+            "deliverable_modes": list(modes) if backing == "backed" else [],
+            "capacity_backing": backing,
+        },
+    )
+
+
+def _frozen_pools():
+    """The pools the frozen declarations belong to."""
+    return [
+        _declared_pool("default"),
+        _declared_pool("gpu-pool"),
+        _declared_pool(
+            "whole-host-pool", provider="bare_metal.ansible", modes=("bare_metal",)
+        ),
+        _declared_pool(
+            "broker-pool",
+            provider="bare_metal.ansible",
+            backing="unbacked",
+            modes=("bare_metal",),
+        ),
+    ]
+
+
+def _project(declarations, views=VIEWS, pools=None):
+    session = _pool_session(pools=_frozen_pools() if pools is None else pools)
+    return load_capacity_resource_inventory(declarations, views, lambda: session)
 
 
 def _declaration(**overrides):
@@ -133,7 +166,8 @@ FUNGIBLE_PROJECTION = [
 
 SPECIFIC_RESOURCE_DECLARATIONS = [
     _bare_metal_declaration(),
-    # An enabled publication naming no host has no specific host to sell.
+    # An enabled publication in a backed pool naming no host has no specific
+    # host to sell: it projects without the view, and says why.
     _bare_metal_declaration(resource_id="physical-resource-2", host_id=None),
 ]
 
@@ -185,7 +219,13 @@ def test_a_fungible_pool_projects_exactly_its_frozen_expectation():
 
 
 def test_a_specific_resource_pool_projects_exactly_its_frozen_expectation():
-    assert _project(SPECIFIC_RESOURCE_DECLARATIONS) == SPECIFIC_RESOURCE_PROJECTION
+    """What a problem says is the view's domain's, so the frozen shape carries
+    the problem's place and leaves its wording to the domain's own tests."""
+    projected = _project(SPECIFIC_RESOURCE_DECLARATIONS)
+    (problem,) = projected[1].pop("publication_view_problems")["bare_metal.v2"]
+
+    assert projected == SPECIFIC_RESOURCE_PROJECTION
+    assert "host_id" in problem
 
 
 # ---------------------------------------------------------------------------
@@ -239,10 +279,22 @@ def test_unreported_availability_is_not_projected_as_zero():
     assert "available" not in projected
 
 
-def test_a_declaration_with_no_recorded_pool_belongs_to_the_default_pool():
-    (projected,) = _project([_declaration(pool_id=None)])
+def test_a_declaration_with_no_recorded_pool_is_not_projected(caplog):
+    """Not into `default`, nor any other pool: the row is reported and left
+    out, and the declarations around it project as they would without it."""
+    with caplog.at_level("WARNING"):
+        projected = _project(
+            [
+                _declaration(resource_id="vm-slice-1"),
+                _declaration(resource_id="no-pool", pool_id=None),
+                _declaration(resource_id="vm-slice-2"),
+            ]
+        )
 
-    assert projected["pool_id"] == "default"
+    assert projected == _project(
+        [_declaration(resource_id="vm-slice-1"), _declaration(resource_id="vm-slice-2")]
+    )
+    assert "'no-pool' records no pool and is not projected" in caplog.text
 
 
 def test_without_contributed_views_every_attribute_projects_and_no_view_does():
@@ -275,11 +327,113 @@ def test_every_bare_metal_view_meets_its_consumers_contract():
                 continue
             validate_bare_metal_publication_view(
                 view,
+                backing=BACKED,
                 physical_resource_id=resource["physical_resource_id"],
                 pool_id=pool["pool_id"],
             )
             validated += 1
     assert validated == 3
+
+
+# ---------------------------------------------------------------------------
+# Pool context and view problems
+# ---------------------------------------------------------------------------
+
+def _views_and_problems(declarations):
+    pools = resource_pool_projection(_project(declarations))
+    return {
+        resource["physical_resource_id"]: (
+            (resource.get("publication_views") or {}).get("bare_metal.v2"),
+            (resource.get("publication_view_problems") or {}).get("bare_metal.v2"),
+        )
+        for pool in pools
+        for resource in pool["resources"]
+    }
+
+
+def test_an_unbacked_pools_host_less_declaration_projects_a_view_without_terms():
+    projected = _views_and_problems(
+        [_bare_metal_declaration(pool_id="broker-pool", host_id=None)]
+    )
+
+    view, problems = projected["physical-resource-1"]
+    assert problems is None
+    validate_bare_metal_publication_view(
+        view, backing=UNBACKED, physical_resource_id="physical-resource-1",
+        pool_id="broker-pool",
+    )
+    assert {"host_id", "physical_host_id", "access_methods", "available"}.isdisjoint(view)
+
+
+def test_an_unbacked_pools_host_bearing_declaration_carries_no_terms_either():
+    projected = _views_and_problems([_bare_metal_declaration(pool_id="broker-pool")])
+
+    view, problems = projected["physical-resource-1"]
+    assert problems is None
+    assert {"host_id", "physical_host_id", "access_methods", "available"}.isdisjoint(view)
+
+
+def test_a_malformed_declaration_projects_without_its_view_beside_its_pools_others():
+    malformed = _bare_metal_declaration(resource_id="physical-resource-2")
+    malformed["attributes"]["allocation_mode"] = "shareable"
+
+    projected = _views_and_problems([_bare_metal_declaration(), malformed])
+
+    view, problems = projected["physical-resource-2"]
+    assert view is None and problems
+    assert any("allocation_mode" in problem for problem in problems)
+    assert projected["physical-resource-1"][0] is not None
+
+
+def test_a_declaration_whose_pool_has_no_row_projects_no_view():
+    (projected,) = _project([_bare_metal_declaration(pool_id="unknown-pool")])
+
+    assert "publication_views" not in projected
+    assert "publication_view_problems" not in projected
+
+
+def test_each_pool_is_read_once_and_every_member_gets_its_context():
+    seen = []
+
+    class Recording:
+        resource_view_ids = frozenset({"record.v1"})
+        pool_view_ids: frozenset[str] = frozenset()
+        consumed_attributes: frozenset[str] = frozenset()
+
+        def resource_views(self, declaration, *, pool):
+            seen.append((declaration["resource_id"], pool.pool_id, pool.provider,
+                         pool.declarations.backing))
+            return ResourceViews()
+
+        def pool_views(self, db, *, pool_id, provider):
+            return {}
+
+    session = _pool_session(pools=_frozen_pools())
+    load_capacity_resource_inventory(
+        [
+            _declaration(),
+            _declaration(resource_id="vm-slice-2"),
+            _bare_metal_declaration(pool_id="broker-pool"),
+        ],
+        compose_inventory_views([("record", Recording())]),
+        lambda: session,
+    )
+
+    assert session.query.call_count == 1
+    assert seen == [
+        ("vm-slice-1", "gpu-pool", "ansible", BACKED),
+        ("vm-slice-2", "gpu-pool", "ansible", BACKED),
+        ("physical-resource-1", "broker-pool", "bare_metal.ansible", UNBACKED),
+    ]
+
+
+def test_a_pool_whose_declarations_do_not_resolve_gives_its_members_no_view():
+    pools = [_pool(id="whole-host-pool", provider="bare_metal.ansible", policy_tags={})]
+
+    (projected,) = _project([_bare_metal_declaration()], pools=pools)
+
+    assert "publication_views" not in projected
+    assert "publication_view_problems" not in projected
 
 
 # ---------------------------------------------------------------------------
@@ -293,11 +447,13 @@ class _ThirdDomainViews:
     pool_view_ids = frozenset({"third.pool.v1"})
     consumed_attributes = frozenset({"third_config"})
 
-    def resource_views(self, declaration, *, pool_id):
+    def resource_views(self, declaration, *, pool):
         config = (declaration.get("attributes") or {}).get("third_config")
         if not config:
-            return {}
-        return {"third.v1": {"pool_id": pool_id, "flavour": config["flavour"]}}
+            return ResourceViews()
+        return ResourceViews(
+            views={"third.v1": {"pool_id": pool.pool_id, "flavour": config["flavour"]}}
+        )
 
     def pool_views(self, db, *, pool_id, provider):
         return {"third.pool.v1": {"provider": provider}} if provider == "third" else {}

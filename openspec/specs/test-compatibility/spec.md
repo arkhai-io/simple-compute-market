@@ -114,12 +114,17 @@ Credential-free SCM tests MUST prove generated wire contracts, JCS hashes, manda
 
 ### Requirement: External payment qualification names its target
 
-External qualification MUST identify the actual payments target and consumer revision, check readiness before mutations, and report unavailable prerequisites rather than substitute another mechanism. Payment-service ledger, hold release, fees, disputes, top-ups, payouts, and provider recovery remain the payments service's evidence.
+External qualification MUST identify the actual payments target and consumer revision, check readiness before mutations, and report unavailable prerequisites rather than substitute another mechanism. A payment scenario MUST report itself blocked only when no payments target is configured or the configured target is not ready; once a target is configured, a missing setting the scenario itself supplies — its parties' accounts and credentials, or the service policy it pins — MUST fail the scenario rather than block it. Payment-service ledger, hold release, fees, disputes, top-ups, payouts, and provider recovery remain the payments service's evidence.
 
 #### Scenario: Bare-metal qualification lacks hardware
 
 - **WHEN** a disposable selected-site host is unavailable
 - **THEN** local deterministic tests do not claim authenticated access, revocation, or physical teardown
+
+#### Scenario: A configured payments run lacks a buyer credential
+
+- **WHEN** a payments target is configured but the buyer's marketplace credential is not
+- **THEN** the payment scenario fails naming the missing setting, rather than reporting itself blocked
 
 ### Requirement: Signed receipts in tests come from the kit fixture
 
@@ -247,3 +252,66 @@ not restart services.
 
 - **WHEN** teardown was accepted before the response was lost
 - **THEN** after the rebuild, a repeated teardown returns the same lease release operation and the site releases capacity once
+
+### Requirement: A configured bare-metal payment purchase is qualified end to end
+
+With a ready payments target configured, the bare-metal lane MUST qualify one fixed-term whole-host purchase settled through `arkhai.payments.v1`: discovery, negotiation, payment approval, receipt-gated mock delivery, re-drive of the original run's settlement, seller refund, and physical teardown, with the refund and the teardown as separate operations. Mock access is evidence of composition, never of real SSH access or revocation. The scenario MUST leave no payment hold, allocated host, mock rule, or held loop behind, whether it passes or fails, except a payment it cannot refund, which it MUST report by its negotiation and transaction together with any host its seller may still deliver for it, and a host whose fulfillment it cannot read or tear down, which it MUST report as a failed cleanup step. Without a configured, ready target it MUST report a named blocked prerequisite, never fall back to Alkahest or count as qualification.
+
+#### Scenario: Bare-metal payment purchase is qualified
+
+- **WHEN** the bare-metal payment scenario runs with a ready configured payments target
+- **THEN** three ordered calls discover a distinct backed whole-host listing, negotiate
+  and approve one hourly payment option with a wallet-free profiled Ed25519 buyer,
+  and observe receipt-gated durable mock delivery
+- **AND** recovery reads the original run and resolves its retained signer, re-drives
+  the same negotiation through `SyncStorefrontClient.settle_agreement`, and requires
+  the original transaction, fulfillment identity, and durable result
+- **AND** the pinned seller refunds the held payment and the buyer separately
+  requests physical teardown, converging mock reclaim and selected-site capacity release
+
+#### Scenario: A stage fails after the payment is approved
+
+- **WHEN** a stage of the bare-metal payment scenario fails after the buyer approved the payment
+- **THEN** the scenario's cleanup refunds the deal's payment if it is not already refunded,
+  then reads the deal's fulfillment and tears down a host it finds not yet torn down,
+  reading the deal's identifiers from the original run when the purchase command failed
+- **AND** a host delivered while the refund was being requested is found and torn down,
+  and one whose fulfillment cannot be read or torn down is reported as a failed step
+- **AND** a refund the seller refuses because the payment is not yet verified, or the
+  payments service or storefront is unavailable, is retried for a bounded time, and a
+  refund that still fails fails the scenario naming the negotiation and transaction
+- **AND** a failed cleanup step is reported without preventing the later ones, and the
+  held loops are resumed whatever an earlier step did
+
+#### Scenario: No payments target is configured
+
+- **WHEN** the bare-metal payment scenario runs with no payments target configured, or an unready one
+- **THEN** it reports a named blocked prerequisite and makes no purchase
+
+### Requirement: Scenarios hold shared services for the whole module
+
+An end-to-end scenario that needs a shared service's timer held — a storefront's
+lifecycle loops, provisioning's fulfillment convergence, or its lease watchdog — MUST
+take its lane's hold fixture for the whole module, built on one shared helper per pause
+kind. A hold MUST be taken before the module's first stage, MUST wait until each held
+loop reports itself paused at its gate, and MUST be released in a finaliser whatever the
+module's outcome, after the module's other cleanup. A stage MUST assert a hold and MUST
+NOT pause or resume a service itself, and a source check MUST refuse a scenario or stage
+that calls a pause route directly. Every lane MUST use the same mechanism.
+
+#### Scenario: A deal scenario fails part-way
+
+- **WHEN** a VM or bare-metal deal scenario fails in a stage after its storefront's loops
+  and the lease watchdog were held
+- **THEN** both are resumed when the module ends, and the next module finds them running
+
+#### Scenario: The Helm deal test passes
+
+- **WHEN** the in-cluster deal test completes against a persistent Helm release
+- **THEN** the seller storefront's lifecycle loops report running afterwards
+
+#### Scenario: A stage pauses a service
+
+- **WHEN** a scenario module or stage calls a storefront or provisioning pause route
+  directly
+- **THEN** the source check fails, naming the call

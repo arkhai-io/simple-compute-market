@@ -380,11 +380,16 @@ _INIT_USER_TEMPLATE = """\
 [chains.ethereum_sepolia]
 # rpc_url = "https://sepolia.infura.io/v3/<project_id>"
 # chain_id = 11155111
-# alkahest_address_config_path = "/path/to/alkahest.json"
 
 # Add additional chains by uncommenting and customizing:
 # [chains.base_sepolia]
 # rpc_url = "https://sepolia.base.org"
+
+# A chain on a deployment's own Alkahest contracts names its address book in
+# the Alkahest section; a chain it does not name uses the SDK's built-in
+# addresses.
+# [settlement.alkahest.address_books]
+# ethereum_sepolia = "/path/to/alkahest.json"
 
 [registry]
 # urls = ["http://localhost:8080"]             # one or more indexer URLs; publishes fan out to each.
@@ -405,11 +410,8 @@ _INIT_USER_TEMPLATE = """\
 
 [provisioning]
 # service_url = "http://localhost:8085"
-# mode = ""                                    # "mock" for dry runs | "" (= http) for real KVM/libvirt
 # timeout = 3600
 # poll_interval = 15
-# preflight_timeout = 30                        # how long startup waits for /health to come up
-# fail_on_unreachable = true                    # set false in dev when service comes up later
 
 [fulfillment.failure_policy]
 # actions = ["release_capacity", "emit_event"] # valid actions: release_capacity, emit_event,

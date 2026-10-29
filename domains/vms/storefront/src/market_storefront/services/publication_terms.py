@@ -23,17 +23,18 @@ from arkhai_vms_listings.pricing_resolution import (
     configured_family_rate_problems as _configured_family_rate_problems,
 )
 from arkhai_vms_listings.reconciler import PoolHintResolutionSettings
-from market_alkahest import ALKAHEST_CONFIG_KEY, publication_release_conditions
+from market_alkahest import ALKAHEST_CONFIG_KEY, AlkahestSettlementConfig
 from market_capability_admissibility import Declaration, parse_declaration
 from market_settlement_runtime import (
+    SettlementConfigurationError,
     SettlementPublicationClause,
     compile_settlement_publication_clause,
+    parse_settlement_publication_clause,
 )
 from market_storefront.settlement_composition import (
     build_storefront_settlement_registry,
 )
 from market_storefront.utils.config import (
-    CHAINS,
     settings,
     settlement_config_mapping,
     settlement_publication_defaults,
@@ -192,6 +193,42 @@ def listing_resource_for_candidate(res: dict[str, Any]) -> dict[str, Any]:
     return listing_resource
 
 
+def enabled_publication_clauses(
+    values: list[str] | list[dict[str, Any]],
+) -> tuple[list[str] | list[dict[str, Any]], tuple[str, ...]]:
+    """The clauses whose mechanism the storefront enables, and the mechanisms
+    of those it drops because their section is absent or disabled.
+
+    Publication rejects a disabled mechanism's clause rather than letting it
+    enable the mechanism, and keeps the candidate's other clauses: a disabled
+    section is the storefront's configuration ruling that mechanism out. Only a
+    clause that reads in full, DSL text or a mapping, is judged by its
+    mechanism's section: one that cannot be read, whatever mechanism it names,
+    is kept for compilation to refuse, so a malformed clause is a payload
+    failure that leaves the candidate's listing as it is, never a mechanism
+    ruled out that would close it.
+    """
+    registry = build_storefront_settlement_registry()
+    config = registry.resolve(settlement_config_mapping(), role="seller")
+    kept: list[Any] = []
+    disabled: list[str] = []
+    for value in values:
+        try:
+            mechanism = parse_settlement_publication_clause(
+                value, registry=registry, role="seller"
+            ).mechanism
+        except SettlementConfigurationError:
+            kept.append(value)
+            continue
+        config_key = registry.registration(mechanism).config_key
+        section = config.mechanisms.get(config_key)
+        if section is None or getattr(section, "enabled", False) is not True:
+            disabled.append(mechanism)
+        else:
+            kept.append(value)
+    return kept, tuple(dict.fromkeys(disabled))
+
+
 def compile_publication_clauses(
     values: list[str] | list[dict[str, Any]],
 ) -> tuple[SettlementPublicationClause, ...]:
@@ -303,22 +340,9 @@ def configured_family_rate_problems() -> list[str]:
     return _configured_family_rate_problems(defaults if isinstance(defaults, dict) else {})
 
 
-def demands_for_publication_clauses(
-    clauses: tuple[SettlementPublicationClause, ...],
-    *,
-    wallet_address: str,
-) -> list[dict[str, Any]]:
-    """The release conditions a listing publishing ``clauses`` advertises.
-
-    The Alkahest mechanism derives them from ``[Settlement.alkahest]``, the
-    seller wallet, and each chain's address book, one per chain an Alkahest
-    clause publishes on.
-    """
+def configured_alkahest_section() -> AlkahestSettlementConfig | None:
+    """The seller's ``[Settlement.alkahest]`` section, which a listing's
+    release conditions derive from; ``None`` when none is configured."""
     registry = build_storefront_settlement_registry()
     config = registry.resolve(settlement_config_mapping(), role="seller")
-    return publication_release_conditions(
-        config.mechanism_config(ALKAHEST_CONFIG_KEY),
-        clauses,
-        chains=CHAINS,
-        wallet_address=wallet_address,
-    )
+    return config.mechanism_config(ALKAHEST_CONFIG_KEY)

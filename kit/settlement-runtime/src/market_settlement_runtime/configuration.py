@@ -34,6 +34,11 @@ from .ports import ConditionalEscrowClient
 
 SETTLEMENT_CONFIG_SCHEMA_VERSION = 1
 SettlementRole = Literal["buyer", "seller"]
+# ``configuration``: the storefront's own configuration causes the blocker, and
+# only an operator can clear it. ``reachability``: a dependency the mechanism
+# needs could not be reached, or has not yet been probed, so its readiness is
+# unknown rather than ruled out.
+ReadinessBlockerKind = Literal["configuration", "reachability"]
 
 
 class SettlementConfigurationError(ValueError):
@@ -41,12 +46,19 @@ class SettlementConfigurationError(ValueError):
 
 
 class ReadinessBlocker(BaseModel):
-    """A stable, public reason that a mechanism is not ready."""
+    """A stable, public reason that a mechanism is not ready.
+
+    ``kind`` has no default: whoever raises a blocker knows whether the
+    storefront's configuration rules the mechanism out or a dependency could not
+    be reached, and publication decides between closing and holding a listing on
+    that difference.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     code: str = Field(min_length=1, max_length=128)
     message: str = Field(min_length=1, max_length=512)
+    kind: ReadinessBlockerKind
 
     @field_validator("code")
     @classmethod
@@ -101,6 +113,21 @@ class MechanismReadiness(BaseModel):
         if self.ready and self.blockers:
             raise ValueError("a ready mechanism cannot have blockers")
         return self
+
+    @property
+    def unknown(self) -> bool:
+        """Whether this readiness could not be determined.
+
+        True when the mechanism is unready and every blocker it reports is a
+        reachability blocker: a dependency it needs could not be reached. Any
+        configuration blocker rules the mechanism out instead, whatever else it
+        reports, since reaching the dependency would not clear it.
+        """
+        return (
+            not self.ready
+            and bool(self.blockers)
+            and all(blocker.kind == "reachability" for blocker in self.blockers)
+        )
 
     def safe_projection(self) -> dict[str, Any]:
         """Return the complete public status representation."""
@@ -637,6 +664,7 @@ class SettlementConfigurationRegistry:
                             ReadinessBlocker(
                                 code="not_configured",
                                 message="mechanism is not configured",
+                                kind="configuration",
                             ),
                         ),
                     )
@@ -644,16 +672,8 @@ class SettlementConfigurationRegistry:
                 continue
             if not _section_enabled(section):
                 results.append(
-                    MechanismReadiness(
-                        mechanism=registration.mechanism_id,
-                        configured=True,
-                        enabled=False,
-                        ready=False,
-                        blockers=(
-                            ReadinessBlocker(
-                                code="disabled", message="mechanism is disabled"
-                            ),
-                        ),
+                    await self._disabled_readiness(
+                        registration, section, shared_resources, role
                     )
                 )
                 continue
@@ -861,6 +881,60 @@ class SettlementConfigurationRegistry:
             ensure_ascii=True,
         ).encode("utf-8")
         return f"sha256:{hashlib.sha256(payload).hexdigest()}"
+
+    async def _disabled_readiness(
+        self,
+        registration: MechanismRegistration,
+        section: BaseModel,
+        resources: Mapping[str, Any],
+        role: SettlementRole,
+    ) -> MechanismReadiness:
+        """A disabled section's readiness: ``disabled``, then its own blockers.
+
+        A disabled section publishes nothing, but its configuration is still
+        the operator's to correct, so the configuration blockers its
+        mechanism's preflight reports for it are listed beside ``disabled``
+        rather than hidden by it; each preflight decides which it reports for a
+        disabled section. Reachability blockers are dropped: whether a disabled
+        mechanism can be reached says nothing about publication.
+        """
+        pending = registration.preflight(section, resources, role)
+        observed = await pending if inspect.isawaitable(pending) else pending
+        if not isinstance(observed, MechanismReadiness):
+            raise SettlementConfigurationError(
+                f"preflight for {registration.mechanism_id!r} returned invalid status"
+            )
+        if observed.mechanism != registration.mechanism_id:
+            raise SettlementConfigurationError(
+                f"preflight for {registration.mechanism_id!r} returned status for {observed.mechanism!r}"
+            )
+        readiness = MechanismReadiness(
+            mechanism=registration.mechanism_id,
+            configured=True,
+            enabled=False,
+            ready=False,
+            blockers=(
+                ReadinessBlocker(
+                    code="disabled",
+                    message="mechanism is disabled",
+                    kind="configuration",
+                ),
+                *(
+                    blocker
+                    for blocker in observed.blockers
+                    if blocker.kind == "configuration"
+                ),
+            ),
+        )
+        secret_values = _secret_values(section)
+        public_payload = json.dumps(
+            readiness.safe_projection(), sort_keys=True, ensure_ascii=True
+        )
+        if any(value and value in public_payload for value in secret_values):
+            raise SettlementConfigurationError(
+                f"preflight for {registration.mechanism_id!r} exposed a secret value"
+            )
+        return readiness
 
     def _validate_readiness(
         self,

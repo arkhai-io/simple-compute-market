@@ -9,9 +9,11 @@ domain reads them, reads each pool's declarations and region (see
 refreshed, or reopened; listings whose resource is unavailable or withdrawn
 close; listings at a site whose projection is not held or whose generation this
 domain refuses, in a pool whose declarations do not resolve, or in a pool that
-resolves no settlement clause or no positive maximum lease duration, are held. Every cycle then
-converges each registry the storefront publishes to on its listings' local
-status.
+resolves no positive maximum lease duration, are held. A candidate that can
+publish no settlement option is refused: its open listing closes when the
+storefront's configuration rules out every mechanism its clauses name, and is
+held while any of them is unknown. Every cycle then converges each registry the
+storefront publishes to on its listings' local status.
 
 A held generation may be stale -- its site's latest poll failed -- and the
 cycle derives from it all the same, because holding a site's listings through
@@ -28,7 +30,6 @@ loop for the storefront's own async persistence and the kit publication runtime.
 from __future__ import annotations
 
 import asyncio
-import copy
 import json
 import logging
 import uuid
@@ -59,6 +60,7 @@ from core_storefront.publication_composition import (
 )
 from core_storefront.publication_runner import (
     REOPEN_UNCHANGED,
+    NoSettlementOption,
     PublicationPayload,
     PublicationSourceSelection,
 )
@@ -70,6 +72,8 @@ from market_capacity_publication import (
     PublicationCycleDriver,
     PublicationCycleReport,
     ReconciliationPlan,
+    RefusedCandidates,
+    SiteDerivationLog,
     SiteProjectionState,
     backing_changed,
     converge_registries,
@@ -121,44 +125,6 @@ def _no_stage(_stage: str) -> None:
     return None
 
 
-# Each derivation action a site's summary lists, by the summary's name for it.
-_DERIVATION_ACTIONS = {"hold": "holds", "refuse": "refusals", "report": "reports"}
-
-#: One site's derivation summary: its holds, refusals, and reports, each the
-#: cycle report's entry without its action and site.
-SiteDerivation = dict[str, list[dict[str, Any]]]
-
-
-class PublicationDerivation:
-    """The latest publication cycle's derivation, per configured site.
-
-    For each site the cycle read: every hold (a site whose projection is not
-    held or whose generation this domain refuses, and each pool or resource held
-    for its declarations, region, rates, override, settlement clauses, or lease
-    bound), every pool
-    refused, and every report, each with its reason. A site that derived cleanly
-    is present with empty lists, so status tells it from a site no cycle has
-    read. The publication step clears it as each cycle starts, and the cycle
-    records it once its compose stage has read every site, so a cycle that fails
-    before then reports none; a preview neither clears nor records. What status
-    reports is therefore always the derivation of the cycle whose outcome the
-    publication loop last recorded, or nothing.
-    """
-
-    def __init__(self) -> None:
-        self._latest: dict[str, SiteDerivation] = {}
-
-    def clear(self) -> None:
-        self._latest = {}
-
-    def record(self, summary: Mapping[str, SiteDerivation]) -> None:
-        self._latest = copy.deepcopy(dict(summary))
-
-    def latest(self) -> dict[str, SiteDerivation]:
-        """Each site's summary from the latest cycle; empty before any cycle."""
-        return copy.deepcopy(self._latest)
-
-
 def build_bare_metal_publication_selection(
     registry: StorefrontDomainRegistry,
     *,
@@ -167,6 +133,7 @@ def build_bare_metal_publication_selection(
     available_candidates: Callable[[str], list[dict[str, Any]]],
     record_published: Callable[[str, dict[str, Any], str], None],
     reopen_existing: Callable[..., dict[str, Any] | None],
+    close_candidate_listing: Callable[[str, str, dict[str, Any], str], None],
 ) -> PublicationSourceSelection:
     """Select the exact registered bare-metal publication capability."""
     registration = registry.resolve_mode(BARE_METAL_OFFERING_MODE)
@@ -180,6 +147,7 @@ def build_bare_metal_publication_selection(
                 "available_candidates": available_candidates,
                 "record_published": record_published,
                 "reopen_existing": reopen_existing,
+                "close_candidate_listing": close_candidate_listing,
             },
         },
     )
@@ -217,12 +185,12 @@ class BareMetalPublicationCycle:
     """One cycle of bare-metal publication over every configured site.
 
     ``site_projections`` is the storefront's one held projection state and
-    ``site_ids`` its configured sites. ``publication_clauses`` and
-    ``default_max_duration_seconds`` are the configured terms a pool's override
-    replaces. ``enter_stage`` names each stage the
+    ``site_ids`` its configured sites. ``default_max_duration_seconds`` is the
+    configured lease bound a pool's override replaces; the configured clauses
+    are the payload builder's. ``enter_stage`` names each stage the
     cycle reaches -- ``compose``, ``run``, ``converge`` -- for the loop
     controller's record of a failed cycle, and ``derivation`` receives each
-    site's derivation summary once compose has read every site.
+    site's holds, refusals, and reports once the cycle has derived them.
     """
 
     def __init__(
@@ -237,16 +205,14 @@ class BareMetalPublicationCycle:
         storefront_url: str,
         seller_principal: Identity,
         build_payload: PayloadBuilder,
-        publication_clauses: Sequence[Any],
         default_max_duration_seconds: int | None = None,
         enter_stage: Callable[[str], None] = _no_stage,
-        derivation: PublicationDerivation | None = None,
+        derivation: SiteDerivationLog | None = None,
     ) -> None:
         self._db = sqlite_client
         # A configured bound that is absent or not positive bounds nothing, so
         # a pool relying on it is held rather than published unbounded.
         self._default_max_duration = positive_lease_bound(default_max_duration_seconds)
-        self._publication_clauses = tuple(publication_clauses)
         self._registry = registry
         self._site_projections = site_projections
         self._site_ids = tuple(site_ids)
@@ -268,6 +234,14 @@ class BareMetalPublicationCycle:
         self._held_pools: set[tuple[str, str]] = set()
         self._candidates: list[dict[str, Any]] = []
         self._pending: dict[int, dict[str, Any]] = {}
+        self._refusals = RefusedCandidates(
+            self.report,
+            call=self._await,
+            listings=sqlite_client,
+            derivation_key=lambda candidate: str(candidate["derivation_key"]),
+            derivation_source=_source_of,
+            reconciliation_close=self._reconciliation_close,
+        )
         self._overrides: dict[tuple[str, str], BareMetalPoolOverride] = {}
         self._dry_run = False
 
@@ -301,8 +275,6 @@ class BareMetalPublicationCycle:
         }
         for site_id in sorted(held):
             self._classify_site(site_id, held[site_id])
-        if self._derivation is not None and not dry_run:
-            self._derivation.record(self._site_derivations())
         selection = build_bare_metal_publication_selection(
             self._registry,
             open_keys=self._open_keys,
@@ -310,6 +282,7 @@ class BareMetalPublicationCycle:
             available_candidates=lambda _db_path: list(self._candidates),
             record_published=self._record_published,
             reopen_existing=self._reopen_existing,
+            close_candidate_listing=self._refusals.close_candidate_listing,
         )
         self._enter_stage("run")
         result = await self._driver.run(
@@ -322,39 +295,30 @@ class BareMetalPublicationCycle:
             skip_open=False,
         )
         for candidate, reason in result.failed:
+            # A candidate whose payload was refused is in the site derivation,
+            # whose log records it once when it appears, not every cycle.
+            if self._refusals.refused(candidate):
+                continue
             logger.warning(
                 "bare-metal candidate %s failed: %s", _source_of(candidate), reason
+            )
+        if self._derivation is not None:
+            self._derivation.record(
+                self._registry.resolve_mode(BARE_METAL_OFFERING_MODE).contribution_id,
+                self.report,
+                self._site_ids,
             )
         self._enter_stage("converge")
         await converge_registries(self._runtime, self.report)
         return self.report.as_dict()
 
-    def _site_derivations(self) -> dict[str, SiteDerivation]:
-        """Every configured site's holds, refusals, and reports so far."""
-        summary: dict[str, SiteDerivation] = {
-            site_id: {name: [] for name in _DERIVATION_ACTIONS.values()}
-            for site_id in self._site_ids
-        }
-        for item in self.report.actions:
-            name = _DERIVATION_ACTIONS.get(item["action"])
-            site_id = item.get("site_id")
-            site = summary.get(site_id) if isinstance(site_id, str) else None
-            if name is None or site is None:
-                continue
-            site[name].append(
-                {key: value for key, value in item.items() if key not in ("action", "site_id")}
-            )
-        return summary
-
     def _classify_site(self, site_id: str, view: ProjectionCacheView[Any]) -> None:
-        """Accept and classify one site's held generation, or hold the site."""
+        """Accept and classify one site's held generation, or hold the site.
+
+        Every hold, refusal, and report goes to the cycle's report, which the
+        site-derivation log records and logs as each entry appears and clears.
+        """
         if view.value is None or view.identity is None:
-            logger.warning(
-                "bare-metal site %s projection is not held (%s): %s",
-                site_id,
-                view.state.value,
-                view.last_error or "no poll has loaded it",
-            )
             self.report.record(
                 "hold",
                 site_id=site_id,
@@ -367,38 +331,37 @@ class BareMetalPublicationCycle:
             "digest": view.identity.digest,
             "resource_pools": list(view.value),
         }
-        try:
-            generation = trusted_bare_metal_projection(
-                site_id=site_id, projection=response
-            )
-        except ValueError as exc:
-            logger.warning(
-                "bare-metal site %s projection generation refused: %s", site_id, exc
-            )
-            self.report.record(
-                "hold", site_id=site_id, reason="site_projection_refused", error=str(exc)
-            )
-            return
         pools = response["resource_pools"]
         site_overrides = {
             pool_id: override
             for (override_site, pool_id), override in self._overrides.items()
             if override_site == site_id
         }
-        reading = read_site_pools(
-            pools,
-            override_asking_rates={
-                pool_id: override.asking_rates
-                for pool_id, override in site_overrides.items()
-                if not override.problems and override.asking_rates is not None
-            },
-            override_problems={
-                pool_id: override.problems or override.term_conflicts
-                for pool_id, override in site_overrides.items()
-                if override.problems or override.term_conflicts
-            },
-        )
-        self._report_pools(site_id, reading)
+        try:
+            # The pools are read first: which backing each view's delivery
+            # terms answer to depends on the whole generation's declarations.
+            reading = read_site_pools(
+                pools,
+                override_asking_rates={
+                    pool_id: override.asking_rates
+                    for pool_id, override in site_overrides.items()
+                    if not override.problems and override.asking_rates is not None
+                },
+                override_problems={
+                    pool_id: override.problems or override.term_conflicts
+                    for pool_id, override in site_overrides.items()
+                    if override.problems or override.term_conflicts
+                },
+            )
+            generation = trusted_bare_metal_projection(
+                site_id=site_id, projection=response, backings=reading.backings
+            )
+        except ValueError as exc:
+            self.report.record(
+                "hold", site_id=site_id, reason="site_projection_refused", error=str(exc)
+            )
+            return
+        held_pools = self._report_pools(site_id, reading, site_overrides)
         classification = classify_bare_metal_resources(
             generation,
             pool_admission=reading.admission,
@@ -408,28 +371,32 @@ class BareMetalPublicationCycle:
         )
         self._classifications[site_id] = classification
         for item in classification.of(HELD):
-            if item.pool_id in reading.regionless:
-                reason = "pool_region_missing"
-            elif item.pool_id in reading.unreadable_overrides:
-                override = site_overrides.get(item.pool_id)
-                reason = (
-                    "pool_override_terms_conflict"
-                    if override is not None and override.term_conflicts
-                    else "pool_override_unreadable"
-                )
-            elif item.pool_id in reading.unreadable_asking_rates:
-                reason = "asking_rates_unreadable"
-            elif item.problems:
-                reason = "declaration_unresolvable"
-            else:
-                reason = "pool_unresolvable"
+            # A pool held whole is reported once, with its reasons, above; a
+            # machine in it is reported too only for its own declaration. One
+            # the site built no view for is reported as unbuildable below.
+            if item.view_unbuildable or (item.pool_id in held_pools and not item.problems):
+                continue
             self.report.record(
                 "hold",
                 site_id=site_id,
                 pool_id=item.pool_id,
                 physical_resource_id=item.physical_resource_id,
-                reason=reason,
+                reason="declaration_unresolvable" if item.problems else "pool_unresolvable",
                 **({"problems": list(item.problems)} if item.problems else {}),
+            )
+        for unbuildable in generation.view_problems:
+            # The site built no view for this resource, so it yields no
+            # listing; an open one is held, as an unreadable declaration is,
+            # and closes only as a withdrawn source: its declaration disabled,
+            # or its pool no longer admitting bare metal. The reasons are its
+            # declaration's, named for the seller.
+            self.report.record(
+                "report",
+                site_id=site_id,
+                pool_id=unbuildable.pool_id,
+                physical_resource_id=unbuildable.physical_resource_id,
+                reason="publication_view_unbuildable",
+                problems=list(unbuildable.problems),
             )
         for item in classification.resources:
             if item.publication_capabilities_ignored:
@@ -441,9 +408,7 @@ class BareMetalPublicationCycle:
                     reason="publication_capabilities_ignored",
                 )
         self._report_unpublished_rates(site_id, reading, classification)
-        unpublishable = self._hold_unbounded_pools(
-            site_id, reading, site_overrides
-        ) | self._hold_pools_without_clauses(site_id, reading, site_overrides)
+        unpublishable = self._hold_unbounded_pools(site_id, reading, site_overrides)
         for candidate in classification.candidates:
             if candidate["pool_id"] in unpublishable:
                 continue
@@ -485,99 +450,48 @@ class BareMetalPublicationCycle:
             self.report.record(
                 "hold", site_id=site_id, pool_id=pool_id, reason="pool_lease_bound_missing"
             )
-            logger.warning(
-                "bare-metal pool %s at %s resolves no positive maximum lease "
-                "duration from its override or [pricing].default_max_duration_seconds; "
-                "its listings are held",
-                pool_id,
-                site_id,
-            )
         return unbounded
 
-    def _hold_pools_without_clauses(
+    def _report_pools(
         self,
         site_id: str,
         reading: SitePoolReading,
         site_overrides: Mapping[str, BareMetalPoolOverride],
     ) -> set[str]:
-        """Hold each admitted pool that resolves no settlement clause.
+        """Hold every pool a site's declarations leave unpublishable, each once
+        per reason with what makes it so, and record each pool-level refusal and
+        report. Returns the pools held, whether or not they have members: a
+        held pool's open listings are neither refreshed nor closed."""
+        held: set[str] = set()
 
-        A pool's clauses are its override's, else the configured ones; with
-        none, no settlement option can be built for its listings, so they are
-        held -- neither published, refreshed, nor closed -- and the pool is
-        reported, as a pool with no lease bound is.
-        """
-        unclaused: set[str] = set()
-        for pool_id, admission in sorted(reading.admission.items()):
-            if admission != POOL_ADMITTED:
-                continue
-            override = site_overrides.get(pool_id)
-            stated = override.clauses if override is not None else None
-            if (stated if stated is not None else self._publication_clauses):
-                continue
-            unclaused.add(pool_id)
+        def hold(pool_id: str, reason: str, problems: Sequence[str] = ()) -> None:
+            held.add(pool_id)
             self._held_pools.add((site_id, pool_id))
             self.report.record(
                 "hold",
                 site_id=site_id,
                 pool_id=pool_id,
-                reason="pool_settlement_clauses_missing",
+                reason=reason,
+                **({"problems": list(problems)} if problems else {}),
             )
-            logger.warning(
-                "bare-metal pool %s at %s resolves no settlement clause from its "
-                "override or [pricing].settlements; its listings are held",
-                pool_id,
-                site_id,
-            )
-        return unclaused
 
-    def _report_pools(self, site_id: str, reading: SitePoolReading) -> None:
-        """Record every pool-level reason a site's pools publish nothing."""
         for pool_id, problems in sorted(reading.unresolvable.items()):
-            self._held_pools.add((site_id, pool_id))
-            logger.warning(
-                "bare-metal pool %s at %s is unresolvable: %s",
-                pool_id,
-                site_id,
-                ", ".join(problems),
-            )
-        for pool_id in reading.regionless:
-            # Held, not withdrawn: a missing region is a declaration to repair,
-            # and the listings it already published stay as they are.
-            self._held_pools.add((site_id, pool_id))
-            logger.warning(
-                "bare-metal pool %s at %s states no region; its listings are held",
-                pool_id,
-                site_id,
-            )
-        for pool_id in reading.unbacked:
-            self.report.record(
-                "refuse", site_id=site_id, pool_id=pool_id, reason="pool_unbacked"
-            )
-            logger.warning(
-                "bare-metal pool %s at %s is unbacked; bare-metal listings "
-                "are capacity-backed, so none is derived from it",
-                pool_id,
-                site_id,
-            )
+            hold(pool_id, "pool_unresolvable", problems)
+        # Held, not withdrawn: a missing region is a declaration to repair, and
+        # the listings it already published stay as they are.
+        for pool_id in sorted(reading.regionless):
+            hold(pool_id, "pool_region_missing")
         for pool_id, problems in sorted(reading.unreadable_overrides.items()):
-            self._held_pools.add((site_id, pool_id))
-            logger.warning(
-                "bare-metal pool %s at %s has a stored override that cannot be "
-                "applied (%s); its listings are held",
+            override = site_overrides.get(pool_id)
+            hold(
                 pool_id,
-                site_id,
-                "; ".join(problems),
+                "pool_override_terms_conflict"
+                if override is not None and override.term_conflicts
+                else "pool_override_unreadable",
+                problems,
             )
         for pool_id, problems in sorted(reading.unreadable_asking_rates.items()):
-            self._held_pools.add((site_id, pool_id))
-            logger.warning(
-                "bare-metal pool %s at %s states asking rates that cannot be read "
-                "(%s); its listings are held",
-                pool_id,
-                site_id,
-                "; ".join(problems),
-            )
+            hold(pool_id, "asking_rates_unreadable", problems)
         for pool_id in reading.listing_shapes_stated:
             self.report.record(
                 "report",
@@ -585,6 +499,7 @@ class BareMetalPublicationCycle:
                 pool_id=pool_id,
                 reason="listing_shapes_not_applicable",
             )
+        return held
 
     def _report_unpublished_rates(
         self, site_id: str, reading: SitePoolReading, classification: Any
@@ -716,12 +631,17 @@ class BareMetalPublicationCycle:
         _source: Any,
         candidate: dict[str, Any],
         listing_resource: dict[str, Any],
-    ) -> PublicationPayload | str:
+    ) -> PublicationPayload | NoSettlementOption | str:
+        """The candidate's payload, or its refusal recorded under its site.
+
+        A candidate with no settlement option is refused where configuration
+        rules out every mechanism its clauses name, and held while any of them
+        is unknown; the runner then closes or keeps its open listing.
+        """
         try:
             payload = self._await(self._payload_builder(candidate))
         except Exception as exc:
-            self.report.record("refuse", source=_source_of(candidate), reason=str(exc))
-            return str(exc)
+            return self._refusals.refuse(candidate, exc)
         self._pending[id(listing_resource)] = candidate
         return payload
 
@@ -910,8 +830,11 @@ class BareMetalPublicationCycle:
                         "fail", listing_id=listing_id, reason="local_close_failed"
                     )
             else:
+                # A refusal, like every one a cycle makes, names its site, pool,
+                # and Physical Resource, so it reaches the site's derivation.
                 self.report.record(
                     "refuse",
+                    **_source_of(candidate),
                     listing_id=listing_id,
                     reason=comparison.outcome,
                     fields=list(comparison.differing_fields),
@@ -1011,7 +934,5 @@ def _persisted_resource(
 __all__ = [
     "BareMetalPublicationCycle",
     "BareMetalPublicationError",
-    "PublicationDerivation",
-    "SiteDerivation",
     "build_bare_metal_publication_selection",
 ]

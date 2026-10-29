@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
+
+import yaml
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -70,6 +73,39 @@ def test_bare_metal_stack_requires_real_selected_site_inputs():
     assert "${BARE_METAL_POOL_DEFINITIONS_FILE:?" in domain_compose
     assert "${BARE_METAL_PROVISIONING_INVENTORY_FILE:?" in domain_compose
     assert "${BARE_METAL_PROVISIONING_SSH_PRIVATE_KEY_FILE:?" in domain_compose
+
+
+def test_bare_metal_lane_delivers_seller_mail_to_its_mail_sink():
+    """The lane's storefront mails each revealed buyer contact to a Mailpit the
+    lane runs, at the host its delivery configuration names, which the
+    introduction scenarios read back through ``MAILPIT.API_URL``."""
+    overlay = yaml.safe_load(
+        (_REPO_ROOT / "compose.bare-metal-local.yml").read_text(encoding="utf-8")
+    )
+    storefront = tomllib.loads(
+        (_REPO_ROOT / "domains/bare_metal/storefront/storefront.dev.toml").read_text(
+            encoding="utf-8"
+        )
+    )
+    settings = yaml.safe_load(
+        (_REPO_ROOT / "e2e-tests/config/config-docker.yml").read_text(encoding="utf-8")
+    )
+
+    services = overlay["services"]
+    assert services["mailpit"]["image"].startswith("docker.io/axllent/mailpit:")
+    assert services["bare-metal-storefront"]["depends_on"]["mailpit"] == {
+        "condition": "service_healthy"
+    }
+    delivery = storefront["Delivery"]
+    assert delivery["enabled"] == ["seller-mail"]
+    mail = delivery["seller-mail"]
+    assert (mail["sink"], mail["host"], mail["port"]) == ("smtp", "mailpit", 1025)
+    # The seller is mailed at the contact the storefront reveals for its site.
+    assert mail["recipients"] == [
+        storefront["Settlement"]["contact"]["contact_payload"]["email"]
+    ]
+    assert mail["recipients"] == [settings["bare_metal_lane"]["seller_contact_email"]]
+    assert settings["mailpit"]["api_url"] == "http://mailpit:8025"
 
 
 def test_bare_metal_stack_keeps_role_credentials_and_state_separate():

@@ -101,7 +101,7 @@ authority_scheme     = "eip191"
 authority_identifier = ""
 # The provisioning service's own signing credential. Distinct from the admin
 # credential above: the storefront trusts this principal as its service peer,
-# which is the caller fulfillment callbacks must come from.
+# which is the caller the capacity-released callback must come from.
 service_scheme       = "eip191"
 service_credential   = ""
 
@@ -114,14 +114,17 @@ service_url     = ""   # credits service (keys/credits/quota)
 storefront_url  = ""   # credits seller storefront
 
 # ---------------------------------------------------------------------------
-# Arkhai payments target for the API-credit payment scenario. Every value is
-# required; the scenario reports blocked rather than run against a partial or
-# unreachable target. Credentials are hex Ed25519 seeds supplied by the lane.
+# Arkhai payments target shared by the payment scenarios. A blank service_url
+# means no target, and the scenarios report blocked and skip, as they do for an
+# unready one. With it set, service_identity, dispute_authority, buyer_account
+# and both marketplace credentials are required; a missing one fails the
+# scenario, naming it. Credentials are hex Ed25519 seeds supplied by the lane.
 # ---------------------------------------------------------------------------
 [default.payments]
 service_url                   = ""   # payments service origin
 service_identity              = ""   # Ed25519 receipt-signing identifier pinned by both roles
 fee_bps                       = 250
+livemode                      = false # sandbox receipts only by default
 dispute_authority             = ""   # Arkhai dispute authority account
 development_auth              = false
 api_key_env                   = ""   # buyer WorkOS key variable when development_auth is false

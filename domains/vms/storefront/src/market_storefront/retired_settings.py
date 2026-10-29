@@ -6,7 +6,9 @@ config set` refuses to write one. A renamed or removed setting also refuses
 startup: running at a default the operator did not choose, or with a switch the
 storefront no longer honours, would change behaviour silently. The retired
 inventory settings do not refuse startup, because no setting replaces them;
-their inventory is declared at provisioning.
+their inventory is declared at provisioning. A key the storefront never read,
+such as `[provisioning] mode`, is not catalogued: stating it changes nothing,
+so it is ignored rather than refused.
 
 This module reads no configuration and imports nothing heavier than the standard
 library, so the command line can consult it without loading the storefront.
@@ -33,6 +35,11 @@ RENAMED_SETTINGS: Mapping[str, str] = {
     "claims_sweep_interval": "settlement_servicing_interval_seconds",
 }
 
+_NO_PROVISIONING_WAIT = (
+    "the storefront starts without waiting for its provisioning service; a site "
+    "it cannot reach is reported in system status, and each call to it is retried"
+)
+
 #: Settings the storefront has removed, each with why nothing replaces it.
 REMOVED_SETTINGS: Mapping[str, str] = {
     "enable_registry_discovery": (
@@ -44,6 +51,8 @@ REMOVED_SETTINGS: Mapping[str, str] = {
         "[Identity.service_peers] entry bound to that site, which rotate through "
         "the storefront's identity routes"
     ),
+    "provisioning.fail_on_unreachable": _NO_PROVISIONING_WAIT,
+    "provisioning.preflight_timeout": _NO_PROVISIONING_WAIT,
 }
 
 #: Every retired key, as a dotted path.

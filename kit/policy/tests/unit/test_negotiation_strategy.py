@@ -73,6 +73,18 @@ def test_load_negotiation_chain_unknown_raises_with_actionable_message():
     msg = str(exc_info.value)
     assert "does.not.exist" in msg
     assert "Registered:" in msg
+    assert "Built-in middlewares are always registered" in msg
+    assert "'market_policy.negotiation_middlewares' entry-point group" in msg
+    assert "VM policy package" not in msg
+
+
+@pytest.mark.parametrize("names", [None, []])
+def test_an_empty_chain_is_refused_naming_the_policies_setting(names):
+    with pytest.raises(ValueError) as exc_info:
+        load_negotiation_chain(names)
+    msg = str(exc_info.value)
+    assert "[negotiation].policies" in msg
+    assert "[negotiation].chain" not in msg
 
 
 def test_chain_terminates_on_first_decision():

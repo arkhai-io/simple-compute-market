@@ -20,7 +20,9 @@ when zerotier_network is unset in the storefront config — entrypoint.sh is alr
 fail-soft on daemon startup and the Python runtime skips all ZeroTier paths
 when zerotier_network is absent.
 */}}
-{{- range $name, $entry := .Values.agents }}
+{{- $agents := dict }}
+{{- include "storefront.agents" (dict "root" . "into" $agents) }}
+{{- range $name, $entry := $agents }}
 {{- /* An agent states no runtime overlay by omitting `secret`. */}}
 {{- $agent := mergeOverwrite (dict "secret" (dict)) $entry (dict "name" $name) }}
 {{- $addressBook := include "storefront.agentAddressBook" $agent | fromJson }}
@@ -66,51 +68,10 @@ spec:
       # whether the volume is a PVC or emptyDir.
       securityContext:
         fsGroup: 1000
-      initContainers:
-        {{- /* Waiting for a dependency is the Kubernetes layer's concern; reading
-        the passed-through configuration to decide it validates nothing. */}}
-        {{- $config := $agent.config | default dict }}
-        {{- $settlement := include "storefront.foldedMap" (dict "doc" $config "name" "settlement") | fromJson }}
-        {{- $alkahest := include "storefront.foldedMap" (dict "doc" $settlement "name" "alkahest") | fromJson }}
-        {{- $alkahestEnabledKey := include "storefront.foldedKey" (dict "doc" $alkahest "name" "enabled") }}
-        {{- $chains := include "storefront.foldedMap" (dict "doc" $config "name" "chains") | fromJson }}
-        {{- if and $alkahestEnabledKey (index $alkahest $alkahestEnabledKey) (gt (len $chains) 0) }}
-        {{- $chainName := first (keys $chains | sortAlpha) }}
-        {{- $chain := index $chains $chainName }}
-        {{- $rpcUrlKey := include "storefront.foldedKey" (dict "doc" $chain "name" "rpc_url") }}
-        {{- if and $rpcUrlKey (index $chain $rpcUrlKey) }}
-        {{- $rpcUrl := index $chain $rpcUrlKey }}
-        - name: wait-for-rpc
-          image: busybox:1.36
-          {{- /* Probe only a public RPC URL rendered into the ConfigMap. */}}
-          command:
-            - sh
-            - -c
-            - |
-              echo "Waiting for RPC..."
-              until wget -qO- --post-data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
-                --header 'Content-Type: application/json' \
-                {{ $rpcUrl | quote }} > /dev/null 2>&1; do
-                echo "RPC not ready, retrying in 5s..."; sleep 5
-              done
-              echo "RPC ready."
-        {{- end }}
-        {{- end }}
-        {{- /* An agent pointed at another registry does not wait on the
-        release's, which may not exist. */}}
-        {{- if include "storefront.usesInternalRegistry" (dict "root" $ "agent" $agent) }}
-        - name: wait-for-registry
-          image: busybox:1.36
-          command:
-            - sh
-            - -c
-            - |
-              echo "Waiting for registry at {{ include "storefront.registryUrl" $ }}/health..."
-              until wget -qO- {{ include "storefront.registryUrl" $ }}/health > /dev/null 2>&1; do
-                echo "Registry not ready, retrying in 5s..."; sleep 5
-              done
-              echo "Registry ready."
-        {{- end }}
+      # No init container waits on the registry, a chain, or a site: the
+      # storefront starts while they are unreachable, reports them degraded in
+      # its system status, and its loops retry until they answer. A wait here
+      # would hold the pod back on a dependency the process already tolerates.
       containers:
         - name: market-storefront-{{ $agent.name }}
           image: {{ include "storefront.image" $ }}
@@ -167,19 +128,26 @@ spec:
               readOnly: true
             {{- end }}
           # /health performs only a fast SQLite ping — safe as a Kubernetes
-          # liveness/readiness probe with no outbound calls or blocking I/O.
+          # probe with no outbound calls or blocking I/O. The startup probe
+          # holds the liveness and readiness probes off until the process
+          # first answers, so a slow start is not judged by them and they need
+          # no initial delay.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            failureThreshold: 30
+            periodSeconds: 2
           livenessProbe:
             httpGet:
               path: /health
-              port: {{ $agent.port }}
-            initialDelaySeconds: 15
+              port: http
             periodSeconds: 15
             timeoutSeconds: 3
           readinessProbe:
             httpGet:
               path: /health
-              port: {{ $agent.port }}
-            initialDelaySeconds: 5
+              port: http
             periodSeconds: 10
             timeoutSeconds: 3
           resources:

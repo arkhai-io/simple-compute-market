@@ -8,6 +8,9 @@ happens before any servicing acts.
 
 from __future__ import annotations
 
+import json
+import logging
+
 import pytest
 from settlement_compositions import ChainClient, EscrowOnChain
 from test_alkahest_lifecycle import _record, _settled, _Site
@@ -69,6 +72,29 @@ async def test_an_obligation_naming_another_mechanism_is_refused(tmp_path) -> No
     with pytest.raises(RuntimeError, match="another mechanism than its Agreement"):
         await runtime._accepted_servicing(relabelled)
     assert alkahest.calls == [] and contact.calls == []
+
+
+class _FailingReady(_Recorder):
+    async def ready(self, record, worker_id):
+        raise RuntimeError("site unreachable")
+
+
+async def test_the_composed_worker_records_a_failing_step_as_a_claims_event(
+    tmp_path, caplog
+) -> None:
+    """The runtime hands its servicing worker the storefront's event callback,
+    so a failing step reaches the deal's stage record."""
+    runtime, record = await _runtime_with(tmp_path, {"alkahest.v1": _FailingReady()})
+
+    with caplog.at_level(logging.INFO, logger="stage"):
+        await runtime.settlement_worker.service_obligation(record.obligation_ref)
+
+    events = [json.loads(r.getMessage()) for r in caplog.records if r.name == "stage"]
+    retries = [e for e in events if e["event"] == "settlement_retry"]
+    assert [(e["stage"], e["obligation_ref"], e["operation"]) for e in retries] == [
+        ("claims", record.obligation_ref, "fulfill")
+    ]
+    assert "site unreachable" in retries[0]["error"]
 
 
 async def test_a_declined_obligation_has_no_effect() -> None:

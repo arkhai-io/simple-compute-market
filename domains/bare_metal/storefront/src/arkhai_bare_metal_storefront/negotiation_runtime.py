@@ -46,8 +46,10 @@ from market_core.schemas import (
 from market_alkahest.proposals import (
     ReleaseConditionError,
     SettlementPlanMaterializationError,
+    UnpinnedEscrowError,
     authorize_escrow_proposal,
 )
+from market_alkahest.release_authorization import require_pinned_escrow
 from market_identity import Identity
 from market_negotiation_runtime import (
     Acceptance,
@@ -85,7 +87,6 @@ EXACT_SELECTION_STRATEGY = "bare_metal_exact_selection"
 #: What an accepted escrow opening answers with, besides the decision.
 _ESCROW_RESPONSE_ARTIFACTS = (
     "settlement_plan",
-    "accepted_escrow_terms",
     "accepted_escrow_proposal",
 )
 
@@ -254,30 +255,49 @@ def _decision_wire(decision: NegotiationDecision) -> dict[str, Any]:
     return payload
 
 
-def _priced_acceptance(
+def _matching_acceptance(
     listing_record: Mapping[str, Any], proposal: EscrowProposal
 ) -> AcceptedEscrow | None:
-    """The accepted escrow whose listed rate prices ``proposal``.
+    """The accepted escrow on ``proposal``'s chain at its escrow address, or None.
 
-    The one on the proposal's chain at its escrow address; otherwise the
-    listing's first accepted escrow. A buyer may leave the escrow contract
-    unpinned (no address, or the zero address), and is then priced from what
-    the listing offers rather than from nothing, so the seller's floor holds
-    for every opening. A pinned address the listing does not offer is refused
-    by ``escrow_shape_guard`` for its own reason, not priced from this.
+    No other entry of the listing stands in for it.
     """
 
-    accepted = [
-        AcceptedEscrow.model_validate(raw)
-        for raw in listing_record.get("accepted_escrows") or []
-    ]
-    for candidate in accepted:
+    for raw in listing_record.get("accepted_escrows") or []:
+        candidate = AcceptedEscrow.model_validate(raw)
         if (
             candidate.chain_name == proposal.chain_name
             and candidate.escrow_address.lower() == proposal.escrow_address.lower()
         ):
             return candidate
-    return accepted[0] if accepted else None
+    return None
+
+
+def _priced_acceptance(
+    listing_record: Mapping[str, Any], proposal: EscrowProposal
+) -> AcceptedEscrow:
+    """The accepted escrow whose listed rate prices ``proposal``, or a refusal.
+
+    An opening is priced only from the escrow it names. One naming no escrow
+    contract is refused as the kit refuses it (``escrow_contract_unpinned``),
+    and one naming a contract the listing does not accept as
+    ``escrow_not_in_accepted_set``, before any seller policy runs: the
+    escrow-shape guard is a policy a seller may omit, and without it neither
+    proposal could be priced from anything but another entry or nothing.
+    """
+
+    try:
+        require_pinned_escrow(proposal)
+    except UnpinnedEscrowError as exc:
+        raise BareMetalNegotiationRefusal(str(exc), status_code=409) from exc
+    accepted = _matching_acceptance(listing_record, proposal)
+    if accepted is None:
+        raise BareMetalNegotiationRefusal(
+            f"escrow_not_in_accepted_set: (chain={proposal.chain_name!r}, "
+            f"address={proposal.escrow_address!r}) not in listing's accepted_escrows",
+            status_code=409,
+        )
+    return accepted
 
 
 def _escrow_proposal(proposal: Mapping[str, Any] | None) -> EscrowProposal:
@@ -439,6 +459,17 @@ def build_bare_metal_negotiation_runtime(
         record = await repository.load_listing(listing_id=listing_id)
         if record is None:
             raise NegotiationStateError(f"listing {listing_id!r} is gone")
+        # The negotiation continues, and is accepted, against the record its
+        # opening was authorized against, so a listing refreshed in place since
+        # cannot change the escrow the buyer funds. The record carries the
+        # current status, so a reader of its lifecycle sees the listing as it
+        # now is rather than as it was at the opening. A thread with no
+        # recorded opening record continues against the current record.
+        opened = await repository.load_bare_metal_opening_listing(
+            negotiation_id=negotiation_id
+        )
+        if opened is not None:
+            record = {**opened, "status": record.get("status")}
         return ResolvedNegotiation(
             listing_id=listing_id,
             listing=listing_of(record),
@@ -684,8 +715,11 @@ def build_bare_metal_negotiation_runtime(
     ) -> int:
         if not scalar or pinned is None or "settlement_selection" in pinned:
             return 0
+        # Read on every resumed round, exit included, so a pinned escrow matching
+        # no entry prices from nothing rather than refusing: a buyer can always
+        # leave, and a counter is refused when its round is evaluated.
         return _seller_reference_amount(
-            _priced_acceptance(record, _escrow_proposal(pinned)),
+            _matching_acceptance(record, _escrow_proposal(pinned)),
             duration_seconds=int(terms.requested_duration_seconds or 0),
             buyer_amount=None,
         )
@@ -757,6 +791,10 @@ def build_bare_metal_negotiation_runtime(
         require_domain(copied.binding)
         await repository.save_bare_metal_message(
             negotiation_id=opening.negotiation_id, message=opening.terms.decoded
+        )
+        await repository.save_bare_metal_opening_listing(
+            negotiation_id=opening.negotiation_id,
+            listing_record=opening.listing_record,
         )
 
     async def persist_artifacts(

@@ -171,6 +171,28 @@ def test_an_existing_assignment_keeps_the_host_it_was_placed_on(services):
     assert again.host_id == "kvm1"
 
 
+def test_a_provider_needing_no_host_places_and_returns_a_hostless_assignment(services):
+    """Where the pool's provider needs no host, a declaration naming none is
+    placed, its assignment carries no host, and a repeat returns it unchanged."""
+    ledger, _, factory = services
+    scheduler = PhysicalSettlementScheduler(
+        ResourcePoolService(factory, {"ansible": _Handler()}),
+        ledger,
+        session_factory=factory,
+        default_resource_kind="compute.gpu",
+        host_requirement={"ansible": False},
+    )
+    _declare(ledger, "a-no-host")
+    capacity_reservation_id = _reserve(ledger, "agreement-1")["capacity_reservation_id"]
+
+    placed = scheduler.schedule_resource(_request(capacity_reservation_id))
+    again = scheduler.schedule_resource(_request(capacity_reservation_id))
+
+    assert placed.settlement_resource_id == "a-no-host"
+    assert placed.host_id is None
+    assert again == placed
+
+
 def test_an_assignment_recorded_with_no_host_is_refused_rather_than_returned(services):
     """An assignment placed before placement refused declarations naming no
     host. It is seeded directly, as that earlier scheduler wrote it, because

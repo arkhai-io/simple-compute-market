@@ -22,7 +22,8 @@
         "inventory_ini": false,
         "storefront_admin_key": false,
         "pool_definitions_path": false,
-        "capacity_definitions_path": false
+        "capacity_definitions_path": false,
+        "playbook_path": false
       }
     },
     "definitions": {
@@ -31,6 +32,23 @@
         "relays": {"type": "object"},
         "pools": {"type": "object"},
         "capacity": {"type": "object"}
+      }
+    },
+    "configFiles": {
+      "type": "object",
+      "additionalProperties": {"type": "string"},
+      "propertyNames": {
+        "pattern": "^[-._a-zA-Z0-9]+$",
+        "maxLength": 253,
+        "not": {
+          "anyOf": [
+            {"enum": [
+              ".", "relay-definitions.yaml", "pool-definitions.yaml", "capacity-definitions.yaml"
+            ]},
+            {"pattern": "^\\.\\."},
+            {"pattern": "^config(-.*)?\\.ya?ml$"}
+          ]
+        }
       }
     },
     "sshDecryptionKey": {"$ref": "#/definitions/secretReference"},

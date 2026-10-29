@@ -94,6 +94,12 @@ def recheck_bare_metal_listing_source(
             SOURCE_ABSENT, "the resource is no longer projected under its pool"
         )
     if item.classification == HELD:
+        if item.view_unbuildable:
+            return ListingSourceCheck(
+                SOURCE_MISMATCH,
+                "the site builds no bare-metal view for the resource: "
+                + "; ".join(item.problems),
+            )
         if item.problems:
             detail = "; ".join(item.problems)
             return ListingSourceCheck(

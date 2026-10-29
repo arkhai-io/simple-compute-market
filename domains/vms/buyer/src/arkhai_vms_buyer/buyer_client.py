@@ -31,13 +31,14 @@ from core_buyer.negotiation_client import (
     negotiate_with_seller as _core_negotiate_with_seller,
     parse_accepted_terms_from_reply as _core_parse_accepted_terms_from_reply,
 )
-from market_alkahest.schemas import EscrowProposal, EscrowTerms
+from market_alkahest.schemas import EscrowProposal
 from market_core.schemas import SettlementPlan, SettlementSelection
 from market_policy.negotiation_middleware import NegotiationMiddleware
 from market_identity import Identity, Signer, TrustedIdentitySet
 
 from arkhai_vms import VmProvisionTerms
 
+from .common import chain_address_books
 from .escrow_client import encode_escrow_proposal
 from .settlement_composition import validate_buyer_acceptance
 
@@ -66,32 +67,20 @@ set_rl_middleware_registrar(_register_rl_middleware)
 
 
 def load_buyer_chain(**kwargs):
-    """Load negotiation middleware with VM-owned chain address config."""
-    from .common import buyer_chains
-
-    kwargs.setdefault(
-        "chain_config_paths",
-        lambda: {
-            name: chain.alkahest_address_config_path
-            for name, chain in buyer_chains().items()
-        },
-    )
+    """Load negotiation middleware with each configured chain's Alkahest
+    address book, as the buyer's Alkahest section names it."""
+    kwargs.setdefault("chain_config_paths", chain_address_books)
     return _core_load_buyer_chain(**kwargs)
 
 
 def parse_accepted_terms_from_reply(reply: dict[str, Any]):
     """Decode core's opaque accepted settlement payloads as Alkahest models."""
-    provision, proposal, selection, plan, terms = _core_parse_accepted_terms_from_reply(
-        reply
-    )
+    provision, proposal, selection, plan = _core_parse_accepted_terms_from_reply(reply)
     return (
         VmProvisionTerms.model_validate(provision) if provision is not None else None,
         EscrowProposal.model_validate(proposal) if proposal is not None else None,
         selection,
         plan,
-        [EscrowTerms.model_validate(term) for term in terms]
-        if terms is not None
-        else None,
     )
 
 
@@ -106,7 +95,6 @@ class NegotiationOutcome(CoreNegotiationOutcome):
 
     accepted_provision_terms: Optional[VmProvisionTerms] = None
     accepted_escrow_proposal: Optional[EscrowProposal] = None
-    accepted_escrow_terms: Optional[list[EscrowTerms]] = None
     duration_seconds: Optional[float] = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -115,10 +103,6 @@ class NegotiationOutcome(CoreNegotiationOutcome):
             d["accepted_provision_terms"] = self.accepted_provision_terms.model_dump()
         if self.accepted_escrow_proposal is not None:
             d["accepted_escrow_proposal"] = self.accepted_escrow_proposal.model_dump()
-        if self.accepted_escrow_terms is not None:
-            d["accepted_escrow_terms"] = [
-                term.model_dump() for term in self.accepted_escrow_terms
-            ]
         if self.duration_seconds is not None:
             d["duration_seconds"] = self.duration_seconds
         return d
@@ -193,7 +177,6 @@ def negotiate_with_seller(
         escrow_proposal=escrow_proposal,
         decode_provision_terms=lambda value: _validate_model(VmProvisionTerms, value),
         decode_escrow_proposal=lambda value: _validate_model(EscrowProposal, value),
-        decode_escrow_terms=lambda value: _validate_model(EscrowTerms, value),
         settlement_selection=settlement_selection,
         max_rounds=max_rounds,
         on_round=on_round,
@@ -216,9 +199,4 @@ def negotiate_with_seller(
         values["accepted_escrow_proposal"] = _validate_model(
             EscrowProposal, core_outcome.accepted_escrow_proposal
         )
-    if core_outcome.accepted_escrow_terms is not None:
-        values["accepted_escrow_terms"] = [
-            _validate_model(EscrowTerms, term)
-            for term in core_outcome.accepted_escrow_terms
-        ]
     return NegotiationOutcome(**values, duration_seconds=duration_seconds)

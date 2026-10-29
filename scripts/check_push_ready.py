@@ -53,7 +53,7 @@ def check(root: Path = ROOT) -> tuple[PushTarget | None, list[str]]:
     if not branch:
         problems.append("HEAD is detached; check out the change's branch")
     elif branch in PROTECTED:
-        problems.append(f"{branch} is a protected branch; validation pushes only a change's "
+        problems.append(f"{branch} is a protected branch; a step pushes only a change's "
                         "own branch")
 
     status = _git(root, "status", "--porcelain", "--untracked-files=all")

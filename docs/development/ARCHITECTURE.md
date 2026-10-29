@@ -68,6 +68,8 @@ only the values and hooks that instantiate them.
 
 Two hooks remain separate when core-owned machinery or a typed invariant sits between them. They may be merged when the core does nothing between them and the split would expose only implementation detail.
 
+Where two domains handle one concern differently and nothing in their markets requires the difference, one behavior is chosen for both and composed from the kit both use, rather than patching the domain that showed the defect. VM and bare metal therefore share the close or hold of a listing left with no settlement option, one site-derivation summary and log, and one answer for a deal settled by introduction, which has no settlement or fulfillment; each keeps only what its market needs, such as its own delivery route surface.
+
 The registry is the schema-centralizing point for discovery. A registry publishes one filter/listing schema and remains opaque to market-domain payloads beyond its configured validation and filter vocabulary. A market-domain operator composes the relevant buyer and storefront plugins around that registry schema.
 
 See the [market composition specification](../../openspec/specs/market-composition/spec.md).
@@ -182,6 +184,8 @@ Executor selection is one table. `(offering_mode, action)` resolves to one compl
 
 A rule installed for one domain therefore never matches another domain's jobs. Mock output passes through the same codec a real run's output does. The mechanism serves the compute family only and is not a foundation kit.
 
+The mechanism's routes are a worked instance of the five-piece route pattern under [Route contracts and their HTTP binding](#route-contracts-and-their-http-binding), with every piece but the binding the family's. The route contract is a template, `MockRouteMount` in `compute_provisioning_contracts`, whose declarations for rule add, list, delete, and resume and for job evaluation are generated under a prefix and an operation-name prefix; the wire models sit beside it; the route service is `MockRuleRouteService` in the family kit; and the typed clients are `MockRuleClient` and `SyncMockRuleClient` in `compute_provisioning_client`, constructed over the family client's transport with a mount. Each domain's adapter binds the routes and contributes its mount's declarations, so a domain states only its two prefixes; only the evaluated job's request, whose fields are the domain's job parameters, stays the domain's.
+
 ### Kit areas
 
 The kit layer is not a flat peer group. Within it, capabilities fall into areas with an explicit one-way order, which is the acyclicity the layer rule requires stated as a map of where a capability lives and what it may build on. The order is a map, not a checked rule: the rules a check holds are the layer and scope rules above, and a kit-to-kit edge those allow but this order forbids is a review finding, guarded where it matters by that kit's own boundary test. Mechanism kits — `kit/alkahest`, `kit/arkhai-payments`, `kit/contact-exchange` — sit beside the foundation area rather than in this order: each is the one kit whose scope holds its mechanism, each depends on the foundation only, and only specializations and compositions depend on them. Thin client kits — `kit/site-client`, `kit/resource-pools-client`, `core/registry-client`, `core/storefront-client` — depend on their contracts and the identity kit, whatever area their server belongs to.
@@ -189,7 +193,7 @@ The kit layer is not a flat peer group. Within it, capabilities fall into areas 
 1. **Foundation capabilities** — identity, configuration, generic policy, `kit/negotiation-runtime`'s schema-opaque round lifecycle, settlement-mechanism primitives, `kit/settlement-runtime`'s domain-neutral obligation/operation lifecycle, `kit/capability-shape`'s family-grouped capability shapes, which import only the standard library so buyers, pool administration, sites, and domains can all depend on them, `kit/capability-pricing`'s exact pricing of a shape from per-family rates behind a replaceable aggregator, which imports only the standard library and the shape kit so storefronts, buyers, and hold billing can all price a shape, and `kit/capability-admissibility`'s evaluation of which shapes a seller will sell, the only reader of a shape constraint, which imports only the standard library and the shape kit so storefronts, buyers, and pool administration can all evaluate a policy (see the [market composition architecture](../../openspec/specs/market-composition/architecture.md#capability-shape-admissibility)).
 2. **Authority capabilities** — `kit/site` and `kit/resource-pools`, which own capacity and pool administration and depend only on foundation capabilities.
 3. **Orchestration capabilities** — kits that drive a lifecycle across the authorities and may depend on them. `kit/fulfillment` is the one today: it owns provider-neutral scheduling and provider execution contracts.
-4. **Storefront role composition** — `kit/storefront`, which composes the core storefront shell with injected domain service and route hooks. It owns the storefront loop controller that holds every storefront's timer loops, the process-local trading pause, and the framework-free deal-control route services: the stage-event read, evaluate-negotiate, and force-accept. It may depend only on core storefront contracts and foundation capabilities; its Alkahest client construction makes it depend on `kit/alkahest`, a divergence listed under "Where the current tree diverges".
+4. **Storefront role composition** — `kit/storefront`, which composes the core storefront shell with injected domain service and route hooks. It owns the storefront loop controller that holds every storefront's timer loops, the process-local trading pause, and the framework-free deal-control route services: the stage-event read, evaluate-negotiate, and force-accept. It also owns the first shared seller-stage convention: a deal whose accepted stage declares `completes_outside_settlement` has no settlement or fulfillment, so its settle request and its fulfillment reads are refused, the kit deciding the refusal and its status from the declaration the domain passes it. It may depend only on core storefront contracts and foundation capabilities; its Alkahest client construction makes it depend on `kit/alkahest`, a divergence listed under "Where the current tree diverges".
 
 `kit/capacity-publication` and `kit/pool-overrides` are storefront-side kits in the same area as `kit/storefront`: composed by storefronts, never by a site or a buyer.
 
@@ -203,7 +207,7 @@ Dependencies never point upward. Kit packages never import deployed services or 
 
 `kit/config`, a foundation kit, holds what the storefronts share about their own configuration, so neither compute storefront depends on the other for it. Its setting types are `PositiveSeconds`, a positive, finite number of seconds, at least a microsecond, that can be applied to an instant without leaving `datetime`'s range, and `SiteAuthorityUrl`, a site authority's HTTP(S) origin, parsed by the WHATWG URL standard through pydantic and carrying no credentials, path, query, or fragment; each is a pydantic annotated type over a plain function, so an untyped read can apply the same rule. Its values-schema generator turns a storefront's typed configuration models into the definition its chart's values schema carries. Each storefront passes in its own sections, settlement registrations, and discovered delivery sinks, so the kit depends on neither the delivery kit nor a storefront, and each storefront writes only its own chart's schema with its own drift test.
 
-`kit/alkahest`, the Alkahest mechanism kit, owns a listing's release conditions. `market_alkahest.release_conditions` derives each chain's arbiter and demand data from the seller's `[Settlement.alkahest]` policy, the seller wallet, and the chain's address book, identically for every domain that composes Alkahest, and each domain's Alkahest seller stage declares the release models it can deliver. Every kit entry point that materializes an obligation from a buyer's proposal takes the listing and authorizes the selected condition against it (`market_alkahest.release_authorization`), so no seller policy and no acceptance path can skip the check. See the [negotiation protocol](../../openspec/specs/negotiation-protocol/spec.md).
+`kit/alkahest`, the Alkahest mechanism kit, owns a listing's release conditions. `market_alkahest.release_conditions` derives each chain's arbiter and demand data from the seller's `[Settlement.alkahest]` policy, the seller wallet, and the chain's address book, identically for every domain that composes Alkahest, and each domain's Alkahest seller stage declares the release models it can deliver. Every kit entry point that materializes an obligation from a buyer's proposal takes the listing and authorizes the selected condition against it (`market_alkahest.release_authorization`), so no seller policy and no acceptance path can skip the check. Release conditions are derived only for escrows published while Alkahest is ready (`market_alkahest.release_conditions.escrow_release_conditions`). On the buyer side the kit writes and reads what a buyer records about a listing's release conditions (`release_conditions_record`, `recorded_release_conditions`), which the buyer's run-log carries as one opaque `listing_record`, so core never names a release condition; a resumed run derives its escrow through the kit and holds it to the seller's recorded plan (`derive_accepted_escrow_terms`), and the buyer's escrow settle hook checks the buyer's own derivation against that plan before any escrow is created (`require_escrow_terms_fund_plan`). The kit also owns the chain probe, `market_alkahest.chain_probe.AlkahestChainProbe`: each storefront composing Alkahest registers its step as the `alkahest-chain-probe` lifecycle loop, the probe holds and rebuilds the storefront's live map of chain clients, and Alkahest's readiness reads each chain's last result rather than calling a chain. See the [negotiation protocol](../../openspec/specs/negotiation-protocol/spec.md) and the [settlement configuration architecture](../../openspec/specs/settlement-configuration/architecture.md).
 
 `kit/resource-pools-contracts` and `kit/resource-pools-client` are the pool capability's thin distributions. The contracts package holds the pool wire models, which validate every domain-neutral hint's structure, the declaration hints and their shared resolver, the asking-rate structural checks, the capacity backing delegate, and the pool route declarations as plain data. It depends only on pydantic, the admissibility kit, which splits a pool's stated shapes from their constraints, and the shape kit, which the asking-rate checks use directly. The client package holds typed sync and async pool methods over any transport exposing `authenticated_request`. The authority, its persistence, and its framework-free route service stay in `kit/resource-pools`, and the hosting service owns the HTTP binding and adds the declarations to its route table. A caller that only reads or administers pools therefore installs neither the authority nor the compute family's client.
 
@@ -301,6 +305,22 @@ supplies only schema-opaque candidates and codecs plus hooks that resolve each
 listing's durable capacity binding. Each storefront keeps its domain's cycle
 semantics — which sources it reads, what it derives, closes, and holds — and
 composes them onto that driver.
+
+What a cycle does with a candidate its payload builder refuses is one
+implementation for every storefront driving its cycle through the kit,
+`RefusedCandidates`. It records the refusal under the candidate's site
+(`record_payload_refusal`), as `no_settlement_option`,
+`settlement_mechanism_unknown`, or `payload_unbuildable`, and it is the
+source's close hook the core runner calls when the storefront's configuration
+rules out every mechanism the candidate could publish: it closes the open
+listing bound under the candidate's derivation key through the storefront's
+own reconciliation, so the listing reopens under the same identity once its
+payload builds again. Each domain supplies only its derivation key and source
+and its reconciliation close. Every hold, refusal, and report a real
+publication cycle makes is kept per publication source and site by one
+`SiteDerivationLog`, which both compute storefronts serve as
+`publication_derivation` in system status and which logs an entry once when
+it appears and once when it clears; a preview records nothing.
 
 The per-site projection state, `SiteProjectionState`, holds the resource-pool and
 capacity-bucket projections of every site a storefront's aggregate capacity
@@ -443,6 +463,10 @@ Role compositions may consume the schema compilers, but they do not own or
 fork the parser. Neither compiler may import an affected buyer/storefront role
 to obtain vocabulary or policy.
 
+What an Agreement and the listing it was accepted against determine, each party derives for itself. A counterparty's copy of a derivable input — the seller's settlement plan in an accept reply, say — is compared with the party's own derivation and never used in its place: a buyer funds only the escrow it derives from its acceptance and the listing, and only when that equals the seller's plan, and a seller verifies and settles a deal against the plan it committed at acceptance rather than against the listing as it now stands.
+
+A configured mechanism whose section parses but which cannot currently settle — an Alkahest section with no usable oracle, no seller wallet or key, no chains, or a release model its domain cannot deliver — is unready: its options are not published and the storefront runs on its other mechanisms. A section that does not parse stops startup, as all configuration does, and so does configuration that is incoherent in itself. Every readiness blocker states its kind, `configuration` or `reachability`, so publication can tell a mechanism the storefront's configuration rules out from one whose readiness could not be determined because its chain or service cannot be reached.
+
 Preflight remains mechanism-owned but projects one sanitized readiness contract. Storefront publication combines enabled ready registrations with explicit typed clauses in configured mechanism order; it never uses one untyped price for multiple mechanisms. Buyer policy ranks only compatible advertised survivors after ordered explicit clauses. Priority and clauses apply before acceptance only. Accepted Terms and persisted operation identities remain authoritative through readiness or configuration changes.
 
 Typed metadata generates role-appropriate templates, edit validation, environment and Helm schema fragments, clause descriptors, and reference output. Marketplace schemas admit public consumer trust and policy but reject payment-provider, administrator, webhook, ledger database, and service-migration state. See the [CLI query language](../../openspec/specs/cli-query-language/spec.md), [settlement configuration contract](../../openspec/specs/settlement-configuration/spec.md), and its [architecture](../../openspec/specs/settlement-configuration/architecture.md).
@@ -489,15 +513,19 @@ Within a service, controllers stay thin: HTTP routing, request/response schemas,
 
 A capability that serves HTTP routes is split into five pieces. The package that owns the capability owns the wire models, the route contract, and the route service:
 
-1. **Wire models**: the request and response schemas.
+1. **Typed client**: a method for every route, sync and async where both are offered, built on the route contract. It may live beside the capability or in a thin client package of its own that depends only on the models and the contract, so a caller does not install the capability's service code to call it.
 2. **Route contract**: each route's method, path, signed operation name, the resource a request binds, and the caller roles it admits. Request authentication and the typed client both bind requests from it, so the two cannot disagree.
-3. **Typed client**: a method for every route, sync and async where both are offered, built on the route contract. It may live beside the capability or in a thin client package of its own that depends only on the models and the contract, so a caller does not install the capability's service code to call it.
-4. **Route service**: a framework-free class over the capability's collaborators that validates and performs each route and shapes its response. It reports a refusal as an error carrying a status code and detail, and it imports no web framework.
-5. **HTTP binding**: the thin controller that maps each route to its route service, turns the route-service error into a response, and sits behind the process's authentication. It belongs to whatever composes the process: a storefront for storefront capabilities, the provisioning service for the compute family kit's routes, and a domain package for the routes that domain contributes.
+3. **Wire models**: the request and response schemas, with the validation that refuses a malformed request before dispatch.
+4. **HTTP binding**: the thin controller that maps each route to its route service, turns the route-service error into a response, and sits behind the process's authentication. It belongs to whatever composes the process: a storefront for storefront capabilities, the provisioning service for the compute family kit's routes, and a domain package for the routes that domain contributes.
+5. **Route service**: a framework-free class over the capability's collaborators that validates and performs each route and shapes its response. It reports a refusal as an error carrying a status code and detail, and it imports no web framework.
+
+The diagram below follows one request through the five pieces, each filled by the package that owns it. The route contract and the wire models stand between the caller and the serving process because the typed client on one side and the binding and route service on the other are built from them, so a client and the service it calls cannot disagree about a route. Solid arrows follow one request; a dashed arrow points from a piece to the contract piece it is built from. The diagram's source is [`diagrams/route-contract-pattern.drawio`](diagrams/route-contract-pattern.drawio); the SVG beside it is the export and also opens in draw.io.
+
+![The five pieces of a capability's HTTP surface and the package that owns each](diagrams/route-contract-pattern.svg)
 
 A request is checked in the order of what it takes to judge it. What the request establishes by itself is validated by its wire models, in the contracts package, so a typed caller and the server refuse it before dispatch or database work, as HTTP 422. Checks that need the composed service — registered providers, provider-owned configuration — or stored state — immutable fields — belong to the route service and refuse through its own error. A comparison of stored and proposed state is one pure function shared by every write path that needs it, individual and document alike, rather than repeated per adapter. The order is a default, not a ranking of messages: a path is not reordered, nor a lookup added, only to report a different error first. The resource-pool capability is the worked instance; see its [administrative reconciliation](../../openspec/specs/resource-pool-management/architecture.md#administrative-reconciliation).
 
-A domain that contributes routes to a service it does not compose declares their contracts in its own package and supplies its router as a factory taking accessors for its collaborators, so no route reaches into the composing service's module state. Because a binding repeats its contract's path, the provisioning service, which assembles its route table from contributions, tests that every route it mounts resolves to exactly one contract and that every contract resolves to a mounted route.
+A domain that contributes routes to a service it does not compose declares their contracts in its own package and supplies its router as a factory taking accessors for its collaborators, so no route reaches into the composing service's module state. Because a binding repeats its contract's path, the provisioning service, which assembles its route table from contributions, tests that every route it mounts resolves to exactly one contract and that every contract resolves to a mounted route. When it composes its table, before it accepts traffic, it refuses two contracts of different contributions that one method and path could both match; within one contribution the first matching contract decides, in the order its owner gave. Overlap is decidable because a contract's pattern is restricted to literal segments, `[^/]+` named captures, alternations of literal segments, and an optional trailing `/?`, and building a contract refuses any other pattern. A route that needs more adopts an established path-template grammar rather than widening this one. A request that matches no contract is answered unsigned by what failed to match — 404 for an unknown path, 405 with `Allow` for a known path under another method, 400 for a route whose body resource cannot be bound — as the provisioning service and `kit/site`'s middleware both answer it; see [`physical-provisioning`](../../openspec/specs/physical-provisioning/spec.md) and [`site-capacity`](../../openspec/specs/site-capacity/spec.md).
 
 `kit/pool-overrides` is the reference instance. `kit/site` predates the pattern and ships its own FastAPI router.
 
@@ -509,7 +537,7 @@ A domain that contributes routes to a service it does not compose declares their
 | Marketplace principal normalization, proof dispatch, and canonical envelopes | Identity kit | Scheme-neutral foundation capability; roles inject signers and authorities own subject/role bindings |
 | Listing, negotiation, deal, and seller policy state | Storefront | Market-facing state, not physical inventory |
 | Capacity admission and reservation | Site authority | Serialization point for competing reservations |
-| Sellable capacity: each Physical Resource's declared shape, quantity, pool, and match attributes | Site authority | Declared by registration, a capacity-definitions document, or derivation from legacy host inventory; host records are connection identity only |
+| Sellable capacity: each Physical Resource's declared shape, quantity, pool, and match attributes | Site authority | Declared only by registration, a capacity-definitions document, or capacity import; no host write declares capacity, and host records are connection identity only |
 | VM listing shapes a storefront publishes | Storefront, within what the site declares | A storefront pool override, else the pool's `listing_shapes` hint, else the VM domain's default generator; constraints a stated shape carries, merged with the storefront's configured `[admissibility.defaults.vm]`, decide which shapes it would sell, and a site's constraints are advisory input to that policy; feasibility is judged against the site's declarations, and admission remains the site's |
 | A bare-metal listing's shape | Site authority, through the Physical Resource's declaration | Derived from the declared capacity and attributes; the storefront chooses nothing |
 | Resource-pool metadata and provider configuration | Resource-pool service | Provisioning routing metadata; the provider is fixed at creation, and disabled pools remain resolvable |
@@ -548,6 +576,15 @@ A rule a site declares but does not enforce at admission is therefore advisory t
 the storefront whatever its wording. A rule that must bind every storefront acting
 for a site belongs in site admission, over what a claim carries.
 
+The same judgement applies to what crosses a wire between parties. Anything a
+counterparty can send is handled on its own terms, whatever client produced it: a
+party cannot rely on the counterparty running a particular client, or on that
+client filling a field sensibly. So an escrow proposal that names no escrow
+contract is refused at the seller's materialization chokepoint as well as by its
+default shape guard, rather than read as a negotiation carrying no escrow, and a
+deal's settlement inputs are derived by each party rather than taken from the
+other's message (see "Settlement configuration").
+
 ### Omission states no commitment
 
 A term a declaration leaves out states that nothing is committed on it. It is not a
@@ -580,7 +617,19 @@ the pool too. Only when every base shape reads does a listing whose admissibilit
 policy cannot be computed — unreadable constraints, an empty merged range, or one base
 shape stated twice with different constraints — close, alone, while the pool's other
 listings publish. A storefront's own configuration is its operator's input, so an
-unreadable configured term stops startup instead. Each term's rule is normative in
+unreadable configured term stops startup instead.
+
+The same test applies to settlement. A candidate left with no settlement option is
+classified by the mechanisms of the clauses it could publish — its pool's override,
+else the configured clauses, after admissibility for its backing. While any of those
+mechanisms is unknown, its readiness undetermined because its chain or service
+cannot be reached, its open listing is held: the offer it published is still one the
+storefront would make once the dependency answers. Only when the storefront's
+configuration rules every one of them out is the listing closed through
+reconciliation, as `no_settlement_option`, to reopen under the same identity once an
+option returns. A mechanism outside those clauses decides nothing either way.
+
+Each term's rule is normative in
 [storefront publication](../../openspec/specs/storefront-publication/spec.md); the
 rationale for admissibility's is in its
 [architecture](../../openspec/specs/storefront-publication/architecture.md#shape-constraints).
@@ -593,13 +642,13 @@ Specific-resource listings are a valid opt-in: the seller exposes a concrete res
 
 Storefront capacity pools and provisioning resource pools are separate concepts. Mapping is explicit configuration or attributes, never a cross-service foreign key.
 
-A listing's capacity backing is declared by the pool it derives from and read from that declaration; it is never inferred from absent capacity data, an empty projection, or a stale generation. It is fixed on the listing's binding when the listing is created, and it is independent of how a pool's listings are enumerated and of which settlement mechanisms a listing offers. A capacity-backed listing is admitted at its site; an unbacked listing has no admission authority behind it, so it never reaches reservation and publishes only settlement options its domain does not fulfil through capacity. A listing's origin site is where it was declared, not an authority that admits it. Every decision that differs between the two — admitting an effect, placing a hold, judging availability, the scope of availability reconciliation, settlement admissibility — is asked of the backing delegate the listing's binding carries; no storefront compares the label. A listing's backing is compared with its source's before anything else on every refresh, reopen, and source check, and a mismatch closes the listing for good.
+A listing's capacity backing is declared by the pool it derives from and read from that declaration; it is never inferred from absent capacity data, an empty projection, or a stale generation. It is fixed on the listing's binding when the listing is created, and it is independent of how a pool's listings are enumerated and of which settlement mechanisms a listing offers. A capacity-backed listing is admitted at its site; an unbacked listing has no admission authority behind it, so it never reaches reservation and publishes only settlement options its domain does not fulfil through capacity. A listing's origin site is where it was declared, not an authority that admits it. Every decision that differs between the two — admitting an effect, placing a hold, judging availability, the scope of availability reconciliation, settlement admissibility, and which delivery terms a listing carries — is asked of the backing delegate the listing's binding carries; no storefront compares the label. A listing's backing is compared with its source's before anything else on every refresh, reopen, and source check, and a mismatch closes the listing for good.
 
 Every VM listing is a listing shape, and a published dimension is a commitment: the claim a VM listing produces reserves every quantity it publishes, so it publishes exactly the quantities its shape declares. A dimension its shape omits is outside the commitment; fulfillment may supply it from the pool's configured VM defaults or leave it to downstream provisioning, and the operator keeps capacity sufficient for it. A VM shape comes from the storefront's own override for that site and pool, else the pool's `listing_shapes` hint, else the VM domain's default generator, and it is published only where a source member is feasible for it.
 
-A bare-metal listing's shape is derived, not chosen: it is its Physical Resource's declaration read through the compute-family schema, published under the same flat names so the compute filters read both domains alike. Its commitment is one whole unit: the claim reserves exactly one `units` of the resource, exclusively, and requires the shape's attributes, while the shape's quantities describe what that unit contains rather than being reserved one by one. The shape's digest completes the listing's derivation identity, so a corrected declaration closes the listing and publishes a successor. API-credit listings are not listing shapes. A configured site whose projection the storefront does not hold is unknown, not empty: its listings are held, and nothing is derived in its place. See the [storefront publication architecture](../../openspec/specs/storefront-publication/architecture.md#listing-shapes-and-the-storefronts-authority).
+A bare-metal listing's shape is derived, not chosen: it is its Physical Resource's declaration read through the compute-family schema, published under the same flat names so the compute filters read both domains alike. Its commitment is one whole unit: the claim reserves exactly one `units` of the resource, exclusively, and requires the shape's attributes, while the shape's quantities describe what that unit contains rather than being reserved one by one. The shape's digest completes the listing's derivation identity, so a corrected declaration closes the listing and publishes a successor. A bare-metal listing is backed or unbacked, as its pool declares. Some of its fields commit the marketplace to delivering something — its host identity, physical host identity, and access methods — and these delivery terms are the backing delegate's decision: a backed listing carries every one, and an unbacked listing, which nothing stands behind, carries none, even where its declaration names a host. The site builds a resource's publication view through the delegate's `carry_delivery_terms`, and the trusted view carrier the site and the storefront share applies its `delivery_term_constraints` against the containing pool's backing, so a view contradicting its pool refuses the site's generation. An unbacked listing is never judged against availability; it is refused only by its declaration. API-credit listings are not listing shapes. A configured site whose projection the storefront does not hold is unknown, not empty: its listings are held, and nothing is derived in its place. See the [storefront publication architecture](../../openspec/specs/storefront-publication/architecture.md#listing-shapes-and-the-storefronts-authority).
 
-VM and bare-metal publication each run on their own as a storefront lifecycle loop over the site projections the storefront holds, and every listing, backed or unbacked, derives only from those projections: a storefront holds no physical inventory to derive from. A publication command is a client of that loop, run through the storefront's administrator API. Terms of sale come only from durable sources — pool declarations, per-pool overrides, and configuration — never from a command's arguments. A storefront that derives listings from site projections refuses to start when publishing is impossible for the whole storefront: no registry, or one without its authority pin; no enabled settlement mechanism; or no site, or a site not bound to exactly one service peer. Missing storefront-wide terms are not such a case, because a pool's override or hint may state them; a pool that resolves none is held and reported.
+VM and bare-metal publication each run on their own as a storefront lifecycle loop over the site projections the storefront holds, and every listing, backed or unbacked, derives only from those projections: a storefront holds no physical inventory to derive from. A publication command is a client of that loop, run through the storefront's administrator API. Terms of sale come only from durable sources — pool declarations, per-pool overrides, and configuration — never from a command's arguments. A storefront that derives listings from site projections refuses to start when publishing is impossible for the whole storefront: no registry, or one without its authority pin; no enabled settlement mechanism; or no site, or a site not bound to exactly one service peer. Missing storefront-wide terms are not such a case, because a pool's override or hint may state them. A pool that resolves no lease bound is held and reported; a candidate whose pool resolves no settlement clause is refused as `no_settlement_option`, its open listing closed through reconciliation and reopened once a clause resolves.
 
 Which registry a listing is published to is an operator curation decision, expressed by forking a filter spec, rather than a property of the listing. A registry deployment serves one filter spec and buyer commands match its declared schema identity, so listing shape is deployment-scoped — but the compute family's form factors share one schema identity rather than needing a registry each. Separate profiles exist for listings whose shape genuinely differs, such as the sparse option-only profile an introduction market ships.
 
@@ -616,7 +665,7 @@ execution.
 
 Each provisioning connection is bound to an operator-configured `site_id`, its authority URL, and exactly one service peer. Configuration seeds the peer; once seeded, its principals are the storefront's durable identity state, rotated with bounded overlap through the storefront's identity routes. Marketplace version 2 proofs authenticate requests, and every signed response or callback from the site is verified against that peer's currently active principals, read from memory at verification, so a rotation reaches responses and callbacks together as it commits. Matching an address-like body value, administrator key, private-key field, or identifier under another scheme never substitutes for the peer's principal and role. The trusted connection binding, not a counterparty assertion, selects the site.
 
-Capacity events are anonymous availability deltas broadcast through a pull feed. Deal-scoped fulfillment events are point-to-point to the owning storefront and retain deal context. A storefront reconciles listings in response to capacity deltas regardless of which seller action caused the change.
+Capacity events are anonymous availability deltas broadcast through a pull feed. One deal-scoped event is pushed point-to-point to the owning storefront with its deal context: the provisioning service's capacity-released notification, retried from its durable outbox until acknowledged (see [`compute-provisioning-contract`](../../openspec/specs/compute-provisioning-contract/spec.md)). Every other fulfillment state reaches the storefront by its own read. A storefront reconciles listings in response to capacity deltas regardless of which seller action caused the change.
 
 A site authority's client-facing surface splits into two separately typed clients, both living in `kit/site-client`: a buyer-facing read/reserve/commit client (`SiteCapacityClient`) never used for operator writes, and a typed capacity-administration client (`SiteCapacityAdminClient`) for operator resource registration and update. Neither client depends on the other's implementation.
 
@@ -635,10 +684,22 @@ A pool's provider, like its backing, is fixed at creation: every administration
 path, API and definition document alike, refuses to change it, because existing
 members and records were resolved through it. Inventory reaches another provider
 through a second pool and explicit member reassignment, under the site's and
-the host authority's own move guards. A fresh site with a mounted pool document
-creates `default` from that document with its declared provider, before any
-host is admitted. VM and bare metal register as `vm.ansible` and
-`bare_metal.ansible`.
+the host authority's own move guards. VM and bare metal register as `vm.ansible`
+and `bare_metal.ansible`. No pool is special and none is created implicitly:
+migration creates no pool, and a fresh site, storing no pool and configuring no
+pool document, is seeded at startup from a pool document packaged with the
+provisioning service, which declares `vm-default` and `bare-metal-default`. An
+operator replaces the seed or disables it; a site that already holds pools is
+never seeded. See the
+[resource-pool management architecture](../../openspec/specs/resource-pool-management/architecture.md#administrative-reconciliation).
+
+No host write places a host in a pool or declares its capacity, whatever its entry
+point. A host names its pool, or is unplaced; a host's pool is placement intent,
+read by the pool-change hooks and host reads, and nothing that admits, schedules,
+dispatches, or sells reads it. A host sells only through capacity an operator has
+explicitly declared, and a declaration names its own pool. So a host an
+administrator lists or registers is never sold before they decide how to sell it,
+and every entry point that writes a host has the same effect.
 
 A pool also declares which offering modes its listings may advertise and whether
 it is capacity-backed. Advertisement is separate from delivery so a seller with no
@@ -729,7 +790,7 @@ variables, and the bare-metal listing. The VM listing model still accepts a
 serves a slice is provisioning's, and a VM storefront database written before
 that boundary keeps `vm_host` only in its frozen inventory tables. The address the provisioner connects to is the host's
 `ssh_host`. `physical_host_id` is a different concept and keeps its own name: the
-stable identity of a physical machine across hosts. A host belongs to exactly one
+stable identity of a physical machine across hosts. A host belongs to at most one
 Resource Pool, so one machine offered both as VM slices and as a whole host is
 registered as two hosts, and `physical_host_id` is what lets cross-mode accounting
 see one machine.
@@ -923,9 +984,9 @@ The current round-robin scheduling policy is deterministic for the same candidat
 
 ### Fulfillment status and results
 
-A caller observes fulfillment progress by pulling `GET /fulfillment/{fulfillment_id}/status` and `GET /fulfillment/{fulfillment_id}/result` from the durable aggregate — there is no push channel from provisioning to the storefront today. `status` is a plain read with no provider call. `result` returns a provider-neutral `fulfillment.result.v1` envelope; for a fulfillment in `active` state it also performs a live, uncached credential fetch against the provider (never persisted) outside any open database transaction, so every read reflects current provider-reported credentials rather than a value captured once at creation. A live credential-fetch failure on an otherwise-healthy `active` fulfillment is its own stable error category (`credential_fetch_failed`), distinct from a create/status/teardown failure.
+A caller observes fulfillment progress by pulling `GET /fulfillment/{fulfillment_id}/status` and `GET /fulfillment/{fulfillment_id}/result` from the durable aggregate — status and results are always pulled; provisioning's one push to the storefront, the capacity-released notification (see Site authority above), carries neither. `status` is a plain read with no provider call. `result` returns a provider-neutral `fulfillment.result.v1` envelope; for a fulfillment in `active` state it also performs an uncached credential fetch against the provider outside any open database transaction, so the fulfillment aggregate never holds credentials; the job-backed provider that VM and bare metal share reads them from the job authority, which stores what the create job's executor reported. A live credential-fetch failure on an otherwise-healthy `active` fulfillment is its own stable error category (`credential_fetch_failed`), distinct from a create/status/teardown failure.
 
-Push-based result delivery (provisioning notifying the storefront rather than the storefront polling) is planned future work, tracked as `replace-polling-with-authenticated-push`, and requires a new provisioning→storefront authenticated channel that does not exist yet. It does not change the durable persistence this section describes, only the delivery transport.
+Provisioning does not notify the storefront of results: the capacity-released callback is the only channel from provisioning to the storefront, and it carries no result, so the storefront polls. The durable persistence this section describes does not depend on the delivery transport; a pushed notification would change only how a caller learns that state changed.
 
 ### Release
 
@@ -972,6 +1033,9 @@ single operator does not yet need is upgrade-order guidance between independentl
 operated sites and storefronts — for example, a site writing a declaration that a
 storefront release cannot yet read. Designs record where such ordering would matter,
 to be revisited once operators are no longer all known, at the first major release.
+Until then a package's incompatible change takes a minor version, and a contract
+that carries its own version is versioned rather than changed in place; the rule
+lapses at 1.0.0 (see [`RELEASING.md`, "Versioning policy"](RELEASING.md#versioning-policy)).
 
 ## Build, packaging, and initialization
 

@@ -6,7 +6,18 @@ metadata, and its migration history reads these models to create and evolve
 them.
 """
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import func
 from sqlalchemy.sql.expression import true as sa_true
@@ -93,11 +104,12 @@ class AnsiblePoolConfig(Base):
     __tablename__ = "ansible_pool_configs"
 
     pool_id = Column(String, ForeignKey(ResourcePool.__table__.c.id), primary_key=True)
-    playbook_path = Column(String, nullable=False)
+    # Nullable: a pool that states no playbook runs the service's configured
+    # VM playbook, frozen into each job when the job is prepared.
+    playbook_path = Column(String, nullable=True)
     requirement_delegate = Column(
         String, nullable=False, default="vm_management_v1", server_default="vm_management_v1"
     )
-    inventory_group = Column(String, nullable=False)
     extra_vars = Column(JSON, nullable=False, default=dict)
     # Fulfillment-time fallback shape, read only by VM's fulfillment plan's
     # three-tier precedence (derived > requirements > pool default) when
@@ -146,6 +158,19 @@ class RelayPortLease(Base):
     __tablename__ = "relay_port_leases"
     __table_args__ = (
         UniqueConstraint("relay_id", "remote_port", name="uq_relay_port_leases_endpoint"),
+        # One active lease per owner, enforced rather than only queried, so two
+        # concurrent retries of one fulfillment cannot both take a port. Partial
+        # because release is soft: a released lease keeps its row, and an
+        # unconditional constraint would stop an owner ever holding a second
+        # lease across its history. SQLite (3.8+) and PostgreSQL both support it.
+        Index(
+            "uq_relay_port_leases_active_owner",
+            "owner_kind",
+            "owner_id",
+            unique=True,
+            sqlite_where=text("released_at IS NULL"),
+            postgresql_where=text("released_at IS NULL"),
+        ),
     )
 
     id = Column(String, primary_key=True)

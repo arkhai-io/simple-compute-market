@@ -5,7 +5,12 @@ SQLite persistence are real; each deal is opened through ``negotiate_new`` with 
 payment selection, exactly as a buyer opens one. Site capacity and provisioning
 are in-memory authorities, and the payments service is the kit's fake injected at
 ``PaymentsClient`` through the settlement composition. Settlement must start
-fulfillment itself once the receipt verifies.
+fulfillment itself once the receipt verifies. The fulfillment status a buyer reads
+is read from the fulfillment service the route calls, since the buyer reads it over
+a signed transport an in-process application cannot serve.
+
+One deal is instead bought by the production buyer's ``market bare-metal buy``,
+against the app served on loopback, through the same fake.
 """
 
 from __future__ import annotations
@@ -19,6 +24,9 @@ from types import SimpleNamespace
 import httpx
 import pytest
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
+from buyer_commands import BuyerCommands
+from held_loops import held_loop_controller
+from loopback import serving
 from market_arkhai_payments import PaymentSettlementData
 from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt
 from market_core.schemas import RateValue, SettlementOption, derive_settlement_option_id
@@ -27,6 +35,7 @@ from source_sites import SourceSite, listing_source_projection, source_projectio
 from storefront_client import StorefrontClient, StorefrontClientError
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
+from arkhai_bare_metal_storefront.fulfillment_service import BareMetalFulfillmentError
 from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
 from arkhai_bare_metal_storefront.server import (
     build_bare_metal_storefront_app,
@@ -91,6 +100,7 @@ class Capacity:
 class Provisioning:
     def __init__(self) -> None:
         self.begin_calls: list = []
+        self.terminated: list = []
         # When set, dispatch pauses after delivery started until ``release`` is set.
         self.started: asyncio.Event | None = None
         self.release: asyncio.Event | None = None
@@ -101,13 +111,8 @@ class Provisioning:
             pool_id=POOL,
             resource_kind="compute.bare-metal",
             provider="bare_metal.ansible",
-            attributes={
-                "bare_metal_publication": {
-                    "enabled": True,
-                    "host_id": HOST,
-                    "physical_host_id": PHYSICAL_HOST,
-                }
-            },
+            host_id=HOST,
+            attributes={"physical_host_id": PHYSICAL_HOST},
         )
 
     async def begin_fulfillment(self, request):
@@ -120,6 +125,15 @@ class Provisioning:
             capacity_reservation_id="reservation-pay",
             state="dispatch_pending",
         )
+
+    async def get_fulfillment_status(self, fulfillment_id, *, capacity_reservation_id):
+        """The dispatched create has not settled yet."""
+        return SimpleNamespace(
+            state="dispatch_pending", failure_reason=None, failure_message=None
+        )
+
+    async def terminate_lease(self, capacity_reservation_id, *, reason):
+        self.terminated.append((capacity_reservation_id, reason))
 
 
 def _option() -> SettlementOption:
@@ -337,6 +351,52 @@ async def test_a_refund_before_delivery_blocks_fulfillment(harness):
     assert harness.payments.count("reverse") == 1
 
 
+# A buyer cleaning up reads this answer to tell a purchase with nothing delivered
+# from a host it cannot read; the fulfillment status route carries it as its 409
+# detail, since the route gives no structured reason.
+_UNVERIFIED_WITHOUT_FULFILLMENT = "bare-metal settlement is not authoritatively verified"
+
+
+async def _fulfillment_status(harness):
+    return await harness.runtime.fulfillment_service().status(
+        negotiation_id=harness.negotiation_id, buyer_principal=BUYER.identity,
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_undelivered_deal_reads_as_an_unverified_payment_before_and_after_refund(
+    harness,
+):
+    assert (await harness.settle()).pending
+    refusals = []
+    with pytest.raises(BareMetalFulfillmentError) as pending:
+        await _fulfillment_status(harness)
+    refusals.append(pending.value)
+
+    harness.serve()
+    await harness.refund()
+    with pytest.raises(BareMetalFulfillmentError) as refunded:
+        await _fulfillment_status(harness)
+    refusals.append(refunded.value)
+
+    for refusal in refusals:
+        assert (refusal.status_code, refusal.detail) == (409, _UNVERIFIED_WITHOUT_FULFILLMENT)
+    assert harness.provisioning.begin_calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_delivered_deal_stays_readable_after_its_refund(harness):
+    harness.serve()
+    started = await harness.settle()
+    assert not started.pending
+    await harness.refund()
+
+    status = await _fulfillment_status(harness)
+
+    assert status["fulfillment_id"] == "fulfillment-pay"
+    assert status["settlement_ref"] == harness.data.transaction_id
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("enabled", [False])
 async def test_an_accepted_deal_settles_and_refunds_after_payments_is_disabled(harness):
@@ -411,8 +471,12 @@ async def test_every_settlement_route_contract_is_mounted(harness):
 
 
 
-def _restarted_runtime(tmp_path, payments: FakePaymentsClient) -> tuple[BareMetalStorefrontRuntime, Provisioning]:
-    """A fresh runtime over the same SQLite file, as after a process restart."""
+def _runtime(tmp_path, payments: FakePaymentsClient) -> tuple[BareMetalStorefrontRuntime, Provisioning]:
+    """A runtime over the test's SQLite file; built again over it, the storefront after a restart.
+
+    Its loops start held, so a served app reconciles no payment and publishes
+    nothing the test does not step.
+    """
     domain = get_market_domain_contract()
     provisioning = Provisioning()
     runtime = BareMetalStorefrontRuntime(
@@ -427,6 +491,7 @@ def _restarted_runtime(tmp_path, payments: FakePaymentsClient) -> tuple[BareMeta
         # Openings recheck the listing against the projection held for its site.
         site_projections=source_projections((SITE, SourceSite())),
         fulfillment_client=provisioning,
+        loop_controller_factory=held_loop_controller,
     )
     return runtime, provisioning
 
@@ -436,7 +501,7 @@ async def test_an_approved_payment_converges_after_restart_without_the_buyer(har
     """The buyer approved, never settled, and the storefront restarted: the seller delivers."""
     payments = FakePaymentsClient()
     payments.serve(build_signed_receipt(signer=SERVICE, mandate=harness.data.mandate))
-    runtime, provisioning = _restarted_runtime(tmp_path, payments)
+    runtime, provisioning = _runtime(tmp_path, payments)
     assert runtime.payments_reconciliation_enabled()
 
     # The registered step: what the timer loop and an operator's step run.
@@ -458,7 +523,7 @@ async def test_an_approved_payment_converges_after_restart_without_the_buyer(har
 
 @pytest.mark.asyncio
 async def test_reconciliation_leaves_an_unapproved_payment_pending(harness, tmp_path):
-    runtime, provisioning = _restarted_runtime(tmp_path, FakePaymentsClient())
+    runtime, provisioning = _runtime(tmp_path, FakePaymentsClient())
 
     done = await runtime.settlement_service().reconcile_payments_once()
 
@@ -524,3 +589,59 @@ async def test_a_malformed_agreement_never_stops_reconciliation(harness):
 
     assert (done.attempted, done.failed) == (1, 0)
     assert len(harness.provisioning.begin_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_buy_command_settles_over_a_run_log_a_later_command_reloads(
+    tmp_path, monkeypatch
+):
+    """The production ``market bare-metal buy`` against the served storefront:
+    it negotiates the advertised payment option, approves the mandate, and
+    settles until delivery starts, recording a run log that ``market bare-metal
+    teardown`` then reloads to ask for the lease's end. The kit's fake stands behind the
+    buyer's ``PaymentsClient`` as behind the seller's, so the receipt the
+    buyer's approval obtains is the one the seller verifies."""
+    payments = FakePaymentsClient(signer=SERVICE)
+    runtime, provisioning = _runtime(tmp_path, payments)
+    await _publish(runtime)
+    service = SERVICE.identity.model_dump(mode="json")
+    buyer = BuyerCommands(
+        monkeypatch,
+        tmp_path,
+        signer=BUYER,
+        registry_principal=ADMIN.identity,
+        settings=(
+            f'payer_account = "{PAYER}"\n'
+            "[bare_metal.arkhai_payments]\n"
+            "enabled = true\n"
+            'service_url = "http://127.0.0.1:9"\n'
+            f'service_identity = {{scheme = "{service["scheme"]}", '
+            f'identifier = "{service["identifier"]}"}}\n'
+            "fee_bps = 250\n"
+            f'dispute_authority = "{DISPUTE}"\n'
+        ),
+    )
+    buyer.pay_through(payments)
+    option = _option()
+    app = build_bare_metal_storefront_app(
+        registry=build_bare_metal_storefront_registry(domain=runtime.domain), runtime=runtime
+    )
+    with serving(app) as base_url:
+        buyer.serve(
+            SimpleNamespace(
+                listing_id=LISTING,
+                storefront_url=base_url,
+                publisher_id="publisher-1",
+                publisher_principals=TrustedIdentitySet(identities=(SELLER.identity,)),
+                settlement_options=[option.model_dump(mode="json")],
+            )
+        )
+        bought = buyer.run(
+            "buy", LISTING, "--option-id", option.option_id, "--ssh-public-key", SSH_KEY
+        )
+        teardown = buyer.run("teardown", "--run-id", bought["run_id"])
+
+    assert payments.count("approve") == 1
+    assert len(provisioning.begin_calls) == 1
+    assert teardown["state"] == "terminating"
+    assert provisioning.terminated == [("reservation-pay", "buyer_teardown")]

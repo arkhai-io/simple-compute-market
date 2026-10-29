@@ -28,7 +28,11 @@ def _unready(mechanism: str) -> MechanismReadiness:
         configured=True,
         enabled=True,
         ready=False,
-        blockers=(ReadinessBlocker(code="test.unready", message="not ready"),),
+        blockers=(
+            ReadinessBlocker(
+                code="test.unready", message="not ready", kind="configuration"
+            ),
+        ),
     )
 
 

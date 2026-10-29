@@ -8,15 +8,16 @@ from typing import Any
 from core_buyer.buyer_config import ResolvedBuyerIdentity
 from core_buyer.settlement import BuyerSettlementPolicy
 from market_config.config_loader import load_user_config
+from market_alkahest.schemas import EscrowProposal
 from market_core import SettlementStageTable
-from market_core.schemas import Agreement
+from market_core.schemas import Agreement, SettlementSelection
 from market_settlement_runtime import (
     MechanismReadiness,
     SettlementConfig,
     SettlementConfigurationRegistry,
 )
 
-from .common import resolve_fresh_buyer_identity
+from .common import refuse_retired_address_book_keys, resolve_fresh_buyer_identity
 from .settlement_stages import AlkahestBuyerStage, PaymentBuyerStage
 
 BUYER_STAGES = SettlementStageTable({
@@ -37,6 +38,19 @@ def buyer_stage(agreement: Any) -> Any:
 
 def validate_buyer_acceptance(outcome: Any) -> None:
     buyer_stage(outcome.agreement).validate_acceptance(outcome)
+
+
+def accepted_listing_record(match: Mapping[str, Any], proposal: Any) -> dict[str, Any]:
+    """What the entry the buyer's proposal selects records about its listing.
+
+    An escrow proposal is Alkahest's, and a selection names its mechanism; a
+    proposal of neither kind records nothing.
+    """
+    if isinstance(proposal, EscrowProposal):
+        return BUYER_STAGES["alkahest.v1"].listing_record(match)
+    if isinstance(proposal, SettlementSelection) and proposal.mechanism in BUYER_STAGES:
+        return BUYER_STAGES[proposal.mechanism].listing_record(match)
+    return {}
 
 
 def buyer_settlement_registry() -> SettlementConfigurationRegistry:
@@ -72,6 +86,7 @@ def resolve_buyer_settlement_policy(
             "legacy [settlement] configuration is not supported; run "
             "`market config migrate --scope settlement --write --backup`"
         )
+    refuse_retired_address_book_keys(document)
     raw = document.get("Settlement", {})
     if not isinstance(raw, Mapping):
         raise ValueError("[Settlement] must be a table")

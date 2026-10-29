@@ -96,9 +96,9 @@ the chain. An unknown name stops the storefront at startup.
 | Name | Type | Round(s) | Behavior |
 |---|---|---|---|
 | `has_matching_inventory_guard` | Guard | every | Rejects with `no_matching_declaration` when the listing's own source (its site's pool or Physical Resource) no longer declares what it publishes, and with `no_matching_inventory` when a capacity-backed listing's published quantity is not free at its own site. It reads the check the negotiation runtime makes before every seller decision; the runtime also enforces that check itself, at a buyer's or an administrator's acceptance and whatever the chain contains, and refuses a source it cannot confirm with a retryable 503. |
-| `escrow_shape_guard` | Guard | every | Rejects with `escrow_field_mismatch` if any seller-pinned key on `accepted_escrows[i].literal_fields` doesn't equal the buyer's value in `escrow_proposal.literal_fields`, and with `release_condition_not_advertised` when the listing advertises no Alkahest release condition on the proposal's chain. A proposal naming no escrow address, or the zero placeholder, passes. It is the early, explained rejection: plan materialization refuses an unauthorized release condition whatever the chain contains. |
+| `escrow_shape_guard` | Guard | every | Rejects an escrow proposal naming no escrow contract (no address, or the zero address) with `escrow_contract_unpinned`, one the listing does not accept, including on a listing accepting none, with `escrow_not_in_accepted_set`, with `escrow_field_mismatch` if any seller-pinned key on `accepted_escrows[i].literal_fields` doesn't equal the buyer's value in `escrow_proposal.literal_fields`, and with `release_condition_not_advertised` when the listing advertises no Alkahest release condition on the proposal's chain. A round carrying no escrow passes. It is the early, explained rejection: plan materialization refuses an unpinned contract and an unauthorized release condition whatever the chain contains. |
 | `max_rounds_guard` | Guard | every | Exits with `max_rounds_reached` once `len(history) >= [negotiation].max_rounds` (default 5). |
-| `bisection` | Decider | every | Bisects between the seller's floor (`accepted_escrows[0]` primary rate × duration) and the peer's latest offer; accepts within ~1% convergence, counters at midpoint, exits with `price_unreasonable` when the peer's offer is below `floor / 1.5`. No ML dependencies. |
+| `bisection` | Decider | every | Bisects between the seller's floor (the primary rate of the option the buyer's opening selects × duration) and the peer's latest offer; accepts within ~1% convergence, counters at midpoint, exits with `price_unreasonable` when the peer's offer is below `floor / 1.5`. No ML dependencies. |
 | `listed_price` | Decider | every | Accepts the peer's proposal when its amount is within the side's bound (≥ the floor in `maximize`, ≤ the ceiling in `minimize`); exits with `price_above_bound` otherwise. Never counters beyond the opening; accepts amountless escrow shapes as proposed. |
 | `rl` | Decider | every | Loads the trained pufferlib checkpoint at `domains/vms/negotiation/src/arkhai_vms_negotiation/rl/models/arkhai_negotiator_seller.pt` and produces the next move. Requires the `[rl]` extra (torch + pufferlib). Exits with `torch_unavailable` if torch isn't installed; exits with `model_missing` if the checkpoint isn't at the configured path. |
 | `erc20_bisection`, `native_token_bisection`, `erc1155_bisection` | Decider | every | Escrow-family names for the same scalar-`amount` bisection policy. Useful in `[negotiation.policies]` dispatch tables. |
@@ -113,11 +113,16 @@ broken `rl` setup at startup.
 
 ## Storefront: fulfillment failure policy
 
-The storefront failure policy is an explicit commercial/admin repair surface;
-it is not the physical release authority for durable fulfillments. Provisioning
+The storefront failure policy is the storefront's commercial response to a
+failed fulfillment; it is not the physical release authority for durable
+fulfillments. Provisioning
 provider failures retain capacity until fulfillment teardown succeeds or an
-operator performs explicit recovery. Legacy callback invocation may emit events
-or run configured commercial actions:
+operator performs explicit recovery. The VM storefront runs the policy on its
+pull path, when it reads a failed fulfillment: settlement's provisioning step
+when starting the fulfillment fails, and the fulfillment-resume loop when the
+provisioning service reports the fulfillment failed. No callback runs it; the
+provisioning service's only callback to the storefront is capacity-released.
+The policy may emit events or run configured commercial actions:
 
 ```toml
 [fulfillment.failure_policy]
@@ -130,7 +135,7 @@ Supported actions:
 
 | Action | Behavior |
 |---|---|
-| `release_capacity` | Explicit admin repair for a reservation proven safe outside the fulfillment lifecycle. Do not configure this as an automatic response to provider create/teardown failure; provisioning-owned teardown is authoritative. |
+| `release_capacity` | Ask the listing's recorded site to release the failed deal's reservation, recording the failure as its reason, and reopen the listings the release makes fit again. The site's release guard decides whether anything is freed: it frees the capacity only when the fulfillment has been torn down, or when nothing was dispatched for the reservation — no fulfillment aggregate, or one still `assigned` or `abandoned`, with no create handle and no job, as when starting the fulfillment failed before any create was sent. It refuses a fulfillment the provisioning service reports `failed`, whose create may have left a workload; that reservation stays held, reopening nothing, until an operator verifies the host and force-releases it. It is in the default list. Omit it to leave even an undispatched reservation held until the lease's own release frees it. |
 | `emit_event` | Write a `stage_events` row with `stage="fulfillment"` and `event="failed"`; this is visible through `/api/v1/system/events` and its SSE stream. |
 | `webhook` | POST the failure payload to `webhook_url`. Failures are logged and do not block the rest of the policy chain. |
 | `refund` | Attempt the explicit seller refund path: send already-claimed assets back to the buyer. Token escrows dispatch through the selected escrow codec, covering native token, ERC-20, ERC-721, ERC-1155, and token-bundle escrows. Rows without a stored escrow proposal are skipped rather than deriving refund details from listing defaults. |

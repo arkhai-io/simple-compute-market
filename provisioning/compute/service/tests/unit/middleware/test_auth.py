@@ -349,6 +349,95 @@ def test_exact_retry_returns_recorded_outcome_and_changed_reuse_conflicts(identi
     assert calls["count"] == 1
 
 
+def test_a_route_failing_after_authentication_answers_a_signed_500_replayed_exactly(
+    identities, caplog
+):
+    storefront, authority = identities
+    client, calls = _app(storefront, authority)
+    path = "/api/v1/contract/leases/reservation-1/release-oversight"
+    role = _ROUTE_TABLE.resolve("POST", path, {})[0].required_role
+    signer = _ADMIN_SIGNER if role == "admin" else storefront
+
+    async def failing(_: Request):
+        calls["count"] += 1
+        raise RuntimeError("stored row unreadable: internal detail")
+
+    client.app.add_api_route(path, failing, methods=["POST"])
+    headers = _headers(signer, path, {}, request_id="failing-request", role=role)
+
+    with caplog.at_level("ERROR"):
+        first = client.post(path, json={}, headers=headers)
+    retry = client.post(path, json={}, headers=headers)
+
+    assert first.status_code == retry.status_code == 500
+    assert first.json() == retry.json() == {"detail": "Provisioning request failed"}
+    assert "internal detail" not in first.text
+    assert "internal detail" in caplog.text
+    assert _verified_response(first, authority.identity, path, {}).verified
+    assert _verified_response(retry, authority.identity, path, {}).verified
+    # The retry replays the recorded answer; the route runs once.
+    assert calls["count"] == 1
+
+
+_RESPONSE_AUTHENTICATION = (
+    SIGNATURE_VERSION_HEADER,
+    IDENTITY_SCHEME_HEADER,
+    IDENTITY_IDENTIFIER_HEADER,
+    ROLE_HEADER,
+    REQUEST_ID_HEADER,
+    TIMESTAMP_HEADER,
+    SIGNATURE_HEADER,
+)
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body", "status", "allow"),
+    [
+        ("POST", "/api/v1/nowhere", {}, 404, None),
+        ("DELETE", "/api/v1/fulfillment/schedule", {}, 405, "POST"),
+        ("DELETE", "/api/v1/capacity/snapshot", {}, 405, "GET"),
+        ("POST", "/api/v1/fulfillment/schedule", {}, 400, None),
+        ("POST", "/api/v1/fulfillment/schedule", {"capacity_reservation_id": 7}, 400, None),
+    ],
+    ids=["unknown-path", "family-method", "site-method", "missing-resource", "non-string-resource"],
+)
+def test_an_unroutable_request_is_answered_unsigned_by_what_failed(
+    identities, method, path, body, status, allow
+):
+    storefront, authority = identities
+    client, calls = _app(storefront, authority)
+    signed = _headers(storefront, "/api/v1/fulfillment/schedule", {"capacity_reservation_id": "r"})
+
+    response = client.request(method, path, json=body, headers=signed)
+
+    assert response.status_code == status
+    assert response.headers.get("Allow") == allow
+    if status == 400:
+        # The middleware's own answer is under test: it names the field.
+        assert "capacity_reservation_id" in response.json()["detail"]
+    for header in _RESPONSE_AUTHENTICATION:
+        assert header not in response.headers
+    answered = response.text + "".join(response.headers.values())
+    assert signed[SIGNATURE_HEADER] not in answered
+    assert signed[IDENTITY_IDENTIFIER_HEADER] not in answered
+    assert calls["count"] == 0
+
+
+def test_an_unreadable_body_on_an_unroutable_request_is_answered_by_its_route(identities):
+    """A JSON body that does not parse is refused only where a route serves it."""
+    storefront, authority = identities
+    client, _ = _app(storefront, authority)
+    unreadable = {"content": b"{not json", "headers": {"content-type": "application/json"}}
+
+    unknown = client.request("POST", "/api/v1/nowhere", **unreadable)
+    unserved = client.request("DELETE", "/api/v1/capacity/snapshot", **unreadable)
+    routed = client.request("POST", "/api/v1/fulfillment/schedule", **unreadable)
+
+    assert (unknown.status_code, unserved.status_code, routed.status_code) == (404, 405, 400)
+    assert unserved.headers["Allow"] == "GET"
+    assert "capacity_reservation_id" not in routed.json()["detail"]
+
+
 def test_legacy_admin_header_is_rejected_and_health_stays_open(identities):
     storefront, authority = identities
     client, calls = _app(storefront, authority)

@@ -54,9 +54,10 @@ class Stream:
     wake the session for another turn, so the last result is the run's end but
     its `permission_denials` are only its own turn's; the denials are gathered
     from every result, keyed by the call, and each takes the reason the harness
-    gave in its `permission_denied` event. The harness emits that event only for a
-    decision of the permission mode, `mode` for a call no allow rule matched; a
-    call that met a deny rule has none, so its denial carries no reason.
+    gave in its `permission_denied` event: `mode` for a call no allow rule
+    matched, `rule` for one a deny rule refused, and `subcommandResults` for a
+    shell command the harness refused by one of its parts. A denial with no such
+    event carries no reason.
     """
 
     def __init__(self, transcript: Path, progress: Path, clock: Clock = utc_now,
@@ -76,6 +77,8 @@ class Stream:
         self.notices: list[str] = []
         self._denials: dict[str, dict[str, Any]] = {}
         self._reasons: dict[str, str] = {}
+        # Every tool call the run made, by id, which names the subagents it started.
+        self.tool_use_ids: set[str] = set()
         self._files: dict[Path, TextIO] = {}
 
     def close(self) -> None:
@@ -113,6 +116,8 @@ class Stream:
         content = message.get("content") if isinstance(message, dict) else None
         for item in content if isinstance(content, list) else []:
             if isinstance(item, dict) and item.get("type") == "tool_use":
+                if isinstance(item.get("id"), str):
+                    self.tool_use_ids.add(item["id"])
                 at = self.clock().astimezone(timezone.utc).strftime("%H:%M:%SZ")
                 shown = f"{at} {item.get('name', '?')} {tool_summary(item)}".rstrip()
                 self._append(self.progress, shown + "\n")

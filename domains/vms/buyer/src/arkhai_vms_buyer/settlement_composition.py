@@ -24,6 +24,7 @@ from market_settlement_runtime import (
 )
 
 from .chain_cli import chain_app
+from .common import refuse_retired_address_book_keys
 from .escrow_cli import escrow_app
 from .settlement_stages import AlkahestBuyerStage, PaymentsBuyerStage
 
@@ -55,6 +56,18 @@ def advertised_plan_validator(match: Mapping[str, Any]):
     if not isinstance(selected, SelectedSettlementOption):
         return None
     return buyer_stage(selected.selection.mechanism).plan_validator(match, selected)
+
+
+def accepted_listing_record(match: Mapping[str, Any], _proposal: Any) -> dict[str, Any]:
+    """What the selected entry records about a match's listing at acceptance.
+
+    The entry is the match's selected settlement option, from which the
+    buyer's proposal was built.
+    """
+    selected = match.get("_selected_settlement")
+    if not isinstance(selected, SelectedSettlementOption):
+        return {}
+    return buyer_stage(selected.selection.mechanism).listing_record(match)
 
 
 def validate_buyer_acceptance(outcome) -> None:
@@ -141,6 +154,7 @@ def resolve_buyer_settlement_policy(
             "legacy [settlement] configuration is not supported; run "
             "`market config migrate --scope settlement --write --backup`"
         )
+    refuse_retired_address_book_keys(document)
     raw = document.get("Settlement", {})
     if not isinstance(raw, Mapping):
         raise ValueError("[Settlement] must be a table")
@@ -162,12 +176,3 @@ def alkahest_entry_from_selection(
     return buyer_stage(selected.selection.mechanism).accepted_entry(selected)
 
 
-def resolve_alkahest_address_config_path(
-    config: Mapping[str, Any] | None = None,
-) -> str | None:
-    """Resolve Alkahest's public address book without enabling new admission."""
-
-    policy = resolve_buyer_settlement_policy(config)
-    section = policy.config.mechanism_config("alkahest")
-    value = getattr(section, "address_config_path", None)
-    return value if isinstance(value, str) and value else None

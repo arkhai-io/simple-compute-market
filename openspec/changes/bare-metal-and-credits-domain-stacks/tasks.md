@@ -157,7 +157,18 @@ Its scenario proves the storefront half of 4b.9.
       authorize the agreement's teardown is refused and not retried elsewhere. The
       command's current options and subcommands differ from the real-host scenario's
       invocations (`--from`, `teardown request`/`status`); reconcile the two first.
-      (`buyer-orchestration` delta.)
+      (`buyer-orchestration` delta.) Amended 2026-10-27: the scenario's `result` and
+      `access` calls pass `--from … --json` too, where the commands take `--run-id`, and
+      `teardown` is one command, not a group; reconcile every call
+      (`unbacked-bare-metal-listings` pre-closeout review 176 F3).
+- [ ] 4b.10 **`buy` and `request-introduction` share one run shape.** Both commands
+      repeat the listing read, the advertised option's match, and the run's start, which
+      is how they came to carry the same three defects (`unbacked-bare-metal-listings`
+      22.7): no advertised option passed to the negotiation, the publisher principals
+      recorded as a bare list, and no provision-terms decoder. Give the two commands one
+      helper for that shape so a fix reaches both, proven by the commands' existing
+      storefront-level tests and by 4b.9's reconciled real-host scenario. Added 2026-10-27
+      from `unbacked-bare-metal-listings` pre-closeout review 176 F3.
 
 ## 5. Validation
 

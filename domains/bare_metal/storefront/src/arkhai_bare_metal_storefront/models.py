@@ -78,8 +78,12 @@ class BareMetalHealthResponse(BaseModel):
     # last cycle, whether its timer or an operator's step ran it; on status.
     lifecycle: dict[str, LoopStatus] | None = None
     # Each configured site's holds, refusals, and reports, each with its reason,
-    # from the latest publication cycle; on status, and empty before any cycle.
+    # from the latest publication cycle that derived it; on status, and a site
+    # no cycle has derived since start is absent.
     publication_derivation: dict[str, dict[str, list[dict[str, object]]]] | None = None
+    # Each composed settlement mechanism's readiness as its registration
+    # projects it, each blocker with its kind; on status.
+    settlement: list[dict[str, object]] | None = None
 
 
 class BareMetalFulfillmentResponse(BaseModel):
@@ -152,16 +156,12 @@ class BareMetalSettleStatusResponse(BaseModel):
 
 
 class BareMetalVerifyEscrowRequest(BaseModel):
-    """An administrator's dry-run check of an escrow against a listing's terms."""
+    """An administrator's dry-run check of an escrow against the plan the
+    accepted negotiation it names committed."""
 
     model_config = ConfigDict(extra="forbid")
 
-    seller_wallet: str = Field(min_length=1)
-    # Base units in the uint256 domain, as a decimal-digit string.
-    agreed_price: str = Field(pattern=r"^[0-9]+$")
-    agreed_duration_seconds: int = Field(gt=0)
-    listing_id: str = Field(min_length=1)
-    chain_name: str = Field(default="anvil", min_length=1)
+    negotiation_id: str = Field(min_length=1)
 
 
 class BareMetalVerifyEscrowResponse(BaseModel):
@@ -193,10 +193,14 @@ class BareMetalEvaluateSettleResponse(BaseModel):
 
 
 class BareMetalSettleWaitResponse(BaseModel):
+    """A settle wait's answer. ``last_error`` is the error of its last status
+    read when that read failed and the wait ended unready."""
+
     ready: bool
     status: str
     elapsed_ms: int
     fulfillment_state: str | None = None
+    last_error: str | None = None
 
 
 class BareMetalReserveCapacityRequest(BaseModel):

@@ -12,15 +12,15 @@ FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 
-.PHONY: helm-values-schema e2e-dev-identities e2e-dev-identities-env e2e-vms-dev-env e2e-apicredits-dev-env e2e-apicredits-stack-env e2e-bare-metal-dev-env review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-python-version check-project-layout lock
+.PHONY: helm-values-schema e2e-dev-identities e2e-dev-identities-env e2e-vms-dev-env e2e-apicredits-dev-env e2e-apicredits-stack-env e2e-bare-metal-dev-env review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-bare-metal-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-uv-version check-python-version check-project-layout lock
 .PHONY: check-architecture check-architecture-layers check-architecture-scope check-architecture-dependencies check-architecture-kinds check-architecture-change architecture-report
 .PHONY: test-release-tooling test-deployment-packaging test-registry-client test-provisioning-adapter test-e2e-unit
 .PHONY: dist-arkhai-core-registry
 .PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits
 .PHONY: dist-bare-metal-buyer
-.PHONY: run-e2e fetch-e2e-logs
+.PHONY: run-e2e run-ci fetch-e2e-logs
 .PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
-.PHONY: check-agent-skills review design-review design orchestrate plan implement validate-local validate-helm check-push-ready push-branch validate triage closeout archive-cleanup check-change-index check-tasks check-change change-next change-watch change-cost round-view round-done round-e2e-baseline round-view-closed review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
+.PHONY: check-agent-skills review design-review design orchestrate plan implement validate-local validate-ci validate-helm validate-parallel check-push-ready push-branch validate triage closeout archive-cleanup check-change-index check-tasks check-change change-clone change-clone-remove change-history record-capacity change-next change-graph change-watch change-cost round-view round-done round-view-closed review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -267,6 +267,15 @@ test-kits:
 # runners carry (4.3) has no `.WAIT` to order them, so these targets order
 # their steps as recipe lines of recursive calls instead. Only the images,
 # which share nothing but `.dist/`, are built in parallel.
+#
+# IMAGE_SUFFIX, empty by default, is appended to every image tag a build target
+# writes, here and in each subproject the image targets delegate to, which is
+# passed it explicitly. A change's Helm validation builds with
+# `IMAGE_SUFFIX=-<change>` and deploys those tags, so two changes' builds never
+# write one tag (scripts/change_namespace.py). Compose, the pipeline lanes, and
+# an owner's own deployments use the bare tags.
+IMAGE_SUFFIX ?=
+
 build: ## Build the wheels, the buyer CLI binary, and every runtime image
 	$(MAKE) init-prerequisites
 	$(MAKE) dist
@@ -483,44 +492,45 @@ build-anvil-state:
 	cd kit/alkahest && uv run --find-links ../../.dist python ../../dev-env/generate_state.py
 
 build-dev-env: build-anvil-state
-	cd dev-env && make build
+	cd dev-env && make build IMAGE_SUFFIX=$(IMAGE_SUFFIX)
 
 build-registry:
-	cd core/registry && make build
+	cd core/registry && make build IMAGE_SUFFIX=$(IMAGE_SUFFIX)
 
 build-storefront:
-	cd domains/vms/storefront && make build
+	cd domains/vms/storefront && make build IMAGE_SUFFIX=$(IMAGE_SUFFIX)
 
 build-bare-metal-storefront:
 	docker build --ulimit nofile=65536:65536 \
 		-f domains/bare_metal/storefront/Dockerfile \
-		-t arkhai:bare-metal-storefront .
+		-t arkhai:bare-metal-storefront$(IMAGE_SUFFIX) .
 
 build-provisioning:
-	cd provisioning/compute/service && make build
+	cd provisioning/compute/service && make build IMAGE_SUFFIX=$(IMAGE_SUFFIX)
 
 # API-credits domain images (item 6). Built from the repo root so each
 # Dockerfile's `COPY .dist/` + `COPY domains/` resolve. The api-credits
 # registry reuses arkhai:registry (built by build-registry) with a
 # different filter-spec mounted at runtime.
 build-apicredits-service:
-	docker build --ulimit nofile=65536:65536 -f domains/apicredits/service/Dockerfile -t arkhai:apicredits-service .
+	docker build --ulimit nofile=65536:65536 -f domains/apicredits/service/Dockerfile -t arkhai:apicredits-service$(IMAGE_SUFFIX) .
 
 build-apicredits-storefront:
-	docker build --ulimit nofile=65536 -f domains/apicredits/storefront/Dockerfile -t arkhai:apicredits-storefront .
+	docker build --ulimit nofile=65536 -f domains/apicredits/storefront/Dockerfile -t arkhai:apicredits-storefront$(IMAGE_SUFFIX) .
 
 build-apicredits-sample-app:
-	docker build --ulimit nofile=65536:65536 -f domains/apicredits/sample-app/Dockerfile -t arkhai:apicredits-sample-app .
+	docker build --ulimit nofile=65536:65536 -f domains/apicredits/sample-app/Dockerfile -t arkhai:apicredits-sample-app$(IMAGE_SUFFIX) .
 
 build-test-image:
-	cd e2e-tests && make build
+	cd e2e-tests && make build IMAGE_SUFFIX=$(IMAGE_SUFFIX)
 
 #Init should complete all deployment times set up steps required prior to your standalone run statements
 #The less of these the better but sometimes you get things like helm repo add or terraform init that can't be avoided.
-# `make init` resolves dependencies for all three roles. Each role's
-# Makefile owns its own venv; we just delegate so a fresh clone has one
-# entry point. Run `make build` separately to produce wheel/Docker artifacts.
-init: init-prerequisites init-submodules init-buyer init-storefront init-arkhai-core-registry
+# `make init` builds the internal wheels and resolves dependencies for the buyer,
+# both storefronts, and the registry. Each project's Makefile owns its own venv;
+# we just delegate so a fresh clone has one entry point. Run `make build`
+# separately for Docker images.
+init: init-prerequisites init-submodules init-buyer init-storefront init-bare-metal-storefront init-arkhai-core-registry
 
 init-prerequisites:
 	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Installing uv..."; curl -LsSf https://astral.sh/uv/0.8.13/install.sh | sh; source $HOME/.local/bin/env; }
@@ -533,13 +543,23 @@ init-submodules:
 init-zero-tier:
 	cd scripts/zerotier && make install
 
-init-buyer: dist-domains
+# Each role's environment installs every internal package its lock names from
+# .dist, so each builds the whole repository wheelhouse first. A hand-kept subset
+# drifts from the locks, and the gap shows only in a checkout whose .dist no
+# earlier build has filled, such as a fresh clone.
+init-buyer: dist-ci
 	cd domains/vms/buyer && make init
 
-init-storefront: dist-domains dist-policy dist-compute-provisioning dist-storefront-client dist-registry-client
+init-storefront: dist-ci
 	cd domains/vms/storefront && make init
 
-init-arkhai-core-registry: dist-registry-client
+# The bare-metal chart's and the release topology's render checks load their
+# rendered configuration with this environment's storefront; without it they
+# skip, which validation fails.
+init-bare-metal-storefront: dist-ci
+	cd domains/bare_metal/storefront && make init
+
+init-arkhai-core-registry: dist-ci
 	cd core/registry && make init
 
 deploy-compose:
@@ -770,8 +790,14 @@ helm-values-schema: ## Regenerate each storefront's config definition in its Hel
 	cd domains/vms/storefront && uv run --frozen --no-sync python -m market_storefront.values_schema write --root ../../..
 	cd domains/bare_metal/storefront && uv run --frozen --no-sync python -m arkhai_bare_metal_storefront.values_schema write --root ../../..
 
-lock: dist ## Relock projects against current wheels without installing anything (PROJECTS="dir ..." narrows it)
+# An older uv writes locks differently, and check-locks would pass them; the
+# check runs before the wheelhouse is built, even under -j.
+lock: check-uv-version ## Relock projects against current wheels without installing anything (PROJECTS="dir ..." narrows it)
+	@$(MAKE) --no-print-directory dist
 	python3 scripts/uv_project.py lock $(PROJECTS)
+
+check-uv-version: ## Fail if the installed uv is older than the minimum that writes this repository's locks
+	@python3 scripts/check_uv_version.py
 
 check-packaging: dist ## Run every packaging check against the tree and a freshly built wheelhouse
 	@$(MAKE) --no-print-directory check-uv-setup check-locks check-python-version check-project-layout check-architecture
@@ -909,11 +935,19 @@ review: round-view-closed ## Review an OpenSpec change read-only, in Codex or, w
 # .claude/change-steps.toml, ending with an outcome logged to the change's
 # reviews/workflow.jsonl. Without it, each target opens an interactive session as
 # the owner's own permission settings allow.
+#
+# ALLOW holds rules the owner grants for that one run, several separated by `;`;
+# each reaches the script as its own `--allow`, single-quoted so the shell passes
+# a rule's spaces, `*`, and quotes as they are (a `$` is make's own, written `$$`),
+# and the run's log line records them as `granted`. An interactive session ignores
+# it: no table restricts that one.
+ALLOW ?=
 STEP_RUN = python3 scripts/run_change_step.py run
+STEP_GRANTS = $(if $(strip $(ALLOW)), --allow '$(subst ;,' --allow ',$(subst ','\'',$(ALLOW)))')
 
-design: ## Open a Claude Code design session for an OpenSpec change (CHANGE=<change> [UNATTENDED=1])
+design: ## Open a Claude Code design session for an OpenSpec change (CHANGE=<change> [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
 	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
-	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) design "$(CHANGE)",claude "/change-design $(CHANGE)")
+	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) design "$(CHANGE)"$(STEP_GRANTS),claude "/change-design $(CHANGE)")
 
 # The orchestrating session relays and routes rather than judging, so it needs a
 # large context for a change's relayed turns, not a high effort.
@@ -921,21 +955,21 @@ orchestrate: ## Open the orchestrating Claude Code session for one OpenSpec chan
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
 	@claude --model claude-opus-5-5 --effort medium "/change-orchestrate $(CHANGE)"
 
-plan: ## Open a Claude Code planning session for an OpenSpec change; unattended, it resumes the design session (CHANGE=<change> [UNATTENDED=1] [FRESH=1])
+plan: ## Open a Claude Code planning session for an OpenSpec change; unattended, it resumes the design session (CHANGE=<change> [UNATTENDED=1 [FRESH=1] [ALLOW='<rule>;<rule>']])
 	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
-	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) plan "$(CHANGE)"$(if $(filter 1,$(FRESH)), --fresh),claude "/change-plan $(CHANGE)")
+	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) plan "$(CHANGE)"$(if $(filter 1,$(FRESH)), --fresh)$(STEP_GRANTS),claude "/change-plan $(CHANGE)")
 
-implement: round-view-closed ## Open a fresh Claude Code session implementing an OpenSpec change (CHANGE=<change> [SECTION=<n>] [SECTIONS=<n-m>] [UNATTENDED=1])
+implement: round-view-closed ## Open a fresh Claude Code session implementing an OpenSpec change; unattended, ARGUMENTS follows the change in the skill's invocation, as a merge's conflicts to resolve, and SESSION_ID continues that implementation session instead (CHANGE=<change> [SECTION=<n>] [SECTIONS=<n-m>] [UNATTENDED=1 [ARGUMENTS=<text>] [SESSION_ID=<id>] [ALLOW='<rule>;<rule>']])
 	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
-	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) implement "$(CHANGE)"$(if $(strip $(SECTIONS)$(SECTION)), --sections "$(or $(strip $(SECTIONS)),$(strip $(SECTION)))"),claude "/change-implement $(CHANGE)$(if $(strip $(SECTIONS)), sections $(SECTIONS),$(if $(strip $(SECTION)), section $(SECTION)))")
+	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) implement "$(CHANGE)"$(if $(strip $(SECTIONS)$(SECTION)), --sections "$(or $(strip $(SECTIONS)),$(strip $(SECTION)))")$(if $(strip $(ARGUMENTS)), --arguments '$(subst ','\'',$(ARGUMENTS))')$(if $(strip $(SESSION_ID)), --session '$(subst ','\'',$(strip $(SESSION_ID)))')$(STEP_GRANTS),claude "/change-implement $(CHANGE)$(if $(strip $(SECTIONS)), sections $(SECTIONS),$(if $(strip $(SECTION)), section $(SECTION)))")
 
-triage: round-view-closed ## Open a fresh Claude Code session triaging an OpenSpec change's untriaged reviews, validation, and the owner's notes (CHANGE=<change> [UNATTENDED=1])
+triage: round-view-closed ## Open a fresh Claude Code session triaging an OpenSpec change's untriaged reviews, validation, and the owner's notes (CHANGE=<change> [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
-	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) triage "$(CHANGE)",claude "/change-triage $(CHANGE)")
+	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) triage "$(CHANGE)"$(STEP_GRANTS),claude "/change-triage $(CHANGE)")
 
-closeout: round-view-closed ## Open a fresh Claude Code session closing out an OpenSpec change, archiving it last; resumes one archived but not committed (CHANGE=<change> [UNATTENDED=1])
+closeout: round-view-closed ## Open a fresh Claude Code session closing out an OpenSpec change, archiving it last; resumes one archived but not committed (CHANGE=<change> [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
-	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) closeout "$(CHANGE)",claude "/change-closeout $(CHANGE)")
+	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) closeout "$(CHANGE)"$(STEP_GRANTS),claude "/change-closeout $(CHANGE)")
 
 check-change-index: ## Fail if the change index has a malformed row, an unresolved change link, an unknown status, a dependency it does not list or that is archived, or an active change directory without exactly one row
 	@python3 scripts/check_change_index.py
@@ -950,29 +984,41 @@ change-watch: ## Follow the progress of an OpenSpec change's steps as they run, 
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
 	@python3 scripts/run_change_step.py watch "$(CHANGE)"
 
+change-clone: ## Create a change's own clone beside the owner's workspace, or finish one left incomplete, and start its bootstrap in the background; run in the workspace (CHANGE=<change> [BRANCH=feat/<change>] [FROM=dev])
+	@python3 scripts/change_clone.py create "$(CHANGE)" $(if $(strip $(BRANCH)),--branch "$(BRANCH)") $(if $(strip $(FROM)),--from "$(FROM)")
+
+change-clone-remove: ## Delete a merged change's clone, copying its history into the workspace first; refuses, deleting nothing, while the clone holds anything else; run in the workspace (CHANGE=<change>)
+	@python3 scripts/change_clone.py remove "$(CHANGE)"
+
+record-capacity: ## Record in helm/validation-capacity.toml the memory a change's latest validation measured, with when and from which change; when it measured none, leave the file as it is and say so; run by archive cleanup (CHANGE=<change>)
+	@python3 scripts/validate_slice.py capacity --change "$(CHANGE)"
+
+change-history: ## Copy an archived change's records and the validation evidence they name from its clone into the owner's workspace, extending files that grew and refusing any that differ; run in the clone (CHANGE=<change>)
+	@python3 scripts/change_history.py sync "$(CHANGE)"
+
 change-next: ## Print the next step of an OpenSpec change as the orchestrator computes it, in plain form: the step, its reason, and for a waiting run its seq and what it asks (CHANGE=<change>)
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
 	@python3 scripts/change_next_step.py "$(CHANGE)" --plain
+
+change-graph: ## Report where docs/development/diagrams/change-workflow-graph.drawio departs from the workflow's graph — each box and edge to add, change, or remove — to redraw it from; fails while it does
+	@PYTHONPATH=scripts python3 -m change_workflow.diagram
 
 change-cost: ## Report what an OpenSpec change's unattended runs cost, by step and by round, with partial dollars as a range and the cache misses with their gaps (CHANGE=<change>)
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
 	@python3 scripts/change_cost.py "$(CHANGE)"
 
-archive-cleanup: round-view-closed ## Open a fresh Claude Code session cleaning up an archived OpenSpec change once its closeout review's triage has advanced it: dependents released, row set to archived (CHANGE=<change> [UNATTENDED=1])
+archive-cleanup: round-view-closed ## Open a fresh Claude Code session cleaning up an archived OpenSpec change once its closeout review's triage has advanced it: dependents released, row set to archived, the capacity figure recorded, its validation namespace torn down, and its history copied into the owner's workspace (CHANGE=<change> [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
 	@python3 scripts/find_change.py --archived "$(CHANGE)" >/dev/null
-	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) archive-cleanup "$(CHANGE)",claude "/change-archive-cleanup $(CHANGE)")
+	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) archive-cleanup "$(CHANGE)"$(STEP_GRANTS),claude "/change-archive-cleanup $(CHANGE)")
 
 round-view-closed: ## Fail while a round view is open: the branch then points at the round's base, not its commit
 	@python3 scripts/round_view.py check
 
-round-view: ## Show an implementation round as uncommitted changes in this checkout for the owner's reading, after pushing HEAD and dispatching the E2E pipeline (CHANGE=<change> [BASE=<commit>] [NO_E2E=1])
-	@python3 scripts/round_view.py start "$(CHANGE)" $(if $(BASE),--base "$(BASE)") $(if $(filter 1,$(NO_E2E)),--no-e2e)
+round-view: ## Show an implementation round as uncommitted changes for the owner's reading: in the owner's workspace, on the branch fetched from the change's clone, or in place for a change with no clone; run again to follow the clone's new commits (CHANGE=<change> [BASE=<commit>])
+	@python3 scripts/round_view.py start "$(CHANGE)" $(if $(BASE),--base "$(BASE)")
 
-round-done: ## Return the branch to the round's commit after round-view, keeping any edits as uncommitted changes
+round-done: ## Return the branch to the round's commit after round-view, carrying commits made during the view onto it and keeping other edits uncommitted, then return the workspace to where it was
 	@python3 scripts/round_view.py done
-
-round-e2e-baseline: ## Print, and forget, the run before the E2E run round-view dispatched for HEAD, if it dispatched one
-	@python3 scripts/round_view.py e2e-baseline
 
 design-review: ## Design review of an OpenSpec change in Codex, continuing the last design reviewer (CHANGE=<change> [FRESH=1])
 	@$(MAKE) --no-print-directory review CHANGE="$(CHANGE)" KIND=design
@@ -982,8 +1028,19 @@ HELM_CONTEXT ?= docker-desktop
 validate-local: round-view-closed ## Validate HEAD without changing the checkout: check-packaging, then make test
 	@python3 scripts/validate_slice.py local
 
-validate-helm: round-view-closed ## Validate HEAD on the Helm charts: preflights, images, render checks, the release replaced by a fresh local deploy, the pipeline's scenarios (HELM_CONTEXT=docker-desktop [HELM_ALL_SCENARIOS=1])
-	@python3 scripts/validate_slice.py helm --context "$(HELM_CONTEXT)" $(if $(filter 1,$(HELM_ALL_SCENARIOS)),--all-scenarios)
+WORKFLOW ?=
+CI_AFTER_RUN ?=
+
+validate-ci: round-view-closed ## Validate HEAD on a CI run dispatched by run-ci: wait for the run newer than CI_AFTER_RUN, keep its job logs, and class each failure against the same job in the latest completed dev run of code the branch contains (WORKFLOW=<file> CI_AFTER_RUN=<id>)
+	@python3 scripts/validate_slice.py ci --workflow "$(WORKFLOW)" $(if $(strip $(CI_AFTER_RUN)),--after-run "$(CI_AFTER_RUN)")
+
+validate-helm: round-view-closed ## Validate HEAD on the Helm charts in the change's namespace: preflights, the change's images, render checks, the release upgraded from zero over deleted volumes, the pipeline's scenarios as a pod there (CHANGE=<change> HELM_CONTEXT=docker-desktop [HELM_ALL_SCENARIOS=1])
+	@python3 scripts/validate_slice.py helm --context "$(HELM_CONTEXT)" $(if $(CHANGE),--change "$(CHANGE)") $(if $(filter 1,$(HELM_ALL_SCENARIOS)),--all-scenarios)
+
+# It deploys, so it is named as a validation and its script outside `check_*`:
+# six steps' rules allow any `make check-*`, and closeout's `python3 scripts/check_*`.
+validate-parallel: ## Run two changes' clones' Helm parts at the same moment and report whether each kept to its own namespace, tags, and scenario pod, and what it left in its namespace (CLONES="<clone> <clone>" HELM_CONTEXT=docker-desktop)
+	@python3 scripts/validate_parallel.py --context "$(HELM_CONTEXT)" $(CLONES)
 
 check-push-ready: round-view-closed ## Fail unless HEAD is a clean, attached change branch that may be pushed to its own name
 	@python3 scripts/check_push_ready.py check
@@ -991,9 +1048,9 @@ check-push-ready: round-view-closed ## Fail unless HEAD is a clean, attached cha
 push-branch: round-view-closed ## Push exactly HEAD, unforced, to the current branch's own name once check-push-ready passes
 	@python3 scripts/check_push_ready.py push
 
-validate: round-view-closed ## Open a Claude Code session validating the commit at HEAD for an OpenSpec change (CHANGE=<change> [HELM_ALL_SCENARIOS=1] [UNATTENDED=1])
+validate: round-view-closed ## Open a Claude Code session validating the commit at HEAD for an OpenSpec change (CHANGE=<change> [HELM_ALL_SCENARIOS=1] [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
-	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) validate "$(CHANGE)"$(if $(filter 1,$(HELM_ALL_SCENARIOS)), --arguments "with HELM_ALL_SCENARIOS=1"),claude "/change-validate $(CHANGE)$(if $(filter 1,$(HELM_ALL_SCENARIOS)), with HELM_ALL_SCENARIOS=1)")
+	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) validate "$(CHANGE)"$(if $(filter 1,$(HELM_ALL_SCENARIOS)), --arguments "with HELM_ALL_SCENARIOS=1")$(STEP_GRANTS),claude "/change-validate $(CHANGE)$(if $(filter 1,$(HELM_ALL_SCENARIOS)), with HELM_ALL_SCENARIOS=1)")
 
 run-e2e: round-view-closed ## Run the E2E GitHub Actions workflow on the current branch.
 	@branch="$$(git branch --show-current)"; \
@@ -1003,6 +1060,9 @@ run-e2e: round-view-closed ## Run the E2E GitHub Actions workflow on the current
 	fi; \
 	echo "Triggering E2E workflow on branch $$branch..."; \
 	gh workflow run e2e.yml --ref "$$branch"
+
+run-ci: round-view-closed ## Dispatch a CI workflow validation may dispatch on the current branch, refusing any other, and print the newest run of it there before the dispatch as CI_AFTER_RUN (WORKFLOW=<file>)
+	@python3 scripts/ci_evidence.py dispatch "$(WORKFLOW)"
 
 E2E_LOG_DIR ?= $(CURDIR)/.snapshot/e2e-logs
 E2E_RUN_ID ?=

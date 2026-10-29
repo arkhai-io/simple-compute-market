@@ -16,6 +16,14 @@ compute service composition
 
 The offering-mode-neutral composition root lets generic services dispatch by recorded executor or provider identity without importing a concrete domain implementation.
 
+The mock mechanism is a worked instance of the five-piece route pattern (`docs/development/ARCHITECTURE.md`, "Route contracts and their HTTP binding") in which the family owns every piece but the binding's location. `compute_provisioning_contracts.mock_rules` holds the route-contract template, `MockRouteMount`, a path prefix and an operation-name prefix whose `route_declarations()` yields the rule add, list, delete, and resume routes and the evaluate-job route, and the wire models those routes answer with (`MockRuleAdded`, `MockRuleView`, `MockRuleDeleted`, `MockRuleResumed`, `MockJobEvaluation`, and the request `MockRuleCreate`). The family kit's `MockRuleRouteService` (`compute_provisioning.jobs.executor_mock`) answers with them, and `compute_provisioning_client`'s `MockRuleClient` and `SyncMockRuleClient` sign each call from a mount's declarations and return the same models. A domain states only its mount: VM's is `VM_MOCK_ROUTE_MOUNT`, `("/test", "provisioning_test")`, in `vm_provisioning_operator.routes`; bare metal's two values, `"/test/bare-metal"` and `"provisioning_test_bare_metal"`, live in `arkhai_bare_metal.provisioning_routes`, so `arkhai-bare-metal` keeps no compute dependency and its adapter builds the mount. Each adapter binds the route service under its mount's prefix and contributes the mount's declarations to the service's table. The evaluate-job request stays each domain's, since its fields are the domain's job parameters. A further compute domain mounts the mechanism by stating its two values.
+
+The service's database holds VM's tables, so its metadata (`db/database.py`) and its one migration history (`db/migrations.py`) name them: the history is the record of how those tables were created and evolved, including VM's pool-configuration table and VM's legacy lease conversion. `deployment-state`'s "Service-owned migration history" still gives the migration entrypoint only its database; nothing injects VM's schema. A single chain is adequate while one compute domain owns provisioning-side tables. When a second domain needs its own, each adapter would own its chain, run in an order the contributions declare, which amends that requirement.
+
+The resource-pool projection a site serves is neutral, and a domain that publishes more — a view of a whole machine it sells, or a pool's configured defaults — contributes an `InventoryViewProjection` from `compute_provisioning.inventory_views`, which owns the protocol and its composer. The service merges what each projection returns and never names a domain's view, attribute, or provider configuration. A resource view is built with its pool's context, an `InventoryPoolContext` of pool ID, provider, and the pool's resolved declarations, because what a view may carry depends on them: a bare-metal view carries its delivery terms only where the pool's backing delegate passes them through (see the [resource-pool management architecture](../resource-pool-management/architecture.md#advertisement-delivery-and-backing)). The provisioning service, as the composition root, reads the pool rows in its own resource pass, resolves each pool once through the shared resolver, and hands each declaration its pool's context, interpreting none of it; the pool pass reads raw tags and the provider from the same column, so the two passes cannot drift on a pool's provider. A stored pool whose declarations do not resolve, which startup refuses and no write path produces, gives its members no context, so they project with no views and no problems, and the service logs a warning. Building the context is compute-family work, so it sits at the contributed-view seam and nothing above the compute family learns of it: `kit/site` copies the per-resource result into its projection without reading it, and `kit/resource-pools` and core do not see it.
+
+A contributed projection never raises on a declaration's content. Declarations reach the site over its API from any client, and one a view builder could not handle would otherwise fail the site's whole resource-pool projection, every pool and every domain with it. `resource_views` returns a `ResourceViews` of the views it built and, per declared view it could not build, the reasons, which the projected resource carries as `publication_view_problems` keyed by view identifier. A backed bare-metal declaration naming no host or no access methods, a missing or invalid `allocation_mode` or `physical_host_id`, and a private-looking capacity or capability key are such cases. A storefront reads a resource with problems as an unreadable declaration and holds its listing (see the [storefront publication architecture](../storefront-publication/architecture.md#reconciliation)). Refusing a malformed attribute when the declaration is written was rejected: its backing-dependent rules need a site read of pool state that the site may not take while its edge into the pool authority stands, so a write-time check would be partial and the projection would still have to tolerate what it missed.
+
 ## Registration boundary
 
 Adapters register executor actions and FulfillmentProviders explicitly. Duplicate identities fail during startup because silent replacement would make persisted records execute under a different implementation. Provider and executor registration remain independent: fulfillment create/status/teardown and lease-release actions have different contracts and may evolve separately.
@@ -25,6 +33,10 @@ Adapters register executor actions and FulfillmentProviders explicitly. Duplicat
 A persisted job gives accepted work a durable identity, status, request snapshot, result, and diagnostic history. The in-process queue is only the execution mechanism. It does not become the database, retry authority, or provider policy engine.
 
 This distinction makes accepted work observable while avoiding false recovery promises. A process restart does not by itself prove that every queued or running action is safely resumed; recovery must be explicit where required.
+
+The job record is also where delivered credentials live. A job's executor reports the credentials it generated as `CredentialEnvelope`s, and the job authority stores them with the transition that reports them. The fulfillment aggregate, its provider metadata, and the fulfillment result hold none: a result query for an active fulfillment reads its create job's credentials from the job record each time. Keeping them there is a necessity, not a cache — the create job generates VM tenant credentials on the host, and nothing can read them back from it afterwards.
+
+Two limits follow. An operator's VM password reset runs as its own job, whose new credentials are stored against that job; the fulfillment result still reads the create job's, so after a reset it delivers the superseded password. And the envelopes are stored as plain JSON, unlike a relay's admission token, which is encrypted with the deployment's key, and nothing deletes job rows; anyone who can read the provisioning database can read every credential a job has reported, including those of workloads since torn down.
 
 ## Selected-resource execution
 
@@ -36,14 +48,16 @@ Operational inventory is authoritative service state, not a checked-in Ansible i
 
 The bare-metal storefront is a client of the accepted POOLS-7 scheduling and fulfillment contracts, not a second job repository or convergence worker. It derives one `SettlementResource` request from the immutable accepted listing/site/Physical Resource and agreed bare-metal terms, submits it to the provisioning authority bound to that site, and persists only returned reservation, settlement-resource, and fulfillment correlations.
 
-The storefront's seller table binds payment, Alkahest and fused contact stages;
-its purchase table binds payment only. Each seller persists one
+The storefront's seller table binds payment, Alkahest and contact stages;
+its purchase table binds payment only. A payment or Alkahest seller persists one
 `bare_metal.settlement-evidence.v1` payload in negotiation-keyed
 `bare_metal_settlement_records`, bound to the exact Agreement digest and an
 immutable established reference. Verified source/delivery cannot be replaced.
 Physical lifecycle correlations, progress and private results remain separate.
-Contact evidence contains a reveal reference, not duplicated PII or a physical
-phase. No escrow row or payment chain-name sentinel is alternative authority.
+A contact-exchange deal records no settlement evidence: it completes by its
+introduction, whose reveal is the contact-exchange kit's own record, and it has
+no settlement or fulfillment to load. No escrow row or payment chain-name
+sentinel is alternative authority.
 
 Common begin, recovery/status, access/result and teardown load verified evidence
 through the accepted entry. Payment rechecks the mandate and trusted signed
@@ -122,6 +136,73 @@ canonical response body. Clients verify every field against the expected
 authority before accepting an acknowledgement. This distinguishes an
 authenticated authority outcome from an unsigned status code or a correctly
 signed response produced by the wrong service.
+
+A route that fails after the caller was authenticated still answers signed: a
+500 with a fixed, non-revealing detail, the error itself going to the service's
+log. An unsigned 500 would reach the caller's typed client as missing response
+authentication rather than as the authority's failure. The provisioning
+service's middleware records that answer as the request's outcome, as it
+records any, so an exact retry replays the same signed 500 instead of finding
+the reservation in progress until its dispatch lease expires. `kit/site`'s
+middleware, which the API-credits service composes, keeps reservations but no
+outcomes, so it answers the signed 500 and records nothing; an exact retry is
+handled as its route's retry contract says. Neither middleware catches a failure
+after a route has started its response: the body stream ends and the error is
+re-raised only once the status is sent, so the middleware would sign, and the
+provisioning service record, a truncated body under the original status. No
+route streams its response, so the limit is latent; a streaming route needs the
+middleware to detect that failure or to refuse streamed responses.
+
+A request that resolves to no route contract is answered before authentication,
+by what failed to match, and unsigned: 404 for a path no contract names, 405
+with `Allow` for a path named only under other methods, 400 for a route whose
+body resource cannot be bound. Route resolution reports the case through a
+typed error (`ProvisioningRouteNotFound`, `ProvisioningRouteMethodNotAllowed`,
+`ProvisioningRouteResourceUnbound` in `compute_provisioning_contracts.routes`;
+`SiteRouteNotFound`, `SiteRouteMethodNotAllowed`, `SiteRouteResourceUnbound`
+in `market_site.auth` for `kit/site`'s middleware). Such an answer cannot be
+signed meaningfully: a response proof binds the method, operation, resource,
+request identity, status, and body, and a client verifies it against its own
+operation and resource, while the server knows no operation for an unknown path
+or a wrong method and no resource for an unbindable body, and a request carries
+a signature over its operation rather than the operation itself. Signing "not
+served" over the caller's claimed operation needs a request envelope that states
+its operation, which the current version does not; until then the answers stay
+unsigned. The family client and the site client refuse an unsigned answer as
+they refuse any unverifiable one, but report it distinctly
+(`ComputeProvisioningUnauthenticatedResponseError`,
+`SiteCapacityUnauthenticatedResponseError`), by its status alone: an unsigned
+answer is also what anything between client and authority may give, so nothing
+it says is repeated. The family client resolves its own table before sending,
+so it meets these answers only when its table and the service's differ.
+
+The route table can answer by cause, and can refuse ambiguity, because a route
+contract's pattern is restricted: literal segments, `[^/]+` named captures,
+finite alternations of literal segments, and an optional terminal `/?`. Building
+a contract refuses any other pattern, and so does a pattern compiled with a
+flag, since the comparison reads only the pattern's text. Over that grammar,
+overlap is decidable segment by segment, so `ProvisioningRouteTable` refuses,
+when it is composed and before the service accepts traffic, two contracts of
+different contributions that one method and path could both match: neither
+owner can say which signature such a request means. Within one contribution the
+first matching contract decides, in the order its owner gave. Detecting
+ambiguity per request instead would let a mis-composed service start and fail on
+exactly the overlapping requests. The grammar is hand-written only while it
+stays this small: a route needing more, such as a tail capture or a typed
+segment, is a reason to adopt an established path-template grammar and its
+matcher, and rebuild the overlap comparison on it, not to widen this one.
+`kit/site`'s middleware has no ambiguous case: it resolves first-match over the
+one ordered table its composition root gives it, which the API-credits service
+extends with its own routes, and it takes no contributions.
+
+One such failure is refused at startup instead: the service does not start
+while a stored pool names a provider no registered handler serves. Handlers are fixed by
+the build and every write refuses an unknown provider, so such a row comes only
+from outside the service's write paths, no pool document can repair it, and
+every read of it would fail; startup names each pool and provider, beside its
+refusal of stored pools whose declarations are invalid. Unreadable own state
+stops startup because waiting does not repair it, where an unavailable
+dependency starts the service degraded.
 
 ### Scheme, credential, and package boundaries
 

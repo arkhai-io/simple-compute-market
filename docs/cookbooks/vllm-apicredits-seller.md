@@ -83,7 +83,16 @@ private_key = "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a
 [chains.anvil]
 rpc_url = "ws://anvil:8545"
 chain_id = 31337
-alkahest_address_config_path = "/app/alkahest_anvil_addresses.json"
+
+[settlement]
+schema_version = 1
+priority = ["alkahest.v1"]
+
+[settlement.alkahest]
+enabled = true
+# The local Anvil's Alkahest contracts; a chain not named here uses the SDK's
+# built-in addresses.
+address_books = { anvil = "/app/alkahest_anvil_addresses.json" }
 
 [registry]
 urls = ["http://api-credits-registry:8080"]
@@ -92,8 +101,6 @@ discovery_timeout = 5.0
 [credits]
 service_url = "http://credits-service:8082"
 admin_key = "test-api-key"
-preflight_timeout = 60
-fail_on_unreachable = true
 
 [capacity]
 poll_interval = 1
@@ -246,7 +253,14 @@ private_key = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690
 
 [chains.anvil]
 rpc_url = "ws://anvil:8545"
-alkahest_address_config_path = "/config/alkahest_anvil_addresses.json"
+
+[Settlement]
+schema_version = 1
+priority = ["alkahest.v1"]
+
+[Settlement.alkahest]
+enabled = true
+address_books = { anvil = "/config/alkahest_anvil_addresses.json" }
 
 [registry]
 urls = ["http://api-credits-registry:8080"]

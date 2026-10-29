@@ -13,9 +13,11 @@ from types import SimpleNamespace
 
 import pytest
 from core_buyer.negotiation_client import (
+    NegotiationOutcome,
     _parse_settlement_data,
     _validate_settlement_acceptance,
     negotiate_with_seller,
+    parse_accepted_terms_from_reply,
 )
 from market_core.schemas import (
     Agreement,
@@ -102,6 +104,24 @@ def test_seller_settlement_data_survives_buyer_acceptance(monkeypatch) -> None:
     assert _parse_settlement_data({}) is None
     with pytest.raises(ValueError, match="must be an object"):
         _parse_settlement_data({"settlement_data": ["not", "an object"]})
+
+
+@pytest.mark.parametrize(
+    "terms",
+    [[{"maker": "buyer", "escrow_contract": "0x" + "33" * 20}], "not even a list"],
+    ids=["terms naming another escrow", "unreadable terms"],
+)
+def test_escrow_terms_an_accept_reply_carries_are_never_read(terms) -> None:
+    """A buyer funds only the escrow it derives, so a reply's terms are ignored."""
+    reply = {
+        "accepted_escrow_proposal": {"chain_name": "anvil"},
+        "accepted_escrow_terms": terms,
+    }
+
+    assert parse_accepted_terms_from_reply(reply) == (
+        None, {"chain_name": "anvil"}, None, None,
+    )
+    assert "accepted_escrow_terms" not in NegotiationOutcome.__dataclass_fields__
 
 
 _BUYER = Identity(scheme="eip191", identifier="0x" + "11" * 20)

@@ -580,7 +580,6 @@ def buyer_cli(buyer_cli_binary: Path, tmp_path_factory) -> BuyerCli:
         "",
         "[chains.anvil]",
         f"rpc_url = {_toml_quote(rpc_url)}",
-        f"alkahest_address_config_path = {_toml_quote(alkahest_path)}",
         "",
         "[negotiation]",
         'policies = ["buyer_escrow_shape_guard", "bisection"]',
@@ -597,10 +596,9 @@ def buyer_cli(buyer_cli_binary: Path, tmp_path_factory) -> BuyerCli:
         "",
         "[Settlement.alkahest]",
         "enabled = true",
-        # The same addresses file the chain section names. Alkahest resolves
-        # contract addresses through the mechanism section here, not through
-        # the chain entry, so both have to point at it.
-        f"address_config_path = {_toml_quote(alkahest_path)}",
+        # The anvil chain's address book, which every Alkahest read on that
+        # chain resolves through this table.
+        f"address_books = {{ anvil = {_toml_quote(alkahest_path)} }}",
         "oracle_gated = false",
         "trusted_oracle_addresses = []",
         "interruptible = false",

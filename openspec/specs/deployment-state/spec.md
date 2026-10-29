@@ -65,7 +65,7 @@ Each service MUST own its database and migration history; cross-service identifi
 - **THEN** correlation identifiers cross the API while provisioning retains ownership of its allocation records
 
 ### Requirement: Service-owned migration history
-Each stateful service MUST run and record its own ordered migration chain against its owned database; a deployed provisioning service MUST apply pending migrations before application startup and MUST reject schema drift from its normal startup path instead of applying migrations in-process.
+Each stateful service MUST run and record its own ordered migration chain against its owned database; a deployed provisioning service MUST apply pending migrations before application startup and MUST reject schema drift from its normal startup path instead of applying migrations in-process. The provisioning migration entrypoint MUST receive only its database and MUST NOT read operational configuration; configuration-driven seeding belongs to runtime initialization.
 
 #### Scenario: Database initialization is repeated
 - **WHEN** a service initializes a database whose migrations are already applied
@@ -82,6 +82,10 @@ Each stateful service MUST run and record its own ordered migration chain agains
 #### Scenario: A service has no separate deployment step for migrations
 - **WHEN** a stateful service has no Kubernetes init container or standalone migration CLI to apply migrations ahead of the application process (for example, the API-credit service, which has no Helm chart)
 - **THEN** it MAY apply its own ordered migration chain in-process at application startup, before serving requests, rather than rejecting drift from its normal startup path — this is a valid instantiation of service-owned migration history for a service without the provisioning service's deployment topology, not an exception to it
+
+#### Scenario: Provisioning migration runs under different configuration
+- **WHEN** the provisioning migration runs against the same database under two configurations that differ in playbooks, host defaults, or pool and seed documents
+- **THEN** both runs produce the same schema and the same rows
 
 ### Requirement: Shared Dynaconf bootstrap preserves consumer policy
 
@@ -328,12 +332,24 @@ The chart MAY refuse a release whose parts disagree with each other: internal-re
 trust whose authority or principals do not include the release's registry identity;
 provisioning trust, or a provisioning service peer for a site bound to the internal
 provisioning service, that does not include the release's provisioning principal; or a
-stated port that differs from the agent's. The chart MAY read the passed-through
-configuration to make a Kubernetes decision, such as waiting for a configured chain's
-RPC endpoint, or for the internal registry when the agent uses it, before the
-storefront starts. The chart MUST match every key it reads or writes as the
-storefront's loader matches it, without regard to case, and MUST refuse a
+stated port that differs from the agent's. The chart MUST match every key it reads or
+writes as the storefront's loader matches it, without regard to case, and MUST refuse a
 configuration that states one key in two spellings at any depth.
+
+A chart that runs several agents MUST key them by agent name, never list them. A
+`null` assigned to a mapping key in a values file MUST remove that key — whether it
+names an agent, a value of an agent, or a key at any depth of an agent's
+configuration, including mapping keys inside list elements — whether or not the
+Helm release's merge removed it. A removed key MUST reach no agent-reading template,
+and the agent MUST render as it would had the key never been stated. The chart MUST
+NOT render `null` as a mapping value. List elements MUST retain their item schema's
+meaning; a `null` list element MUST NOT be removed by mapping-key normalization.
+
+An agent map that names no agent once its null-valued entries are removed MUST be
+refused at render, as an empty agent map is refused by the values schema, and so
+MUST an agent that states no port or no identity once its null-valued keys are
+removed, naming the agent and the missing value. A key the values schema refuses
+MUST stay refused when its value is `null`.
 
 A values file using a retired values shape MUST be refused at render, naming the
 retired key, rather than passed through as keys the storefront ignores.
@@ -395,6 +411,65 @@ retired key, rather than passed through as keys the storefront ignores.
 #### Scenario: A values file uses the retired shape
 
 - **WHEN** an agent's values use a retired key such as `seller` or `storefrontDomains`
+- **THEN** rendering fails naming the key
+
+#### Scenario: An overlay removes an agent
+
+- **WHEN** a values file sets to `null` an agent an earlier values file defines
+- **THEN** no workload, Service, ConfigMap, Secret, or volume is rendered for that agent
+- **AND** the release's other agents render as they would without it
+
+#### Scenario: An overlay removes the only agent
+
+- **WHEN** a values file sets to `null` the only agent an earlier values file defines,
+  through the umbrella chart or the storefront chart alone
+- **THEN** rendering fails naming the empty agent map
+
+#### Scenario: An overlay removes a defaulted setting
+
+- **WHEN** a values file sets to `null`, at any depth, a key of an agent's
+  configuration that the storefront defaults and the chart does not add
+- **THEN** the rendered configuration omits the key and the storefront applies its own
+  default
+
+#### Scenario: An overlay removes a value the release knows
+
+- **WHEN** a values file sets to `null` a key of an agent's configuration that the
+  chart adds when it is absent, such as `db_path`, `registry.urls`, or `port`
+- **THEN** the rendered configuration carries the release's value, as when the agent's
+  configuration omits the key
+
+#### Scenario: An overlay removes a required setting
+
+- **WHEN** a values file sets to `null` a setting the storefront requires and the chart
+  does not add
+- **THEN** the chart renders the configuration without it and the storefront refuses
+  it at startup
+
+#### Scenario: An overlay removes a chart-level agent value
+
+- **WHEN** a values file sets to `null` an agent's `component`, `configMapName`,
+  runtime `secret`, or Alkahest address book, or a key under either of the last two
+- **THEN** the agent renders as it would had the value never been stated: its name as
+  the component, the generated ConfigMap name, no runtime overlay or address book, and
+  for a key under them its default, or none mounted where the key names the Secret or
+  ConfigMap to mount
+
+#### Scenario: An overlay removes an agent's port or identity
+
+- **WHEN** a values file sets an agent's `port` or `identity` to `null`
+- **THEN** rendering fails naming the agent and the missing value
+
+#### Scenario: An overlay removes internal-registry trust
+
+- **WHEN** a values file sets an agent's `internalRegistryTrust` to `null` while the
+  agent uses the internal registry
+- **THEN** rendering fails naming the missing internal-registry trust, not the `null`
+
+#### Scenario: A refused key stays refused as null
+
+- **WHEN** a values file sets a key the values schema refuses, such as a wallet's
+  private key, to `null` in an agent's configuration
 - **THEN** rendering fails naming the key
 
 ### Requirement: A storefront reads chart-rendered configuration between its file and its overlay
@@ -859,10 +934,76 @@ remains available to an operator.
 - **THEN** its pod environment carries only the configuration directory and the signing
   credential, and every other value is in a mounted configuration file
 
+### Requirement: The provisioning chart mounts operator files it gives no meaning
+The provisioning chart MUST render each entry of `configFiles` verbatim into its ConfigMap and mount it read-only in the application container at `/app/config/<name>`, beside the rendered profile. The chart MUST NOT derive a setting from an operator file: a setting under `config` names it by that path. The values schema MUST refuse a name that is not a single file name, a name the chart mounts itself, and `config.yml` or `config-*.yml` and their `.yaml` forms, which the service would load as configuration profiles. A file's content and name MUST reach the container exactly as given.
+
+#### Scenario: An operator supplies a fresh site's seed
+- **WHEN** a release sets `configFiles` with a `pool-seed.yaml` entry and `config.pool_seed_path` to `/app/config/pool-seed.yaml`
+- **THEN** the file renders and mounts at that path, and the rendered profile carries the setting as stated
+
+#### Scenario: An operator file takes a reserved name
+- **WHEN** a release names an operator file `pool-definitions.yaml`, `config.yml`, `config-production.yml`, `..`, or a path rather than a file name
+- **THEN** rendering fails naming the refused name
+
+### Requirement: A deployment does not wait on a service's dependencies
+
+A chart MUST NOT hold a service back with init containers that wait for or validate its
+external dependencies, such as a registry, a chain, or a site, and a service MUST NOT
+wait for one, or refuse to start because one is unreachable, in its own startup. The
+service MUST start while a dependency is unreachable, report the dependency as degraded
+in its status while its process health check answers, and recover without a restart when
+the dependency answers. A chart whose service starts slowly MUST give it a startup probe,
+so that a slow start is not judged by its liveness probe.
+
+#### Scenario: The VM storefront starts before its registry and chain
+
+- **WHEN** the VM storefront starts while its registry, its site, and its chain are
+  unreachable
+- **THEN** it starts and answers its health check; its status reports the registry check
+  unreachable, the storefront degraded, and Alkahest unready with a reachability blocker;
+  its publication cycle holds the listings of the site whose projection it has not loaded
+  and closes none of them
+- **AND** Alkahest becomes ready once the chain answers, and publication reaches the
+  registry once it answers, both without a restart
+
+#### Scenario: A storefront starts before its site or service
+
+- **WHEN** the VM storefront starts while its provisioning service is unreachable, or the
+  API-credit storefront while its credits service is
+- **THEN** it starts and answers its health check, calls to that service fail retryably,
+  and they succeed once it answers, without a restart
+
+#### Scenario: A storefront chart renders
+
+- **WHEN** the VM or bare-metal storefront chart is rendered
+- **THEN** its Deployment carries no init container that waits on a dependency, and its
+  container carries a startup probe
+
+### Requirement: Helm test pods carry no workload selector labels
+
+A Helm test pod MUST NOT carry every selector label of any workload its release deploys,
+so that selecting a workload's pods by label never returns a test pod. A test pod MUST
+carry the release's instance label and `app.kubernetes.io/component: test`, and MUST NOT
+carry `app.kubernetes.io/name`.
+
+#### Scenario: A registry's pods are selected
+
+- **WHEN** an operator selects the registry Deployment's pods by its selector labels after
+  `helm test` has run
+- **THEN** only the registry's own pods are returned
+
+#### Scenario: Both topology releases are rendered
+
+- **WHEN** both local topology releases are rendered
+- **THEN** no Pod annotated `helm.sh/hook: test` carries all of any rendered Deployment's
+  `matchLabels` or any rendered Service's selector
+
 ## Evidence
 
 - Configurable registry endpoints and independently composed role stacks: core buyer registry configuration plus domain Compose and Helm manifests.
 - Service-owned persistence, provisioning migration init, and schema-drift rejection: registry Alembic tests, `provisioning/compute/service/tests/integration/test_database.py`, and `helm/charts/provisioning/templates/deployment.yaml`.
+- The provisioning migration reading no operational configuration, the same database migrated under two configurations to equal schema and rows: `provisioning/compute/service/tests/integration/test_migration_reads_no_configuration.py`; job-envelope host evidence: `provisioning/compute/service/tests/integration/test_job_envelope_migration.py`.
+- The provisioning chart's `configFiles` rendered, mounted, and named in the profile, exact content and names, and refused names: `helm/charts/provisioning/tests/test_render.py`.
 - Wheel-directory dependency resolution without parent-path UV sources: package `pyproject.toml` files and package Makefiles using `--find-links`.
 - Package architecture in the packaging check: `make check-architecture`, `scripts/check_architecture_*.py`, and `scripts/tests/test_check_architecture.py`.
 - Derived internal-package refresh for environments, images, and locks: `scripts/uv_project.py`, `scripts/tests/test_uv_project.py`, every `reinit` target, and every Dockerfile that copies `.dist`.

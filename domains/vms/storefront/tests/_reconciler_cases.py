@@ -63,7 +63,22 @@ def _judged(function):
     return call
 
 
-available_compute_slices = _judged(_available_compute_slices)
+# Each site's report from the latest derivation these cases ran through
+# ``available_compute_slices``, which ``_site_report`` reads.
+_LATEST_REPORTS: dict[str, dict] = {}
+
+
+def _reported(function):
+    def call(*args, **kwargs):
+        if "reports" not in kwargs:
+            _LATEST_REPORTS.clear()
+            kwargs["reports"] = _LATEST_REPORTS
+        return function(*args, **kwargs)
+
+    return call
+
+
+available_compute_slices = _reported(_judged(_available_compute_slices))
 
 
 def _keyed(function):
@@ -445,9 +460,7 @@ def _shape_slices(db_path, pools, *, buckets=None, holds=None):
 
 
 def _site_report() -> dict:
-    from arkhai_vms_listings.reconciler import derivation_reports
-
-    return derivation_reports()["site-a"]
+    return _LATEST_REPORTS["site-a"]
 
 
 _BIG = {"gpu_count": 8, "vcpu_count": 64, "ram_gb": 512, "disk_gb": 2000}

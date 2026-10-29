@@ -297,10 +297,10 @@ async def terminate_vm_lease(
     only requests that teardown begin and returns the lease as the site then
     records it.
 
-    No caller exists yet in this codebase: this function exists so a future
-    buyer-initiated early-termination flow -- the buyer asks the storefront,
-    which asks the site -- has something to call. See
-    `openspec/specs/vm-storefront-fulfillment/spec.md`.
+    It is the storefront's half of a buyer-initiated early termination, in
+    which the buyer asks the storefront and the storefront asks the site; no
+    storefront route exposes that flow, so nothing in the storefront calls
+    it. See `openspec/specs/vm-storefront-fulfillment/spec.md`.
     """
     return await fulfillment_client.terminate_lease(
         capacity_reservation_id, site_id=site_id, reason=reason

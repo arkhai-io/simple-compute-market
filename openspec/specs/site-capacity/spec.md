@@ -167,7 +167,7 @@ A capacity reservation MUST expose its identity, lifecycle state, hold expiry, r
 ### Requirement: Reservation lifecycle
 Capacity reservation MUST use a hold/commit/release lifecycle keyed by durable allocation identity, support expiry of uncommitted holds, and be idempotent for retries.
 
-`reserve()` itself is idempotent by `deal_ref`'s `escrow_uid` when present: a repeat call for an escrow_uid with an existing reservation in any held state (`reserved`, `provisioning`, `leased`, `releasing`, `release_failed`, `unmanaged`) returns that reservation rather than admitting a second one. This closes the retry gap `commit`/`release` already closed for their own calls: a caller retrying `reserve()` itself after a crash — before it durably recorded the first reservation's identity elsewhere — does not double-reserve capacity for the same deal. An escrow_uid whose prior reservation already expired or was released is not matched (it has moved out of the held states), so a genuinely new attempt after expiry still admits fresh.
+`reserve()` itself is idempotent by `deal_ref`'s `escrow_uid` when present: a repeat call for an escrow_uid with an existing reservation in any held state (`reserved`, `leased`, `releasing`, `release_failed`, `unmanaged`) returns that reservation rather than admitting a second one. This closes the retry gap `commit`/`release` already closed for their own calls: a caller retrying `reserve()` itself after a crash — before it durably recorded the first reservation's identity elsewhere — does not double-reserve capacity for the same deal. An escrow_uid whose prior reservation already expired or was released is not matched (it has moved out of the held states), so a genuinely new attempt after expiry still admits fresh.
 
 #### Scenario: Two buyers reserve the same final unit
 - **WHEN** concurrent requests race at one site
@@ -259,6 +259,7 @@ Capacity projection events MUST remain anonymous and versioned, while deal-scope
 - Storefront-to-site HTTP contract: `kit/site-client/tests/unit/test_client.py`, `kit/site-client/tests/unit/test_opacity.py`.
 - “Do not close on ignorance” reconciliation: `domains/vms/storefront/tests/unit/test_cli_publish_helpers.py`.
 - Shared feasibility predicate: `kit/site/tests/unit/test_resource_satisfies_requirement.py`.
+- A stored declaration with no pool excluded from admission, both projections, scheduling, settlement assignment, and pool moves, logged, and still listed for its operator: `kit/site/tests/integration/test_ledger.py`; from projection and the injected exact matcher: `kit/site/tests/unit/test_projections.py` and `kit/site/tests/unit/test_dict_resource_satisfies_claim.py`; from the provisioning resource-pool projection: `provisioning/compute/service/tests/unit/services/test_capacity_inventory.py`.
 - Session-scoped settlement assignment, locked reservation reads, and in-session backing-resource lookup: `kit/site/tests/unit/test_settlement_assignment.py`.
 - Reservation supersede (`resize_reservation`) and unconditional settlement-abandonment hook invocation across TTL lapse, release, and resize: `kit/site/tests/integration/test_ledger.py`.
 - One release-handle name: the ledger payload and model in `kit/site/tests/integration/test_ledger.py`; the published and updatable VM lease handle in `provisioning/compute/service/tests/integration/test_leases_api.py`, the published bare-metal lease handle in `provisioning/compute/service/tests/integration/test_bare_metal_leases_api.py`, and the lease models in `provisioning/compute/service/tests/unit/test_lease_models.py`; the upgrade, including the mirror-only backfill and the refusal on disagreement, in `provisioning/compute/service/tests/integration/test_reservation_release_mirror_migration.py`; and the deployed VM release path through teardown in `e2e-tests/tests/e2e/roles/scenarios/vms/test_full_deal.py`.
@@ -457,7 +458,7 @@ pool MUST be rejected at request validation rather than recorded against a defau
 because registration replaces the whole declaration and a silently defaulted pool is
 a reassignment nobody requested. A declaration naming a pool the site does not have
 MUST be refused, whether it arrives as a registration or a document entry. A stored
-declaration with no recorded pool is read as belonging to the default pool.
+declaration with no recorded pool MUST NOT be read as belonging to any pool.
 
 #### Scenario: Shape authority is not admission authority
 
@@ -494,6 +495,11 @@ declaration with no recorded pool is read as belonging to the default pool.
 - **WHEN** a capacity declaration carries only some dimensions
 - **THEN** the authority accepts it and treats the omitted dimensions as undeclared
   rather than rejecting the declaration or substituting a value from another record
+
+#### Scenario: A stored declaration has no pool
+
+- **WHEN** a stored declaration carries no pool identifier
+- **THEN** it is not projected, admitted against, or moved as a member of any pool, including one named `default`
 
 ### Requirement: Projected inventory is internally consistent
 
@@ -713,9 +719,8 @@ offering mode that shares the reservation table.
 The site authority MUST record a reservation's executor target once, written in the
 transaction of the caller that records it, without changing the reservation's state or
 window and without a capacity event. A recorded target MUST NOT be replaced, and none is
-recorded on a `released`, `force_released`, or `provisioning_failed` reservation. The create
-and release handles are lifecycle evidence, and a recorded create handle MUST NOT be
-replaced.
+recorded on a `released` or `force_released` reservation. The create and release handles
+are lifecycle evidence, and a recorded create handle MUST NOT be replaced.
 
 #### Scenario: A target is recorded on a committed reservation
 
@@ -739,14 +744,17 @@ the reservation's current state, refused, with nothing written, from any other s
 that a lifecycle acting on a stale read cannot undo what an operator or a completed release
 recorded:
 
-- Entering `releasing` MUST be allowed from `reserved`, `provisioning`, `leased`, and
-  `release_failed` (a retry). A reservation already `releasing` under the same release
-  handle MUST be returned unchanged; one releasing under another handle MUST be refused.
-- Recording a release failure MUST be allowed from `reserved`, `provisioning`, `leased`, and
-  `releasing`. A `releasing` reservation MUST still be releasing under the handle the
-  failure was observed for.
+- Entering `releasing` MUST be allowed from `reserved`, `leased`, and `release_failed` (a
+  retry). A reservation already `releasing` under the same release handle MUST be returned
+  unchanged; one releasing under another handle MUST be refused.
+- Recording a release failure MUST be allowed from `reserved`, `leased`, and `releasing`. A
+  `releasing` reservation MUST still be releasing under the handle the failure was
+  observed for.
 - Handing a reservation to an operator (`unmanaged`) MUST be allowed only from `leased`.
 - Only a forced release MAY free an `unmanaged` reservation.
+
+No interface MAY set a reservation's state other than through these transitions, commit,
+release, expiry, and forced release.
 
 #### Scenario: A stale cycle meets a lease an operator took over
 
@@ -759,6 +767,12 @@ recorded:
 - **WHEN** a release failure observed before an operator force-released the lease is
   recorded afterwards
 - **THEN** it is refused, the reservation stays `force_released`, and its capacity stays free
+
+#### Scenario: A caller asks to set a state directly
+
+- **WHEN** a caller wants a reservation in a given state
+- **THEN** no ledger operation writes a state it names; the reservation reaches the state
+  only through the lifecycle's transitions
 
 ### Requirement: Commit begins a lease once and never resurrects one
 
@@ -798,10 +812,10 @@ through every client layer between the caller and the authority.
 ### Requirement: Lease truncation neither resurrects nor extends a lease
 
 Ending a lease early MUST only move its lease end earlier. A truncation naming an end later
-than the current one MUST be refused. A truncation of a `reserved`, `provisioning`,
-`releasing`, `release_failed`, or `unmanaged` reservation MUST be refused and MUST NOT change
-its state: an uncommitted hold is ended by releasing it, not by truncation. Once a lease is
-committed, truncation is the only operation that moves its end.
+than the current one MUST be refused. A truncation of a `reserved`, `releasing`,
+`release_failed`, or `unmanaged` reservation MUST be refused and MUST NOT change its state:
+an uncommitted hold is ended by releasing it, not by truncation. Once a lease is committed,
+truncation is the only operation that moves its end.
 
 #### Scenario: A storefront ends an uncommitted hold
 
@@ -857,3 +871,90 @@ The site authority reclaims capacity from a reservation in exactly three interna
 
 - **WHEN** a caller releases a reservation whose capacity the guard does not permit freeing
 - **THEN** the release returns no reservation, the reservation keeps its state and capacity, and no settlement assignment is abandoned
+
+### Requirement: Unambiguous capacity reservation identity
+
+Cross-domain contracts and schemas MUST use `capacity_reservation_id` instead
+of the ambiguous `allocation_id`. Capacity reservations, pools, physical
+resources, fulfillments, and provisioned resources MUST use globally unique
+opaque identifiers, while ownership remains explicit through `site_id` or an
+equivalent authority field rather than being inferred by parsing identifiers.
+
+#### Scenario: Reservation routed to owning site
+- **WHEN** the storefront invokes scheduling or fulfillment for a capacity
+  reservation
+- **THEN** it sends the request only to the provisioning authority that owns
+  that reservation
+
+### Requirement: Scheduling requirements remain within reserved capacity
+
+Scheduling requirements MAY be smaller than the admitted reservation but MUST
+NOT exceed it in any governed dimension. Reservation admission and scheduling
+eligibility MUST use the same shared feasibility predicate.
+
+#### Scenario: Smaller scheduled shape
+- **WHEN** a reservation contains more capacity than the requested scheduling
+  shape
+- **THEN** scheduling may select an eligible resource without increasing the
+  reservation
+
+#### Scenario: Scheduling exceeds reservation
+- **WHEN** any requested scheduling dimension exceeds the capacity reservation
+- **THEN** scheduling is rejected before resource assignment
+
+### Requirement: Capacity schema separation
+
+The site-capacity schema MUST name a reservation `CapacityReservation`,
+keyed by `capacity_reservation_id`, with explicit site ownership and
+globally unique identifiers. It MUST keep host identity, pool membership,
+reservable capacity, and settlement-resource assignment separate.
+
+#### Scenario: Existing host migration
+- **WHEN** the schema migration runs
+- **THEN** every existing host is represented in the default resource pool
+  before active fulfillment records are backfilled
+
+### Requirement: A stored reservation in a retired state is converted at upgrade
+
+A service whose database holds the site ledger MUST, in its migration chain, convert a
+reservation stored as `provisioning` to `unmanaged` and one stored as `provisioning_failed`
+to `force_released`, each with a failure reason naming the state it held, so that every
+reservation keeps its capacity effect and reads in a state the lifecycle defines.
+
+#### Scenario: A held reservation in a retired state is upgraded
+
+- **WHEN** a database holding a `provisioning` reservation is migrated
+- **THEN** the reservation is `unmanaged`, its capacity stays held until an operator
+  repairs it, and its failure reason names `provisioning`
+
+#### Scenario: A terminal reservation in a retired state is upgraded
+
+- **WHEN** a database holding a `provisioning_failed` reservation is migrated
+- **THEN** the reservation is `force_released`, its capacity stays free, and its failure
+  reason names `provisioning_failed`
+
+#### Scenario: No reservation holds a retired state
+
+- **WHEN** a database with no such reservation is migrated
+- **THEN** no reservation changes
+
+### Requirement: A site authority answers an unroutable request by what failed to match
+
+The site kit's authentication middleware MUST answer a request that resolves to no route
+contract, without signing it, with 404 when no contract names its path, 405 naming the
+allowed methods when a contract names its path under another method, and 400 naming the
+field when its route's body resource cannot be bound. The middleware MUST resolve a request
+against the one ordered table it is given, the first matching contract deciding, so no
+request is claimed by two contracts. The site client MUST report an answer carrying no
+response authentication as unauthenticated, with its status, and the report MUST contain
+no part of the response body, no header value, and no credential.
+
+#### Scenario: A known path is requested with another method
+
+- **WHEN** a signed request uses a method no contract binds to a path a contract names
+- **THEN** the authority answers an unsigned 405 whose `Allow` names the contract's method
+
+#### Scenario: The site client receives an unauthenticated answer
+
+- **WHEN** the site client receives an answer with no response authentication
+- **THEN** it fails closed and reports the status and that the answer was unauthenticated

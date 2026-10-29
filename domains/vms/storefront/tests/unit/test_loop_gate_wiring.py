@@ -28,6 +28,7 @@ from functools import partial
 from types import SimpleNamespace
 
 import pytest
+from market_alkahest import AlkahestChainProbe
 
 import market_storefront.container as container
 from market_storefront import lifecycle
@@ -169,9 +170,15 @@ class TestStartupRegistersEveryLoopOnTheController:
         assert "start_loops()" in source
 
     async def test_startup_registers_and_starts_every_loop(
-        self, long_intervals, collaborators
+        self, long_intervals, collaborators, monkeypatch
     ):
-        """Held from the start, so no loop runs a cycle here."""
+        """Held from the start, so no loop runs a cycle here. With an Alkahest
+        section composed, the chain probe is one of the timed loops."""
+        monkeypatch.setattr(
+            container,
+            "resolved_alkahest_chain_probe",
+            AlkahestChainProbe((), interval_seconds=_LONG_INTERVAL),
+        )
         lifecycle.controller().request_pause(True)
         collaborators.publication.sites = ("default",)
         # A development site URL on a reserved domain; nothing is called there.
@@ -179,13 +186,14 @@ class TestStartupRegistersEveryLoopOnTheController:
             startup._start_lifecycle_loops()
         await asyncio.wait_for(lifecycle.await_quiescence(), timeout=_PROMPTLY)
 
+        timed = {*_TIMED_LOOPS, lifecycle.ALKAHEST_CHAIN_PROBE}
         assert set(lifecycle.registered_loop_names()) == {
-            *_TIMED_LOOPS,
+            *timed,
             lifecycle.CAPACITY_EVENTS_POLLER,
         }
         snapshot = lifecycle.snapshot()
-        assert {name: snapshot[name].state for name in _TIMED_LOOPS} == dict.fromkeys(
-            _TIMED_LOOPS, "paused"
+        assert {name: snapshot[name].state for name in timed} == dict.fromkeys(
+            timed, "paused"
         )
         # The fan-out's task is started with the timers, and each configured
         # site's poller is declared before its first cycle.

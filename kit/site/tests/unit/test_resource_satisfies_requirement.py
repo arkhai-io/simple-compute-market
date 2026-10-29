@@ -11,7 +11,7 @@ behavior, rather than only indirectly through either caller.
 
 from decimal import Decimal
 
-from market_site import resource_satisfies_requirement
+from market_site import resource_feasibility_view, resource_satisfies_requirement
 
 
 def test_matching_kind_and_sufficient_dimensions_is_satisfied():
@@ -109,8 +109,6 @@ def test_no_required_attributes_means_any_attributes_pass():
 
 
 def test_canonical_view_exposes_authoritative_top_level_facts():
-    from market_site import resource_feasibility_view
-
     view = resource_feasibility_view(
         resource_id="resource-1",
         pool_id="pool-authoritative",
@@ -137,8 +135,6 @@ def test_canonical_view_exposes_authoritative_top_level_facts():
 def test_declaration_fields_win_over_attributes_of_the_same_name():
     """A row stored before registration refused such attributes must not
     restate its own identity for matching."""
-    from market_site import resource_feasibility_view
-
     view = resource_feasibility_view(
         resource_id="resource-1",
         pool_id="default",

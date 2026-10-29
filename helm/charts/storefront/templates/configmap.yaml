@@ -3,10 +3,12 @@ Per-agent ConfigMap holding the public storefront document, storefront.json.
 Mounted alongside the Secret overlay, storefront.secrets.toml, at /etc/arkhai/;
 the storefront merges the two at startup, the overlay winning.
 
-Kept apart from the Secret so non-sensitive edits (log levels, provisioning
-mode, RPC URLs) diff as a ConfigMap, with no secret-rotation noise.
+Kept apart from the Secret so non-sensitive edits (log levels, poll
+intervals, RPC URLs) diff as a ConfigMap, with no secret-rotation noise.
 */}}
-{{- range $name, $entry := .Values.agents }}
+{{- $agents := dict }}
+{{- include "storefront.agents" (dict "root" . "into" $agents) }}
+{{- range $name, $entry := $agents }}
 {{- /* An agent states no runtime overlay by omitting `secret`. */}}
 {{- $agent := mergeOverwrite (dict "secret" (dict)) $entry (dict "name" $name) }}
 {{- $component := $agent.component | default $agent.name }}

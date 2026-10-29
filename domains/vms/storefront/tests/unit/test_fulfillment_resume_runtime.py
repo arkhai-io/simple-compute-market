@@ -5,7 +5,10 @@ from unittest.mock import AsyncMock
 import pytest
 from market_alkahest import RELEASE_MODELS
 
-from market_storefront.services.fulfillment_resume_runtime import converge_delivery_once
+from market_storefront.services.fulfillment_resume_runtime import (
+    converge_delivery_once,
+    converge_post_physical_delivery,
+)
 from market_storefront.settlement_stages import VmAlkahestSellerStage
 from tests.fulfillment_fixtures import (
     make_vm_lifecycle_fixture,
@@ -192,10 +195,6 @@ async def test_missing_identifiers_replay_exact_persisted_request(tmp_path):
 
 @pytest.mark.asyncio
 async def test_post_physical_convergence_records_ready_and_claim():
-    from market_storefront.services.fulfillment_resume_runtime import (
-        converge_post_physical_delivery,
-    )
-
     db = SimpleNamespace(
         update_vm_delivery=AsyncMock(),
         update_escrow=AsyncMock(),
@@ -232,7 +231,10 @@ async def test_post_physical_convergence_records_ready_and_claim():
             authentication={"tenant": {"password": "secret", "key_type": "ed25519"}},
             continuation=partial(
                 VmAlkahestSellerStage(
-                    None, fulfils_through_capacity=True, release_models=RELEASE_MODELS
+                    None,
+                    fulfils_through_capacity=True,
+                    completes_outside_settlement=False,
+                    release_models=RELEASE_MODELS,
                 ).continue_delivery,
                 evidence=vm_delivery_evidence(),
                 db=db,
@@ -261,10 +263,6 @@ async def test_post_physical_convergence_records_ready_and_claim():
 
 @pytest.mark.asyncio
 async def test_ambiguous_onchain_recovery_never_blindly_resubmits():
-    from market_storefront.services.fulfillment_resume_runtime import (
-        converge_post_physical_delivery,
-    )
-
     db = SimpleNamespace(
         update_vm_delivery=AsyncMock(),
         store_credential=AsyncMock(),
@@ -287,7 +285,10 @@ async def test_ambiguous_onchain_recovery_never_blindly_resubmits():
             authentication=None,
             continuation=partial(
                 VmAlkahestSellerStage(
-                    None, fulfils_through_capacity=True, release_models=RELEASE_MODELS
+                    None,
+                    fulfils_through_capacity=True,
+                    completes_outside_settlement=False,
+                    release_models=RELEASE_MODELS,
                 ).continue_delivery,
                 evidence=vm_delivery_evidence(),
                 db=db,

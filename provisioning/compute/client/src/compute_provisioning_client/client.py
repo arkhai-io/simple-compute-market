@@ -21,6 +21,7 @@ from typing import Any, Protocol
 import httpx
 from compute_provisioning_contracts import (
     ConnectivityResult,
+    ConvergenceCycleResponse,
     FulfillmentAcceptanceResponse,
     FulfillmentRequestBody,
     FulfillmentScheduleRequest,
@@ -37,6 +38,7 @@ from compute_provisioning_contracts import (
     JobListSort,
     JobLogsResponse,
     JobStatusResponse,
+    LeaseCheckResponse,
     LeaseForceRelease,
     LeaseListResponse,
     LeaseReleaseOversight,
@@ -44,9 +46,11 @@ from compute_provisioning_contracts import (
     LeaseState,
     LeaseTermination,
     LeaseView,
+    PrincipalRotationResponse,
     ProvisioningRouteContract,
     SystemStatusResponse,
     VersionResponse,
+    WorkerPauseResponse,
 )
 from market_core import VersionedEnvelope
 from market_identity import EMPTY_BODY, RotationRequest, Signer
@@ -210,7 +214,11 @@ def _register_host(body: HostCreate) -> _Call:
 
 
 def _update_host(host_id: str, body: HostUpdate) -> _Call:
-    return _Call("PUT", f"/api/v1/hosts/{host_id}", body, parse=_model(HostResponse))
+    # An update sends exactly the fields its caller set: an explicit
+    # ``pool_id=None`` unplaces the host, so it must reach the service as
+    # ``null``, where the shared serialization drops every null as unset.
+    payload = body.model_dump(mode="json", exclude_unset=True)
+    return _Call("PUT", f"/api/v1/hosts/{host_id}", payload, parse=_model(HostResponse))
 
 
 def _set_host_enabled(host_id: str, enabled: bool) -> _Call:
@@ -245,8 +253,20 @@ def _system_status() -> _Call:
     )
 
 
-def _system_post(path: str) -> _Call:
-    return _Call("POST", path, {}, parse=_object)
+def _lease_check() -> _Call:
+    return _Call(
+        "POST", "/api/v1/system/check-leases", {}, parse=_model(LeaseCheckResponse)
+    )
+
+
+def _convergence_cycle(step: str) -> _Call:
+    return _Call(
+        "POST", f"{_CONVERGENCE}/{step}", {}, parse=_model(ConvergenceCycleResponse)
+    )
+
+
+def _worker_pause(path: str) -> _Call:
+    return _Call("POST", path, {}, parse=_model(WorkerPauseResponse))
 
 
 def _version() -> _Call:
@@ -256,7 +276,12 @@ def _version() -> _Call:
 def _rotate(role: str, rotation: RotationRequest) -> _Call:
     if role not in {"admin", "seller"}:
         raise ValueError("role must be 'admin' or 'seller'")
-    return _Call("POST", f"/api/v1/identity/rotations/{role}", rotation, parse=_object)
+    return _Call(
+        "POST",
+        f"/api/v1/identity/rotations/{role}",
+        rotation,
+        parse=_model(PrincipalRotationResponse),
+    )
 
 
 _CONVERGENCE = "/api/v1/system/fulfillment-convergence"
@@ -300,7 +325,7 @@ class ComputeProvisioningClientProtocol(Protocol):
     ) -> LeaseView: ...
     async def rotate_trusted_principal(
         self, role: str, rotation: RotationRequest, *, request_id: str | None = None
-    ) -> dict[str, Any]: ...
+    ) -> PrincipalRotationResponse: ...
     async def schedule_resource(
         self, request: FulfillmentScheduleRequest, *, request_id: str | None = None
     ) -> FulfillmentScheduleResponse: ...
@@ -577,34 +602,42 @@ class ComputeProvisioningClient(SigningBase):
     async def get_version(self, *, request_id: str | None = None) -> VersionResponse:
         return await self._run(_version(), request_id)
 
-    async def check_leases(self, *, request_id: str | None = None) -> dict[str, Any]:
+    async def check_leases(self, *, request_id: str | None = None) -> LeaseCheckResponse:
         """Run one lease lifecycle cycle now."""
-        return await self._run(_system_post("/api/v1/system/check-leases"), request_id)
+        return await self._run(_lease_check(), request_id)
 
-    async def run_fulfillment_convergence_cycle(self, *, request_id: str | None = None) -> dict[str, Any]:
-        return await self._run(_system_post(f"{_CONVERGENCE}/run-cycle"), request_id)
+    async def run_fulfillment_convergence_cycle(
+        self, *, request_id: str | None = None
+    ) -> ConvergenceCycleResponse:
+        return await self._run(_convergence_cycle("run-cycle"), request_id)
 
     async def advance_fulfillment_convergence_cycle(
         self, *, request_id: str | None = None
-    ) -> dict[str, Any]:
+    ) -> ConvergenceCycleResponse:
         """One observable advance: the watchdog releases its own claims first; it must be paused."""
-        return await self._run(_system_post(f"{_CONVERGENCE}/advance-cycle"), request_id)
+        return await self._run(_convergence_cycle("advance-cycle"), request_id)
 
-    async def pause_fulfillment_convergence(self, *, request_id: str | None = None) -> dict[str, Any]:
-        return await self._run(_system_post(f"{_CONVERGENCE}/pause"), request_id)
+    async def pause_fulfillment_convergence(
+        self, *, request_id: str | None = None
+    ) -> WorkerPauseResponse:
+        """Hold convergence's timer; ``at_gate`` says whether it is held yet."""
+        return await self._run(_worker_pause(f"{_CONVERGENCE}/pause"), request_id)
 
-    async def resume_fulfillment_convergence(self, *, request_id: str | None = None) -> dict[str, Any]:
-        return await self._run(_system_post(f"{_CONVERGENCE}/resume"), request_id)
+    async def resume_fulfillment_convergence(
+        self, *, request_id: str | None = None
+    ) -> WorkerPauseResponse:
+        return await self._run(_worker_pause(f"{_CONVERGENCE}/resume"), request_id)
 
-    async def pause_lease_watchdog(self, *, request_id: str | None = None) -> dict[str, Any]:
-        return await self._run(_system_post(f"{_LEASE_WATCHDOG}/pause"), request_id)
+    async def pause_lease_watchdog(self, *, request_id: str | None = None) -> WorkerPauseResponse:
+        """Hold the lease watchdog's timer; ``at_gate`` says whether it is held yet."""
+        return await self._run(_worker_pause(f"{_LEASE_WATCHDOG}/pause"), request_id)
 
-    async def resume_lease_watchdog(self, *, request_id: str | None = None) -> dict[str, Any]:
-        return await self._run(_system_post(f"{_LEASE_WATCHDOG}/resume"), request_id)
+    async def resume_lease_watchdog(self, *, request_id: str | None = None) -> WorkerPauseResponse:
+        return await self._run(_worker_pause(f"{_LEASE_WATCHDOG}/resume"), request_id)
 
     async def rotate_trusted_principal(
         self, role: str, rotation: RotationRequest, *, request_id: str | None = None
-    ) -> dict[str, Any]:
+    ) -> PrincipalRotationResponse:
         return await self._run(_rotate(role, rotation), request_id)
 
 
@@ -843,32 +876,42 @@ class SyncComputeProvisioningClient(SigningBase):
     def get_version(self, *, request_id: str | None = None) -> VersionResponse:
         return self._run(_version(), request_id)
 
-    def check_leases(self, *, request_id: str | None = None) -> dict[str, Any]:
+    def check_leases(self, *, request_id: str | None = None) -> LeaseCheckResponse:
         """Run one lease lifecycle cycle now."""
-        return self._run(_system_post("/api/v1/system/check-leases"), request_id)
+        return self._run(_lease_check(), request_id)
 
-    def run_fulfillment_convergence_cycle(self, *, request_id: str | None = None) -> dict[str, Any]:
-        return self._run(_system_post(f"{_CONVERGENCE}/run-cycle"), request_id)
+    def run_fulfillment_convergence_cycle(
+        self, *, request_id: str | None = None
+    ) -> ConvergenceCycleResponse:
+        return self._run(_convergence_cycle("run-cycle"), request_id)
 
-    def advance_fulfillment_convergence_cycle(self, *, request_id: str | None = None) -> dict[str, Any]:
+    def advance_fulfillment_convergence_cycle(
+        self, *, request_id: str | None = None
+    ) -> ConvergenceCycleResponse:
         """See ``ComputeProvisioningClient.advance_fulfillment_convergence_cycle``."""
-        return self._run(_system_post(f"{_CONVERGENCE}/advance-cycle"), request_id)
+        return self._run(_convergence_cycle("advance-cycle"), request_id)
 
-    def pause_fulfillment_convergence(self, *, request_id: str | None = None) -> dict[str, Any]:
-        return self._run(_system_post(f"{_CONVERGENCE}/pause"), request_id)
+    def pause_fulfillment_convergence(
+        self, *, request_id: str | None = None
+    ) -> WorkerPauseResponse:
+        """See ``ComputeProvisioningClient.pause_fulfillment_convergence``."""
+        return self._run(_worker_pause(f"{_CONVERGENCE}/pause"), request_id)
 
-    def resume_fulfillment_convergence(self, *, request_id: str | None = None) -> dict[str, Any]:
-        return self._run(_system_post(f"{_CONVERGENCE}/resume"), request_id)
+    def resume_fulfillment_convergence(
+        self, *, request_id: str | None = None
+    ) -> WorkerPauseResponse:
+        return self._run(_worker_pause(f"{_CONVERGENCE}/resume"), request_id)
 
-    def pause_lease_watchdog(self, *, request_id: str | None = None) -> dict[str, Any]:
-        return self._run(_system_post(f"{_LEASE_WATCHDOG}/pause"), request_id)
+    def pause_lease_watchdog(self, *, request_id: str | None = None) -> WorkerPauseResponse:
+        """See ``ComputeProvisioningClient.pause_lease_watchdog``."""
+        return self._run(_worker_pause(f"{_LEASE_WATCHDOG}/pause"), request_id)
 
-    def resume_lease_watchdog(self, *, request_id: str | None = None) -> dict[str, Any]:
-        return self._run(_system_post(f"{_LEASE_WATCHDOG}/resume"), request_id)
+    def resume_lease_watchdog(self, *, request_id: str | None = None) -> WorkerPauseResponse:
+        return self._run(_worker_pause(f"{_LEASE_WATCHDOG}/resume"), request_id)
 
     def rotate_trusted_principal(
         self, role: str, rotation: RotationRequest, *, request_id: str | None = None
-    ) -> dict[str, Any]:
+    ) -> PrincipalRotationResponse:
         return self._run(_rotate(role, rotation), request_id)
 
 

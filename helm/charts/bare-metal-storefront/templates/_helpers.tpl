@@ -22,6 +22,22 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 
+{{/*
+Labels for this chart's Helm test pod. Every workload selector in the release
+requires app.kubernetes.io/name, so a test pod carries the release's other
+labels but never that one: selecting a workload's pods by its selector, as
+`kubectl logs -l` or `kubectl logs deploy/...` does, never returns a test pod.
+*/}}
+{{- define "bare-metal-storefront.testLabels" -}}
+helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: test
+{{- end -}}
+
 {{- define "bare-metal-storefront.image" -}}
 {{- $repository := .Values.image.repository | default .Values.global.imageRepository -}}
 {{- $name := .Values.image.name -}}
@@ -158,12 +174,40 @@ the umbrella's `global.provisioning` and `global.provisioningIdentity`, or "".
 {{- end -}}
 
 {{/*
+A values file's `null` removes what it names, whether or not Helm's merge removed
+it: under the supported Helm release, a parent's `null` for a subchart is dropped
+only where the subchart's own defaults define the key, and the umbrella or an
+overlay supplies `config`'s keys and `internalRegistryTrust`. So the chart reads
+both with every `null` removed, and the storefront's document renders as it would
+had the removed key never been stated.
+
+`bare-metal-storefront.dropNulls`: remove, in place, every key whose value is `null`
+from the mapping `.`, at every depth, inside list elements too; a `null` list
+element stays.
+*/}}
+{{- define "bare-metal-storefront.dropNulls" -}}
+{{- if kindIs "map" . -}}
+  {{- range $key, $value := . -}}
+    {{- if kindIs "invalid" $value -}}
+      {{- $_ := unset $ $key -}}
+    {{- else -}}
+      {{- include "bare-metal-storefront.dropNulls" $value -}}
+    {{- end -}}
+  {{- end -}}
+{{- else if kindIs "slice" . -}}
+  {{- range $item := . -}}
+    {{- include "bare-metal-storefront.dropNulls" $item -}}
+  {{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Render the public storefront document, `storefront.json`.
 
-`config` is the storefront's own configuration and passes through unchanged:
-the chart supplies no service default and does not validate the service's
-settings, which the storefront does at startup. The chart adds only what the
-release knows -- the port its container, probes, and Service share, the
+`config` is the storefront's own configuration and passes through with its
+`null` keys removed. The chart supplies no service default and does not validate
+the service's settings, which the storefront does at startup. The chart adds only
+what the release knows -- the port its container, probes, and Service share, the
 Service's URL, and the database path under the persistence mount; and, in an
 umbrella release, its internal registry, with the trust stated as
 `internalRegistryTrust` written under its URL, and a `default` site for its
@@ -176,6 +220,7 @@ configuration through".
 */}}
 {{- define "bare-metal-storefront.configDocument" -}}
 {{- $cfg := deepCopy (.Values.config | default dict) -}}
+{{- include "bare-metal-storefront.dropNulls" $cfg -}}
 {{- include "bare-metal-storefront.refuseFoldedDuplicates" (dict "path" "config" "value" $cfg) -}}
 {{- $portKey := include "bare-metal-storefront.foldedKey" (dict "doc" $cfg "name" "port") -}}
 {{- if $portKey -}}
@@ -198,7 +243,8 @@ configuration through".
 {{- /* Registry: the umbrella's internal registry, its trust stated outside config. */ -}}
 {{- $registryKey := include "bare-metal-storefront.foldedKey" (dict "doc" $cfg "name" "registry") | default "registry" -}}
 {{- $registry := index $cfg $registryKey | default dict -}}
-{{- $trust := .Values.internalRegistryTrust -}}
+{{- $trust := deepCopy (.Values.internalRegistryTrust | default dict) -}}
+{{- include "bare-metal-storefront.dropNulls" $trust -}}
 {{- $internalRegistry := include "bare-metal-storefront.internalRegistryUrl" . -}}
 {{- if include "bare-metal-storefront.foldedKey" (dict "doc" $registry "name" "urls") -}}
   {{- if $trust -}}

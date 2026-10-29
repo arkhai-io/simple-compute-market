@@ -89,6 +89,48 @@ def test_structured_settlement_publication_defaults_are_validated() -> None:
     }
 
 
+def _alkahest_clause(**mechanism_input) -> dict:
+    return {
+        "mechanism": "alkahest.v1",
+        "asset": "0x" + "11" * 20,
+        "rate": "2.00",
+        "per": "hour",
+        "mechanism_input": {
+            "chain": "base_sepolia",
+            "escrow_kind": "erc20_escrow_obligation_default",
+            **mechanism_input,
+        },
+    }
+
+
+def test_a_disabled_mechanisms_configured_clause_is_read_for_publication_to_drop() -> None:
+    """Publication drops the clause, ruling the mechanism out, so the defaults
+    keep it rather than refusing the whole configuration."""
+    source = Dynaconf(environments=False)
+    source.set(
+        "settlement",
+        {"schema_version": 1, "priority": [], "alkahest": {"enabled": False}},
+    )
+    source.set("pricing.settlements", [_alkahest_clause()])
+
+    (clause,) = agent_config.settlement_publication_defaults(source)
+
+    assert clause.mechanism == "alkahest.v1"
+    assert clause.mechanism_input["chain"] == "base_sepolia"
+
+
+def test_a_disabled_mechanisms_unreadable_clause_is_still_refused() -> None:
+    source = Dynaconf(environments=False)
+    source.set(
+        "settlement",
+        {"schema_version": 1, "priority": [], "alkahest": {"enabled": False}},
+    )
+    source.set("pricing.settlements", [_alkahest_clause(private_key="must-not-cross")])
+
+    with pytest.raises(ValueError, match="not public metadata"):
+        agent_config.settlement_publication_defaults(source)
+
+
 def test_structured_publication_defaults_reject_partial_or_secret_input() -> None:
     source = Dynaconf(environments=False)
     source.set(
@@ -335,6 +377,23 @@ def test_chains_dict_empty_when_no_chains_section(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+def test_a_stated_provisioning_mode_loads_beside_the_section_it_sits_in(
+    tmp_path, monkeypatch
+):
+    """`[provisioning]` is untyped, and the storefront reads no mode from it:
+    a file stating one loads, its service URL read as stated."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    config_dir = tmp_path / "arkhai"
+    config_dir.mkdir()
+    (config_dir / "storefront.toml").write_text(
+        '[provisioning]\nservice_url = "http://provisioning.example:8081"\nmode = "mock"\n'
+    )
+
+    s = agent_config._build_settings()
+
+    assert s.get("provisioning.service_url") == "http://provisioning.example:8081"
+
+
 def test_build_settings_reads_a_rendered_json_layer_under_the_overlay(
     tmp_path, monkeypatch
 ):
@@ -491,15 +550,19 @@ def test_nested_env_var_via_double_underscore(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# EVM wallet settings are optional, explicit mechanism inputs. Marketplace
-# configuration never derives an address from a private key.
+# EVM wallet settings are optional mechanism inputs, apart from the marketplace
+# identity. A stated address is returned as stated; with none, the seller is the
+# account its key signs as.
 # ---------------------------------------------------------------------------
 
 
+# Anvil's first published development key and the address it signs as; never
+# use them on a public network.
 _ANVIL_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+_ANVIL_ADDRESS = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 
 
-def test_evm_wallet_helpers_return_only_explicit_values(tmp_path, monkeypatch):
+def test_evm_wallet_helpers_return_the_stated_address(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     cfg_dir = tmp_path / "arkhai"
     cfg_dir.mkdir(parents=True)
@@ -513,6 +576,21 @@ address = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
         "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
     )
     assert agent_config.get_evm_wallet_private_key(cfg) == _ANVIL_KEY
+
+
+def test_an_omitted_wallet_address_is_the_account_its_key_signs_as(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    cfg_dir = tmp_path / "arkhai"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "storefront.toml").write_text(f"""
+[wallet]
+private_key = "{_ANVIL_KEY}"
+""")
+    cfg = agent_config._build_settings()
+
+    assert agent_config.get_evm_wallet_address(cfg) == _ANVIL_ADDRESS
 
 
 def test_build_chains_uses_known_chain_id_when_omitted(tmp_path, monkeypatch):

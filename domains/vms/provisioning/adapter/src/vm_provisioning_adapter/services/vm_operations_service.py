@@ -12,9 +12,11 @@ import dataclasses
 from typing import Optional
 
 from compute_provisioning.jobs.submission import JobSubmissionService
+from compute_provisioning.route_errors import ProvisioningRouteError
 from compute_provisioning_contracts import JobSubmitResponse
 from vm_provisioning_operator.models import CreateVmRequest, VmActionRequest
 
+from vm_provisioning_adapter.guest_names import check_guest_name
 from vm_provisioning_adapter.models.jobs_model import VmJobParams
 from vm_provisioning_adapter.models.vm_request_model import build_create_params, build_simple_params
 
@@ -53,7 +55,16 @@ class VmOperationsService:
         body: CreateVmRequest,
         operation_id: str | None = None,
     ) -> JobSubmitResponse:
-        """Submit a VM creation job for ``host``."""
+        """Submit a VM creation job for ``host``.
+
+        The operator's guest name is refused with 422 before anything is
+        prepared when VM's playbooks would refuse it, so a bad name is not
+        discovered by a failed playbook run halfway through creating the guest.
+        """
+        try:
+            check_guest_name(body.vm_target)
+        except ValueError as exc:
+            raise ProvisioningRouteError(422, str(exc)) from exc
         return await submit_vm_job(
             self._submission, build_create_params(host, body), operation_id=operation_id
         )

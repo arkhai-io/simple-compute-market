@@ -10,6 +10,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from compute_provisioning import InventoryPoolContext, ResourceViews
+from market_resource_pools_contracts.backing import BACKED
+from market_resource_pools_contracts.hints import PoolDeclarations
 from vm_provisioning_adapter.db import AnsiblePoolConfig
 from vm_provisioning_adapter.inventory_views import (
     VM_ANSIBLE_POOL_DEFAULTS_VIEW,
@@ -71,5 +74,11 @@ def test_a_stale_row_for_a_pool_another_provider_serves_publishes_nothing():
 
 
 def test_the_view_contributes_nothing_per_resource():
-    assert VIEWS.resource_views({"attributes": {}}, pool_id="gpu-pool") == {}
+    pool = InventoryPoolContext(
+        pool_id="gpu-pool",
+        provider="vm.ansible",
+        declarations=PoolDeclarations(advertisable_modes=frozenset({"vm"}), backing=BACKED),
+    )
+
+    assert VIEWS.resource_views({"attributes": {}}, pool=pool) == ResourceViews()
     assert (VIEWS.resource_view_ids, VIEWS.consumed_attributes) == (frozenset(), frozenset())

@@ -5,6 +5,7 @@ _with_owned_record provides.
 
 from __future__ import annotations
 
+import threading
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -29,6 +30,7 @@ from market_core import VersionedEnvelope
 from market_fulfillment.db import Base, SettlementRecord
 from market_core import envelope
 from market_fulfillment.settlement_repository import begin_sqlite_write_transaction
+from market_fulfillment.transitions import validate_transition
 from market_site.db import Base as SiteBase, CapacityReservation
 from market_site.ledger import CapacityConflictError
 from vm_provisioning_adapter.db import Base as VmBase, Relay, RelayPortLease
@@ -692,8 +694,6 @@ async def test_converge_teardowns_provider_failure_is_not_terminal(session_facto
         assert record.state == SettlementRecordState.teardown_failed.value
         assert record.claimed_by is None
         # Confirm the transition table genuinely allows recovery from here.
-        from market_fulfillment.transitions import validate_transition
-
         validate_transition(
             record.state, SettlementRecordState.teardown_dispatch_pending.value
         )
@@ -885,9 +885,9 @@ async def test_fresh_watchdog_resumes_a_teardown_from_durable_state_after_restar
     """Teardown-path counterpart to
     test_fresh_watchdog_against_the_same_database_resumes_from_durable_state:
     the claim/lease/resume machinery is shared between
-    dispatch_pending_creates and dispatch_pending_teardowns, but that
-    sharing was never itself asserted for the teardown path -- only
-    exercised through it incidentally, if at all."""
+    dispatch_pending_creates and dispatch_pending_teardowns, and this
+    asserts the sharing holds for the teardown path directly rather than
+    leaving it to the create path's test."""
 
     database = tmp_path / "restart-teardown.db"
     engine = create_engine(
@@ -1120,21 +1120,19 @@ async def test_eventual_convergence_after_repeated_failures_then_success(
 
 
 # ----------------------------------------------------------------------
-# Concurrent reclaim vs. outcome application (code review finding)
+# Concurrent reclaim vs. outcome application
 # ----------------------------------------------------------------------
 
 
 def test_concurrent_reclaim_cannot_be_clobbered_by_a_stale_outcome(tmp_path):
     """A worker whose lease has already lapsed must not be able to commit
     its outcome on top of a row another worker has since legitimately
-    reclaimed. This was a real, empirically-confirmed gap: a plain SELECT
-    does not open a SQLite-level transaction on its own (pysqlite only
-    begins one before a DML statement), so checking ownership before
-    acquiring the write reservation left a window where a stale worker's
-    write proceeded uncontested after the real owner had already moved on.
-    _with_owned_record now acquires the write reservation before reading."""
-
-    import threading
+    reclaimed. A plain SELECT does not open a SQLite-level transaction on
+    its own (pysqlite only begins one before a DML statement), so checking
+    ownership before acquiring the write reservation would leave a window
+    where a stale worker's write proceeds uncontested after the real owner
+    has moved on; _with_owned_record acquires the write reservation before
+    reading."""
 
     database = tmp_path / "reclaim_race.db"
     engine = create_engine(
@@ -1236,10 +1234,9 @@ def test_concurrent_reclaim_cannot_be_clobbered_by_a_stale_outcome(tmp_path):
 async def test_requeue_teardown_failures_makes_teardown_failed_retryable(
     session_factory, repo
 ):
-    """Code review finding: teardown_failed was documented as retryable
-    (db.py's state comment, spec.md) but no handler ever claimed it.
-    requeue_teardown_failures + dispatch_pending_teardowns together close
-    that gap within one cycle."""
+    """teardown_failed is retryable (db.py's state comment, spec.md):
+    requeue_teardown_failures and dispatch_pending_teardowns together
+    redispatch it within one cycle."""
 
     _active_row_ready_for_teardown(repo, session_factory)
     with session_factory() as db:

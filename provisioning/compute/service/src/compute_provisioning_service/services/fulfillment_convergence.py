@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -30,10 +31,36 @@ from compute_provisioning.job_fulfillment import fulfillment_executor_target
 _TERMINAL_RESERVATION_STATES = (
     ReservationState.released.value,
     ReservationState.force_released.value,
-    ReservationState.provisioning_failed.value,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _diagnostics_text(
+    diagnostics: Mapping[str, Any], lease_targets: Mapping[str, Any] | None
+) -> str:
+    """The recovery counts as one line: failures, each state's rows, and the
+    lease-target sweep."""
+    parts = [
+        f"failed={diagnostics.get('failed_count')}",
+        f"teardown_failed={diagnostics.get('teardown_failed_count')}",
+    ]
+    for state, counts in sorted(dict(diagnostics.get("per_state") or {}).items()):
+        parts.append(
+            f"{state}=total:{counts.get('total')}"
+            f",claimed:{counts.get('actively_claimed')}"
+            f",expired:{counts.get('expired_claims')}"
+            f",max_attempts:{counts.get('max_attempt_count')}"
+            f",oldest_s:{counts.get('oldest_row_age_seconds')}"
+        )
+    if lease_targets is not None:
+        unrecordable = dict(lease_targets.get("unrecordable") or {})
+        parts.append(
+            f"lease_targets=repaired:{lease_targets.get('repaired')}"
+            f",different:{lease_targets.get('different_target_recorded')}"
+            f",unrecordable:{sum(int(value) for value in unrecordable.values())}"
+        )
+    return " ".join(parts)
 
 
 @dataclass(frozen=True)
@@ -79,6 +106,9 @@ class FulfillmentConvergenceWatchdog:
         # the same rows underneath it.
         self._resume_event = asyncio.Event()
         self._resume_event.set()
+        # Timer cycles past the gate and not yet finished. A pause stops new
+        # ones at the gate; one already running finishes first.
+        self._timer_cycles_in_flight = 0
 
     def pause(self) -> None:
         """Stop timer-driven cycles; explicit cycles still run."""
@@ -94,6 +124,17 @@ class FulfillmentConvergenceWatchdog:
     @property
     def is_paused(self) -> bool:
         return not self._resume_event.is_set()
+
+    @property
+    def is_at_gate(self) -> bool:
+        """Paused with no timer cycle running, so none can run until resumed.
+
+        A timer cycle that passed the gate before the pause keeps running to
+        its end; until it does the watchdog is paused but not yet held, and a
+        caller holding it waits for this. An explicit ``run_cycle`` or
+        ``advance_cycle`` is the caller's own and does not count.
+        """
+        return self.is_paused and self._timer_cycles_in_flight == 0
 
     async def advance_cycle(self) -> dict[str, object]:
         """Run one cycle guaranteed to reach this worker's own claimed rows.
@@ -144,12 +185,15 @@ class FulfillmentConvergenceWatchdog:
         logger.info("[FULFILLMENT_CONVERGENCE] Started (interval=%ss)", interval)
         while True:
             try:
-                if not self._resume_event.is_set():
+                # Read again after each wake: a resume and a pause in quick
+                # succession wake the waiter with the watchdog paused again,
+                # and a pause that answered "at the gate" must hold this cycle.
+                while not self._resume_event.is_set():
                     logger.debug(
                         "[FULFILLMENT_CONVERGENCE] Cycle blocked — watchdog is paused"
                     )
                     await self._resume_event.wait()
-                await self.run_cycle()
+                await self._run_timer_cycle()
                 await asyncio.sleep(interval)
             except asyncio.CancelledError:
                 logger.info("[FULFILLMENT_CONVERGENCE] Cancelled, shutting down")
@@ -157,6 +201,13 @@ class FulfillmentConvergenceWatchdog:
             except Exception:
                 logger.exception("[FULFILLMENT_CONVERGENCE] Unhandled cycle error")
                 await asyncio.sleep(interval)
+
+    async def _run_timer_cycle(self) -> dict[str, object]:
+        self._timer_cycles_in_flight += 1
+        try:
+            return await self.run_cycle()
+        finally:
+            self._timer_cycles_in_flight -= 1
 
     async def run_cycle(self) -> dict[str, object]:
         """Run one production convergence cycle and return bounded diagnostics.
@@ -293,7 +344,13 @@ class FulfillmentConvergenceWatchdog:
             }
             if lease_targets is not None:
                 extra["lease_targets"] = lease_targets
-            logger.info("[FULFILLMENT_CONVERGENCE] recovery diagnostics", extra=extra)
+            # The counts are in the message itself, as other workers' cycle
+            # lines carry theirs, since a plain log handler drops ``extra``.
+            logger.info(
+                "[FULFILLMENT_CONVERGENCE] recovery diagnostics: %s",
+                _diagnostics_text(diagnostics, lease_targets),
+                extra=extra,
+            )
         except Exception:  # noqa: BLE001
             # Observability must not make lifecycle progress appear to
             # fail: the four operational passes above already completed
@@ -334,11 +391,11 @@ class FulfillmentConvergenceWatchdog:
         """Claim one bounded batch in its own short write transaction.
 
         A lock-contention error here means another worker's outcome
-        application is mid-transaction (holding the write reservation
-        _with_owned_record now acquires up front) -- expected, occasional
-        contention under the fix that closed the stale-outcome race, not a
-        cycle-aborting failure. Treated the same as "no eligible rows this
-        attempt": the next cycle tries again.
+        application is mid-transaction, holding the write reservation
+        _with_owned_record acquires before its ownership check. That is
+        expected, occasional contention, not a cycle-aborting failure.
+        Treated the same as "no eligible rows this attempt": the next cycle
+        tries again.
         """
         with self._session_factory() as db:
             try:
@@ -591,12 +648,11 @@ class FulfillmentConvergenceWatchdog:
         and checking ownership, not after: a plain SELECT does not open a
         SQLite-level transaction on its own (pysqlite only begins one before
         a DML statement), so checking ownership first and writing later
-        left a real, empirically-confirmed gap -- a worker whose lease had
-        already been reclaimed by another worker could still commit its
-        stale outcome on top of the new owner's claim, silently clearing it.
-        Reserving the write lock first closes that gap: once reserved, no
-        other worker's claim_pending() can commit a reclaim until this
-        transaction resolves, so the ownership check and the writes that
+        would let a worker whose lease another worker had already reclaimed
+        commit its stale outcome on top of the new owner's claim, silently
+        clearing it. Reserving the write lock first prevents that: once
+        reserved, no other worker's claim_pending() can commit a reclaim until
+        this transaction resolves, so the ownership check and the writes that
         follow it observe a consistent view.
         """
         with self._session_factory() as db:

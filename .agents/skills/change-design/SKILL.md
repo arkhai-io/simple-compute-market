@@ -16,8 +16,10 @@ ledger, and a prerequisite's proposal and dependency (both in section 4).
 
 ## Running unattended
 
-Run interactively, as most runs are, this section does not apply, and nothing else
-in the skill changes. When this skill runs through `scripts/run_change_step.py` —
+Run interactively, as most runs are, this section does not apply but for the
+outcome it describes, which an interactive run records itself ("Running
+interactively"); nothing else in the skill changes.
+When this skill runs through `scripts/run_change_step.py` —
 `make design UNATTENDED=1`, or the orchestrating session — nobody can answer in
 the session, and every turn ends with an outcome matching
 `.agents/change-outcome.schema.json`, whose `message` the owner reads as written:
@@ -45,17 +47,45 @@ the session, and every turn ends with an outcome matching
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
   to stop and report — a repository guard refusing, `HEAD` moving under you — end
   with `stopped`, `reason` saying why, and `denials` empty.
+- **Git runs in this checkout.** Run Git in the current checkout, never with `-C`:
+  the step already runs in the checkout it reads, and no rule allows `git -C`, since
+  a wildcard after `-C` would also span a push. Run Make here too, never `make -C
+  <a checkout>`: `-C` names only a subdirectory, or the prerequisite's worktree
+  this skill names.
 - **Every reply is a turn.** This step is a discussion: each reply to the owner
   ends its turn with an outcome, the reply in full as its `message` — `question`
   while you wait for the owner's answer or disposition. The orchestrating session
   shows the owner every message and resumes this session with each reply.
-- **The end is an outcome.** When the settled design is recorded (section 6),
-  end with `finished`, `next` naming the design review. A design that cannot
-  proceed without another change ends `blocked`, `blocked_on` the prerequisite's
+- **The end is an outcome.** When the settled design is recorded, committed, and
+  pushed (section 6), end with `finished`, `next` naming design's one exit, the
+  design review, `{"step": "review", "kind": "design"}`. A
+  design that cannot proceed without another change ends `blocked`, `blocked_on` the prerequisite's
   exact change name, at steps 3 and 4 of "When the design needs another change
   first" (section 4); telling the owner there is that outcome's `message`. Under
   orchestration the release of step 5 is proposed to the owner by the
   orchestrating session, which drops the dependency on their word.
+
+## Running interactively
+
+Run in an interactive session — `make design` without `UNATTENDED=1`, or the slash
+command — no wrapper records the run, so its last act records the outcome it would
+end with unattended, as "Running unattended" gives it:
+
+```text
+python3 scripts/run_change_step.py record <change> design --outcome '<the outcome, as JSON>'
+```
+
+`record` checks the outcome against `.agents/change-outcome.schema.json` and
+appends it to the change's workflow log with the session's id, `HEAD`, and
+`interactive: true`, and the next-step computation routes on it as on an
+unattended run's. It reads the session's id from `CLAUDE_CODE_SESSION_ID`, which
+`printenv CLAUDE_CODE_SESSION_ID` shows; where the variable is unset it refuses,
+and `--session <id>` gives the id. Record the outcome the session ends with —
+`finished` or `blocked` — never a question or a stop, which the owner, present,
+settles in the session: a recorded stop would wait for a resume only the wrapper
+makes. When `record` refuses, correct what it names and run it again. A session
+closed before it records leaves design in progress: the computation names it
+again, to be resumed, or its outcome recorded with the command above.
 
 ## 1. Load everything before saying anything
 
@@ -76,6 +106,11 @@ places that matter, so read all of this first, in full:
   check every factual claim the design makes about the current system.
 - Each change listed in the row's `Depends on`, at least its `proposal.md` and
   `design.md`.
+- Another change's records, where the design rests on them — a dependency's
+  reviews, an earlier change's findings or validation. They are untracked, so they
+  are where that change was worked: `python3 scripts/find_change.py --records
+  <change>` prints where, this checkout's or, from a change's clone, the owner's
+  workspace's, which holds the history of every cleaned-up change.
 
 If a dependency gates `design` and has not reached `archived`, stop and tell
 the owner: designing now risks designing work the
@@ -96,6 +131,16 @@ decision become this discussion's decisions, under their finding labels; do not
 restate them as separate corrections or questions with a second numbering. Open the
 discussion of section 3 only for what the reviews did not already raise, and
 continue the same numbering scheme rather than starting a parallel one.
+
+That triage records its outcome as `change-triage`'s "Running interactively" says,
+`finished`, `triaged` naming what it triaged, and its exit this discussion,
+`{"step": "design"}` — finished rather than returned, since this session is the
+design it leads to and nothing waits for a confirmation: the computation brings
+that exit to the owner until this session's own outcome, recorded at its end,
+names the design review. Unattended, nothing but the
+wrapper records an outcome, and it records only the design's, so a review brought
+to an unattended design is triaged as its own step first: ask the owner to run it
+(`make triage CHANGE=<change>`).
 
 ## 2. Mark the change as in design
 
@@ -119,7 +164,12 @@ the problem itself, lead with that — a well-designed solution to a misread
 problem is the costliest outcome.
 
 **Decisions.** List every open decision, numbered, including ones the
-documents treat as settled but the code or a correction reopens. For each:
+documents treat as settled but the code or a correction reopens, as an agenda:
+each decision's number, title, and kind (below), one line each, no positions, in
+the order to settle them. Then present the first decision in full and wait for
+the owner's answer before the next: one decision per message. Every decision
+presented at once invites answers before the owner has read the arguments, and
+an answer to one often reshapes the next. In full, a decision has:
 
 - **Context.** Recap what the design currently says or assumes on this point,
   and the code, guidance, or correction that bears on it, so the owner can
@@ -298,6 +348,11 @@ Only when the owner says the design is settled:
   validation and the change's citations check among the repository's closing
   checks, and report the result. A citation of a file the change itself will
   create is expected; any other is a defect.
+- Commit the recorded design as one commit — the change's documents, the index
+  row, and the ledger lines this step wrote — whose message names the change and
+  says its design is settled, so the design review reads a committed design. Then
+  push it with `make push-branch`, the guarded push of exactly `HEAD`; if it
+  refuses, stop and report its reasons.
 
 Do not write or amend `tasks.md`: planning is a separate phase and starts only
 once the design review's triage records that the change advances.
@@ -305,7 +360,7 @@ once the design review's triage records that the change advances.
 ## 7. Hand off to design review
 
 The design phase ends with a design review, not with this skill. Tell the owner
-the design is ready for review and leave the status `in design`. Its triage records
-under `## Next` whether the change advances or another design review runs; when it
-advances, the triage sets `ready for planning`, and planning follows without
-another question to the owner.
+the design is ready for review and leave the status `in design`. Its triage names,
+as its exit, whether the change advances to planning or another design review runs;
+when it advances, the triage sets `ready for planning`, and planning follows
+without another question to the owner.

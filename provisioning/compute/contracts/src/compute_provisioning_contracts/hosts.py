@@ -59,12 +59,19 @@ class HostCreate(BaseModel):
     enabled: bool = Field(default=True, description="Whether this host is available for jobs.")
     pool_id: Optional[str] = Field(
         default=None,
-        description="Resource pool this host belongs to. Defaults to the 'default' pool.",
+        description=(
+            "Resource pool this host is placed in, which must exist. Omitted, the "
+            "host is unplaced: it belongs to no pool."
+        ),
     )
 
 
 class HostUpdate(BaseModel):
-    """Body accepted by ``PUT /api/v1/hosts/{host_id}``."""
+    """Body accepted by ``PUT /api/v1/hosts/{host_id}``.
+
+    A field the request omits is left as it is. ``pool_id`` alone tells an
+    explicit ``null`` from an omitted field: ``null`` unplaces the host.
+    """
 
     connection: Optional[ConnectionSubmission] = Field(
         default=None, description="A replacement connection."
@@ -72,7 +79,13 @@ class HostUpdate(BaseModel):
     gpu_count: Optional[int] = Field(default=None, ge=0)
     gpu_model: Optional[str] = Field(default=None, description="Updated descriptive GPU model.")
     enabled: Optional[bool] = Field(default=None)
-    pool_id: Optional[str] = Field(default=None, description="Reassign this host to a different pool.")
+    pool_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "Move this host to another existing pool, or unplace it with an explicit "
+            "null. Omitted, the host keeps its pool."
+        ),
+    )
 
 
 class HostResponse(BaseModel):
@@ -83,7 +96,7 @@ class HostResponse(BaseModel):
     gpu_count: int
     gpu_model: Optional[str] = None
     enabled: bool
-    pool_id: str
+    pool_id: Optional[str] = Field(description="The host's pool, or null when it is unplaced.")
     created_at: datetime
     updated_at: datetime
 

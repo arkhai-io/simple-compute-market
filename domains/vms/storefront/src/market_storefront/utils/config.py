@@ -22,6 +22,13 @@ from typing import Any
 from core_storefront.identity_config import IdentityConfig, resolve_storefront_signer
 from core_storefront.multi_registry_client import RegistryAuthorityTrust
 from dynaconf import Dynaconf
+from market_alkahest import (
+    AlkahestSettlementConfig,
+    alkahest_address_book,
+    retired_address_book_keys,
+    retired_address_book_refusal,
+    wallet_account_address,
+)
 from market_config.config_loader import (  # type: ignore[import-not-found]
     ChainConfig,
     chains_from_config,
@@ -30,6 +37,10 @@ from market_config.config_loader import (  # type: ignore[import-not-found]
 from market_config.registry_url import normalize_registry_url
 from market_config.setting_types import PositiveSeconds, SiteAuthorityUrl
 from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
+from market_settlement_runtime import (
+    compile_settlement_publication_clause,
+    parse_settlement_publication_clause,
+)
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from .zerotier import BaseUrlResolutionError, resolve_base_url_best_effort
@@ -154,9 +165,14 @@ def storefront_domain_registry(
 def settlement_publication_defaults(
     source: Dynaconf | None = None,
 ) -> tuple[Any, ...]:
-    """Return validated structured publication defaults as complete clauses."""
+    """Return validated structured publication defaults as complete clauses.
 
-    from market_settlement_runtime import compile_settlement_publication_clause
+    A clause naming a mechanism whose section is absent or disabled is read in
+    full but not compiled against its section, which a disabled mechanism has
+    no use for: publication drops it, so the storefront's own configuration
+    rules that mechanism out, and a listing it alone priced closes. A clause
+    that cannot be read, whatever its mechanism, is refused here.
+    """
 
     from market_storefront.settlement_composition import (
         build_storefront_settlement_registry,
@@ -173,15 +189,22 @@ def settlement_publication_defaults(
 
     registry = build_storefront_settlement_registry()
     config = registry.resolve(settlement_config_mapping(active), role="seller")
-    return tuple(
-        compile_settlement_publication_clause(
-            item,
-            registry=registry,
-            config=config,
-            role="seller",
+    clauses = []
+    for item in raw:
+        clause = parse_settlement_publication_clause(item, registry=registry, role="seller")
+        section = config.mechanisms.get(registry.registration(clause.mechanism).config_key)
+        if section is None or getattr(section, "enabled", False) is not True:
+            clauses.append(clause)
+            continue
+        clauses.append(
+            compile_settlement_publication_clause(
+                item,
+                registry=registry,
+                config=config,
+                role="seller",
+            )
         )
-        for item in raw
-    )
+    return tuple(clauses)
 
 
 def _build_chains(s: Dynaconf) -> dict[str, ChainConfig]:
@@ -194,11 +217,60 @@ settings: Dynaconf = _build_settings()
 CHAINS: dict[str, ChainConfig] = _build_chains(settings)
 
 
+def chain_address_books() -> dict[str, str | None]:
+    """Each configured chain's Alkahest address book, by chain name.
+
+    Resolved from `[Settlement.alkahest.address_books]` through the Alkahest
+    kit, ``None`` for a chain the table names no book for, which uses the
+    SDK's built-in addresses. The storefront hands this mapping to the
+    packages it composes; none of them reads the table itself.
+
+    Raises ``ValueError`` naming each retired address-book key the
+    configuration states. Nothing reads those keys, so a command run without
+    the server, which refuses them at startup, would otherwise resolve a chain
+    the operator gave a book to as using the built-in addresses.
+    """
+    problems = retired_address_book_problems()
+    if problems:
+        raise ValueError("; ".join(problems))
+    raw = settlement_config_mapping().get("alkahest")
+    section = (
+        AlkahestSettlementConfig.model_validate(raw) if isinstance(raw, dict) else None
+    )
+    return {name: alkahest_address_book(section, name) for name in CHAINS}
+
+
+def retired_address_book_problems(source: Dynaconf | None = None) -> list[str]:
+    """Each retired Alkahest address-book key the configuration states, as the
+    refusal naming what replaces it."""
+    active = settings if source is None else source
+    try:
+        settlement = settlement_config_mapping(active)
+    except ValueError:
+        # A [Settlement] that is not a table is reported as unresolvable.
+        settlement = {}
+    return [
+        retired_address_book_refusal(path)
+        for path in retired_address_book_keys(settlement, active.get("chains"))
+    ]
+
+
+def chain_address_book(chain_name: str) -> str | None:
+    """The Alkahest address book of one chain, as :func:`chain_address_books`."""
+    return chain_address_books().get(chain_name)
+
+
 def get_evm_wallet_address(source: Dynaconf | None = None) -> str:
-    """Return the explicitly configured EVM mechanism address, if any."""
+    """The seller's EVM address: `[Wallet].address`, else the account its key
+    signs as, so every place naming the seller names one account."""
 
     active = settings if source is None else source
-    return str(active.get("wallet.address", "") or "").strip()
+    return wallet_account_address(
+        {
+            "address": str(active.get("wallet.address", "") or ""),
+            "private_key": get_evm_wallet_private_key(active),
+        }
+    )
 
 
 def get_evm_wallet_private_key(source: Dynaconf | None = None) -> str:

@@ -23,14 +23,13 @@ class ReservationState(str, enum.Enum):
     """Lifecycle states for a capacity reservation.
 
     The reservation row is the merged ledger entry the capacity design doc
-    calls for: the storefront's hold (``reserved → provisioning → leased``)
-    and the lease's temporal tail (``releasing → released``) are one row,
-    so release happens in a local transaction with no cross-service sync.
+    calls for: the storefront's hold (``reserved → leased``) and the lease's
+    temporal tail (``releasing → released``) are one row, so release happens
+    in a local transaction with no cross-service sync. Every state here is
+    one a lifecycle transition writes; none is set directly.
 
-    reserved     — capacity held for a deal; not yet provisioning. May carry
+    reserved     — capacity held for a deal, not yet committed. May carry
                    a TTL (``hold_expires_at``) for two-phase reserve.
-    provisioning — executor is building the workload.
-    provisioning_failed  — provisioning failed before a usable lease existed.
     leased       — committed into an active lease (``lease_end_utc`` set).
     releasing    — lease ended; teardown in flight under ``release_job_id``.
     released             — teardown succeeded and capacity returned to the pool.
@@ -40,8 +39,6 @@ class ReservationState(str, enum.Enum):
     """
 
     reserved = "reserved"
-    provisioning = "provisioning"
-    provisioning_failed = "provisioning_failed"
     leased = "leased"
     releasing = "releasing"
     released = "released"
@@ -54,7 +51,6 @@ class ReservationState(str, enum.Enum):
 # workload may not be torn down yet.
 HELD_RESERVATION_STATES = (
     ReservationState.reserved.value,
-    ReservationState.provisioning.value,
     ReservationState.leased.value,
     ReservationState.releasing.value,
     ReservationState.release_failed.value,

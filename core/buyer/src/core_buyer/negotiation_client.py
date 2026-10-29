@@ -92,8 +92,9 @@ def set_rl_middleware_registrar(fn: Callable[[], None] | None) -> None:
 def _maybe_register_rl_middleware() -> None:
     """Trigger self-registration of the RL middleware, if a domain
     package installed a registrar. Best-effort — if the strategy's
-    dependencies aren't installed, the chain loader raises its own
-    actionable KeyError pointing at the extras."""
+    dependencies aren't installed, the middleware stays unregistered and
+    the chain loader's KeyError names it and the entry-point group that
+    would provide it."""
     if _RL_MIDDLEWARE_REGISTRAR is None:
         return
     try:
@@ -267,8 +268,6 @@ class NegotiationOutcome:
     accepted_escrow_proposal: Any | None = None
     settlement_selection: Optional[SettlementSelection] = None
     settlement_plan: Optional[SettlementPlan] = None
-    # Legacy mechanism-specific terms remain opaque at the core boundary.
-    accepted_escrow_terms: Optional[list[Any]] = None
     agreement: Agreement | None = None
     agreement_bytes: str | None = None
     settlement_data: dict[str, Any] | None = None
@@ -291,10 +290,6 @@ class NegotiationOutcome:
             d["settlement_selection"] = self.settlement_selection.model_dump()
         if self.settlement_plan is not None:
             d["settlement_plan"] = self.settlement_plan.model_dump()
-        if self.accepted_escrow_terms is not None:
-            d["accepted_escrow_terms"] = [
-                _dump_payload(term) for term in self.accepted_escrow_terms
-            ]
         if self.agreement is not None:
             d["agreement"] = self.agreement.model_dump(mode="json", exclude_none=True)
         if self.agreement_bytes is not None:
@@ -321,24 +316,23 @@ def parse_accepted_terms_from_reply(
     *,
     decode_provision_terms: Callable[[dict[str, Any]], Any] | None = None,
     decode_escrow_proposal: Callable[[dict[str, Any]], Any] | None = None,
-    decode_escrow_terms: Callable[[dict[str, Any]], Any] | None = None,
 ) -> tuple[
     Any | None,
     Any | None,
     Optional[SettlementSelection],
     Optional[SettlementPlan],
-    Optional[list[Any]],
 ]:
     """Extract the seller's accepted state from a negotiate reply.
 
     Returns all-None on exit/reject paths.  The authoritative
-    ``settlement_plan`` is never synthesized from another field.
+    ``settlement_plan`` is never synthesized from another field. Escrow terms a
+    reply carries beside it are never read: a buyer funds only the escrow it
+    derives, and compares the plan with that derivation.
     """
     raw_prov = reply.get("accepted_provision_terms")
     raw_esc = reply.get("accepted_escrow_proposal")
     raw_selection = reply.get("settlement_selection")
     raw_plan = reply.get("settlement_plan")
-    raw_terms = reply.get("accepted_escrow_terms")
     prov = (
         decode_provision_terms(dict(raw_prov))
         if isinstance(raw_prov, dict) and decode_provision_terms is not None
@@ -358,24 +352,10 @@ def parse_accepted_terms_from_reply(
         if isinstance(raw_selection, dict)
         else None
     )
-    if isinstance(raw_terms, list):
-        if not all(isinstance(item, dict) for item in raw_terms):
-            raise ValueError("accepted_escrow_terms must contain objects")
-        raw_term_dicts = [dict(item) for item in raw_terms]
-    else:
-        raw_term_dicts = None
-    terms = (
-        [
-            decode_escrow_terms(term) if decode_escrow_terms is not None else term
-            for term in raw_term_dicts
-        ]
-        if raw_term_dicts is not None
-        else None
-    )
     plan: Optional[SettlementPlan] = None
     if isinstance(raw_plan, dict):
         plan = SettlementPlan.model_validate(raw_plan)
-    return prov, esc, selection, plan, terms
+    return prov, esc, selection, plan
 
 
 def _parse_accepted_agreement(
@@ -872,7 +852,6 @@ class ResumeState:
     settlement_plan: dict[str, Any] | None = None
     accepted_escrow_proposal: dict[str, Any] | None = None
     settlement_selection: dict[str, Any] | None = None
-    accepted_escrow_terms: list[dict[str, Any]] | None = None
     agreement: dict[str, Any] | None = None
     agreement_bytes: str | None = None
 
@@ -892,7 +871,6 @@ def negotiate_with_seller(
     encode_escrow_proposal: Callable[[Any], dict[str, Any]] | None = None,
     decode_provision_terms: Callable[[dict[str, Any]], Any] | None = None,
     decode_escrow_proposal: Callable[[dict[str, Any]], Any] | None = None,
-    decode_escrow_terms: Callable[[dict[str, Any]], Any] | None = None,
     settlement_selection: Optional[SettlementSelection] = None,
     max_rounds: int = DEFAULT_MAX_ROUNDS,
     on_round: Optional[Callable[[int, dict, dict], None]] = None,
@@ -980,7 +958,6 @@ def negotiate_with_seller(
     accepted_esc: Any | None = None
     accepted_selection: Optional[SettlementSelection] = None
     accepted_plan: Optional[SettlementPlan] = None
-    accepted_terms: Optional[list[Any]] = None
     accepted_agreement: Agreement | None = None
     accepted_agreement_bytes: str | None = None
     accepted_settlement_data: dict[str, Any] | None = None
@@ -992,13 +969,11 @@ def negotiate_with_seller(
         Any | None,
         SettlementSelection | None,
         SettlementPlan | None,
-        list[Any] | None,
     ]:
         return parse_accepted_terms_from_reply(
             reply_payload,
             decode_provision_terms=decode_provision_terms,
             decode_escrow_proposal=decode_escrow_proposal,
-            decode_escrow_terms=decode_escrow_terms,
         )
 
     negotiation_policy_params = dict(policy_params or {})
@@ -1019,14 +994,12 @@ def negotiate_with_seller(
             accepted_esc,
             accepted_selection,
             accepted_plan,
-            accepted_terms,
         ) = _parse_reply(
             {
                 "settlement_plan": resume.settlement_plan,
                 "accepted_provision_terms": resume.accepted_provision_terms,
                 "accepted_escrow_proposal": resume.accepted_escrow_proposal,
                 "settlement_selection": resume.settlement_selection,
-                "accepted_escrow_terms": resume.accepted_escrow_terms,
             }
         )
         expected_selection = accepted_selection
@@ -1246,7 +1219,6 @@ def negotiate_with_seller(
             accepted_esc,
             accepted_selection,
             accepted_plan,
-            accepted_terms,
         ) = _parse_reply(reply)
         accepted_settlement_data = (
             _parse_settlement_data(reply)
@@ -1306,7 +1278,6 @@ def negotiate_with_seller(
                 accepted_escrow_proposal=accepted_esc,
                 settlement_selection=accepted_selection,
                 settlement_plan=accepted_plan,
-                accepted_escrow_terms=accepted_terms,
                 agreement=accepted_agreement,
                 agreement_bytes=accepted_agreement_bytes,
                 settlement_data=accepted_settlement_data,
@@ -1473,7 +1444,6 @@ def negotiate_with_seller(
                     reply_esc,
                     reply_selection,
                     reply_plan,
-                    reply_terms,
                 ) = _parse_reply(reply)
                 _validate_accepted_provision_terms(reply_prov, accepted_prov)
                 accepted_agreement, accepted_agreement_bytes = _parse_accepted_agreement(
@@ -1515,7 +1485,6 @@ def negotiate_with_seller(
                         if expected_selection is not None
                         else reply_plan or accepted_plan
                     ),
-                    accepted_escrow_terms=reply_terms or accepted_terms,
                     agreement=accepted_agreement,
                     agreement_bytes=accepted_agreement_bytes,
                     settlement_data=(
@@ -1576,7 +1545,6 @@ def negotiate_with_seller(
                 reply_esc,
                 reply_selection,
                 reply_plan,
-                reply_terms,
             ) = _parse_reply(reply)
             _validate_accepted_provision_terms(reply_prov, accepted_prov)
             accepted_agreement, accepted_agreement_bytes = _parse_accepted_agreement(
@@ -1618,7 +1586,6 @@ def negotiate_with_seller(
                     if expected_selection is not None
                     else reply_plan or accepted_plan
                 ),
-                accepted_escrow_terms=reply_terms or accepted_terms,
                 agreement=accepted_agreement,
                 agreement_bytes=accepted_agreement_bytes,
                 settlement_data=(

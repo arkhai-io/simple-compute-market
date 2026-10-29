@@ -132,16 +132,77 @@ def test_provision_terms_defaults():
 # Pricing / strategy
 # ---------------------------------------------------------------------------
 
+#: A proposal selecting the listing's one accepted escrow.
+_SELECTS_ESCROW = {"chain_name": "anvil", "escrow_address": _ESCROW}
+
+
 def test_unit_price_from_advertised_rate():
-    assert extract_unit_price_from_order(_listing(rate="250")) == 250
+    assert (
+        extract_unit_price_from_order(_listing(rate="250"), proposal=_SELECTS_ESCROW)
+        == 250
+    )
 
 
 def test_unit_price_hidden_reserve_falls_back_then_refuses():
     listing = _listing()
     listing["accepted_escrows"][0]["rates"] = []
-    assert extract_unit_price_from_order(listing, default_min_price="7") == 7.0
+    assert (
+        extract_unit_price_from_order(
+            listing, default_min_price="7", proposal=_SELECTS_ESCROW
+        )
+        == 7.0
+    )
     with pytest.raises(ValueError, match="hidden reserve"):
-        extract_unit_price_from_order(listing)
+        extract_unit_price_from_order(listing, proposal=_SELECTS_ESCROW)
+
+
+@pytest.mark.parametrize(
+    "proposal",
+    [
+        pytest.param(None, id="no proposal"),
+        pytest.param({**_SELECTS_ESCROW, "escrow_address": "0x" + "00" * 20}, id="unpinned"),
+        pytest.param({**_SELECTS_ESCROW, "escrow_address": "0x" + "22" * 20}, id="unlisted"),
+    ],
+)
+def test_a_proposal_selecting_nothing_is_priced_from_no_entry(proposal):
+    """Not from the listing's first accepted escrow, nor from the floor: the
+    extractor refuses it, and the round prices it at zero for its guards to
+    refuse."""
+    with pytest.raises(ValueError, match="selects no settlement option"):
+        extract_unit_price_from_order(
+            _listing(rate="250"), default_min_price="7", proposal=proposal
+        )
+    assert (
+        _seller_reference_amount(
+            _listing(rate="250"), 2, default_min_price="7", proposal=proposal
+        )
+        == 0
+    )
+
+
+def test_a_selection_matching_no_option_is_refused_by_pricing():
+    unknown = {
+        "settlement_selection": {
+            "mechanism": "example.rated.v1",
+            "option_id": "f" * 64,
+            "expiration_unix": 2_000_000_000,
+        }
+    }
+    with pytest.raises(ValueError, match="does not exact-match"):
+        _seller_reference_amount(
+            _listing(rate="250"), 2, default_min_price="7", proposal=unknown
+        )
+
+
+def test_a_listing_accepting_no_escrow_prices_an_escrow_from_no_entry():
+    listing = _listing(rate="250")
+    listing["accepted_escrows"] = []
+    assert (
+        _seller_reference_amount(
+            listing, 2, default_min_price="7", proposal=_SELECTS_ESCROW
+        )
+        == 0
+    )
 
 
 def test_strategy_is_maximize_for_token_offers():
@@ -382,17 +443,27 @@ def test_ownership_guard_rejects_cross_scheme_collision():
 def test_round_reference_amount_is_exact_for_a_rational_floor_and_a_long_rate():
     hidden = _listing()
     hidden["accepted_escrows"][0]["rates"] = []
-    assert _seller_reference_amount(hidden, 3, default_min_price="1.5") == 4
+    assert (
+        _seller_reference_amount(
+            hidden, 3, default_min_price="1.5", proposal=_SELECTS_ESCROW
+        )
+        == 4
+    )
 
     long_rate = "123456789012345678901234567"
-    assert _seller_reference_amount(_listing(rate=long_rate), 1000) == int(long_rate) * 1000
+    assert (
+        _seller_reference_amount(_listing(rate=long_rate), 1000, proposal=_SELECTS_ESCROW)
+        == int(long_rate) * 1000
+    )
 
 
 def test_float_floor_is_refused():
     hidden = _listing()
     hidden["accepted_escrows"][0]["rates"] = []
     with pytest.raises(ValueError, match="decimal text"):
-        extract_unit_price_from_order(hidden, default_min_price=1.5)
+        extract_unit_price_from_order(
+            hidden, default_min_price=1.5, proposal=_SELECTS_ESCROW
+        )
 
 
 def _rated_option(rate=None):

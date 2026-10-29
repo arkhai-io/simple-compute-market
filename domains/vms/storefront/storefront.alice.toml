@@ -63,7 +63,8 @@ priority = ["alkahest.v1"]
 
 [Settlement.alkahest]
 enabled = true
-address_config_path = "/app/alkahest_anvil_addresses.json"
+# Each chain's Alkahest address book; the dev chain's is mounted by Compose.
+address_books = { anvil = "/app/alkahest_anvil_addresses.json" }
 oracle_gated = false
 trusted_oracle_addresses = []
 interruptible = false
@@ -75,9 +76,6 @@ ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAc
 
 [Chains.anvil]
 rpc_url = "ws://anvil:8545"
-# Read per chain when the Alkahest clients are built; the settlement-level
-# `address_config_path` above is read separately by the readiness preflight.
-alkahest_address_config_path = "/app/alkahest_anvil_addresses.json"
 chain_id = 31337
 
 [registry]

@@ -13,11 +13,12 @@ shape:
 
 Only the fields a consumer depends on are checked: pool identity, enablement, the
 advertisement, backing, and delivery declarations, and each member's identity,
-resource kind, enablement, capacity, availability, and attributes. A storefront
-judges whether a member can serve a listing's claim by its resource kind, so a
-member must state one. A current producer projects
-metadata on every pool; a producer that predates the declarations is a consumer
-concern, read under the older-producer rule, and is not this contract.
+resource kind, enablement, capacity, availability, and attributes, and the form
+of any view problems it carries. A storefront judges whether a member can serve
+a listing's claim by its resource kind, so a member must state one. A current
+producer projects metadata on every pool; a producer that predates the
+declarations is a consumer concern, read under the older-producer rule, and is
+not this contract.
 """
 
 from __future__ import annotations
@@ -41,6 +42,7 @@ def build_projected_resource(
     enabled: bool = True,
     resource_type: str = "compute.gpu",
     publication_views: Mapping[str, Mapping[str, Any]] | None = None,
+    publication_view_problems: Mapping[str, Sequence[str]] | None = None,
 ) -> dict[str, Any]:
     """One projected pool member. ``available`` defaults to its capacity.
 
@@ -48,7 +50,9 @@ def build_projected_resource(
     declaration that names none. ``publication_views`` maps a view name to the
     domain-owned view the site projects for the member; each view's own shape
     is that domain's contract, not this one. A member with no views projects
-    none, as a site does.
+    none, as a site does. ``publication_view_problems`` maps a view name to why
+    the site could not build that view for the member; a member with none
+    projects no such field.
     """
     capacity = dict(capacity if capacity is not None else {"gpu_count": 1})
     resource: dict[str, Any] = {
@@ -63,6 +67,11 @@ def build_projected_resource(
     if publication_views is not None:
         resource["publication_views"] = {
             str(name): dict(view) for name, view in publication_views.items()
+        }
+    if publication_view_problems is not None:
+        resource["publication_view_problems"] = {
+            str(name): list(problems)
+            for name, problems in publication_view_problems.items()
         }
     return resource
 
@@ -142,6 +151,19 @@ def _counts(value: Any, field: str) -> None:
     ), f"{field} must map dimension names to integers, got {value!r}"
 
 
+def _view_problems(value: Any, field: str) -> None:
+    # Each entry names a view the member could not be given and why; what a
+    # problem says is the view's domain's, so only its form is checked.
+    assert isinstance(value, Mapping) and value, (
+        f"{field} publication_view_problems must map a view to its problems, got {value!r}"
+    )
+    for name, problems in value.items():
+        assert isinstance(name, str) and name, f"{field} names a view {name!r}"
+        assert isinstance(problems, list) and problems and all(
+            isinstance(problem, str) and problem for problem in problems
+        ), f"{field} view {name} problems must be non-empty text, got {problems!r}"
+
+
 def validate_resource_pool_projection(response: Mapping[str, Any]) -> None:
     """Assert a real projection response has the shape consumers derive from."""
     rows = response.get("resource_pools")
@@ -181,6 +203,10 @@ def validate_resource_pool_projection(response: Mapping[str, Any]) -> None:
             assert isinstance(resource.get("attributes"), Mapping), (
                 f"member {resource_id} must project its attributes"
             )
+            if "publication_view_problems" in resource:
+                _view_problems(
+                    resource["publication_view_problems"], f"member {resource_id}"
+                )
 
 
 __all__ = [

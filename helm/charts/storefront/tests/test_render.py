@@ -7,8 +7,8 @@ only: values are written as JSON, which is YAML.
 
 Agents are keyed by name, and a test states only what it changes in Bob's
 default agent from ``values.yaml``, as an operator's overlay does: Helm merges
-the overlay into the agent key by key, replaces lists, and removes a key the
-overlay sets to ``None``.
+the overlay into the agent key by key and replaces lists, and the chart removes a
+key or an agent the overlay sets to ``None``.
 
 Set ``STOREFRONT_PYTHON`` to the storefront environment's interpreter to also
 load rendered documents with the storefront's own configuration loader.
@@ -176,9 +176,33 @@ def test_default_release_renders_mounts_and_derives_together() -> None:
     }
     assert config["Settlement"] == {"priority": []}
     assert "provisioning" not in config or "identity" not in config["provisioning"]
-    assert "wait-for-registry" in deployment
-    assert "wait-for-rpc" not in deployment
     assert "alkahest-address-book" not in deployment
+
+
+# The release renders with each committed fixture that renders at all; the
+# invalid-* fixtures exist to be refused, which test-render.sh asserts.
+RENDERING_FIXTURES = tuple(
+    sorted(path.name for path in (UMBRELLA / "fixtures").glob("*.yaml") if not path.name.startswith("invalid-"))
+)
+
+
+def test_no_release_waits_on_a_dependency_and_every_agent_has_a_startup_probe() -> None:
+    """The storefront starts while its registry, chain, or site is unreachable
+    and reports them degraded, so no init container waits on one; the startup
+    probe holds the liveness and readiness probes off a slow start instead."""
+    manifests = {"defaults": _ok(_render()), "local release": _ok(_render_local())}
+    for fixture in RENDERING_FIXTURES:
+        manifests[fixture] = _ok(_render(files=(fixture,), release=LOCAL_RELEASE))
+    manifests["a second agent"] = _ok(_render(agents={"carol": CAROL}))
+    for label, manifest in manifests.items():
+        deployments = _documents(manifest, "deployment.yaml")
+        assert deployments, label
+        for deployment in deployments:
+            assert "initContainers" not in deployment, label
+            assert "wait-for-" not in deployment, label
+            probe = re.search(r"\n( +)startupProbe:\n\1  httpGet:\n\1    path: /health\n\1    port: http\n", deployment)
+            assert probe, f"{label}: no startupProbe on /health"
+            assert "initialDelaySeconds" not in deployment, label
 
 
 def test_the_pod_environment_carries_no_service_links() -> None:
@@ -236,12 +260,19 @@ def test_stated_values_are_rendered_as_stated() -> None:
     assert config["base_url"] == "https://bob.example/"
     assert config["db_path"] == "/var/lib/arkhai/custom.db"
     assert config["registry"] == agent["config"]["registry"]
-    assert config["provisioning"] == {"mode": "mock", "service_url": "http://provisioning.example:8081"}
+    assert config["provisioning"] == {"service_url": "http://provisioning.example:8081"}
     assert config["capacity"] == {
         "source_confirmation_seconds": 3600,
         "sites": {"west": "http://provisioning.example:8081"},
     }
-    assert "wait-for-registry" not in _source(manifest, "deployment.yaml")
+
+
+def test_a_stated_provisioning_mode_renders_beside_the_derived_service_url() -> None:
+    """The storefront reads no provisioning mode, and the schema does not
+    refuse one: an overlay stating it renders, the mode inert."""
+    config = _config(_ok(_render(agent=_with_config(provisioning={"mode": "real"}))))
+    assert config["provisioning"]["mode"] == "real"
+    assert config["provisioning"]["service_url"]
 
 
 def test_a_stated_port_equal_to_the_agents_is_accepted() -> None:
@@ -261,27 +292,14 @@ def test_a_differently_spelled_section_is_read_for_release_checks() -> None:
                 }
             },
         },
-        Settlement=None,
-        settlement={"alkahest": {"enabled": True}},
-        chains={"anvil": {"chain_id": 31337, "rpc_url": "http://anvil:8545"}},
     )
     manifest = _ok(_render(agent=agent))
 
-    assert "wait-for-rpc" in _source(manifest, "deployment.yaml")
     assert _config(manifest)["identity"]["service_peers"]
-
-
-def test_a_chain_whose_rpc_url_is_in_the_overlay_is_not_probed() -> None:
-    """An RPC URL carrying a credential lives in the Secret overlay; the pod
-    spec must not name it, so no readiness probe is rendered for it."""
-    agent = _with_config(
-        Settlement={"priority": ["alkahest.v1"], "alkahest": {"enabled": True}},
-        Chains={"anvil": {"chain_id": 31337}},
-    )
-    manifest = _ok(_render(agent=agent))
-
-    assert "wait-for-rpc" not in _source(manifest, "deployment.yaml")
-    assert "rpc_url" not in _config(manifest)["Chains"]["anvil"]
+    # The same peer without the release's provisioning principal is refused,
+    # so the differently spelled section is the one the check read.
+    agent["config"]["identity"]["service_peers"]["provisioning_default"]["principals"] = [ACTIVE_REGISTRY]
+    _refused(_render(agent=agent), "Identity.service_peers")
 
 
 # --- release checks --------------------------------------------------------
@@ -357,13 +375,6 @@ def test_release_owned_keys_are_matched_in_any_spelling() -> None:
     manifest = _ok(_render(agent=agent))
     assert _config(manifest)["Registry"]["URLS"] == [external]
     assert "urls" not in _config(manifest)["Registry"]
-    assert "wait-for-registry" not in _source(manifest, "deployment.yaml")
-
-    agent = _with_config(
-        Settlement={"priority": ["alkahest.v1"], "alkahest": {"enabled": True}},
-        CHAINS={"anvil": {"chain_id": 31337, "RPC_URL": "http://anvil:8545"}},
-    )
-    assert "wait-for-rpc" in _source(_ok(_render(agent=agent)), "deployment.yaml")
 
 
 def test_typed_fields_are_accepted_in_any_spelling() -> None:
@@ -540,13 +551,12 @@ def test_generated_schema_refuses_secret_delivery_settings() -> None:
     _ok(_render(agent=delivery(mail=smtp)))
 
 
-def test_evm_fixture_waits_for_its_chain() -> None:
+def test_evm_fixture_passes_its_chain_through_and_mounts_its_address_book() -> None:
     # The fixture names the dev-env chart's Services and ConfigMap by the
     # release name the Makefile installs.
     manifest = _ok(_render(files=("eip191-evm-values.yaml",), release=LOCAL_RELEASE))
 
     assert _config(manifest)["Chains"]["anvil"]["chain_id"] == 31337
-    assert "wait-for-rpc" in _source(manifest, "deployment.yaml")
     _mounted_address_book(manifest)
 
 
@@ -609,24 +619,254 @@ def test_a_list_of_agents_is_refused_naming_the_map() -> None:
     )
 
 
+def _names_path(stderr: str, dotted: str) -> bool:
+    """Whether a refusal names the value at ``dotted``, as a dotted path or as the
+    JSON pointer Helm's schema validator writes, however Helm words the rest."""
+    return dotted in stderr or "/" + dotted.replace(".", "/") in stderr
+
+
 def test_an_agent_is_named_by_its_key_alone() -> None:
-    _refused(_render(agent=_agent(name="carol")), "agents.bob.name")
+    for name in ("carol", None):
+        rendered = _render(agent=_agent(name=name))
+        assert rendered.returncode != 0, f"{name!r}: render succeeded"
+        assert _names_path(rendered.stderr, "agents.bob.name"), rendered.stderr
+
+
+def test_a_retired_value_stays_refused_as_null() -> None:
+    for agent, dotted in (
+        (_agent(agentId=None), "agents.bob.agentId"),
+        (_with_config(seller=None), "agents.bob.config.seller"),
+    ):
+        rendered = _render(agent=agent)
+        assert rendered.returncode != 0, f"{agent}: render succeeded"
+        assert _names_path(rendered.stderr, dotted), rendered.stderr
+
+
+# --- a null removes what it names ------------------------------------------
+
+
+CHART_GLOBALS = {
+    "imageRepository": "",
+    "registryIdentity": {"authority": "registry-a", "principal": ACTIVE_REGISTRY},
+    "provisioningIdentity": ACTIVE_PROVISIONING,
+    "rpc": {"enabled": True, "host": "dev-env", "port": 8545},
+    "registry": {"host": "", "port": 8080},
+    "provisioning": {"host": "arkhai-node-operator-provisioning", "port": 8081},
+}
+
+
+def _render_chart(*layers: dict) -> subprocess.CompletedProcess[str]:
+    """Render the storefront chart alone, with the globals the umbrella would
+    supply and then each of ``layers`` as its own values file, in order."""
+    with tempfile.TemporaryDirectory() as directory:
+        command = ["helm", "template", RELEASE, str(CHART)]
+        for index, layer in enumerate(({"global": CHART_GLOBALS}, *layers)):
+            path = Path(directory) / f"layer-{index}.json"
+            path.write_text(json.dumps(layer))
+            command += ["--values", str(path)]
+        return subprocess.run(command, check=False, capture_output=True, text=True)
+
+
+def _render_layers(*layers: dict, files: tuple[Path, ...] = (), release: str = RELEASE) -> subprocess.CompletedProcess[str]:
+    """Render values.yaml, then each of ``files``, then each overlay of
+    ``layers`` from its own values file, in order: a later layer can remove what
+    an earlier one states, as an operator's overlay removes what the release's
+    values state."""
+    with tempfile.TemporaryDirectory() as directory:
+        command = ["helm", "template", release, str(UMBRELLA), "--values", str(UMBRELLA / "values.yaml")]
+        for path in files:
+            command += ["--values", str(path)]
+        for index, layer in enumerate(layers):
+            path = Path(directory) / f"layer-{index}.json"
+            path.write_text(json.dumps(layer))
+            command += ["--values", str(path)]
+        return subprocess.run(command, check=False, capture_output=True, text=True)
+
+
+def _bob(**changes) -> dict:
+    """A values layer changing ``changes`` in Bob's agent."""
+    return {"storefront": {"agents": {"bob": dict(changes)}}}
+
+
+def test_removing_an_agent_beside_another_renders_the_release_as_if_never_stated() -> None:
+    """The storefront chart alone, since only there can a release leave Bob
+    unstated: with Bob stated and removed by a later values file, the manifest is
+    the one Carol renders alone, rollout checksums included."""
+    bob = {**CAROL, "port": 8001, "config": {**CAROL["config"], "agent_id": "bob"}}
+    assert f"{RELEASE}-storefront-bob" in _ok(_render_chart({"agents": {"bob": bob, "carol": CAROL}}))
+    alone = _ok(_render_chart({"agents": {"carol": CAROL}}))
+    removed = _ok(_render_chart({"agents": {"bob": bob, "carol": CAROL}}, {"agents": {"bob": None}}))
+
+    assert "checksum/config" in alone
+    assert removed == alone
+
+
+def test_removing_the_only_agent_is_refused_naming_agents() -> None:
+    """Through the umbrella both the storefront chart and the umbrella's smoke-test
+    profile refuse it, naming the agent map; whichever Helm renders first is the
+    refusal reported."""
+    _refused(_render(agents={"bob": None}), "agents names no agent")
+
+
+def test_removing_the_only_agent_of_the_storefront_chart_alone_is_refused() -> None:
+    """Rendered without the umbrella, a later values file's null reaches the
+    chart's values as a parent's does through the umbrella, and the chart refuses
+    an empty agent map."""
+    agent = {"bob": {"port": 8001, "identity": {"credentialSecret": {"name": "x", "key": "y"}}}}
+    with tempfile.TemporaryDirectory() as directory:
+        defined = Path(directory) / "agents.json"
+        removed = Path(directory) / "removed.json"
+        defined.write_text(json.dumps({"agents": agent}))
+        removed.write_text(json.dumps({"agents": {"bob": None}}))
+        rendered = subprocess.run(
+            ["helm", "template", RELEASE, str(CHART), "--values", str(defined), "--values", str(removed)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    _refused(rendered, "agents names no agent")
+
+
+def test_a_removed_setting_is_absent_and_no_null_is_rendered() -> None:
+    """A defaulted setting removed at depth is absent from storefront.json, and no
+    null the values stated reaches it, even inside a list element."""
+    domains = [{"contribution": "vms", "offering_mode": "vm", "domain_identity": "compute.v1",
+                "contract_version": "1.0", "label": None}]
+    manifest = _ok(
+        _render(
+            agent=_with_config(
+                log_file_path=None,
+                capacity={"source_confirmation_seconds": None},
+                negotiation={"policies": None},
+                storefront_domains=domains,
+                Futuristic={"inner": {"gone": None, "kept": 1}},
+            )
+        )
+    )
+    document = _block(_source(manifest, "configmap.yaml"), "storefront.json")
+    config = json.loads(document)
+
+    assert "log_file_path" not in config
+    assert config["capacity"] == {"sites": {"default": PROVISIONING_URL}}
+    assert config["negotiation"] == {}
+    assert config["storefront_domains"][0] == {key: value for key, value in domains[0].items() if key != "label"}
+    assert config["Futuristic"] == {"inner": {"kept": 1}}
+    assert "null" not in document
+
+
+def test_a_removed_value_the_release_knows_carries_the_releases_value() -> None:
+    """Each value is stated by one layer and removed by the next, so the release's
+    value replaces a stated one."""
+    external = "http://registry.example:8080"
+    stated = _bob(
+        internalRegistryTrust=None,
+        config={
+            "db_path": "/data/custom.db",
+            "port": 8001,
+            "registry": {"urls": [external], "authorities": {external: {"authority": "registry-x", "principals": [ACTIVE_REGISTRY]}}},
+        },
+    )
+    assert _config(_ok(_render_layers(stated)))["db_path"] == "/data/custom.db"
+    removed = _bob(
+        internalRegistryTrust={"authority": "registry-a", "principals": [ACTIVE_REGISTRY]},
+        config={"db_path": None, "port": None, "registry": {"urls": None, "authorities": None}},
+    )
+    config = _config(_ok(_render_layers(stated, removed)))
+
+    assert config["db_path"] == "/var/lib/arkhai/agent.db"
+    assert config["port"] == 8001
+    assert config["registry"]["urls"] == [REGISTRY_URL]
+    assert list(config["registry"]["authorities"]) == [REGISTRY_URL]
+
+
+def test_a_removed_required_setting_renders_absent_and_the_storefront_refuses_it() -> None:
+    """The local release starts on its Settlement (its own test shows it); with
+    that Settlement removed, the document holds none and the storefront refuses
+    it naming the section."""
+    removed = _render_layers(_bob(config={"Settlement": None}), files=(UMBRELLA / "local-values.yaml",), release=LOCAL_RELEASE)
+    config = _config(_ok(removed))
+
+    assert "Settlement" not in config and "settlement" not in config
+    python = os.environ.get("STOREFRONT_PYTHON")
+    if not python:
+        print("skip: STOREFRONT_PYTHON unset; the storefront startup check did not run")
+        return
+    refused = _storefront_starts(config, python)
+    assert "[Settlement]" in (refused["refusal"] or ""), refused
+
+
+def test_removed_internal_registry_trust_is_refused_naming_the_missing_trust() -> None:
+    _refused(_render(agent=_without("internalRegistryTrust")), "requires internalRegistryTrust")
+
+
+def test_removed_agent_values_render_as_if_never_stated() -> None:
+    """Each value is stated by values.yaml or the first layer and removed by the
+    next: the component falls back to the agent's name, the ConfigMap to its
+    generated name, the address book and the runtime overlay to none, and a key
+    inside either to its default."""
+    stated = _bob(
+        configMapName="bob-settings",
+        alkahestAddressBook={"configMapName": "books", "key": "book.json", "mountPath": "/books"},
+        secret={"configKey": "runtime.toml"},
+    )
+    manifest = _ok(_render_layers(stated))
+    deployment = _source(manifest, "deployment.yaml")
+    assert 'app.kubernetes.io/component: "seller"' in deployment
+    assert "name: bob-settings" in deployment and "mountPath: \"/books\"" in deployment
+    assert "subPath: runtime.toml" in deployment and "arkhai-secrets" in deployment
+
+    removed = _ok(
+        _render_layers(
+            stated,
+            _bob(component=None, configMapName=None, alkahestAddressBook=None, secret={"configKey": None}),
+        )
+    )
+    deployment = _source(removed, "deployment.yaml")
+    assert 'app.kubernetes.io/component: "bob"' in deployment and 'component: "seller"' not in deployment
+    assert f"{RELEASE}-storefront-bob-config" in _configs(removed)
+    assert "bob-settings" not in removed
+    assert "alkahest-address-book" not in deployment
+    assert "subPath: storefront.secrets.toml" in deployment
+
+    nested = _source(_ok(_render_layers(stated, _bob(alkahestAddressBook={"key": None, "mountPath": None}))), "deployment.yaml")
+    assert 'mountPath: "/etc/arkhai/alkahest"' in nested
+    assert 'name: "books"' in nested and 'key: "alkahest_addresses.json"' in nested
+
+    without_book = _source(_ok(_render_layers(stated, _bob(alkahestAddressBook={"configMapName": None}))), "deployment.yaml")
+    assert "alkahest-address-book" not in without_book
+
+    for removal in ({"secretName": None}, None):
+        without_overlay = _source(_ok(_render_layers(_bob(secret=removal))), "deployment.yaml")
+        assert "arkhai-secrets" not in without_overlay and "arkhai-bob-runtime" not in without_overlay, removal
+
+
+def test_a_removed_port_or_identity_is_refused_naming_it() -> None:
+    """An agent cannot run without either, and the chart has neither to default to:
+    refused through the umbrella and by the storefront chart rendered alone. The
+    umbrella's own refusal words it the same, so which of the two Helm reports
+    through the umbrella is not asserted."""
+    for key in ("port", "identity"):
+        _refused(_render(agent=_without(key)), f"storefront agent bob states no {key}")
+        _refused(
+            _render_chart({"agents": {"carol": CAROL}}, {"agents": {"carol": _without(key)}}),
+            f"storefront agent carol states no {key}",
+        )
+
+
+def test_a_refused_key_stays_refused_as_null() -> None:
+    rendered = _render(agent=_with_config(Wallet={"private_key": None}))
+    assert rendered.returncode != 0, "render succeeded"
+    assert _names_path(rendered.stderr, "config.Wallet.private_key"), rendered.stderr
 
 
 # --- Alkahest address books ------------------------------------------------
 
 
 def _address_paths(config: dict) -> list[str]:
-    """Every Alkahest address-book path ``config`` names."""
-    paths = [
-        chain["alkahest_address_config_path"]
-        for chain in (config.get("Chains") or {}).values()
-        if chain.get("alkahest_address_config_path")
-    ]
+    """Every Alkahest address-book path ``config`` names, which only
+    ``[Settlement.alkahest.address_books]`` does."""
     alkahest = (config.get("Settlement") or {}).get("alkahest") or {}
-    if alkahest.get("address_config_path"):
-        paths.append(alkahest["address_config_path"])
-    return paths
+    return [path for path in (alkahest.get("address_books") or {}).values() if path]
 
 
 def _mounted_address_book(manifest: str) -> tuple[str, dict]:
@@ -710,10 +950,25 @@ try:
 except StorefrontStartupError as exc:
     print(json.dumps({"refusal": str(exc)}))
     raise SystemExit(0)
-from market_storefront.services.publication_terms import demands_for_publication_clauses
-from market_storefront.utils.config import get_evm_wallet_address, settlement_publication_defaults
-demands = demands_for_publication_clauses(
-    settlement_publication_defaults(), wallet_address=get_evm_wallet_address()
+from market_alkahest import escrow_release_conditions
+from market_settlement_runtime import MechanismReadiness
+from market_storefront.services.publication_terms import configured_alkahest_section
+from market_storefront.utils.config import CHAINS, get_evm_wallet_address, settlement_publication_defaults
+# Readiness turns on what the render does not carry -- a reachable chain and the
+# Secret overlay's wallet key -- so the probe derives as a ready Alkahest would.
+ready = MechanismReadiness(mechanism="alkahest.v1", configured=True, enabled=True, ready=True)
+# Each configured Alkahest clause publishes an escrow on its chain.
+escrows = [
+    {"chain_name": clause.mechanism_input["chain"]}
+    for clause in settlement_publication_defaults()
+    if clause.mechanism == "alkahest.v1"
+]
+demands = escrow_release_conditions(
+    configured_alkahest_section(),
+    escrows,
+    readiness=(ready,),
+    chains=CHAINS,
+    wallet_address=get_evm_wallet_address(),
 )
 print(json.dumps({"refusal": None, "demands": demands}))
 """

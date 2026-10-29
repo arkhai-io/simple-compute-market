@@ -42,12 +42,24 @@ def _bootstrap_engine():
     table for tests to seed directly (``run_migrations`` drops it as its
     final step, matching production's one-shot cutover)."""
     engine = _sqlite_memory_engine()
-    run_migrations(
-        engine,
-        default_playbook_path=_PLAYBOOK_PATH,
-        default_inventory_group=_INVENTORY_GROUP,
-    )
+    run_migrations(engine)
     with engine.begin() as connection:
+        # Migration creates no pool. A lease-holding database held the VM
+        # `default` pool, whose configuration carried an inventory group the
+        # current table no longer has.
+        connection.execute(text(
+            "INSERT INTO resource_pools (id, label, provider, enabled, policy_tags) "
+            "VALUES ('default', 'Default Pool', 'vm.ansible', 1, :tags)"
+        ), {"tags": '{"deliverable_modes": ["vm"], "advertisable_modes": ["vm"], '
+                    '"capacity_backing": "backed"}'})
+        connection.execute(text(
+            "ALTER TABLE ansible_pool_configs ADD COLUMN inventory_group VARCHAR"
+        ))
+        connection.execute(text(
+            "INSERT INTO ansible_pool_configs "
+            "(pool_id, playbook_path, requirement_delegate, extra_vars, inventory_group) "
+            "VALUES ('default', :playbook, 'vm_management_v1', '{}', :group)"
+        ), {"playbook": _PLAYBOOK_PATH, "group": _INVENTORY_GROUP})
         connection.execute(text(
             """
             CREATE TABLE vm_leases (

@@ -2,6 +2,9 @@
 export UV_PYTHON := $(or $(shell cat ../../.python-version 2>/dev/null),$(error ../../.python-version not found))
 
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
+# Appended to the image's tag; the root Makefile's IMAGE_SUFFIX. A suffixed build
+# is tagged per change alone: a commit tag would keep one image per validated commit.
+IMAGE_SUFFIX ?=
 
 # Path to the monorepo .dist/ wheel directory, relative to core/registry/.
 # Used by uv when resolving pure-Python internal packages distributed as wheels
@@ -24,8 +27,8 @@ init-uv:
 build: reinit build-images
 
 build-images:
-	docker build --ulimit nofile=65536:65536 -f Dockerfile -t arkhai:registry ../..
-	docker tag arkhai:registry arkhai:registry-$(GIT_SUFFIX)
+	docker build --ulimit nofile=65536:65536 -f Dockerfile -t arkhai:registry$(IMAGE_SUFFIX) ../..
+	$(if $(IMAGE_SUFFIX),,docker tag arkhai:registry arkhai:registry-$(GIT_SUFFIX))
 
 deploy:
 	docker run --rm -d --network market --name registry --env-file ./.env.docker-compose --env-file ../../shared-env/.env -p 8080:8080 arkhai:registry

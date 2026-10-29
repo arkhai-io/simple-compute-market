@@ -16,6 +16,8 @@ from __future__ import annotations
 import pytest
 
 from market_site.ledger import (
+    _requested_dimensions,
+    _split_claim_requirement,
     dict_resource_satisfies_claim,
     resource_feasibility_view,
     resource_satisfies_requirement,
@@ -42,8 +44,6 @@ def _row(**overrides):
 def _authoritative_result(row, claim):
     """The admission-path result for the same data, built the same way
     ledger.py's own call sites build a ResourceFeasibilityView."""
-    from market_site.ledger import _requested_dimensions, _split_claim_requirement
-
     resource_kind, required_attributes = _split_claim_requirement(claim)
     required_dimensions = _requested_dimensions(claim)
     resource = resource_feasibility_view(
@@ -117,6 +117,15 @@ def test_malformed_dimensions_raises_same_as_admission():
 def test_no_claim_matches_everything():
     assert dict_resource_satisfies_claim(_row(), None) is True
     assert dict_resource_satisfies_claim(_row(), {}) is True
+
+
+@pytest.mark.parametrize(
+    "claim", [None, {}, {"pool_id": "default"}, {"pool_id": "r1"}, {"units": 1}]
+)
+def test_a_row_recording_no_pool_matches_no_claim(claim):
+    """Admission admits nothing against such a row, so ranking must not
+    read it as `default`, or as a pool named for the resource."""
+    assert dict_resource_satisfies_claim(_row(pool_id=None), claim) is False
 
 
 def test_unit_claim_keys_must_match_the_backing_ledger_service_configuration():

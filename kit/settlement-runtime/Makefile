@@ -13,5 +13,5 @@ init: reinit ## Create or update the environment
 reinit: ## Reinstall the local package environment
 	python3 ../../scripts/uv_project.py reinit
 
-test: reinit ## Run the focused unit suite
-	uv run pytest tests/unit -q
+test: reinit ## Run the unit and library integration suites
+	uv run pytest -q

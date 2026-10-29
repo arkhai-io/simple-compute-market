@@ -2,7 +2,8 @@
 
 Verifies:
   - All /test/* endpoints are reachable when mock profile is simulated
-  - Mock rule add/list/delete/resume round-trip
+  - Mock rule add/list/delete/resume round-trip, answered with the family's
+    typed models through the family's mock-rule client
   - drain and wait endpoints work correctly
   - Test controller is NOT mounted when the mock service is not active
     (simulated by swapping in a runner mock)
@@ -23,11 +24,6 @@ import pytest
 from compute_provisioning_ansible.runner import MaterializedInventory
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from market_site import CapacityLedgerService
-
-from compute_provisioning_service.services.capacity_derivation import (
-    LegacyHostCapacityDerivation,
-)
 
 from .conftest import (
     ProvisioningClients,
@@ -63,7 +59,14 @@ from compute_provisioning_service.services.job_retry import retry_policy_from
 from compute_provisioning.jobs.submission import JobSubmissionService
 from compute_provisioning.jobs.executor_mock import MockRule
 from compute_provisioning_ansible import MockAnsibleRunner
-from compute_provisioning_contracts import HostCreate
+from compute_provisioning_client import ComputeProvisioningError
+from compute_provisioning_contracts import (
+    HostCreate,
+    MockRuleAdded,
+    MockRuleDeleted,
+    MockRuleResumed,
+    MockRuleView,
+)
 from vm_provisioning_adapter.services.mock_output import vm_mock_output
 from vm_provisioning_adapter.services.relay_port_allocator import RelayPortAllocator
 from vm_provisioning_adapter.services.relay_service import RelayService
@@ -116,7 +119,6 @@ async def client_and_queue(
 ) -> AsyncIterator[tuple[ProvisioningClients, AsyncJobQueue, MockAnsibleRunner, AsyncProvisioningTestClient]]:
     _install_signed_asgi_transport(monkeypatch)
     mock_settings = MagicMock(
-        default_host_id="kvm1",
         default_max_retries=3,
         retry_backoff_initial_seconds=60,
         retry_backoff_multiplier=2.0,
@@ -126,7 +128,7 @@ async def client_and_queue(
         frp_server_addr="",
         frp_domain="",
         frp_dashboard_password="",
-        resolved_playbook_path=Path("/fake/playbook.yml"),
+        resolved_vm_playbook_path=Path("/fake/playbook.yml"),
         resolved_inventory_path=Path("/fake/hosts"),
         ssh_decryption_key="",
         database_url="sqlite:///:memory:",
@@ -149,13 +151,6 @@ async def client_and_queue(
     host_authority = HostAuthority(
         session_factory,
         codecs=ConnectionCodecs([SshConnectionCodec()]),
-        capacity_derivation=LegacyHostCapacityDerivation(
-            CapacityLedgerService(
-                session_factory,
-                unit_claim_keys=("units", "gpu_count"),
-                mirror_dimension="gpu_count",
-            )
-        ),
     )
     host_authority.register_host(HostCreate(
         host_id=HOST,
@@ -278,6 +273,8 @@ def _make_event_seam(job_queue: AsyncJobQueue) -> asyncio.Event:
 # ---------------------------------------------------------------------------
 
 class TestMockRuleCrud:
+    """VM's rule routes, through the family's mock-rule client and VM's mount."""
+
     async def test_add_rule_and_list(self, client_and_queue):
         _, _, _, test_client = client_and_queue
         result = await test_client.add_mock_rule(
@@ -285,30 +282,60 @@ class TestMockRuleCrud:
             match={"vm_action": "create"},
             pause_before_result=False,
         )
-        assert result["rule_id"] == "test-r1"
+        assert result == MockRuleAdded(rule_id="test-r1", status="added")
 
         rules = await test_client.list_mock_rules()
-        ids = {r["rule_id"] for r in rules}
-        assert "test-r1" in ids
+        assert rules == [
+            MockRuleView(
+                rule_id="test-r1",
+                match={"vm_action": "create"},
+                pause_before_result=False,
+                fail_with=None,
+                result_stdout=False,
+                paused=False,
+                waiting=0,
+            )
+        ]
+
+    async def test_a_vm_rule_holds_a_vm_job_until_resumed(self, client_and_queue):
+        """A gated rule installed through VM's mount holds the VM job it matches,
+        and resuming it through the same mount releases the job."""
+        prov_client, _, mock, test_client = client_and_queue
+        await test_client.add_mock_rule(rule_id="gate", match={}, pause_before_result=True)
+        submit = await prov_client.vm.create_vm(HOST, CreateVmRequest(
+            vm_target="held-vm", vm_ram=2048, vm_vcpus=2,
+            vm_disk_size="20G", ssh_pubkey="ssh-ed25519 AAAA test",
+        ))
+        await asyncio.wait_for(mock.rules.wait_until_held("gate"), timeout=5.0)
+        held = await test_client.list_mock_rules()
+
+        resumed = await test_client.resume_rule("gate")
+        finished = await test_client.wait_for_job(submit.job_id, timeout=10.0)
+        await asyncio.wait_for(mock.rules.wait_until_released("gate"), timeout=5.0)
+
+        assert (held[0].paused, held[0].waiting) == (True, 1)
+        assert resumed == MockRuleResumed(rule_id="gate", resumed=True)
+        assert finished["status"] == "succeeded", finished
+        assert (await test_client.list_mock_rules())[0].waiting == 0
 
     async def test_delete_rule(self, client_and_queue):
         _, _, _, test_client = client_and_queue
         await test_client.add_mock_rule(rule_id="del-me", match={})
         result = await test_client.delete_mock_rule("del-me")
-        assert result["deleted"] is True
+        assert result == MockRuleDeleted(rule_id="del-me", deleted=True)
 
         rules = await test_client.list_mock_rules()
-        ids = {r["rule_id"] for r in rules}
+        ids = {r.rule_id for r in rules}
         assert "del-me" not in ids
 
     async def test_delete_nonexistent_returns_false(self, client_and_queue):
         _, _, _, test_client = client_and_queue
         result = await test_client.delete_mock_rule("ghost")
-        assert result["deleted"] is False
+        assert result.deleted is False
 
     async def test_resume_nonexistent_returns_404(self, client_and_queue):
         _, _, _, test_client = client_and_queue
-        with pytest.raises(AsyncProvisioningTestClientError) as exc_info:
+        with pytest.raises(ComputeProvisioningError) as exc_info:
             await test_client.resume_rule("ghost")
         assert exc_info.value.status_code == 404
 
@@ -404,13 +431,13 @@ class TestWaitForJob:
 
 class TestControllerGating:
     async def test_test_routes_absent_without_programmable_mock(self, client_and_queue):
-        # Rejection-path test: swapping in a non-programmable mock causes
-        # /test/mock-rules to return 503. Asserts on status code only.
+        # Swapping in a non-programmable mock makes /test/mock-rules answer
+        # 503. Asserts on status code only.
         _, _, _, test_client = client_and_queue
         original = _container_module.resolved_ansible_service
         _container_module.resolved_ansible_service = MagicMock(spec=AnsibleRunner)
         try:
-            with pytest.raises(AsyncProvisioningTestClientError) as exc_info:
+            with pytest.raises(ComputeProvisioningError) as exc_info:
                 await test_client.add_mock_rule(match={})
             assert exc_info.value.status_code == 503
         finally:

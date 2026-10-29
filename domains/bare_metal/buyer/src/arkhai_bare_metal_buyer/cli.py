@@ -17,10 +17,13 @@ from arkhai_bare_metal import (
 from core_buyer import (
     BuyerActionHandler,
     IntroductionTransport,
+    ResolvedBuyerIdentity,
     deliver_introduction,
     load_buyer_delivery_sinks,
     report_delivery,
     resolve_buyer_action_policy,
+    resolve_fresh_buyer_identity,
+    resolve_recovery_buyer_identity,
 )
 from core_buyer.introductions import IntroductionPayloadsDeleted
 from core_buyer.negotiation_client import negotiate_with_seller
@@ -30,6 +33,7 @@ from market_contact_exchange import (
     create_contact_command_group,
 )
 from core_buyer.deal_helpers import (
+    accepted_seller_principal,
     load_deal_context,
     open_run_log,
     settlement_acceptance_fields,
@@ -42,20 +46,55 @@ from market_core.schemas import (
 )
 from market_identity import TrustedIdentitySet
 from pydantic_core import to_jsonable_python
+from registry_client import SyncRegistryClient
 from registry_client.query import compile_resource_query
 from market_settlement_runtime import derive_obligation_ref
 
-from .config import (
-    fresh_identity,
-    load_bare_metal_buyer_config,
-    recovery_identity,
-    registry_client,
-)
+from .config import BareMetalBuyerConfig, load_bare_metal_buyer_config
 from .fulfillment import BareMetalFulfillmentTransport
 from market_arkhai_payments import PaymentApproval
 
 from .arkhai_payments import BareMetalSettlementTransport
 from .settlement_composition import BUYER_STAGES
+
+# The commands build their collaborators through the factories below: a Typer
+# command has no constructor to inject through, so these are the seam a test
+# replaces.
+
+
+def fresh_identity() -> ResolvedBuyerIdentity:
+    """Resolve the active profile signer for new buyer work."""
+
+    return resolve_fresh_buyer_identity()
+
+
+def recovery_identity(run_id: str) -> ResolvedBuyerIdentity:
+    """Resolve the exact retained signer recorded for one run."""
+
+    return resolve_recovery_buyer_identity(run_id)
+
+
+def registry_client(
+    config: BareMetalBuyerConfig,
+    identity: ResolvedBuyerIdentity,
+) -> SyncRegistryClient:
+    """Create a signed registry client without accepting secrets in domain config."""
+
+    return SyncRegistryClient(
+        config.registry_url,
+        timeout=config.timeout_seconds,
+        signer=identity.signer,
+        caller_role="buyer",
+        expected_registries=config.registry_trust,
+        registry_authority=config.registry_authority,
+    )
+
+
+def payment_approval(config: BareMetalBuyerConfig) -> PaymentApproval:
+    """Approve payments from the configured payer account, and nothing else."""
+
+    return PaymentApproval(config.arkhai_payments, config.payer_account)
+
 
 bare_metal_app = typer.Typer(
     no_args_is_help=True, help="Discover and settle trusted bare-metal listings."
@@ -291,11 +330,12 @@ class _IntroductionContext:
         def deliver_copy(projection: Any) -> None:
             """The buyer's own copy, never fatal: the reveal is re-readable."""
 
+            assert sinks is not None
             outcomes = deliver_introduction(
                 projection,
                 sinks=sinks,
                 agreement_ref=deal.negotiation_id,
-                counterparty=_seller_principal(deal),
+                counterparty=accepted_seller_principal(deal),
             )
             report_delivery(outcomes, sinks.warnings)
             if outcomes:
@@ -344,7 +384,8 @@ def buy_bare_metal(
     identity = fresh_identity()
     with registry_client(buyer_config, identity) as client:
         listing = client.get_listing(listing_id)
-    if not listing.storefront_url or listing.publisher_principals is None:
+    seller_principals = listing.publisher_principals
+    if not listing.storefront_url or seller_principals is None:
         raise typer.BadParameter("listing has no trusted storefront identity")
     options = [
         SettlementOption.model_validate(item) for item in listing.settlement_options
@@ -362,9 +403,7 @@ def buy_bare_metal(
         ) from exc
     rate = selected.rates[0]
     amount = compute_rate_total(rate, duration_seconds)
-    payment_approval = PaymentApproval(
-        buyer_config.arkhai_payments, buyer_config.payer_account
-    )
+    approval = payment_approval(buyer_config)
     run_log = RunLog.start(
         profile_id=identity.profile_id,
         principal=identity.principal,
@@ -375,10 +414,7 @@ def buy_bare_metal(
         seller_url=listing.storefront_url,
         storefront_url=listing.storefront_url,
         publisher_id=str(listing.publisher_id),
-        publisher_principals=[
-            principal.model_dump(mode="json")
-            for principal in listing.publisher_principals.identities
-        ],
+        publisher_principals=seller_principals.model_dump(mode="json"),
         source_registry_url=buyer_config.registry_url,
         source_registry_authority=buyer_config.registry_authority,
     )
@@ -392,7 +428,7 @@ def buy_bare_metal(
         principal=identity.principal,
         signer=identity.signer,
         listing_id=listing_id,
-        resolve_seller_principals=lambda: listing.publisher_principals,
+        resolve_seller_principals=lambda: seller_principals,
         initial_price=amount,
         max_price=amount,
         unit_count=duration_seconds / 3600,
@@ -403,17 +439,22 @@ def buy_bare_metal(
                 "ssh_public_key": ssh_public_key,
             },
         ),
+        decode_provision_terms=BareMetalProvisionTerms.model_validate,
         settlement_selection=selection,
+        # The opening policy reads from the selected option whether it bargains
+        # an amount; without it the opening carries none, and the amount this
+        # buyer derived from the option's rate never enters the negotiation.
+        policy_params={"_selected_settlement_option": selected.model_dump(mode="json")},
         max_rounds=buyer_config.default_max_rounds,
         validate_acceptance=lambda accepted: stage.validate_acceptance(
-            accepted, payment_approval
+            accepted, approval
         ),
     )
     if outcome.status != "agreed" or outcome.negotiation_id is None:
         run_log.end("exited", reason=outcome.reason)
         _json({"run_id": run_log.run_id, **outcome.to_dict()})
         return
-    stage.validate_acceptance(outcome, payment_approval)
+    stage.validate_acceptance(outcome, approval)
     run_log.event(
         "agreement_accepted",
         negotiation_id=outcome.negotiation_id,
@@ -430,12 +471,12 @@ def buy_bare_metal(
         seller_url=listing.storefront_url,
         principal=identity.principal,
         signer=identity.signer,
-        resolve_seller_principals=lambda: listing.publisher_principals,
+        resolve_seller_principals=lambda: seller_principals,
         timeout=buyer_config.timeout_seconds,
     )
     transaction, fulfillment = stage.settle(
         outcome=outcome,
-        approval=payment_approval,
+        approval=approval,
         transport=settlement,
         timeout=payment_timeout_seconds,
         run_log=run_log,
@@ -446,11 +487,7 @@ def buy_bare_metal(
         agreed_amount=outcome.agreed_amount,
         transaction_id=transaction,
         fulfillment=fulfillment,
-        accepted_provision_terms=(
-            outcome.accepted_provision_terms.model_dump(mode="json")
-            if outcome.accepted_provision_terms is not None
-            else None
-        ),
+        accepted_provision_terms=outcome.to_dict().get("accepted_provision_terms"),
         **settlement_acceptance_fields(
             negotiation_id=outcome.negotiation_id,
             selection=outcome.settlement_selection,
@@ -509,10 +546,7 @@ def request_introduction(
         seller_url=listing.storefront_url,
         storefront_url=listing.storefront_url,
         publisher_id=str(listing.publisher_id),
-        publisher_principals=[
-            item.model_dump(mode="json")
-            for item in listing.publisher_principals.identities
-        ],
+        publisher_principals=publisher_principals.model_dump(mode="json"),
         source_registry_url=buyer_config.registry_url,
         source_registry_authority=buyer_config.registry_authority,
     )
@@ -531,7 +565,11 @@ def request_introduction(
                 "access_method": "none",
             },
         ),
+        decode_provision_terms=BareMetalProvisionTerms.model_validate,
         settlement_selection=selection,
+        # The seller's accept reply is checked against the option the listing
+        # advertised; without it the buyer has nothing to hold the plan to.
+        policy_params={"_selected_settlement_option": selected.model_dump(mode="json")},
         max_rounds=buyer_config.default_max_rounds,
     )
     if outcome.status != "agreed" or outcome.negotiation_id is None:
@@ -547,10 +585,7 @@ def request_introduction(
         negotiation_id=outcome.negotiation_id,
         agreement_ref=outcome.negotiation_id,
         obligation_ref=obligation_ref,
-        seller_principals=[
-            item.model_dump(mode="json")
-            for item in listing.publisher_principals.identities
-        ],
+        seller_principals=publisher_principals.model_dump(mode="json"),
         storefront_url=listing.storefront_url,
         accepted_plan=outcome.settlement_plan.model_dump(mode="json"),
     )
@@ -558,11 +593,15 @@ def request_introduction(
         "agreed",
         negotiation_id=outcome.negotiation_id,
         agreed_amount=outcome.agreed_amount,
-        accepted_provision_terms=(
-            outcome.accepted_provision_terms.model_dump(mode="json")
-            if outcome.accepted_provision_terms is not None
+        # The accepted Agreement names the seller a delivered introduction
+        # identifies as its counterparty.
+        agreement=(
+            outcome.agreement.model_dump(mode="json", exclude_none=True)
+            if outcome.agreement is not None
             else None
         ),
+        agreement_bytes=outcome.agreement_bytes,
+        accepted_provision_terms=outcome.to_dict().get("accepted_provision_terms"),
         **settlement_acceptance_fields(
             negotiation_id=outcome.negotiation_id,
             selection=outcome.settlement_selection,
@@ -578,10 +617,10 @@ def request_introduction(
     )
 
 
-def _seller_principal(deal: Any) -> Any:
-    principals = getattr(deal, "seller_principals", None)
-    identities = getattr(principals, "identities", ()) if principals else ()
-    return identities[0] if identities else None
+# Bare metal's settlement utilities sit under its own command, beside
+# ``request-introduction``, so it registers no root ``settlement`` group: the
+# core application refuses a root command two installed domains register.
+bare_metal_app.add_typer(settlement_app, name="settlement")
 
 
 def register_commands(app: object) -> None:
@@ -589,4 +628,3 @@ def register_commands(app: object) -> None:
 
     add_typer = getattr(app, "add_typer")
     add_typer(bare_metal_app, name="bare-metal")
-    add_typer(settlement_app, name="settlement")

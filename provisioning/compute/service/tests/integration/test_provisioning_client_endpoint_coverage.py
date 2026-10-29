@@ -19,7 +19,13 @@ from compute_provisioning_service import container as _container_module
 import pytest
 
 from vm_provisioning_operator.models import CreateVmRequest
-from compute_provisioning_contracts import HostCreate
+from compute_provisioning_contracts import (
+    HostCreate,
+    MockJobEvaluation,
+    MockRuleAdded,
+    MockRuleDeleted,
+    MockRuleResumed,
+)
 
 
 HOST = "kvm1"
@@ -130,8 +136,8 @@ class TestSystemClientEndpointCoverage:
         paused = await client.family.pause_lease_watchdog()
         resumed = await client.family.resume_lease_watchdog()
 
-        assert paused["paused"] is True
-        assert resumed["paused"] is False
+        assert paused.paused is True
+        assert resumed.paused is False
 
 
 class TestCapacityClientEndpointCoverage:
@@ -204,14 +210,13 @@ class TestBareMetalTestRouteCoverage:
         resumed = await test_client.resume_bare_metal_rule("coverage-gate")
         deleted = await test_client.delete_bare_metal_mock_rule("coverage-gate")
 
-        assert added == {"rule_id": "coverage-gate", "status": "added"}
-        assert [(rule["rule_id"], rule["waiting"]) for rule in listed] == [
-            ("coverage-gate", 0)
-        ]
-        assert evaluated["rule_matched"] == "coverage-gate"
-        assert evaluated["host_exists"] is True
-        assert resumed == {"rule_id": "coverage-gate", "resumed": True}
-        assert deleted == {"rule_id": "coverage-gate", "deleted": True}
+        assert added == MockRuleAdded(rule_id="coverage-gate", status="added")
+        assert [(rule.rule_id, rule.waiting) for rule in listed] == [("coverage-gate", 0)]
+        assert evaluated == MockJobEvaluation(
+            params_valid=True, host_exists=True, rule_matched="coverage-gate", would_pause=True
+        )
+        assert resumed == MockRuleResumed(rule_id="coverage-gate", resumed=True)
+        assert deleted == MockRuleDeleted(rule_id="coverage-gate", deleted=True)
         assert bare_metal_runner.list_rules() == []
 
 

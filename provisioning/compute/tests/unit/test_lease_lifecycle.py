@@ -8,6 +8,7 @@ by aggregate state, are ``test_release.py``'s.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -65,7 +66,7 @@ class FakeSiteAuthority:
             if reservation.get("release_job_id") not in (None, release_job_id):
                 return None
             return reservation
-        if reservation["state"] not in {"reserved", "provisioning", "leased", "release_failed"}:
+        if reservation["state"] not in {"reserved", "leased", "release_failed"}:
             return None
         reservation["release_requested_at"] = datetime.now(timezone.utc).isoformat()
         reservation.update(state="releasing", release_job_id=release_job_id)
@@ -75,7 +76,7 @@ class FakeSiteAuthority:
         self, capacity_reservation_id, *, reason, message=None, release_job_id=None
     ):
         reservation = self.reservations[capacity_reservation_id]
-        if reservation["state"] not in {"reserved", "provisioning", "leased", "releasing"}:
+        if reservation["state"] not in {"reserved", "leased", "releasing"}:
             return None
         if (
             reservation["state"] == "releasing"
@@ -485,3 +486,85 @@ async def test_oversight_of_a_lease_the_lifecycle_began_releasing_is_a_conflict(
         lifecycle.release_oversight("alloc-1", SimpleNamespace(reason="manual"))
 
     assert site.reservations["alloc-1"]["state"] == "releasing"
+
+
+class _GatedExecutor(ScriptedExecutor):
+    """Holds each release decision until ``release`` is set; ``waiting`` is set
+    once a cycle is waiting on it."""
+
+    def __init__(self, *decisions: ReleaseDecision) -> None:
+        super().__init__(*decisions)
+        self.waiting = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def submit_release(self, reservation):
+        self.waiting.set()
+        await self.release.wait()
+        return await super().submit_release(reservation)
+
+
+@pytest.mark.asyncio
+async def test_an_idle_watchdog_is_at_its_gate_once_paused():
+    lifecycle = _lifecycle(FakeSiteAuthority(), ScriptedExecutor(_decision(ReleaseAction.FREE)))
+
+    assert (lifecycle.is_paused, lifecycle.is_at_gate) == (False, False)
+    lifecycle.pause()
+    assert (lifecycle.is_paused, lifecycle.is_at_gate) == (True, True)
+    lifecycle.resume()
+    assert (lifecycle.is_paused, lifecycle.is_at_gate) == (False, False)
+
+
+@pytest.mark.asyncio
+async def test_a_timer_cycle_in_flight_keeps_a_paused_watchdog_off_its_gate():
+    """A pause stops the next timer cycle, not one already running: until that
+    one ends the watchdog is paused but not held. An explicit check is the
+    caller's own and never counts."""
+    site = FakeSiteAuthority()
+    site.due = [site.reservations["alloc-1"]]
+    executor = _GatedExecutor(_decision(ReleaseAction.FREE))
+    lifecycle = _lifecycle(site, executor)
+
+    cycle = asyncio.create_task(lifecycle.check_leases())
+    await asyncio.wait_for(executor.waiting.wait(), timeout=1)
+    lifecycle.pause()
+    assert (lifecycle.is_paused, lifecycle.is_at_gate) == (True, False)
+    executor.release.set()
+    await asyncio.wait_for(cycle, timeout=1)
+    assert lifecycle.is_at_gate is True
+
+    site.reservations["alloc-1"]["state"] = "leased"
+    executor.waiting.clear()
+    executor.release.clear()
+    explicit = asyncio.create_task(lifecycle.force_check_leases())
+    await asyncio.wait_for(executor.waiting.wait(), timeout=1)
+    assert lifecycle.is_at_gate is True
+    executor.release.set()
+    await asyncio.wait_for(explicit, timeout=1)
+
+
+@pytest.mark.asyncio
+async def test_a_pause_straight_after_a_resume_holds_the_cycle_the_resume_woke():
+    """A resume wakes the timer cycle waiting at the gate; a pause before that
+    cycle runs answers "at the gate", so the woken cycle must wait again rather
+    than run inside the hold."""
+    site = FakeSiteAuthority()
+    site.due = [site.reservations["alloc-1"]]
+    executor = _GatedExecutor(_decision(ReleaseAction.FREE))
+    lifecycle = _lifecycle(site, executor)
+    lifecycle.pause()
+    cycle = asyncio.create_task(lifecycle.check_leases())
+    await asyncio.sleep(0)
+
+    lifecycle.resume()
+    lifecycle.pause()
+    assert lifecycle.is_at_gate is True
+    for _ in range(5):
+        await asyncio.sleep(0)
+
+    assert not executor.waiting.is_set()
+    assert not cycle.done()
+    assert lifecycle.is_at_gate is True
+    lifecycle.resume()
+    await asyncio.wait_for(executor.waiting.wait(), timeout=1)
+    executor.release.set()
+    await asyncio.wait_for(cycle, timeout=1)

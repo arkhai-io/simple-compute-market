@@ -201,8 +201,9 @@ def test_release_two_publishes_to_release_ones_registry_under_its_pinned_trust()
     deployment = _source(_release_two(), "bare-metal-storefront/templates/deployment.yaml")
     assert f'name: "{RELEASE_ONE}-dev-env-alkahest-addresses"' in {line.strip() for line in deployment.splitlines()}
     path = "/etc/arkhai/alkahest/alkahest_anvil_addresses.json"
-    assert storefront["Chains"]["anvil"]["alkahest_address_config_path"] == path
-    assert storefront["Settlement"]["alkahest"]["address_config_path"] == path
+    assert storefront["Settlement"]["alkahest"]["address_books"] == {"anvil": path}
+    assert "alkahest_address_config_path" not in storefront["Chains"]["anvil"]
+    assert "address_config_path" not in storefront["Settlement"]["alkahest"]
 
 
 def test_release_two_runs_only_its_storefront_and_provisioning_service() -> None:
@@ -404,6 +405,107 @@ def test_topology_up_restarts_every_deployment_but_the_chain() -> None:
     assert components == {*order, "dev-env"}
 
 
+def _mapping_under(lines: list[str], header: str) -> dict[str, str]:
+    """The ``key: value`` lines nested under the first line equal to ``header``,
+    at the next indentation, with any quotes around a value removed."""
+    start = lines.index(header)
+    indent = " " * (len(header) - len(header.lstrip()) + 2)
+    mapping = {}
+    for line in lines[start + 1 :]:
+        if not line.startswith(indent) or line.startswith(indent + " "):
+            break
+        key, value = line.strip().split(": ", 1)
+        mapping[key.strip('"')] = value.strip('"')
+    return mapping
+
+
+_TEST_HOOK = re.compile(r'^\s+"?helm\.sh/hook"?: "?test"?$', re.MULTILINE)
+
+
+def _selectors_and_test_pods(
+    manifest: str,
+) -> tuple[dict[str, dict[str, str]], dict[str, dict[str, str]]]:
+    """Every rendered Deployment's ``spec.selector.matchLabels`` and Service's
+    ``spec.selector``, each by its kind and name, and every Pod annotated
+    ``helm.sh/hook: test``'s labels, by its name."""
+    selectors, test_pods = {}, {}
+    for document in _documents(manifest):
+        lines = document.splitlines()
+        deployment = "kind: Deployment" in lines
+        service = "kind: Service" in lines and "  selector:" in lines
+        test_pod = "kind: Pod" in lines and _TEST_HOOK.search(document) is not None
+        if not (deployment or service or test_pod):
+            continue
+        name = next(line.split(": ", 1)[1].strip('"') for line in lines if line.startswith("  name: "))
+        if deployment:
+            selectors[f"Deployment/{name}"] = _mapping_under(lines, "    matchLabels:")
+        elif service:
+            selectors[f"Service/{name}"] = _mapping_under(lines, "  selector:")
+        else:
+            test_pods[name] = _mapping_under(lines, "  labels:")
+    return selectors, test_pods
+
+
+def _test_templates(manifest: str) -> dict[str, str]:
+    """Every Pod rendered from a chart's ``templates/tests/``: its name, and
+    the template it was rendered from, from ``templates/tests/`` on."""
+    templates = {}
+    for document in _documents(manifest):
+        lines = document.splitlines()
+        source = next(
+            (line for line in lines if line.startswith("# Source: ") and "/templates/tests/" in line),
+            None,
+        )
+        if "kind: Pod" in lines and source is not None:
+            name = next(line.split(": ", 1)[1].strip('"') for line in lines if line.startswith("  name: "))
+            templates[name] = source[source.index("templates/tests/") :]
+    return templates
+
+
+#: The test templates each topology release renders a Pod from, so a test pod
+#: that stops rendering fails here rather than leaving nothing to check.
+_EXPECTED_TEST_TEMPLATES = {
+    RELEASE_ONE: {
+        "templates/tests/registry-environment-test.yaml",
+        "templates/tests/storefront-environment-test.yaml",
+        "templates/tests/provisioning-smoke-test.yaml",
+        "templates/tests/e2e-deal-test.yaml",
+        "templates/tests/chain-environment-test.yaml",
+    },
+    RELEASE_TWO: {
+        "templates/tests/provisioning-smoke-test.yaml",
+        "templates/tests/health-test.yaml",
+    },
+}
+
+
+def test_no_test_pod_carries_a_workload_selector() -> None:
+    """The deployment-state scenario "Both topology releases are rendered", a
+    static stand-in for selecting a workload's pods in a cluster: no Helm test
+    pod carries all of any Deployment's or Service's selector, since every test
+    pod lacks ``app.kubernetes.io/name``, which every selector requires, and
+    each carries its release's instance label and ``component: test``."""
+    for release_name, release in ((RELEASE_ONE, _release_one()), (RELEASE_TWO, _release_two())):
+        selectors, test_pods = _selectors_and_test_pods(release)
+        templates = _test_templates(release)
+        # Every test template's Pod is read as a test pod, so none escapes the
+        # checks below by a hook annotation spelled some other way.
+        assert set(test_pods) == set(templates), (sorted(test_pods), release_name)
+        assert set(templates.values()) == _EXPECTED_TEST_TEMPLATES[release_name], (
+            sorted(templates.values()),
+            release_name,
+        )
+        assert any(key.startswith("Service/") for key in selectors), (sorted(selectors), release_name)
+        assert selectors and test_pods, (sorted(selectors), sorted(test_pods))
+        assert all("app.kubernetes.io/name" in selector for selector in selectors.values()), selectors
+        for pod, labels in test_pods.items():
+            assert labels.get("app.kubernetes.io/component") == "test", (pod, labels)
+            assert labels.get("app.kubernetes.io/instance") == release_name, (pod, labels)
+            assert "app.kubernetes.io/name" not in labels, (pod, labels)
+            for deployment, selector in selectors.items():
+                assert not selector.items() <= labels.items(), (pod, deployment)
+
+
 def _secret_references(manifest: str) -> set[str]:
     named = re.findall(r'secretName: "?([^"\s]+)"?', manifest)
     keyed = re.findall(r'secretKeyRef:\n\s+name: "?([^"\s]+)"?', manifest)
@@ -472,6 +574,20 @@ def test_one_release_running_both_storefronts_on_its_provisioning_service_is_ref
         }
     }
     _ok(_render(RELEASE_ONE, RELEASE_ONE_VALUES, own_site))
+
+    # A later values file removing those sites leaves the derived `default` site on
+    # the release's provisioning service, which the release refuses again: the
+    # check reads the bare-metal config with its nulls removed.
+    with tempfile.NamedTemporaryFile("w", suffix=".json") as stated:
+        json.dump(own_site, stated)
+        stated.flush()
+        removed = _render(
+            RELEASE_ONE,
+            (*RELEASE_ONE_VALUES, Path(stated.name)),
+            {"bare-metal-storefront": {"config": {"capacity": {"sites": None}}}},
+        )
+    assert removed.returncode != 0, "render succeeded"
+    assert "run the bare-metal storefront as a second release" in removed.stderr, removed.stderr
 
 
 # --- the storefront's own loader -----------------------------------------

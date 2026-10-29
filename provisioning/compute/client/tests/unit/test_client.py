@@ -26,9 +26,14 @@ from market_identity import (
 from compute_provisioning_client import (
     ComputeProvisioningClient,
     ComputeProvisioningAuthenticationError,
+    ComputeProvisioningUnauthenticatedResponseError,
     SyncComputeProvisioningClient,
 )
 from compute_provisioning_contracts import (
+    ConvergenceCycleResponse,
+    HostUpdate,
+    LeaseCheckResponse,
+    PrincipalRotationResponse,
     resolve_provisioning_route,
 )
 
@@ -93,6 +98,7 @@ def _signed_transport(
     served_body=None,
     unsigned=False,
     seen=None,
+    answer=None,
 ):
     signer = authority if response_signer is None else response_signer
 
@@ -120,7 +126,7 @@ def _signed_transport(
         assert result.verified
         if seen is not None:
             seen.append(dict(request.headers))
-        signed_body = {"ok": True}
+        signed_body = {"ok": True} if answer is None else answer
         response_body = signed_body if served_body is None else served_body
         if unsigned:
             return httpx.Response(200, json=response_body)
@@ -229,13 +235,20 @@ async def test_client_rejects_wrong_authority_role_body_and_unsigned_response(
             unsigned=unsigned,
         ),
     ) as client:
-        with pytest.raises(ComputeProvisioningAuthenticationError):
+        with pytest.raises(ComputeProvisioningAuthenticationError) as refused:
             await client.authenticated_request(
                 "POST",
                 "/api/v1/fulfillment/begin",
                 {"capacity_reservation_id": "reservation-1"},
                 request_id="request-1",
             )
+    # Only the answer with no proof at all is reported as unauthenticated; one
+    # from another principal, role, or body keeps its verification result.
+    assert isinstance(
+        refused.value, ComputeProvisioningUnauthenticatedResponseError
+    ) is unsigned
+    if response_signer is not None:
+        assert "wrong_principal" in str(refused.value)
 
 
 @pytest.mark.parametrize(
@@ -284,6 +297,81 @@ async def test_client_exact_retry_fresh_signs_and_changed_reuse_fails_closed(
 
     assert seen[0]["x-market-timestamp"] != seen[1]["x-market-timestamp"]
     assert seen[0]["x-market-signature"] != seen[1]["x-market-signature"]
+
+
+@pytest.mark.parametrize("variant", ("async", "sync"))
+@pytest.mark.asyncio
+async def test_an_unsigned_405_is_refused_and_reported_as_unauthenticated(variant):
+    """The client and service route tables differ: the service answers an
+    unsigned 405, and the report names its status and nothing it said."""
+    caller = Ed25519Signer(b"\x11" * 32)
+    authority = Ed25519Signer(b"\x12" * 32)
+    sent: list[httpx.Request] = []
+
+    def unsigned(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(
+            405, json={"detail": "body-canary"}, headers={"Allow": "header-canary"}
+        )
+
+    client = _client(
+        variant,
+        caller=caller,
+        expected_authorities=TrustedIdentitySet(identities=(authority.identity,)),
+        transport=httpx.MockTransport(unsigned),
+    )
+    try:
+        with pytest.raises(ComputeProvisioningUnauthenticatedResponseError) as refused:
+            await _call(client, "table-drift")
+    finally:
+        await _close(client)
+
+    report = str(refused.value)
+    assert refused.value.status_code == 405
+    assert "HTTP 405" in report and "without response authentication" in report
+    for leaked in ("body-canary", "header-canary", sent[0].headers["X-Market-Signature"]):
+        assert leaked not in report
+
+
+@pytest.mark.parametrize("variant", ("async", "sync"))
+@pytest.mark.asyncio
+async def test_a_bad_response_proof_is_not_reported_as_unauthenticated(variant):
+    """Every authentication header present, its proof one the authority never
+    made: refused for the proof, as before, not as an unauthenticated answer."""
+    caller = Ed25519Signer(b"\x11" * 32)
+    authority = Ed25519Signer(b"\x12" * 32)
+
+    def forged(request: httpx.Request) -> httpx.Response:
+        signed = sign_response(
+            signer=authority,
+            envelope=ResponseEnvelope(
+                role="service",
+                principal=authority.identity,
+                method=request.method,
+                operation="provisioning_lease_get",
+                resource="another-reservation",
+                request_id=request.headers["X-Market-Request-ID"],
+                timestamp=int(time.time()),
+                status=200,
+                body_hash=canonical_body_hash({}),
+            ),
+        )
+        return httpx.Response(200, json={}, headers=_identity_headers(signed))
+
+    client = _client(
+        variant,
+        caller=caller,
+        expected_authorities=TrustedIdentitySet(identities=(authority.identity,)),
+        transport=httpx.MockTransport(forged),
+    )
+    try:
+        with pytest.raises(ComputeProvisioningAuthenticationError) as refused:
+            await _call(client, "forged")
+    finally:
+        await _close(client)
+
+    assert not isinstance(refused.value, ComputeProvisioningUnauthenticatedResponseError)
+    assert "authentication failed" in str(refused.value)
 
 
 async def _call(client, request_id):
@@ -428,13 +516,28 @@ async def test_rotation_is_the_administrator_s_and_a_seller_cannot_sign_it():
             admin,
             authority,
             expected_role="admin",
+            answer={
+                "role": "admin",
+                "generation": 2,
+                "current_valid_until": "2026-01-01T00:01:00+00:00",
+                "replacement": replacement.identity.model_dump(mode="json"),
+            },
         ),
     ) as client:
-        assert await client.rotate_trusted_principal(
+        rotated = await client.rotate_trusted_principal(
             "admin",
             rotation,
             request_id="rotate-1",
-        ) == {"ok": True}
+        )
+        assert rotated == PrincipalRotationResponse.model_validate(
+            {
+                "role": "admin",
+                "generation": 2,
+                "current_valid_until": "2026-01-01T00:01:00+00:00",
+                "replacement": replacement.identity.model_dump(mode="json"),
+            }
+        )
+        assert rotated.replacement == replacement.identity
     async with ComputeProvisioningClient(
         "http://provisioner",
         signer=admin,
@@ -450,6 +553,66 @@ async def test_rotation_is_the_administrator_s_and_a_seller_cannot_sign_it():
                 rotation,
                 request_id="wrong-role",
             )
+
+
+_DIAGNOSTICS = {
+    "per_state": {
+        "dispatch_pending": {
+            "total": 1,
+            "actively_claimed": 0,
+            "expired_claims": 0,
+            "oldest_row_age_seconds": 2.5,
+            "max_attempt_count": 1,
+        }
+    },
+    "failed_count": 0,
+    "teardown_failed_count": 0,
+}
+
+
+@pytest.mark.parametrize("variant", ("async", "sync"))
+@pytest.mark.parametrize(
+    ("call", "answer", "model"),
+    [
+        (
+            "check_leases",
+            {"checked": 1, "released": 0, "release_failed": 0, "skipped": 2},
+            LeaseCheckResponse,
+        ),
+        (
+            "run_fulfillment_convergence_cycle",
+            {"before": _DIAGNOSTICS, "after": _DIAGNOSTICS},
+            ConvergenceCycleResponse,
+        ),
+        (
+            "advance_fulfillment_convergence_cycle",
+            {"before": _DIAGNOSTICS, "after": _DIAGNOSTICS},
+            ConvergenceCycleResponse,
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_each_worker_control_answers_its_model(variant, call, answer, model):
+    admin = Ed25519Signer(b"\x11" * 32)
+    authority = Ed25519Signer(b"\x12" * 32)
+    client_type = (
+        ComputeProvisioningClient if variant == "async" else SyncComputeProvisioningClient
+    )
+    client = client_type(
+        "http://provisioner",
+        signer=admin,
+        caller_role="admin",
+        expected_authorities=TrustedIdentitySet(identities=(authority.identity,)),
+        transport=_signed_transport(admin, authority, expected_role="admin", answer=answer),
+    )
+    try:
+        result = getattr(client, call)()
+        if variant == "async":
+            result = await result
+    finally:
+        await _close(client)
+
+    assert result == model.model_validate(answer)
 
 
 _LEASE_GET = {
@@ -490,3 +653,44 @@ async def test_the_client_signs_a_route_its_caller_names() -> None:
             )
 
     assert signed == [("admin", "/api/v1/example/leases/lease-1")]
+
+
+@pytest.mark.parametrize("variant", ("async", "sync"))
+@pytest.mark.parametrize(
+    ("update", "body"),
+    (
+        (HostUpdate(pool_id=None), {"pool_id": None}),
+        (HostUpdate(pool_id="gpu"), {"pool_id": "gpu"}),
+        (HostUpdate(enabled=False), {"enabled": False}),
+        (HostUpdate(), {}),
+    ),
+)
+@pytest.mark.asyncio
+async def test_a_host_update_sends_exactly_the_fields_its_caller_set(variant, update, body):
+    """An explicit ``pool_id=None`` unplaces a host, so it is sent as ``null``;
+    an omitted pool is not sent at all, so the host keeps its pool."""
+    sent: list = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.content))
+        return httpx.Response(500)
+
+    caller = Ed25519Signer(b"\x61" * 32)
+    client_type = (
+        ComputeProvisioningClient if variant == "async" else SyncComputeProvisioningClient
+    )
+    client = client_type(
+        "http://provisioner",
+        signer=caller,
+        caller_role="admin",
+        expected_authorities=TrustedIdentitySet(identities=(caller.identity,)),
+        transport=httpx.MockTransport(handler),
+    )
+    # The fake authority answers unsigned, so the call fails after sending.
+    with pytest.raises(ComputeProvisioningAuthenticationError):
+        result = client.update_host("kvm1", update)
+        if variant == "async":
+            await result
+    await _close(client)
+
+    assert sent == [body]

@@ -27,11 +27,12 @@ spec:
       securityContext:
         fsGroup: 1000
       initContainers:
-        # Applies DB migrations before the main container starts — see
-        # ARCHITECTURE.md § Schema Migration Execution. Same image, only the
-        # command differs. `Init:Error` in pod status is an unambiguous
-        # migration-failure signal, distinct from an application crash.
-        # Idempotent: safe to re-run on every rollout/restart.
+        # Applies DB migrations before the main container starts; the service
+        # refuses a database behind its last migration — see
+        # openspec/specs/deployment-state/spec.md, "Service-owned migration
+        # history". Same image, only the command differs. `Init:Error` in pod
+        # status is an unambiguous migration-failure signal, distinct from an
+        # application crash. Idempotent: safe to re-run on every rollout/restart.
         - name: provisioning-migrate
           image: {{ include "provisioning.image" . }}
           imagePullPolicy: {{ .Values.server.image.pullPolicy }}
@@ -106,6 +107,12 @@ spec:
             - name: config
               mountPath: /app/config/capacity-definitions.yaml
               subPath: capacity-definitions.yaml
+              readOnly: true
+            {{- end }}
+            {{- range $name, $_ := .Values.configFiles }}
+            - name: config
+              mountPath: {{ printf "/app/config/%s" $name | quote }}
+              subPath: {{ $name | quote }}
               readOnly: true
             {{- end }}
           livenessProbe:

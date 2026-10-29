@@ -321,7 +321,10 @@ def contact_preflight(
     resources: Mapping[str, Any],
     role: SettlementRole,
 ) -> MechanismReadiness:
-    """Observe configuration completeness only; there is nothing to probe."""
+    """Observe configuration completeness only; there is nothing to probe.
+
+    Readiness contacts nothing, so every blocker is a configuration blocker.
+    """
 
     config = ContactSettlementConfig.model_validate(section)
     blockers: list[ReadinessBlocker] = []
@@ -331,6 +334,7 @@ def contact_preflight(
                 ReadinessBlocker(
                     code="no_contact_profiles",
                     message="no contact profiles are configured",
+                    kind="configuration",
                 )
             )
         if not contact_payloads(config):
@@ -338,6 +342,7 @@ def contact_preflight(
                 ReadinessBlocker(
                     code="no_contact_payload",
                     message="no contact payload is configured to reveal",
+                    kind="configuration",
                 )
             )
     channels = sorted({profile.channel for profile in config.profiles.values()})

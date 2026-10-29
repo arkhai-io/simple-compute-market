@@ -32,8 +32,7 @@ image:
 # A map rather than a list because Helm merges maps key by key and replaces
 # lists whole: an overlay states only what it changes in one agent, and setting
 # a key to null removes it, the agent's own name included. The chart ships no
-# agent, since Helm cannot remove a subchart's default agent from a parent's
-# values; the umbrella chart's values declare the release's agents. A list of
+# agent; the umbrella chart's values declare the release's agents. A list of
 # agents is refused, naming this shape.
 #
 # Each agent renders one Deployment and Service, named for its key. `config` is
@@ -74,9 +73,8 @@ image:
 #         # real token; inject via --set at render/deploy time.
 #         registryAuthToken: ""
 #       # An existing ConfigMap holding an Alkahest address book, mounted
-#       # read-only at mountPath; an empty name mounts nothing. A chain's
-#       # alkahest_address_config_path and [Settlement.alkahest]'s
-#       # address_config_path name <mountPath>/<key>.
+#       # read-only at mountPath; an empty name mounts nothing. The chain's
+#       # entry in [Settlement.alkahest.address_books] names <mountPath>/<key>.
 #       alkahestAddressBook:
 #         configMapName: ""
 #         key: alkahest_addresses.json

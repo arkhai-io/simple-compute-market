@@ -4,16 +4,18 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from arkhai_apicredits.settlement import CreditsServiceClient
+from core_storefront.stage_log import stage_event
 from market_alkahest import (
     ALKAHEST_CONFIG_KEY,
     ALKAHEST_MECHANISM_ID,
     RECIPIENT_RELEASE,
-    release_conditions,
-    require_deliverable_release_model,
+    AlkahestChainProbe,
+    configured_release_model,
+    escrow_release_conditions,
 )
 from market_arkhai_payments import (
     ARKHAI_PAYMENTS_CONFIG_KEY,
@@ -82,7 +84,8 @@ class ApiCreditsSettlementComposition:
     mechanism_clients: Mapping[str, Any]
     settlement_config: Any
     configuration_registry: SettlementConfigurationRegistry
-    mechanism_resources: Mapping[str, Any]
+    # Carries the seller wallet's key, so it is never part of the repr.
+    mechanism_resources: Mapping[str, Any] = field(repr=False)
     credits_client: CreditsServiceClient
     evidence_service: ApiCreditsIssuanceEvidenceService
     private_results: ApiCreditPrivateResultRepository
@@ -105,12 +108,27 @@ class ApiCreditsSettlementComposition:
             mechanism=ARKHAI_PAYMENTS_MECHANISM,
         )
 
-    async def readiness(self) -> tuple[MechanismReadiness, ...]:
+    async def readiness(
+        self, *, accepted_escrows: Sequence[Mapping[str, Any]] = ()
+    ) -> tuple[MechanismReadiness, ...]:
+        """Each mechanism's readiness; ``accepted_escrows`` are escrows a listing
+        request supplies, whose chains Alkahest's readiness is then judged on."""
+        resources: Mapping[str, Any] = self.mechanism_resources
+        if accepted_escrows:
+            resources = {
+                **resources,
+                "accepted_escrows": [dict(escrow) for escrow in accepted_escrows],
+            }
         return await self.configuration_registry.ordered_readiness(
             self.settlement_config,
             role="seller",
-            resources=self.mechanism_resources,
+            resources=resources,
         )
+
+    def canonical_mechanism(self, name: str) -> str:
+        """The canonical ID of the mechanism a publication clause names, by its
+        ID or its configuration key, as compiling the clause resolves it."""
+        return self.configuration_registry.canonical_mechanism_id(name, role="seller")
 
     def accepted_obligation_dispatch(
         self,
@@ -146,31 +164,24 @@ class ApiCreditsSettlementComposition:
         return dispatch
 
     def release_conditions(
-        self, accepted_escrows: Sequence[Mapping[str, Any]]
+        self,
+        accepted_escrows: Sequence[Mapping[str, Any]],
+        *,
+        readiness: Sequence[MechanismReadiness],
     ) -> list[dict[str, Any]]:
         """The release conditions a listing publishing ``accepted_escrows`` advertises.
 
-        Accepted escrows are the Alkahest publication form, so each one's chain
-        gets the condition the Alkahest mechanism derives from the configured
-        section, the seller wallet, and that chain's address book. An escrow on
-        a chain this storefront does not configure is refused, since nothing
-        could settle it. An unset wallet still derives a condition, with no
-        recipient; materialization refuses every deal under it as unreadable.
+        The Alkahest mechanism's own derivation, over the configured section,
+        the seller wallet, and the configured chains: nothing while
+        ``readiness`` reports Alkahest unready, and otherwise one condition per
+        chain the escrows name, refusing a chain this storefront does not
+        configure.
         """
-        chain_names = {str(escrow["chain_name"]) for escrow in accepted_escrows}
-        if not chain_names:
-            return []
-        chains = self.mechanism_resources["chains"]
-        unconfigured = sorted(name for name in chain_names if name not in chains)
-        if unconfigured:
-            raise ValueError(
-                f"accepted escrow names chain {unconfigured[0]!r}, which this "
-                "storefront does not configure under [chains]"
-            )
-        return release_conditions(
+        return escrow_release_conditions(
             self.settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY),
-            chain_names=chain_names,
-            chains=chains,
+            accepted_escrows,
+            readiness=readiness,
+            chains=self.mechanism_resources["chains"],
             wallet_address=self.seller_wallet_address,
         )
 
@@ -181,7 +192,12 @@ class ApiCreditsSettlementComposition:
     ) -> tuple[
         list[dict[str, Any]], list[dict[str, Any]], tuple[MechanismReadiness, ...]
     ]:
-        """Compile each complete ready clause without suppressing ready peers."""
+        """Compile each complete ready clause without suppressing ready peers.
+
+        A clause whose mechanism is unready compiles nothing, so with none ready
+        no artifact is returned; the readiness returned beside them says why,
+        which the caller judges.
+        """
         merged_resources = {**self.mechanism_resources, **resources}
         compiled = (
             [
@@ -257,27 +273,38 @@ class ApiCreditsSettlementComposition:
             settlement_options.extend(
                 dict(item) for item in envelope.get("settlement_options", ())
             )
-        if not accepted_escrows and not settlement_options:
-            raise RuntimeError("no enabled settlement mechanism is ready")
         return accepted_escrows, settlement_options, readiness
 
 
-def require_api_credit_release_model(settlement_config: Any = None) -> None:
-    """Refuse a configured Alkahest release model API credits cannot deliver.
+def alkahest_ready(readiness: Sequence[MechanismReadiness]) -> bool:
+    """Whether ``readiness`` reports Alkahest ready."""
+    return any(
+        status.mechanism == ALKAHEST_MECHANISM_ID and status.ready
+        for status in readiness
+    )
 
-    A configured section owns the deals accepted under it, enabled or not, so
-    its release model must be one the Alkahest entry declares. With no
-    ``settlement_config``, the storefront's own configuration is resolved.
+
+def require_coherent_release_model(settlement_config: Any = None) -> None:
+    """Refuse a configured Alkahest section that selects contradictory models.
+
+    A section stating both the oracle-gated and the interruptible model is
+    incoherent configuration rather than an unusable mechanism, so it stops
+    startup, enabled or not; a coherent model API credits cannot deliver is a
+    readiness blocker instead. With no ``settlement_config``, the storefront's
+    own configuration is resolved.
     """
     if settlement_config is None:
         settlement_config = build_storefront_settlement_registry().resolve(
             storefront_config.settlement_config_mapping(), role="seller"
         )
-    alkahest_section = settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY)
-    if alkahest_section is not None:
-        require_deliverable_release_model(
-            alkahest_section, SELLER_STAGES[ALKAHEST_MECHANISM_ID].release_models
-        )
+    configured_release_model(settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY))
+
+
+def record_servicing_event(event: str, fields: dict[str, Any]) -> None:
+    """Record a servicing worker's event as a ``claims`` stage event, as every
+    storefront composing the worker does, so a failing step is on the deal's
+    record."""
+    stage_event("claims", event, **fields)
 
 
 def build_api_credit_settlement_composition(
@@ -288,24 +315,42 @@ def build_api_credit_settlement_composition(
     marketplace_signer: Signer,
     failure_policy: Any,
     payments_client_for_owner: ClientForOwner | None = None,
+    chain_probe: AlkahestChainProbe | None = None,
 ) -> ApiCreditsSettlementComposition:
-    """Build lazy mechanism clients and the shared servicing worker."""
+    """Build lazy mechanism clients and the shared servicing worker.
+
+    ``alkahest_clients`` is the live map ``chain_probe`` updates in place, so
+    it is held here rather than copied; readiness reads the probe's results.
+    """
     registry = build_storefront_settlement_registry()
     settlement_config = registry.resolve(
         storefront_config.settlement_config_mapping(),
         role="seller",
     )
-    require_api_credit_release_model(settlement_config)
+    require_coherent_release_model(settlement_config)
     repository = SettlementSQLiteRepository(
         sqlite_client.db_path, apply_migrations=False
     )
+    seller_wallet_address = storefront_config.seller_wallet_address()
+    seller_wallet_key = str(storefront_config.settings.get("wallet.private_key", "") or "")
     resources: dict[str, Any] = {
         "marketplace_signer": marketplace_signer,
-        "clients": dict(alkahest_clients),
+        "clients": alkahest_clients,
         "get_client": lambda chain: alkahest_clients.get(chain or ""),
         "chains": storefront_config.CHAINS,
         "default_chain": next(iter(storefront_config.CHAINS), None),
+        # Readiness reads the seller wallet. With neither an address nor a key
+        # no escrow could pay the seller, whatever clients are composed; an
+        # address its key does not sign as names two accounts. The storefront
+        # submits its issuance evidence on chain with the key, so a missing key
+        # or chain makes Alkahest unready. A configured model the Alkahest entry
+        # cannot deliver is reported the same way.
+        "wallet": {"address": seller_wallet_address, "private_key": seller_wallet_key},
+        "signs_transactions": True,
+        "deliverable_release_models": SELLER_STAGES[ALKAHEST_MECHANISM_ID].release_models,
     }
+    if chain_probe is not None:
+        resources["chain_probe"] = chain_probe
     mechanism_clients: dict[str, Any] = {}
     for registration in registry.ordered_registrations(
         settlement_config, role="seller"
@@ -334,6 +379,7 @@ def build_api_credit_settlement_composition(
         repository,
         worker_id=f"api-credit-storefront:{storefront_config.AGENT_ID}",
         interval_seconds=storefront_config.settlement_servicing_interval(),
+        on_event=record_servicing_event,
     )
     composition = ApiCreditsSettlementComposition(
         domain=domain,
@@ -350,9 +396,7 @@ def build_api_credit_settlement_composition(
         private_results=private_results,
         failure_policy=failure_policy,
         arkhai_payments_stage=_payments_stage(settlement_config, payments_client_for_owner),
-        seller_wallet_address=str(
-            storefront_config.settings.get("wallet.address", "") or ""
-        ),
+        seller_wallet_address=seller_wallet_address,
     )
     return composition
 

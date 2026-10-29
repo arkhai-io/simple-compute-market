@@ -37,6 +37,7 @@ from typing import Any, Protocol, runtime_checkable
 from market_alkahest.release_authorization import (
     ReleaseConditionError,
     authorized_release_condition,
+    require_pinned_escrow,
     selected_release_condition,
 )
 from market_alkahest.schemas import EscrowTerms, RateValue, compute_rate_total
@@ -131,8 +132,8 @@ def resolve_alkahest_address_config(
         return None
     if selected == NETWORK_ANVIL:
         raise ValueError(
-            "chain_name='anvil' requires an explicit alkahest_address_config_path "
-            "with deployed local addresses."
+            "chain_name='anvil' requires an address book with its deployed local "
+            "addresses, named under [Settlement.alkahest.address_books]."
         )
     return _sdk_addresses_for_chain(selected)
 
@@ -150,8 +151,8 @@ def _arbiter_address(
         return str(override["arbiters_addresses"][arbiter_field])
     if selected == NETWORK_ANVIL:
         raise ValueError(
-            "chain_name='anvil' requires an explicit alkahest_address_config_path "
-            "with deployed local addresses."
+            "chain_name='anvil' requires an address book with its deployed local "
+            "addresses, named under [Settlement.alkahest.address_books]."
         )
     cfg = _sdk_addresses_for_chain(selected)
     return str(getattr(cfg.arbiters_addresses, arbiter_field))
@@ -270,8 +271,8 @@ def _escrow_obligation_address(
         return str(category_override[field])
     if selected == NETWORK_ANVIL:
         raise ValueError(
-            "chain_name='anvil' requires an explicit alkahest_address_config_path "
-            "with deployed local addresses."
+            "chain_name='anvil' requires an address book with its deployed local "
+            "addresses, named under [Settlement.alkahest.address_books]."
         )
     cfg = _sdk_addresses_for_chain(selected)
     address_category = getattr(cfg, category)
@@ -508,8 +509,8 @@ def _override_reverse_address_map(
     override = _load_override_config(config_path)
     if override is None:
         raise ValueError(
-            "chain_name='anvil' requires an explicit alkahest_address_config_path "
-            "with deployed local addresses."
+            "chain_name='anvil' requires an address book with its deployed local "
+            "addresses, named under [Settlement.alkahest.address_books]."
         )
 
     result: dict[str, str] = {}
@@ -570,8 +571,8 @@ def address_to_slot(
         ).get(address.lower())
     if selected == NETWORK_ANVIL:
         raise ValueError(
-            "chain_name='anvil' requires an explicit alkahest_address_config_path "
-            "with deployed local addresses."
+            "chain_name='anvil' requires an address book with its deployed local "
+            "addresses, named under [Settlement.alkahest.address_books]."
         )
     return _sdk_address_to_slot(selected, address)
 
@@ -927,10 +928,19 @@ def materialize_escrow_terms_from_proposal(
     proposal selecting none takes the listing's, and an ``arbiter`` or
     ``demand`` stated among the escrow's fields is overwritten. ``listing`` is
     the listing the proposal was negotiated against, a mapping or model
-    carrying its ``demands``. A listing authorizing none, a selection it does
-    not authorize, and a condition the codecs cannot encode raise
-    ``ReleaseConditionError`` before any obligation data is built.
+    carrying its ``demands``. A proposal naming no escrow contract, a listing
+    authorizing none, a selection it does not authorize, and a condition the
+    codecs cannot encode raise ``ReleaseConditionError`` before any obligation
+    data is built.
+
+    The escrow is not held to an entry of the listing's ``accepted_escrows``:
+    a buyer derives from a record carrying only the release conditions, and
+    holds the result to the seller's plan instead. A seller authorizes the
+    proposal with :func:`market_alkahest.proposals.authorize_escrow_proposal`,
+    which also refuses an escrow outside the listing's accepted entries, before
+    materializing it.
     """
+    require_pinned_escrow(proposal)
     # The release condition is the one the listing authorizes, and nothing
     # else: an arbiter or demand stated among the escrow's fields, or a
     # recipient implied by them, is never a condition of the obligation.

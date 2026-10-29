@@ -136,7 +136,7 @@ class FakeSite:
         available = self._capacity(rid)
         for reservation in self.reservations.values():
             if reservation["resource_id"] != rid or reservation["state"] not in (
-                "reserved", "provisioning", "leased", "releasing"
+                "reserved", "leased", "releasing"
             ):
                 continue
             held = reservation.get("dimensions") or {"gpu_count": reservation["units"]}
@@ -257,6 +257,10 @@ class FakeSite:
                     "resources": [
                         {
                             "resource_id": rid,
+                            # Every declaration names its pool, and a row with
+                            # none matches no claim; this fake places each
+                            # resource in a pool of its own, as its matcher does.
+                            "pool_id": rid,
                             "resource_type": "compute.gpu",
                             "unit": "count",
                             "value": row["total_units"],

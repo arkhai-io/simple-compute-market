@@ -546,10 +546,15 @@ def test_erc20_unconditional_get_obligation_dispatches_to_sdk():
     mock_client.erc20.escrow.unconditional.get_obligation.assert_awaited_once_with("0xescrow")
 
 
+#: An escrow contract the development address book does not name, so no codec
+#: decides whether the escrow bargains an amount; a development value only.
+_UNREGISTERED_ESCROW = "0x" + "19" * 20
+
+
 def test_materialize_escrow_terms_uses_final_agreed_amount_over_proposal_amount():
     proposal = SimpleNamespace(
         chain_name="anvil",
-        escrow_address="0x" + "00" * 20,
+        escrow_address=_UNREGISTERED_ESCROW,
         fields={"token": _TOKEN, "amount": 7000},
         demand=_CONDITION,
         expiration_unix=1_800_000_000,
@@ -569,7 +574,7 @@ def test_materialize_escrow_terms_uses_final_agreed_amount_over_proposal_amount(
 def test_materialize_escrow_terms_payload_matches_model_dump():
     proposal = SimpleNamespace(
         chain_name="anvil",
-        escrow_address="0x" + "00" * 20,
+        escrow_address=_UNREGISTERED_ESCROW,
         fields={"token": _TOKEN, "amount": 7000},
         demand=_CONDITION,
         expiration_unix=1_800_000_000,
@@ -598,7 +603,7 @@ def test_materialize_escrow_terms_payload_matches_model_dump():
 def test_materialize_escrow_terms_assigns_indexed_bundle_rate_fields():
     proposal = SimpleNamespace(
         chain_name="anvil",
-        escrow_address="0x" + "00" * 20,
+        escrow_address=_UNREGISTERED_ESCROW,
         literal_fields={"erc20Tokens": [_TOKEN, "0x" + "ef" * 20]},
         demand=_CONDITION,
         rates=[
@@ -625,7 +630,7 @@ def test_materialize_escrow_terms_assigns_indexed_bundle_rate_fields():
 def test_materialize_escrow_terms_does_not_add_amount_for_amountless_escrow():
     proposal = SimpleNamespace(
         chain_name="anvil",
-        escrow_address="0x" + "00" * 20,
+        escrow_address=_UNREGISTERED_ESCROW,
         literal_fields={"attestationUid": "0x" + "12" * 32},
         demand=_CONDITION,
         rates=[],

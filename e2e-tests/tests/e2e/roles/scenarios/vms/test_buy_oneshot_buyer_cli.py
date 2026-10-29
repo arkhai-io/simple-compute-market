@@ -34,11 +34,11 @@ import logging
 from importlib import resources
 
 import pytest
+from compute_provisioning_contracts import MockRuleCreate
 from market_alkahest.dev_chain import anvil_address_book_path
 
 from market_alkahest.alkahest import (
     get_alkahest_network,
-    get_recipient_arbiter,
     resolve_alkahest_address_config,
 )
 from e2e_harness.settings import settings
@@ -53,9 +53,9 @@ from tests.e2e.roles.scenarios.vms.host_registry import (
 from tests.e2e.roles.helpers.compute_deal import (
     DealLease,
     advance_storefront,
+    assert_storefront_loops_held,
     delete_mock_rules_if_present,
     dry_run_storefront,
-    pause_storefront,
 )
 from tests.e2e.roles.scenarios.vms.conftest import (
     DealState,
@@ -66,7 +66,16 @@ from tests.e2e.roles.scenarios.vms.conftest import (
 
 log = logging.getLogger(__name__)
 
-pytestmark = pytest.mark.e2e_buy
+pytestmark = [
+    # Listed first, so the hold is taken before, and released after, every
+    # other fixture of the module; the lane's cleanup follows it, so it runs
+    # while the hold stands.
+    pytest.mark.usefixtures(
+        "storefront_loops_held",
+        "ensure_storefront_resumed", "reap_buyer_settle_subprocess", "release_reserved_resources",
+    ),
+    pytest.mark.e2e_buy,
+]
 
 # ---------------------------------------------------------------------------
 # Offer / demand spec — distinct from the full-deal suite so the two can
@@ -151,19 +160,6 @@ def _run_log_digest(run: MarketRun) -> str:
     return "run-log events:\n  " + "\n  ".join(lines)
 
 
-def _recipient_demands(seller_wallet: str) -> list[dict]:
-    return [
-        {
-            "chain_name": "anvil",
-            "arbiter": get_recipient_arbiter(
-                "anvil",
-                config_path=_ALKAHEST_ADDRESSES_PATH,
-            ).lower(),
-            "demand_data": {"recipient": seller_wallet.lower()},
-        }
-    ]
-
-
 DURATION_HOURS = 1
 #: Whole tokens, as `market buy` takes them: under the 10-token asking
 #: rate so round 0 counters, ceiling over it so the buyer accepts the
@@ -181,22 +177,18 @@ _REGISTRY_A = str(settings.REGISTRY.API_URL or "http://registry:8080")
 # ===========================================================================
 
 
-class TestStage00_LifecyclePause:
-    def test_00_pauses_the_storefront_loops(self, storefront_admin_client):
-        """Hold the storefront's timer loops idle for the rest of this scenario.
+class TestStage00_LifecycleHeld:
+    def test_00_the_storefront_loops_are_held(self, storefront_admin_client):
+        """The storefront's timer loops are held for this scenario.
 
-        A named stage rather than a fixture because every later assertion depends
-        on it: with the loops running, a listing status read after a reserve races
-        the capacity poller's next cycle, and a defect that reorders two writes
-        shows up as an intermittent failure instead of a reproducible one.
-
-        Trading is unaffected — this pauses the loops, not the storefront's
-        willingness to negotiate — so the deal stages below still work. Loops are
-        held, not stopped: nothing is torn down and no cycle is cut in half. Work
-        a loop would have done is requested explicitly from here on, through
-        `advance_storefront`.
+        The module holds them through ``storefront_loops_held``; this stage
+        asserts the hold, through system status, because every later assertion
+        depends on it: with the loops running, a listing status read after a
+        reserve races the capacity poller's next cycle. Trading is unaffected, so
+        the deal stages below still work; work a loop would have done is
+        requested explicitly, through `advance_storefront`.
         """
-        pause_storefront(storefront_admin_client)
+        assert_storefront_loops_held(storefront_admin_client)
 
 
 class TestStageB0_Readiness:
@@ -291,7 +283,7 @@ class TestStageB1a_ExecutorHostRegistry:
 class TestStageB2_PublishListing:
     def test_b2_create_and_publish_listing(
         self, storefront_admin_client,
-        storefront_seller_client, seller_wallet, registry_client, deal_state: DealState
+        storefront_seller_client, registry_client, deal_state: DealState
     ):
         """Create the listing paused, resume to publish, confirm in registry.
 
@@ -305,7 +297,6 @@ class TestStageB2_PublishListing:
             listing_resource=OFFER_RESOURCE,
             capacity_source=capacity_source_for(OFFER_RESOURCE),
             accepted_escrows=ACCEPTED_ESCROWS,
-            demands=_recipient_demands(seller_wallet),
             max_duration_seconds=DURATION_HOURS * 3600,
             paused=True,
         )
@@ -345,27 +336,28 @@ class TestStageB3_ArmProvisioning:
         require_state(deal_state, "_provisioning_mock_mode", "resume_confirmed")
 
         delete_mock_rules_if_present(
-            provisioning_test_client,
+            provisioning_test_client.vm_rules,
             BUY_RULE_ID,
             "e2e-create-pause",
         )
-        provisioning_test_client.add_mock_rule(
-            rule_id=BUY_RULE_ID,
-            match={"vm_action": "create"},
-            pause_before_result=False,
-            # The create fact the VM playbook prints, with the forwarded port and
-            # the time access became ready: a create reporting neither says
-            # nothing a buyer can use, and fails.
-            result_stdout=(
-                'ok: [kvm1] => {\n    "vm_creation_data": '
-                '{"action": "create", "vm_name": "e2e-buy-vm", "tenant_user": "vmuser", '
-                '"external_ssh_port": "2222", "timestamp": "2030-01-01T00:00:01Z", '
-                '"tenant_ssh_key_path": "/tmp/e2e.key", "frp": {"enabled": false}, '
-                '"authentication": {"tenant": {"ssh_commands": '
-                '{"external": "ssh vmuser@localhost", '
-                '"internal": "ssh vmuser@10.0.0.1"}}}}\n}\n'
-            ),
-            fail_with=None,
+        provisioning_test_client.vm_rules.add_rule(
+            MockRuleCreate(
+                rule_id=BUY_RULE_ID,
+                match={"vm_action": "create"},
+                pause_before_result=False,
+                # The create fact the VM playbook prints, with the forwarded port
+                # and the time access became ready: a create reporting neither
+                # says nothing a buyer can use, and fails.
+                result_stdout=(
+                    'ok: [kvm1] => {\n    "vm_creation_data": '
+                    '{"action": "create", "vm_name": "e2e-buy-vm", "tenant_user": "vmuser", '
+                    '"external_ssh_port": "2222", "timestamp": "2030-01-01T00:00:01Z", '
+                    '"tenant_ssh_key_path": "/tmp/e2e.key", "frp": {"enabled": false}, '
+                    '"authentication": {"tenant": {"ssh_commands": '
+                    '{"external": "ssh vmuser@localhost", '
+                    '"internal": "ssh vmuser@10.0.0.1"}}}}\n}\n'
+                ),
+            )
         )
         deal_state.provisioning_gate_armed = True
         log.info("[B3] Provisioning create rule armed (no pause): %s", BUY_RULE_ID)

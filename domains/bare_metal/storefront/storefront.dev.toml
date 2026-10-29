@@ -77,7 +77,7 @@ priority = ["alkahest.v1", "contact-exchange.v1"]
 [Settlement.alkahest]
 enabled = true
 # The dev chain's address book, which compose.bare-metal-local.yml mounts.
-address_config_path = "/app/alkahest_anvil_addresses.json"
+address_books = { anvil = "/app/alkahest_anvil_addresses.json" }
 oracle_gated = false
 trusted_oracle_addresses = []
 interruptible = false
@@ -99,13 +99,26 @@ retention_sweep_interval_seconds = 86400
 channel = "email"
 terms = "Development introduction; no commercial terms."
 
+# Seller-side delivery of each revealed buyer contact, to the lane's Mailpit
+# (compose.bare-metal-local.yml), which scenarios read back through its API.
+# The addresses are development values on a reserved domain.
+[Delivery]
+enabled = ["seller-mail"]
+
+[Delivery.seller-mail]
+sink = "smtp"
+host = "mailpit"
+port = 1025
+start_tls = false
+sender = "storefront@bare-metal-e2e.invalid"
+recipients = ["seller@bare-metal-e2e.invalid"]
+
 # The seller wallet's address, Anvil account 2; its key is in the secrets overlay.
 [Wallet]
 address = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
 
 [Chains.anvil]
 rpc_url = "ws://anvil:8545"
-alkahest_address_config_path = "/app/alkahest_anvil_addresses.json"
 
 [pricing]
 # The dev chain's test ERC-20, as the VM lane's Alkahest clauses name it.

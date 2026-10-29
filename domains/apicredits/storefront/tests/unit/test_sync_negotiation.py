@@ -105,5 +105,10 @@ def test_accepted_artifacts_refuse_a_listing_authorizing_no_condition():
                 "expiration_unix": 1_800_000_000,
             },
             agreed_amount=300,
-            listing={"demands": []},
+            listing={
+                "accepted_escrows": [
+                    {"chain_name": "anvil", "escrow_address": _ESCROW}
+                ],
+                "demands": [],
+            },
         )

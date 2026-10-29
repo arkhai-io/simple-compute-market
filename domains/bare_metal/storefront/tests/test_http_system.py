@@ -5,10 +5,12 @@ import dataclasses
 import functools
 import logging
 import sqlite3
+from datetime import datetime, timezone
 
 import httpx
 import pytest
 from compute_provisioning_contracts import COMPUTE_PROVISIONING_CONTRACT_VERSION
+from market_alkahest import AlkahestChainProbe, ProbedChain
 from core_storefront.multi_registry_client import RegistryAuthorityTrust
 from fastapi.testclient import TestClient
 from market_identity import Eip191Signer, Identity, TrustedIdentitySet
@@ -690,7 +692,10 @@ async def test_status_reports_a_running_loop_whose_timer_cycles_fail(
         "compose",
     )
     assert outcome["error"] == {"type": "OperationalError", "message": None}
-    assert status.publication_derivation == {}
+    # The failed cycles derived nothing, so the first cycle's clean derivation stands.
+    assert status.publication_derivation == {
+        "site-a": {"holds": [], "refusals": [], "reports": []}
+    }
 
 
 def _derivation_runtime(tmp_path, monkeypatch, sites: dict, **changes):
@@ -776,35 +781,66 @@ async def test_status_reports_a_held_pools_reason_from_the_latest_cycle_only(
     }
 
 
-async def test_status_reports_a_pool_resolving_no_settlement_clause_held(
-    tmp_path, monkeypatch
-) -> None:
-    """A pool whose override states no clauses, with none configured, is held
-    at compose with its own reason, and its listing is neither published nor
-    refused later in the cycle. Spec "A storefront that cannot publish refuses
-    to start": a pool that resolves no clauses from any tier is held and
-    reported per site."""
-    sites = {"site-a": Site(pool("pool-1", member("r1", "pool-1")))}
-    runtime = _derivation_runtime(tmp_path, monkeypatch, sites, publication_clauses=())
+async def _publication_cycle(runtime: BareMetalStorefrontRuntime):
+    """One publication cycle of a storefront started on ``runtime``, the
+    listing it then serves, and its status."""
     app = _app(runtime)
-
     async with app.router.lifespan_context(app):
         async with _admin_client(app) as admin:
             report = await admin.admin_run_lifecycle_cycle("publication")
+            listings = await admin.list_listings(status="closed")
+            open_listings = await admin.list_listings(status="open")
             status = await admin.get_system_status()
+    return report, {
+        "open": [listing.listing_id for listing in open_listings.listings],
+        "closed": [listing.listing_id for listing in listings.listings],
+    }, status
 
-    (hold,) = status.publication_derivation["site-a"]["holds"]
-    assert hold == {"pool_id": "pool-1", "reason": "pool_settlement_clauses_missing"}
-    assert report["counts"].get("publish") is None
-    assert report["counts"].get("refuse") is None
 
-
-async def test_a_cycle_failing_in_compose_leaves_no_earlier_derivation_in_status(
+async def test_a_listing_whose_pool_resolves_no_clause_closes_and_reopens_with_one(
     tmp_path, monkeypatch
 ) -> None:
-    """The derivation status reports is the last cycle's: a cycle that fails
-    before it has read every site clears the one before it, so status never
-    pairs a failed outcome with an earlier cycle's holds."""
+    """A storefront restarted with no clause configured refuses the candidate,
+    records the refusal under its site, and closes its open listing as
+    `no_settlement_option`; restarted with the clause again, the same listing
+    reopens. Spec "A storefront that cannot publish refuses to start", scenario
+    "A pool resolves no settlement clause", and the close and reopen "A compute
+    candidate with no settlement option yields no listing" requires."""
+    sites = {"site-a": Site(pool("pool-1", member("r1", "pool-1")))}
+    runtime = _derivation_runtime(tmp_path, monkeypatch, sites)
+
+    first, published, _ = await _publication_cycle(runtime)
+    (listing_id,) = published["open"]
+    unconfigured, after_close, status = await _publication_cycle(
+        dataclasses.replace(runtime, publication_clauses=())
+    )
+    reconfigured, after_reopen, _ = await _publication_cycle(
+        dataclasses.replace(runtime)
+    )
+
+    assert first["counts"]["publish"] == 1
+    assert {
+        (item["listing_id"], item["reason"])
+        for item in unconfigured["actions"]
+        if item["action"] == "close"
+    } == {(listing_id, "no_settlement_option")}
+    assert after_close == {"open": [], "closed": [listing_id]}
+    (refusal,) = status.publication_derivation["site-a"]["refusals"]
+    assert refusal["reason"] == "no_settlement_option"
+    assert (refusal["pool_id"], refusal["physical_resource_id"]) == ("pool-1", "r1")
+    assert refusal["mechanisms"] == []
+    assert status.publication_derivation["site-a"]["holds"] == []
+    assert [
+        item["listing_id"] for item in reconfigured["actions"] if item["action"] == "reopen"
+    ] == [listing_id]
+    assert after_reopen == {"open": [listing_id], "closed": []}
+
+
+async def test_a_cycle_failing_in_compose_leaves_the_last_derivation_in_status(
+    tmp_path, monkeypatch
+) -> None:
+    """A cycle that fails before deriving a site leaves that site's last
+    derivation, which status keeps reporting beside the failed outcome."""
     sites = {"site-a": Site(pool("pool-1", member("r1", "pool-1")))}
     composed = iter((True, False))
 
@@ -831,9 +867,52 @@ async def test_a_cycle_failing_in_compose_leaves_no_earlier_derivation_in_status
             status = await admin.get_system_status()
 
     assert derived["site-a"]["holds"] != []
-    assert status.publication_derivation == {}
+    assert status.publication_derivation == derived
     outcome = status.lifecycle[PUBLICATION]["last_outcome"]
     assert (outcome["completed"], outcome["stage"]) == (False, "compose")
+
+
+async def test_a_regionless_pool_is_logged_once_and_reported_until_it_clears(
+    tmp_path, monkeypatch, caplog
+) -> None:
+    """A pool stating no region is held and reported under its site's holds as
+    ``pool_region_missing`` in every cycle, as VM reports it; its hold is
+    logged as a warning when it appears and at info when it clears, and not on
+    the cycles between. Spec scenarios "A pool states no region for many
+    cycles" and "A held pool recovers"."""
+    regionless = Site(pool("pool-1", member("r1", "pool-1"), policy_tags={"region": None}))
+    runtime = _derivation_runtime(tmp_path, monkeypatch, {"site-a": regionless})
+    app = _app(runtime)
+    caplog.set_level(logging.INFO, logger="market_capacity_publication.cycle")
+
+    def logged() -> list[tuple[str, str]]:
+        return [
+            (record.levelname, record.getMessage())
+            for record in caplog.records
+            if record.name == "market_capacity_publication.cycle"
+        ]
+
+    async with app.router.lifespan_context(app):
+        async with _admin_client(app) as admin:
+            held = []
+            for _ in range(3):
+                await admin.admin_run_lifecycle_cycle("publication")
+                held.append((await admin.get_system_status()).publication_derivation)
+            appeared = logged()
+            caplog.clear()
+            regionless.serve(pool("pool-1", member("r1", "pool-1")))
+            await admin.admin_run_lifecycle_cycle("site-projections")
+            await admin.admin_run_lifecycle_cycle("publication")
+            cleared = (await admin.get_system_status()).publication_derivation
+            cleared_log = logged()
+
+    hold = {"pool_id": "pool-1", "reason": "pool_region_missing"}
+    assert all(derivation["site-a"]["holds"] == [hold] for derivation in held)
+    ((level, message),) = appeared
+    assert level == "WARNING" and "pool_region_missing" in message
+    assert cleared["site-a"]["holds"] == []
+    ((level, message),) = cleared_log
+    assert level == "INFO" and "cleared" in message and "pool_region_missing" in message
 
 
 class _NothingDue:
@@ -934,6 +1013,7 @@ async def test_startup_starts_every_loop_on_the_controllers_timer(tmp_path) -> N
         site_projections=_sited_runtime(
             str(tmp_path / "unused.db"), _sites(site_a=1)
         ).site_projections,
+        alkahest_chain_probe=_probe(_Rpc(), _Clock()),
         loop_controller_factory=held_loop_controller,
     )
     app = _app(runtime)
@@ -943,12 +1023,14 @@ async def test_startup_starts_every_loop_on_the_controllers_timer(tmp_path) -> N
         routes = runtime.loops.step_routes()
 
     assert started == [
+        "alkahest_chain_probe",
         "negotiation_watchdog",
         "publication",
         "settlement_servicing",
         "site_projection_poller",
     ]
     assert routes == {
+        "alkahest-chain-probe": "alkahest_chain_probe",
         "negotiation-watchdog": "negotiation_watchdog",
         "publication": "publication",
         "settlement-servicing": "settlement_servicing",
@@ -1141,3 +1223,89 @@ async def test_a_configured_site_reads_status_as_a_service_and_another_cannot(
     assert status.extra.get("pool_overrides") is None
     assert administrator.settlement_manual_required == 0
     assert refused.value.status_code in (401, 403)
+
+
+class _Rpc:
+    """The chain's JSON-RPC endpoint, the boundary the probe calls: refusing
+    connections until ``answering`` is set."""
+
+    def __init__(self) -> None:
+        self.answering = False
+
+    def __call__(self, rpc_url, method, params, timeout):
+        if not self.answering:
+            raise ConnectionRefusedError("connection refused")
+        return hex(31337) if method == "eth_chainId" else "0x6080"
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    def __call__(self) -> datetime:
+        return self.now
+
+
+def _probe(rpc: _Rpc, clock: _Clock) -> AlkahestChainProbe:
+    return AlkahestChainProbe(
+        [ProbedChain(name="anvil", rpc_url="http://anvil:8545", chain_id=31337)],
+        json_rpc=rpc,
+        required_addresses=lambda _chain: {"escrow": "0x" + "11" * 20},
+        clock=clock,
+    )
+
+
+async def test_a_storefront_whose_chain_refuses_is_unready_until_a_stepped_probe_reaches_it(
+    tmp_path,
+) -> None:
+    """Spec scenario "A storefront starts with its chain down": Alkahest is
+    unready with the reachability blocker until a stepped probe reaches the
+    chain, then ready, with no restart; status reports the probe's result."""
+    rpc, clock = _Rpc(), _Clock()
+    probe = _probe(rpc, clock)
+    runtime = _status_runtime(
+        str(tmp_path / "storefront.db"),
+        settlement_composition=alkahest_composition(
+            SELLER_SIGNER,
+            wallet="0x" + "33" * 20,
+            chain_clients={"anvil": object()},
+            # The probe stands in for the chain's address book here, so the
+            # section names none for readiness to load.
+            chain_probe=probe,
+        ),
+        alkahest_chain_probe=probe,
+        loop_controller_factory=held_loop_controller,
+    )
+    app = _app(runtime)
+
+    def alkahest(status: HealthResponse) -> dict:
+        (item,) = [m for m in status.settlement if m["mechanism"] == "alkahest.v1"]
+        return item
+
+    async with app.router.lifespan_context(app):
+        async with _admin_client(app) as admin:
+            unprobed = alkahest(await admin.get_system_status())
+            await admin.admin_run_lifecycle_cycle("alkahest-chain-probe")
+            refused = alkahest(await admin.get_system_status())
+            # A step probes at once, with no interval to wait out.
+            rpc.answering = True
+            await admin.admin_run_lifecycle_cycle("alkahest-chain-probe")
+            ready = alkahest(await admin.get_system_status())
+            loops = (await admin.get_system_status()).lifecycle
+
+    assert [(b["code"], b["kind"]) for b in unprobed["blockers"]] == [
+        ("alkahest.chain_unreachable", "reachability")
+    ]
+    assert unprobed["public_details"]["chain_probe"] == {"anvil": None}
+    assert [(b["code"], b["kind"]) for b in refused["blockers"]] == [
+        ("alkahest.chain_unreachable", "reachability")
+    ]
+    assert refused["public_details"]["chain_probe"]["anvil"]["result"] == (
+        "alkahest.chain_unreachable"
+    )
+    assert ready["ready"] is True
+    assert ready["public_details"]["chain_probe"]["anvil"] == {
+        "result": "reachable",
+        "probed_at": clock.now.isoformat(),
+    }
+    assert loops["alkahest_chain_probe"]["last_outcome"]["trigger"] == "step"

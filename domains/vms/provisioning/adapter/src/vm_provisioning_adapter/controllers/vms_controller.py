@@ -36,7 +36,7 @@ from fastapi_utils.cbv import cbv
 from compute_provisioning.hosts.service import HostNotFoundError
 from vm_provisioning_operator.models import CreateVmRequest, VmActionRequest
 from compute_provisioning_contracts import JobSubmitResponse
-from vm_provisioning_adapter.controllers.route_binding import dependency
+from vm_provisioning_adapter.controllers.route_binding import dependency, routed_async
 from vm_provisioning_adapter.services.vm_operations_service import VmOperationsService
 
 _POLL_NOTE = (
@@ -49,10 +49,11 @@ async def _submitted(submission):
     """A submitted job's response; an unregistered host is not found.
 
     Every job is refused at submission when its host is not registered, rather
-    than accepted and failed when it runs.
+    than accepted and failed when it runs. A refusal the operations service
+    reports is answered with its own status and detail.
     """
     try:
-        return await submission
+        return await routed_async(submission)
     except HostNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 

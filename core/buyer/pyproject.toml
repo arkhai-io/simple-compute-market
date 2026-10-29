@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-core-buyer"
-version = "0.5.0"
+version = "0.6.0"
 license = "MIT"
 description = "Core buyer role shell and orchestration contracts"
 requires-python = ">=3.12"
@@ -22,11 +22,11 @@ dependencies = [
   # Mechanism-neutral settlement selection and plan carriers.
   "arkhai-core>=0.4.0",
   # Installed mechanism registration, canonical priority, and recovery dispatch.
-  "arkhai-kit-settlement-runtime==0.4.0",
+  "arkhai-kit-settlement-runtime==0.6.0",
   # Canonical principals, signer injection, and v2 request/response proofs.
   "arkhai-kit-identity==0.4.0",
   # Signed registry discovery with pinned authority responses.
-  "arkhai-core-registry-client==0.12.2",
+  "arkhai-core-registry-client==0.12.3",
 ]
 
 [project.scripts]

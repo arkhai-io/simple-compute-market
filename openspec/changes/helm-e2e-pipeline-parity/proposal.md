@@ -67,19 +67,26 @@ specification changes, and adds a delta and clears `skip_specs` if it does.
   release.
 - Whether the added services belong in the default `helm/values.yaml` or in a
   values overlay used for validation.
-- How the buyer-CLI scenarios reach the storefront from outside the cluster, since
-  the pipeline runs them from inside the compose network.
 - Whether the chart's out-of-band Secrets become optional, with the ordinary values
   overlays supplying development values when a Secret is absent. Today a deploy
-  with the default values reads six Secrets that must be created by hand first,
-  and validation's preflight (`make -C helm check-local-secrets`) refuses to deploy
-  until they exist. `parallel-change-workflows` gives each validation its own
-  namespace, where the same Secrets would otherwise be needed again.
+  with the default values reads Secrets the chart never creates;
+  `make -C helm topology-secrets` generates them from development values, and
+  `parallel-change-workflows` runs it in each validation's namespace.
+
+How the buyer-CLI scenarios reach the storefront from outside the cluster is
+settled by `parallel-change-workflows`: the Helm scenarios run as a pod inside the
+change's namespace and reach services by their in-cluster names, so they never
+leave the cluster.
 
 ## Dependencies and Related Changes
 
 - Follows `agent-driven-change-workflow`, whose pre-review validation introduced
   the Helm run and its list of served scenarios.
+- Depends, for its design, on `parallel-change-workflows`, which runs each Helm
+  validation in its change's namespace with its Secrets generated there, forwards
+  to a named namespace, and runs the Helm scenarios as a pod in the cluster. This
+  change grows what that pod runs and extends the forward target to the services
+  the pipeline's topology adds.
 - Related to the unowned item in this campaign about converging compose
   configuration onto one source shared with the Helm charts; design decides
   whether this change takes it on.

@@ -18,9 +18,18 @@ from types import SimpleNamespace
 import pytest
 import typer
 
+import arkhai_apicredits_buyer.common as common
 import arkhai_apicredits_buyer.settle_cli as settle_cli
 from core_buyer.buyer_config import ResolvedBuyerIdentity
 from core_buyer.run_log import read_run
+from market_alkahest.alkahest import get_recipient_arbiter
+from market_alkahest.dev_chain import anvil_address_book_path
+from market_alkahest.plans import (
+    escrow_terms_from_settlement_plan,
+    materialize_settlement_plan_from_proposal,
+)
+from market_alkahest.release_authorization import release_conditions_record
+from market_alkahest.schemas import EscrowProposal
 from market_identity import REQUEST_PROTOCOL, Eip191Signer, TrustedIdentitySet
 
 
@@ -130,15 +139,13 @@ def agreed_run(tmp_path, monkeypatch):
 
 @pytest.fixture
 def fake_chain_config(monkeypatch):
-    import arkhai_apicredits_buyer.common as common
-
     chain = SimpleNamespace(
         name="anvil",
         rpc_url="http://anvil:8545",
         chain_id=31337,
-        alkahest_address_config_path=None,
     )
     monkeypatch.setattr(common, "chain_by_name", lambda name: chain)
+    monkeypatch.setattr(settle_cli, "chain_address_book", lambda _name: None)
     monkeypatch.setattr(
         common,
         "resolve_buyer_wallet",
@@ -280,17 +287,20 @@ _CONDITION = {
 @pytest.mark.parametrize(
     ("proposal", "reason"),
     [
-        (_PROPOSAL, "release_condition_unselected"),
-        ({**_PROPOSAL, "demands": None, "demand": _CONDITION}, "not the listing that authorizes"),
+        (_PROPOSAL, "release_conditions_unrecorded"),
+        (
+            {**_PROPOSAL, "demands": None, "demand": _CONDITION},
+            "release_conditions_unrecorded",
+        ),
     ],
     ids=["naming no condition", "selecting a condition"],
 )
 def test_settle_creates_no_escrow_from_an_accepted_proposal_alone(
     tmp_path, monkeypatch, fake_chain_config, proposal, reason
 ):
-    """A run-log records the accepted proposal but not the listing that
-    authorizes its release condition, so with no accepted escrow terms the
-    resumed settlement refuses by name and nothing reaches the chain."""
+    """A run accepted before its listing's release conditions were recorded
+    has nothing to derive its escrow from, so the resumed settlement refuses
+    by name and nothing reaches the chain."""
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     runs = tmp_path / "arkhai" / "buy-runs"
     runs.mkdir(parents=True)
@@ -351,3 +361,110 @@ def test_settle_creates_no_escrow_from_an_accepted_proposal_alone(
         e for e in read_run("run-tok-3") if e.get("event") == "escrow_release_condition_missing"
     ]
     assert reason in missing["error"]
+
+
+_BOOK = str(anvil_address_book_path())
+
+
+def _recipient_condition(recipient: str) -> dict:
+    return {
+        "chain_name": "anvil",
+        "arbiter": get_recipient_arbiter("anvil", config_path=_BOOK),
+        "demand_data": {"recipient": recipient},
+    }
+
+
+def _plan_paying(recipient: str) -> dict:
+    condition = _recipient_condition(recipient)
+    return materialize_settlement_plan_from_proposal(
+        proposal=EscrowProposal.model_validate(
+            {**_PROPOSAL, "demands": None, "demand": condition}
+        ),
+        listing={"demands": [condition]},
+        agreed_amount=300,
+        duration_seconds=0,
+        addr_config_path=_BOOK,
+    ).model_dump(mode="json")
+
+
+_SELLER_WALLET = "0x" + "44" * 20
+
+
+def _settle_recorded_run(tmp_path, monkeypatch, *, plan: dict) -> tuple[int, list]:
+    """Resume a run that recorded its listing's conditions; return its exit and what it funds."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    runs = tmp_path / "arkhai" / "buy-runs"
+    runs.mkdir(parents=True)
+    accepted = {**_PROPOSAL, "demands": None, "demand": _recipient_condition(_SELLER_WALLET)}
+    events = [
+        _run_event(
+            "run-tok-4", "run_started", seller_url="http://seller:8002",
+            listing_id="lst-1", chain_name="anvil", publisher_id="publisher-1",
+            source_registry_url="http://registry:8080",
+            source_registry_authority="registry-1",
+        ),
+        _run_event(
+            "run-tok-4", "run_ended", status="agreed", negotiation_id="neg-4",
+            agreed_amount=300,
+            publisher_principals=TrustedIdentitySet(
+                identities=(_SELLER_SIGNER.identity,),
+            ).model_dump(mode="json"),
+            accepted_escrow_proposal=accepted,
+            listing_record=release_conditions_record(
+                {"demands": [_recipient_condition(_SELLER_WALLET)]}
+            ),
+            settlement_plan=plan,
+        ),
+    ]
+    (runs / "run-tok-4.jsonl").write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    monkeypatch.setattr(
+        common,
+        "chain_by_name",
+        lambda _name: SimpleNamespace(
+            name="anvil", rpc_url="http://anvil:8545", chain_id=31337,
+        ),
+    )
+    monkeypatch.setattr(settle_cli, "chain_address_book", lambda _name: _BOOK)
+    funded: list = []
+
+    def _record(**_kwargs):
+        def create(terms):
+            funded.extend(terms)
+            raise RuntimeError("stop before submission")
+
+        return create
+
+    monkeypatch.setattr(settle_cli, "make_create_escrow_fn", _record)
+    with pytest.raises(typer.Exit) as stopped:
+        settle_cli.run_settle_from_log(
+            run_id="run-tok-4", escrow_uid=None, identity=_IDENTITY,
+            evm_address=None, evm_private_key=None, chain_name=None,
+            poll_interval=0.01, settlement_timeout=5.0,
+        )
+    return stopped.value.exit_code, funded
+
+
+def test_settle_funds_what_it_derives_from_the_recorded_conditions(
+    tmp_path, monkeypatch, fake_chain_config
+):
+    plan = _plan_paying(_SELLER_WALLET)
+
+    exit_code, funded = _settle_recorded_run(tmp_path, monkeypatch, plan=plan)
+
+    assert exit_code == 4  # the recorded create failure, after funding was attempted
+    assert funded == escrow_terms_from_settlement_plan(plan)
+
+
+def test_settle_refuses_a_seller_plan_paying_another_recipient(
+    tmp_path, monkeypatch, fake_chain_config
+):
+    exit_code, funded = _settle_recorded_run(
+        tmp_path, monkeypatch, plan=_plan_paying("0x" + "99" * 20)
+    )
+
+    assert exit_code == 3
+    assert funded == []
+    (missing,) = [
+        e for e in read_run("run-tok-4") if e.get("event") == "escrow_release_condition_missing"
+    ]
+    assert "seller_plan_mismatch" in missing["error"]

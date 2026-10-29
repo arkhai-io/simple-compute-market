@@ -34,6 +34,7 @@ class VmPublicationSourceCallbacks:
         ],
         dict[str, Any] | None,
     ]
+    close_candidate_listing: Callable[[str, str, dict[str, Any], str], None]
 
 
 
@@ -48,6 +49,7 @@ def build_vm_publication_source_kwargs(
         "listing_resource": callbacks.listing_resource,
         "record_published": callbacks.record_published,
         "reopen_existing": callbacks.reopen_existing,
+        "close_candidate_listing": callbacks.close_candidate_listing,
     }
 
 

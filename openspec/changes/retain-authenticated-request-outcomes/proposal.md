@@ -1,6 +1,6 @@
 ## Status
 
-Blocked on [`redesign-authenticated-replay-state`](../redesign-authenticated-replay-state/).
+Blocked on [`redesign-authenticated-requests`](../redesign-authenticated-requests/).
 That change found that every authority's replay store grows without bound, that the
 storefront and registry already retain response bodies indefinitely, and that most
 routes are idempotent in their own domain, so re-running them answers an exact retry

@@ -33,6 +33,7 @@ Usage (async)::
         resp = await client.negotiate_new(
             listing_id="listing-id",
             initial_amount=100,
+            escrow_address="0x...",
             provision_terms={...},
         )
 """
@@ -175,8 +176,11 @@ def _negotiate_new_proposal(
     """The opening proposal ``negotiate_new`` sends.
 
     An escrow opening carries an Alkahest escrow carrier: chain, escrow address,
-    fields, literal fields, and expiry, with development defaults for any the
-    caller omits. A selection-only opening carries only ``fields`` beside its
+    fields, literal fields, and expiry. It must name the escrow contract it
+    funds, since a storefront refuses an escrow naming none, so an opening with
+    no ``escrow_address`` is refused here; the chain and expiry have development
+    defaults, and the token appears only when the caller states one. A
+    selection-only opening carries only ``fields`` beside its
     ``settlement_selection``: a payments or introduction mechanism has no escrow,
     and a storefront may refuse a proposal that mixes the two carriers. Stating
     an escrow parameter in a selection-only opening is refused here rather than
@@ -206,12 +210,17 @@ def _negotiate_new_proposal(
                 "a selection-only opening carries no escrow; remove " + ", ".join(stated)
             )
         return {"fields": fields}
+    if not escrow_address:
+        raise ValueError(
+            "an escrow opening names the escrow contract it funds; pass escrow_address, "
+            "or open with selection_only=True for a mechanism with no escrow"
+        )
     literals = dict(literal_fields or {})
-    if token or literal_fields is None:
-        literals.setdefault("token", token or ("0x" + "0" * 40))
+    if token:
+        literals.setdefault("token", token)
     proposal: dict[str, Any] = {
         "chain_name": chain_name or "anvil",
-        "escrow_address": escrow_address or ("0x" + "0" * 40),
+        "escrow_address": escrow_address,
         "fields": fields,
         "literal_fields": literals,
         "expiration_unix": escrow_expiration_unix or (int(time.time()) + 3600),
@@ -1216,10 +1225,9 @@ class StorefrontClient(_StorefrontClientBase):
         acknowledgement; changed reuse is rejected locally.
 
         Deal-scoped event from the capacity side: the reservation's lease
-        ended and its capacity returned to the pool. The site authority's
-        watchdog delivers this point-to-point to the deal's owning
-        storefront — it replaces the legacy resource PATCH for
-        ledger-held reservations.
+        ended and its capacity returned to the pool. The provisioning
+        service delivers it point-to-point to the deal's owning storefront,
+        retrying from its durable outbox until the storefront acknowledges it.
         """
         body: dict = {
             "capacity_reservation_id": capacity_reservation_id,
@@ -1236,101 +1244,6 @@ class StorefrontClient(_StorefrontClientBase):
             body,
             role="service",
             operation="fulfillment_capacity_released",
-            resource=capacity_reservation_id,
-            request_id=request_id,
-        )
-
-    async def notify_usage_started(
-        self,
-        capacity_reservation_id: str,
-        *,
-        site_id: str,
-        escrow_uid: str | None = None,
-        provider_id: str | None = None,
-        provider_lease_id: str | None = None,
-        resource_id: str | None = None,
-        host_id: str | None = None,
-        gpu_count: int | None = None,
-        lease_end_utc: str | None = None,
-        request_id: str | None = None,
-    ) -> dict:
-        """Post a service-authenticated usage-started callback.
-
-        Deal-scoped progress event: the reservation moved from held to
-        actually leased/in-use. Progress events carry no capacity effect
-        of their own (the reservation stays held throughout), but do
-        reconcile derived listings against current availability.
-        """
-        body: dict = {
-            "capacity_reservation_id": capacity_reservation_id,
-            "site_id": site_id,
-        }
-        if escrow_uid is not None:
-            body["escrow_uid"] = escrow_uid
-        if provider_id is not None:
-            body["provider_id"] = provider_id
-        if provider_lease_id is not None:
-            body["provider_lease_id"] = provider_lease_id
-        if resource_id is not None:
-            body["resource_id"] = resource_id
-        if host_id is not None:
-            body["host_id"] = host_id
-        if gpu_count is not None:
-            body["gpu_count"] = gpu_count
-        if lease_end_utc is not None:
-            body["lease_end_utc"] = lease_end_utc
-        return await self._authenticated_post(
-            "/api/v1/admin/fulfillment/events/usage-started",
-            body,
-            role="service",
-            operation="fulfillment_usage_started",
-            resource=capacity_reservation_id,
-            request_id=request_id,
-        )
-
-    async def notify_fulfillment_failed(
-        self,
-        capacity_reservation_id: str,
-        *,
-        site_id: str,
-        escrow_uid: str | None = None,
-        provider_id: str | None = None,
-        provider_job_id: str | None = None,
-        resource_id: str | None = None,
-        reason: str | None = None,
-        message: str | None = None,
-        logs_ref: str | None = None,
-        request_id: str | None = None,
-    ) -> dict:
-        """Post a service-authenticated fulfillment-failed callback.
-
-        Deal-scoped event: provisioning failed for this reservation.
-        Releases the held capacity through the site authority and
-        applies the storefront's own fulfillment failure policy.
-        """
-        body: dict = {
-            "capacity_reservation_id": capacity_reservation_id,
-            "site_id": site_id,
-        }
-        if escrow_uid is not None:
-            body["escrow_uid"] = escrow_uid
-        if provider_id is not None:
-            body["provider_id"] = provider_id
-        if provider_job_id is not None:
-            body["provider_job_id"] = provider_job_id
-        if resource_id is not None:
-            body["resource_id"] = resource_id
-        if reason is not None:
-            body["reason"] = reason
-        if message is not None:
-            body["message"] = message
-        if logs_ref is not None:
-            body["logs_ref"] = logs_ref
-        return await self._authenticated_post(
-            "/api/v1/admin/fulfillment/events/failed",
-            body,
-            role="service",
-            operation="fulfillment_failed",
             resource=capacity_reservation_id,
             request_id=request_id,
         )
@@ -1514,8 +1427,9 @@ class StorefrontClient(_StorefrontClientBase):
         interprets a domain payload. ``initial_amount`` is the absolute opening
         amount for scalar escrows; amountless exact escrows can pass
         ``initial_amount=None`` with explicit ``literal_fields`` / ``rates``.
-        ``selection_only=True`` opens with a ``settlement_selection`` and no
-        escrow carrier, as a payments or introduction buyer does.
+        An escrow opening must name its ``escrow_address``; ``ValueError``
+        otherwise. ``selection_only=True`` opens with a ``settlement_selection``
+        and no escrow carrier, as a payments or introduction buyer does.
         """
         proposal = _negotiate_new_proposal(
             initial_amount=initial_amount,
@@ -1716,31 +1630,17 @@ class StorefrontClient(_StorefrontClientBase):
         self,
         escrow_uid: str,
         *,
-        seller_wallet: str,
-        agreed_price: int,
-        agreed_duration_seconds: int,
-        listing_id: str,
-        chain_name: str = "anvil",
+        negotiation_id: str,
         request_id: str | None = None,
     ) -> dict:
         """POST /api/v1/admin/settle/{escrow_uid}/verify.
 
-        Reads the escrow from chain on ``chain_name`` and confirms it
-        matches the supplied terms. Returns dict with valid=True/False
-        and reason on failure. No DB writes.
-
-        ``agreed_price`` is base units in the uint256 domain, sent as a
-        decimal-digit string: this body is canonicalized for signing and an
-        18-decimal amount has no JSON number form. It was typed ``float``,
-        which no amount in this protocol is.
+        Reads the escrow from chain and confirms it matches the settlement
+        plan the accepted negotiation ``negotiation_id`` committed, as settle
+        verifies it. Returns dict with valid=True/False and reason on failure.
+        No DB writes.
         """
-        body = {
-            "seller_wallet": seller_wallet,
-            "agreed_price": str(int(agreed_price)),
-            "agreed_duration_seconds": agreed_duration_seconds,
-            "listing_id": listing_id,
-            "chain_name": chain_name,
-        }
+        body = {"negotiation_id": negotiation_id}
         return await self._authenticated_post(
             f"/api/v1/admin/settle/{escrow_uid}/verify",
             body,
@@ -2590,86 +2490,6 @@ class SyncStorefrontClient(_StorefrontClientBase):
             request_id=request_id,
         )
 
-    def notify_usage_started(
-        self,
-        capacity_reservation_id: str,
-        *,
-        site_id: str,
-        escrow_uid: str | None = None,
-        provider_id: str | None = None,
-        provider_lease_id: str | None = None,
-        resource_id: str | None = None,
-        host_id: str | None = None,
-        gpu_count: int | None = None,
-        lease_end_utc: str | None = None,
-        request_id: str | None = None,
-    ) -> dict:
-        """Post a service-authenticated usage-started callback."""
-        body: dict[str, Any] = {
-            "capacity_reservation_id": capacity_reservation_id,
-            "site_id": site_id,
-        }
-        optional = {
-            "escrow_uid": escrow_uid,
-            "provider_id": provider_id,
-            "provider_lease_id": provider_lease_id,
-            "resource_id": resource_id,
-            "host_id": host_id,
-            "gpu_count": gpu_count,
-            "lease_end_utc": lease_end_utc,
-        }
-        body.update(
-            {key: value for key, value in optional.items() if value is not None}
-        )
-        return self._authenticated_post(
-            "/api/v1/admin/fulfillment/events/usage-started",
-            body,
-            role="service",
-            operation="fulfillment_usage_started",
-            resource=capacity_reservation_id,
-            request_id=request_id,
-        )
-
-    def notify_fulfillment_failed(
-        self,
-        capacity_reservation_id: str,
-        *,
-        site_id: str,
-        escrow_uid: str | None = None,
-        provider_id: str | None = None,
-        provider_job_id: str | None = None,
-        resource_id: str | None = None,
-        reason: str | None = None,
-        message: str | None = None,
-        logs_ref: str | None = None,
-        request_id: str | None = None,
-    ) -> dict:
-        """Post a service-authenticated fulfillment-failed callback."""
-        body: dict[str, Any] = {
-            "capacity_reservation_id": capacity_reservation_id,
-            "site_id": site_id,
-        }
-        optional = {
-            "escrow_uid": escrow_uid,
-            "provider_id": provider_id,
-            "provider_job_id": provider_job_id,
-            "resource_id": resource_id,
-            "reason": reason,
-            "message": message,
-            "logs_ref": logs_ref,
-        }
-        body.update(
-            {key: value for key, value in optional.items() if value is not None}
-        )
-        return self._authenticated_post(
-            "/api/v1/admin/fulfillment/events/failed",
-            body,
-            role="service",
-            operation="fulfillment_failed",
-            resource=capacity_reservation_id,
-            request_id=request_id,
-        )
-
     def evaluate_negotiate(
         self,
         listing_id: str,
@@ -2846,8 +2666,9 @@ class SyncStorefrontClient(_StorefrontClientBase):
 
         ``provision_terms`` is the required versioned domain envelope. The
         shared client validates its generic shape without interpreting payload.
-        ``selection_only=True`` opens with a ``settlement_selection`` and no
-        escrow carrier, as a payments or introduction buyer does.
+        An escrow opening must name its ``escrow_address``; ``ValueError``
+        otherwise. ``selection_only=True`` opens with a ``settlement_selection``
+        and no escrow carrier, as a payments or introduction buyer does.
         """
         proposal = _negotiate_new_proposal(
             initial_amount=initial_amount,
@@ -3048,31 +2869,17 @@ class SyncStorefrontClient(_StorefrontClientBase):
         self,
         escrow_uid: str,
         *,
-        seller_wallet: str,
-        agreed_price: int,
-        agreed_duration_seconds: int,
-        listing_id: str,
-        chain_name: str = "anvil",
+        negotiation_id: str,
         request_id: str | None = None,
     ) -> dict:
         """POST /api/v1/admin/settle/{escrow_uid}/verify.
 
-        Reads the escrow from chain on ``chain_name`` and confirms it
-        matches the supplied terms. Returns dict with valid=True/False
-        and reason on failure. No DB writes.
-
-        ``agreed_price`` is base units in the uint256 domain, sent as a
-        decimal-digit string: this body is canonicalized for signing and an
-        18-decimal amount has no JSON number form. It was typed ``float``,
-        which no amount in this protocol is.
+        Reads the escrow from chain and confirms it matches the settlement
+        plan the accepted negotiation ``negotiation_id`` committed, as settle
+        verifies it. Returns dict with valid=True/False and reason on failure.
+        No DB writes.
         """
-        body = {
-            "seller_wallet": seller_wallet,
-            "agreed_price": str(int(agreed_price)),
-            "agreed_duration_seconds": agreed_duration_seconds,
-            "listing_id": listing_id,
-            "chain_name": chain_name,
-        }
+        body = {"negotiation_id": negotiation_id}
         return self._authenticated_post(
             f"/api/v1/admin/settle/{escrow_uid}/verify",
             body,

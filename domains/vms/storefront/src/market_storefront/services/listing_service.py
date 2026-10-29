@@ -12,7 +12,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 from functools import partial
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import datetime
 from typing import Any
 
@@ -29,6 +29,7 @@ from core_storefront.models.listing_models import (
     ReclaimRequest,
     RefundRequest,
 )
+from core_storefront.publication_runner import NoSettlementOption
 from core_storefront.stage_log import stage_event
 from arkhai_vms_listings.models import Listing
 from arkhai_vms_listings.resources import parse_resource_from_dict
@@ -38,15 +39,27 @@ from market_capacity_publication import (
     PublicationBinding,
     SiteProjectionState,
 )
+from market_alkahest import escrow_release_conditions
 from market_core import MarketDomainContract
 from market_identity import Identity, Signer
 from market_settlement_runtime import (
+    MechanismReadiness,
     SettlementPublicationClause,
     compile_settlement_publication_clause,
 )
 
 from market_storefront.models.listing_models import VmCreateListingRequest
 from market_storefront.publication_binding import prepare_vm_listing_binding
+from market_storefront.services.publication_service import publish_order_to_registry
+from market_storefront.services.publication_terms import (
+    configured_alkahest_section,
+)
+from market_storefront.utils.config import (
+    CHAINS,
+    chain_address_book,
+    get_evm_wallet_address,
+    get_evm_wallet_private_key,
+)
 from arkhai_vms import DIMENSION_KEYS, flatten_vm_shape
 from market_resource_pools_contracts.backing import CapacityBacking
 from market_storefront.services.listing_sources import resolve_source_backing
@@ -109,12 +122,8 @@ class ListingService:
         settlement_composition_provider: Callable[[], Any],
         site_projections: SiteProjectionState,
         source_backing_resolver: Callable[..., CapacityBacking] | None = None,
+        registry_publisher: Callable[..., Awaitable[dict[str, Any]]] | None = None,
     ) -> None:
-        from market_storefront.utils.config import (
-            CHAINS,
-            get_evm_wallet_private_key,
-        )
-
         if getattr(sqlite_client, "domain_registry", None) is not registry:
             raise RuntimeError(
                 "listing service and SQLite repository must share the exact "
@@ -135,6 +144,8 @@ class ListingService:
         self._capacity_runtime = capacity_runtime
         self._db = sqlite_client
         self._marketplace_signer = marketplace_signer
+        # The live map the chain probe updates in place; read when needed, so a
+        # client the probe builds is available without a restart.
         self._alkahest_clients = alkahest_clients
         self._settlement_composition_provider = settlement_composition_provider
         # What a source's site currently declares about it, read from the held
@@ -143,11 +154,22 @@ class ListingService:
         self._source_backing = source_backing_resolver or partial(
             resolve_source_backing, site_projections
         )
+        # Publishes one listing to every configured registry; the storefront's
+        # publication runtime unless a caller supplies its own.
+        self._registry_publisher = registry_publisher
 
-        self._token_transfers_available = bool(
-            self._alkahest_clients and CHAINS and get_evm_wallet_private_key()
-        )
-        self._alkahest_available = bool(self._alkahest_clients)
+    async def _publish_to_registries(self, listing: Listing | dict) -> dict[str, Any]:
+        if self._registry_publisher is not None:
+            return await self._registry_publisher(listing, sqlite_client=self._db)
+        return await publish_order_to_registry(listing, sqlite_client=self._db)
+
+    @property
+    def _token_transfers_available(self) -> bool:
+        return bool(self._alkahest_clients and CHAINS and get_evm_wallet_private_key())
+
+    @property
+    def _alkahest_available(self) -> bool:
+        return bool(self._alkahest_clients)
 
     @property
     def domain_registry(self) -> StorefrontDomainRegistry:
@@ -204,16 +226,10 @@ class ListingService:
             return row, chain_name, None, None
         from market_alkahest.alkahest import get_escrow_codec_for
 
-        from market_storefront.utils.config import CHAINS
-
-        chain_cfg = CHAINS.get(chain_name)
-        config_path = (
-            chain_cfg.alkahest_address_config_path if chain_cfg is not None else None
-        )
         codec = get_escrow_codec_for(
             chain_name,
             escrow_address,
-            config_path=config_path,
+            config_path=chain_address_book(chain_name),
         )
         return row, chain_name, alkahest, codec
 
@@ -358,7 +374,9 @@ class ListingService:
         clauses: tuple[SettlementPublicationClause, ...] | None = None,
         composition: Any | None = None,
         origin: str,
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    ) -> tuple[
+        list[dict[str, Any]], list[dict[str, Any]], tuple[MechanismReadiness, ...]
+    ]:
         if request.settlement_options:
             raise ValueError(
                 "settlement_options are derived from installed mechanism registrations"
@@ -379,19 +397,18 @@ class ListingService:
             "origin": origin,
         }
         try:
-            accepted, options, _readiness = await composition.publication_artifacts(
+            accepted, options, readiness = await composition.publication_artifacts(
                 resources,
                 clauses=list(canonical_clauses) or None,
             )
         except (RuntimeError, TypeError, ValueError) as exc:
             raise ValueError(str(exc)) from exc
-        return accepted, options
+        return accepted, options, readiness
 
     def _parse_listing_resource_and_escrows(
         self, request: VmCreateListingRequest
     ) -> tuple[
         Any,
-        list[dict[str, Any]],
         list[dict[str, Any]],
         list[dict[str, Any]],
     ]:
@@ -416,15 +433,15 @@ class ListingService:
             )
         if not request.accepted_escrows and not getattr(request, "settlements", ()):
             raise ValueError("at least one settlement input is required")
-        demands = [
-            d.model_dump(mode="json") if hasattr(d, "model_dump") else dict(d)
-            for d in (request.demands or [])
-        ]
+        if request.demands:
+            raise ValueError(
+                "demands are derived from the storefront's [Settlement.alkahest] "
+                "configuration and are not accepted in a create request"
+            )
         return (
             listing_resource,
             list(request.accepted_escrows),
             [],
-            demands,
         )
 
 
@@ -460,6 +477,31 @@ class ListingService:
             "publish a distinct resource or pool, or close the listing that "
             "holds this one."
         )
+
+    def admissible_mechanisms(
+        self, mechanisms: Sequence[str], *, backing: CapacityBacking
+    ) -> tuple[str, ...]:
+        """Those of ``mechanisms`` a listing of ``backing`` could publish.
+
+        Decided as the listing's own terms are kept, by each seller stage's
+        declaration of whether it delivers through VM capacity, so a mechanism
+        is classified -- ruled out by configuration, or unknown -- only where
+        the listing could publish it. A mechanism this storefront composes no
+        stage for is one it could never publish.
+        """
+        composition = self._settlement_composition_provider()
+        composed = tuple(
+            mechanism for mechanism in mechanisms if mechanism in composition.seller_stages
+        )
+        kept, _ = backing.admissible_settlement(
+            composed,
+            mechanism=str,
+            fulfils_through_capacity=lambda mechanism: (
+                composition.seller_stages[mechanism].fulfils_through_capacity
+            ),
+        )
+        return tuple(kept)
+
     @staticmethod
     def _admissible_settlement_terms(
         *,
@@ -470,6 +512,8 @@ class ListingService:
         demands: list[dict[str, Any]],
         composition: Any,
         source: str,
+        readiness: Sequence[MechanismReadiness] = (),
+        escrows_supplied: bool = False,
     ) -> tuple[
         list[dict[str, Any]],
         list[dict[str, Any]],
@@ -481,8 +525,12 @@ class ListingService:
         Each seller stage declares whether settling through it delivers through
         VM capacity. Where nothing admits the listing against capacity, such a
         stage would take a buyer's funds and then reach a reservation that
-        cannot be made, so its options are dropped, with a notice naming them;
-        if nothing remains the listing is refused.
+        cannot be made, so its options are dropped, with a notice naming them.
+
+        If nothing remains the listing is refused with ``NoSettlementOption``,
+        naming the mechanisms it could have published -- its admissible
+        clauses', and Alkahest's where the request supplied escrows its
+        backing admits -- and those whose ``readiness`` is unknown.
         """
         def fulfils_through_capacity(mechanism: str) -> bool:
             stage = composition.seller_stages.get(mechanism)
@@ -505,12 +553,14 @@ class ListingService:
         )
         dropped = list(dropped_options)
         # Accepted escrows and their demands are the Alkahest publication form.
-        if accepted_escrows:
-            _, escrow_dropped = backing.admissible_settlement(
+        escrow_mechanisms: tuple[str, ...] = ()
+        if accepted_escrows or escrows_supplied:
+            escrow_kept, escrow_dropped = backing.admissible_settlement(
                 ("alkahest.v1",),
                 mechanism=str,
                 fulfils_through_capacity=fulfils_through_capacity,
             )
+            escrow_mechanisms = tuple(escrow_kept)
             if escrow_dropped:
                 accepted_escrows, demands = [], []
                 dropped.extend(m for m in escrow_dropped if m not in dropped)
@@ -523,9 +573,24 @@ class ListingService:
                 dropped,
             )
         if not kept_options and not accepted_escrows:
-            raise ValueError(
+            mechanisms = tuple(
+                dict.fromkeys(
+                    [*(_clause_mechanism(clause) for clause in kept_clauses),
+                     *escrow_mechanisms]
+                )
+            )
+            # A ready mechanism that built nothing, as contact exchange does
+            # for an origin with no contact, is ruled out like a misconfigured one.
+            statuses = {status.mechanism: status for status in readiness}
+            raise NoSettlementOption(
                 f"{backing.label} source {source} has no settlement option it may "
-                f"publish (dropped: {', '.join(dropped) or 'none'})"
+                f"publish (dropped: {', '.join(dropped) or 'none'})",
+                mechanisms=mechanisms,
+                unknown=tuple(
+                    mechanism
+                    for mechanism in mechanisms
+                    if mechanism in statuses and statuses[mechanism].unknown
+                ),
             )
         return accepted_escrows, list(kept_options), tuple(kept_clauses), demands
 
@@ -547,17 +612,34 @@ class ListingService:
             request,
             composition=composition,
         )
-        listing_resource, _accepted_inputs, _settlement_inputs, demands = (
+        listing_resource, _accepted_inputs, _settlement_inputs = (
             self._parse_listing_resource_and_escrows(request)
         )
         # Read first: the source's site becomes the listing binding's origin,
         # and options are built for exactly that origin.
         capacity_source = request.capacity_source.model_dump(mode="json")
-        accepted_escrows, settlement_options = await self._derive_settlement_artifacts(
+        (
+            accepted_escrows,
+            settlement_options,
+            readiness,
+        ) = await self._derive_settlement_artifacts(
             request,
             clauses=canonical_clauses,
             composition=composition,
             origin=str(capacity_source["site_id"]),
+        )
+        # Derived after readiness, under the readiness the options were built
+        # with, for every escrow published whether a clause compiled it or the
+        # request supplied it, so an unready Alkahest advertises no condition
+        # and refuses no candidate. A create request never supplies the
+        # conditions, so a listing advertises only what the storefront's own
+        # configuration can settle.
+        demands = escrow_release_conditions(
+            configured_alkahest_section(),
+            accepted_escrows,
+            readiness=readiness,
+            chains=CHAINS,
+            wallet_address=get_evm_wallet_address() or "",
         )
 
         if (
@@ -620,6 +702,8 @@ class ListingService:
             demands=demands,
             composition=composition,
             source=f"{capacity_source['site_id']}/{source_id}",
+            readiness=readiness,
+            escrows_supplied=bool(request.accepted_escrows),
         )
         listing_resource.capacity_backing = backing.label
 
@@ -668,10 +752,6 @@ class ListingService:
         self, derived: DerivedVmListing, *, paused: bool = False
     ) -> CreateListingResponse:
         """Write a derived listing and its binding, then publish it unless paused."""
-        from market_storefront.services.publication_service import (
-            publish_order_to_registry,
-        )
-
         listing = derived.listing
         listing_dict = listing.model_dump(mode="json")
         listing_id = listing.listing_id
@@ -722,10 +802,7 @@ class ListingService:
             )
             return CreateListingResponse(status="created", listing_id=listing_id)
 
-        publish_result = await publish_order_to_registry(
-            listing_dict,
-            sqlite_client=self._db,
-        )
+        publish_result = await self._publish_to_registries(listing_dict)
         return CreateListingResponse(
             status="created",
             listing_id=listing_id,
@@ -742,10 +819,6 @@ class ListingService:
     ) -> dict[str, Any]:
         """Refresh one listing's ready options without touching accepted Terms."""
         from arkhai_vms_listings.models import Listing
-
-        from market_storefront.services.publication_service import (
-            publish_order_to_registry,
-        )
 
         stored = await self._db.load_listing(listing_id=listing_id)
         if stored is None:
@@ -772,6 +845,8 @@ class ListingService:
             option_resources,
             clauses=persisted_clauses or None,
         )
+        if not accepted_escrows and not settlement_options:
+            raise RuntimeError("no enabled settlement mechanism is ready")
         await self._db.update_listing(
             listing_id=listing_id,
             accepted_escrows=accepted_escrows,
@@ -783,7 +858,7 @@ class ListingService:
             "settlement_options": settlement_options,
         }
         listing = Listing.model_validate(updated)
-        await publish_order_to_registry(listing, sqlite_client=self._db)
+        await self._publish_to_registries(listing)
         return listing.model_dump(mode="json")
 
     async def close_listing(self, listing_id: str) -> CloseListingResponse:

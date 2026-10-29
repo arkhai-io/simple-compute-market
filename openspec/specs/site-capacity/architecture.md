@@ -41,13 +41,21 @@ job is SSH users, key material, and addressing, and an Ansible inventory is a po
 carrier for declarations because it exists to describe how to reach a machine.
 Keeping GPUs on hosts and moving the other dimensions to declarations would have
 left two partial authorities in one service. So declarations own every dimension,
-and a host's legacy GPU count is only input: where INI inventory enters, and once
-at upgrade, a host with GPUs that no declaration names gets a declaration derived
-from it, and after that its inventory no longer affects capacity.
+and a host's GPU count and model are descriptive. Only the ordered migration ever
+reads them for capacity: once, at upgrade, a host with GPUs that no declaration
+named received a declaration derived from it. No host write declares capacity —
+not an INI inventory applied at startup or through the import API, and not the
+host API — because a declaration made as a side effect of listing a host would sell
+it before its administrator decided how, and would make one host behave
+differently by the entry point that wrote it.
 
 One declaration type serves every entry point — single registration, a mounted or
-submitted definitions document, and derivation — with the same validation and the
-same refusals, so a declaration means the same thing however it arrives.
+submitted definitions document, and capacity import — with the same validation and
+the same refusals, so a declaration means the same thing however it arrives. Every
+declaration names its pool, and a stored row with none is malformed: it is reported
+by the administrative listing, so an operator can find and re-declare it, but is
+projected, admitted, scheduled, and moved as a member of no pool, rather than read
+as `default` or as a pool named for its resource.
 
 Administration composes with the ledger's serialization rather than around it. A
 declaration's checks against stored state (a pool move while the resource holds a
@@ -65,6 +73,10 @@ Admission and scheduling use the same fit semantics. Every requested dimension m
 ## Reservation lifecycle
 
 A hold protects negotiation-time intent for a bounded period. Commit makes capacity durable for execution. Release returns capacity only through the owning lifecycle. Expiry and early termination may initiate release, but physical capacity remains held until executor or provider teardown succeeds or an operator explicitly force-releases it.
+
+Every state `ReservationState` defines is one a lifecycle transition writes, and no ledger operation writes a state its caller names: release takes whether it is forced, not a target state. A generic state writer would be the one way a reservation could enter a state its lifecycle forbids, so tests reach a state through the real transitions or seed the row, as `docs/development/TESTING.md` permits for state no API expresses.
+
+Two states nothing wrote, `provisioning` and `provisioning_failed`, are not defined, and a stored row in either is converted by the migration chain of each service whose database holds the ledger: the provisioning service's `20261028_001_retired_reservation_states` and the API-credits service's `20261028_006_retired_reservation_states`. A `provisioning` row becomes `unmanaged`, whose capacity stays held until an operator repairs it, and a `provisioning_failed` row becomes `force_released`, whose capacity stays free; each records a failure reason naming the state it held. Converting keeps each row's capacity effect, so nothing held is freed and nothing free is held. The windowed reads count an `unmanaged` row against every window, so a converted row that held capacity only within its lease window holds it in every window until repaired: wider than before, never narrower. Refusing the upgrade while such rows existed was rejected: it would stop an upgrade on data an operator may not understand, while the converted rows land in states an operator's tools already act on.
 
 ## Resize as one transaction, not two calls in either order
 

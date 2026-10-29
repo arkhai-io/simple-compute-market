@@ -207,12 +207,12 @@ def test_resource_without_pool_is_not_schedulable(services):
     pools, ledger, scheduler = services
     _pool(pools, DEFAULT_POOL_ID)
     ledger.register_resource(resource_id="orphan", total_units=4, attributes={}, pool_id="default")
-    # A legacy row stored with no pool; registration can no longer write one.
-
+    capacity_reservation_id = _reserve(ledger)
+    # The row loses its pool after admission, as no write can make it: every
+    # declaration names one. It belongs to no pool, `default` included.
     with ledger._session_factory() as db:
         db.query(CapacityBucket).filter_by(backing_resource_id="orphan").one().pool_id = None
         db.commit()
-    capacity_reservation_id = _reserve(ledger)
     with pytest.raises(NoEligibleSettlementResourceError):
         scheduler.schedule_resource(_request(capacity_reservation_id))
 

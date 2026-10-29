@@ -70,6 +70,22 @@ through Dynaconf — it is read from the resolved settings at startup and
 written into `os.environ` once, explicitly, rather than set as a pod env
 var).
 
+**A setting that belongs to one domain is named for it.** The compute
+provisioning service reads the VM playbook from `vm_playbook_path` and the
+bare-metal playbook from `bare_metal_playbook_path`; neither has an alias. A
+renamed setting is refused rather than ignored, because an ignored key would
+silently fall back to a default the operator meant to replace: the service's
+first startup step refuses a configuration stating the retired `playbook_path`
+in any layer, environment included, naming `vm_playbook_path`, and the
+provisioning chart's values schema refuses `config.playbook_path`. A setting
+retired because the service stopped needing it, such as
+`default_pool_inventory_group` and `default_host_id`, is not refused, since
+ignoring it changes nothing the service does.
+
+Before a package reaches 1.0.0, the meaning of a configuration key it reads may
+change incompatibly in a minor release (see
+[`RELEASING.md`, "Versioning policy"](RELEASING.md#versioning-policy)).
+
 ## Kubernetes: ConfigMap and Secret mounting
 
 All application configuration travels through mounted files, never
@@ -96,6 +112,18 @@ application Deployment and to Helm test pods.
 - A pod sets only `ACTIVE_PROFILES` (the list of profile names to layer,
   comma-separated) and `CONFIG_DIRECTORY` (where the mounted files live)
   as environment variables.
+- A file a setting names by path, rather than a value, reaches the
+  provisioning service through the chart's `configFiles` map: each entry's
+  content renders verbatim into the ConfigMap and mounts read-only at
+  `/app/config/<name>`, and the operator names that path under `config`, as
+  `config.pool_seed_path` names a replacement pool seed. The chart gives the
+  file no meaning and derives no setting from it, so it stays config-neutral.
+  Its schema takes a single file name Kubernetes accepts as a ConfigMap key,
+  and refuses `.` and names beginning `..`, the names the chart mounts itself
+  (its definition documents), and `config.yml`, `config-*.yml`, and their
+  `.yaml` forms, which the service would load as profiles around the
+  rendered one. Each file renders through `toYaml` and each mount's name is
+  quoted, so content and name reach the container exactly as given.
 
 **The rule behind the pod rule.** Every configuration value of a storefront
 reaches it through its configuration system: its configuration files and its
@@ -112,6 +140,23 @@ stays available to an operator correcting a development cluster. Both storefront
 charts set `enableServiceLinks: false`, because Kubernetes would otherwise inject
 variables for every Service in the namespace, and one named `storefront…` would
 land in the storefronts' `STOREFRONT_` override layer.
+
+**A deployment does not wait on a service's dependencies.** No chart holds a
+service back with an init container that waits for or validates an external
+dependency — a chain, a registry, a site, or another service — and no service
+waits for one in process either. The service starts with its dependencies
+unreachable, reports each one it cannot reach in its system status as degraded,
+and its own loops retry it; a misaddressed dependency is indistinguishable at
+start from one that is down, so it is reported the same way rather than refused.
+The one init container a chart runs is the provisioning service's migration,
+which acts on the service's own state (see "Migrations at startup"). What stops a
+service is its own configuration or stored state being incoherent (see
+"Storefront startup and site trust"), since waiting does not repair either. Both
+storefront charts give their container a `startupProbe` on `/health`, so a slow
+start holds the liveness and readiness probes off rather than being judged by
+them; `/health` is a process check that calls no dependency. Each chart's render
+tests assert that no `wait-for-` container and no init container renders for a
+storefront, and that the `startupProbe` does.
 
 **Toggling a mock/test profile:** A boolean chart value (for example
 `mockMode`) can conditionally append a profile name to
@@ -130,7 +175,9 @@ registry pins `registry.authority_id` and `registry.identifier`, which are what 
 release's clients trust (`global.registryIdentity`), carried only for the internal
 registry and only for an EIP-191 identity, the one scheme the registry smoke test
 verifies; `buyer.wallet_address`, from the e2e-tests chart's development buyer
-identity; `seller.wallet_address`, from the target agent's `[Wallet].address`; and
+identity; `seller.wallet_address`, from the target agent's `[Wallet].address` when its
+configuration states one, and absent when the agent derives its address from
+its key; and
 `provisioning.authority_scheme` and `provisioning.authority_identifier`, the
 provisioning signer the release's clients trust (`global.provisioningIdentity`),
 which the provisioning chart's own identity must equal. The provisioning smoke
@@ -161,17 +208,39 @@ them; `--raw` prints each public file and never the overlay.
 because Helm merges maps key by key and replaces lists whole: an overlay states
 only what it changes in one agent, and `null` removes a key or an agent. A list
 is refused by the values schema, naming the map, and so is a `name` inside an
-entry, whose key is its name. The storefront subchart ships no agent, since Helm
-cannot remove a subchart's default from a parent's values; the umbrella's
-`values.yaml` declares Bob, and a values file that replaces Bob with an agent of
-its own states `bob: null` beside it. The same holds for any chart value that
-overlays change per entry: key it, do not list it.
+entry, whose key is its name. The storefront subchart ships no agent; the
+umbrella's `values.yaml` declares Bob, and a values file that replaces Bob with
+an agent of its own states `bob: null` beside it. The same holds for any chart
+value that overlays change per entry: key it, do not list it.
+
+The supported Helm is the release pinned in
+[`.github/workflows/tests.yml`](../../.github/workflows/tests.yml). That release
+removes a parent's `null` for a subchart key only where the subchart's own
+defaults define the key. The charts remove remaining null-valued keys themselves,
+before any template reads an agent, so removal does not depend on Helm's merge.
+A `null` assigned to a mapping key in a values file removes that key, at any
+depth of an agent, including keys inside list elements; it never sets that
+setting to `None`. Null list elements keep their item schema's meaning.
+A removed key renders as if it had never been stated: the storefront applies
+its default, or the chart adds a release-derived value where it normally would.
+A required service setting the chart does not derive remains absent, and the
+storefront refuses it at startup. To set a value to `None` where the storefront
+accepts it, use the storefront's own file or the Secret overlay instead.
+
+Removing every agent is refused at render; set `storefront.enabled: false` to
+run none. Removing an agent's `port` or `identity` is also refused, naming the
+agent and missing value, since the chart has neither to default to. Removing
+`component` or `configMapName` uses the chart's default; removing a runtime
+`secret` or address book mounts none, as does removing its Secret or ConfigMap
+name. Other removed keys under those values take their defaults. A key the
+values schema refuses, including a secret or retired key, stays refused as
+`null`.
 
 Each agent entry carries the storefront's own configuration
 in `config`, in the storefront's own key names, and the chart renders it
-unchanged into `storefront.json`. A setting or settlement mechanism the
-storefront gains deploys through values alone. Keys may be spelled in any case,
-as the storefront's loader reads them; a key stated in two spellings is refused
+into `storefront.json` with its null-valued keys removed. A setting or settlement
+mechanism the storefront gains deploys through values alone. Keys may be spelled
+in any case, as the storefront's loader reads them; a key stated in two spellings is refused
 at render. The chart adds only what the release knows, and except for the port
 only where `config` does not state it:
 
@@ -195,9 +264,13 @@ service default and does not validate the storefront's own settings.
 
 An agent's `alkahestAddressBook` (`configMapName`, empty mounting nothing; `key`;
 `mountPath`, default `/etc/arkhai/alkahest`) mounts an existing ConfigMap's
-address book read-only at `<mountPath>/<key>`, and the agent's
-`Chains.<name>.alkahest_address_config_path` and
-`[Settlement.alkahest].address_config_path` name that file. The `dev-env` chart,
+address book read-only at `<mountPath>/<key>`, and the agent's `config` names that
+file as its chain's entry in `[Settlement.alkahest.address_books]`; the chart
+renders the entry as stated and derives none. A retired address-book key —
+`alkahest_address_config_path` under a `[Chains]` table, or `address_config_path`
+under `[Settlement.alkahest]` — is refused by the storefront's own startup refusal,
+which the chart's render tests run over the rendered `storefront.json` (see
+"Settlement consumer configuration and cutover"). The `dev-env` chart,
 which deploys the Anvil state the book describes, renders its copy of
 `kit/alkahest`'s development address book as `<release>-dev-env-alkahest-addresses`.
 
@@ -240,7 +313,9 @@ replaces it, and startup refuses a renamed or removed key under its own heading,
 `enable_registry_discovery`, refused whatever its value, so an operator who had
 turned publication off is not silently switched on, since VM always publishes to
 every `[registry].urls` entry; the removed `[provisioning.identity]`, since every
-site client verifies against its site's service peer; and the local-inventory keys,
+site client verifies against its site's service peer; the removed
+`provisioning.fail_on_unreachable` and `provisioning.preflight_timeout`, since the
+storefront starts without waiting for its provisioning service; and the local-inventory keys,
 which startup does not refuse (see "Settlement consumer configuration and
 cutover"). The chart's hand-written block holds only the chart's own retired values
 shape, that of storefront chart releases before 0.2.0 — `seller`,
@@ -288,12 +363,85 @@ site's URL is not an HTTP(S) origin. The refusal runs before the storefront open
 database or builds a signer, so it leaves no database file and starts no loop.
 Missing storefront-wide terms are not a refusal: an empty `[pricing].settlements` or
 an absent `[pricing].default_max_duration_seconds` leaves the terms to each pool's
-override or hint, and a pool that resolves none is held and reported in system
-status's `publication_derivation`. Retired settings are refused under their own
+override or hint. A pool that resolves no lease bound is held and reported in system
+status's `publication_derivation`; a candidate whose pool resolves no settlement
+clause is refused as `no_settlement_option`, and its open listing is closed through
+reconciliation and reopened under the same identity once a clause resolves (see
+"Storefront listing shapes and pool overrides"). Retired settings are refused under their own
 heading, apart from these, since a stale key is not a reason publication is
 impossible. A storefront that only services deals already accepted is not a supported
 deployment. A storefront chart cannot check any of this, which is why each chart's
 render tests run the storefront's own refusal over a rendered `storefront.json`.
+
+**A service refuses to start on its own incoherent state, never on a dependency.**
+A service refuses to start when its own configuration contradicts itself or its
+stored state cannot be served as it stands, since waiting repairs neither; a
+dependency it cannot reach is reported, not refused (see "Kubernetes: ConfigMap and
+Secret mounting"). Every storefront refuses an Alkahest section selecting both the
+oracle-gated and the interruptible release model, and the bare-metal storefront
+refuses Alkahest inputs — `[Wallet].address`, `[Chains]`, `[Wallet].private_key` —
+stated with no Alkahest section. The provisioning service refuses to start while a
+stored resource pool lacks valid advertisement and backing declarations, or names a
+provider no handler in its build serves, naming each pool and provider: handlers are
+fixed by the build and every write refuses an unknown provider, so such a row comes
+from outside the service's write paths, and no pool document can repair it.
+
+**A storefront starts with its dependencies unreachable.** None waits for its
+registry, chain, site, or credits service. The VM storefront's
+`[seller.provisioning]` and the API-credit storefront's `credits` sections have no
+reachability preflight: their removed `fail_on_unreachable` and `preflight_timeout`
+keys are retired settings, refused at startup and, for VM, by the values schema and
+`market-storefront config set`. A storefront started with its registry unreachable
+reports the registry check unreachable and itself `degraded`, and its publication
+cycle still completes, each listing it could not publish recording
+`registry_not_converged` until a later cycle publishes it. One started with its site
+unreachable holds no projection of that site, so its cycle holds the site's listings
+and closes none, and its fulfillment and settlement calls to the site fail
+retryably. API credits' configured seed listing is created by its `listing-seed`
+loop step, which waits while the credits service cannot be reached or a mechanism
+its clauses use is unknown, and gives up, logging once, on a configuration failure.
+
+**An Alkahest section that cannot settle makes Alkahest unready.** A section that
+parses but under which no deal could settle is reported through Alkahest readiness
+blockers, its options are not published, and the storefront's other mechanisms run:
+`oracle_gated` with no `trusted_oracle_addresses`, `interruptible` with no
+`interruptible_oracle_addresses`, a release oracle equal to the seller wallet, a
+seller wallet with no address, no private key where the storefront signs, no
+`[Chains]` entry, an address configuration that cannot be loaded, or a release
+model the storefront's domain does not deliver (bare metal delivers `recipient` and
+`oracle_gated`). A section that does not parse stops startup, as all configuration
+does. A disabled section reports, after `disabled`, the configuration blockers that
+would keep it from settling. Readiness governs publication only: an address, chains,
+or key removed while Alkahest deals are open leaves the seller unable to service or
+collect them, the buyer's escrow staying reclaimable at expiry, and the blocker
+naming what is missing is the operator's signal. Every readiness blocker states its
+`kind`: `configuration`, which the storefront's own settings cause, or
+`reachability`, when the mechanism's chain or service could not be reached;
+publication reads the kind to decide whether an open listing left with no option is
+closed or held (see "Storefront listing shapes and pool overrides").
+
+**Alkahest probes its chains.** Readiness makes no chain call. Each storefront
+composing Alkahest runs an `alkahest-chain-probe` lifecycle loop that, once per
+`[Settlement.alkahest].probe_interval_seconds` (30 by default), reads each
+configured chain's `eth_chainId` and the code at each contract its address
+configuration requires, each call bounded by `rpc_timeout_seconds` (5 by default);
+both are seller settings and positive seconds. An RPC that errors or times out reads
+as the reachability blocker `alkahest.chain_unreachable`; a different chain ID is
+`alkahest.chain_id_mismatch`, and a required contract with no code
+`alkahest.contract_missing`, both configuration blockers. A chain not yet probed
+since start reads as unreachable, so a freshly started storefront holds its open
+Alkahest listings rather than closing them; a result does not expire, so while the
+loop is held readiness reads the last one however old. Startup constructs no chain
+client: the probe constructs each at its first step, waiting no longer than the RPC
+timeout, and again at each probe until one succeeds, so a storefront recovers
+without a restart, and a chain whose client cannot be constructed reads
+unreachable whatever its RPC answers. The probe calls a `ws://` or `wss://`
+`rpc_url` over `http://` or `https://` at the same host, port, and path, so a
+provider serving the two on different endpoints reads as unreachable. Status
+readiness judges every configured chain, so `ready` there means every one is
+reachable and deployed; publication judges the chains a candidate's escrows name,
+and one unreachable chain among them withholds the candidate's Alkahest options on
+all of them.
 
 **A site's authority URL is an origin.** Each `[capacity.sites]` URL is parsed by the
 WHATWG URL standard (pydantic's `AnyHttpUrl`) and must have an `http` or `https`
@@ -350,10 +498,25 @@ not positive seconds.
 **System status.** Each storefront's system status reports its lifecycle loops as
 `lifecycle`: each loop's state and last cycle's outcome, a failure's stage and error
 type, and its message only for the storefront's own configuration and publication
-errors. The VM and bare-metal storefronts also report each site's projection families
-and the latest publication derivation. The API-credit storefront's status is the
+errors. Each also reports `settlement`, every composed mechanism's readiness as its
+registration projects it — `mechanism`, `ready`, and each blocker's `code` and
+`kind` — with Alkahest's carrying each chain's last probe result and when it was
+taken (`chain_probe`); and `status` is `degraded`, rather than `ok`, while a check
+such as the registry's fails, the process itself still serving. The VM and
+bare-metal storefronts also report each site's projection families and its
+`publication_derivation`, in one shape for both: per site, the `holds`, `refusals`,
+and `reports` the last real publication cycle made, each entry a reason code with
+the pool or Physical Resource it concerns and any detail. Only a publication cycle
+records it — a preview, a listing-source check, and capacity-event reconciliation
+do not — so a configured site no cycle has derived since start is absent, and a site
+present with empty lists derived cleanly. The storefront logs each entry as a
+warning when it first appears and at info when it clears, and never logs a standing
+entry again or a preview, so a condition that lasts many cycles is logged once. A
+cycle that cannot read a site at all records a hold naming no pool, and the site's
+other entries from the last cycle that read it stand beside that hold until a cycle
+reads the site again. The API-credit storefront's status is the
 administrator's signed read (`admin_system_status`), as VM's and bare metal's are;
-`/health` stays unauthenticated.
+`/health` stays unauthenticated and is a process check.
 
 ## Marketplace identity configuration
 
@@ -518,10 +681,12 @@ Deploy to a local development cluster with `make -C helm deploy-local`, never wi
 `make -C helm deploy` or the root `make deploy`, whether a person or an agent is
 deploying. A local cluster is redeployed with whatever code is checked out, and a
 retained volume keeps the state that code wrote — a database another branch
-migrated — for the next deployment to start from. Pre-review validation refuses
-to deploy over a release volume that carries the annotation and stops to ask, so a
-local deploy without the overlay costs the next validation a decision.
-`make -C helm deploy` is for a deployment whose state must survive reinstalling.
+migrated — for the next deployment to start from. Pre-review validation run in
+`default` refuses to deploy over a release volume that carries the annotation and
+stops to ask, so a local deploy without the overlay costs the next validation a
+decision; a change's validation runs in its own namespace instead and deletes its
+volumes itself ("Validation namespaces", below). `make -C helm deploy` is for a
+deployment whose state must survive reinstalling.
 
 ### Release topology
 
@@ -552,7 +717,9 @@ value (Anvil accounts 8 and 9) never for a public network. Release 2 reuses rele
 1's provisioning SSH and runtime Secrets and reads three of its own.
 
 - `make helm-topology-secrets` creates or replaces, idempotently, every Secret both
-  releases read, deriving each key with `cast` from Foundry's default development
+  releases read, in its namespace, which it creates when absent (`make -C helm
+  topology-secrets CHANGE=<change>` for a change's validation namespace),
+  deriving each key with `cast` from Foundry's default development
   mnemonic at `helm/Makefile`'s `DEV_ACCOUNT_*` indices (development values only);
   provisioning's SSH key is the committed mock placeholder,
   `PROVISIONING_SSH_KEY_FILE`. `helm/scripts/topology-secrets.sh` says what each
@@ -576,6 +743,82 @@ value (Anvil accounts 8 and 9) never for a public network. Release 2 reuses rele
 An end-to-end scenario that needs release 2 states `make helm-topology-up` on its
 Makefile target and in its suite module's docstring; the Helm validation scenarios
 need release 1 alone.
+
+**Helm test pods carry no workload selector label.** Each chart labels its Helm
+test pod through its own `<chart>.testLabels` helper: chart, version, managed-by,
+instance, and `app.kubernetes.io/component: test`, but never
+`app.kubernetes.io/name`, which every Deployment selector requires. So
+`kubectl logs -l <selector>` or `kubectl logs deploy/<name>` finds only the
+service's pods, and no Service routes traffic to a test pod. Adding `component`
+to the Deployment selectors instead is not available: a selector is immutable, and
+changing one forces each release to recreate its Deployments.
+`helm/tests/test_release_topology.py` renders both topology releases and asserts
+that no Pod annotated `helm.sh/hook: test` carries all of any Deployment's
+`matchLabels` or any Service's selector, and that each release renders its expected
+test pods.
+
+### Validation namespaces
+
+A change's pre-review validation deploys release 1 into a namespace of the change's
+own, so several changes are validated side by side on one development cluster
+without uninstalling each other's release (the `change-workflow` contract,
+`openspec/specs/change-workflow/spec.md`, "Each Helm validation is isolated in its
+change's namespace").
+
+- **The namespace.** `validate-<change>`, cut to 63 characters with the first eight
+  hex digits of the full name's SHA-256 appended when longer
+  (`scripts/change_namespace.py`). Every `helm/Makefile` target that takes
+  `NAMESPACE=` also takes `CHANGE=`, deriving the namespace the same way; giving
+  both is refused. Release names do not change with the namespace, so the in-cluster
+  Service names `local-values.yaml` states resolve in every one, and the two-release
+  topology fits in it.
+- **Image tags.** Every build target appends `IMAGE_SUFFIX`, empty by default:
+  `make build-dev IMAGE_SUFFIX=-<change>` builds `arkhai:storefront-<change>` and its
+  siblings, and the deploy names them through a values overlay naming every `arkhai`
+  image `helm/values.yaml` sets (`change_namespace.py <change> --image-overlay
+  <path>`); a render test holds the overlay to every image the chart renders, so an
+  image added later cannot deploy under its bare tag. Compose, the pipeline lanes,
+  and your own deployments keep bare tags. A namespace alone would not isolate
+  images, since every image is pulled `IfNotPresent` from the one Docker daemon the
+  cluster reads. The tag is fixed per change, never per commit: commit-suffixed tags
+  caused repeated image-not-found failures deploying Helm, and a rebuilt image under
+  a fixed tag rolls out by restarting pods. A suffixed build writes no commit tag; a
+  bare build still writes `arkhai:<tag>-<sha>`, which `make push-images` reads.
+- **Upgraded from zero over deleted volumes.** Each validation of the change scales
+  the release's workloads to zero if a crashed run left any up, deletes its pods,
+  its volume claims, and the deal test's `arkhai-buyer-profiles`, and waits until
+  they are gone; creates the namespace's Secrets with `topology-secrets`; and runs
+  `helm upgrade --install` with `local-values.yaml` and the change's image overlay,
+  then restores each workload's replica count and waits for its rollout. Every pod
+  starts new, on the images just built, against empty volumes. An upgrade the chart
+  refuses (`field is immutable`) falls back to uninstalling and installing.
+- **Scaled to zero afterwards.** Once the scenarios have run, validation keeps
+  every pod's log and the namespace's events, then scales the namespace's
+  Deployments and StatefulSets to zero, keeping objects and volumes, so resident
+  memory does not grow with the active changes. `make -C helm resume CHANGE=<change>`
+  scales them back to the replica counts the installed release states, rendering
+  nothing from the checkout.
+- **Manual access.** `make -C helm forward CHANGE=<change>` forwards that
+  namespace's services on the usual ports (8545, 8080, 8001, 8081) for running e2e
+  targets by hand. The ports are the same for every namespace, so one namespace is
+  forwarded at a time: a port another checkout already forwards fails to bind, and
+  `forward` names it and stops. Validation itself forwards nothing.
+- **Capacity.** The node's memory is the one resource the namespaces share.
+  `helm/validation-capacity.toml` records the memory one release needs, when, and
+  from which change's validation it was measured; before deploying, validation
+  compares that figure, times the releases that would then be running, with the
+  node's allocatable memory, and stops for a deployment that would not fit. The
+  check is an estimate that reserves nothing. The figure is measured through the
+  cluster's metrics API and written at archive cleanup (`make record-capacity`)
+  only when the change's latest validation measured one; on a cluster with no
+  metrics source none is recorded, and the check warns that it was skipped. Where
+  two branches' figures conflict at a merge, keep the one whose `measured_at` is
+  later.
+- **Teardown.** Archive cleanup runs `make -C helm teardown CHANGE=<change>`,
+  which deletes the change's namespace in `HELM_CONTEXT` (`docker-desktop` by
+  default), with every release, volume, and Secret in it, and removes each image the
+  change's validation build tagged. It takes `CHANGE=` only, so it never deletes
+  `default`.
 
 ### Combined compute-family storefront
 
@@ -652,20 +895,35 @@ configured. The chart's schema refuses the pool and capacity paths under
 supplies none is managed entirely through the API.
 
 Startup imports them in dependency order: relays, then pools (which may name a
-relay), then host inventory, then capacity (whose declarations name a pool and
-may name a host). A capacity document naming a pool other than `default` needs
-that pool supplied beside it on a first boot.
+relay), then the pool seed on a fresh site, then host inventory, then capacity
+(whose declarations name a pool and may name a host). Every pool a capacity
+document names must exist when it is imported: from the pool document, or, on a
+fresh site with none, from the seed.
 
-On a first boot with a pool document configured, the document creates the
-`default` pool: migration seeds none, so `default` takes the provider and
-configuration the document declares, before any host is admitted. A bare-metal
-site therefore declares `default` as `bare_metal.ansible`, and a VM site as
-`vm.ansible`. A configured document that is missing or invalid fails startup;
-the service does not fall back to a VM default. A first boot is judged by
-whether any pool or host is stored, so a migration interrupted before it stored
-either still leaves `default` to the document when it is retried. With no pool
-document configured, migration seeds a VM `default` from the configured
-playbook. A database that already holds pools or hosts keeps its `default`.
+Migration creates no pool, and no pool name is special: a pool document need
+not name `default`, and any pool may be disabled. A configured pool document
+creates the pools it declares, with their providers, before any host or
+declaration can name them; one that is missing or invalid fails startup, and
+the seed does not stand in for it.
+
+A site that configures no pool document and stores no pool, enabled or
+disabled, is seeded at startup from the document `pool_seed_path` names. The
+default, `seed/pools.yaml` packaged with the service beside its `settings.toml`
+(a relative path resolves against that directory), declares `vm-default`
+(`vm.ansible`) and `bare-metal-default` (`bare_metal.ansible`), each delivering
+and advertising its own mode, backed, and with no provider configuration, so a
+VM job in `vm-default` runs the service's `vm_playbook_path`. The seed is
+applied through the same validation and import as a pool document, in one
+transaction, records no digest, and is never applied again: a site holding pools
+is never seeded, and an edit to the seed reaches no existing site. The seed
+pools sell nothing until capacity is declared into them. An operator replaces
+the seed by pointing `pool_seed_path` at another pool document — under Helm,
+one supplied through the provisioning chart's `configFiles` — or disables
+seeding with an empty `pool_seed_path`, which starts a fresh site with no pool.
+A seed that applies and is missing or invalid fails startup; where it does not
+apply it is not read, so a dangling path never fails a serving site. One process
+initializes a database: two starting together on one fresh database can both
+find no pool, and the second fails its start, then skips the seed on restart.
 
 A pool's provider is fixed at creation. A changed pool document that names a
 different provider for an existing pool is refused whole: validate-only reports
@@ -705,6 +963,12 @@ and is not read again. Execution renders its inventory from the registered host
 record the work names, never from the file. A host added to the file after first boot is
 therefore not registered, and dispatch to it is refused until it is imported
 through `POST /api/v1/hosts/import` or registered through `POST /api/v1/hosts`.
+No host write, from the inventory, the import API, or the host API, places a host
+in a pool it does not name or declares any of its capacity: an INI entry's
+`pool_id=<id>` places or moves the host, an empty `pool_id=` unplaces it, and an
+entry with no `pool_id` leaves an existing host's pool unchanged and a new host
+unplaced. `gpus=` and `gpu_model=` are descriptive; a host sells only through a
+capacity declaration.
 
 ### Reconciliation follows the document, not the process
 
@@ -745,7 +1009,7 @@ the API is one relay, not two.
 
 A capacity declaration absent from the document is **retained**, as a relay is.
 An unnamed declaration may have been registered through the API, derived from a
-host's inventory, or be backing a live reservation, and none of those is what an
+host's inventory by the upgrade migration, or be backing a live reservation, and none of those is what an
 operator editing an unrelated entry means to switch off. A capacity document
 therefore adds and updates declarations and never removes one; disabling is an
 explicit `enabled: false`, in the document or through the API.
@@ -759,8 +1023,8 @@ declaration with the registration API's field names — `resource_id`, `pool_id`
 exactly the effect of the same `PUT /api/v1/capacity/resources/{resource_id}`.
 
 - **An entry replaces the declaration it names.** A field it omits is cleared,
-  not kept, so an entry adopting a declaration derived from host inventory must
-  restate its `host_id`, and an omitted `enabled` re-enables one disabled through
+  not kept, so an entry adopting a declaration the upgrade migration derived
+  from host inventory must restate its `host_id`, and an omitted `enabled` re-enables one disabled through
   the API.
 - **Entries equal to the stored declaration write nothing** and emit no capacity
   event, so reapplying a document — or one changed only in comments or layout —
@@ -833,6 +1097,25 @@ deployment topology:
 
 See `docs/development/TESTING.md` for how migration behavior itself is
 validated (fresh bootstrap, idempotent rerun, drift detection).
+
+The compute provisioning migration reads no operational configuration:
+`compute-provisioning-migrate` reads only its database URL and log level, so
+one database migrates to the same schema and rows under any profile. What a
+site configures — its pools, their seed, its playbooks — is applied by the
+service's own startup, after migration. Migration therefore creates no pool. A
+database whose hosts predate resource pools and that holds no `default` pool is
+refused by the resource-pool migration with a schema-drift error saying what to
+create; every live database is past that migration. A job recorded before job
+envelopes takes its host only from evidence naming its physical host — the
+row's `host_id`, then its `host_id` parameter, then, for a bare-metal job alone,
+its `executor_target` — never from a VM job's guest target; a job with none
+keeps no host, is logged by ID at WARNING, and if still queued fails at
+execution as naming no host.
+
+The migrations that make a host's pool and a VM pool's playbook optional
+rebuild `hosts` and `ansible_pool_configs` in place, keeping every row's
+values, and drop the unread `ansible_pool_configs.inventory_group`. An older
+image writes that column, so recovery after these migrations rolls forward.
 
 The VM provider is named `vm.ansible`. A provisioning database with pools or
 fulfillment records under the historical name `ansible` is migrated to the
@@ -976,9 +1259,10 @@ system status names the retired keys.
   undefined field, or with an unknown key; bounds that merge to an empty range; or
   one base shape stated twice with different constraints — closes alone, and the
   pool's other listings publish. System status reports the inadmissible offers and
-  the uncomputable policies per site in `publication_derivation`, under
-  `inadmissible_listing_shapes` and `unusable_shape_constraints`, naming the tier,
-  path, and problem, each tier's conflicting value, or each conflicting entry.
+  the uncomputable policies under each site's `publication_derivation` `reports`,
+  as `listing_shape_inadmissible` and `shape_constraints_unusable` entries whose
+  `findings` name the tier, path, and problem, each tier's conflicting value, or
+  each conflicting entry.
 
 - **Writes refuse what they can check.** The provisioning service refuses a pool
   write whose constraint mappings are malformed or that states one base shape twice
@@ -1006,6 +1290,43 @@ system status names the retired keys.
   unreachable does not delist that site. Listings derive only from site
   projections; nothing local stands in for one. A site decommissioned without
   closing its listings leaves them advertised until an operator closes them.
+- **A candidate with no settlement option yields no listing.** In VM and bare metal
+  alike, a candidate whose payload carries no settlement option and no accepted
+  escrow is refused and recorded under its site's `publication_derivation`
+  `refusals`, with its pool and Physical Resource. Its admissible clauses are its
+  pool override's, else the configured ones, after admissibility for its backing
+  (an unbacked listing publishes only options its domain does not fulfil through
+  capacity). When the candidate's listing is open, each mechanism of those clauses
+  is judged by its readiness blockers' `kind` (see "Storefront startup and site
+  trust"):
+  - every mechanism ruled out by configuration — no clause, a contact-only option
+    whose origin has no contact, or any configuration blocker — refuses it as
+    `no_settlement_option` and closes the listing through reconciliation; it
+    reopens under the same identity on the first cycle whose payload builds again;
+  - any mechanism whose every blocker is reachability — its chain or service
+    unreachable, or not yet probed since start — holds the listing on its
+    last-published terms as `settlement_mechanism_unknown`, a hold, and it
+    negotiates as before; with no open listing that is a refusal;
+  - any other payload failure is refused as `payload_unbuildable`, its text the
+    entry's `error`, and leaves an open listing as it is.
+
+  A mechanism outside the candidate's admissible clauses is not judged, so an
+  outage on a mechanism the listing could never publish neither holds nor closes
+  it.
+- **A clause naming a disabled mechanism is dropped wherever it is stated.** A
+  settlement clause is read in full before its mechanism's enablement is judged,
+  so a malformed clause — including a stated `mechanism_input` that is not a
+  mapping — is a payload failure that leaves its listing as it is. A readable
+  clause whose mechanism's section is absent or disabled is dropped and rules that
+  mechanism out, whether a pool's hint, an override, or `[pricing].settlements`
+  states it, so a listing it alone priced closes as `no_settlement_option`.
+  `market-storefront config migrate --scope settlement|publication` validates its result
+  through the same reading, so it accepts a configuration whose clause names a
+  disabled mechanism, as the storefront starts with one; disabling a mechanism is a
+  deliberate operator act.
+- **A region is the pool's alone.** A pool stating no `region` is held as
+  `pool_region_missing`: it publishes nothing new and leaves its open listings
+  unrefreshed.
 
 Constraints are additive: every shape stated without them is valid, and with no
 constraint and no configured default publication is unchanged. Sites and storefronts
@@ -1015,6 +1336,13 @@ release without constraints, first remove every constraint mapping from pool hin
 and stored overrides: a constraint left
 in place makes the older storefront hold the pool, and the older provisioning service
 refuse any write that keeps it.
+
+The compute provisioning contract is at major 3, and every party accepts major 3
+alone: a provisioning service, the storefronts that call it, and the family and
+domain clients they use upgrade together and roll back together. A mismatched pair
+does not half-work; each request is refused by its contract version, naming the
+supported major (see
+[`compute-provisioning-contract`](../../openspec/specs/compute-provisioning-contract/spec.md)).
 
 Upgrading to listing shapes is fail-forward. Every VM listing's identity now
 includes its shape, so the first publication cycle after upgrade closes each
@@ -1045,8 +1373,18 @@ error's type.
   the next publication cycle holds that pool as `pool_override_terms_conflict`
   rather than publishing; raise the maximum or correct the override. A pool for
   which neither the override nor configuration states a positive maximum is held
-  as `pool_lease_bound_missing`, and one resolving no settlement clause as
-  `pool_settlement_clauses_missing`.
+  as `pool_lease_bound_missing`. A pool resolving no settlement clause is not
+  held: its candidates have no settlement option, as "A candidate with no
+  settlement option yields no listing" above describes.
+- **A machine the site builds no view for is reported, and its listing held.** The
+  site projects a declaration from which it cannot build a bare-metal view — a
+  backed one naming no host, no access methods, or no `physical_host_id`, a missing
+  or invalid `allocation_mode`, a private-looking capacity or capability key —
+  without the view, and with the reason in its `publication_view_problems`. The
+  storefront reports it as `publication_view_unbuildable` with those problems and
+  refuses openings against it; an open listing of it is held, neither closed nor
+  refreshed, until the declaration is corrected, while a disabled declaration or a
+  pool that stops admitting bare metal still closes it.
 - **A write takes effect at once.** An accepted write refreshes the site's held
   projections and wakes the publication loop.
 - **Status is judged against the held projection.** An override's status reads
@@ -1066,6 +1404,19 @@ EVM credentials and networks remain in `[Wallet]` and `[Chains]`.
 Generated TOML, ConfigMaps, status output, and run logs contain only public
 configuration projections.
 
+`livemode` in a role's Arkhai payments settings — `[Settlement.arkhai_payments]`,
+or `[bare_metal.arkhai_payments]` in the bare-metal buyer's configuration file — is
+the service mode whose receipts the role accepts. Receipts sign `livemode`, true only from a live payments service, and a
+receipt verifies only when its signed mode equals the role's setting. The default,
+`false`, accepts only test-mode receipts, so a role against a live service refuses
+every receipt until it sets `livemode = true`; set it on both buyer and storefront
+in the same release that points them at a live service. Mode, service origin, and
+receipt identity change together, and changing them is a cutover: each receipt
+check, including the revalidation of a stored receipt at restart, compares with the
+current setting, so a payment deal accepted under the old mode never reaches
+delivery or issuance afterwards. Drain open payment deals, or refund them, before
+the change.
+
 Agreement attachment is set on each side. A buyer's `attach_agreement` (default `false`)
 attaches the exact Agreement when it approves a payment; setting it in a seller
 configuration is a publication blocker. A seller that wants the Agreement on file sets
@@ -1075,6 +1426,37 @@ discloses both principals, the listing, amount, timing, and provision terms, so 
 either only where that disclosure to the payments service is intended.
 
 Stripe consumer settings are rejected with removal diagnostics; they are not migrated to Arkhai accounts, credentials, or transactions. Role CLIs reject legacy settlement keys and expose the same explicit migration contract. The storefront additionally rejects legacy publication pricing that would synthesize options from `min_price`, `token`, or raw `accepted_escrows`. A check is read-only and reports paths and actions with values redacted. A write requires `--backup`, validates the complete candidate before mutation, creates a restrictive same-directory `.bak`, fsyncs, and atomically replaces the source. Conflicting old and new values fail rather than choosing one. Repeating a completed migration is a no-op.
+
+An Alkahest address book — one deployment's contract addresses, overriding the
+SDK's built-in addresses for a chain such as Anvil — is named per chain in
+`[Settlement.alkahest.address_books]`, a table from chain name to path; a chain not
+listed uses the built-in addresses, and a key naming no configured chain makes
+Alkahest unready (`alkahest.address_book_chain_unknown`). `[Chains]` holds only
+chain resources. Every role — storefront and buyer, seller and payer — resolves a
+chain's book through `kit/alkahest` and uses it for client construction,
+publication, release conditions, escrow verification, refunds, and claim
+servicing alike. The two retired keys, `[Chains.<name>].alkahest_address_config_path`
+and `[Settlement.alkahest].address_config_path`, are refused before the settlement
+section is resolved, with a diagnostic naming the table. The settlement migration
+commands, `market-storefront config migrate --scope settlement` and the buyer's
+`market config migrate --scope settlement`, move them into it; the bare-metal and
+API-credit storefronts have no such command, and their operators move the key by
+hand. A chain's own key moves to that chain's entry, and the
+section key to the one configured chain, or else to the chains whose own keys name
+the same book. Where it cannot tell which chains the section key served, or a chain
+would be given two different books, it refuses and names the keys; an empty key is
+removed. The section key named the book claims were serviced against on every
+chain, so on any other configured chain a seller's claims move to that chain's own entry, or to the
+built-in addresses where it has none; a seller's migration report names each such
+chain before anything is written. A release that predates the table refuses it,
+since `[Settlement]` is strict.
+
+A seller's `[Wallet].address` is the recipient its release conditions name, and its
+`[Wallet].private_key` signs every chain transaction, so the two name one account.
+The address is optional: absent, it is derived from the key. An address that names
+another account than the key's makes Alkahest unready
+(`alkahest.wallet_address_mismatch`) and leaves the storefront running. A buyer's
+address names nothing an escrow pays, and is not compared with its key.
 
 Publication config migrates separately from the `[Settlement]` hierarchy. The migration converts an unambiguous single-mechanism legacy price into one complete typed clause. It refuses a dual-mechanism source whose one scalar price has no authoritative asset scale, and refuses per-model legacy pricing, which needs manual clauses.
 
@@ -1228,6 +1610,16 @@ Operators re-deliver a revealed introduction to its origin's instances with
 bare-metal storefront's `redeliver-introduction` command. Delivery and re-delivery
 are specified in [introduction delivery](../../openspec/specs/introduction-delivery/spec.md).
 
+The VM and bare-metal end-to-end lanes each run a Mailpit as the seller's mail sink.
+Each lane's storefront configuration (`domains/vms/storefront/storefront.bob.toml`,
+`domains/bare_metal/storefront/storefront.dev.toml`) enables one SMTP instance,
+`[Delivery.seller-mail]`, sending to the `mailpit` host on port 1025 and addressed
+to the seller contact its `[Settlement.contact]` reveals; the bare-metal lane adds
+the service in `compose.bare-metal-local.yml`, which its storefront waits on until
+healthy. The introduction scenarios read the mail back through the lane's
+`MAILPIT.API_URL` (`e2e-tests/config/config-docker.yml`). Every address in them is a
+development value on a reserved domain.
+
 ### Contact-exchange retention
 
 Two seller-only settings in `[Settlement.contact]` bound how long revealed contacts
@@ -1252,9 +1644,9 @@ The bare-metal storefront reads its configuration as every storefront does: `$XD
 
 `[capacity.sites]` maps each site to its authority URL, and each site is bound to exactly one `[Identity.service_peers.<peer>]`, seeded at the server's start and rotated through the identity routes (see "Storefront startup and site trust"). Health and status report each site by its ID, its service peer, and the peer's active principals, primary first, never its URL; a site's error text in status may name the URL, which is public configuration refused at startup when it carries credentials. `[capacity].poll_interval` (5 s), `[capacity].publication_interval_seconds` (30 s), and `[capacity].source_confirmation_seconds` (three poll intervals unless stated) time the projection poller, the publication loop, and the opening recheck's confirmation window. `[pricing].settlements` compile when the storefront starts, so a clause that cannot be read refuses startup naming the key; an empty list is not a refusal. `[negotiation].policies` names the seller chain.
 
-`[Settlement]` is the strict shared settlement root. A configured Alkahest section, enabled or disabled, requires the seller's public address (`[Wallet].address`), at least one chain (`[Chains.<name>]`, its `rpc_url` and optional `alkahest_address_config_path`), and the wallet key (`[Wallet].private_key`, in the Secret overlay only). Disabled sections still service accepted obligations. Those inputs supplied with no Alkahest section are refused. Payments-only configuration supplies none of them and constructs no Alkahest wallet, chain, or RPC client; its payment credentials remain behind the secret boundary. The storefront delivers the `recipient` and `oracle_gated` release models and refuses to start configured as `interruptible`. Publication additionally requires authenticated registry trust, exact typed clauses, freshly confirmed site projections for its source checks, and a maximum lease duration per pool.
+`[Settlement]` is the strict shared settlement root. A configured Alkahest section, enabled or disabled, settles with at least one chain (`[Chains.<name>]` and its `rpc_url`, with an optional address book under `[Settlement.alkahest.address_books]`) and the wallet key (`[Wallet].private_key`, in the Secret overlay only), whose account is the seller's address; `[Wallet].address` may state it, and one naming another account is a blocker (see "Settlement consumer configuration and cutover"). A section missing any input starts, and Alkahest readiness names each missing input as a blocker, since disabled sections still service accepted obligations. Those inputs supplied with no Alkahest section are refused at startup. Payments-only configuration supplies none of them and constructs no Alkahest wallet, chain, or RPC client; its payment credentials remain behind the secret boundary. The storefront delivers the `recipient` and `oracle_gated` release models; configured as `interruptible`, Alkahest is unready (see "Storefront startup and site trust"). Publication additionally requires authenticated registry trust, exact typed clauses, freshly confirmed site projections for its source checks, and a maximum lease duration per pool.
 
-The Compose wrapper mounts the operator's `storefront.toml` and the Secret overlay and reads the identity credential from its own environment file. The Helm chart, `helm/charts/bare-metal-storefront`, is the storefront chart's agent shape with one agent's keys at its top level: `config` rendered unchanged into `storefront.json` in a ConfigMap; `secret` naming an existing Secret whose key is mounted as `storefront.secrets.toml`; `identity.credentialSecret`; `alkahestAddressBook` mounting an existing ConfigMap read-only; `port`, which the container, probes, and Service share; persistence; and scheduling. The pod's environment carries only `XDG_CONFIG_HOME` and the credential, and service links are off. The chart derives only what the release knows, and only where `config` states none: `port` always (a different stated value refused), `base_url` as the Service's URL, `db_path` under `persistence.mountPath`, and, in an umbrella release, the internal registry's URL with the chart-level `internalRegistryTrust` under it and `[capacity.sites]` as `{default: <provisioning URL>}`. A site bound to the release's provisioning service must have a role-`service` peer naming `global.provisioningIdentity`, which the chart checks and never adds. Installed alone, with no umbrella globals, it derives the first three only and refuses `internalRegistryTrust`. Its values schema is closed: the top level refuses every value it does not know, retired ones by name, and `config` is typed by a definition generated from the storefront's settings models, each section closed, so a misspelled or secret key is refused at render. A key stated in two spellings is refused at render too, since the loader would merge them silently. The chart validates no service semantics; the storefront's startup refusal does.
+The Compose wrapper mounts the operator's `storefront.toml` and the Secret overlay and reads the identity credential from its own environment file. The Helm chart, `helm/charts/bare-metal-storefront`, is the storefront chart's agent shape with one agent's keys at its top level: `config` rendered into `storefront.json` in a ConfigMap with null-valued keys removed (see "Storefront agents: pass-through configuration"); `secret` naming an existing Secret whose key is mounted as `storefront.secrets.toml`; `identity.credentialSecret`; `alkahestAddressBook` mounting an existing ConfigMap read-only; `port`, which the container, probes, and Service share; persistence; and scheduling. The pod's environment carries only `XDG_CONFIG_HOME` and the credential, and service links are off. The chart derives only what the release knows, and only where `config` states none: `port` always (a different stated value refused), `base_url` as the Service's URL, `db_path` under `persistence.mountPath`, and, in an umbrella release, the internal registry's URL with the chart-level `internalRegistryTrust` under it and `[capacity.sites]` as `{default: <provisioning URL>}`. A site bound to the release's provisioning service must have a role-`service` peer naming `global.provisioningIdentity`, which the chart checks and never adds. Installed alone, with no umbrella globals, it derives the first three only and refuses `internalRegistryTrust`. Its values schema is closed: the top level refuses every value it does not know, retired ones by name, and `config` is typed by a definition generated from the storefront's settings models, each section closed, so a misspelled or secret key is refused at render. A key stated in two spellings is refused at render too, since the loader would merge them silently. The chart validates no service semantics; the storefront's startup refusal does.
 
 The selected-site authority owns inventory, executor routing, provisioning credentials, and teardown. The payments authority owns financial state. Buyer, storefront, site, and payment credentials retain their separate authority boundaries.
 

@@ -7,6 +7,8 @@ from types import SimpleNamespace
 
 import market_policy.negotiation_thread as negotiation_thread
 import pytest
+from dynaconf import Dynaconf
+from market_alkahest import AlkahestChainProbe
 from market_identity import Ed25519Signer
 from storefront_client.settlement_routes import unmounted_settlement_routes
 
@@ -21,10 +23,11 @@ from apicredits_storefront.lifecycle_steps import (
     register_api_credit_lifecycle_steps,
     register_api_credit_loops,
 )
+from apicredits_storefront.listing_seed import ListingSeed
 from apicredits_storefront.retired_settings import retired_setting_problems
 from apicredits_storefront.services.capacity_client import capacity_poll_interval
 from apicredits_storefront.startup_refusal import StorefrontStartupError
-from tests._settings_overrides import settings_overrides
+from tests._settings_overrides import replaced_setting, settings_overrides
 
 
 def test_api_credit_routes_use_shared_storefront_shell():
@@ -45,7 +48,9 @@ async def test_api_credit_lifespan_carries_exact_domain_container(monkeypatch):
     container = SimpleNamespace(domain=domain)
     events: list[str] = []
 
-    monkeypatch.setattr(server, "_build_api_credit_services", lambda selected: container)
+    monkeypatch.setattr(
+        server, "_build_api_credit_services", lambda selected, _seams: container
+    )
 
     async def start(selected):
         assert selected is container
@@ -69,24 +74,31 @@ async def test_api_credit_lifespan_carries_exact_domain_container(monkeypatch):
 
 
 def test_api_credit_chain_values_are_contributed_to_shared_factory(monkeypatch):
-    captured = []
-    chain = SimpleNamespace(
-        rpc_url="http://rpc",
-        alkahest_address_config_path="addresses.json",
-    )
-    monkeypatch.setattr(server, "CHAINS", {"anvil": chain})
-    monkeypatch.setattr(
-        server,
-        "build_alkahest_clients",
-        lambda policy, **_kwargs: captured.append(policy) or {"anvil": object()},
-    )
+    """Each chain's book comes from the Alkahest section: ``anvil``'s is named,
+    and ``base_sepolia``, which the table does not name, has none."""
+    chains = {
+        "anvil": SimpleNamespace(rpc_url="http://rpc"),
+        "base_sepolia": SimpleNamespace(rpc_url="http://base"),
+    }
+    monkeypatch.setattr(server, "CHAINS", chains)
+    monkeypatch.setattr(storefront_config, "CHAINS", chains)
 
-    with settings_overrides(**{"wallet.private_key": "secret"}):
-        clients = server._build_alkahest_clients()
+    with settings_overrides(**{"wallet.private_key": "secret"}), replaced_setting(
+        "settlement",
+        {
+            "schema_version": 1,
+            "priority": [],
+            "alkahest": {"address_books": {"anvil": "addresses.json"}},
+        },
+    ):
+        policy = server._alkahest_client_policy()
 
-    assert tuple(clients) == ("anvil",)
-    assert captured[0].chains[0].name == "anvil"
-    assert captured[0].chains[0].rpc_url == "http://rpc"
+    assert policy.private_key == "secret"
+    assert policy.missing_requirements == ()
+    assert [(c.name, c.rpc_url, c.address_book) for c in policy.chains] == [
+        ("anvil", "http://rpc", "addresses.json"),
+        ("base_sepolia", "http://base", None),
+    ]
 
 
 def test_api_credit_watchdog_preserves_configured_schedule():
@@ -119,7 +131,9 @@ async def test_startup_registers_and_starts_every_loop(monkeypatch, payments):
 
     Startup registers each sweep's timer over the step its route runs and the
     capacity-event pollers' fan-out, and `start_loops` starts them all. Payment
-    reconciliation runs only while Arkhai payments is composed.
+    reconciliation runs only while Arkhai payments is composed; the Alkahest
+    chain probe, composed here, runs while Alkahest is; and the listing seed,
+    configured here, runs while a seed is configured.
     """
     domain = get_market_domain_contract()
     composition = (
@@ -127,11 +141,25 @@ async def test_startup_registers_and_starts_every_loop(monkeypatch, payments):
     )
     monkeypatch.setattr(container, "resolved_settlement_composition", composition)
     monkeypatch.setattr(container, "resolved_sqlite_client", object())
+    monkeypatch.setattr(
+        container,
+        "resolved_alkahest_chain_probe",
+        AlkahestChainProbe((), interval_seconds=3600),
+    )
+    # A configured seed, held with every loop, so its step never attempts and
+    # none of its boundaries is reached.
+    monkeypatch.setattr(
+        container,
+        "resolved_listing_seed",
+        ListingSeed(
+            seed={"resource_id": "demo-quota"},
+            register_quota=None,
+            find_listing=None,
+            listing_service=None,
+        ),
+    )
     loops = api_credit_loop_controller()
     register_api_credit_lifecycle_steps(loops)
-
-    async def _noop():
-        return None
 
     class _HeldFeeds:
         """The quota authority's feeds: one site, held from the start, so its
@@ -148,10 +176,13 @@ async def test_startup_registers_and_starts_every_loop(monkeypatch, payments):
     monkeypatch.setattr(container, "resolved_settlement_worker", object())
     monkeypatch.setattr(container, "resolved_loop_controller", loops)
     monkeypatch.setattr(negotiation_thread, "get_thread_store", lambda **_kwargs: None)
-    monkeypatch.setattr(startup, "_preflight_credits_service", _noop)
-    monkeypatch.setattr(startup, "_seed_demo_listing", _noop)
 
-    timed = {"negotiation_watchdog", "settlement_servicing"}
+    timed = {
+        "negotiation_watchdog",
+        "settlement_servicing",
+        "alkahest_chain_probe",
+        "listing_seed",
+    }
     if payments:
         timed.add("payment_reconciliation")
     loops.request_pause(True)
@@ -265,6 +296,44 @@ def test_the_renamed_servicing_interval_refuses_startup_naming_its_replacement(
     assert not created
 
 
+@pytest.mark.parametrize(
+    "key",
+    [
+        "credits.fail_on_unreachable",
+        "CREDITS.Fail_On_Unreachable",
+        "credits.preflight_timeout",
+        "Credits.Preflight_Timeout",
+    ],
+)
+def test_the_removed_credits_preflight_settings_refuse_startup_by_key(
+    monkeypatch, tmp_path, key
+):
+    """The storefront starts without waiting for its credits service, so a stated
+    wait setting is refused by its key, in any spelling, before anything is
+    composed."""
+    refusal, created = _refused(monkeypatch, tmp_path, **{key: 30})
+
+    named = key.lower()
+    assert str(refusal) == (
+        f"the storefront states retired settings: {named} was removed: the "
+        "storefront starts without waiting for its credits service; its listing "
+        "seed waits for the service, and each call to it is retried"
+    )
+    assert not created
+
+
+def test_an_unset_credits_service_refuses_startup_before_anything_is_composed(
+    monkeypatch, tmp_path
+):
+    refusal, created = _refused(monkeypatch, tmp_path, **{"credits.service_url": ""})
+
+    assert str(refusal) == (
+        "the storefront has no credits service to sell for: "
+        "[credits].service_url is not configured"
+    )
+    assert not created
+
+
 def test_authorities_that_are_not_principals_refuse_startup_by_key(monkeypatch, tmp_path):
     """Refused with the other startup refusals, before anything is composed,
     rather than when the capacity pollers first read the site; the refusal
@@ -327,6 +396,39 @@ def test_the_capacity_poll_interval_is_five_seconds_only_when_unstated():
 
 def test_a_configuration_stating_no_renamed_setting_is_not_refused():
     assert retired_setting_problems() == []
+
+
+def _source(values: dict) -> Dynaconf:
+    source = Dynaconf(environments=False)
+    for key, value in values.items():
+        source.set(key, value)
+    return source
+
+
+@pytest.mark.parametrize(
+    ("values", "path"),
+    [
+        (
+            {"chains": {"anvil": {"rpc_url": "ws://anvil:8545",
+                                  "alkahest_address_config_path": "/book.json"}}},
+            "[Chains.anvil].alkahest_address_config_path",
+        ),
+        (
+            {"settlement": {"schema_version": 1, "priority": ["alkahest.v1"],
+                            "alkahest": {"enabled": True,
+                                         "address_config_path": "/book.json"}}},
+            "[Settlement.alkahest].address_config_path",
+        ),
+    ],
+    ids=["chain-key", "section-key"],
+)
+def test_a_retired_address_book_key_is_refused_naming_the_table(values, path):
+    """Spec scenario "A retired key is stated", for the API-credit storefront."""
+    (problem,) = retired_setting_problems(_source(values))
+
+    assert problem.startswith(f"{path} is retired")
+    assert "[Settlement.alkahest.address_books]" in problem
+    assert "/book.json" not in problem
 
 
 @pytest.mark.parametrize(

@@ -4,8 +4,9 @@ The domain's own checks (duration bounds, access method, SSH key, no
 buyer-supplied access authority) run first and refuse for their own reasons;
 then a configured chain decides the price. The chain always begins with
 ``has_matching_inventory_guard``, which reads the negotiation runtime's check of
-the listing against its source for the round. The default chain accepts at or
-above the listed rate and exits below it; a chain ending in ``bisection``
+the listing against its source for the round, then ``escrow_shape_guard``, which
+holds the buyer's escrow to one the listing accepts. The default chain accepts at
+or above the listed rate and exits below it; a chain ending in ``bisection``
 counters.
 """
 
@@ -35,10 +36,16 @@ from market_policy.negotiation_middleware import (
 from market_policy.scalar_policies import proposal_uses_scalar_amount
 from market_policy.seller_round import SellerRoundResult
 
-#: The seller chain when none is configured: the escrow shape, then the listed rate.
-DEFAULT_SELLER_POLICIES: tuple[str, ...] = ("escrow_shape_guard", "listed_price")
-#: Prepended to every chain, so no configuration can drop the source check.
-REQUIRED_SELLER_GUARDS: tuple[str, ...] = ("has_matching_inventory_guard",)
+#: The seller chain's decider when none is configured: the listed rate.
+DEFAULT_SELLER_POLICIES: tuple[str, ...] = ("listed_price",)
+#: Prepended to every chain, in this order, so no configuration can drop the
+#: source check or the escrow-shape check. Policies decide whether and at what
+#: price to deal within what the listing offers; whether an escrow is one the
+#: listing accepts is the listing's, never a seller's preference.
+REQUIRED_SELLER_GUARDS: tuple[str, ...] = (
+    "has_matching_inventory_guard",
+    "escrow_shape_guard",
+)
 
 
 def seller_policy_names(configured: Any = None) -> list[str]:
@@ -54,13 +61,27 @@ def seller_policy_names(configured: Any = None) -> list[str]:
     ]
 
 
+# The status probe's synthetic listing: placeholder values that name no real
+# contract or party. The shape guard refuses an escrow naming no contract, one
+# its listing does not accept, and a condition its listing does not advertise,
+# so the probe's opening names this listing's escrow and condition.
+_PROBE_ESCROW = {"chain_name": "probe", "escrow_address": "0x" + "11" * 20}
+_PROBE_CONDITION = {
+    "chain_name": "probe",
+    "arbiter": "0x" + "22" * 20,
+    "demand_data": {"recipient": "0x" + "33" * 20},
+}
+_PROBE_LISTING = {"accepted_escrows": [_PROBE_ESCROW], "demands": [_PROBE_CONDITION]}
+
+
 def seller_chain_check(configured: Any = None) -> str:
     """Whether the configured seller chain decides a round, as status reports it.
 
-    Runs the chain against a synthetic round-zero proposal with no listing and
-    a matching listing-source verdict, so only the chain itself is judged. A
-    chain that exits or rejects here would refuse every buyer. The values are
-    the ones every storefront's status reports for this check:
+    Runs the chain against a synthetic round-zero proposal on a synthetic
+    listing accepting it and a matching listing-source verdict, so only the
+    chain itself is judged. A chain that exits or rejects here would refuse
+    every buyer. The values are the ones every storefront's status reports for
+    this check:
 
     - ``chain[N] (count=N)``: the chain decided without exiting;
     - ``chain[N] (exit_on_probe: <reason>)``: it exited or rejected;
@@ -74,12 +95,10 @@ def seller_chain_check(configured: Any = None) -> str:
                 round_number=0,
                 sender="them",
                 action="initial",
-                # The zero escrow address keeps the shape guard's carve-out
-                # applicable, so the probe needs no listing's accepted escrows.
                 proposal={
-                    "chain_name": "probe",
-                    "escrow_address": "0x" + "00" * 20,
+                    **_PROBE_ESCROW,
                     "fields": {"amount": 10_000},
+                    "demand": _PROBE_CONDITION,
                     "expiration_unix": 4_102_444_800,
                 },
             )
@@ -87,6 +106,7 @@ def seller_chain_check(configured: Any = None) -> str:
         context = NegotiationContext(
             direction="maximize",
             our_reference_amount=10_000,
+            listing=_PROBE_LISTING,
             listing_source=ListingSourceVerdict("matches"),
         )
         decision, _context = run_negotiation_chain_with_context(chain, history, context)
@@ -173,7 +193,9 @@ def bare_metal_admission_refusal(
         and requested.duration_seconds > listing.max_duration_seconds
     ):
         return "bare_metal_duration_above_listing_max"
-    if requested.access_method not in listing.access_methods:
+    # An unbacked listing carries no access methods, since nothing delivers a
+    # machine behind it, so no access a buyer asks for is listed.
+    if requested.access_method not in (listing.access_methods or ()):
         return "bare_metal_access_method_not_listed"
     if requested.access_method != SSH_ACCESS_METHOD:
         return "bare_metal_access_method_unsupported"

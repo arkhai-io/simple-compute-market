@@ -61,10 +61,19 @@ def _artifacts(demands, heartbeat_interval=60, chain_config_paths=None):
         "demands": demands,
         "expiration_unix": 1_800_000_000,
     }
-    # The listing advertises the condition the proposal selects.
+    # The listing accepts the proposed escrow and advertises the condition the
+    # proposal selects.
+    listing = {
+        "accepted_escrows": [{
+            "chain_name": "base_sepolia",
+            "escrow_address": ESCROW,
+            "literal_fields": {"token": TOKEN},
+        }],
+        "demands": demands,
+    }
     return accepted_escrow_artifacts_from_proposal(
         proposal=proposal,
-        listing={"demands": demands},
+        listing=listing,
         agreed_amount=5_000_000,
         duration_seconds=3600,
         chain_config_paths=chain_config_paths,

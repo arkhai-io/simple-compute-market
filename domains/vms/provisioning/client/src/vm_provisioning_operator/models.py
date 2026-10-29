@@ -5,8 +5,8 @@ and version models are the compute family's, in
 ``compute_provisioning_contracts``.
 
 Internal server-only types (``VmJobParams``, ``build_simple_params``,
-``EvaluateJobRequest``, ``EvaluateJobResponse``) remain in the VM adapter and
-are not part of this public surface.
+``EvaluateJobRequest``) remain in the VM adapter and are not part of this
+public surface; the mock routes' models are the compute family's.
 """
 
 from __future__ import annotations

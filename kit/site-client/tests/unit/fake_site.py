@@ -70,7 +70,6 @@ class FakeSite:
         self.response_operation: str | None = None
         self.response_resource: str | None = None
         self.response_protocol: str | None = None
-        self.omit_response_authentication = False
 
     def add_resource(
         self,
@@ -105,7 +104,7 @@ class FakeSite:
             for reservation in self.reservations.values()
             if reservation["resource_id"] == resource_id
             and reservation["state"]
-            in ("reserved", "provisioning", "leased", "releasing")
+            in ("reserved", "leased", "releasing")
         )
         return self.resources[resource_id]["total_units"] - held
 
@@ -250,9 +249,6 @@ class FakeSite:
         resource: str,
         request_id: str,
     ) -> httpx.Response:
-        if self.omit_response_authentication:
-            return httpx.Response(status_code, json=body)
-
         response_signer = self.response_signer or self.authority
         signed = sign_response(
             signer=response_signer,

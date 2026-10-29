@@ -75,8 +75,8 @@ Phase 9 — Provisioning completion
          GET provisioning /api/v1/leases/by-escrow/{uid} -> active/pending lease
 
 Phase 10 — Lease expiry and durable teardown
-  10a  Pause automatic lease servicing, arm the provider teardown gate, and
-       back-date the lease end so the watchdog reads it as expired. Expiry is
+  10a  Assert the module's lease-watchdog hold, arm the provider teardown gate,
+       and back-date the lease end so the watchdog reads it as expired. Expiry is
        what ends a lease in production; admin interruption is an escape hatch
        for a deal sold as interruptible and is covered elsewhere.
   10b  Run one lease cycle → reservation releasing, fulfillment id recorded,
@@ -95,7 +95,6 @@ import logging
 import pytest
 from market_alkahest.alkahest import (
     get_alkahest_network,
-    get_recipient_arbiter,
     resolve_alkahest_address_config,
 )
 from market_alkahest.dev_chain import anvil_address_book_path
@@ -106,7 +105,7 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     DEAL_TOKEN,
     DURATION_HOURS,
     LISTED_HOURLY_RATE,
-    Stage00_LifecyclePause,
+    Stage00_LifecycleHeld,
     Stage00a_StorefrontHealth,
     Stage00b_RegistryReachable,
     Stage00c_ProvisioningHealth,
@@ -140,12 +139,17 @@ from tests.e2e.roles.scenarios.vms.conftest import DealState, capacity_source_fo
 log = logging.getLogger(__name__)
 
 pytestmark = [
+    # Listed first, so the holds are taken before, and released after, every
+    # other fixture of the module; the lane's cleanup follows them, so it runs
+    # while the holds stand.
+    # The module steps the storefront's loops, fulfillment convergence (a timer
+    # cycle could claim a row mid-provider-call, and the module's own explicit
+    # cycle would then reach nothing), and lease expiry itself.
+    pytest.mark.usefixtures(
+        "storefront_loops_held", "fulfillment_convergence_held", "lease_watchdog_held",
+        "ensure_storefront_resumed", "reap_buyer_settle_subprocess", "release_reserved_resources",
+    ),
     pytest.mark.e2e_deal,
-    # This module advances fulfillment convergence itself, so the
-    # 30s timer is stopped for its duration -- otherwise a timer
-    # cycle can claim a row mid-provider-call and the module's own
-    # explicit cycle reaches nothing.
-    pytest.mark.usefixtures("convergence_advanced_explicitly"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -184,21 +188,11 @@ ACCEPTED_ESCROWS = [{
 }]
 
 
-def _recipient_demands(seller_wallet: str) -> list[dict]:
-    return [{
-        "chain_name": "anvil",
-        "arbiter": get_recipient_arbiter(
-            "anvil", config_path=_ALKAHEST_ADDRESSES_PATH,
-        ).lower(),
-        "demand_data": {"recipient": seller_wallet.lower()},
-    }]
-
-
 # ===========================================================================
 # Phase 0 — E2E readiness
 # ===========================================================================
 
-class TestStage00_LifecyclePause(Stage00_LifecyclePause):
+class TestStage00_LifecycleHeld(Stage00_LifecycleHeld):
     pass
 
 
@@ -246,7 +240,7 @@ class TestStage00h_ProvisioningStorefrontLink(Stage00h_ProvisioningStorefrontLin
 class TestStage02b_CreateListingPaused:
     def test_02b_create_listing_paused_local_only(
         self, storefront_admin_client,
-        storefront_seller_client, seller_wallet, registry_client, deal_state: DealState
+        storefront_seller_client, registry_client, deal_state: DealState
     ):
         """Create listing with paused=True; confirm locally visible and registry absent.
 
@@ -264,7 +258,6 @@ class TestStage02b_CreateListingPaused:
             listing_resource=OFFER_RESOURCE,
             capacity_source=capacity_source_for(OFFER_RESOURCE),
             accepted_escrows=ACCEPTED_ESCROWS,
-            demands=_recipient_demands(seller_wallet),
             max_duration_seconds=DURATION_HOURS * 3600,
             paused=True,
         )

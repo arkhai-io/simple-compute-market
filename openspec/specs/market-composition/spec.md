@@ -580,12 +580,17 @@ command assembly.
 
 ### Requirement: Arkhai payment request and receipt authentication
 
-Headless calls to the Arkhai payments service MUST authenticate with WorkOS user-scoped API keys issued for the caller's Arkhai account. Arkhai payment receipts MUST use the service's Ed25519 `arkhai.payments.receipt.v1` signature framing and be verified through the identity kit. Marketplace registry, storefront, and negotiation request authentication MUST remain on their existing contracts and MUST NOT become a cross-repository source dependency.
+Headless calls to the Arkhai payments service MUST authenticate with WorkOS user-scoped API keys issued for the caller's Arkhai account. Arkhai payment receipts MUST use the service's Ed25519 `arkhai.payments.receipt.v1` signature framing and be verified through the identity kit. A receipt MUST verify only when its signed `livemode` equals the verifying role's configured `livemode`: a test-mode receipt never proves a live payment, and a live receipt never satisfies a test deployment. Marketplace registry, storefront, and negotiation request authentication MUST remain on their existing contracts and MUST NOT become a cross-repository source dependency.
 
 #### Scenario: Arkhai payment request is authenticated
 
 - **WHEN** a buyer or seller kit calls the Arkhai payments service
 - **THEN** the request uses the owner's WorkOS user-scoped API credential, and the caller verifies a returned receipt with the published signature contract rather than copying marketplace request-signing code
+
+#### Scenario: A receipt from the other mode proves nothing
+
+- **WHEN** a buyer or seller stage receives a correctly signed receipt for the accepted mandate whose signed `livemode` differs from the stage's configured `livemode`
+- **THEN** the receipt does not verify, the stage produces no verified settlement evidence, and delivery or issuance stays blocked
 
 ### Requirement: Arkhai payments registers as a peer settlement mechanism
 
@@ -1055,7 +1060,11 @@ framework-free test route service. A mock executor MUST be assembled from shared
 execution mechanics and the adapter's contributed default output; no adapter's mock MAY
 derive from another adapter's. The mechanism MUST NOT be presented as a foundation kit,
 and a non-compute domain's executor mock MUST NOT be added to it. Each adapter MUST
-mount its rule routes under its own prefix; job draining and waiting MUST stay shared.
+mount its rule and evaluate-job routes under its own prefix, contributing their route
+contracts from the family's template instantiated with its mount; job draining and
+waiting MUST stay shared.
+The test route service MUST answer with response models the compute family's contracts
+distribution owns, so every adapter's rule routes answer the same typed shapes.
 
 #### Scenario: A bare-metal grant runs under the mock profile
 
@@ -1072,6 +1081,12 @@ mount its rule routes under its own prefix; job draining and waiting MUST stay s
 
 - **WHEN** a scenario installs a VM mock rule
 - **THEN** it matches VM jobs only and never a bare-metal job
+
+#### Scenario: Two adapters' rule routes answer one shape
+
+- **WHEN** a scenario lists the rules installed through VM's and through bare metal's rule
+  routes
+- **THEN** both answers are the family's typed rule models
 
 ### Requirement: Per-site projection state is kit-owned and held once per process
 

@@ -20,6 +20,7 @@ the first import rather than patch afterwards.
 from __future__ import annotations
 
 import importlib
+import sqlite3
 import sys
 import time
 import uuid
@@ -30,6 +31,11 @@ from typing import Any, Iterator
 import httpx
 import pytest
 import pytest_asyncio
+from arkhai_apicredits.settlement.credits_client import (
+    CreditsServiceAuthenticationError,
+    CreditsServiceError,
+    derive_credit_fulfillment_id,
+)
 from market_identity import (
     EMPTY_BODY,
     Ed25519Signer,
@@ -262,6 +268,35 @@ async def test_an_unsigned_request_is_refused_with_a_signed_refusal(client):
     )
     assert response.status_code == 401
     _assert_signed_by_authority(response)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path", "allowed"),
+    (
+        ("/api/v1/capacity/snapshot", "GET"),
+        ("/api/v1/keys/key-1/revoke", "POST"),
+    ),
+    ids=("site-route", "credits-route"),
+)
+async def test_a_known_path_under_another_method_answers_405(client, path, allowed):
+    """Rejection path: the typed clients never send a method a contract lacks.
+
+    Asserts the status and `Allow` only. The site's table and the credits
+    table extended over it answer alike, since one middleware reads both.
+    """
+    response = await client.delete(
+        path,
+        headers=_headers(
+            signer=STOREFRONT_SIGNER,
+            role="seller",
+            method="DELETE",
+            operation="unserved",
+            resource="",
+        ),
+    )
+    assert response.status_code == 405
+    assert response.headers["Allow"] == allowed
 
 
 @pytest.mark.asyncio
@@ -594,6 +629,30 @@ async def test_the_seller_client_reads_back_what_it_issued(signed_app):
         derive_credit_fulfillment_id("neg-2")
     )
     assert grant is not None
+
+
+@pytest.mark.asyncio
+async def test_a_route_failing_after_authentication_answers_a_signed_500(
+    signed_app, tmp_path, caplog
+):
+    """The seller client verifies the answer and reports a failure, not missing auth.
+
+    The failure is a committed grant whose key row is gone, which no route can
+    produce, so the row is removed directly as service-internal setup.
+    """
+    await _seed_quota(signed_app)
+    seller = _seller_client(signed_app)
+    issued = await seller.submit_credit_issuance(_issuance_request("neg-broken"))
+    with sqlite3.connect(tmp_path / "credits.db") as db:
+        db.execute("DELETE FROM api_keys WHERE key_id = ?", (issued.key_id,))
+
+    with caplog.at_level("ERROR"), pytest.raises(CreditsServiceError) as failed:
+        await seller.get_credit_issuance(derive_credit_fulfillment_id("neg-broken"))
+
+    assert not isinstance(failed.value, CreditsServiceAuthenticationError)
+    assert failed.value.status_code == 500
+    assert "missing API key" not in str(failed.value)
+    assert "missing API key" in caplog.text
 
 
 BUYER = "0xabcdef0000000000000000000000000000000001"

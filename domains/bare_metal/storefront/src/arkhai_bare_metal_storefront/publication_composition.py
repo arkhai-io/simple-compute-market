@@ -15,10 +15,10 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from core_storefront.publication_runner import PublicationPayload
+from core_storefront.publication_runner import NoSettlementOption, PublicationPayload
 from market_resource_pools_contracts.backing import capacity_backing
+from market_settlement_runtime import parse_settlement_publication_clause
 
-from .pool_overrides import compile_publication_clauses
 from .publication import BareMetalPublicationCycle, BareMetalPublicationError
 from .publication_service import BareMetalRegistryConfiguration
 from .runtime import BareMetalStorefrontRuntime
@@ -33,7 +33,15 @@ def publication_payload_builder(
     """Build each candidate's payload from the configured publication terms.
 
     A candidate reaches the builder only with a positive lease bound: the cycle
-    holds a pool whose override and configuration state none.
+    holds a pool whose override and configuration state none. A candidate left
+    with no clause its backing admits, including one whose pool resolves no
+    clause at all, is refused with ``NoSettlementOption`` naming no mechanism:
+    the storefront's configuration rules every one out.
+
+    A pool override's clauses are read in full before anything is decided by
+    their mechanisms, so one that cannot be read raises as a defect that leaves
+    the candidate's listing as it is, whatever mechanism it names, rather than
+    standing for a mechanism the configuration rules out, which would close it.
     """
     composition = runtime.settlement_composition
     if composition is None:
@@ -51,7 +59,12 @@ def publication_payload_builder(
         # bound for that pool's listings only.
         override_clauses = candidate.get("override_clauses")
         configured = (
-            compile_publication_clauses(override_clauses)
+            tuple(
+                parse_settlement_publication_clause(
+                    clause, registry=composition.registry, role="seller"
+                )
+                for clause in override_clauses
+            )
             if override_clauses is not None
             else clauses
         )
@@ -71,11 +84,12 @@ def publication_payload_builder(
                 candidate.get("pool_id"),
                 list(dropped),
             )
-            if not admissible:
-                raise ValueError(
-                    f"pool {candidate.get('pool_id')!r} has no settlement option its "
-                    f"{backing.label} listings may publish"
-                )
+        if not admissible:
+            raise NoSettlementOption(
+                f"pool {candidate.get('pool_id')!r} has no settlement option its "
+                f"{backing.label} listings may publish"
+                + (f" (dropped: {', '.join(dropped)})" if dropped else "")
+            )
         return await composition.publication_payload(
             candidate=candidate,
             clauses=admissible,
@@ -108,7 +122,6 @@ def build_publication_cycle(
         storefront_url=runtime.storefront_url,
         seller_principal=runtime.seller_principal,
         build_payload=publication_payload_builder(runtime),
-        publication_clauses=runtime.publication_clauses,
         default_max_duration_seconds=runtime.default_max_duration_seconds,
         enter_stage=runtime.loops.enter_stage,
         derivation=runtime.publication_derivation,

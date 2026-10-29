@@ -49,46 +49,6 @@ class ReserveCapacityResponse(BaseModel):
     closed_listing_ids: list[str] = Field(default_factory=list)
 
 
-class FulfillmentStartedEventRequest(BaseModel):
-    capacity_reservation_id: str
-    site_id: str
-    escrow_uid: str | None = None
-    provider_id: str | None = None
-    provider_job_id: str | None = None
-    resource_id: str | None = None
-    gpu_count: int | None = None
-
-
-class FulfillmentFailedEventRequest(BaseModel):
-    capacity_reservation_id: str
-    site_id: str
-    escrow_uid: str | None = None
-    provider_id: str | None = None
-    provider_job_id: str | None = None
-    resource_id: str | None = None
-    reason: str | None = None
-    message: str | None = None
-    logs_ref: str | None = None
-
-
-class UsageStartedEventRequest(BaseModel):
-    capacity_reservation_id: str
-    site_id: str
-    escrow_uid: str | None = None
-    provider_id: str | None = None
-    provider_lease_id: str | None = None
-    resource_id: str | None = None
-    host_id: str | None = None
-    gpu_count: int | None = None
-    lease_end_utc: str | None = None
-
-
-class ReleaseStartedEventRequest(BaseModel):
-    capacity_reservation_id: str
-    site_id: str
-    provider_lease_id: str | None = None
-
-
 class CapacityReleasedEventRequest(BaseModel):
     capacity_reservation_id: str
     site_id: str

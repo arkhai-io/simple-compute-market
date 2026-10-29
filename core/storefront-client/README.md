@@ -41,7 +41,7 @@ client whose configured role does not match the route contract:
 - `buyer`: negotiation and settlement calls.
 - `admin`: operator writes and reads, including events, negotiation inspection,
   inventory, and settlement evaluation.
-- `service`: system status and fulfillment lifecycle callbacks.
+- `service`: system status and the capacity-released callback.
 
 `get_health`, `list_listings`, and `get_listing` remain public reads and can be
 called by a client without identity configuration.

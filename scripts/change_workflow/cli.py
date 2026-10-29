@@ -1,30 +1,67 @@
 """The command line of `scripts/run_change_step.py`, each command dispatched to the
 module that does its work.
 
-`run` and `resume` run a step through the wrapper, `review` a review, `log` and
-`note` read and write the workflow log, `watch` follows the steps as they run, and
-`denials` reports a run's denials. A command that runs a step prints the line it
-logged on stdout, its progress going to stderr, and exits non-zero when that line
-is `stopped`.
+`run` and `resume` run a step through the wrapper, either granting rules for that
+one run with `--allow`; `run --session` continues a named implementation session; `review` runs a review, `log` and `note` read and write the
+workflow log, `watch` follows the steps as they run, and `denials` reports a run's
+denials. `record` is a step's own last act when the owner runs it interactively:
+it records the step's outcome, which the wrapper records for an unattended run.
+`convert` brings a change's records into the log's format, shown first and written
+on the owner's `--confirm`. A command that runs a step prints the line it logged on
+stdout, its progress going to stderr, and exits non-zero when that line is
+`stopped`.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Mapping, Sequence
 
 from change_workflow.common import KINDS, ORCHESTRATOR, ROOT, StepError
-from change_workflow.log import (branch_decisions, last_entries, log_path, note_orchestrator,
-                                 note_round, read_log)
+from change_workflow.convert import convert_change
+from change_workflow.harness import UNATTENDED_RUN
+from change_workflow.log import (branch_decisions, direction, history_log_path, last_entries,
+                                 log_path, note_orchestrator, note_round, read_log,
+                                 record_interactive)
 from change_workflow.records import git_head
 from change_workflow.review import DEFAULT_BASE, review_and_log
 from change_workflow.watch import denial_report, watch
 from change_workflow.wrapper import Wrapper
 
 DESCRIPTION = "Run a step of an OpenSpec change unattended, and keep the change's workflow log."
+# Where Claude Code gives every command it starts the id of its session. The
+# variable is not documented, so a run where it is unset is refused rather than
+# recorded without a session, and `--session` gives the id instead.
+SESSION_ID = "CLAUDE_CODE_SESSION_ID"
+
+
+def interactive_outcome(change: str, step: str, outcome_text: str, session: str | None,
+                        environ: Mapping[str, str], root: Path,
+                        head: Callable[[Path], str | None] = git_head) -> dict:
+    """Record the outcome of `step`, run interactively on `change`, and return its line.
+
+    Refused, writing nothing, inside a run the wrapper started, whose outcome the
+    wrapper records, so it is never written twice; without a session id, naming the
+    variable; and for an outcome that is not JSON, or that the log's writer
+    refuses.
+    """
+    if environ.get(UNATTENDED_RUN):
+        raise StepError(f"this run is the wrapper's ({UNATTENDED_RUN} is set), and the "
+                        "wrapper records its outcome; record only a run held interactively")
+    session = session or environ.get(SESSION_ID)
+    if not session:
+        raise StepError(f"{SESSION_ID} is not set, so the run's session is unknown; give it "
+                        "with --session")
+    try:
+        outcome = json.loads(outcome_text)
+    except json.JSONDecodeError as exc:
+        raise StepError(f"--outcome is not JSON: {exc}") from exc
+    return record_interactive(log_path(root, change), step, outcome, session=session,
+                              commit=head(root))
 
 
 def expand_sections(text: str) -> list[int | str]:
@@ -48,6 +85,14 @@ def parse_sections(text: str) -> list[list[int | str]]:
             for session in text.split(";") if session.strip()]
 
 
+def split_rules(values: Sequence[str]) -> list[str]:
+    """Each `--allow` value split on `;`, each part trimmed and empty ones dropped:
+    `make`'s `ALLOW` holds several rules so separated. No rule loses by it, since
+    the harness matches each command of a chain on its own, so a rule holding `;`
+    could never match."""
+    return [rule.strip() for value in values for rule in value.split(";") if rule.strip()]
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=DESCRIPTION)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -60,13 +105,20 @@ def _parser() -> argparse.ArgumentParser:
                      help="text added to the skill's invocation after the change")
     run.add_argument("--fresh", action="store_true",
                      help="start a fresh session for a step that resumes another's")
+    run.add_argument("--session", default="",
+                     help="implementation only: continue this session, one of the change's "
+                          "implementation runs not waiting on the owner")
+    run.add_argument("--allow", action="append", default=[],
+                     help="permission rules granted for this run alone, several separated "
+                          "by ';'")
     resume = commands.add_parser("resume", help="resume a waiting run with the owner's answer")
     resume.add_argument("change")
     resume.add_argument("--seq", type=int, required=True,
                         help="the waiting run's line in the workflow log")
     resume.add_argument("--answer", required=True)
     resume.add_argument("--allow", action="append", default=[],
-                        help="a permission rule granted for this run alone")
+                        help="permission rules granted for this run alone, several separated "
+                             "by ';'")
     review = commands.add_parser(
         "review", help="review a change, read-only, on the first available of the review's "
                        "models")
@@ -84,6 +136,38 @@ def _parser() -> argparse.ArgumentParser:
                         help="start a new reviewer session instead of continuing the last one")
     review.add_argument("--unvalidated", action="store_true",
                         help="run a pre-closeout review without a passing validation of HEAD")
+    record = commands.add_parser(
+        "record", help="record the outcome of a step run interactively, as its last act")
+    record.add_argument("change")
+    record.add_argument("step")
+    record.add_argument("--outcome", required=True,
+                        help="the step's outcome as JSON, matching the outcome schema")
+    record.add_argument("--session", default=None,
+                        help=f"the session's id, where {SESSION_ID} is not set")
+    convert = commands.add_parser(
+        "convert", help="convert the change's records to the workflow log's format: shown, "
+                        "and written on the owner's --confirm")
+    convert.add_argument("change")
+    convert.add_argument("--confirm", action="store_true",
+                         help="write the conversion and its direction: the owner's "
+                              "confirmation, attesting that each triage it flags finished")
+    convert.add_argument("--decline", action="store_true",
+                         help="write no direction, declining the return the conversion "
+                              "proposes to confirm, which then waits for the owner")
+    convert.add_argument("--next", dest="next_step", default=None,
+                         help="the owner's direction in the proposal's place: the step the "
+                              "change stands at")
+    convert.add_argument("--kind", default=None,
+                         help="the kind of review --next is, or triages; with --target, the "
+                              "target's")
+    convert.add_argument("--sections", default=None,
+                         help="with --next implement, its sections, as `note round` takes "
+                              "them; with --target, the target's")
+    convert.add_argument("--target", default=None,
+                         help="with --next validate, the step the validation is for")
+    convert.add_argument("--reason", default=None,
+                         help="the direction's reason, in place of the one the conversion "
+                              "gives")
     log = commands.add_parser("log", help="print the last lines of the change's workflow log")
     log.add_argument("change")
     log.add_argument("--last", type=int, default=10)
@@ -117,8 +201,16 @@ def _parser() -> argparse.ArgumentParser:
     decision.add_argument("--reads", type=int, default=None,
                           help="the seq of the run whose denials the decision has read")
     decision.add_argument("--next", dest="next_step", default=None,
-                          help="the step the decision directs next")
-    decision.add_argument("--kind", default=None, help="the review kind when --next is review")
+                          help="the owner's direction: the step the change goes to next")
+    decision.add_argument("--kind", default=None,
+                          help="the kind of review --next is, or triages; with --target, "
+                               "the target's")
+    decision.add_argument("--sections", default=None,
+                          help="with --next implement, the sections it implements out of "
+                               "the plan's order, as `note round` takes them; with "
+                               "--target, the target's")
+    decision.add_argument("--target", default=None,
+                          help="with --next validate, the step the validation is for")
     decision.add_argument("--branch", default=None,
                           help="with --change, the owner's word that the change is worked on "
                                "this branch")
@@ -129,18 +221,39 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None, root: Path = ROOT,
-         wrapper: Wrapper | None = None) -> int:
+         wrapper: Wrapper | None = None, environ: Mapping[str, str] = os.environ) -> int:
     args = _parser().parse_args(argv)
     wrapper = wrapper or Wrapper(root=root)
     try:
-        path = log_path(wrapper.root, args.change)
+        path = (history_log_path if args.command == "log" else log_path)(wrapper.root,
+                                                                          args.change)
+        if args.command == "record":
+            line = interactive_outcome(args.change, args.step, args.outcome, args.session,
+                                       environ, wrapper.root, wrapper.head)
+            print(json.dumps(line, ensure_ascii=False))
+            return 0
+        if args.command == "convert":
+            if args.next_step is None and (args.kind, args.sections, args.target) != (
+                    None, None, None):
+                raise StepError("--kind, --sections, and --target qualify --next")
+            given = (direction(args.next_step, args.kind,
+                               parse_sections(args.sections) if args.sections is not None
+                               else None, args.target)
+                     if args.next_step is not None else None)
+            for shown in convert_change(wrapper.root, args.change, confirm=args.confirm,
+                                        decline=args.decline, given=given,
+                                        reason=args.reason, head=wrapper.head):
+                print(shown)
+            return 0
         if args.command == "run":
             sections = expand_sections(args.sections)
             words = (f"section {args.sections}" if len(sections) == 1
                      else f"sections {args.sections}" if sections else "")
             arguments = " ".join(part for part in (words, args.arguments) if part)
             line = wrapper.run(args.step, args.change, arguments=arguments,
-                               sections=sections, fresh=args.fresh)
+                               sections=sections, fresh=args.fresh,
+                               granted=split_rules(args.allow),
+                               continuing=args.session.strip() or None)
             print(json.dumps(line, ensure_ascii=False))
             return 1 if line["outcome"] == "stopped" else 0
         if args.command == "review":
@@ -154,7 +267,7 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
             print(json.dumps(line, ensure_ascii=False))
             return 1 if line["outcome"] == "stopped" else 0
         if args.command == "resume":
-            line = wrapper.resume(args.change, args.seq, args.answer, args.allow)
+            line = wrapper.resume(args.change, args.seq, args.answer, split_rules(args.allow))
             print(json.dumps(line, ensure_ascii=False))
             return 1 if line["outcome"] == "stopped" else 0
         if args.command == "log":
@@ -186,6 +299,9 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
             line = note_orchestrator(path, args.decision, args.reason, by=args.by,
                                      resolves=args.resolves, reads=args.reads,
                                      next_step=args.next_step, kind=args.kind,
+                                     sections=(parse_sections(args.sections)
+                                               if args.sections is not None else None),
+                                     target=args.target,
                                      branch=args.branch,
                                      # A branch decision is about the change whose
                                      # log holds it, which is where steps look.

@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import pytest
 from market_fulfillment import ProviderRegistry, SettlementRecordState, SettlementRepository
 from market_fulfillment.db import SettlementRecord
+from market_resource_pools import ResourcePool
 from market_site.db import CapacityReservation
 from market_site.ledger import CapacityLedgerService
 from sqlalchemy import create_engine
@@ -46,6 +47,15 @@ def world():
     )
     run_migrations(engine)
     factory = sessionmaker(bind=engine)
+    with factory() as db, db.begin():
+        db.add(ResourcePool(
+            id="default", label="Default Pool", provider="vm.ansible", enabled=True,
+            policy_tags={
+                "deliverable_modes": ["vm"],
+                "advertisable_modes": ["vm"],
+                "capacity_backing": "backed",
+            },
+        ))
     ledger = CapacityLedgerService(
         factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count"
     )

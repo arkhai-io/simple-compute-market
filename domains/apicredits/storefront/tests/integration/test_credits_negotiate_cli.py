@@ -38,7 +38,7 @@ from market_arkhai_payments import (
     servicing_stage,
 )
 from market_arkhai_payments.fixtures import FakePaymentsClient
-from market_identity import Ed25519Signer, TrustedIdentitySet
+from market_identity import TrustedIdentitySet
 from typer.testing import CliRunner
 
 import apicredits_storefront.container as container
@@ -50,16 +50,16 @@ from apicredits_storefront.middleware.response_auth import authenticate_response
 from tests._settings_overrides import settings_overrides
 from tests.integration.credit_negotiation import (
     BUYER_SIGNER,
+    DISPUTE_ACCOUNT,
     LISTING_ID,
     PAYER_ACCOUNT,
+    PAYMENTS_SERVICE,
     SELLER_SIGNER,
+    QuotaHolds,
     payment_option,
 )
 from tests.loopback import serving
 
-# A deterministic development key for this test only; never used on any network.
-_SERVICE = Ed25519Signer(bytes.fromhex("55" * 32))
-_DISPUTE = "33333333-3333-4333-8333-333333333333"
 _DOMAIN = get_market_domain_contract()
 _IDENTITY = ResolvedBuyerIdentity(
     profile_id=uuid.UUID("11111111-1111-4111-8111-111111111111"),
@@ -69,22 +69,6 @@ _IDENTITY = ResolvedBuyerIdentity(
 )
 
 
-class _QuotaHolds:
-    """The capacity runtime a payment acceptance reserves its quota through."""
-
-    def __init__(self) -> None:
-        self.claims: list[dict] = []
-
-    async def reserve(self, _binding, *, claim, deal_ref, ttl_seconds):
-        self.claims.append(claim)
-        return {
-            "capacity_reservation_id": f"alloc-{len(self.claims)}",
-            "resource_id": "svc-quota",
-            "allocated_units": claim["units"],
-            "hold_expires_at": "2099-01-01 00:00",
-        }
-
-
 @pytest.fixture
 async def storefront(db, fake_capacity, key_records, monkeypatch):
     """The served negotiation routes of a payments-composed storefront."""
@@ -92,9 +76,9 @@ async def storefront(db, fake_capacity, key_records, monkeypatch):
         ArkhaiPaymentsConfig(
             enabled=True,
             service_url="http://127.0.0.1:9",
-            service_identity=_SERVICE.identity,
+            service_identity=PAYMENTS_SERVICE.identity,
             fee_bps=250,
-            dispute_authority=_DISPUTE,
+            dispute_authority=DISPUTE_ACCOUNT,
             development_auth=True,
         ),
         client_for_owner=FakePaymentsClient(),
@@ -107,7 +91,7 @@ async def storefront(db, fake_capacity, key_records, monkeypatch):
             agreement["settlement"]["mechanism"]
         ].agreement_artifacts(agreement, composition),
     )
-    holds = _QuotaHolds()
+    holds = QuotaHolds()
     monkeypatch.setattr(settlement_stages, "build_capacity_runtime", lambda _factory: holds)
     monkeypatch.setattr(container, "resolved_sqlite_client", db)
     monkeypatch.setattr(container, "resolved_negotiation_runtime", runtime)

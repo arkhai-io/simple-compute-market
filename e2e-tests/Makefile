@@ -42,12 +42,16 @@ reinit: init-venv
 IMAGE_NAME ?= arkhai
 IMAGE_TAG  ?= e2e-tests
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
+# Appended to the image's tag; the root Makefile's IMAGE_SUFFIX. A suffixed build
+# is tagged per change alone: a commit tag would keep one image per validated commit.
+# The targets that run the image use the bare tag, as the pipeline lanes do.
+IMAGE_SUFFIX ?=
 
 build: build-images
 
 build-images: reinit
-	cd .. && docker build -t $(IMAGE_NAME):$(IMAGE_TAG) -f e2e-tests/Dockerfile .
-	docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_NAME):$(IMAGE_TAG)-$(GIT_SUFFIX)
+	cd .. && docker build -t $(IMAGE_NAME):$(IMAGE_TAG)$(IMAGE_SUFFIX) -f e2e-tests/Dockerfile .
+	$(if $(IMAGE_SUFFIX),,docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_NAME):$(IMAGE_TAG)-$(GIT_SUFFIX))
 
 test:
 	ACTIVE_PROFILES=$(ACTIVE_PROFILES) \
@@ -89,12 +93,14 @@ test-container-module:
 # passes its own.
 NETWORK ?= simple-market-service_default
 BUYER_MODULE ?= e2e_deal_buyer_cli or e2e_buy
-# The VM lane's scenarios. `e2e_alkahest_escrow_codecs` needs only the chain and
-# stays here; `multi_registry` reads VM's two registries;
+# The VM lane's scenarios. `e2e_alkahest_escrow_codecs` and
+# `e2e_alkahest_trusted_oracle` need only the chain and its funded buyer and
+# seller wallets, and stay here; `multi_registry` reads VM's two registries;
 # `e2e_non_erc20_settlement` settles native-token and ERC1155 escrows against
 # the dev chain's own deployments.
 E2E_MODULE ?= e2e_deal or e2e_deal_buyer_cli or e2e_buy or multi_registry \
               or e2e_compute_dynamic_listings or e2e_alkahest_escrow_codecs \
+              or e2e_alkahest_trusted_oracle \
               or e2e_listing_shapes or e2e_vm_introduction \
               or e2e_non_erc20_settlement
 # The API-credit lane's scenarios. The payment deal is blocked without a
@@ -103,7 +109,8 @@ E2E_APICREDITS_MODULE ?= e2e_credits_deal or e2e_credits_payment_deal
 # The bare-metal lane's scenarios. `e2e_bare_metal_deal` is in neither lane: it
 # needs a real whole host to SSH into, which the pipeline never has.
 E2E_BARE_METAL_MODULE ?= e2e_bare_metal_publication or e2e_bare_metal_introduction \
-                         or e2e_bare_metal_mock_deal
+                         or e2e_bare_metal_unbacked_introduction or e2e_bare_metal_mock_deal \
+                         or e2e_bare_metal_payment_deal
 
 test-buyer-machine:
 	docker run --rm \

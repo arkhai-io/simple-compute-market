@@ -8,6 +8,9 @@ import pytest
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.pool import StaticPool
 
+from market_site.db import Base as SiteBase
+
+import apicredits_service.db.migrations as migrations_module
 from apicredits_service.db.database import create_db_engine, run_migrations
 from apicredits_service.db.migrations import (
     SchemaDriftError,
@@ -67,6 +70,7 @@ class TestRunMigrationsFreshBootstrap:
             ("20260815_003_fulfillment_grants",),
             ("20260922_004_pool_advertisement_and_backing",),
             ("20261005_005_reservation_release_requested_at",),
+            ("20261028_006_retired_reservation_states",),
         ]
 
     def test_a_reservation_table_from_before_release_timing_gains_the_column(self):
@@ -107,7 +111,7 @@ class TestRunMigrationsIsIdempotent:
             count = connection.execute(
                 text("SELECT COUNT(*) FROM schema_migrations")
             ).scalar()
-        assert count == 5
+        assert count == 6
 
 
 class TestAdoptingAPreCreateAllOnlyDatabase:
@@ -123,8 +127,6 @@ class TestAdoptingAPreCreateAllOnlyDatabase:
         # Simulate the pre-migration-system startup path directly,
         # bypassing run_migrations entirely.
         Base.metadata.create_all(bind=engine)
-        from market_site.db import Base as SiteBase
-
         SiteBase.metadata.create_all(bind=engine)
 
         assert "schema_migrations" not in set(inspect(engine).get_table_names())
@@ -139,8 +141,6 @@ class TestAdoptingAPreCreateAllOnlyDatabase:
     def test_adopts_a_database_with_existing_data_without_touching_it(self):
         engine = _sqlite_memory_engine()
         Base.metadata.create_all(bind=engine)
-        from market_site.db import Base as SiteBase
-
         SiteBase.metadata.create_all(bind=engine)
         with engine.begin() as connection:
             connection.execute(
@@ -164,8 +164,6 @@ class TestAdoptingAPreCreateAllOnlyDatabase:
     def test_migrates_wallet_owner_to_canonical_eip191_principal(self):
         engine = _sqlite_memory_engine()
         Base.metadata.create_all(bind=engine)
-        from market_site.db import Base as SiteBase
-
         SiteBase.metadata.create_all(bind=engine)
         with engine.begin() as connection:
             connection.execute(
@@ -208,8 +206,6 @@ class TestAdoptingAPreCreateAllOnlyDatabase:
     def test_malformed_owner_rolls_back_principal_migration(self):
         engine = _sqlite_memory_engine()
         Base.metadata.create_all(bind=engine)
-        from market_site.db import Base as SiteBase
-
         SiteBase.metadata.create_all(bind=engine)
         with engine.begin() as connection:
             connection.execute(
@@ -245,17 +241,13 @@ class TestAdoptingAPreCreateAllOnlyDatabase:
 
 
 class TestCheckSchemaVersion:
-    """Not called by this service's own startup today (see migrations.py's
-    module docstring -- there's no separate deployment step to check
-    against yet), but this proves the fail-fast primitive itself is
-    correct and ready for when one exists.
+    """The fail-fast primitive itself. This service's startup migrates in
+    process and does not call it (see migrations.py's module docstring).
     """
 
     def test_passes_after_baseline_is_applied(self):
         engine = _sqlite_memory_engine()
         Base.metadata.create_all(bind=engine)
-        from market_site.db import Base as SiteBase
-
         SiteBase.metadata.create_all(bind=engine)
         apply_schema_migrations(engine)
         check_schema_version(engine)
@@ -263,11 +255,8 @@ class TestCheckSchemaVersion:
     def test_raises_when_schema_migrations_table_is_entirely_missing(self):
         engine = _sqlite_memory_engine()
         Base.metadata.create_all(bind=engine)
-        # Only meaningful once _MIGRATIONS is non-empty; document the
-        # intended behavior now so it's exercised the moment a real
-        # migration is added, rather than discovered broken then.
-        import apicredits_service.db.migrations as migrations_module
-
+        # A single known migration stands in for the real chain, so the
+        # check's verdict does not depend on which migrations exist.
         original = migrations_module._MIGRATIONS
         migrations_module._MIGRATIONS = (
             migrations_module.Migration("00000000_placeholder", lambda engine: None),
@@ -290,12 +279,8 @@ class TestCreateDbEngineIsSqliteOnly:
 
 
 def test_failed_migration_is_not_recorded_and_prior_success_is_preserved(monkeypatch):
-    import apicredits_service.db.migrations as migrations_module
-
     engine = _sqlite_memory_engine()
     Base.metadata.create_all(bind=engine)
-    from market_site.db import Base as SiteBase
-
     SiteBase.metadata.create_all(bind=engine)
 
     calls: list[str] = []

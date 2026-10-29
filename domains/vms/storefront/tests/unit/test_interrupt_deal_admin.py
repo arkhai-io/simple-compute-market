@@ -8,9 +8,31 @@ import market_storefront.server  # noqa: F401 - initializes controller import or
 from market_storefront.controllers.admin_controller import AdminController
 from market_storefront.models.capacity_admin_models import InterruptDealRequest
 from tests.fulfillment_fixtures import (
+    BUYER_PRINCIPAL,
+    SELLER_PRINCIPAL,
     VmLifecycleFixture,
     make_vm_lifecycle_fixture,
 )
+
+
+async def _commit_plan(lifecycle: VmLifecycleFixture, *, interruptible: bool) -> None:
+    """Commit the deal's settlement plan, with or without the interruptible term."""
+    service_terms = (
+        {"interruptible": {"schema": "vms.interruptible.v1", "refund_authority": "seller_declared"}}
+        if interruptible
+        else {}
+    )
+    await lifecycle.db.commit_settlement_plan(
+        negotiation_id="neg-1",
+        settlement_plan={
+            "obligations": [],
+            "buyer_principal": BUYER_PRINCIPAL.model_dump(mode="json"),
+            "seller_principal": SELLER_PRINCIPAL.model_dump(mode="json"),
+            "service_terms": service_terms,
+        },
+        buyer_principal=BUYER_PRINCIPAL,
+        seller_principal=SELLER_PRINCIPAL,
+    )
 
 
 class _FakeCapacity:
@@ -75,6 +97,7 @@ async def test_interrupt_deal_dry_run_does_not_truncate(
         tmp_path / "interrupt-dry-run.db",
         status="ready",
     )
+    await _commit_plan(lifecycle, interruptible=True)
     capacity = _FakeCapacity()
     ctl = _controller(lifecycle, capacity, monkeypatch)
 
@@ -104,7 +127,10 @@ async def test_interrupt_deal_truncates_capacity_lease(
     lifecycle = await make_vm_lifecycle_fixture(
         tmp_path / "interrupt.db",
         status="ready",
+        # The current listing does not decide: the committed plan does.
+        interruptible=False,
     )
+    await _commit_plan(lifecycle, interruptible=True)
     capacity = _FakeCapacity()
     ctl = _controller(lifecycle, capacity, monkeypatch)
 
@@ -132,15 +158,21 @@ async def test_interrupt_deal_truncates_capacity_lease(
 
 
 @pytest.mark.asyncio
-async def test_interrupt_deal_rejects_non_interruptible_listing(
+@pytest.mark.parametrize("plan", ["without_interruptible_term", "none"])
+async def test_interrupt_deal_rejects_a_deal_its_plan_did_not_make_interruptible(
     tmp_path,
     monkeypatch,
+    plan,
 ) -> None:
+    """Refused even though the listing now says interruptible: a deal's
+    interruptibility is a term of its committed plan."""
     lifecycle = await make_vm_lifecycle_fixture(
         tmp_path / "non-interruptible.db",
         status="ready",
-        interruptible=False,
+        interruptible=True,
     )
+    if plan != "none":
+        await _commit_plan(lifecycle, interruptible=False)
     ctl = _controller(lifecycle, _FakeCapacity(), monkeypatch)
 
     with pytest.raises(HTTPException) as exc_info:

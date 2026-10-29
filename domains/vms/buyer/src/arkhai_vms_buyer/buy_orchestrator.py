@@ -40,11 +40,12 @@ from core_buyer.orchestration import (
     make_settle_hook as _core_make_settle_hook,
 )
 from core_buyer.policy_surface import extract_seller_min_price  # noqa: F401
-from market_alkahest.schemas import EscrowProposal, EscrowTerms
+from market_alkahest.schemas import EscrowProposal
 
 from .arkhai_payments import AgreedTerms  # noqa: F401 — public VM summary
 from .escrow_client import BuildEscrowTermsFn, CreateEscrowFn, encode_escrow_proposal
 from .settlement_composition import (
+    accepted_listing_record,
     buyer_settlement_stages,
     resolve_buyer_settlement_policy,
     advertised_plan_validator,
@@ -74,13 +75,13 @@ def make_legacy_negotiate_hook(
         encode_escrow_proposal=encode_escrow_proposal,
         decode_provision_terms=VmProvisionTerms.model_validate,
         decode_escrow_proposal=EscrowProposal.model_validate,
-        decode_escrow_terms=EscrowTerms.model_validate,
         max_negotiation_rounds=max_negotiation_rounds,
         derive_prices=derive_prices,
         chain=chain,
         revalidate_settlement=revalidate_settlement,
         validate_acceptance=validate_buyer_acceptance,
         advertised_plan_validator=advertised_plan_validator,
+        accepted_listing_record=accepted_listing_record,
     )
 
 

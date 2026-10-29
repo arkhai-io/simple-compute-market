@@ -17,9 +17,13 @@ Three things follow from where this sits in the package graph:
 - **The replay store is a port**, with an in-memory default. A service with
   durable replay requirements supplies its own; a service without one still
   gets replay rejection within a process lifetime instead of none.
-- **Refusals are signed too.** An unauthenticated refusal cannot be told from
-  a network fault or an impostor by a client that requires signed responses --
-  it fails on a missing header rather than reporting the 401 it was sent.
+- **Refusals of a routed request are signed too.** A client that requires
+  signed responses cannot tell an unsigned refusal from a network fault or an
+  impostor. Only a request that resolves to no route is answered unsigned --
+  404, 405, or 400 by what failed to match -- because a response proof binds
+  the operation and resource the client verifies against, and the server
+  knows no operation or no resource for it; the site client reports such an
+  answer by its status as unauthenticated.
 
 Scoped by route table, not by mounting position: a composing service passes the
 tables covering its own paths, and anything unmatched is refused rather than
@@ -71,12 +75,66 @@ SIGNATURE_HEADER = "X-Market-Signature"
 #: than by lacking a contract, so an unlisted route is a refusal.
 EXCLUDED_PATHS = frozenset({"/health", "/docs", "/openapi.json", "/redoc"})
 
+#: The detail of the signed 500 answering a route that raised after
+#: authentication; it reveals nothing of the error.
+ROUTE_FAILURE_DETAIL = "Site-authority request failed"
+
 #: The operator's own role. Accepted on every contract rather than enumerated
 #: route by route: `admin` exists for manual operation, debugging and
 #: intervention, and a role that can read a site's whole ledger but not one
 #: named route is a gate that only ever obstructs the person holding it.
 #: Service components use their own role and do not hold this one.
 ADMIN_ROLE = "admin"
+
+
+class SiteRouteResolutionError(ValueError):
+    """A request resolved to no route contract, carrying the answer it gets.
+
+    The answer is unsigned: a response proof binds an operation and resource
+    the client verifies against its own, and the server knows no operation
+    for an unknown path or a refused method, and no resource for an unbound
+    body.
+    """
+
+    status_code: int = 400
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+
+    @property
+    def headers(self) -> dict[str, str]:
+        return {}
+
+
+class SiteRouteNotFound(SiteRouteResolutionError):
+    """No contract names the request's path."""
+
+    status_code = 404
+
+
+class SiteRouteMethodNotAllowed(SiteRouteResolutionError):
+    """A contract names the path, under other methods only."""
+
+    status_code = 405
+
+    def __init__(self, detail: str, *, allowed_methods: tuple[str, ...]) -> None:
+        super().__init__(detail)
+        self.allowed_methods = allowed_methods
+
+    @property
+    def headers(self) -> dict[str, str]:
+        return {"Allow": ", ".join(self.allowed_methods)}
+
+
+class SiteRouteResourceUnbound(SiteRouteResolutionError):
+    """The route matches, but its body does not name the resource it binds."""
+
+    status_code = 400
+
+    def __init__(self, detail: str, *, field: str) -> None:
+        super().__init__(detail)
+        self.field = field
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +172,12 @@ class SiteRouteContract:
     exact_retry_safe: bool = True
 
     def match(self, method: str, path: str, body: Any) -> str | None:
+        """The bound resource, or ``None`` when the method or path differs.
+
+        Raises :class:`SiteRouteResourceUnbound` when the route matches but its
+        body names no resource: the route is this one, so no later contract
+        is tried.
+        """
         if method.upper() != self.method:
             return None
         matched = self.pattern.fullmatch(path)
@@ -123,18 +187,24 @@ class SiteRouteContract:
             return matched.group(self.path_resource)
         if self.body_resource is not None:
             if not isinstance(body, dict):
-                raise ValueError(
-                    f"{self.operation} requires a JSON object request body"
+                raise SiteRouteResourceUnbound(
+                    f"{self.operation} requires a JSON object request body "
+                    f"naming body.{self.body_resource}",
+                    field=self.body_resource,
                 )
             resource = body.get(self.body_resource)
             if resource is None and self.optional_body_resource:
                 return ""
             if not isinstance(resource, str) or not resource:
-                raise ValueError(
-                    f"{self.operation} requires body.{self.body_resource}"
+                raise SiteRouteResourceUnbound(
+                    f"{self.operation} requires body.{self.body_resource}",
+                    field=self.body_resource,
                 )
             return resource
         return ""
+
+    def names_path(self, path: str) -> bool:
+        return self.pattern.fullmatch(path) is not None
 
     def permits(self, role: str) -> bool:
         return role == ADMIN_ROLE or role in self.allowed_roles
@@ -250,13 +320,26 @@ def resolve_site_route(
     *,
     contracts: Sequence[SiteRouteContract] = CAPACITY_ROUTE_CONTRACTS,
 ) -> tuple[SiteRouteContract, str]:
-    """Return the server-owned contract and resource for a route."""
+    """Return the server-owned contract and resource for a route.
 
+    The first contract matching the method and path decides, in the order the
+    table gives, so no request is claimed by two. A request no contract
+    matches raises the :class:`SiteRouteResolutionError` naming why.
+    """
+
+    allowed: set[str] = set()
     for contract in contracts:
         resource = contract.match(method, path, body)
         if resource is not None:
             return contract, resource
-    raise ValueError(f"no authenticated site contract for {method} {path}")
+        if contract.names_path(path):
+            allowed.add(contract.method)
+    if allowed:
+        raise SiteRouteMethodNotAllowed(
+            f"{method.upper()} is not served at {path}",
+            allowed_methods=tuple(sorted(allowed)),
+        )
+    raise SiteRouteNotFound(f"no authenticated site contract for {method} {path}")
 
 
 class SiteReplayStore(Protocol):
@@ -346,21 +429,23 @@ class SiteAuthMiddleware(BaseHTTPMiddleware):
 
         signer = self._signer_provider()
         body, body_error = await _request_body(request)
-        if body_error is not None:
-            return _rejection(body_error, status.HTTP_400_BAD_REQUEST)
-
         try:
+            if body_error is not None:
+                # An unroutable request is answered by what failed to match
+                # whatever its body; only a routed one is refused for the body.
+                _route_by_path(request, self._contracts)
+                return _rejection(body_error, status.HTTP_400_BAD_REQUEST)
             contract, resource = resolve_site_route(
                 request.method,
                 request.url.path,
                 body,
                 contracts=self._contracts,
             )
-        except ValueError as exc:
-            # Unsigned: with no contract there is no operation to sign over,
-            # and inventing one would put a signature on a claim about a route
-            # this service does not define.
-            return _rejection(str(exc), status.HTTP_404_NOT_FOUND)
+        except SiteRouteResolutionError as exc:
+            # Unsigned: the server knows no operation, or no resource, to sign
+            # over, and inventing one would put a signature on a claim about a
+            # route this service does not define.
+            return _rejection(exc.detail, exc.status_code, headers=exc.headers)
         operation = contract.operation
 
         try:
@@ -519,8 +604,25 @@ class SiteAuthMiddleware(BaseHTTPMiddleware):
                         request_id=authenticated.request_id,
                     )
 
-        response = await call_next(request)
-        raw = b"".join([chunk async for chunk in response.body_iterator])
+        try:
+            response = await call_next(request)
+            raw = b"".join([chunk async for chunk in response.body_iterator])
+        except Exception:
+            # The caller is authenticated, so it gets a signed answer it can
+            # verify rather than an unsigned 500 its client reads as missing
+            # response authentication. The detail is fixed: the error belongs
+            # in this service's log. Nothing is recorded, as this store keeps no
+            # outcomes; an exact retry is handled as its route's retry contract says.
+            logger.exception(
+                "Site-authority route failed after authentication: %s %s",
+                request.method,
+                request.url.path,
+            )
+            response = JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content={"detail": ROUTE_FAILURE_DETAIL},
+            )
+            raw = bytes(response.body)
         return self._signed_outcome(
             signer,
             method=request.method,
@@ -771,8 +873,21 @@ def _response_body(response: Response, raw: bytes) -> Any:
     return raw
 
 
-def _rejection(detail: str, status_code: int) -> JSONResponse:
-    return JSONResponse(status_code=status_code, content={"detail": detail})
+def _route_by_path(request: Request, contracts: Sequence[SiteRouteContract]) -> None:
+    """Raise the 404 or 405 an unroutable request gets, binding no body."""
+
+    try:
+        resolve_site_route(request.method, request.url.path, contracts=contracts)
+    except SiteRouteResourceUnbound:
+        pass
+
+
+def _rejection(
+    detail: str, status_code: int, *, headers: Mapping[str, str] | None = None
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code, content={"detail": detail}, headers=headers
+    )
 
 
 def _verification_detail(code: VerificationCode) -> str:

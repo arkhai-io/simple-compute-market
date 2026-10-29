@@ -644,16 +644,17 @@ pools:
         assert svc.list_pools() == []
 
     def test_validate_accepts_disabled_default_pool(self, svc):
-        """A disabled `default` in an authoritative document is valid —
-        only omitting `default` entirely is rejected
-        (test_missing_default_pool_rejected, below)."""
+        """A disabled `default` in an authoritative document is valid, as
+        a disabled pool of any other name is."""
         response = svc.validate_pools(
             _YAML.replace("enabled: true", "enabled: false", 1)
         )
         assert response.valid is True
         assert response.diff is not None
 
-    def test_missing_default_pool_rejected(self, svc):
+    def test_document_without_default_pool_validates_and_imports(self, svc):
+        """No pool name is required of a document: one that names no
+        `default` validates and imports like any other."""
         no_default_yaml = """
 pools:
   - id: hetzner-eu-central
@@ -667,8 +668,15 @@ pools:
       inventory_group: kvm_hosts_eu
 """
         response = svc.validate_pools(no_default_yaml)
-        assert response.valid is False
-        assert "missing_default_pool" in {p.code for p in response.problems}
+        assert response.valid is True
+        assert response.problems == []
+        assert response.diff is not None
+        assert response.diff.created == ["hetzner-eu-central"]
+        assert svc.list_pools() == []
+
+        diff = svc.import_pools(no_default_yaml)
+        assert diff.created == ["hetzner-eu-central"]
+        assert [pool.id for pool in svc.list_pools()] == ["hetzner-eu-central"]
 
     def test_validate_accumulates_all_detectable_problems(self, svc):
         response = svc.validate_pools("""
@@ -1572,6 +1580,32 @@ class TestStoredDeclarations:
 
         with pytest.raises(PoolValidationError, match="pool 'drifted' deliverable_modes"):
             svc.require_valid_stored_declarations()
+
+    def test_served_providers_pass(self, svc):
+        _create_backed_vm(svc)
+
+        svc.require_served_stored_providers()
+
+    @pytest.mark.parametrize("enabled", [True, False], ids=["enabled", "disabled"])
+    def test_a_pool_naming_an_unserved_provider_is_named(
+        self, svc, session_factory, enabled
+    ):
+        # A disabled pool's records are still read, so it is refused as well.
+        _create_backed_vm(svc, "served")
+        with session_factory() as db, db.begin():
+            db.add(ResourcePool(
+                id="orphaned", label="Orphaned", provider="retired.provider",
+                enabled=enabled, policy_tags=dict(_BACKED_VM),
+            ))
+
+        with session_factory() as db:
+            assert svc.stored_provider_problems(db) == [("orphaned", "retired.provider")]
+        with pytest.raises(PoolValidationError) as refused:
+            svc.require_served_stored_providers()
+        message = str(refused.value)
+        assert "pool 'orphaned' provider 'retired.provider'" in message
+        assert "registered providers: 'ansible'" in message
+        assert "pool 'served'" not in message
 
     def test_a_pool_without_backing_may_be_given_one(self, svc, session_factory):
         # The repair path for a row an older version rewrote: supplying the

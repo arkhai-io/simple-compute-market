@@ -30,7 +30,6 @@ from arkhai_bare_metal_storefront.settlement_composition import (
 
 ALKAHEST_SECTION = {
     "enabled": True,
-    "address_config_path": "/app/alkahest_anvil_addresses.json",
     "oracle_gated": False,
     "trusted_oracle_addresses": [],
     "interruptible": False,
@@ -112,6 +111,7 @@ def alkahest_composition(
     escrow: Any | None = None,
     section: Mapping[str, Any] | None = None,
     chains: Mapping[str, Any] | None = None,
+    chain_probe: Any | None = None,
 ) -> BareMetalStorefrontSettlementComposition:
     """Alkahest settlement over ``chain_clients``, the chain boundary's doubles.
 
@@ -119,7 +119,9 @@ def alkahest_composition(
     would build over those chain clients; without it, the registration builds
     the real one. ``section`` replaces settings of the configured Alkahest
     section, and ``chains`` the chains' configuration, which otherwise names
-    only an RPC URL for each chain client.
+    only an RPC URL for each chain client. ``chain_probe`` is the probe
+    readiness reads, as the runtime hands it; with none, readiness reports no
+    chain blocker.
     """
     raw = {
         "schema_version": 1,
@@ -144,12 +146,12 @@ def alkahest_composition(
             "marketplace_signer": signer,
             "claimant_principal": signer.identity,
             "wallet": wallet,
-            "wallet_ready": True,
             "clients": dict(chain_clients),
             "chains": (
                 dict(chains)
                 if chains is not None
                 else {name: {"rpc_url": "http://anvil:8545"} for name in chain_clients}
             ),
+            **({"chain_probe": chain_probe} if chain_probe is not None else {}),
         },
     )

@@ -25,8 +25,10 @@ validation.
 
 ## Running unattended
 
-Run interactively, as most runs are, this section does not apply, and nothing else
-in the skill changes. When this skill runs through `scripts/run_change_step.py` —
+Run interactively, as most runs are, this section does not apply but for the
+outcome it describes, which an interactive run records itself ("Running
+interactively"); nothing else in the skill changes.
+When this skill runs through `scripts/run_change_step.py` —
 `make closeout UNATTENDED=1`, or the orchestrating session — nobody can answer in
 the session, and every turn ends with an outcome matching
 `.agents/change-outcome.schema.json`, whose `message` the owner reads as written:
@@ -54,12 +56,47 @@ the session, and every turn ends with an outcome matching
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
   to stop and report — a repository guard refusing, `HEAD` moving under you — end
   with `stopped`, `reason` saying why, and `denials` empty.
+- **Git runs in this checkout.** Run Git in the current checkout, never with `-C`:
+  the step already runs in the checkout it reads, and no rule allows `git -C`, since
+  a wildcard after `-C` would also span a push. Run Make here too, never `make -C
+  <a checkout>`: `-C` names only a subdirectory a skill names.
 - **The end is an outcome.** Each point this skill puts to the owner is a
-  `question`. A part that would need a code edit ends with `returned`,
-  `return_to` `implementation`, and `evidence` naming the closeout task's notes,
-  where you recorded what needs the edit; closeout never edits code. The owner
-  confirms the return, and implementation then sets the status. When the archive is committed, end with `finished`,
-  `next` naming the closeout review.
+  `question`. A part that would need a code edit ends with `returned`, `next`
+  implementation, `{"step": "round"}`, and `evidence` naming the closeout task's
+  notes, where you recorded what needs the edit; closeout never edits code. Every
+  section before closeout is checked, so no planned round remains: the owner's
+  confirmation directs the implementation that makes the edit. Before ending,
+  commit what closeout has written — the status, the notes, any part done — as one
+  work-in-progress commit naming the change and why it returns, and push it with
+  `make push-branch`: no session is left to commit it, and a dirty checkout blocks
+  every later step's guarded push. The owner confirms the return, and the step
+  their confirmation directs then sets the status. A stop commits nothing: its work waits
+  uncommitted for the resumed session, and one stopped because a repository guard
+  refused or `HEAD` moved leaves the checkout as it was. When the archive
+  is committed and pushed, end with `finished`, `next` naming closeout's one exit,
+  the closeout review, `{"step": "review", "kind": "closeout"}`.
+
+## Running interactively
+
+Run in an interactive session — `make closeout` without `UNATTENDED=1`, or the
+slash command — no wrapper records the run, so its last act records the outcome
+it would end with unattended, as "Running unattended" gives it:
+
+```text
+python3 scripts/run_change_step.py record <change> closeout --outcome '<the outcome, as JSON>'
+```
+
+`record` checks the outcome against `.agents/change-outcome.schema.json` and
+appends it to the change's workflow log with the session's id, `HEAD`, and
+`interactive: true`, and the next-step computation routes on it as on an
+unattended run's. It reads the session's id from `CLAUDE_CODE_SESSION_ID`, which
+`printenv CLAUDE_CODE_SESSION_ID` shows; where the variable is unset it refuses,
+and `--session <id>` gives the id. Record the outcome the session ends with —
+`finished` or `returned` — never a question or a stop, which the owner, present,
+settles in the session: a recorded stop would wait for a resume only the wrapper
+makes. When `record` refuses, correct what it names and run it again. A
+session closed before it records leaves closeout in progress: the computation
+names it again, to be resumed, or its outcome recorded with the command above.
 
 ## 1. Check that closeout may start
 
@@ -69,21 +106,20 @@ the session, and every turn ends with an outcome matching
   that it runs on this branch: run `git branch --show-current`, then
   `python3 scripts/run_change_step.py log <change> --branch <that branch>`; a line
   it prints is that decision, and the branch is accepted.
-- **Status.** The change's row in `openspec/changes/README.md` is `ready for
-  closeout`, or `in closeout` when an earlier closeout session stopped. The
-  triage file of the latest pre-closeout review in the change's `reviews/` has a
-  `## Next` beginning `Advance` — a file from before `## Next`, ending with a
-  `## Gate` beginning `Passed`, reads the same. A row still `in implementation`
-  with that triage is accepted when the latest validation record is `passed` and
-  names `HEAD`, or an ancestor `HEAD` differs from only in changes' ledgers and
-  reviews: the triage advanced before its fix commit was validated, so it could
-  not set `ready for closeout`. If either is missing, stop: the change is not
-  ready, and whether it advances is recorded in triage.
+- **Route.** `python3 scripts/change_next_step.py <change>` names `closeout`,
+  whatever the status says: the pre-closeout triage's exit, once a validation
+  cleared `HEAD`, or the owner's direction to closeout, which checks no exit guard.
+  A row still `in implementation` is so accepted: the triage advanced before its
+  fix commit was validated, so it could not set `ready for closeout`. When the
+  computation names anything else — the pre-closeout review's triage, a validation
+  of `HEAD`, the owner — stop: the change is not ready, and the computation's reason
+  says what comes first.
 - **Where it stopped.** Find the change with `python3 scripts/find_change.py
   <change>`. When it prints a directory under `openspec/changes/archive/` while the
   row says `in closeout`, an earlier session archived it and stopped: if the
-  archive is committed, closeout is finished, so say so and point to the closeout
-  review; if not, skip to step 4's steps after the archive (3 onwards), then commit.
+  archive is committed, closeout is finished: say so, end with the finished
+  outcome the earlier session did not record — interactively, record it — and
+  point to the closeout review; if not, skip to step 4's steps after the archive (3 onwards), then commit.
   Never archive twice. Read every file of the change from the directory the lookup
   prints, not from `openspec/changes/<change>/`.
 - **Tasks.** `make check-tasks CHANGE=<change>` passes, so the sections are what
@@ -112,6 +148,10 @@ Read in full, even if you believe you know it:
   and its `architecture.md` companion when one exists.
 - The change's row, campaign, and every row that lists it in `Depends on`, in
   `openspec/changes/README.md`.
+- Another change's records, where the closeout's evidence or promotion rests on
+  them, wherever `python3 scripts/find_change.py --records <change>` says they are:
+  this checkout, or, from a change's clone, the owner's workspace, which holds the
+  history of every cleaned-up change.
 
 ## 3. Work through the closeout task
 
@@ -154,9 +194,12 @@ list its parts in another order; work in this order, and note it on the section.
   divergence; reassigning is the owner's decision, so put it to them.
 - **End-to-end pipeline.** Record the run the latest passing validation names, its
   result, and the scenarios that exercise the change, from the validation record's
-  coverage section. Closeout changes no code, so that run still describes the code
-  the closeout commit carries; say whether it names the pre-closeout commit or an
-  earlier one the owner waived.
+  coverage section. Record too, from that record's `## CI`, each observation the
+  change's sections owed by validation (`Owed by validation:` in `tasks.md`): the
+  workflow's run, the job and what it showed, and the `dev` baseline its other
+  failures were compared with. Closeout changes no code, so those runs still
+  describe the code the closeout commit carries; say whether they name the
+  pre-closeout commit or an earlier one the owner waived.
 
 A part that needs a decision the change does not make — an open question the plan
 left to closeout, or a disposition the triage deferred to it — is put to the owner
@@ -214,8 +257,9 @@ not closeout's to make, stop and tell the owner.
 
 Commit the closeout as one commit: the permanent documents, the archived change
 with its `tasks.md` and promotion record, the merged specifications, and the index.
-The message names the change and says it is closed out and archived. Do not push;
-the closeout review reads the commit locally.
+The message names the change and says it is closed out and archived. Then push it
+with `make push-branch`, the guarded push of exactly `HEAD`; if it refuses, stop
+and report its reasons. The closeout review reads the commit locally.
 
 ## 6. Report
 

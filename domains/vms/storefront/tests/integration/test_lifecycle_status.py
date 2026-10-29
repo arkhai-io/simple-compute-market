@@ -5,15 +5,20 @@ publication cases make the cycle fail where it composes what it reads, through
 the capacity runtime the cycle takes from the container, and read system
 status: the publication loop's state and its last outcome, whether the
 controller's timer or an operator's step ran the cycle. The capacity-event case
-fails one site's feed and reads that site's poller's outcome.
+fails one site's feed and reads that site's poller's outcome. The chain-probe
+case steps the ``alkahest-chain-probe`` loop over a probe whose JSON-RPC
+boundary refuses, then answers, and reads Alkahest's readiness in status, which
+the harness's settlement double evaluates through the real registry.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 
 import pytest
+from market_alkahest import AlkahestChainProbe, ProbedChain
 from market_capacity_publication import CapacityConfigurationError
 from storefront_client import StorefrontClientError
 
@@ -127,7 +132,7 @@ async def test_every_loop_is_reported_with_its_state(world):
     """Held from the start: each loop startup registers is reported paused,
     with no cycle recorded yet."""
     await world.client.admin_pause_lifecycle_loops()
-    lifecycle_steps.register_vm_loops()
+    lifecycle_steps.register_vm_loops(alkahest_probe_interval_seconds=30.0)
     lifecycle.start_loops()
     await world.client.admin_pause_lifecycle_loops()
 
@@ -141,6 +146,7 @@ async def test_every_loop_is_reported_with_its_state(world):
         lifecycle.PUBLICATION,
         lifecycle.CAPACITY_EVENTS_POLLER,
         lifecycle.capacity_site_loop_name(SITE),
+        lifecycle.ALKAHEST_CHAIN_PROBE,
     ):
         assert loops[name]["state"] == "paused", name
         assert loops[name]["last_outcome"] is None, name
@@ -189,3 +195,72 @@ async def test_a_sites_failing_capacity_event_feed_is_reported_under_its_loop(wo
     assert outcome["error"] == {"type": "SiteCapacityClientError", "message": None}
     # The aggregate loop runs no cycle of its own to record.
     assert loops[lifecycle.CAPACITY_EVENTS_POLLER]["last_outcome"] is None
+
+
+class _Rpc:
+    """The chain's JSON-RPC endpoint, the boundary the probe calls: refusing
+    connections until ``answering`` is set."""
+
+    def __init__(self) -> None:
+        self.answering = False
+
+    def __call__(self, rpc_url, method, params, timeout):
+        if not self.answering:
+            raise ConnectionRefusedError("connection refused")
+        return hex(31337) if method == "eth_chainId" else "0x6080"
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    def __call__(self) -> datetime:
+        return self.now
+
+
+def _alkahest(status) -> dict:
+    (alkahest,) = [item for item in status.settlement if item["mechanism"] == "alkahest.v1"]
+    return alkahest
+
+
+async def test_a_storefront_whose_chain_refuses_is_unready_until_a_stepped_probe_reaches_it(
+    world, monkeypatch
+):
+    """Spec scenario "A storefront starts with its chain down": Alkahest is
+    unready with the reachability blocker until a probe succeeds, then ready,
+    with no restart; status reports the probe's result and when it was taken."""
+    rpc, clock = _Rpc(), _Clock()
+    probe = AlkahestChainProbe(
+        [ProbedChain(name="anvil", rpc_url="http://anvil.test", chain_id=31337)],
+        json_rpc=rpc,
+        required_addresses=lambda _chain: {"escrow": "0x" + "11" * 20},
+        clock=clock,
+    )
+    monkeypatch.setattr(container, "resolved_alkahest_chain_probe", probe)
+    monkeypatch.setattr(container, "resolved_settlement_composition", world.composition)
+
+    unprobed = _alkahest(await world.client.get_system_status())
+    assert unprobed["ready"] is False
+    assert [(b["code"], b["kind"]) for b in unprobed["blockers"]] == [
+        ("alkahest.chain_unreachable", "reachability")
+    ]
+    assert unprobed["public_details"]["chain_probe"] == {"anvil": None}
+
+    await world.client.admin_run_lifecycle_cycle("alkahest-chain-probe")
+    refused = _alkahest(await world.client.get_system_status())
+    assert [(b["code"], b["kind"]) for b in refused["blockers"]] == [
+        ("alkahest.chain_unreachable", "reachability")
+    ]
+    assert refused["public_details"]["chain_probe"] == {
+        "anvil": {"result": "alkahest.chain_unreachable", "probed_at": clock.now.isoformat()}
+    }
+
+    # A step probes at once, with no interval to wait out.
+    rpc.answering = True
+    stepped = await world.client.admin_run_lifecycle_cycle("alkahest-chain-probe")
+    assert stepped["probed"] == ["anvil"]
+
+    ready = _alkahest(await world.client.get_system_status())
+    assert ready["ready"] is True
+    assert ready["blockers"] == []
+    assert ready["public_details"]["chain_probe"]["anvil"]["result"] == "reachable"

@@ -2,6 +2,10 @@
 
 Each module holds one concern, on the standard library alone:
 
+- `graph` — the workflow's graph: its nodes, their exits, joins, and guards, which
+  the next-step computation interprets;
+- `diagram` — the architecture's hand-laid diagram of the graph, held to the table
+  (`make change-graph`);
 - `outcome` — the outcome a step ends with, checked against its schema;
 - `log` — the change's workflow log, the orchestrating session's notes, and the
   owner's branch decisions; it is the log's only writer;
@@ -12,9 +16,13 @@ Each module holds one concern, on the standard library alone:
 - `harness` — the Claude Code and Codex commands, and how each harness says it
   cannot serve a model;
 - `cost` — what each run cost;
+- `running` — the record of each run in progress in a checkout, which a round view
+  reads before it moves the checkout;
 - `wrapper` — running a step unattended, and resuming a waiting run;
 - `review` — a review run read-only and published as a numbered record;
 - `watch` — following the steps as they run, and a run's denials report;
+- `convert` — a change's records brought into the workflow log's format, on the
+  owner's confirmation, with the direction to where the change stands;
 - `cli` — the command line, which `scripts/run_change_step.py` runs.
 
 Contract: openspec/specs/change-workflow/spec.md, "Unattended step runs end with a

@@ -3,29 +3,33 @@
 ## Purpose
 
 Define how an OpenSpec change is worked with agent skills: the phases it moves
-through, where the owner is consulted and where a triage's `## Next` lets the change
+through, the workflow graph its steps' exits and the owner's directions are checked
+against, where the owner is consulted and where a triage's exit lets the change
 advance without them, its review records and their findings, triage and the
 intervention ledger, implementation sections and the sessions that implement them,
 validation as an observation of a committed slice, the guarded push of a change's
 branch, the orchestrating session and the unattended step runs it advances a change
-through, and agent skills that every supported harness loads from one source.
+through, the clone each change may be worked in and the validation namespace each
+change's Helm validation runs in, so that several changes are worked at once, and
+agent skills that every supported harness loads from one source.
 
 ## Requirements
 
 ### Requirement: Phases and owner touchpoints
 
 A change MUST move through design, planning, implementation, and closeout, in that
-order. The design phase MUST end with a design review, the implementation phase
+order, except where the owner directs a step, as the requirement on the owner's
+directions allows; no direction crosses the archive. The design phase MUST end with a design review, the implementation phase
 with a pre-closeout review, and the closeout phase with a closeout review; a phase
 ending in a review MUST NOT be treated as finished until that review has been
-triaged and its triage file records that the change advances. The repository owner
-MUST be consulted for the design discussion's questions, for their notes on each
-implementation round before its triage, for the disposition of every finding, and
-for whether the dispositions merit another review round, which triage MUST ask
-once every finding is disposed and before any fix is made; a triage with no
+triaged and its triage's outcome names, as its exit, a step of the next phase. The
+repository owner MUST be consulted for the design discussion's questions, for their
+notes on each implementation round before its triage, for the disposition of every
+finding, and for whether the dispositions merit another review round, which triage
+MUST ask once every finding is disposed and before any fix is made; a triage with no
 finding and no point of the owner's notes to dispose of MAY record that the change
-advances without the owner. Every other transition MUST proceed without waiting for the owner, unless a
-step raises a question only the owner can answer.
+advances without the owner. Every other transition MUST proceed without waiting for
+the owner, unless a step raises a question only the owner can answer.
 Closeout MUST archive the change, merging its specification deltas into the
 permanent specifications, before its closeout review, and that review MUST read the
 archived change and the permanent documents as archived; the archive is cleaned up,
@@ -94,7 +98,8 @@ its own or another agent's agreement with a finding as a disposition.
   the owner tells the orchestrating session they waive it, judging the paths named
 - **THEN** the owner's word is recorded in the workflow log as a decision directing
   archive cleanup, the computation names archive cleanup until it has run, and
-  archive cleanup's own check asks the owner and records the waiver in the ledger
+  archive cleanup's own check finds the direction in the log and records the waiver
+  in the ledger, without asking the owner again
 
 #### Scenario: Closeout finds a comment that needs rewriting
 
@@ -278,11 +283,21 @@ severity. A recommendation the owner accepts MUST NOT be logged.
 ### Requirement: Implementation sections and sessions
 
 Each `tasks.md` section MUST be a coherent slice that can be verified, sized by what
-it changes and what proves it, and MUST end at a verification point. The plan MUST
-NOT prescribe in `tasks.md` how sections are distributed across agent sessions or
+it changes and what proves it, and MUST end at a verification point. A section's
+verification MUST name only evidence an implementation session can produce; evidence
+only a push produces, such as a CI workflow run a change branch's push does not
+trigger, MUST be named as owed by validation — the workflow, the job, and what the
+job must show — and MUST NOT gate a task's completion. An implementation session that
+finds such evidence in a verification MUST check the task once its own evidence
+passes and name that evidence as owed by validation in the section's notes. The plan
+MUST NOT prescribe in `tasks.md` how sections are distributed across agent sessions or
 review rounds.
 A session implementing sections MUST begin with no prior conversation and read the
-repository guidance documents, the change, and its sections; how many sessions
+repository guidance documents, the change, and its sections, unless the owner
+directs the work to an implementation session of the change named by its id, one
+not waiting on the owner, which then continues with the new sections or
+instructions on the model it ran on, reading the change's files again where they
+may have changed; how many sessions
 implement the work, and how much each round covers before it is reviewed, MUST be
 settled in the design discussion as the change's implementation cadence, the
 plan's sections ordered by it, and planning's outcome MUST carry the mapping of the
@@ -294,7 +309,8 @@ committed on its own. Anything a later session needs MUST be recorded in the cha
 files before each section is committed. Before a section is committed, its diff MUST
 be checked against the repository guidance by an agent whose context contains no
 part of the implementing session. When discovered code invalidates the plan, the
-session MUST record why and stop without committing partial work.
+session MUST record why, commit what it has as work in progress with no task checked
+for it, push it, and return the change.
 
 #### Scenario: A section is finished
 
@@ -302,6 +318,16 @@ session MUST record why and stop without committing partial work.
 - **THEN** it records any handoff in the section's task notes, a fresh-context
   check of the section's diff passes, and the section is committed; the session
   continues into the next section it was given, or stops
+
+#### Scenario: The owner sends the next section to a finished session
+
+- **WHEN** the session that implemented section 2 finished, and the owner directs
+  section 3 to it
+- **THEN** the orchestrating session runs `make implement CHANGE=<change>
+  UNATTENDED=1 SECTIONS=3 SESSION_ID=<its session>`, the wrapper continues that
+  session on its model, and the run's log line names the run it continues; a
+  session that waits on the owner's answer is refused, its answer going through a
+  resume, and so is any session while another implementation run waits
 
 #### Scenario: A plan maps a two-round cadence
 
@@ -314,7 +340,24 @@ session MUST record why and stop without committing partial work.
 #### Scenario: The plan's premise fails mid-section
 
 - **WHEN** an implementation session finds code that invalidates the section's plan
-- **THEN** it records the finding in the change, commits no partial work, and stops
+- **THEN** it records the finding in the change, commits its partial work as work in
+  progress with no task checked for it, pushes it, and returns the change
+
+#### Scenario: A section owes CI evidence
+
+- **WHEN** a section's change can be shown only by a run of `tests.yml`, which no
+  push of the change's branch triggers
+- **THEN** the plan names the workflow, the job, and what it must show as owed by
+  validation, and the section's verification task is checked on its local evidence
+  alone
+
+#### Scenario: An older plan gates a task on a CI run
+
+- **WHEN** an implementation session's verification task asks for a CI run of the
+  pushed branch
+- **THEN** the session checks the task once its own evidence passes and names the
+  CI run as owed by validation in the section's notes, and the next-step computation
+  does not name the section again
 
 ### Requirement: Validation observes a committed slice
 
@@ -323,12 +366,25 @@ modify the checkout: it MUST fail if the worktree is not clean when it starts or
 after any step, or if `HEAD` is no longer the validated commit after any step, and
 MUST then collect no further evidence, though it MAY still stop what it started,
 such as port-forwards; it MUST NOT itself regenerate lockfiles or any other
-tracked file. It MUST build the internal packages
+tracked file, `tasks.md` included. It MUST build the internal packages
 it tests from the commit under validation, never from wheels another branch left in
 the shared wheelhouse. A
 condition validation could repair, such as a stale lock, MUST fail validation and
 return the slice to implementation. End-to-end evidence MUST come from a pipeline
-run whose head commit is the commit under validation. Validation MUST also build the
+run whose head commit is the commit under validation. Validation MUST dispatch, on
+the change's branch, each workflow a section complete at the validated commit names
+as owed by validation, and MUST dispatch only workflows on a fixed list that holds
+none that publishes; adding to the list MUST be a tracked change by the owner. It
+MUST judge each named job and what that job must show, from a run whose head commit
+is the commit under validation; a named job that fails, or an observation that is
+absent, MUST be a failure. It MUST compare each failure of every other failing job
+of that run — a failing test's ID and its exception type where the job reports
+them, otherwise the failing step and its error — with the same job in the latest completed run of the same workflow
+on `dev` whose head commit is an ancestor of the commit under validation, and MUST
+name that run and its commit: a failure that run shows too MUST be reported as
+already failing on `dev` and MUST NOT be a failure, and any other MUST be diagnosed
+as any failure is; with no such run, or a job whose failures cannot be compared,
+the failure MUST be of unknown cause. Validation MUST also build the
 service images and include the Helm render checks, with the chart-to-loader check
 able to run, and a Helm end-to-end run of the scenarios the charts serve, named in
 an explicit list. A skipped chart-to-loader check MUST fail validation. Every
@@ -370,6 +426,55 @@ name the end-to-end scenarios that exercise the change, with the basis for each.
 - **THEN** the validation report lists it as not run against Helm, and its evidence
   comes from the pipeline alone
 
+#### Scenario: Owed CI evidence beside jobs that fail on `dev`
+
+- **WHEN** a complete section owes `tests.yml`'s `release · deployment contracts`
+  job passing, and the dispatched run passes that job and fails two others whose
+  failing tests also fail, with the same exception types, in `dev`'s latest run of
+  `tests.yml` at a commit the branch contains
+- **THEN** validation judges the owed job passed, reports the two others as already
+  failing on `dev`, naming that run and its commit, and neither is a failure
+
+#### Scenario: A job not owed fails only on the branch
+
+- **WHEN** a job no section owes fails in the dispatched run and passes in `dev`'s
+  latest run of the same workflow at a commit the branch contains
+- **THEN** validation diagnoses it as any failure, and one caused by the commit or of
+  unknown cause fails validation
+
+#### Scenario: A new failure in a job that already fails on `dev`
+
+- **WHEN** a job no section owes fails on `dev` with one test, and the dispatched
+  run's same job fails with that test and another
+- **THEN** validation reports the first as already failing on `dev` and diagnoses the
+  other as any failure
+
+#### Scenario: A test that fails on `dev` fails another way on the branch
+
+- **WHEN** a job no section owes fails on `dev` with a test raising `TimeoutError`,
+  and the dispatched run's same job fails that test with an `AssertionError`
+- **THEN** validation does not report it as already failing on `dev`, and diagnoses
+  it as any failure
+
+#### Scenario: No `dev` run of the branch's code
+
+- **WHEN** a job no section owes fails, and no completed run of the workflow on `dev`
+  has a head commit the branch contains
+- **THEN** the failure is of unknown cause, so validation fails and it is triaged
+
+#### Scenario: A plan owes a workflow that publishes
+
+- **WHEN** a section names `publish-pypi.yml` as owed by validation
+- **THEN** the dispatch is refused, naming the workflows validation may dispatch, and
+  nothing is published
+
+#### Scenario: A dispatched run is cancelled
+
+- **WHEN** the run validation dispatched is cancelled by a newer dispatch on the same
+  branch
+- **THEN** the part produced no evidence for an environmental reason, which goes to
+  the owner with its remedy, and the part is rerun on the owner's word
+
 ### Requirement: Guarded push of a change branch
 
 An agent MAY push a change's own branch without separate approval, only after a
@@ -401,21 +506,58 @@ verbatim as a review record and triaged like any review: the triaging agent MUST
 state its own position on each point rather than carry it out as an instruction, and
 each disposition MUST be logged to the intervention ledger. Accepted fixes MUST pass
 the checks a section passes before they are committed, and the commit MUST be
-validated again. The owner MUST be able to read a round as one set of changes from the
+validated again, unless, after a pre-closeout review, it changes only paths under
+`openspec/` and `docs/`. A triage of any kind MUST commit the tracked edits its
+dispositions made, with a fix or alone, and push them. The owner MUST be able to read a round as one set of changes from the
 commit the previous round ended on to the round's commit, without any commit being
-changed to show it; while the branch is moved to show it, review, validation,
-triage, and implementation MUST NOT start, and ending the reading MUST return the branch
-to the round's commit. A pre-closeout review MUST NOT run, and its triage MUST NOT advance the
-change, unless the latest validation's result is `passed` and it names `HEAD`, or a commit
-from which `HEAD` descends and differs only in changes' intervention ledgers and review
-records, except
-where the owner overrides it.
+changed to show it. For a change worked in its own clone, the reading MUST take place
+in the owner's workspace, on that workspace's copy of the change's branch, and MUST
+NOT move the branch in the clone; validation and the implementation review MUST start
+when the round's sections are committed, beside the reading; and triage MUST NOT start
+until the owner has answered on the round, with notes or with none, and the answer is
+saved as the round's owner record. When a round's triage records another round and
+commits a fix, the repeat pass MUST be read in the same way, as one set of changes
+from the commit that triage's review read to the fix's commit, and its triage MUST
+NOT start until the owner has answered on that pass; an answer saved before that
+triage finished answers only for the earlier pass. For a change worked in the owner's workspace, while
+its branch is moved to show the round, review, validation, triage, and implementation
+MUST NOT start. Ending the reading MUST return the branch to the round's commit when
+the owner made no commit while it was moved, and otherwise to the last of those
+commits carried onto the round's commit; the round's own commits MUST NOT change. A
+view MUST NOT move a checkout in which an unattended run is in progress. Ending the
+reading MUST carry each commit the owner made while the branch was moved onto the
+round's commit, holding exactly the paths that commit changed at the content it gave
+them, and MUST leave every edit the owner did not commit uncommitted. It MUST carry a
+path the round also changed only when the commit's version holds every change the
+round made to that path, and MUST refuse without moving the branch when it does not,
+when any such commit is a merge, or when the branch has left the line of the round's
+base. A path the round added, deleted, or changed as a binary file, a symlink, or a
+mode MUST be carried only when the commit's version is the round's — absent, for a
+path the round deleted — and an absent path MUST NOT be taken for an empty file. A
+view MUST NOT be
+moved to a new head while such commits or uncommitted edits are present. A commit the
+owner makes on the change's branch while reading MUST reach the clone only through a
+fast-forward triage makes. A pre-closeout review MUST NOT run, and its triage MUST NOT
+advance the change, unless the latest validation's result is `passed` and it names
+`HEAD`, or a commit from which `HEAD` descends and differs only in changes' intervention
+ledgers and review records, except where the owner overrides it. Once a pre-closeout
+review's triage has run, a commit from which `HEAD` differs only in paths under
+`openspec/` and `docs/` MUST be accepted in the same way, since closeout's own checks
+read them again.
 
 #### Scenario: The owner's note is contradicted by the files
 
 - **WHEN** a point in the owner's notes rests on a claim the files contradict
 - **THEN** triage says so, with the evidence, and nothing changes until the owner
   has recorded a disposition
+
+#### Scenario: A repeat round's fix is read
+
+- **WHEN** a round's triage recorded another round and committed a fix, and the
+  owner's only record on the round was saved before that triage finished, even
+  one numbered after the review it triaged
+- **THEN** the owner is shown the fix as uncommitted changes over the commit that
+  review read, and the repeat pass's triage waits for the owner's answer on it
 
 #### Scenario: A review and a validation describe different commits
 
@@ -430,14 +572,102 @@ where the owner overrides it.
   a line to a change's intervention ledger
 - **THEN** a pre-closeout review may run without the commit being validated again
 
+#### Scenario: A pre-closeout triage commits only documents
+
+- **WHEN** a pre-closeout review's triage advances the change with no fix, and
+  commits its edits to the change's documents and the index row after the latest
+  validation passed
+- **THEN** closeout starts without the commit being validated again
+
+#### Scenario: An implementation triage commits only documents
+
+- **WHEN** an implementation round's triage commits an edit to the change's task
+  list after the latest validation passed, with no fix
+- **THEN** that commit is validated before the next round or the pre-closeout review
+
 #### Scenario: The owner reads a round committed section by section
 
-- **WHEN** the owner reads a round whose sections were each committed
-- **THEN** the round is shown as uncommitted changes over the commit the previous
-  round ended on, in the owner's own checkout, and when the reading ends the
-  branch is back at the round's commit with the commits unchanged
-- **AND** no review, validation, triage, or implementation starts while the
-  branch does not point at the round's commit
+- **WHEN** the owner reads a round of a change worked in its own clone
+- **THEN** the round is shown in the owner's workspace as uncommitted changes over the
+  commit the previous round ended on, on the change's branch by name, and when the
+  reading ends with no commit made during it that branch is back at the round's
+  commit with the commits unchanged
+- **AND** the branch in the change's clone never moves
+
+#### Scenario: Validation runs while the owner reads
+
+- **WHEN** a round's sections are committed in a change's clone
+- **THEN** validation and the implementation review start there while the owner reads
+  the round, and triage starts only once the owner has answered on the round and both
+  records exist
+
+#### Scenario: The owner has no notes
+
+- **WHEN** the owner answers that a round raises nothing
+- **THEN** that answer is saved as the round's owner record, the view is closed, and
+  triage starts
+
+#### Scenario: The owner commits an edit while reading
+
+- **WHEN** the owner commits an edit on the branch in their workspace while the view
+  shows the round
+- **THEN** ending the reading carries the commit onto the round's commit, with the
+  paths it changed and nothing else, keeping its author and message, names it
+  beside its replacement, and leaves the branch at the replacement, the round's own
+  commits unchanged
+- **AND** triage pulls it into the clone only as a fast-forward, refusing a branch
+  that has diverged, before presenting it like any point; a commit the owner then
+  rejects is undone among the round's fixes
+
+#### Scenario: The owner commits part of a file the round changed
+
+- **WHEN** a commit made during the view holds a file the round also changed without
+  some of the round's changes to it, whether they were left unstaged or removed
+- **THEN** ending the reading refuses, naming the file and how to commit it again on
+  the round's commit, and the branch is not moved
+
+#### Scenario: The owner commits a whole file the round changed, then edits on
+
+- **WHEN** a commit made during the view holds a file the round changed with all of
+  the round's changes and the owner's edit, and the owner edits the file again
+  without committing
+- **THEN** ending the reading carries the commit, and the later edit stays
+  uncommitted
+
+#### Scenario: The owner edits a file the round added
+
+- **WHEN** a commit made during the view holds a file the round added, with an edit
+  of the owner's
+- **THEN** ending the reading refuses, naming the file and how to commit it again on
+  the round's commit, and the branch is not moved
+
+#### Scenario: The owner commits a deletion the round made
+
+- **WHEN** a commit made during the view deletes a file the round deleted
+- **THEN** ending the reading carries the commit, and the file stays absent
+
+#### Scenario: The owner commits a binary file the round changed
+
+- **WHEN** a commit made during the view holds a binary file the round changed
+- **THEN** ending the reading carries it only when its contents are the round's,
+  and otherwise refuses, naming the file
+
+#### Scenario: The owner merges during the view
+
+- **WHEN** a commit made during the view has two parents
+- **THEN** ending the reading refuses, naming the commit, and the branch is not moved
+
+#### Scenario: The view is refreshed over the owner's commit
+
+- **WHEN** the owner opens the view again while a commit made during it is on the
+  branch
+- **THEN** the view is refused, naming the commit and the command that ends the
+  reading
+
+#### Scenario: A view would move a checkout with a run in progress
+
+- **WHEN** the owner opens a view in a workspace where an unattended run is in progress
+- **THEN** the view is refused, naming the run, and nothing is checked out
 
 #### Scenario: Validation fails beside an implementation review
 
@@ -470,13 +700,30 @@ its workflow log, so that a new session resumes the change from them alone. It M
 run the next step the next-step computation names, and MUST advance without the
 owner wherever the computation names a step. It MUST bring every question a step
 raises to the owner, showing each step's message as written, and MUST NOT answer a
-design question, decide or state a position on a finding, or commit. It MUST NOT
-read code, reviews, or change documents to form or state a view of a finding or a
-design question; it MAY read what routing and recovery need: the computation and
-the inputs it names, the workflow log, and the denials report.
+design question or decide or state a position on a finding, and MUST show the
+earlier outcomes a run's line keeps beside its last. It MUST continue a named
+implementation session only on the owner's word. It MAY create the
+change's clone and branch, and MAY commit changes to the workflow itself — skills,
+the step table — what else the owner explicitly asks for, and merges of `dev` the
+owner asks for, in the change's clone, on its branch, pushing each through the
+guarded push. It MUST NOT commit while a step runs, MUST NOT merge while a round
+view of the change is open or between a round's sections being committed and that
+round's triage, and MUST NOT write the change's feature work of its own accord; it
+MUST NOT commit a closed step's leftover work unless the owner asks, bringing such
+work to the owner instead. It MUST resolve a merge's conflicts in the change index,
+change documents, the step table, and skills itself, and MUST bring a conflict in
+code to the owner; one the owner does not rule on MUST go to an implementation run,
+named the conflicted files. While a merge is in progress the next-step computation
+MUST name the owner. It MUST NOT read
+code, reviews, or change documents to form or state a view of a finding or a design
+question; it MAY read what routing and recovery need: the computation and the inputs
+it names, the workflow log, and the denials report.
 It MAY report misbehaviour of the workflow's own tooling that it observed across
-steps, as a numbered record marked as its own, for the next triage. It MUST advance
-only the change it was started for.
+steps, as a numbered record marked as its own, for the next triage. When the owner
+waives another design review for a design decision made after a return, it MUST
+record the owner's word as a decision directing planning, and the next-step
+computation MUST then name planning. It MUST advance only the change it was started
+for.
 
 #### Scenario: The orchestrating session restarts
 
@@ -489,8 +736,9 @@ only the change it was started for.
 
 - **WHEN** an orchestrating session is started while a round view of the change is
   open
-- **THEN** it waits for the owner's notes on the round, saves them as the change's
-  next owner-notes record, and closes that view before computing any other step
+- **THEN** it waits for the owner's answer on the round, saves it as the change's
+  next owner record, and closes that view before triage, and, for a change worked
+  in the owner's workspace without a clone, before computing any other step
 
 #### Scenario: A review's triage has nothing for the owner
 
@@ -499,22 +747,73 @@ only the change it was started for.
 - **THEN** the triage records that the change advances, and the orchestrating
   session runs the next step without asking the owner
 
+#### Scenario: The owner waives a design review after a return under orchestration
+
+- **WHEN** planning returned a change to design, the design step settled the
+  decision and finished, and the owner tells the orchestrating session they waive
+  another design review
+- **THEN** the owner's word is recorded in the workflow log as a decision directing
+  planning, the waiver is recorded in the intervention ledger, and the computation
+  names planning rather than a design review
+
 #### Scenario: A finding is relayed
 
 - **WHEN** an orchestrated triage presents a finding
 - **THEN** the orchestrating session shows the triage's message as written, adds no
   position of its own, and resumes the triage with the owner's reply
 
+#### Scenario: The owner asks for a permission fix
+
+- **WHEN** a run is denied a command for want of a rule, and the owner asks the
+  orchestrating session to add the rule
+- **THEN** it edits the step table in the change's clone and commits the edit on the
+  change's branch, so the step's next run is held to the new rule
+
+#### Scenario: A merge of `dev` conflicts in a skill and in code
+
+- **WHEN** the owner asks the orchestrating session to merge `dev` between steps, and
+  the merge conflicts in a skill and in a script
+- **THEN** it resolves the skill's conflict itself and brings the script's to the
+  owner; when the owner does not rule on it, it starts an implementation run naming
+  the conflicted script, which resolves it, concludes the merge, and pushes
+
+#### Scenario: A merge is asked for during a round's window
+
+- **WHEN** the owner asks for a merge of `dev` after a round's sections are committed
+  and before that round's triage
+- **THEN** the orchestrating session makes the merge only once the round is triaged,
+  so it never moves the commit the round's validation and review describe
+
+#### Scenario: A closed step leaves tracked work uncommitted
+
+- **WHEN** a step's run finished and left a tracked edit uncommitted
+- **THEN** the orchestrating session brings it to the owner as a defect of that step,
+  and commits it only if the owner asks
+
 ### Requirement: Unattended step runs end with a structured outcome
 
 A step MAY be run unattended, through one wrapper, as its leaf skill in a
 non-interactive session. Every unattended run MUST end with an outcome that conforms
-to the repository's outcome schema and is one of: finished, with the next step;
-a question for the owner; a proposed return to an earlier phase; blocked on a
-prerequisite; or stopped, with its reason and any tools it was denied. The wrapper
+to the repository's outcome schema and is one of: finished, naming the exit it
+takes; a question for the owner; a proposed return, naming the step it returns to;
+blocked on a prerequisite; or stopped, with its reason and any tools it was denied.
+An exit or a return MUST be named as a target: an object naming a node of the
+workflow graph by its step, with its review kind for a review, the kind of review it
+triages for a triage, and the sections for an implementation out of the plan's
+order; a review or a triage named without its kind, or with an empty or unknown one,
+MUST be refused. A validation MUST name as its exit the target the computation gave
+it, and archive cleanup the terminal node `done`. A triage's finished or returned outcome
+MUST name the review records it triaged, as a non-empty list of distinct record
+names in the form `NN-<kind>`, each a numbered record in the change's `reviews/`
+with its triage file beside it, at least one of them a review; the wrapper MUST NOT
+record a triage's outcome that names none, or breaks that rule, as anything but
+stopped, naming the reference, and the record command MUST refuse it. The wrapper
 MUST append each outcome, with the run's session and commit, to the change's
 workflow log, and MUST record a stopped outcome itself for a run that ends without
-one. Where the workflow log and the change's files disagree, the files MUST prevail.
+one. A run whose session took further turns after an outcome — a background
+command finishing, a wake-up — MUST be logged with its last outcome, and MUST keep
+each earlier one on its line. The files hold the change's state and MUST prevail
+over the log on it; the log holds the exits steps chose and the owner's decisions.
 Every outcome's denials MUST be taken from the run's own record of denied tools,
 over every turn of the run, each with the harness's reason for it.
 A review run's outcome MUST name the review record that run published; a review run
@@ -522,12 +821,12 @@ that published none MUST be recorded as stopped, and an earlier record MUST NOT 
 as its result.
 A question MUST be answered by resuming the same session with the owner's answer.
 A proposed return MUST NOT change the change's status until the owner confirms it;
-the confirmation MUST be recorded in the workflow log as a decision naming the run
-it resolves and the step it directs, and the step so directed sets the status.
+the confirmation MUST be recorded in the workflow log as the owner's decision naming
+the run it resolves and the step it directs, and the step so directed sets the
+status.
 A decision that resolves a run MUST name it, and MUST NOT resolve any other; a
 decision that reads a run's denials MUST name that run; a decision that directs a
-review MUST name its kind.
-An interactive run of a step MUST behave as it does without the wrapper.
+step MUST name its target as an outcome names an exit, and MUST be the owner's.
 
 #### Scenario: Validation needs an environmental remedy
 
@@ -540,40 +839,88 @@ An interactive run of a step MUST behave as it does without the wrapper.
 - **WHEN** an unattended run exits without producing an outcome
 - **THEN** the workflow log records a stopped outcome with its exit status
 
+#### Scenario: A wake-up follows a run's report
+
+- **WHEN** an implementation run reports its section finished, and a wake-up it
+  scheduled starts another turn that ends with "nothing left to wait for"
+- **THEN** the run's line carries that last outcome with the section's report kept
+  under `earlier`, and the orchestrating session shows the owner both
+
 #### Scenario: Implementation finds a design question
 
 - **WHEN** an unattended implementation run finds that a task needs a decision the
   design does not make
-- **THEN** it ends with a proposed return to design, and the change's status is
+- **THEN** it ends with a proposed return naming design, and the change's status is
   unchanged until the owner confirms the return
+
+#### Scenario: A triage names its exit
+
+- **WHEN** an unattended triage of review 157 ends with
+  `{"outcome": "finished", "message": "…", "triaged": ["157-closeout"], "next": {"step": "review", "kind": "closeout"}}`
+- **THEN** the wrapper records it, and the computation routes on its exit
+
+#### Scenario: A triage outcome names no records
+
+- **WHEN** an unattended triage ends finished without naming the records it triaged,
+  or naming an empty list
+- **THEN** the wrapper records the run as stopped, naming the missing field
+
+#### Scenario: A triage outcome names an unknown record
+
+- **WHEN** an unattended triage of review 13 ends finished with
+  `"triaged": ["31-design"]`, and the change has no record 31
+- **THEN** the wrapper records the run as stopped, naming `31-design`
+
+#### Scenario: A triage outcome names no review
+
+- **WHEN** a triage outcome's `triaged` names only `12-validation`
+- **THEN** it is refused, since it names no review, and the review it triaged stays
+  in progress
+
+#### Scenario: A triage outcome names a record twice
+
+- **WHEN** a triage outcome's `triaged` is `["13-design", "13-design"]`
+- **THEN** it is refused, naming the duplicate
 
 #### Scenario: The owner confirms a return
 
 - **WHEN** an implementation run at seq 50 ended with a proposed return to design
   and the owner confirms it, recorded as
-  `{"seq": 51, "step": "orchestrator", "outcome": "orchestrator", "by": "owner", "resolves": 50, "next": "design", "decision": "return to design confirmed", "reason": "task 0.4 needs a provider decision the design does not make"}`
+  `{"seq": 51, "step": "orchestrator", "outcome": "orchestrator", "by": "owner", "resolves": 50, "next": {"step": "design"}, "decision": "return to design confirmed", "reason": "task 0.4 needs a provider decision the design does not make"}`
 - **THEN** the next-step computation names design until it has run, and the
   design step sets the status
 
 #### Scenario: A confirmation names no run
 
-- **WHEN** a confirmation line with `next: design` and no `resolves` is attempted
-- **THEN** the log's writer refuses it, since the returned run at seq 50 would
-  otherwise keep waiting and the computation would name the owner, never design
+- **WHEN** the returned run at seq 50 waits, and the owner's direction to design is
+  recorded naming no run
+- **THEN** the run at seq 50 still waits, and the computation names the owner for it
+  until a decision resolves it
 
 #### Scenario: The owner directs a repeat review
 
 - **WHEN** the owner asks the orchestrating session for a pre-closeout review
   again outside a triage, recorded as
-  `{"seq": 61, "step": "orchestrator", "outcome": "orchestrator", "by": "owner", "next": "review", "kind": "pre-closeout", "decision": "review again", "reason": "the reviewer should see the triage"}`,
+  `{"seq": 61, "step": "orchestrator", "outcome": "orchestrator", "by": "owner", "next": {"step": "review", "kind": "pre-closeout"}, "decision": "review again", "reason": "the reviewer should see the triage"}`,
   naming no run, since no run waits on it
 - **THEN** the next-step computation names the pre-closeout review until it has run
 
 #### Scenario: A directed review names no kind
 
-- **WHEN** a decision line with `next: review` and no `kind` is attempted
-- **THEN** the log's writer refuses it, since the computation could name no review
-  from it
+- **WHEN** a decision line directing `{"step": "review"}` with no kind is attempted
+- **THEN** the log's writer refuses it, since a review is a node only with its kind
+
+#### Scenario: A directed triage names no kind
+
+- **WHEN** a decision line directing `{"step": "triage"}` with no kind is attempted
+- **THEN** the log's writer refuses it, since a triage is a node only with the kind
+  of review it triages
+
+#### Scenario: The orchestrating session directs a step
+
+- **WHEN** a decision line by the orchestrating session directing a review is
+  attempted
+- **THEN** the log's writer refuses it, since a direction is the owner's
 
 #### Scenario: A decision about one run leaves another waiting
 
@@ -584,20 +931,57 @@ An interactive run of a step MUST behave as it does without the wrapper.
 
 ### Requirement: The next step is computed from the files
 
-The next step of a change MUST be computed by a script from the change's index row,
-its reviews and their triage, its tasks, its workflow log, and the state of any open
-round view, and the same
-computation MUST be available to the owner by hand. When the computation fails or
-cannot classify the change's state, the orchestrating session MUST determine what
-happened and either resolve it, when it concerns only routing or recovery, or bring
-it to the owner, when it would decide a finding, settle a design question, or
-change a status; and MUST record what it decided in the workflow log. A review's triage
-MUST record, in its triage file's `## Next`, whether the change advances or another
-review round runs, beginning with the token `Advance` or `Another round`; the
-computation MUST route on that token alone, and MUST treat a triage file without it
-as a triage in progress. An implementation or pre-closeout round MUST advance only
-on a `passed` validation naming its final commit; an `inconclusive` validation MUST
-be brought to the owner.
+The next step of a change MUST be computed by a script that interprets the workflow
+graph over the change's index row, its reviews, its tasks, its workflow log, and the
+state of any open round view, and the same computation MUST be available to the
+owner by hand. When the computation fails or cannot classify the change's state, the
+orchestrating session MUST determine what happened and either resolve it, when it
+concerns only routing or recovery, or bring it to the owner, when it would decide a
+finding, settle a design question, or change a status; and MUST record what it
+decided in the workflow log. The computation MUST route on the exit the last step's
+outcome names, and on the owner's latest direction until a later run of its target
+is logged, and MUST NOT infer an exit from the phase. A review's triage MUST name its
+exit in its outcome, and MUST keep the target and the owner's words under its triage
+file's `## Next` as prose, which nothing routes on; a review whose triage file exists
+while no finished or returned triage outcome, and no conversion line, names it MUST
+be treated as a triage in progress. An exit its node does not declare, a validation's exit other than the
+target it was given, and an exit whose target's entry guard is not met MUST be
+brought to the owner. When a guard on a declared exit is not met, the computation
+MUST name the step that satisfies it, carrying the exit as its target, and MUST
+bring a guard no step can satisfy to the owner, naming the target and what is
+missing. The computation MUST name validation with a target always — the round's
+triage in a round's join, the target an owner's direction named after one — and
+MUST check the target's guards again on the validation's exit. Every line the
+workflow tooling appends to a workflow log MUST carry the log's format marker. A
+change whose log holds a line without the marker, or which has numbered review
+records and no log, MUST be brought to the owner with the command that converts the
+change's records, and its log MUST NOT be read as the new format. The conversion
+MUST refuse a change with a triage file in progress by the older reading — with
+neither `## Next` nor `## Gate`, and no marked triage outcome naming its review —
+naming the review. It MUST rewrite the log's lines in place, each keeping its seq,
+so every decision still names the run it named; MUST append one conversion line
+naming, as `triaged`, every review with a triage file, and no exit, naming a review
+no marked triage outcome names only once the owner, shown the heading line its
+triage file was read from, confirms that triage finished; MUST append after it the
+owner's direction to the node the change stands at, which the owner confirms or
+gives, and which the command proposes from the latest routing decision after the
+latest triage — a later direction whose target has not run, or else the triage's
+token — with the remedy of any unmet exit guard on the edge it follows, and does
+not propose when a step's run follows the latest triage or a later direction's
+target can no longer be entered; MUST hold the log's lock from its read through
+replacing the log in one step, so that an interrupted conversion leaves the older
+log; and every reader and appender of the log MUST, once it holds its lock, open
+the log again when the file it locked is no longer the one the log's name holds,
+so a line appended while the log is converted is kept. Once the owner confirms
+a return, the returned review MUST NOT govern what follows, so the work the return
+leads to is implemented, validated, and reviewed afresh, as a round of its own even
+where it reworks a section the returned round implemented; a return the owner
+declined, or one recorded at closeout, MUST be brought to the owner. An
+implementation or pre-closeout round MUST advance only on a `passed` validation
+naming its final commit, or a commit from which its final commit differs only in
+changes' records — or, after a pre-closeout review, only in paths under `openspec/`
+and `docs/`; an `inconclusive` validation MUST be brought to the owner. Nothing
+routes on a triage file's `## Next`.
 
 #### Scenario: Reviews await triage
 
@@ -606,53 +990,237 @@ be brought to the owner.
 
 #### Scenario: A status was edited by hand
 
-- **WHEN** a change's status disagrees with its workflow log
-- **THEN** the orchestrating session follows the files and records that it did
+- **WHEN** a change's status was set back by hand into an earlier phase than its
+  workflow log's last step, and no direction of the owner's follows that step
+- **THEN** the computation follows the status, naming the node its phase starts at
+  — design, planning, or the round — with that node's unwaivable entry guards
+  checked, until that node's step starts or the owner directs another
+
+#### Scenario: A status is ahead of the log
+
+- **WHEN** a change's status is past the step its workflow log names
+- **THEN** the computation names that step as in progress, its result carrying a
+  `disagreement` naming the missing outcome
 
 #### Scenario: Triage records another round
 
-- **WHEN** a review's triage recorded another round, and a commit after the commit
-  it reviewed changes more than changes' records
-- **THEN** the computation names the review of the same kind again, an
-  implementation or pre-closeout one once that commit has a passing validation;
-  with no such commit, it names the review again on the same commit
+- **WHEN** a review's triage named a review of the same kind as its exit, and a
+  commit after the commit it reviewed changes more than changes' records — after a
+  pre-closeout review, more than paths under `openspec/` and `docs/`
+- **THEN** the computation names validation of that commit with the review as its
+  target, for an implementation or pre-closeout review, and then the review; with no
+  such commit, it names the review again on the same commit
 
 #### Scenario: A triage has not finished
 
-- **WHEN** a review's triage file exists without a `## Next` section
+- **WHEN** a review's triage file exists and no finished or returned triage outcome
+  names the review
 - **THEN** the computation names the triage, or the run waiting in it, and no
   review
 
+#### Scenario: A step names an exit its node lacks
+
+- **WHEN** a design run finishes naming `{"step": "plan"}`, an exit the design node
+  does not declare
+- **THEN** the computation names the owner, with the design's choice and the design
+  node's exits
+
+#### Scenario: A triage names sections out of the plan's order
+
+- **WHEN** an implementation round's triage names
+  `{"step": "implement", "sections": [["5"]]}` while section 4 is open, and the fix
+  commit's validation passed
+- **THEN** the computation names a round of section 5, recorded as it starts
+
+#### Scenario: A triage returns the change
+
+- **WHEN** an implementation round's triage proposed a return naming
+  `{"step": "plan"}`, the owner confirmed the return, and the amended plan finished
+- **THEN** the computation names the amended plan's next round, not that triage,
+  and the round's own validation covers the work-in-progress commit the return left
+
+#### Scenario: A pre-closeout triage returns the change
+
+- **WHEN** a pre-closeout review's triage proposed a return naming
+  `{"step": "plan"}`, the owner confirmed the return, and the amended plan added
+  nothing to implement
+- **THEN** the computation names a validation of `HEAD`, and then a new
+  pre-closeout review
+
+#### Scenario: The owner declines a return
+
+- **WHEN** a triage proposed a return and the owner's decision resolved its run
+  without directing a step
+- **THEN** the computation names the owner, who decides what follows
+
+#### Scenario: A return confirmed by anyone but the owner
+
+- **WHEN** a decision the log would attribute to the orchestrating session, resolving
+  a triage's proposed return and directing planning, is attempted
+- **THEN** the log's writer refuses it, and the return still waits for the owner
+
+#### Scenario: A new triage file awaits its outcome
+
+- **WHEN** a review's triage file has `## Next` written as prose beginning with
+  "Advance to planning", and no triage outcome names the review
+- **THEN** the computation names the triage as in progress, and does not read the
+  prose
+
 #### Scenario: A triage file predates `## Next`
 
-- **WHEN** a review's triage file ends with a `## Gate` beginning `Passed`
-- **THEN** the computation reads it as `Advance`; any other legacy gate is brought
-  to the owner
+- **WHEN** a review's triage file ends with a `## Gate` beginning `Passed`, and no
+  triage outcome names the review
+- **THEN** the computation names the triage as in progress, since it reads no
+  `## Gate`; a change's records are converted when it takes the new code, so that
+  its conversion line names each such review
+
+#### Scenario: A log not yet converted
+
+- **WHEN** a change's workflow log holds a decision line, without the format marker,
+  whose `next` is the string `review` beside a `kind` field
+- **THEN** the computation names the owner with the command that converts the
+  change's records, and routes on none of its lines
+
+#### Scenario: An older return awaits confirmation
+
+- **WHEN** a change's workflow log ends with a triage's `returned` outcome that
+  carries `return_to` and no `next`, without the format marker
+- **THEN** the computation names the owner with the conversion command, not the
+  waiting return
+
+#### Scenario: A change has records and no log
+
+- **WHEN** a change worked in interactive sessions has `reviews/03-design.md` and
+  its triage file, and no workflow log
+- **THEN** the computation names the owner with the conversion command, and names
+  no triage in progress
+
+#### Scenario: A change is converted
+
+- **WHEN** a change's log holds older lines, the last triage file of review 21
+  records `Another round`, and the owner confirms the review the conversion proposes
+- **THEN** each older line is rewritten in place with its seq and marked, one
+  conversion line is appended naming every triaged review and no exit, followed by
+  the owner's direction to `{"step": "review", "kind": "design"}`, and the
+  computation names that review
+
+#### Scenario: A pending return is converted, then confirmed
+
+- **WHEN** a change's last triage, logged at seq 50, proposed a return to planning
+  that the owner has not confirmed, and the owner confirms the direction the
+  conversion proposes
+- **THEN** seq 50 is rewritten in place naming `{"step": "plan"}`, and the
+  conversion's direction to planning resolves seq 50; had the owner declined it,
+  no direction would be written, and the computation would name the owner for
+  seq 50
+
+#### Scenario: A confirmed return is converted
+
+- **WHEN** the owner's decision at seq 51 resolved the returned triage run at seq 50,
+  directing design, and design has not run when the change is converted
+- **THEN** seq 50 and 51 keep their seqs, the decision still resolves seq 50, and
+  the direction the conversion writes names `{"step": "design"}`
+
+#### Scenario: A conversion proposes a guard's remedy
+
+- **WHEN** a change's latest triage file is an implementation round's, recording
+  `Advance`, no step's run is logged after it, and the fix commit has no passing
+  validation
+- **THEN** the conversion proposes the direction
+  `{"step": "validate", "target": {"step": "round"}}`
+
+#### Scenario: A conversion after later runs
+
+- **WHEN** a change's latest triage file is a design review's, recording `Advance`,
+  and a planning run is logged after that triage's run
+- **THEN** the conversion proposes nothing, names the planning run, and writes
+  nothing until the owner gives the node with `--next`
+
+#### Scenario: A conversion follows a later direction
+
+- **WHEN** a change's latest triage file is a design review's, recording
+  `Another round`, and the owner's later decision directing planning is logged with
+  no planning run after it
+- **THEN** the conversion proposes `{"step": "plan"}`, not another design review
+
+#### Scenario: A conversion's triage is not attested
+
+- **WHEN** a change's latest triage file has `## Next` written as prose and no
+  triage outcome names its review, because the triage's interactive session closed
+  before `record`, and the owner declines the conversion that lists it
+- **THEN** the log is unchanged; once the triage's outcome is recorded with
+  `record`, running the conversion again names the review by that outcome
+
+#### Scenario: An append waits on the conversion
+
+- **WHEN** a step's run opens the log to append its outcome while the conversion
+  holds the log's lock, and takes the lock after the converted log has replaced it
+- **THEN** the run finds the file it locked replaced, opens the log again, and its
+  line is appended to the converted log
+
+#### Scenario: A conversion is interrupted
+
+- **WHEN** a conversion stops after rewriting the older lines and before replacing
+  the log
+- **THEN** the log is unchanged, the computation still names the owner with the
+  conversion command, and running it again converts the change
+
+#### Scenario: A change is converted with a triage in progress
+
+- **WHEN** a change's latest triage file has neither `## Next` nor `## Gate`, and
+  no marked triage outcome names its review
+- **THEN** the conversion refuses, naming the review and how to finish its triage,
+  writes nothing, and the review stays a triage in progress
+
+#### Scenario: An older wrapper appends after the conversion
+
+- **WHEN** a converted log gains a line without the format marker, as the converting
+  run's own outcome appended by the wrapper that started it
+- **THEN** the computation names the owner with the conversion command again, and
+  the conversion, finding a run after the latest triage, requires the owner's
+  `--next`
+
+#### Scenario: A validation before closeout passes
+
+- **WHEN** a pre-closeout review's triage named closeout, the computation named
+  validation of `HEAD` with closeout as its target, and the validation passed,
+  naming closeout as its exit
+- **THEN** the computation names closeout
+
+#### Scenario: A validation names another exit
+
+- **WHEN** the computation named validation with closeout as its target, and the
+  validation ends finished naming `{"step": "triage", "kind": "implementation"}`
+- **THEN** the computation names the owner, with the validation's choice and the
+  target it was given
 
 #### Scenario: A closeout correction awaits validation
 
-- **WHEN** a closeout review's triage records `Advance` and its correction changed
-  a path outside `openspec/` and `docs/` since the reviewed commit
-- **THEN** the computation names validation of `HEAD` before archive cleanup
+- **WHEN** a closeout review's triage named archive cleanup and its correction
+  changed a path outside `openspec/` and `docs/` since the reviewed commit
+- **THEN** the computation names validation of `HEAD`, with archive cleanup as its
+  target
 
 #### Scenario: A documentation correction at closeout
 
-- **WHEN** a closeout review's triage records `Advance` and its correction changed
-  only paths under `openspec/` and `docs/`
+- **WHEN** a closeout review's triage named archive cleanup and its correction
+  changed only paths under `openspec/` and `docs/`
 - **THEN** the computation names archive cleanup without a validation
 
 #### Scenario: A round's validation is inconclusive
 
-- **WHEN** an implementation round's triage records `Advance` and the fix commit's
-  validation is `inconclusive`
-- **THEN** the computation names the owner, not the next round
+- **WHEN** an implementation round's triage named the plan's next round and the fix
+  commit's validation is `inconclusive`
+- **THEN** the computation names the owner, with the next round as the target, not
+  the next round
 
 #### Scenario: An implementation round advances
 
-- **WHEN** an implementation round's triage recorded that the change advances, and
-  its fixes are committed
-- **THEN** the computation names validation of the fix commit, and once it passes,
-  the next round or, after the last, the pre-closeout review, without the owner
+- **WHEN** an implementation round's triage named the plan's next round, and its
+  fixes are committed
+- **THEN** the computation names validation of the fix commit, with the next round
+  as its target, and once it passes, the next round, without the owner; a triage of
+  the last round names the pre-closeout review, reached the same way
 
 #### Scenario: A round is recorded after the fact
 
@@ -681,18 +1249,25 @@ to design.
 ### Requirement: Unattended runs are held to their step's permissions
 
 An unattended run MUST be limited to the tools its step's permission table allows,
-and MUST NOT be granted a push other than validation's guarded push. Every denial a
+and MUST NOT be granted a push other than the guarded push of the change's branch.
+Every step that writes tracked work on the change — design, planning,
+implementation, triage, closeout, archive cleanup — MUST commit it and push it
+through that guarded push; validation and review MUST commit nothing. A run that
+returns the change to an earlier phase MUST commit what it has as work in progress,
+check no task for it, and push it; a run that stops MUST leave its partial work
+uncommitted, and one stopped by a refusing repository guard or a moved `HEAD` MUST
+commit nothing. A step MUST NOT reset, check out, switch, rebase, stash, or clean. Every denial a
 run records MUST be recorded on the run's outcome, from the run's own record and
-with the harness's reason when it gives one; the harness gives none for a call a
-deny rule refused. A run that cannot go on without a denied tool MUST end
+with the harness's reason when it gives one. A run that cannot go on without a denied tool MUST end
 with a stopped outcome naming the denial, rather than asking a question or working
 around it; a run that goes on MUST do so only by calls its step's rules allow. A
 call a deny rule refused MUST NOT be done by another tool; a call denied for want
 of an allow rule MAY be done by a tool the step's rules allow for the same work,
 and the run MUST name that substitute in its message. The orchestrating session
 MUST read each recorded denial from the run's record, never from the step's
-message; classify it by the harness's reason, or its absence, as a gap in the
-table or a forbidden action; check the run's later calls, after a deny-rule
+message; classify it by the harness's reason as a gap in the table or a
+forbidden action, matching a command refused by its parts, or one with no
+reason, against the step's deny rules; check the run's later calls, after a deny-rule
 denial, for a workaround; propose, for a gap, the narrowest rule that matches the
 call and say whether it is a one-run grant or a tracked change; and record its
 reading in the workflow log as a
@@ -700,9 +1275,12 @@ decision reading that run, before the next step runs. A run whose outcome still
 waits — a question, a proposed return — MUST be answered or decided after its
 denials are read, and the reading MUST NOT settle that outcome. A denial by a
 deny rule MUST NOT be granted for one run. A
-change to a step's permissions MUST be made by the owner, as a tracked change, or
-granted by the owner for one resumed run. Interactive runs MUST NOT be restricted by
-the table.
+change to a step's permissions MUST be made by the owner or, on the owner's word, by
+the orchestrating session, as a tracked change, or granted by the owner for one
+run, fresh or resumed. A grant MUST be passed on that run's command line — for a
+fresh run through its step's make target — recorded as `granted` on the run's log
+line, and never added to the table, so the step's next run is held to its table
+again. Interactive runs MUST NOT be restricted by the table.
 
 #### Scenario: Validation attempts to relock
 
@@ -714,7 +1292,14 @@ the table.
 
 - **WHEN** an unattended run is denied a command because no allow rule names it
 - **THEN** the orchestrating session proposes the narrowest allow rule matching the
-  call, and the owner grants it for the resumed run or commits it to the table
+  call, and the owner grants it for the resumed run or has it committed to the table
+
+#### Scenario: The owner grants rules before a fresh run
+
+- **WHEN** the owner grants two rules for a step's next run, which has not started
+- **THEN** the orchestrating session starts the run through its make target with
+  both rules in `ALLOW`, separated by `;`, the run's log line records both as
+  `granted`, and the step's run after it is held to its table alone
 
 #### Scenario: A step does the work of a call no rule names with a tool its rules allow
 
@@ -736,6 +1321,19 @@ the table.
 - **WHEN** an unattended run is denied a call that a deny rule names
 - **THEN** the denial stands, and the run's attempt is reported to the owner as a
   finding
+
+#### Scenario: A step commits its work
+
+- **WHEN** an unattended implementation run commits a section
+- **THEN** it pushes that commit through the guarded push of the change's branch, and
+  any other push it attempted would be denied
+
+#### Scenario: A step stops at its session's limit
+
+- **WHEN** an unattended implementation run stops partway through a section because
+  its session reached its limit
+- **THEN** its edits stay uncommitted, and the resumed session finishes the section
+  and commits it
 
 ### Requirement: A design blocked on a prerequisite halts
 
@@ -824,6 +1422,416 @@ step and by round, with the cache misses and their gaps listed.
 - **THEN** the run's line records the gap, a cache miss, and the run's own cost,
   not the session's running total, and the cost report lists the miss with its gap
 
+### Requirement: Each change is worked in its own clone
+
+A change MAY be worked in a clone of the owner's workspace of its own, which holds
+its branch, its records, its environments, its evidence, and its step sessions; a
+change MAY instead be worked in the owner's workspace itself. When a change's branch
+is checked out neither in a clone of its own nor in the checkout the next-step
+computation runs in, the computation MUST name the creation of its clone, and the
+orchestrating session MUST create it and, when the branch does not exist, the
+branch — unless the workspace already holds the change's records, when the
+computation MUST NOT name the clone and MUST bring the change to the owner, naming
+both routes: working it in the workspace, or moving it into a clone by hand.
+Creating a clone MUST be safe to repeat: it MUST finish a clone left
+incomplete, and MUST refuse, deleting nothing, a directory that is not a clone of
+the workspace, has another branch checked out, or has uncommitted changes. The
+clone's `origin` MUST be the workspace's `origin`, and one of its remotes MUST name
+the workspace. The clone's bootstrap MAY run while design proceeds; implementation
+and validation MUST NOT start before it has succeeded. Its state MUST be recorded
+so that running, succeeded, and failed are told apart, and a failed bootstrap MUST
+be brought to the owner, naming its log, rather than retried by itself. As its last
+act, after every record it writes, archive cleanup MUST copy the change's records,
+and the validation evidence they name, into the owner's workspace at the same
+paths; the copy MUST be safe to repeat, MUST extend a file there whose contents
+are a prefix of the clone's, and MUST NOT otherwise overwrite a file there,
+refusing and naming any whose contents differ; once archive cleanup's own outcome is
+logged, the orchestrating session MUST repeat the copy, so the workspace holds that
+outcome too. A step that reads another change's
+or an earlier change's records MUST look for them in its own checkout and then in
+the owner's workspace. A clone MUST be removed only on the owner's command; the
+removal MUST first repeat the copy, and MUST proceed only once the clone's records,
+and the named evidence it holds, are in the workspace with identical contents, its
+branch is merged, and it holds no commit and no change its `origin` lacks; named
+evidence the clone does not hold MUST be named in the removal's report.
+
+#### Scenario: Feature work begins on a change
+
+- **WHEN** the owner starts the orchestrating session for a change whose branch no
+  clone holds
+- **THEN** the computation names the clone, the orchestrating session creates it
+  with the change's branch, and design runs while the clone's bootstrap continues
+  in the background
+- **AND** the computation names no implementation or validation until the
+  bootstrap has succeeded
+
+#### Scenario: A change already under way in the workspace
+
+- **WHEN** the owner starts the orchestrating session for a change whose branch no
+  clone holds and whose records are in the owner's workspace
+- **THEN** the computation names no clone and brings the change to the owner,
+  naming both routes: checking out its branch in the workspace and working it there,
+  or moving it into a clone by hand
+
+#### Scenario: Clone creation was interrupted
+
+- **WHEN** an orchestrating session restarts after creating a change's clone only
+  in part
+- **THEN** the computation names the clone again, and creating it finishes the
+  steps not yet done without recloning or deleting anything
+
+#### Scenario: The bootstrap failed
+
+- **WHEN** a clone's bootstrap ended with a failure, or its process died without
+  recording a status
+- **THEN** the computation names no implementation or validation, and the failure
+  is brought to the owner naming its log; creating the clone again restarts the
+  bootstrap
+
+#### Scenario: Two changes are worked at once
+
+- **WHEN** one change's validation runs in its clone and another change's
+  implementation runs in its own
+- **THEN** neither moves the other's branch, writes the other's records, or
+  rebuilds the other's wheelhouse
+
+#### Scenario: A later session needs a cleaned-up change's history
+
+- **WHEN** a design session reads the reviews of a change whose archive was cleaned
+  up in its clone
+- **THEN** it finds them in the owner's workspace, at the archived change's path,
+  even where the workspace's branch also carries the change's active directory
+  without them, and a report of the change's cost or log reads them there
+
+#### Scenario: The owner removes a clone too early
+
+- **WHEN** the owner asks to remove a clone whose branch is not merged, or whose
+  records are not all in the workspace
+- **THEN** the removal is refused, naming what is missing, and nothing is deleted
+
+#### Scenario: Records grow after archive cleanup copied them
+
+- **WHEN** archive cleanup's outcome is appended to the clone's workflow log after
+  its copy, and another round on the pull request writes a record in the clone
+- **THEN** the next copy, or clone removal's own, extends the workspace's log and
+  adds the record, overwriting nothing
+
+#### Scenario: A copied record conflicts
+
+- **WHEN** a file in the owner's workspace differs from the clone's other than by
+  the clone's having grown it
+- **THEN** the copy refuses, naming the file, and clone removal deletes nothing
+
+### Requirement: Each Helm validation is isolated in its change's namespace
+
+Validation's Helm part MUST deploy into a namespace of its change's own, derived
+from the change's name, and MUST NOT install, upgrade, remove, or scale a release
+or volume in any other namespace. The images it deploys MUST carry a tag fixed per
+change, so that two changes' builds never write one tag; it MUST NOT tag them by
+commit. Before deploying, it MUST remove every volume the change's previous
+deployment wrote, including the volumes created for its tests out of band, and
+MUST create the namespace's out-of-band Secrets. It SHOULD upgrade the release in
+place from zero replicas, and MAY uninstall and install it when the upgrade is
+refused, saying so. Its scenarios MUST run inside the namespace and MUST NOT depend
+on a local port. After the scenarios it MUST keep every pod's log and the
+namespace's events with the attempt's evidence, and MUST scale the namespace's
+workloads to zero. A preflight MUST compare the memory a release is recorded to
+need, times the releases that would be running, with what the node can allocate,
+and MUST treat a deployment that would not fit as an environmental failure; it is
+an estimate and reserves nothing. When no figure is recorded, or usage cannot be
+measured, it MUST warn and go on. A pod that fails for memory after a passed
+preflight MUST be classified as any validation failure is, from the namespace's
+events, the other namespaces' workloads at the time, and the rendered requests and
+limits: as environmental only when that evidence shows contention for the node's
+memory, and otherwise as caused by the commit or of unknown cause.
+Archive cleanup MUST remove the change's namespace and images and, when the
+change's latest validation measured memory, MUST record it, with when it was
+measured; when that validation measured none, it MUST keep the figure already
+recorded and say that it recorded none. Where two branches' recorded figures
+conflict at a merge, the one measured later MUST be kept.
+
+#### Scenario: Two changes are validated at once
+
+- **WHEN** two changes' Helm parts run at the same time on one cluster
+- **THEN** each builds its own images under its own tags, deploys into its own
+  namespace, and runs its scenarios against its own release, and neither removes,
+  replaces, or reaches the other's
+
+#### Scenario: A change is validated again
+
+- **WHEN** a change's earlier validation left its namespace scaled to zero with its
+  volumes
+- **THEN** validation deletes those volumes, recreates the Secrets, and upgrades the
+  release, whose pods start new on the images just built against empty volumes
+
+#### Scenario: An earlier run crashed with its workloads up
+
+- **WHEN** validation finds the change's workloads running from a run that ended
+  without scaling them down
+- **THEN** it scales them to zero before deleting the volumes
+
+#### Scenario: Usage cannot be measured
+
+- **WHEN** the cluster has no metrics source
+- **THEN** the preflight warns that no memory figure will be recorded, and the part
+  goes on
+
+#### Scenario: Archive cleanup after a validation that measured nothing
+
+- **WHEN** archive cleanup runs and the change's latest validation recorded no
+  memory
+- **THEN** it leaves the recorded figure as it is, or absent, and says in its report
+  and the pull-request draft that it recorded none
+
+#### Scenario: No memory figure is recorded yet
+
+- **WHEN** a validation's preflight runs before any archive cleanup has recorded
+  the memory a release needs
+- **THEN** it warns that the check was skipped, and the part goes on
+
+#### Scenario: Two validations pass the preflight together
+
+- **WHEN** two changes' preflights pass before either deploys, and one's pods then
+  cannot be scheduled or are evicted for memory while the other's workloads are up
+- **THEN** that validation's failure is diagnosed as environmental, with the remedy
+  of scaling another change's namespace to zero or running again once it is down
+
+#### Scenario: A commit's own pod is killed for memory
+
+- **WHEN** a pod is killed at its own memory limit after a passed preflight, and the
+  commit changed the rendered requests or limits or the evidence shows no
+  contention
+- **THEN** the failure is reported as caused by the commit or of unknown cause, so
+  validation fails and the failure is triaged
+
+#### Scenario: A change's archive is cleaned up
+
+- **WHEN** archive cleanup runs for a change validated on Helm
+- **THEN** the change's namespace and images are removed, and the memory its latest
+  validation measured, if it measured any, is recorded for the preflight
+
+### Requirement: The workflow graph is declared in code
+
+The workflow's steps and the transitions between them MUST be declared as one table
+in code, which the next-step computation interprets: each node a step, qualified by
+its review kind where it has one — a review by its kind, a triage by the kind of
+review it triages; the exits it may take; the records a join waits for; the guards
+on each exit, each naming the step that satisfies it, or the owner where no step
+can; and its entry guards, the conditions without which its step cannot carry out
+its work, each unwaivable or waivable. Exit guards MUST apply to the exits steps
+take, and MUST NOT be checked against the owner's directions. Entry guards MUST be
+checked on every entry to their node: an unwaivable one MUST refuse every entry
+while unmet, and a waivable one MUST take the owner's direction as its override.
+The change's archive MUST be an unwaivable entry guard of the closeout review, its
+triage, and archive cleanup, and its absence one of design, planning, and
+implementation. A triage node's entry guard MUST be that a review of its kind
+awaits triage, or a validation record numbered after the latest review, which is
+of its kind and not a design review. Validation's entry guard MUST be unwaivable:
+that it carries a
+target, a node of the table; the target's own entry guards MUST be checked on
+validation's exit, not on its entry. Archive
+cleanup's exit MUST be the terminal node `done`, which has no
+exits and no step, and which no direction reaches. A change to the table MUST be
+made as an OpenSpec change.
+The source of the diagram the `change-workflow` architecture shows, and the copy of
+it its export embeds, MUST be checked against the table's nodes, exits, joins, and
+guards, whatever its layout; the export's visible drawing, which draw.io renders
+from the source it embeds, is not compared.
+
+#### Scenario: The diagram's departures are reported
+
+- **WHEN** the owner runs `make change-graph` after a change to the table
+- **THEN** it names each box and edge the diagram's source draws otherwise than the
+  table, with the text the table gives it, and fails; and once the source draws the
+  table, it says so and succeeds
+
+#### Scenario: The documented diagram drifts
+
+- **WHEN** a change adds an exit to a node and does not update the diagram in the
+  `change-workflow` architecture
+- **THEN** the check comparing that diagram with the table fails, naming the exit
+  it does not draw
+
+#### Scenario: The round's triage waits for its join
+
+- **WHEN** an implementation round's validation has finished and its review and the
+  owner's reading have not
+- **THEN** the computation names the steps the join still waits for, and no triage
+
+#### Scenario: A round's validation and review ran before the owner read it
+
+- **WHEN** a change worked in the owner's checkout has its round's validation and
+  implementation review, and no owner record of the round
+- **THEN** the computation names the round view, now that no step runs beside it,
+  and triage only once the owner record exists
+
+#### Scenario: A round's validation starts before its review is published
+
+- **WHEN** an implementation round's validation and review start from the same
+  commit, and no implementation review awaits triage yet
+- **THEN** the computation names validation with
+  `{"step": "triage", "kind": "implementation"}` as its target, and validation's
+  entry guard is met
+
+#### Scenario: Archive cleanup finishes
+
+- **WHEN** archive cleanup ends finished, naming `{"step": "done"}`
+- **THEN** the computation names `done`, with the reason `archived`, and no step runs
+
+#### Scenario: The owner directs the triage of a failed fix validation
+
+- **WHEN** an implementation triage committed a fix and named its exit, the fix
+  commit's validation failed, and the owner directs
+  `{"step": "triage", "kind": "implementation"}`
+- **THEN** the log's writer accepts the direction, since the validation awaits
+  triage after the latest review, and that triage, naming the review again beside
+  the validation, routes on through its exit's guards
+
+#### Scenario: A step's exit meets an unmet entry guard
+
+- **WHEN** closeout ends finished naming `{"step": "review", "kind": "closeout"}`,
+  and the change's directory is not under the archive
+- **THEN** the computation names the owner, with the exit and the entry guard, and
+  no closeout review
+
+### Requirement: Interactive step runs record their outcome
+
+An interactive run of a step MUST behave as it does without the wrapper, unrestricted
+by the step table, except that it MUST end by recording its outcome through the
+workflow tooling's record command. A review is the exception and MUST record
+nothing: an interactive review publishes no record, and its text is saved as an
+external review by the triage it is pasted into. The command MUST check the outcome
+against the outcome schema, MUST record it with the session's id — read from the
+harness's environment, or given explicitly — the commit at `HEAD`, and that the run
+was interactive, and MUST refuse to record without a session id, and inside an
+unattended run, whose outcome the wrapper records. Every step's permissions MUST
+allow it to print the session's id.
+
+#### Scenario: An interactive triage finishes
+
+- **WHEN** the owner triages a review in an interactive session, and the triage
+  ends by recording its outcome naming the review it triaged and its exit
+- **THEN** the workflow log holds that outcome with the session's id, `HEAD`, and
+  `interactive`, and the computation routes on it
+
+#### Scenario: An interactive review is pasted into a triage
+
+- **WHEN** the owner asks for a review in an interactive session and pastes it into
+  a triage
+- **THEN** the review's session records no outcome, the triage saves the review as
+  the change's next `NN-<kind>-external.md`, and the triage's outcome names it in
+  `triaged`
+
+#### Scenario: An interactive session ends without recording
+
+- **WHEN** the owner closes an interactive session of any step but a review before it
+  recorded its outcome, and the last exit or direction names that step
+- **THEN** the computation names the step as in progress, its reason saying that if
+  no session of it is open, an interactive session ended without recording, to be
+  resumed or recorded by hand
+
+#### Scenario: An interactive plan sets its status and records nothing
+
+- **WHEN** an interactive planning session wrote the task list and set the status
+  `ready for implementation`, and was closed before it recorded its outcome
+- **THEN** the computation names planning as in progress, and no round, its result
+  carrying a `disagreement` naming the missing plan outcome and the record command
+
+#### Scenario: The harness exports no session id
+
+- **WHEN** the record command runs where the harness's session id variable is unset,
+  and no session is given
+- **THEN** it refuses, naming the variable, and records nothing
+
+#### Scenario: An unattended run records its own outcome
+
+- **WHEN** a step run by the wrapper runs the record command
+- **THEN** the command refuses, and the run's outcome is the one the wrapper records
+
+### Requirement: The owner directs a change's next step
+
+The owner MAY direct a change to any node of the workflow graph, by a decision in the
+workflow log naming its target as an outcome names an exit, with a reason, which
+says what any skipped check was; the decision MAY resolve the run waiting on it.
+Only the owner MAY direct a step: the orchestrating session MUST NOT direct one of
+its own accord, nor record a step's exit on its behalf. The computation MUST name
+the directed step until a later run of it is logged, checking no exit guard, and the
+step sets its own status as it starts. A direction MUST be refused, naming the
+guard, while an unwaivable entry guard of any node it names is not met — its
+target, and the target nested in a direction to validation: an archived change MUST NOT be
+directed to design, planning, or implementation, nor a change not archived to the
+closeout review, its triage, or archive cleanup. A waivable entry guard, and the
+directed step's own entry check for it, MUST accept the direction as its override.
+A direction to validation MUST name, nested in its target, the target the
+validation is for, and MUST be refused without one by validation's entry guard; a
+directed validation that passed MUST lead to its target, whose entry guards are
+checked, and one that failed or was inconclusive MUST be brought to the owner.
+
+#### Scenario: The owner directs past a guard
+
+- **WHEN** the latest validation of `HEAD` failed, and the owner directs the change
+  to closeout
+- **THEN** the computation names closeout, not the owner or a validation
+
+#### Scenario: Closeout finds a design defect before the archive
+
+- **WHEN** closeout, before archiving the change, finds that a design decision
+  contradicts a permanent requirement, and the owner directs the change back to
+  design
+- **THEN** the computation names design, and the design step sets the status
+  `in design` as it starts
+
+#### Scenario: The owner waives archive cleanup's validation by a direction
+
+- **WHEN** the computation names a validation before archive cleanup, and the owner
+  directs archive cleanup, the reason saying the validation is waived
+- **THEN** the computation names archive cleanup, and archive cleanup, finding the
+  direction in the log, records the waiver in the intervention ledger
+
+#### Scenario: An archived change is directed to design
+
+- **WHEN** a direction of an archived change to design is attempted
+- **THEN** the log's writer refuses it, naming the archive
+
+#### Scenario: A change not archived is directed to archive cleanup
+
+- **WHEN** a direction to archive cleanup of a change whose directory is not under
+  the archive is attempted
+- **THEN** the log's writer refuses it, naming the missing archive
+
+#### Scenario: The owner directs a pre-closeout review over a failed validation
+
+- **WHEN** the latest validation of `HEAD` failed, and the owner directs a
+  pre-closeout review
+- **THEN** the computation names the pre-closeout review, and the review starts,
+  taking the direction as its override of the validation check
+
+#### Scenario: The owner directs a validation before closeout
+
+- **WHEN** the owner directs `{"step": "validate", "target": {"step": "closeout"}}`,
+  and the validation passes, naming closeout as its exit
+- **THEN** the computation names validation with closeout as its target, and then
+  closeout; had the validation failed, it would name the owner
+
+#### Scenario: A validation is directed without a target
+
+- **WHEN** a direction to `{"step": "validate"}` naming no target is attempted
+- **THEN** the log's writer refuses it, naming validation's entry guard
+
+#### Scenario: A directed validation could never reach its target
+
+- **WHEN** a direction to
+  `{"step": "validate", "target": {"step": "archive-cleanup"}}` of a change whose
+  directory is not under the archive is attempted
+- **THEN** the log's writer refuses it, naming the missing archive, and no
+  validation runs
+
+#### Scenario: A triage is directed with nothing to triage
+
+- **WHEN** a direction to `{"step": "triage", "kind": "design"}` is attempted and
+  every design review has its triage
+- **THEN** the log's writer refuses it, naming the entry guard
+
 ## Evidence
 
 - Contributor guide to each step, the review directory, and the ledger:
@@ -839,6 +1847,12 @@ step and by round, with the cache misses and their gaps listed.
   `.agents/change-outcome.schema.json`; each step's permissions and models:
   `.claude/change-steps.toml`; finding a change by name, active or archived:
   `scripts/find_change.py`.
+- The workflow graph: `scripts/change_workflow/graph.py`; its diagram,
+  `docs/development/diagrams/change-workflow-graph.drawio` and its SVG export, held
+  to the table by `scripts/change_workflow/diagram.py` (`make change-graph`).
+- An interactive run's outcome recorded: `python3 scripts/run_change_step.py
+  record`; a change's records converted to the log's format: `python3
+  scripts/run_change_step.py convert` (`scripts/change_workflow/convert.py`).
 - The next-step computation: `scripts/change_next_step.py` (`make change-next`);
   the orchestrating session: `make orchestrate`; following a run:
   `make change-watch`; the cost report: `make change-cost`
@@ -846,10 +1860,23 @@ step and by round, with the cache misses and their gaps listed.
   `scripts/completions/make-change.bash`.
 - A change's closing checks: `make check-change` (`scripts/check_change.py`); its
   task list's sections: `make check-tasks` (`scripts/check_tasks.py`).
-- Validation: `make validate-local` and `make validate-helm`
+- Validation: `make validate-local`, `make validate-helm`, and `make validate-ci`
   (`scripts/validate_slice.py`); run selection for the validated commit:
-  `scripts/fetch-e2e-logs.py`; the push guard: `make check-push-ready` and
+  `scripts/fetch-e2e-logs.py`; the workflows validation may dispatch and the
+  comparison of a CI run's failures with `dev`'s: `make run-ci`
+  (`scripts/ci_evidence.py`); the push guard: `make check-push-ready` and
   `make push-branch` (`scripts/check_push_ready.py`).
+- A change's validation namespace and image tags: `scripts/change_namespace.py`,
+  with `CHANGE=` on every `helm/Makefile` target and `IMAGE_SUFFIX` on the build
+  targets; manual access: `make -C helm forward` and `make -C helm resume`;
+  teardown: `make -C helm teardown`; the memory one release needs:
+  `helm/validation-capacity.toml`, written by `make record-capacity`; two clones'
+  Helm parts at once: `make validate-parallel` (`scripts/validate_parallel.py`).
+- A change's clone: `make change-clone` and `make change-clone-remove`
+  (`scripts/change_clone.py`); its history in the owner's workspace: `make
+  change-history` (`scripts/change_history.py`) and `python3
+  scripts/find_change.py --records`; a run in progress in a checkout:
+  `scripts/change_workflow/running.py`.
 - Reading a round: `make round-view` and `make round-done` (`scripts/round_view.py`).
 - Index edits checked: `make check-change-index` (`scripts/check_change_index.py`).
 - The post-compaction hook: `.claude/settings.json` and

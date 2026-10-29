@@ -274,7 +274,7 @@ VM and bare-metal execution MUST consume the common compute-provisioning envelop
 - **THEN** the domain's codec renders its variables and interprets its result, and the shared mechanics hold no VM or bare-metal meaning
 
 ### Requirement: Compute-owned caller contract
-Shared storefront/provisioner DTOs, the job, host, credential, lease, and system-status wire models, and the family's route contracts MUST be owned by compute provisioning rather than the VM domain, in a contracts distribution that depends on no service, persistence, or web-framework package. Routes the provisioning service hosts for another capability, such as resource-pool administration and capacity-definition import, MUST keep that capability's models, contracts, and client; hosting a route does not make it compute provisioning's. The family's typed client MUST be a separate client distribution depending on no service, persistence, or web-framework package: only that contracts distribution, the core carrier package, the identity kit, its HTTP library, and its model library; it offers async and sync variants with identical operations, and the family kit itself MUST contain no client. Direct VM operator APIs MAY retain VM-owned VM action, relay, and VM pool-configuration models and a VM client extension over the family client's authenticated transport; callers import compute-owned models from the contracts distribution. Compute provisioning MUST NOT name a domain's routes: a domain, an execution implementation, or another capability MUST contribute the route contracts of the routes it mounts. The service's request authentication MUST resolve requests against the table the provisioning service's composition root assembles from those contributions; each typed client MUST sign its routes from its owner's contracts. Where the owner's contracts are one declaration that both the service's table and the client read, as the compute family's, the resource-pool authority's, the Ansible implementation's, and each domain's are, operation, resource binding, and roles cannot diverge. Where an owner keeps separate server and client declarations, as the site capacity authority does, a contract-parity test MUST hold the two equal in method, path, operation, resource binding, and the models they exchange.
+Shared storefront/provisioner DTOs, the job, host, credential, lease, system-status, worker-control, and mock-rule wire models, and the family's route contracts MUST be owned by compute provisioning rather than the VM domain, in a contracts distribution that depends on no service, persistence, or web-framework package. Routes the provisioning service hosts for another capability, such as resource-pool administration and capacity-definition import, MUST keep that capability's models, contracts, and client; hosting a route does not make it compute provisioning's. The family's typed client MUST be a separate client distribution depending on no service, persistence, or web-framework package: only that contracts distribution, the core carrier package, the identity kit, its HTTP library, and its model library; it offers async and sync variants with identical operations, and the family kit itself MUST contain no client. The family's mock mechanism is the family's capability wherever it is mounted: the contracts distribution MUST own its route contracts as one template instantiated by a mount, a path prefix and an operation-name prefix, and the family client MUST offer its typed client over a mount; a compute domain MUST contribute only its mount for those routes, never declarations of its own. Each compute domain's client package MAY offer an extension over the family client's authenticated transport for other routes that domain mounts; direct VM operator APIs MAY retain VM-owned VM action, relay, and VM pool-configuration models; callers import compute-owned models from the contracts distribution. Compute provisioning MUST NOT name a domain's routes: a domain, an execution implementation, or another capability MUST contribute the route contracts of the routes it mounts, and for the mock mechanism's routes a domain contributes them through its mount. The service's request authentication MUST resolve requests against the table the provisioning service's composition root assembles from those contributions; each typed client MUST sign its routes from its owner's contracts. Where the owner's contracts are one declaration that both the service's table and the client read, as the compute family's, the resource-pool authority's, the Ansible implementation's, and each domain's are, operation, resource binding, and roles cannot diverge. Where an owner keeps separate server and client declarations, as the site capacity authority does, a contract-parity test MUST hold the two equal in method, path, operation, resource binding, and the models they exchange.
 
 #### Scenario: Bare-metal storefront installs the shared client
 - **WHEN** a bare-metal caller installs the compute-provisioning client without VM execution extras
@@ -295,6 +295,18 @@ Shared storefront/provisioner DTOs, the job, host, credential, lease, and system
 #### Scenario: An operator reads a lease
 - **WHEN** an operator reads a VM or bare-metal lease through the generic lease routes
 - **THEN** the response is the neutral lease view, carrying no VM-only field
+
+#### Scenario: A test reads a mock rule through the family client
+- **WHEN** a test lists or installs a bare-metal or VM mock rule through the family's mock-rule client, constructed with that domain's mount
+- **THEN** the request is signed with the domain's existing path and operation name, and the test receives the family's typed rule model from the contracts distribution
+
+#### Scenario: A compute domain mounts the mock mechanism
+- **WHEN** a compute domain mounts the mock mechanism's routes
+- **THEN** it states its path prefix and operation-name prefix, and its route contracts and typed client come from the family without a declaration of its own
+
+#### Scenario: An operator runs a worker control
+- **WHEN** an operator checks leases, runs or advances a convergence cycle, or rotates the provisioning identity through the family client
+- **THEN** the answer is a typed model from the contracts distribution
 
 ### Requirement: Compute-owned provisioning service
 
@@ -341,16 +353,16 @@ Service composition MUST reject duplicate job-executor registrations for one `(o
 
 ### Requirement: Ansible fulfillment adapter
 
-The VM Ansible fulfillment adapter MUST execute only against the scheduler-selected `SettlementResource`. Before dispatch it MUST reject disabled or missing pools, pool/resource/provider mismatches, missing host identity, malformed VM requirements, and provider variables that collide with authoritative job inputs. Accepted operations MUST snapshot the resolved playbook and provider variables with the submitted job. Create metadata MUST retain the exact `host_id` and `executor_target` (the guest provisioning named), and teardown MUST reuse those accepted values rather than infer them from a resource identifier. Provider-specific job states MUST map to the normalized fulfillment states `pending`, `succeeded`, `failed`, or `unknown`.
+The VM Ansible fulfillment adapter MUST execute only against the scheduler-selected `SettlementResource`. Before dispatch it MUST reject disabled or missing pools, pool/resource/provider mismatches, missing host identity, malformed VM requirements, and provider variables that collide with authoritative job inputs. Accepted operations MUST snapshot the resolved playbook and provider variables with the submitted job; the resolved playbook is the pool's `playbook_path` when the pool states one, and otherwise the service's `vm_playbook_path` as configured when the job is prepared. Create metadata MUST retain the exact `host_id` and `executor_target` (the guest provisioning named), and teardown MUST reuse those accepted values rather than infer them from a resource identifier. Provider-specific job states MUST map to the normalized fulfillment states `pending`, `succeeded`, `failed`, or `unknown`.
 
 Reservation-governed VM shape is resolved from the committed reservation dimensions carried by the scheduled settlement resource. Caller-supplied sizing fields do not override or fill missing committed dimensions. For each dimension absent from the committed reservation, the adapter MAY apply the corresponding pool default; if neither a committed dimension nor a pool default exists, the provider input remains unset and the selected playbook or inventory supplies its own default. The pool-selected registered requirement delegate owns conversion from canonical VM dimensions into the selected playbook's variable names, units, and derived values.
 
-The fulfillment request's `connectivity` field MUST NOT carry relay configuration. Which relay a host dials is a durable property of the deployment, recorded on the relay a pool references, and MUST NOT be selectable per request: a request-supplied relay would make a fleet-wide fact depend on a caller's configuration and would let two requests for one host disagree about how that host is reached. The buyer-facing address and port are returned in the fulfillment result rather than supplied with the request. Any remaining `connectivity` content is opaque metadata the adapter forwards unchanged and never interprets, and is not a sizing or feasibility requirement.
+A VM fulfillment request MUST NOT say how its guest is reached, and the adapter MUST refuse one that carries a `connectivity` field or any other field the request does not declare. Which relay a host dials is a durable property of the deployment, recorded on the relay a pool references, and MUST NOT be selectable per request: a request-supplied relay would make a fleet-wide fact depend on a caller's configuration and would let two requests for one host disagree about how that host is reached. The buyer-facing address and port are returned in the fulfillment result rather than supplied with the request. The refusal happens while the request is prepared, inside the transaction that would accept it, so a refused request is never stored and nothing it carried, such as a relay credential, is kept at rest.
 
 #### Scenario: A request supplies relay configuration
 
-- **WHEN** a fulfillment request's `connectivity` field carries a relay address, domain, or dashboard credential
-- **THEN** the value does not select a relay, and the relay referenced by the pool is used instead
+- **WHEN** a fulfillment request's payload carries a `connectivity` field, such as a relay address, domain, or dashboard credential
+- **THEN** validation reports the request invalid, `begin_fulfillment` refuses it, and no fulfillment is accepted, no job is dispatched, and the request is not stored
 
 #### Scenario: Pool configuration changes after create dispatch
 
@@ -381,6 +393,11 @@ The fulfillment request's `connectivity` field MUST NOT carry relay configuratio
 
 - **WHEN** neither the committed reservation nor the resolved pool supplies a VM dimension
 - **THEN** the adapter leaves the corresponding provider input unset so the selected playbook or inventory may supply its own default
+
+#### Scenario: A VM pool states no playbook
+
+- **WHEN** a VM job is prepared for a pool whose provider configuration states no `playbook_path`
+- **THEN** the job's stored parameters carry the service's `vm_playbook_path` as configured at preparation
 
 ### Requirement: Generic provisioning has one package owner
 
@@ -443,14 +460,15 @@ on create and update. A capacity declaration's explicit `bare_metal_publication`
 view MUST carry the declaration's own pool. The `bare_metal.ansible` provider accepts no pool-local
 playbook, inventory-group, credential, or executor-target configuration:
 execution uses service-owned configuration and the scheduler-selected Physical
-Resource. The operator MUST register that Physical Resource and its explicit
+Resource, and a bare-metal job's stored parameters carry the service's
+`bare_metal_playbook_path` as configured when the job is prepared. The operator MUST register that Physical Resource and its explicit
 `bare_metal_publication` view through the authenticated capacity administration
 surface before the host is publishable.
 
 #### Scenario: Fresh selected-site inventory binds to a bare-metal pool
 
 - **WHEN** startup imports a `bare_metal.ansible` pool and then seeds a host whose inventory row names that pool
-- **THEN** the durable host row retains the exact pool id and unknown pool ids fail instead of falling back to `default`
+- **THEN** the durable host row retains the exact pool id and an unknown pool id fails the seed rather than leaving the host unplaced or assigning another pool
 
 #### Scenario: Publication retains the inventory pool binding
 
@@ -470,28 +488,70 @@ surface before the host is publishable.
 - **WHEN** a `bare_metal.ansible` pool contains a non-empty `provider_config`
 - **THEN** validation rejects the pool before it can authorize or dispatch fulfillment
 
+#### Scenario: The bare-metal playbook setting changes after a grant is prepared
+
+- **WHEN** `bare_metal_playbook_path` changes after a grant or reclaim job is prepared
+- **THEN** the job runs the playbook its stored parameters carry, and a job prepared afterwards carries the new one
+
 ### Requirement: A bare-metal publication view is built from its capacity declaration
 
 A capacity declaration's bare-metal publication view SHALL take its Physical
 Resource identity, pool, host, physical host identity, capacity, and availability
-from that declaration alone, and SHALL NOT read a host inventory record. A
-declaration whose publication is enabled but which names no host SHALL be
-projected without the view rather than failing the projection generation.
+from that declaration alone, and SHALL NOT read a host inventory record. Its host
+identity, physical host identity, access methods, and availability are delivery
+terms: the view SHALL carry them only as the declaring pool's backing delegate passes
+them, so a capacity-backed pool's view carries all of them and an unbacked pool's view
+carries none, and SHALL be built and validated through the bare-metal domain's shared
+view carrier with that pool's backing. The view builder SHALL hold no branch on backing
+of its own, and the view SHALL carry no backing label.
+
+The view builder SHALL NOT raise on a declaration's content. A declaration whose
+publication is enabled but from which no valid view can be built — a capacity-backed
+declaration naming no host or no access methods, a missing or invalid allocation mode,
+a missing physical host identity, or a capacity or capability key the view may not
+publish — SHALL be projected without the view, with a `publication_view_problems`
+entry for the view naming why, and every other entry in the generation SHALL be
+unaffected. A declaration in an unbacked pool whose publication is enabled SHALL be
+projected with the view whether or not it names a host.
 
 #### Scenario: An enabled publication names no host
 
-- **GIVEN** a capacity declaration with an enabled bare-metal publication and no
-  host
+- **GIVEN** a capacity declaration in a capacity-backed pool with an enabled
+  bare-metal publication and no host
 - **WHEN** the resource-pool projection is produced
-- **THEN** the declaration is projected without the bare-metal view and every
-  other entry in the generation is unaffected
+- **THEN** the declaration is projected without the bare-metal view and with a
+  `publication_view_problems` entry for it, and every other entry in the generation is
+  unaffected
+
+#### Scenario: An enabled publication declares no access methods
+
+- **GIVEN** a capacity declaration in a capacity-backed pool with an enabled
+  bare-metal publication that names a host and declares no access methods
+- **WHEN** the resource-pool projection is produced
+- **THEN** the projection succeeds, the declaration is projected without the bare-metal
+  view, and its `publication_view_problems` entry names the missing access methods
 
 #### Scenario: The named host is not registered
 
-- **GIVEN** a capacity declaration with an enabled bare-metal publication naming
-  a host that has no registered record
+- **GIVEN** a capacity declaration in a capacity-backed pool with an enabled
+  bare-metal publication naming a host that has no registered record
 - **WHEN** the resource-pool projection is produced
 - **THEN** the view is produced and carries the declaration's host
+
+#### Scenario: An unbacked declaration names no host
+
+- **GIVEN** a capacity declaration in an unbacked pool with an enabled bare-metal
+  publication and no host
+- **WHEN** the resource-pool projection is produced
+- **THEN** the view is produced carrying the resource's identity, pool, capacity, and
+  capabilities, and no host identity, access methods, or availability
+
+#### Scenario: An unbacked declaration names a host
+
+- **GIVEN** a capacity declaration in an unbacked pool with an enabled bare-metal
+  publication naming a host and access methods
+- **WHEN** the resource-pool projection is produced
+- **THEN** the view carries neither the host identity nor the access methods
 
 ### Requirement: Signed payment receipts gate selected-site execution
 
@@ -544,7 +604,6 @@ obligation, MUST decline explicitly.
 - **WHEN** a serviced obligation's mechanism differs from its accepted Agreement's
 - **THEN** the hook refuses it and no entry's servicing acts
 
-
 ### Requirement: Bare-metal evidence is independent of escrow rows
 
 Bare-metal settlement stages MUST persist accepted-Agreement-bound SettlementEvidence by negotiation ID. Fulfillment and status MUST read that record's verified status/reference, not accept an escrow row as alternative proof or interpret a chain-name sentinel. Established identity/source evidence MUST be conflict-protected. Incompatible evidence/lifecycle schemas MUST require explicit database reset without legacy payment-row copying or fallback. Before protected recovery effects, the selected stage MUST revalidate authoritative source evidence; an Alkahest journal's materialization identity alone MUST NOT authorize physical delivery.
@@ -568,7 +627,6 @@ Bare-metal settlement stages MUST persist accepted-Agreement-bound SettlementEvi
 
 - **WHEN** recovery finds reclaim or collection in progress or completed, a non-ready mechanism status, or chain evidence no longer matching the accepted obligation
 - **THEN** it refuses before reservation, fulfillment, access or teardown effects
-
 
 ### Requirement: Physical payment fulfillment recovers on accepted evidence
 
@@ -1001,29 +1059,21 @@ inventory file.
 - **WHEN** a tenant's connection details are produced for that host
 - **THEN** they carry the connection address
 
-### Requirement: Legacy host capacity is derived into declarations
+### Requirement: Host writes declare no capacity
 
-A compute provisioner MUST create a capacity declaration for a host inventory record
-that carries a positive legacy GPU count and has no correlated declaration, at two
-points only: when host inventory is applied from an INI document — whether seeded at
-startup or submitted through the host import API — in the same transaction as the
-host upsert, and once, by ordered migration, for host records present at upgrade.
-Derivation MUST NOT run on a process start that applies no inventory, and MUST NOT
-run when a host is created or updated through the individual host API.
+A compute provisioner MUST NOT create a capacity declaration from a host record on any host write: not when host inventory is applied from an INI document, whether seeded at startup or submitted through the host import API, and not when a host is created or updated through the individual host API. A host's GPU count and model are descriptive and MUST NOT affect capacity. Capacity MUST be declared only through capacity registration, a capacity-definitions document, or capacity import. The ordered migration derived a declaration once for host records with a positive legacy GPU count present at upgrade.
 
 A host MUST be treated as already declared when any declaration names it as its
 `host_id`, which is also the only rule the capacity projection uses to correlate
 declarations to hosts.
-Derivation MUST NOT overwrite or merge into an existing declaration, and an
-operator-supplied declaration MUST win over any derivable legacy value.
 
 #### Scenario: Deployment configured only through host inventory
 
-- **WHEN** a provisioner seeds host inventory carrying legacy GPU counts from an INI
-  document and no capacity declarations exist
-- **THEN** a declaration is derived for each such host in the same transaction as
-  its host record
-- **AND** published capacity is unchanged from before declarations existed
+- **WHEN** a provisioner applies host inventory carrying GPU counts from an INI
+  document, at startup or through the host import API, and no capacity declarations
+  exist
+- **THEN** the hosts are registered, no capacity declaration is created for them, and
+  the capacity projection contains no entry for them
 
 #### Scenario: Existing hosts at upgrade
 
@@ -1034,28 +1084,27 @@ operator-supplied declaration MUST win over any derivable legacy value.
 
 #### Scenario: Operator declaration and legacy host value disagree
 
-- **WHEN** a host carries a legacy capacity value and an operator has declared
-  different capacity for the same Physical Resource
-- **THEN** the operator's declaration is retained unchanged and no derivation occurs
-  for that resource
+- **WHEN** a host carries a GPU count and an operator has declared different
+  capacity for the same Physical Resource
+- **THEN** the operator's declaration is retained unchanged and the host's value does
+  not affect it
 
 #### Scenario: A declaration's resource id differs from its host
 
 - **WHEN** a declaration whose resource id differs from a host's `host_id` names that
   host as its `host_id`
-- **THEN** the host is treated as declared and no second declaration is derived for it
+- **THEN** the host is treated as declared
 
 #### Scenario: A host is created through the individual host API
 
-- **WHEN** an operator creates a host with a legacy GPU count through the individual
-  host API
-- **THEN** no declaration is derived, and the host's capacity is declared through the
+- **WHEN** an operator creates a host with a GPU count through the individual host API
+- **THEN** no declaration is created, and the host's capacity is declared through the
   capacity administration surface
 
 #### Scenario: A host has no GPUs
 
-- **WHEN** host inventory is applied for a host whose legacy GPU count is zero
-- **THEN** no declaration is derived for it
+- **WHEN** host inventory is applied for a host whose GPU count is zero
+- **THEN** no declaration is created for it, as for any host
 
 ### Requirement: Capacity definitions are imported from a mounted document
 
@@ -1349,6 +1398,19 @@ the declaration attributes it consumes, a consumed attribute MUST NOT appear in 
 projected attributes, and composition MUST refuse a view identifier or consumed attribute
 declared by two projections.
 
+A projection producing a resource view MUST receive the context of the resource's pool —
+its provider and its resolved declarations, the backing delegate among them — alongside
+the resource's declaration, through the compute provisioning layer's view protocol. The
+provisioning service MUST resolve that context in its own resource pass, from the pool
+records it reads there through the shared declaration resolver, and MUST NOT interpret
+it; the site kit MUST NOT carry pool state into the resource pass. A
+contributed projection MUST NOT raise on a declaration's content: it MUST return, beside
+the views it built, the problems that kept it from building a view it declares, and the
+provisioning service MUST carry them on the projected resource as
+`publication_view_problems`, keyed by view identifier. The site kit's resource-pool
+projection MUST carry that field when present, as it carries `publication_views`, without
+reading or interpreting it.
+
 #### Scenario: A third domain contributes a view
 
 - **WHEN** a domain contributes a projection producing a resource view under its own
@@ -1360,6 +1422,19 @@ declared by two projections.
 
 - **WHEN** two contributed projections declare the same view identifier
 - **THEN** composition refuses to start
+
+#### Scenario: A resource view depends on its pool's backing
+
+- **WHEN** a contributed projection builds a resource view for a resource whose pool
+  declares itself unbacked
+- **THEN** the projection receives that pool's backing delegate and the provisioning
+  service makes no decision on backing itself
+
+#### Scenario: A projection cannot build a view
+
+- **WHEN** a contributed projection cannot build its view from one declaration's content
+- **THEN** the resource-pool projection is served, that resource carries the projection's
+  problem under `publication_view_problems`, and no other resource is affected
 
 ### Requirement: Domain routes are bound through accessors
 
@@ -1729,6 +1804,344 @@ Market-managed leases MUST record the executor target on an existing committed s
 - **WHEN** a lease is terminated and beginning its fulfillment's teardown fails
 - **THEN** the lease is `releasing` with the fulfillment as its handle, and the lease lifecycle begins the teardown on a later cycle, including after a restart
 
+### Requirement: A domain's service playbook setting is named for its domain
+
+The provisioning service MUST read the VM playbook from `vm_playbook_path` and the bare-metal playbook from `bare_metal_playbook_path`, and MUST refuse to start when its configuration sets the retired `playbook_path`, naming `vm_playbook_path` as its replacement. No alias for the retired name is read.
+
+#### Scenario: A configuration sets the retired key
+
+- **WHEN** the provisioning service starts with `playbook_path` set in any configuration layer
+- **THEN** startup fails with an error naming `vm_playbook_path`
+
+#### Scenario: A configuration sets the VM playbook
+
+- **WHEN** the provisioning service starts with `vm_playbook_path` set
+- **THEN** VM jobs whose pool states no playbook are prepared with that path
+
+### Requirement: A failure after authentication is answered signed
+
+A provisioning authority, and every service authenticating through the site kit's
+middleware, MUST answer a request that fails after it was authenticated — a route
+raising an unexpected error — with a signed 500 response carrying a fixed detail that
+reveals nothing of the error, and MUST log the error itself. A middleware whose replay
+store records outcomes, as the provisioning service's does, MUST record that response as
+the request's replay outcome, so an exact retry receives the same signed answer rather
+than an unsigned one or an in-progress refusal. The site kit's middleware, whose store
+keeps no outcomes, records nothing, and an exact retry is handled as its route's retry
+contract already says.
+
+#### Scenario: A route raises after authentication
+
+- **WHEN** an authenticated request reaches a provisioning route that raises an
+  unexpected error
+- **THEN** the caller receives a signed 500 its typed client verifies, and the error is
+  logged by the service
+
+#### Scenario: The failed request is retried exactly
+
+- **WHEN** the caller retries that request to the provisioning service with the same
+  request identity and body
+- **THEN** it receives the recorded signed 500 without the route running again
+
+#### Scenario: A route behind the site kit's middleware raises
+
+- **WHEN** an authenticated request to the API-credits service reaches a route that
+  raises an unexpected error
+- **THEN** the caller receives a signed 500 its typed client verifies, and the error is
+  logged by the service
+
+### Requirement: Durable capacity-reservation settlement identity
+
+The provisioning service MUST maintain exactly one durable fulfillment
+aggregate for each accepted `capacity_reservation_id`. `begin_fulfillment`
+MUST be idempotent by `capacity_reservation_id`: equivalent retries return the
+same `fulfillment_id`, while conflicting reuse fails before provider command
+submission.
+
+#### Scenario: Equivalent fulfillment retry
+- **WHEN** `begin_fulfillment` is repeated with an equivalent request for an
+  already accepted capacity reservation
+- **THEN** the existing `fulfillment_id` and state are returned and no second
+  fulfillment aggregate is created
+
+#### Scenario: Conflicting fulfillment retry
+- **WHEN** the same capacity reservation is reused with conflicting selected
+  resource, provider, requirements, or fulfillment identity
+- **THEN** the request fails before any provider command is submitted
+
+### Requirement: Separate scheduling and fulfillment acceptance
+
+The provisioning service MUST expose scheduling and beginning fulfillment as
+separate operations. Scheduling MUST accept a local `capacity_reservation_id`
+and requirements that do not exceed the reservation, and MUST return the
+selected settlement resource without beginning provider execution.
+`begin_fulfillment` MUST resolve the durable scheduled assignment by
+`capacity_reservation_id` and MUST NOT accept an arbitrary caller-selected
+resource as authoritative.
+
+#### Scenario: Resource selected before fulfillment
+- **WHEN** the storefront schedules an active capacity reservation
+- **THEN** the selected settlement resource is persisted and returned without
+  submitting a provider command
+
+#### Scenario: Unknown owning authority
+- **WHEN** a site receives an unknown reservation, pool, or resource identifier
+- **THEN** it rejects the request and does not forward, reinterpret, or fall
+  back to another site
+
+### Requirement: Atomic scheduling persistence
+
+Capacity reassignment, where required for fair scheduling, and durable
+settlement-record creation or transition MUST commit in one database
+transaction. A changed requirement MUST supersede the capacity reservation
+rather than mutate an accepted assignment under the same identifier.
+
+#### Scenario: Crash during assignment transaction
+- **WHEN** scheduling fails before the transaction commits
+- **THEN** neither the capacity movement nor the settlement assignment is
+  visible
+
+#### Scenario: Reservation requirements change
+- **WHEN** requirements change after an assignment is accepted
+- **THEN** the original reservation is superseded and a new reservation is
+  scheduled rather than mutating the existing assignment
+
+### Requirement: Fulfillment and provisioned-resource identities
+
+`begin_fulfillment` MUST return a durable `fulfillment_id`. A fulfillment MUST
+support zero or more provisioned-resource outputs, each with a globally unique
+`provisioned_resource_id` and an optional domain-specific reference. Whole
+fulfillment status and teardown MUST use `fulfillment_id`; cross-domain
+contracts MUST NOT use VM-specific identifiers as the generic teardown
+identity.
+
+#### Scenario: Multi-resource fulfillment representation
+- **WHEN** one fulfillment creates multiple independently identifiable outputs
+- **THEN** all outputs are represented under the same `fulfillment_id` with
+  distinct `provisioned_resource_id` values
+
+### Requirement: Versioned prepared provider operations
+
+Before committing a pending provider-command state, the provider MUST prepare
+and validate a normalized serializable payload containing a schema version and
+kind discriminator. Recovery MUST dispatch from the stored payload and MUST
+NOT reconstruct accepted input from mutable live pool or host configuration.
+
+#### Scenario: Pool configuration changes after acceptance
+- **WHEN** provider configuration changes after fulfillment acceptance but
+  before a recovery retry
+- **THEN** the retry uses the original stored prepared payload
+
+### Requirement: Deterministic provider command idempotency
+
+Create and teardown provider commands MUST use the job service's
+contract-based deduplication path with deterministic identifiers derived from
+`capacity_reservation_id` or `fulfillment_id`, action kind, and command schema
+version. Repeated or concurrent submission of the same logical action MUST
+observe one underlying job.
+
+#### Scenario: Recovery retries create submission
+- **WHEN** a pending create command is retried after an uncertain submission
+- **THEN** at most one underlying create job is enqueued and the existing job
+  identity is observed
+
+#### Scenario: Recovery retries teardown submission
+- **WHEN** a pending teardown command is retried after an uncertain submission
+- **THEN** at most one underlying teardown job is enqueued and the existing job
+  identity is observed
+
+### Requirement: Provisioning-owned lifecycle convergence
+
+After `begin_fulfillment` is durably accepted, the provisioning service MUST
+own provider submission, retry, provider-status convergence, output
+persistence, settlement-result delivery, teardown, and final physical-resource
+reclamation. Progress MUST NOT depend on storefront polling.
+
+Pending and in-progress work MUST be recovered periodically through durable
+claims that stay safe under concurrent claim attempts; on the service's SQLite
+database the single writer serializes those attempts, which is not a
+distributed multi-replica protocol. Database locks MUST be released before
+external provider calls.
+
+#### Scenario: Process restarts after acceptance
+- **WHEN** the provisioning process restarts with a pending or in-progress
+  fulfillment
+- **THEN** periodic recovery resumes and converges the lifecycle without a new
+  storefront command
+
+#### Scenario: Worker dies after claiming work
+- **WHEN** a worker dies after committing a claim but before completing the
+  external call
+- **THEN** the claim expires and another worker can safely retry the operation
+
+### Requirement: Durable fulfillment status and result queries
+
+The provisioning service MUST expose `get_fulfillment_status(fulfillment_id)`
+and `get_fulfillment_result(fulfillment_id)` over the existing
+storefront→provisioning authenticated channel. Both MUST read directly
+from durably persisted fulfillment state; neither requires a separate
+delivery-acknowledgement mechanism, since a read reflects current state
+on demand rather than requiring retry-until-acknowledged delivery.
+
+The provisioning service does not push `SettlementResult` to the
+storefront, and this requirement's durability guarantee does not depend
+on push delivery: a terminal or otherwise reportable fulfillment
+transition commits atomically with the state these queries read,
+regardless of whether or when it is polled.
+
+#### Scenario: Status query after process restart
+- **WHEN** `get_fulfillment_status` is called for a fulfillment whose
+  provisioning process previously restarted mid-lifecycle
+- **THEN** it returns the current, recovered state without requiring the
+  storefront to have polled during the restart window
+
+#### Scenario: Result query for a completed fulfillment
+- **WHEN** `get_fulfillment_result` is called for a fulfillment that
+  reached a terminal successful state
+- **THEN** it returns the normalized result and, if applicable,
+  credentials obtained fresh for this call
+
+#### Scenario: Repeated result queries are idempotent by construction
+- **WHEN** `get_fulfillment_result` is called more than once for the same
+  `fulfillment_id`
+- **THEN** each call independently reflects current durable state; no
+  deduplication bookkeeping is required because reads have no delivery
+  side effect to duplicate
+
+### Requirement: Credentials stay with the job authority and are read on demand
+
+Raw credentials MUST NOT be persisted in the fulfillment aggregate, its
+settlement records or provider metadata, or any result row. The job
+authority's records of the credentials its jobs' executors reported are the
+only provisioning store that holds them. `get_fulfillment_result` MUST read
+the credentials its fulfillment's create job reported from that store at the
+moment it is called, only for an `active` fulfillment, and MUST return them
+only in that response over the authenticated channel.
+
+#### Scenario: Fulfillment succeeds but is never queried
+- **WHEN** a fulfillment reaches a successful terminal state and
+  `get_fulfillment_result` is never called
+- **THEN** fulfillment remains successful and credentials remain
+  obtainable on demand whenever the storefront does call, with no
+  separate delivery-retry state to manage
+
+### Requirement: Atomic abandonment and release
+
+Transitioning an unfulfilled assigned settlement to `abandoned` and releasing
+or superseding its capacity reservation MUST occur in one database
+transaction. Lease lifecycle code SHOULD perform this transition directly;
+periodic watchdog processing MUST reconcile missed transitions.
+
+#### Scenario: Reservation expires before fulfillment begins
+- **WHEN** an assigned reservation expires before `begin_fulfillment`
+- **THEN** the assignment becomes abandoned and its held capacity is released
+  atomically
+
+### Requirement: Active fulfillment migration
+
+The migration MUST place existing hosts into a default resource pool and MUST
+backfill settlement/fulfillment records for every active or releasing VM
+capacity reservation. It MUST infer the selected resource, provider, and
+versioned teardown input from durable fields used by the existing release
+path. Historical create input MAY be absent for already-active fulfillments.
+The migration MUST fail when an active reservation cannot be mapped
+unambiguously.
+
+#### Scenario: Existing active VM
+- **WHEN** the migration encounters an active VM with resolvable host, target,
+  and executor metadata
+- **THEN** it creates a backfilled fulfillment record capable of durable
+  teardown without a legacy release branch
+
+#### Scenario: Ambiguous active VM mapping
+- **WHEN** an active VM cannot be mapped unambiguously to a resource and
+  teardown input
+- **THEN** migration fails visibly rather than creating a partial record
+
+### Requirement: The provisioning service answers an unroutable request by what failed to match
+
+The provisioning service's authentication middleware MUST answer a request that resolves to
+no route contract, without signing it, with 404 when no contract names its path, 405 naming
+the allowed methods when a contract names its path under another method, and 400 naming the
+field when its route's body resource cannot be bound. Such an answer is unsigned because no
+contract supplies the operation and resource a response proof binds.
+
+A route contract's path pattern MUST consist of literal segments, single-segment named
+captures (`[^/]+`), and finite alternations of literal segments, optionally ending in an
+optional trailing slash (`/?`), and building a contract from a declaration MUST refuse any
+other pattern. Composing the route table MUST compare the contracts of different
+contributions segment by segment, a pattern ending in an optional slash as both its forms,
+and MUST refuse, before the service accepts traffic, two whose method and segments can
+match one request. Within one contribution, the first matching contract MUST decide, in
+the order its owner gave.
+
+#### Scenario: An unknown path is requested
+
+- **WHEN** a request names a path no route contract matches
+- **THEN** the service answers an unsigned 404 before checking authentication
+
+#### Scenario: A known path is requested with another method
+
+- **WHEN** a request uses a method no contract binds to a path a contract names
+- **THEN** the service answers an unsigned 405 whose `Allow` names the contract's methods
+
+#### Scenario: A route's body resource is missing
+
+- **WHEN** a request matches a route whose bound resource is a body field it omits
+- **THEN** the service answers an unsigned 400 naming the field
+
+#### Scenario: Two contributions claim one route
+
+- **WHEN** the route table is composed from two contributions whose contracts, compared
+  segment by segment, can both match one method and path
+- **THEN** composition is refused before the service accepts traffic
+
+#### Scenario: A contract's pattern is outside the grammar
+
+- **WHEN** a contribution declares a route whose pattern uses a construct other than a
+  literal segment, a single-segment capture, a literal alternation, or a terminal optional
+  slash
+- **THEN** building its contract is refused, naming the route
+
+#### Scenario: The service's own route table composes
+
+- **WHEN** the provisioning composition root assembles the family's routes and every
+  contribution the service ships
+- **THEN** every contract is built under the grammar and composition succeeds
+- **AND** a path with or without a route's optional trailing slash resolves to that route
+
+#### Scenario: One contribution orders overlapping routes
+
+- **WHEN** one contribution declares a literal route before a capture route that would also
+  match it
+- **THEN** composition succeeds and a request for the literal path resolves to the literal
+  route
+
+### Requirement: The family client names an unauthenticated answer
+
+The compute provisioning client MUST report an answer that carries no response
+authentication as unauthenticated, with its status, distinctly from one whose
+authentication is malformed or from another principal. It MUST still refuse the answer,
+and the report MUST contain no part of the response body, no header value, and no
+credential.
+
+#### Scenario: The client and service route tables differ
+
+- **WHEN** the client sends a request the service's table does not route and receives an
+  unsigned 405
+- **THEN** the client refuses it and reports an unauthenticated 405
+
+### Requirement: An operator-named VM guest satisfies provisioning's naming rules
+
+VM's operator route that creates a VM by name MUST refuse, with 422 and before anything is
+prepared, a guest name that is not a valid hostname label or whose login, stripped to
+letters and digits, is not at most 32 characters starting with a letter.
+
+#### Scenario: An operator names a guest whose login is too long
+
+- **WHEN** an operator creates a VM named so that its login exceeds 32 characters
+- **THEN** the request is refused with 422 naming the rule, and no job is submitted
+
 ## Evidence
 
 - Bare-metal obligation servicing resolved from the accepted Agreement: `domains/bare_metal/storefront/tests/test_obligation_servicing.py` and `test_app_composition.py`.
@@ -1738,8 +2151,12 @@ Market-managed leases MUST record the executor target on an existing committed s
 - Executor-specific release, failed-release capacity retention, retry, and force release: `provisioning/compute/service/tests/integration/test_bare_metal_leases_api.py`, `test_leases_api.py`, and `unit/services/test_ledger_lease_lifecycle.py`.
 - Adapter composition and generic import boundaries: `provisioning/compute/service/tests/unit/test_composition.py` and `test_import_boundaries.py`.
 - VM sizing precedence (committed reservation, pool default, unset), relay access-path selection, and teardown from the lease: `domains/vms/provisioning/adapter/tests/unit/test_vm_fulfillment_plan.py` (`TestSizingPrecedence`, `TestRelayAccessPath`, `TestTeardown`); the delivered credentials and endpoint: `provisioning/compute/service/tests/integration/test_fulfillment_api.py::TestStatusAndResultQueries`.
-- Relay administration, token confidentiality, rebinding, and definition-document reconciliation: `provisioning/compute/service/tests/integration/test_relay_administration.py`, `test_relay_port_allocator.py`, `test_relay_port_leases.py`, `test_relays_api.py` through the canonical client, plus `tests/unit/services/test_definition_document_restart_safety.py`.
+- Relay administration, token confidentiality, rebinding, and definition-document reconciliation: `domains/vms/provisioning/adapter/tests/integration/test_relay_administration.py`, `test_relay_port_allocator.py`, and `test_relay_port_leases.py`, over VM's own schema; through the canonical client, `provisioning/compute/service/tests/integration/test_relays_api.py`; the service's importer and migrations, `provisioning/compute/service/tests/integration/test_definition_document_digest.py` and `test_relay_migrations.py`, plus `provisioning/compute/service/tests/unit/services/test_definition_document_restart_safety.py`.
 - Relay ports held through fulfillment convergence, including a failed creation, and the reservation-released predicate reconciliation is given: `provisioning/compute/service/tests/integration/test_fulfillment_convergence.py`; their return with a reservation's capacity: `provisioning/compute/tests/integration/test_release.py` and `kit/site/tests/integration/test_ledger.py`.
+- Host writes declaring no capacity — an INI import and the startup inventory seed carrying `gpus=`, placed and unplaced, a host created and updated through the host API, and an operator's declaration surviving a re-import: `provisioning/compute/service/tests/integration/test_host_writes_declare_no_capacity_api.py` and `test_capacity_api.py`; the upgrade derivation: `provisioning/compute/service/tests/unit/test_legacy_host_capacity_migration.py`.
+- A VM job's playbook frozen at preparation, the pool's own or the service's `vm_playbook_path`, for create and teardown, and refused with neither: `domains/vms/provisioning/adapter/tests/unit/test_vm_fulfillment_plan.py`; through the typed client for a pool stating none: `provisioning/compute/service/tests/integration/test_fulfillment_api.py`; an omitted or null pool playbook stored and a blank one refused: `domains/vms/provisioning/adapter/tests/integration/test_ansible_pool_config_handler.py` and `provisioning/compute/service/tests/integration/test_pools_api.py`; the `ansible_pool_configs` rebuild: `provisioning/compute/service/tests/integration/test_vm_pool_config_migration.py`.
+- A bare-metal grant and reclaim carrying the configured playbook, and the codec passing it to the plan: `domains/bare_metal/provisioning/adapter/tests/test_bare_metal_fulfillment_plan.py` and `test_bare_metal_codec.py`; through the composed service: `provisioning/compute/service/tests/integration/test_bare_metal_mock_profile.py`.
+- `vm_playbook_path` resolution and refusal of the retired `playbook_path` in a profile and the environment layer: `provisioning/compute/service/tests/unit/test_config.py` and `test_worker.py`; through the app's lifespan: `provisioning/compute/service/tests/integration/test_retired_settings_startup.py`; the chart's renamed value and refused key: `helm/charts/provisioning/tests/test_render.py`.
 
 `PhysicalSettlementScheduler` and fulfillment-provider coordination are durable, not process-local: scheduling, acceptance, and dispatch state live in the fulfillment aggregate (see `openspec/specs/fulfillment/spec.md#durable-settlement-persistence`), and a dedicated periodic worker recovers in-flight provider operations after a crash or restart (see `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker` and `docs/development/ARCHITECTURE.md#recovery-workers`). This is a database-wide SQLite writer guarantee, not a distributed multi-replica protocol.
 

@@ -35,6 +35,7 @@ import market_storefront.server  # noqa: F401  (import order, see above)
 from market_storefront import lifecycle, lifecycle_steps
 from market_storefront.controllers.admin_controller import router as admin_router
 from market_storefront.utils.config import site_projection_poll_interval
+import market_storefront.utils.config as _storefront_config
 import market_storefront.middleware.admin_identity as _admin_identity
 from market_storefront.controllers.negotiations_controller import (
     router as negotiations_router,
@@ -56,6 +57,8 @@ _SELLER_SIGNER = Ed25519Signer(b"\x22" * 32)
 _EXPECTED_PUBLISHERS = TrustedIdentitySet(identities=(_SELLER_SIGNER.identity,))
 _TOKEN = "0x0000000000000000000000000000000000000001"
 _RECIPIENT = "0x" + "33" * 20
+#: The escrow contract seeded listings accept unless a test names another.
+_ESCROW = "0x" + "11" * 20
 
 
 def _recipient_condition(recipient: str) -> dict:
@@ -73,6 +76,11 @@ def _recipient_condition(recipient: str) -> dict:
 #: paying the seller wallet the fixture configures. A buyer naming a pinned
 #: escrow selects it, as the buyer builds its proposal from the listing.
 _AUTHORIZED = [_recipient_condition(_RECIPIENT)]
+
+#: An opening's escrow carrier for a seeded listing: its escrow, token, and
+#: release condition, so the round's guards pass and a refusal under test is
+#: that test's own.
+_PINNED = {"token": _TOKEN, "escrow_address": _ESCROW, "demands": _AUTHORIZED}
 
 
 def _vm_provision(duration_seconds: int = 3600) -> dict:
@@ -176,7 +184,10 @@ async def _upsert_bound_listing(
     literal_fields: dict | None = None,
     demands: list[dict] | None = _AUTHORIZED,
     extra_rates: tuple[dict, ...] = (),
+    unpriced_escrow_address: str | None = None,
 ) -> None:
+    """Seed an open bound listing with one priced Alkahest option, and with a
+    second, unpriced one on ``unpriced_escrow_address`` when it is given."""
     _declare_source(
         listing_id,
         gpu_model=declared_gpu_model,
@@ -205,13 +216,23 @@ async def _upsert_bound_listing(
             {"field": "amount", "per": "hour", "value": str(demand_amount)}
         ]) + list(extra_rates),
     }
-    body = {"mechanism": "alkahest.v1", "asset": _TOKEN,
-            "rates": [RateValue.model_validate(rate) for rate in entry["rates"]],
-            "params": {"accepted_escrow": entry}}
-    option = SettlementOption(option_id=derive_settlement_option_id(**body), **body)
+    entries = [entry]
+    if unpriced_escrow_address is not None:
+        entries.append({
+            "chain_name": "anvil", "escrow_address": unpriced_escrow_address,
+            "literal_fields": {"token": _TOKEN}, "rates": [],
+        })
+    options = []
+    for each in entries:
+        body = {"mechanism": "alkahest.v1", "asset": _TOKEN,
+                "rates": [RateValue.model_validate(rate) for rate in each["rates"]],
+                "params": {"accepted_escrow": each}}
+        options.append(
+            SettlementOption(option_id=derive_settlement_option_id(**body), **body)
+        )
     await db.upsert_listing_with_binding(
         binding=binding,
-        settlement_options=[option.model_dump(mode="json")],
+        settlement_options=[option.model_dump(mode="json") for option in options],
         status="open",
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
@@ -239,7 +260,8 @@ async def _upsert_bound_listing(
                         {"field": "amount", "per": "hour", "value": str(demand_amount)}
                     ]
                 ),
-            }
+            },
+            *(dict(each) for each in entries[1:]),
         ],
         fulfillment_resource=None,
         max_duration_seconds=max_duration_seconds,
@@ -249,9 +271,10 @@ async def _upsert_bound_listing(
     )
 
 
-async def _selection(db, listing_id):
+async def _selection(db, listing_id, index: int = 0):
     listing = await db.load_listing(listing_id=listing_id)
-    return {"mechanism": "alkahest.v1", "option_id": listing["settlement_options"][0]["option_id"],
+    return {"mechanism": "alkahest.v1",
+            "option_id": listing["settlement_options"][index]["option_id"],
             "expiration_unix": 1_800_000_000}
 
 
@@ -315,19 +338,10 @@ async def client(db, monkeypatch):
             "vm_host": "kvm1",
         },
     )
-    address_config_path = anvil_address_book_path()
-    monkeypatch.setattr(
-        _negotiation_runtime,
-        "CHAINS",
-        {
-            "anvil": ChainConfig(
-                name="anvil",
-                rpc_url="http://anvil.test",
-                chain_id=31337,
-                alkahest_address_config_path=str(address_config_path),
-            )
-        },
-    )
+    chains = {
+        "anvil": ChainConfig(name="anvil", rpc_url="http://anvil.test", chain_id=31337)
+    }
+    monkeypatch.setattr(_storefront_config, "CHAINS", chains)
 
     site_requests: list[str] = []
     original_handle = fake_site._handle
@@ -376,6 +390,8 @@ async def client(db, monkeypatch):
     with settings_overrides(
         **{
             "wallet.address": _RECIPIENT,
+            # The development chain's address book, which the kit installs.
+            "settlement.alkahest.address_books": {"anvil": str(anvil_address_book_path())},
         }
     ):
         async with StorefrontClient(
@@ -403,6 +419,7 @@ class TestNegotiateNew:
                 listing_id="",
                 initial_amount=8000,
                 provision_terms=_vm_provision(),
+                **_PINNED,
             )
         # missing listing_id can't be tested via client (required param);
         # test that a nonexistent listing returns 404 below.
@@ -414,6 +431,7 @@ class TestNegotiateNew:
                 listing_id="ghost-listing",
                 initial_amount=8000,
                 provision_terms=_vm_provision(),
+                **_PINNED,
             )
         assert "404" in str(exc_info.value)
 
@@ -504,6 +522,7 @@ class TestNegotiateNew:
                 listing_id="neg-listing-zero-duration",
                 initial_amount=8000,
                 provision_terms=_vm_provision(0),
+                **_PINNED,
             )
         assert "400" in str(exc_info.value)
         assert "incompatible_provision_terms" in str(exc_info.value)
@@ -523,6 +542,7 @@ class TestNegotiateNew:
                 listing_id="neg-listing-closed",
                 initial_amount=5000,
                 provision_terms=_vm_provision(),
+                **_PINNED,
             )
         msg = str(exc_info.value)
         assert "409" in msg
@@ -541,6 +561,7 @@ class TestNegotiateNew:
                 listing_id="neg-listing-empty",
                 initial_amount=5000,
                 provision_terms=_vm_provision(),
+                **_PINNED,
             )
         msg = str(exc_info.value)
         assert "409" in msg
@@ -563,6 +584,7 @@ class TestNegotiateNew:
                 listing_id="neg-listing-taken",
                 initial_amount=5000,
                 provision_terms=_vm_provision(),
+                **_PINNED,
             )
         msg = str(exc_info.value)
         assert "409" in msg
@@ -582,7 +604,7 @@ class TestNegotiateNew:
                 listing_id="neg-listing-priceless",
                 initial_amount=5000,
                 provision_terms=_vm_provision(),
-                token=_TOKEN,
+                **_PINNED,
             )
         msg = str(exc_info.value)
         assert "409" in msg
@@ -634,20 +656,17 @@ class TestNegotiateNew:
         assert result["action"] == "accept"
         assert "amount" not in result["proposal"]["fields"]
         assert result["accepted_escrow_proposal"]["literal_fields"] == literals
-        assert "amount" not in result["accepted_escrow_terms"][0]["obligation_data"]
 
-        # The canonical plan carrier rides alongside the legacy terms
-        # mirror and stays byte-consistent with it.
-        plan = result["settlement_plan"]
-        assert len(plan["obligations"]) == len(result["accepted_escrow_terms"])
-        ob = plan["obligations"][0]
-        legacy = result["accepted_escrow_terms"][0]
+        # The plan is the seller's committed copy; no escrow terms ride beside
+        # it for a buyer to fund in place of its own derivation.
+        assert "accepted_escrow_terms" not in result
+        (ob,) = result["settlement_plan"]["obligations"]
         assert ob["mechanism"] == "alkahest.v1"
-        assert ob["payer"] == legacy["maker"]
+        assert ob["payer"] == "buyer"
         assert ob["claimant"] == "seller"
-        assert ob["expiration_unix"] == legacy["expiration_unix"]
-        assert ob["params"]["escrow_contract"] == legacy["escrow_contract"]
-        assert ob["params"]["obligation_data"] == legacy["obligation_data"]
+        assert ob["expiration_unix"] == 1_800_000_000
+        assert ob["params"]["escrow_contract"].lower() == escrow_address.lower()
+        assert "amount" not in ob["params"]["obligation_data"]
 
     async def test_inventory_with_wrong_attributes_is_refused(self, client, db):
         """An available resource with the wrong gpu_model doesn't satisfy
@@ -670,6 +689,7 @@ class TestNegotiateNew:
                 listing_id="neg-listing-rtx",
                 initial_amount=5000,
                 provision_terms=_vm_provision(),
+                **_PINNED,
             )
         assert "409" in str(exc_info.value)
         assert "no_matching_declaration" in str(exc_info.value)
@@ -708,6 +728,88 @@ class TestNegotiateContinue:
             )
 
         assert exc_info.value.status_code == 400
+
+
+class TestCounterNamingAnotherOption:
+    """An acceptance settles the buyer's opening, so a counter naming another
+    option changes neither what is priced nor what is accepted."""
+
+    async def test_a_counter_selecting_an_unpriced_option_is_not_accepted_at_its_amount(
+        self, client, db
+    ):
+        c, db = client
+        await _upsert_bound_listing(
+            db, "neg-two-options", demand_amount=5000,
+            unpriced_escrow_address="0x" + "22" * 20,
+        )
+        opened = await c.negotiate_new(
+            listing_id="neg-two-options",
+            settlement_selection=await _selection(db, "neg-two-options"),
+            initial_amount=4000,
+            provision_terms=_vm_provision(),
+            token=_TOKEN,
+            chain_name="anvil",
+            escrow_address=_ESCROW,
+            demands=_AUTHORIZED,
+        )
+        assert opened["action"] == "counter", opened
+
+        countered = await c.negotiate_continue(
+            opened["negotiation_id"],
+            action="counter",
+            proposal={"fields": {"amount": "1"}},
+            settlement_selection=await _selection(db, "neg-two-options", index=1),
+        )
+
+        assert countered["action"] != "accept"
+        with sqlite3.connect(db.db_path) as conn:
+            assert conn.execute(
+                "SELECT COUNT(*) FROM negotiation_threads "
+                "WHERE agreement_bytes IS NOT NULL OR settlement_plan IS NOT NULL"
+            ).fetchone()[0] == 0
+
+    async def test_a_continuation_after_its_option_is_repriced_is_refused_naming_it(
+        self, client, db
+    ):
+        """A publication cycle repricing the opening's option changes its
+        identity, so the round is refused by name rather than decided against a
+        zero reference."""
+        c, db = client
+        await _upsert_bound_listing(db, "neg-repriced", demand_amount=5000)
+        opened = await c.negotiate_new(
+            listing_id="neg-repriced",
+            settlement_selection=await _selection(db, "neg-repriced"),
+            initial_amount=4000,
+            provision_terms=_vm_provision(),
+            token=_TOKEN,
+            chain_name="anvil",
+            escrow_address=_ESCROW,
+            demands=_AUTHORIZED,
+        )
+        assert opened["action"] == "counter", opened
+        repriced_entry = {
+            "chain_name": "anvil", "escrow_address": _ESCROW,
+            "literal_fields": {"token": _TOKEN},
+            "rates": [{"field": "amount", "per": "hour", "value": "6000"}],
+        }
+        body = {"mechanism": "alkahest.v1", "asset": _TOKEN,
+                "rates": [RateValue.model_validate(rate) for rate in repriced_entry["rates"]],
+                "params": {"accepted_escrow": repriced_entry}}
+        repriced = SettlementOption(option_id=derive_settlement_option_id(**body), **body)
+        await db.update_listing(
+            listing_id="neg-repriced",
+            settlement_options=[repriced.model_dump(mode="json")],
+            accepted_escrows=[repriced_entry],
+        )
+
+        countered = await c.negotiate_continue(
+            opened["negotiation_id"],
+            action="counter",
+            proposal={"fields": {"amount": "4500"}},
+        )
+
+        assert countered["action"] == "reject"
+        assert countered["reason"].startswith("pinned_option_withdrawn")
 
 
 class TestUnbackedListingNegotiation:
@@ -758,7 +860,8 @@ class TestUnbackedListingNegotiation:
             )
 
         assert result["action"] == "accept"
-        assert result["accepted_escrow_terms"]
+        assert result["settlement_plan"]["obligations"]
+        assert "accepted_escrow_terms" not in result
         assert site_requests == []
         assert await db.load_capacity_hold(negotiation_id=result["negotiation_id"]) is None
 
@@ -780,6 +883,7 @@ class TestUnbackedListingNegotiation:
                 listing_id="neg-listing-unbacked-shrunk",
                 initial_amount=5000,
                 provision_terms=_vm_provision(),
+                **_PINNED,
             )
 
         assert "no_matching_declaration" in str(exc_info.value)
@@ -898,6 +1002,7 @@ class TestSourceConfirmationWindow:
             settlement_selection=await _selection(db, "neg-window"),
             initial_amount=4000,
             provision_terms=_vm_provision(),
+            **_PINNED,
         )
         with settings_overrides(**{"capacity.source_confirmation_seconds": 60}):
             async with _admin_client() as admin:
@@ -941,11 +1046,43 @@ class TestSourceConfirmationWindow:
                 settlement_selection=await _selection(db, "neg-unbacked-stale"),
                 initial_amount=4000,
                 provision_terms=_vm_provision(),
+                **_PINNED,
             )
 
         assert refused.value.status_code == 503
         assert "listing_source_unverifiable" in str(refused.value)
         assert site_requests == []
+
+    async def test_a_round_refused_while_the_site_fails_succeeds_once_it_answers(
+        self, client, db
+    ):
+        """Spec scenario "A storefront starts before its site or service", for
+        the VM storefront's provisioning site: a round refused retryably while the
+        site cannot be reached succeeds, in the same process, once the site
+        answers and the projection is polled again."""
+        c, db = client
+        await _upsert_bound_listing(db, "neg-site-returns", capacity_backing="unbacked")
+        (site,) = _PROJECTION_SITES
+        state = _container.site_projections()
+        site.failing = True
+        await state.poll_once()
+        opening = dict(
+            listing_id="neg-site-returns",
+            settlement_selection=await _selection(db, "neg-site-returns"),
+            initial_amount=4000,
+            provision_terms=_vm_provision(),
+            **_PINNED,
+        )
+
+        with pytest.raises(StorefrontClientError) as refused:
+            await c.negotiate_new(**opening)
+        site.failing = False
+        await state.poll_once()
+        opened = await c.negotiate_new(**opening)
+
+        assert refused.value.status_code == 503
+        assert "listing_source_unverifiable" in str(refused.value)
+        assert opened["action"] == "counter", opened
 
 
 class TestAcceptanceRechecksTheSource:
@@ -962,6 +1099,7 @@ class TestAcceptanceRechecksTheSource:
             settlement_selection=await _selection(db, listing_id),
             initial_amount=4000,
             provision_terms=_vm_provision(),
+            **_PINNED,
         )
         assert opened["action"] == "counter"
         return opened["negotiation_id"]
@@ -1102,25 +1240,36 @@ class TestReleaseConditionAuthorization:
         assert "release_condition" in str(refused.value)
         self._nothing_accepted(db)
 
-    async def test_a_proposal_naming_no_escrow_address_is_still_held_to_the_listing(
-        self, client, db
+    @pytest.mark.parametrize(
+        "guarded",
+        [
+            pytest.param(True, id="default chain, with the shape guard"),
+            pytest.param(False, id="a seller policy accepting as proposed"),
+        ],
+    )
+    async def test_an_opening_naming_no_escrow_contract_is_refused(
+        self, client, db, guarded
     ):
-        """Under the default seller chain the shape guard finds no escrow
-        address to compare and skips, so materialization alone refuses the
-        buyer's condition."""
+        """With the shape guard the round is refused by name. A seller without
+        it accepts at once, and VM's Alkahest stage refuses the acceptance
+        through the kit's pinned-escrow check before building any plan, so
+        nothing is recorded either way."""
         c, db = client
         await _upsert_bound_listing(
             db, "rc-unpinned", demands=[_recipient_condition(_RECIPIENT)]
         )
 
         with pytest.raises(StorefrontClientError) as refused:
+            if not guarded:
+                self._without_seller_policy()
             await self._open(
                 c, db, "rc-unpinned",
-                demands=[_recipient_condition(_BUYER_RECIPIENT)],
+                escrow_address="0x" + "00" * 20,
+                demands=[_recipient_condition(_RECIPIENT)],
             )
 
         assert refused.value.status_code == 409
-        assert "release_condition" in str(refused.value)
+        assert "escrow_contract_unpinned" in str(refused.value)
         self._nothing_accepted(db)
 
     async def _open_selecting_only(self, c, db, listing_id: str):

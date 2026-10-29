@@ -23,11 +23,13 @@ LISTING_HARDWARE: Mapping[str, Any] = {
 
 
 def build_bare_metal_listing_resource(**overrides: Any) -> dict[str, Any]:
-    """A complete bare-metal listing resource; ``overrides`` replace fields."""
+    """A complete backed bare-metal listing resource, delivery terms included;
+    ``overrides`` replace fields."""
     return {
         "capacity_backing": "backed",
         "host_id": "machine-1",
         "physical_host_id": "physical-host-1",
+        "access_methods": ["ssh"],
         **LISTING_HARDWARE,
         **overrides,
     }

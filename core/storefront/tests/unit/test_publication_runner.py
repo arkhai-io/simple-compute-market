@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 import pytest
 
 from core_storefront.publication_runner import (
+    NO_SETTLEMENT_OPTION,
+    NoSettlementOption,
     PublicationSourceSelection,
     PublicationPayload,
     close_stale_publication_listings,
@@ -20,8 +23,14 @@ def _source(
     name: str = "test",
     candidate: dict[str, Any] | None = None,
     open_keys: set[str] | None = None,
+    closed: list[tuple[dict[str, Any], str]] | None = None,
 ) -> PublicationSource:
     candidate = candidate or {"resource_id": name, "price": "1"}
+    hooks: dict[str, Any] = {}
+    if closed is not None:
+        hooks["close_candidate_listing"] = (
+            lambda _db, _url, value, reason: closed.append((value, reason))
+        )
     return PublicationSource(
         name=name,
         open_keys=lambda _db: open_keys or set(),
@@ -34,6 +43,7 @@ def _source(
         ),
         reopen_existing=lambda *_args, **_kwargs: None,
         reopen_error_label=f"reopen {name}",
+        **hooks,
     )
 
 
@@ -226,3 +236,86 @@ def test_an_unchanged_existing_listing_is_skipped_not_failed_or_duplicated() -> 
 
     assert (published, failed, skipped) == ([], [], [candidate])
     assert published_calls == []
+
+
+def _refusing_round(refusal, source):
+    published_calls: list[Any] = []
+    result = publish_round(
+        (source,),
+        db_path="db.sqlite",
+        base_url="http://seller",
+        build_payload=lambda *_args: refusal,
+        publish_listing=lambda *args, **kwargs: published_calls.append(args) or {},
+    )
+    return result, published_calls
+
+
+def test_a_candidate_whose_mechanisms_configuration_rules_out_closes_its_listing() -> None:
+    candidate = {"resource_id": "r1"}
+    closed: list[tuple[dict[str, Any], str]] = []
+    refusal = NoSettlementOption("no option", mechanisms=("contact.v1",))
+
+    (published, failed, skipped), published_calls = _refusing_round(
+        refusal, _source(candidate=candidate, closed=closed)
+    )
+
+    assert refusal.ruled_out_by_configuration is True
+    assert closed == [(candidate, NO_SETTLEMENT_OPTION)]
+    assert (published, failed, skipped) == ([], [(candidate, "no option")], [])
+    assert published_calls == []
+
+
+def test_a_candidate_with_no_clause_at_all_closes_its_listing() -> None:
+    closed: list[tuple[dict[str, Any], str]] = []
+
+    _refusing_round(NoSettlementOption("no clause"), _source(closed=closed))
+
+    assert [reason for _candidate, reason in closed] == [NO_SETTLEMENT_OPTION]
+
+
+def test_a_candidate_with_an_unknown_mechanism_leaves_its_listing() -> None:
+    candidate = {"resource_id": "r1"}
+    closed: list[tuple[dict[str, Any], str]] = []
+    refusal = NoSettlementOption(
+        "unreachable", mechanisms=("alkahest.v1", "contact.v1"), unknown=("alkahest.v1",)
+    )
+
+    (published, failed, skipped), published_calls = _refusing_round(
+        refusal, _source(candidate=candidate, closed=closed)
+    )
+
+    assert refusal.ruled_out_by_configuration is False
+    assert closed == []
+    assert (published, failed, skipped) == ([], [(candidate, "unreachable")], [])
+    assert published_calls == []
+
+
+def test_another_payload_failure_leaves_the_listing() -> None:
+    closed: list[tuple[dict[str, Any], str]] = []
+
+    (_published, failed, _skipped), _calls = _refusing_round(
+        "clause unreadable", _source(closed=closed)
+    )
+
+    assert closed == []
+    assert [reason for _candidate, reason in failed] == ["clause unreadable"]
+
+
+def test_a_failing_close_is_reported_as_the_candidates_failure() -> None:
+    def close(*_args: Any) -> None:
+        raise RuntimeError("database locked")
+
+    source = replace(_source(), close_candidate_listing=close)
+
+    (_published, failed, _skipped), _calls = _refusing_round(
+        NoSettlementOption("no option"), source
+    )
+
+    assert [reason for _candidate, reason in failed] == [
+        "close listing with no settlement option: database locked"
+    ]
+
+
+def test_an_unknown_mechanism_must_be_one_the_candidate_could_publish() -> None:
+    with pytest.raises(ValueError, match="could publish"):
+        NoSettlementOption("x", mechanisms=("contact.v1",), unknown=("alkahest.v1",))

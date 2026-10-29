@@ -555,12 +555,9 @@ async def test_an_operator_force_release_frees_an_unmanaged_lease_and_notifies(
         capacity_reservation_id=capacity_reservation_id,
         offering_mode=VM_OFFERING_MODE,
     )
-    ledger.update_reservation_state(
-        capacity_reservation_id,
-        state="unmanaged",
-        failure_reason="oversight_released",
-        failure_message="manual ops",
-    )
+    assert ledger.record_unmanaged(
+        capacity_reservation_id, reason="oversight_released", message="manual ops"
+    )["state"] == "unmanaged"
     svc = _lifecycle(session_factory, ledger)
     sf = _storefront()
 

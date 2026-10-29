@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 from market_storefront_kit import TradingPause
 
 if TYPE_CHECKING:
+    from market_alkahest import AlkahestChainProbe
     from market_core import MarketDomainContract
     from core_storefront.services.negotiation_service import NegotiationService
     from market_negotiation_runtime import NegotiationRuntime
@@ -33,6 +34,7 @@ if TYPE_CHECKING:
     from market_identity import Signer
     from market_storefront_kit import StorefrontLoopController
 
+    from apicredits_storefront.listing_seed import ListingSeed
     from apicredits_storefront.services.listing_service import ListingService
     from apicredits_storefront.services.system_service import SystemService
     from apicredits_storefront.utils.sqlite_client import SQLiteClient
@@ -47,8 +49,13 @@ resolved_failure_policy: "FailurePolicy | None" = None
 resolved_settlement_composition: "ApiCreditsSettlementComposition | None" = None
 resolved_issuance_evidence_service: "ApiCreditsIssuanceEvidenceService | None" = None
 resolved_private_result_repository: "ApiCreditPrivateResultRepository | None" = None
+#: The live chain-client map the chain probe updates in place.
 resolved_alkahest_clients: dict[str, Any] = {}
+#: Each configured chain's last probe result; None while Alkahest is not enabled.
+resolved_alkahest_chain_probe: "AlkahestChainProbe | None" = None
 resolved_listing_service: "ListingService | None" = None
+#: The configured seed listing's progress; None without a ``[seed]`` table.
+resolved_listing_seed: "ListingSeed | None" = None
 resolved_negotiation_service: "NegotiationService | None" = None
 resolved_negotiation_runtime: "NegotiationRuntime | None" = None
 resolved_system_service: "SystemService | None" = None
@@ -74,7 +81,9 @@ def clear_lifespan_state(*, domain: "MarketDomainContract") -> None:
     global resolved_issuance_evidence_service
     global resolved_private_result_repository
     global resolved_alkahest_clients
+    global resolved_alkahest_chain_probe
     global resolved_listing_service
+    global resolved_listing_seed
     global resolved_negotiation_service
     global resolved_system_service
     global resolved_marketplace_signer
@@ -96,7 +105,9 @@ def clear_lifespan_state(*, domain: "MarketDomainContract") -> None:
     resolved_issuance_evidence_service = None
     resolved_private_result_repository = None
     resolved_alkahest_clients = {}
+    resolved_alkahest_chain_probe = None
     resolved_listing_service = None
+    resolved_listing_seed = None
     resolved_negotiation_service = None
     resolved_system_service = None
     resolved_marketplace_signer = None

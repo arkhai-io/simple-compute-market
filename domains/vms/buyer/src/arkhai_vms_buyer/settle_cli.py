@@ -19,10 +19,14 @@ from .deal_helpers import (
 )
 from .settlement_composition import (
     buyer_stage,
-    resolve_alkahest_address_config_path,
     resolve_buyer_settlement_policy,
 )
 from .settlement_stages import BuyerResumeContext
+
+
+def chain_address_book(chain_name: str) -> str | None:
+    """The Alkahest address book the buyer names for ``chain_name``."""
+    return common.chain_address_book(chain_name)
 
 
 def run_settle_from_log(
@@ -43,7 +47,7 @@ def run_settle_from_log(
         run_id=run_id, deal=deal, log=log, signer=signer,
         resolve_seller_principals=make_deal_publisher_trust_resolver(run_id, deal, signer),
         resolve_policy=resolve_buyer_settlement_policy,
-        resolve_address_config=resolve_alkahest_address_config_path,
+        resolve_address_book=chain_address_book,
         poll_interval=poll_interval, timeout=settlement_timeout,
         console=console or Console(),
     ))

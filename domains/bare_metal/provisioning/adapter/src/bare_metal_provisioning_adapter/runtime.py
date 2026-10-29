@@ -78,6 +78,7 @@ def build_bare_metal_runtime(
     return BareMetalProvisioningRuntime(
         fulfillment_provider=JobFulfillmentProvider(
             plan=BareMetalFulfillmentPlan(
+                playbook_path=config.resolved_bare_metal_playbook_path,
                 reclaim_policy=getattr(config, "bare_metal_reclaim_policy", None),
             ),
             submission=job_submission,

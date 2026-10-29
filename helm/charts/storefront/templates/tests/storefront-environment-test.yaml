@@ -20,14 +20,13 @@
 {{- if $itDigest -}}
   {{- $itImage = printf "%s@%s" $itImageName $itDigest -}}
 {{- end -}}
-{{- if not .Values.agents -}}
-  {{- fail "storefront smoke test requires at least one configured agent" -}}
-{{- end -}}
-{{- $targetName := $tests.targetAgentName | default (first (keys .Values.agents | sortAlpha)) -}}
-{{- if not (hasKey .Values.agents $targetName) -}}
+{{- $agents := dict -}}
+{{- include "storefront.agents" (dict "root" . "into" $agents) -}}
+{{- $targetName := $tests.targetAgentName | default (first (keys $agents | sortAlpha)) -}}
+{{- if not (hasKey $agents $targetName) -}}
   {{- fail (printf "storefront smoke test targetAgentName %q did not match any agent" $targetName) -}}
 {{- end -}}
-{{- $targetAgent := merge (dict "name" $targetName) (index .Values.agents $targetName) -}}
+{{- $targetAgent := merge (dict "name" $targetName) (index $agents $targetName) -}}
 {{- $component := $targetAgent.component | default $targetAgent.name -}}
 {{- $agentSecret := $targetAgent.secret | default dict -}}
 {{- $secretName := $tests.secretName | default ($agentSecret.secretName | default "") -}}
@@ -60,7 +59,7 @@ kind: Pod
 metadata:
   name: {{ include "storefront.fullname" . }}-smoke-test
   labels:
-    {{- include "storefront.labels" . | nindent 4 }}
+    {{- include "storefront.testLabels" . | nindent 4 }}
   annotations:
     "helm.sh/hook": test
     "helm.sh/hook-delete-policy": before-hook-creation

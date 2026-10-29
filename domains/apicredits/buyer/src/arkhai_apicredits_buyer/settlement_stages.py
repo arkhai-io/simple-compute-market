@@ -17,8 +17,8 @@ from .common import (
 )
 from .escrow_selection import select_escrow_entry
 
-from market_alkahest.plans import escrow_terms_from_settlement_plan
 from market_alkahest.proposals import escrow_proposal_from_accepted_entry
+from market_alkahest.release_authorization import release_conditions_record
 from market_alkahest.token import TokenResolutionError, resolve_token
 from market_alkahest.schemas import accepted_recipient_address, accepted_token_address
 
@@ -60,6 +60,10 @@ class PaymentBuyerStage:
 
     def enrich(self, deal: Any) -> None:
         pass
+
+    def listing_record(self, listing: Any) -> dict[str, Any]:
+        # A payment derives from its mandate, which acceptance records.
+        return {}
 
     def select(self, policy: Any, listing: Any, *, alkahest: Any = None, **kwargs: Any) -> Any:
         return payment_selection_for_listing(policy, listing, prefer_payment=True, **kwargs)
@@ -187,11 +191,10 @@ class AlkahestBuyerStage:
             token = accepted_token_address(deal.accepted_escrow_proposal)
             if token:
                 deal.token_contract = token
-        if deal.settlement_plan is not None and not deal.accepted_escrow_terms:
-            deal.accepted_escrow_terms = [
-                terms.model_dump()
-                for terms in escrow_terms_from_settlement_plan(deal.settlement_plan)
-            ]
+
+    def listing_record(self, listing: Any) -> dict[str, Any]:
+        """The listing's advertised release conditions, which a resumed run derives from."""
+        return release_conditions_record(listing)
 
     def settle(self, negotiation: Any, on_event: Any, *, alkahest: Any, **_unused: Any) -> Any:
         self.validate_acceptance(negotiation.outcome)

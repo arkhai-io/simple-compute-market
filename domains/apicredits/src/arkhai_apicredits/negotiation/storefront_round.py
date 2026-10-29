@@ -26,7 +26,9 @@ from arkhai_apicredits.listings.pricing import (
 )
 from market_policy.scalar_policies import (
     make_escrow_kind_dispatch_middleware,
+    pinned_proposal,
     proposal_uses_scalar_amount,
+    selected_settlement_artifact,
 )
 from market_policy.seller_round import SellerRoundResult
 from market_policy.negotiation_middleware import (
@@ -72,7 +74,7 @@ class ApiCreditsSellerRoundHook(Protocol):
 def _load_chain(
     *,
     negotiation_config: Any = None,
-    chains: Mapping[str, Any] | None = None,
+    chain_config_paths: Mapping[str, str | None] | None = None,
 ) -> list[NegotiationMiddleware]:
     """Resolve the API-credits storefront's negotiation middleware chain.
 
@@ -80,18 +82,17 @@ def _load_chain(
     ``policies`` list, a ``policy_mode`` terminal default, or a
     per-escrow-kind dispatch table. (File-policy discovery and the RL
     strategies are VM-storefront features this domain doesn't ship.)
+    ``chain_config_paths`` maps each configured chain to its Alkahest address
+    book, ``None`` for the SDK's built-in addresses, as the storefront
+    resolved it; the escrow-kind dispatch reads each escrow's kind through it.
     """
     raw_policies = getattr(negotiation_config, "policies", None)
     policies_by_kind = normalize_policies_by_escrow_kind_config(raw_policies)
     if policies_by_kind:
-        chain_config_paths = {
-            name: chain.alkahest_address_config_path
-            for name, chain in (chains or {}).items()
-        }
         return load_negotiation_chain(_DEFAULT_GUARDS) + [
             make_escrow_kind_dispatch_middleware(
                 policies_by_kind,
-                chain_config_paths=chain_config_paths,
+                chain_config_paths=dict(chain_config_paths or {}),
             )
         ]
 
@@ -101,10 +102,15 @@ def _load_chain(
             getattr(negotiation_config, "policy_mode", "") or ""
         ).strip() or _DEFAULT_TERMINAL
         policy_names = [policy_mode]
-    for guard in reversed(_DEFAULT_GUARDS):
-        if guard not in policy_names:
-            policy_names.insert(0, guard)
-    return load_negotiation_chain(policy_names)
+    # The default guards run first, in their own order, wherever an operator
+    # names one: an opening selecting no accepted escrow is priced at zero, and
+    # only these guards refuse it before a decider could accept it.
+    return load_negotiation_chain(
+        [
+            *_DEFAULT_GUARDS,
+            *(name for name in policy_names if name not in _DEFAULT_GUARDS),
+        ]
+    )
 
 
 def _seller_reference_amount(
@@ -117,8 +123,20 @@ def _seller_reference_amount(
     """quantity × the per-credit rate of the option ``proposal`` selects, exactly.
 
     The unit is a base-unit rate or a rational floor, and a long amount must not
-    round through a fixed-precision decimal context.
+    round through a fixed-precision decimal context. ``proposal`` is the buyer's
+    pinned opening, the one an acceptance settles. An opening that selects no
+    accepted escrow and is not a selection, or no opening at all, has reference
+    amount zero rather than another entry's rate, and the guards every seller
+    chain runs first refuse it for its own reason: the escrow-shape guard an
+    escrow the listing does not accept, the opening guard a missing amount. A
+    selection matching no option is refused here.
     """
+    selection = proposal.get("settlement_selection") if isinstance(proposal, Mapping) else None
+    if (
+        not isinstance(selection, Mapping)
+        and selected_settlement_artifact(dict(listing), proposal) is None
+    ):
+        return 0
     unit = extract_unit_price_from_order(
         dict(listing),
         default_min_price=default_min_price,
@@ -141,7 +159,7 @@ async def _run_seller_round(
     strategy_label: str | None,
     policy_inputs: dict[str, Any],
     negotiation_config: Any,
-    chains: Mapping[str, Any] | None,
+    chain_config_paths: Mapping[str, str | None] | None,
     default_min_price: Any,
 ) -> SellerRoundResult:
     listing_dict = dict(listing)
@@ -158,19 +176,24 @@ async def _run_seller_round(
         if item.sender == "them":
             their_proposal = item.proposal
             break
-    uses_scalar_amount = proposal_uses_scalar_amount(listing_dict, their_proposal)
+    # What is priced, and whether it is bargained by amount, is the pinned
+    # opening's: an acceptance settles that opening whatever a counter names.
+    pinned = pinned_proposal(history)
+    uses_scalar_amount = proposal_uses_scalar_amount(listing_dict, pinned)
     reference_amount = (
         _seller_reference_amount(
             listing_dict,
             requested_quantity,
             default_min_price=default_min_price,
-            proposal=their_proposal if isinstance(their_proposal, Mapping) else None,
+            proposal=pinned,
         )
         if uses_scalar_amount
         else 0
     )
 
-    chain = _load_chain(negotiation_config=negotiation_config, chains=chains)
+    chain = _load_chain(
+        negotiation_config=negotiation_config, chain_config_paths=chain_config_paths
+    )
     context = NegotiationContext(
         direction="maximize",
         our_reference_amount=int(reference_amount),
@@ -210,13 +233,13 @@ class _DefaultSellerRoundHook:
         key_lookup: KeyLookup | None,
         *,
         negotiation_config: Any = None,
-        chains: Mapping[str, Any] | None = None,
+        chain_config_paths: Mapping[str, str | None] | None = None,
         default_min_price: Any = None,
     ) -> None:
         self._capacity = capacity
         self._key_lookup = key_lookup
         self._negotiation_config = negotiation_config
-        self._chains = chains
+        self._chain_config_paths = chain_config_paths
         self._default_min_price = default_min_price
 
     async def __call__(
@@ -259,7 +282,7 @@ class _DefaultSellerRoundHook:
             strategy_label=strategy_label,
             policy_inputs=policy_inputs,
             negotiation_config=self._negotiation_config,
-            chains=self._chains,
+            chain_config_paths=self._chain_config_paths,
             default_min_price=self._default_min_price,
         )
 
@@ -269,7 +292,7 @@ def default_seller_round_hook(
     key_lookup: KeyLookup | None = None,
     *,
     negotiation_config: Any = None,
-    chains: Mapping[str, Any] | None = None,
+    chain_config_paths: Mapping[str, str | None] | None = None,
     default_min_price: Any = None,
 ) -> ApiCreditsSellerRoundHook:
     """Build the default API-credits seller round hook.
@@ -284,6 +307,6 @@ def default_seller_round_hook(
         capacity,
         key_lookup,
         negotiation_config=negotiation_config,
-        chains=chains,
+        chain_config_paths=chain_config_paths,
         default_min_price=default_min_price,
     )

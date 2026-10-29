@@ -724,6 +724,7 @@ async def test_a_bare_metal_view_reaches_the_canonical_client_as_storefronts_rea
     for resource_id in ("bm-1", "bm-2"):
         validate_bare_metal_publication_view(
             members[resource_id]["publication_views"]["bare_metal.v2"],
+            backing=BACKED,
             physical_resource_id=resource_id,
             pool_id="whole-host",
         )
@@ -731,6 +732,86 @@ async def test_a_bare_metal_view_reaches_the_canonical_client_as_storefronts_rea
     assert members["bm-1"]["publication_views"]["bare_metal.v2"]["available"] is True
     assert members["bm-2"]["enabled"] is False
     assert members["bm-2"]["publication_views"]["bare_metal.v2"]["available"] is False
+
+
+@pytest.mark.asyncio
+async def test_bare_metal_views_follow_each_pools_backing_and_problems_stay_local(
+    capacity: CapacityApi, client_and_queue,
+):
+    """Each declaration's view is built with its pool's context, over HTTP.
+
+    In an unbacked pool a host-less declaration and a host-bearing one both
+    project a ``bare_metal.v2`` view carrying no delivery terms; a backed
+    declaration no view can be built from projects without one and with its
+    problem, and every other pool and member still projects.
+    """
+    provisioning_client, _ = client_and_queue
+    for pool_id, backing in (("whole-host", "backed"), ("broker", "unbacked")):
+        await provisioning_client.pools.create_pool(PoolCreate(
+            id=pool_id,
+            label=pool_id,
+            provider="bare_metal.ansible",
+            policy_tags={
+                "deliverable_modes": ["bare_metal"] if backing == "backed" else [],
+                "advertisable_modes": ["bare_metal"],
+                "capacity_backing": backing,
+            },
+            provider_config={},
+        ))
+
+    def publication(**overrides):
+        return {
+            "physical_host_id": overrides.pop("physical_host_id", "physical-x"),
+            "allocation_mode": overrides.pop("allocation_mode", ALLOCATION_MODE_EXCLUSIVE),
+            "bare_metal_publication": {
+                "enabled": True,
+                "access_methods": ["ssh"],
+                "capabilities": {},
+            },
+        }
+
+    await capacity.register(
+        "broker-no-host", pool_id="broker", total_units=1,
+        attributes=publication(physical_host_id="physical-b1"),
+    )
+    await capacity.register(
+        "broker-host", pool_id="broker", host_id="broker-host-1", total_units=1,
+        attributes=publication(physical_host_id="physical-b2"),
+    )
+    await capacity.register(
+        "backed-good", pool_id="whole-host", host_id="good-host", total_units=1,
+        attributes=publication(physical_host_id="physical-g"),
+    )
+    await capacity.register(
+        "backed-malformed", pool_id="whole-host", host_id="bad-host", total_units=1,
+        attributes=publication(physical_host_id="physical-m", allocation_mode="shareable"),
+    )
+
+    remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
+    projection = await remote.resource_pool_projection()
+
+    validate_resource_pool_projection(projection)
+    members = {
+        member["physical_resource_id"]: member
+        for row in projection["resource_pools"]
+        for member in row["resources"]
+    }
+    delivery_terms = {"host_id", "physical_host_id", "access_methods", "available"}
+    for resource_id in ("broker-no-host", "broker-host"):
+        view = members[resource_id]["publication_views"]["bare_metal.v2"]
+        validate_bare_metal_publication_view(
+            view, backing=UNBACKED, physical_resource_id=resource_id, pool_id="broker"
+        )
+        assert delivery_terms.isdisjoint(view), view
+        assert "publication_view_problems" not in members[resource_id]
+    validate_bare_metal_publication_view(
+        members["backed-good"]["publication_views"]["bare_metal.v2"],
+        backing=BACKED, physical_resource_id="backed-good", pool_id="whole-host",
+    )
+    malformed = members["backed-malformed"]
+    assert "publication_views" not in malformed
+    (problem,) = malformed["publication_view_problems"]["bare_metal.v2"]
+    assert "allocation_mode" in problem
 
 
 @pytest.mark.asyncio
@@ -899,20 +980,24 @@ async def test_a_registration_without_a_pool_is_rejected(capacity: CapacityApi):
 async def test_the_resource_pool_projection_publishes_declarations_not_hosts(
     capacity: CapacityApi, client_and_queue,
 ):
-    """An INI host gains a derived declaration and is projected from it, with
-    live availability; a host registered with no declaration is not projected
-    at all. Written through the canonical clients, read through
-    SiteCapacityClient.resource_pool_projection."""
+    """A declaration is projected, with live availability; a host is not,
+    whatever GPUs it describes or however it was written. Written through the
+    canonical clients, read through SiteCapacityClient.resource_pool_projection."""
     provisioning_client, _ = client_and_queue
     await provisioning_client.host_import.import_hosts_from_text(
         "[kvm_hosts]\n"
         "kvm1  ansible_host=10.0.0.1  ansible_user=ubuntu  "
-        "ansible_ssh_private_key_file=/keys/id  gpus=4  gpu_model=H200\n",
+        "ansible_ssh_private_key_file=/keys/id  gpus=4  gpu_model=H200  pool_id=default\n",
         ssh_key_type="path",
     )
     await provisioning_client.family.register_host(HostCreate(
         host_id="kvm2", connection=ssh_connection(ssh_host="10.0.0.2", ssh_user="ubuntu", key_path="/keys/id"), gpu_count=8,
     ))
+    assert await capacity.admin.list_resources() == []
+    await capacity.register(
+        "kvm1", pool_id="default", total_units=4, host_id="kvm1",
+        attributes={"gpu_model": "H200"},
+    )
     reserved = await capacity.reserve(
         {"offering_mode": "vm", "gpu_count": 1, "resource_id": "kvm1"}, {}
     )

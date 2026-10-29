@@ -8,12 +8,16 @@ below is a development fixture and must never be used on a public network.
 from __future__ import annotations
 
 import pytest
+from market_identity import Ed25519Signer
 
 from arkhai_bare_metal_storefront.config import (
     IDENTITY_CREDENTIAL_ENV,
     BareMetalConfigurationError,
     identity_credential,
     load_storefront_settings,
+)
+from arkhai_bare_metal_storefront.settlement_composition import (
+    BareMetalStorefrontSettlementComposition,
 )
 from storefront_configuration import (
     ADMIN,
@@ -24,6 +28,44 @@ from storefront_configuration import (
 )
 
 WALLET_KEY = "0x" + "55" * 32
+# Development fixture: the payments service identity the storefront pins.
+PAYMENTS_SERVICE = Ed25519Signer(b"\x07" * 32)
+DISPUTE_ACCOUNT = "33333333-3333-4333-8333-333333333333"
+
+
+def _payments_section() -> dict:
+    return {
+        "enabled": True,
+        "service_url": "http://127.0.0.1:9",
+        "service_identity": PAYMENTS_SERVICE.identity.model_dump(mode="json"),
+        "fee_bps": 250,
+        "dispute_authority": DISPUTE_ACCOUNT,
+        "development_auth": True,
+    }
+
+
+@pytest.mark.parametrize(
+    ("toml", "expected"),
+    [
+        pytest.param("[Settlement.arkhai_payments]\nlivemode = true\n", True, id="declared live"),
+        pytest.param(None, False, id="undeclared"),
+    ],
+)
+def test_the_payments_mode_in_the_files_reaches_the_composed_stage(
+    monkeypatch, tmp_path, toml, expected
+):
+    document = publishable_configuration(tmp_path / "storefront.db")
+    document["Settlement"] = {
+        "schema_version": 1,
+        "priority": ["arkhai.payments.v1"],
+        "arkhai_payments": _payments_section(),
+    }
+    write_configuration(monkeypatch, tmp_path, document, toml=toml)
+
+    settings = load_storefront_settings()
+    composition = BareMetalStorefrontSettlementComposition.from_raw_config(settings.settlement)
+
+    assert composition.arkhai_payments_stage().config.livemode is expected
 
 
 def test_the_packaged_defaults_state_every_interval(monkeypatch, tmp_path):
@@ -166,6 +208,36 @@ def test_a_setting_that_cannot_be_read_is_refused_by_key(
 
     with pytest.raises(BareMetalConfigurationError, match=named):
         load_storefront_settings()
+
+
+@pytest.mark.parametrize(
+    ("document", "path"),
+    [
+        (
+            {"Chains": {"anvil": {"rpc_url": "ws://anvil:8545",
+                                  "alkahest_address_config_path": "/book.json"}}},
+            "[Chains.anvil].alkahest_address_config_path",
+        ),
+        (
+            {"Settlement": {"alkahest": {"enabled": True,
+                                         "address_config_path": "/book.json"}}},
+            "[Settlement.alkahest].address_config_path",
+        ),
+    ],
+    ids=["chain-key", "section-key"],
+)
+def test_a_retired_address_book_key_is_refused_naming_the_table(
+    monkeypatch, tmp_path, document, path
+):
+    """Spec scenario "A retired key is stated", for the bare-metal storefront."""
+    write_configuration(monkeypatch, tmp_path, document)
+
+    with pytest.raises(BareMetalConfigurationError) as refused:
+        load_storefront_settings()
+
+    assert f"{path} is retired" in str(refused.value)
+    assert "[Settlement.alkahest.address_books]" in str(refused.value)
+    assert "/book.json" not in str(refused.value)
 
 
 def test_the_confirmation_window_is_three_poll_intervals_unless_stated(

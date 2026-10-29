@@ -148,6 +148,16 @@ class CompleteIntroduction(Protocol):
     def __call__(self, agreement: IntroductionAgreement) -> Awaitable[None]: ...
 
 
+class ClaimSellerDispatch(Protocol):
+    """Durably claim one introduction's seller-side delivery.
+
+    Answers ``True`` for exactly one caller per introduction, however many
+    starts complete its reveal, and ``False`` for every other.
+    """
+
+    def __call__(self, obligation_ref: str) -> Awaitable[bool]: ...
+
+
 #: Returns the retention disclosure to embed in a reveal, read from the running
 #: configuration at each call so a reveal never states a stale window.
 IntroductionDisclosure = Callable[[], Mapping[str, Any]]
@@ -183,6 +193,16 @@ class IntroductionRouteCallbacks:
     persist: PersistIntroduction
     load: LoadIntroduction
     complete: CompleteIntroduction
+    claim_seller_dispatch: ClaimSellerDispatch
+
+
+#: What a start answers, as HTTP 503, when completing its reveal or claiming
+#: its seller-side delivery fails. Both are retried by a new start, which
+#: completes idempotently and claims; an exact replay answers this again.
+INTRODUCTION_COMPLETION_UNAVAILABLE = (
+    "introduction completion is temporarily unavailable; "
+    "starting the introduction again completes it"
+)
 
 
 class IntroductionRouteError(RuntimeError):
@@ -299,10 +319,13 @@ class IntroductionRouteService:
         try:
             await self._callbacks.complete(agreement)
         except Exception as exc:
-            raise IntroductionRouteError(
-                503,
-                "introduction completion is temporarily unavailable",
-            ) from exc
+            raise IntroductionRouteError(503, INTRODUCTION_COMPLETION_UNAVAILABLE) from exc
+
+    async def _claim_seller_dispatch(self, agreement: IntroductionAgreement) -> bool:
+        try:
+            return await self._callbacks.claim_seller_dispatch(agreement.obligation_ref)
+        except Exception as exc:
+            raise IntroductionRouteError(503, INTRODUCTION_COMPLETION_UNAVAILABLE) from exc
 
     async def start(
         self,
@@ -322,12 +345,8 @@ class IntroductionRouteService:
         replay = self._replay(auth)
         if replay is not None:
             return replay
-        # The record is read before persisting for two reasons. "First reveal"
-        # has to be observed before persisting, because persist is idempotent:
-        # a repeat start with a fresh request id is not a replay and returns
-        # the same record, and delivering again for it would tell the seller a
-        # second time about one introduction. And a redacted record must stop
-        # the start before anything is persisted or delivered.
+        # A redacted record must stop the start before anything is persisted
+        # or delivered.
         existing = await self._callbacks.load(agreement.obligation_ref)
         if existing is not None and existing.payloads_deleted_at is not None:
             # Completion still runs: it is idempotent, and it is how a deal
@@ -348,7 +367,14 @@ class IntroductionRouteService:
         except ValueError as exc:
             raise IntroductionRouteError(409, str(exc)) from exc
         await self._complete(agreement)
-        if existing is None:
+        # Whether a record existed before this start cannot decide delivery:
+        # a start that persisted and then failed completion leaves one behind,
+        # and the new start that completes the reveal must still tell the
+        # seller. Only the start that wins the durable claim dispatches, so a
+        # repeat, concurrent, or later start sends nothing. The record this
+        # start holds is delivered even if a deletion has since committed: the
+        # reveal it completed preceded the deletion.
+        if await self._claim_seller_dispatch(agreement):
             self._deliver_to_seller(record, agreement)
         return self._projection(
             record,
@@ -382,11 +408,13 @@ class IntroductionRouteService:
     ) -> None:
         """Tell the seller's own side, once, about a reveal that just happened.
 
-        Reached only for a reveal that had no record before it: the replay
-        branch returns above and a repeat start is filtered by the check its
-        caller makes, so one introduction is announced once. The seller's view
-        is built explicitly here rather than reusing the response projection,
-        whose counterparty half belongs to whoever asked.
+        Reached only by the start that claimed the introduction's seller-side
+        delivery, so one introduction is announced once. The claim marks this
+        start as the one that dispatches; it records neither whether a sink is
+        routed for the origin nor whether one received the event, and a lost
+        or failed send is recovered by the operator's re-delivery. The seller's
+        view is built explicitly here rather than reusing the response
+        projection, whose counterparty half belongs to whoever asked.
         """
 
         if self._deliver is None:
@@ -434,9 +462,11 @@ class IntroductionRouteService:
 
 
 __all__ = [
+    "INTRODUCTION_COMPLETION_UNAVAILABLE",
     "INTRODUCTION_PAYLOADS_DELETED",
     "SELLER_CONTACT_UNAVAILABLE",
     "AuthorizedIntroductionRequest",
+    "ClaimSellerDispatch",
     "DeliverIntroduction",
     "IntroductionAgreement",
     "IntroductionDisclosure",

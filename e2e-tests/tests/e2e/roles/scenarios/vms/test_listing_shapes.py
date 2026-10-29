@@ -50,13 +50,14 @@ import logging
 from dataclasses import dataclass
 
 import pytest
+from compute_provisioning_contracts import MockRuleCreate
 from market_pool_overrides import SyncPoolOverrideClient, pool_override_statuses
 from market_resource_pools_contracts import PoolUpdate
 
 from tests.e2e.roles.helpers.compute_deal import (
     advance_storefront,
+    assert_storefront_loops_held,
     delete_mock_rules_if_present,
-    pause_storefront,
 )
 from tests.e2e.roles.scenarios.vms.conftest import require_state
 from tests.e2e.roles.scenarios.vms.host_registry import (
@@ -68,7 +69,16 @@ from tests.e2e.roles.scenarios.vms.host_registry import (
 
 log = logging.getLogger(__name__)
 
-pytestmark = pytest.mark.e2e_listing_shapes
+pytestmark = [
+    # Listed first, so the hold is taken before, and released after, every
+    # other fixture of the module; the lane's cleanup follows it, so it runs
+    # while the hold stands.
+    pytest.mark.usefixtures(
+        "storefront_loops_held",
+        "ensure_storefront_resumed", "reap_buyer_settle_subprocess", "release_reserved_resources",
+    ),
+    pytest.mark.e2e_listing_shapes,
+]
 
 #: A model no other scenario declares, so discovery counts only this listing.
 GPU_MODEL = "L40S"
@@ -142,7 +152,7 @@ CREATE_RULE_ID = "e2e-listing-shapes-create"
 
 @dataclass
 class ShapeState:
-    paused: bool = False
+    held: bool = False
     declared: bool = False
     listing_id: str | None = None
     provisioning_armed: bool = False
@@ -162,16 +172,17 @@ def shape_state() -> ShapeState:
 
 
 class TestStage00_Setup:
-    def test_00a_pause_storefront_loops(self, storefront_admin_client, shape_state):
-        """Hold the timer loops so this scenario's publication cycle is explicit."""
-        shape_state.paused = pause_storefront(storefront_admin_client)
-        assert shape_state.paused
+    def test_00a_storefront_loops_are_held(self, storefront_admin_client, shape_state):
+        """The timer loops are held for the module, so this scenario's
+        publication cycle is explicit."""
+        assert_storefront_loops_held(storefront_admin_client)
+        shape_state.held = True
 
     def test_00b_pool_states_a_shape_and_its_declaration_every_dimension(
         self, provisioning_client, resource_pool_client, site_capacity_admin_client,
         storefront_admin_client, shape_state,
     ):
-        require_state(shape_state, "paused")
+        require_state(shape_state, "held")
         provision_e2e_executor(
             provisioning_client,
             site_capacity_admin_client,
@@ -256,24 +267,26 @@ class TestStage03_Provisioning:
         """The one-shot buy blocks until ready, so the mock create job must finish
         on its own."""
         require_state(shape_state, "listing_id")
-        delete_mock_rules_if_present(provisioning_test_client, CREATE_RULE_ID)
-        provisioning_test_client.add_mock_rule(
-            rule_id=CREATE_RULE_ID,
-            match={"vm_action": "create", "host_id": E2E_LISTING_SHAPES_HOST},
-            pause_before_result=False,
-            # The create fact the VM playbook prints, with the forwarded port and
-            # the time access became ready: a create reporting neither says
-            # nothing a buyer can use, and fails.
-            result_stdout=(
-                'ok: [kvm1] => {\n    "vm_creation_data": '
-                '{"action": "create", "vm_name": "e2e-shapes-vm", "tenant_user": "vmuser", '
-                '"external_ssh_port": "2222", "timestamp": "2030-01-01T00:00:01Z", '
-                '"tenant_ssh_key_path": "/tmp/e2e.key", "frp": {"enabled": false}, '
-                '"authentication": {"tenant": {"ssh_commands": '
-                '{"external": "ssh vmuser@localhost", '
-                '"internal": "ssh vmuser@10.0.0.1"}}}}\n}\n'
-            ),
-            fail_with=None,
+        rules = provisioning_test_client.vm_rules
+        delete_mock_rules_if_present(rules, CREATE_RULE_ID)
+        rules.add_rule(
+            MockRuleCreate(
+                rule_id=CREATE_RULE_ID,
+                match={"vm_action": "create", "host_id": E2E_LISTING_SHAPES_HOST},
+                pause_before_result=False,
+                # The create fact the VM playbook prints, with the forwarded port
+                # and the time access became ready: a create reporting neither
+                # says nothing a buyer can use, and fails.
+                result_stdout=(
+                    'ok: [kvm1] => {\n    "vm_creation_data": '
+                    '{"action": "create", "vm_name": "e2e-shapes-vm", "tenant_user": "vmuser", '
+                    '"external_ssh_port": "2222", "timestamp": "2030-01-01T00:00:01Z", '
+                    '"tenant_ssh_key_path": "/tmp/e2e.key", "frp": {"enabled": false}, '
+                    '"authentication": {"tenant": {"ssh_commands": '
+                    '{"external": "ssh vmuser@localhost", '
+                    '"internal": "ssh vmuser@10.0.0.1"}}}}\n}\n'
+                ),
+            )
         )
         shape_state.provisioning_armed = True
 

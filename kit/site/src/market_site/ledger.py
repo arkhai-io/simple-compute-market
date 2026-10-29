@@ -49,10 +49,8 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping, Optional, Protocol, Sequence
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
 from market_resource_pools import (
-    DEFAULT_POOL_ID,
     HostRequirement,
     ResourcePool,
     pool_needs_host,
@@ -75,7 +73,6 @@ ALLOCATION_MODE_ATTR = "allocation_mode"
 ALLOCATION_MODE_EXCLUSIVE = "exclusive"
 ALLOCATION_MODE_SHAREABLE = "shareable"
 PHYSICAL_HOST_ID_ATTR = "physical_host_id"
-VM_OFFERING_MODE = "vm"
 OFFERING_MODE_CLAIM_KEY = "offering_mode"
 
 
@@ -92,6 +89,20 @@ def _executor_ref_for_resource(resource: CapacityBucket) -> dict[str, Any] | Non
     they cannot drift from each other.
     """
     return {"host_id": resource.host_id} if resource.host_id else None
+
+
+def _log_poolless_declaration(resource: CapacityBucket, effect: str) -> None:
+    """Report a stored declaration that records no pool.
+
+    Every write names a pool, so such a row is malformed. It is read as
+    belonging to no pool, never to one a name or a default would supply: that
+    would admit claims against a pool nobody placed the resource in.
+    """
+    logger.warning(
+        "capacity declaration %r records no pool and is %s",
+        resource.backing_resource_id,
+        effect,
+    )
 
 
 class CapacityConflictError(Exception):
@@ -490,7 +501,12 @@ def dict_resource_satisfies_claim(
     ``("units", "gpu_count")`` in ``container.py``) for the legacy
     non-dimensional claim fallback to agree with admission; the default
     here is the module-wide default, not any particular domain's.
+
+    A row recording no pool matches no claim, since admission admits nothing
+    against it.
     """
+    if not row.get("pool_id"):
+        return False
     if not claim:
         return True
     resource_kind, required_attributes = _split_claim_requirement(
@@ -504,7 +520,7 @@ def dict_resource_satisfies_claim(
     )
     resource = resource_feasibility_view(
         resource_id=str(row.get("resource_id") or ""),
-        pool_id=row.get("pool_id") or row.get("resource_id"),
+        pool_id=row.get("pool_id"),
         resource_kind=row.get("resource_type") or "",
         available=row.get("available") or {},
         attributes=row.get("attributes") or {},
@@ -585,7 +601,6 @@ class CapacityReleaseGuard(Protocol):
 _BEGIN_RELEASING_FROM = frozenset(
     {
         ReservationState.reserved.value,
-        ReservationState.provisioning.value,
         ReservationState.leased.value,
         ReservationState.release_failed.value,
     }
@@ -593,7 +608,6 @@ _BEGIN_RELEASING_FROM = frozenset(
 _RECORD_RELEASE_FAILED_FROM = frozenset(
     {
         ReservationState.reserved.value,
-        ReservationState.provisioning.value,
         ReservationState.leased.value,
         ReservationState.releasing.value,
     }
@@ -866,10 +880,9 @@ class CapacityLedgerService:
                     f"host {declaration.host_id!r} already carries resource "
                     f"{holder.backing_resource_id!r}"
                 )
-        if (
-            bucket is not None
-            and (bucket.pool_id or DEFAULT_POOL_ID) != declaration.pool_id
-        ):
+        # A stored row recording no pool belongs to none, so naming any pool
+        # for it is a move.
+        if bucket is not None and bucket.pool_id != declaration.pool_id:
             self._refuse_reassignment_under_obligation(db, bucket, declaration.pool_id)
         is_new = bucket is None
         if bucket is None:
@@ -930,7 +943,7 @@ class CapacityLedgerService:
         rule it would now fail."""
         return CapacityDeclaration.model_construct(
             resource_id=bucket.backing_resource_id,
-            pool_id=bucket.pool_id or DEFAULT_POOL_ID,
+            pool_id=bucket.pool_id,
             resource_type=bucket.resource_type,
             resource_subtype=bucket.resource_subtype,
             host_id=bucket.host_id,
@@ -997,10 +1010,12 @@ class CapacityLedgerService:
         )
         live = debited or assigned
         if live is not None:
+            origin = (
+                f"pool {bucket.pool_id!r}" if bucket.pool_id else "no recorded pool"
+            )
             raise CapacityConflictError(
-                f"resource {bucket.backing_resource_id!r} cannot move from pool "
-                f"{bucket.pool_id or DEFAULT_POOL_ID!r} to {new_pool_id!r} while "
-                f"reservation {live[0]!r} holds it"
+                f"resource {bucket.backing_resource_id!r} cannot move from "
+                f"{origin} to {new_pool_id!r} while reservation {live[0]!r} holds it"
             )
 
     def list_resources(self) -> list[dict[str, Any]]:
@@ -1211,6 +1226,11 @@ class CapacityLedgerService:
             raise CapacityConflictError(
                 f"settlement resource {settlement_resource_id!r} is unavailable"
             )
+        if not destination.pool_id:
+            _log_poolless_declaration(destination, "not assigned for settlement")
+            raise CapacityConflictError(
+                f"settlement resource {settlement_resource_id!r} records no pool"
+            )
         requested_mode = reservation.offering_mode
         if not requested_mode:
             raise CapacityConflictError(
@@ -1219,15 +1239,12 @@ class CapacityLedgerService:
         if not self._pool_declares_mode(db, destination, requested_mode):
             raise UndeclaredOfferingModeError(
                 f"offering mode {requested_mode!r} is not declared by pool "
-                f"{destination.pool_id or DEFAULT_POOL_ID!r}"
+                f"{destination.pool_id!r}"
             )
-        if not destination.host_id and self._pool_needs_host(
-            db, destination.pool_id or DEFAULT_POOL_ID
-        ):
+        if not destination.host_id and self._pool_needs_host(db, destination.pool_id):
             raise CapacityConflictError(
                 f"settlement resource {settlement_resource_id!r} names no host, "
-                f"and pool {destination.pool_id or DEFAULT_POOL_ID!r} delivers "
-                "through one"
+                f"and pool {destination.pool_id!r} delivers through one"
             )
         if (
             self._backing_resource_id(db, reservation.capacity_reservation_id)
@@ -1314,7 +1331,7 @@ class CapacityLedgerService:
         resource = self._bucket_by_backing_resource(db, resource_id)
         if resource is None:
             return None
-        return resource.pool_id or DEFAULT_POOL_ID
+        return resource.pool_id or None
 
     def reservation_payload_in_session(
         self, reservation: CapacityReservation
@@ -1332,7 +1349,8 @@ class CapacityLedgerService:
     def iter_scheduling_candidates_in_session(
         self, db: Session, *, resource_kind: str, exclude_reservation_id: str
     ) -> list[ResourceFeasibilityView]:
-        """Every enabled, ``resource_kind``-matching bucket as a canonical view.
+        """Every enabled, ``resource_kind``-matching bucket recording a pool,
+        as a canonical view.
 
         Session-scoped generalization of ``_find_candidate`` for scheduling:
         ``_find_candidate`` returns the first bucket that satisfies a claim,
@@ -1373,6 +1391,9 @@ class CapacityLedgerService:
         )
         views: list[ResourceFeasibilityView] = []
         for resource in rows:
+            if not resource.pool_id:
+                _log_poolless_declaration(resource, "not a scheduling candidate")
+                continue
             if self._has_physical_host_conflict(
                 db,
                 resource,
@@ -1486,18 +1507,24 @@ class CapacityLedgerService:
         *,
         capacity_reservation_id: str | None = None,
         deal_ref: Mapping[str, Any] | None = None,
-        state: str = ReservationState.released.value,
+        forced: bool = False,
         failure_reason: str | None = None,
         failure_message: str | None = None,
     ) -> dict[str, Any] | None:
         """Return a held reservation's capacity to the pool, if the guard permits.
 
-        Returns ``None`` when no reservation matches, when it is not held, and
-        when the release guard refuses; a refusal changes nothing. A release to
-        ``force_released`` is an operator's override and is not guarded, and it
-        alone frees an ``unmanaged`` reservation, which an operator has taken
-        over from the lease lifecycle.
+        The reservation ends ``released``, or ``force_released`` when
+        ``forced``: an operator's override, which is not guarded and alone frees
+        an ``unmanaged`` reservation, one an operator has taken over from the
+        lease lifecycle. Returns ``None`` when no reservation matches, when it
+        is not held, and when the release guard refuses; a refusal changes
+        nothing.
         """
+        state = (
+            ReservationState.force_released.value
+            if forced
+            else ReservationState.released.value
+        )
         escrow_uid = dict(deal_ref or {}).get("escrow_uid")
         with self.serialized(), self._session_factory() as db:
             reservation = self._find_reservation(
@@ -1519,7 +1546,6 @@ class CapacityLedgerService:
                 return self._reservation_payload(reservation)
             if reservation.state not in HELD_RESERVATION_STATES:
                 return None
-            forced = state == ReservationState.force_released.value
             if not forced and reservation.state == ReservationState.unmanaged.value:
                 return None
             # A forced release is the operator's recorded override after
@@ -1584,12 +1610,12 @@ class CapacityLedgerService:
         held/leased reservation, or if the new shape has no eligible
         candidate.
 
-        No caller uses this method yet. When one is added: resize before
+        No production code calls this method. A caller must resize before
         ``schedule_resource()`` runs for the affected reservation, not
         after. VM fulfillment-request shape derivation
-        (``AnsibleFulfillmentProvider.prepare_create``) trusts the
-        reservation's committed ``dimensions`` as authoritative precisely
-        because nothing currently changes them once a hold exists
+        (``VmFulfillmentPlan.prepare_create``) trusts the reservation's
+        committed ``dimensions`` as authoritative precisely because nothing
+        changes them once a hold exists
         (``compute_capacity_claim_from_order`` computes the claim from the
         terminal, post-negotiation order at acceptance time, so the initial
         reservation and any later shape-derivation always agree by
@@ -1778,8 +1804,8 @@ class CapacityLedgerService:
 
         A conditional transition, so a lease lifecycle acting on a stale read
         cannot undo what an operator or a completed release recorded: allowed
-        from ``reserved``, ``provisioning``, ``leased``, and ``release_failed``
-        (a retry); a reservation already ``releasing`` under the same handle is
+        from ``reserved``, ``leased``, and ``release_failed`` (a retry); a
+        reservation already ``releasing`` under the same handle is
         returned unchanged. ``None`` means the transition was refused (an
         ``unmanaged`` or released reservation, or one releasing under another
         handle) and nothing was written; the caller re-reads it.
@@ -1819,8 +1845,8 @@ class CapacityLedgerService:
     ) -> dict[str, Any] | None:
         """Record that a release failed, if the reservation is still releasable.
 
-        A conditional transition: allowed from ``reserved``, ``provisioning``,
-        ``leased``, and ``releasing``; a ``releasing`` reservation must still be
+        A conditional transition: allowed from ``reserved``, ``leased``, and
+        ``releasing``; a ``releasing`` reservation must still be
         releasing under ``release_job_id`` when one is given. A stale failure
         cannot reach a reservation an operator took over or force-released, nor
         one already released. ``None`` means refused, and nothing was written.
@@ -1889,7 +1915,6 @@ class CapacityLedgerService:
         terminal = {
             ReservationState.released.value,
             ReservationState.force_released.value,
-            ReservationState.provisioning_failed.value,
         }
         if reservation is None or reservation.state in terminal:
             return None
@@ -1921,79 +1946,12 @@ class CapacityLedgerService:
         terminal = {
             ReservationState.released.value,
             ReservationState.force_released.value,
-            ReservationState.provisioning_failed.value,
         }
         if reservation is None or reservation.state in terminal:
             return None
         if reservation.executor_target is None:
             self._sync_executor_fields(reservation, executor_target=executor_target)
         return self._reservation_payload(reservation)
-
-    def find_active_lease_by_vm_target(
-        self, host_id: str, vm_target: str
-    ) -> dict[str, Any] | None:
-        """Return the first active (held) lease reservation for a VM, or None.
-
-        Used by the ``POST /vms/{vm_name}/remove`` endpoint to cancel any
-        watchdog-managed lease before submitting the explicit removal job,
-        avoiding a double-fire when the lease would otherwise expire later.
-
-        ``host_id`` is matched via ``executor_ref``'s JSON payload and
-        ``vm_target`` via ``executor_target`` — neither
-        ``CapacityReservation`` column exists anymore (see
-        ``docs/development/ARCHITECTURE.md``, "Shared vocabulary and
-        identities"); the `executor_ref` lookup is the first ORM-level
-        use of SQLite's JSON1 extension in this module, though the
-        extension itself is already relied on at the migration layer
-        (``compute_provisioning_service/db/migrations.py``'s ``pool_id``
-        backfill).
-        """
-        with self.serialized(), self._session_factory() as db:
-            reservation = (
-                db.query(CapacityReservation)
-                .filter(
-                    func.json_extract(CapacityReservation.executor_ref, "$.host_id")
-                    == host_id,
-                    CapacityReservation.executor_target == vm_target,
-                    CapacityReservation.state.in_(HELD_RESERVATION_STATES),
-                    CapacityReservation.lease_end_utc.isnot(None),
-                )
-                .order_by(CapacityReservation.created_at.desc())
-                .first()
-            )
-            return self._reservation_payload(reservation) if reservation else None
-
-    def update_reservation_state(
-        self,
-        capacity_reservation_id: str,
-        *,
-        state: str,
-        failure_reason: str | None = None,
-        failure_message: str | None = None,
-        release_job_id: str | None = None,
-    ) -> dict[str, Any] | None:
-        """Update a site reservation state without emitting capacity events.
-
-        This is a generic state mutation primitive for lifecycle services.
-        Releasing, release_failed, and unmanaged still consume capacity; use
-        ``release`` when capacity should become available and an event should be
-        published.
-        """
-        with self.serialized(), self._session_factory() as db:
-            reservation = db.get(CapacityReservation, capacity_reservation_id)
-            if reservation is None:
-                return None
-            reservation.state = str(state)
-            if failure_reason is not None:
-                reservation.failure_reason = failure_reason
-            if failure_message is not None:
-                reservation.failure_message = failure_message
-            self._set_release_job_id(
-                reservation,
-                release_job_id=release_job_id,
-            )
-            db.commit()
-            return self._reservation_payload(reservation)
 
     # ------------------------------------------------------------------
     # Event feed
@@ -2248,7 +2206,7 @@ class CapacityLedgerService:
         resource: CapacityBucket,
         requested_mode: str,
     ) -> bool:
-        pool = db.get(ResourcePool, resource.pool_id or DEFAULT_POOL_ID)
+        pool = db.get(ResourcePool, resource.pool_id)
         return (
             pool is not None
             and pool.enabled
@@ -2288,6 +2246,10 @@ class CapacityLedgerService:
         pool_mode_decisions: dict[str, bool] = {}
         pool_host_decisions: dict[str, bool] = {}
         for resource in rows:
+            pool_id = resource.pool_id
+            if not pool_id:
+                _log_poolless_declaration(resource, "not admitted against")
+                continue
             attrs = resource.attributes or {}
             if any(
                 not isinstance(attrs.get(key), str) or not attrs[key].strip()
@@ -2304,7 +2266,6 @@ class CapacityLedgerService:
                 required_attributes=required_attributes,
             ):
                 continue
-            pool_id = resource.pool_id or DEFAULT_POOL_ID
             if requested_mode is not None:
                 if pool_id not in pool_mode_decisions:
                     pool_mode_decisions[pool_id] = self._pool_declares_mode(
@@ -2371,13 +2332,10 @@ class CapacityLedgerService:
         ``escrow_uid`` are absent) finds the most recently created held
         reservation currently debited against the named resource's bucket —
         "which reservation currently holds this physical resource" rather
-        than "the reservation with this ID". No current caller reaches this
-        branch: it exists for a future caller that has a resource identity
-        but not a reservation identity (e.g. admin/recovery tooling, or a
-        not-yet-built direct-resource-reservation path). Ordinary
-        reservations, pool-scoped or resource-pinned, always carry their
-        own ``capacity_reservation_id`` by commit time and use that branch
-        instead.
+        than "the reservation with this ID". No production caller reaches
+        this branch: ordinary reservations, pool-scoped or resource-pinned,
+        always carry their own ``capacity_reservation_id`` by commit time
+        and use that branch instead.
         """
         if capacity_reservation_id:
             return db.get(CapacityReservation, capacity_reservation_id)
@@ -2588,11 +2546,6 @@ class CapacityLedgerService:
             "release_job_id": reservation.release_job_id,
             "executor_ref": dict(reservation.executor_ref or {}),
             "host_id": (reservation.executor_ref or {}).get("host_id"),
-            "vm_target": (
-                reservation.executor_target
-                if reservation.offering_mode == VM_OFFERING_MODE
-                else None
-            ),
             "lease_start_utc": reservation.lease_start_utc,
             "lease_end_utc": reservation.lease_end_utc,
             "create_job_id": reservation.create_job_id,

@@ -20,9 +20,13 @@ from arkhai_vms_negotiation.policies import (
     proposal_uses_scalar_amount,
 )
 from market_policy.listing_source import ListingSourceVerdict
-from market_policy.scalar_policies import selected_settlement_artifact
+from market_policy.scalar_policies import (
+    pinned_proposal,
+    selected_settlement_artifact,
+)
 from market_policy.negotiation_middleware import (
     NegotiationContext,
+    NegotiationDecision,
     NegotiationMiddleware,
     NegotiationRound,
     load_negotiation_chain,
@@ -32,8 +36,6 @@ from market_policy.negotiation_middleware import (
 )
 
 logger = logging.getLogger(__name__)
-
-_NO_PROPOSAL = object()
 
 
 # The result carrier and hook protocol are domain-invariant and live in
@@ -135,11 +137,13 @@ _RL_POLICY_NAMES = {"rl", "erc20_rl", "native_token_rl", "erc1155_rl"}
 
 
 def _prepend_default_guards(policy_names: list[str]) -> list[str]:
-    out = list(policy_names)
-    for guard in reversed(_DEFAULT_GUARDS):
-        if guard not in out:
-            out.insert(0, guard)
-    return out
+    # The default guards run first, in their own order, wherever an operator
+    # names one: an opening selecting nothing the listing offers is priced at
+    # zero, and only these guards refuse it before a decider could accept it.
+    return [
+        *_DEFAULT_GUARDS,
+        *(name for name in policy_names if name not in _DEFAULT_GUARDS),
+    ]
 
 
 def _policy_names_need_rl(policy_names: list[str]) -> bool:
@@ -153,10 +157,15 @@ def _policy_map_needs_rl(policies_by_kind: dict[str, list[str]]) -> bool:
 def _load_storefront_chain(
     *,
     negotiation_config: Any = None,
-    chains: Mapping[str, Any] | None = None,
+    chain_config_paths: Mapping[str, str | None] | None = None,
     extra_policy_paths: Iterable[str | Path] | None = None,
 ) -> list[NegotiationMiddleware]:
-    """Resolve the VM storefront's configured negotiation middleware chain."""
+    """Resolve the VM storefront's configured negotiation middleware chain.
+
+    ``chain_config_paths`` maps each configured chain to its Alkahest address
+    book, ``None`` for the SDK's built-in addresses, as the storefront resolved
+    it; the escrow-kind dispatch reads each escrow's kind through it.
+    """
     _discover_file_policies(extra_policy_paths=extra_policy_paths)
 
     negotiation_cfg = negotiation_config
@@ -165,14 +174,10 @@ def _load_storefront_chain(
     if policies_by_kind:
         if _policy_map_needs_rl(policies_by_kind):
             _maybe_register_rl_middleware()
-        chain_config_paths = {
-            name: chain.alkahest_address_config_path
-            for name, chain in (chains or {}).items()
-        }
         return load_negotiation_chain(_DEFAULT_GUARDS) + [
             make_escrow_kind_dispatch_middleware(
                 policies_by_kind,
-                chain_config_paths=chain_config_paths,
+                chain_config_paths=dict(chain_config_paths or {}),
             )
         ]
 
@@ -197,22 +202,20 @@ def _direction_from_strategy_label(strategy: str) -> str:
     raise ValueError(f"Unknown order strategy {strategy!r}")
 
 
-def _selected_option(listing: Any, proposal: Any) -> Any:
-    """The accepted escrow or settlement option ``proposal`` selects.
+def _listing_dict(listing: Any) -> dict[str, Any]:
+    return listing.model_dump(mode="json") if hasattr(listing, "model_dump") else dict(listing)
 
-    ``_NO_PROPOSAL`` when there is no buyer proposal to read, or when it selects
-    nothing the listing offers -- an escrow proposal naming no escrow address, or
-    a selection the round's guards will refuse. The reference amount then falls
-    back to the listing's first accepted escrow, so a proposal the guards are
-    about to refuse is refused for its own reason rather than for want of a floor.
+
+def _selected_option(listing: Any, proposal: Any) -> Any:
+    """The accepted escrow or settlement option ``proposal`` selects, or None.
+
+    None when there is no buyer proposal to read, or when it selects nothing the
+    listing offers: an escrow proposal naming no escrow contract or one the
+    listing does not accept, or a selection matching no option.
     """
     if not isinstance(proposal, Mapping):
-        return _NO_PROPOSAL
-    listing_dict = (
-        listing.model_dump(mode="json") if hasattr(listing, "model_dump") else dict(listing)
-    )
-    selected = selected_settlement_artifact(listing_dict, proposal)
-    return _NO_PROPOSAL if selected is None else selected
+        return None
+    return selected_settlement_artifact(_listing_dict(listing), proposal)
 
 
 def _seller_reference_amount(
@@ -230,14 +233,19 @@ def _seller_reference_amount(
     rate in an 18-decimal token over a long duration exceeds what a
     fixed-precision decimal context holds, and rounding there would silently
     change the amount the seller negotiates from.
+
+    ``proposal`` is the buyer's pinned opening, the one an acceptance settles.
+    One selecting nothing the listing offers is priced from no entry and has
+    reference amount zero, never another entry's rate or the floor, and the
+    guards the default round hook composes into every chain refuse it for its
+    own reason at the opening: the escrow-shape guard an escrow the listing does
+    not accept, the opening guard a selection matching no option.
     """
     selected = _selected_option(listing, proposal)
-    per_hour = (
-        extract_initial_price_from_order(listing, default_min_price=default_min_price)
-        if selected is _NO_PROPOSAL
-        else extract_initial_price_from_order(
-            listing, default_min_price=default_min_price, selected_option=selected
-        )
+    if selected is None:
+        return 0
+    per_hour = extract_initial_price_from_order(
+        listing, default_min_price=default_min_price, selected_option=selected
     )
     seconds = int(duration_seconds) if duration_seconds is not None else 3600
     return math.floor(Fraction(per_hour) * seconds / 3600)
@@ -251,7 +259,7 @@ async def _run_default_seller_round_policy(
     strategy_label: str | None = None,
     listing_source: ListingSourceVerdict | None = None,
     negotiation_config: Any = None,
-    chains: Mapping[str, Any] | None = None,
+    chain_config_paths: Mapping[str, str | None] | None = None,
     extra_policy_paths: Iterable[str | Path] | None = None,
     default_min_price: Any = None,
 ) -> SellerRoundResult:
@@ -274,24 +282,51 @@ async def _run_default_seller_round_policy(
         if item.sender == "them":
             their_proposal = item.proposal
             break
+    # What is priced, and whether it is bargained by amount, is the pinned
+    # opening's: an acceptance settles that opening whatever a counter names.
+    pinned = pinned_proposal(history)
+    direction = _direction_from_strategy_label(strategy_label)
+    if (
+        pinned is not None
+        and any(item.sender == "us" for item in history)
+        and _selected_option(listing, pinned) is None
+    ):
+        # A continuation is resolved against the listing as it now stands, and
+        # a publication cycle that repriced the opening's option changed its
+        # identity. Pricing it from no option would hand a decider a zero
+        # reference, so the round is refused naming why; the opening guards
+        # refuse an opening selecting nothing for their own reasons.
+        return SellerRoundResult(
+            our_amount=0,
+            strategy_label=strategy_label,
+            direction=direction,
+            chain_label="pinned_option_withdrawn",
+            decision=NegotiationDecision(
+                action="reject",
+                reason=(
+                    "pinned_option_withdrawn: the listing no longer offers the "
+                    "option the opening selected"
+                ),
+            ),
+            intermediate={"uses_scalar_amount": True},
+        )
     uses_scalar_amount = proposal_uses_scalar_amount(
         listing_dict if isinstance(listing_dict, dict) else {},
-        their_proposal,
+        pinned,
     )
     reference_amount = (
         _seller_reference_amount(
             listing,
             requested_duration_seconds,
             default_min_price=default_min_price,
-            proposal=their_proposal,
+            proposal=pinned,
         )
         if uses_scalar_amount else 0
     )
-    direction = _direction_from_strategy_label(strategy_label)
 
     chain = _load_storefront_chain(
         negotiation_config=negotiation_config,
-        chains=chains,
+        chain_config_paths=chain_config_paths,
         extra_policy_paths=extra_policy_paths,
     )
     context = NegotiationContext(
@@ -326,7 +361,7 @@ async def _run_default_seller_round_policy(
 @dataclass
 class _DefaultSellerRoundHook:
     negotiation_config: Any = None
-    chains: Mapping[str, Any] | None = None
+    chain_config_paths: Mapping[str, str | None] | None = None
     extra_policy_paths: Iterable[str | Path] | None = None
     default_min_price: Any = None
 
@@ -346,7 +381,7 @@ class _DefaultSellerRoundHook:
             strategy_label=strategy_label,
             listing_source=listing_source,
             negotiation_config=self.negotiation_config,
-            chains=self.chains,
+            chain_config_paths=self.chain_config_paths,
             extra_policy_paths=self.extra_policy_paths,
             default_min_price=self.default_min_price,
         )
@@ -355,7 +390,7 @@ class _DefaultSellerRoundHook:
 def default_seller_round_hook(
     *,
     negotiation_config: Any = None,
-    chains: Mapping[str, Any] | None = None,
+    chain_config_paths: Mapping[str, str | None] | None = None,
     extra_policy_paths: Iterable[str | Path] | None = None,
     default_min_price: Any = None,
 ) -> SellerRoundHook:
@@ -363,10 +398,12 @@ def default_seller_round_hook(
 
     Each call takes the round's ``listing_source``, the negotiation runtime's
     check of the listing against its own source, which the inventory guard reads.
+    ``chain_config_paths`` is each chain's Alkahest address book as the
+    storefront resolved it.
     """
     return _DefaultSellerRoundHook(
         negotiation_config=negotiation_config,
-        chains=chains,
+        chain_config_paths=chain_config_paths,
         extra_policy_paths=extra_policy_paths,
         default_min_price=default_min_price,
     )

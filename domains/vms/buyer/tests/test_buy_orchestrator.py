@@ -36,10 +36,9 @@ from identity_helpers import (
     signed_response_headers,
     with_accepted_agreement,
 )
-from market_core.schemas import (
-    EscrowProposal,
-    EscrowTerms,
-)
+from market_alkahest.plans import escrow_terms_to_settlement_obligation
+from market_alkahest.schemas import EscrowTerms
+from market_core.schemas import EscrowProposal
 
 from arkhai_vms_buyer.buy_orchestrator import (
     BuyConfig,
@@ -164,6 +163,18 @@ def _stub_escrow_terms(seller_wallet, agreed_amount, duration_seconds):
 
 def _build_escrow_terms_ok(proposal, listing, agreed_amount, duration_seconds):
     return [_stub_escrow_terms(_SELLER_WALLET, agreed_amount, duration_seconds)]
+
+
+def _accepted_echo(agreed_amount, duration_seconds=7200):
+    """The seller's accept-time echo, its plan committing to the escrow the
+    stubbed derivation builds for ``agreed_amount`` over ``duration_seconds``,
+    so the buyer's plan check passes."""
+    terms = _stub_escrow_terms(_SELLER_WALLET, agreed_amount, duration_seconds)
+    obligation = escrow_terms_to_settlement_obligation(terms.model_dump(mode="json"))
+    return {
+        **_ACCEPTED_ECHO,
+        "settlement_plan": {"obligations": [obligation.model_dump(mode="json")]},
+    }
 
 
 def _run_buy_with_legacy_hooks(
@@ -445,7 +456,7 @@ def test_happy_path_drives_to_ready():
             "negotiation_id": "neg-1",
             "action": "accept",
             "proposal": {"fields": {"amount": 50}},
-            **_ACCEPTED_ECHO,
+            **_accepted_echo(50),
         },
         # 3. POST /settle/{uid}
         {"escrow_uid": "0xescrow", "status": "provisioning"},
@@ -550,7 +561,7 @@ def test_first_match_exits_second_agrees():
             "negotiation_id": "neg-2",
             "action": "accept",
             "proposal": {"fields": {"amount": 50}},
-            **_ACCEPTED_ECHO,
+            **_accepted_echo(50),
         },
         # POST /settle/{uid}
         {"escrow_uid": "0xescrow", "status": "provisioning"},
@@ -586,7 +597,7 @@ def test_escrow_hook_failure_returns_exited_with_reason():
             "negotiation_id": "neg-1",
             "action": "accept",
             "proposal": {"fields": {"amount": 50}},
-            **_ACCEPTED_ECHO,
+            **_accepted_echo(50),
         },
     ]
 
@@ -619,7 +630,7 @@ def test_provisioning_failed_returns_failed_status():
             "negotiation_id": "neg-1",
             "action": "accept",
             "proposal": {"fields": {"amount": 50}},
-            **_ACCEPTED_ECHO,
+            **_accepted_echo(50),
         },
         {"escrow_uid": "0xescrow", "status": "provisioning"},
         {"status": "failed", "reason": "no available VM"},
@@ -657,7 +668,7 @@ def test_settlement_timeout_returns_timeout_status():
             "negotiation_id": "neg-1",
             "action": "accept",
             "proposal": {"fields": {"amount": 50}},
-            **_ACCEPTED_ECHO,
+            **_accepted_echo(50),
         },
         {"escrow_uid": "0xescrow", "status": "provisioning"},
     ] + [{"status": "provisioning"}] * 50  # never terminal

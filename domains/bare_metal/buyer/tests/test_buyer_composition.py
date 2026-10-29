@@ -18,8 +18,10 @@ from arkhai_bare_metal_buyer.cli import (
 from arkhai_bare_metal_buyer.config import load_bare_metal_buyer_config
 from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
 from arkhai_bare_metal_buyer.plugin import domain
+from core_buyer.cli import build_app
 from core_buyer.introductions import IntroductionPayloadsDeleted
 from market_core import DomainCapability
+from typer.testing import CliRunner
 from market_identity import IdentityScheme, TrustedIdentitySet, create_signer
 from pydantic import BaseModel
 from registry_client import FilterSpecResponse
@@ -48,6 +50,42 @@ default_duration_seconds = 7200
     )
     with pytest.raises(ValueError):
         load_bare_metal_buyer_config(path)
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        pytest.param("livemode = true\n", True, id="declared live"),
+        pytest.param("", False, id="undeclared"),
+    ],
+)
+def test_the_payments_mode_in_the_file_reaches_the_loaded_config(
+    tmp_path: Path, line: str, expected: bool
+) -> None:
+    # Development fixtures: a placeholder service identity and accounts, never
+    # for use on a public network.
+    path = tmp_path / "buyer.toml"
+    path.write_text(
+        f"""
+[bare_metal]
+registry_url = "https://registry.example"
+registry_authority = "registry-prod"
+registry_principals = [{{scheme = "ed25519", identifier = "{PRINCIPAL}"}}]
+payer_account = "11111111-1111-4111-8111-111111111111"
+
+[bare_metal.arkhai_payments]
+enabled = true
+service_url = "http://127.0.0.1:9"
+service_identity = {{scheme = "ed25519", identifier = "{PRINCIPAL}"}}
+fee_bps = 250
+dispute_authority = "33333333-3333-4333-8333-333333333333"
+development_auth = true
+{line}""".strip(),
+        encoding="utf-8",
+    )
+    config = load_bare_metal_buyer_config(path)
+    assert config.arkhai_payments is not None
+    assert config.arkhai_payments.livemode is expected
 
 
 def test_transient_action_material_is_not_rendered() -> None:
@@ -155,6 +193,28 @@ def test_introduction_commands_are_registered() -> None:
     assert commands == {"introduce", "introduction"}
 
 
+def test_settlement_commands_sit_under_the_bare_metal_command() -> None:
+    """Spec scenario "Bare metal's settlement commands are namespaced": the
+    plugin registers one root command, so it composes beside a domain whose
+    `settlement` group is at the root, as VM's is."""
+    root = typer.Typer()
+    cli.register_commands(root)
+
+    assert [group.name for group in root.registered_groups] == ["bare-metal"]
+    assert root.registered_commands == []
+    (settlement,) = [
+        group for group in bare_metal_app.registered_groups if group.name == "settlement"
+    ]
+    assert settlement.typer_instance is settlement_app
+
+    app = build_app(domains=[domain])
+    runner = CliRunner()
+    namespaced = runner.invoke(app, ["bare-metal", "settlement", "contact", "--help"])
+    assert namespaced.exit_code == 0, namespaced.output
+    assert "introduce" in namespaced.output
+    assert runner.invoke(app, ["settlement", "contact", "--help"]).exit_code != 0
+
+
 def test_the_context_builds_sinks_before_recovering_the_deal(monkeypatch) -> None:
     """A misconfigured sink is refused before anything is revealed."""
 
@@ -164,7 +224,6 @@ def test_the_context_builds_sinks_before_recovering_the_deal(monkeypatch) -> Non
         settlement_plan={"obligations": []},
         seller_url="https://seller.invalid",
         buyer_principal=None,
-        seller_principals=None,
     )
     identity = SimpleNamespace(signer=object(), profile_id="profile-1")
 

@@ -67,7 +67,6 @@ def stub_alkahest_address(monkeypatch):
                 name="anvil",
                 rpc_url="http://localhost:8545",
                 chain_id=31337,
-                alkahest_address_config_path=None,
             ),
         },
         raising=False,

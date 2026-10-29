@@ -33,6 +33,11 @@ def run_cost(results: Sequence[dict[str, Any]], before: float | None) -> Entry:
     so they are summed over its results — a background task finishing can wake
     the session for a second turn with its own result. `session_usd` keeps the
     running total for the session's next run to difference against.
+
+    A running total only grows, so a last total below `before` is not the
+    session's: a resume that found no conversation reports a fresh session's
+    zero. The run records no dollars and no total, and its line keeps the total
+    it found (`measured_cost`).
     """
     usage = [r["usage"] for r in results if isinstance(r.get("usage"), dict)]
 
@@ -47,7 +52,7 @@ def run_cost(results: Sequence[dict[str, Any]], before: float | None) -> Entry:
         "cache_write": total("cache_creation_input_tokens")}
     totals = [r["total_cost_usd"] for r in results
               if isinstance(r.get("total_cost_usd"), (int, float))]
-    if totals:
+    if totals and totals[-1] >= (before or 0.0):
         cost["usd"] = round(totals[-1] - (before or 0.0), 6)
         cost["session_usd"] = totals[-1]
     return cost
@@ -150,17 +155,22 @@ def measured_cost(results: Sequence[dict[str, Any]], first_usage: dict[str, Any]
     `session_usd`, the session's running total, and `entries`, the turns its
     conversation file held when this run ended. A run that reached no model leaves
     the running total as it found it, when its conversation file shows it added
-    nothing, so the next run is not taken for one after a crash.
+    nothing, so the next run is not taken for one after a crash; so does a run
+    whose reported total fell below it, which was not the session's.
     """
     cost = run_cost(results, before.get("usd"))
     if before.get("partial") and "usd" in cost:
         cost["usd_partial"] = True
     if conversation is not None:
         cost["entries"] = conversation.entries
-    if ("session_usd" not in cost and isinstance(before.get("usd"), (int, float))
-            and not before.get("partial") and conversation is not None
-            and conversation.entries == before.get("entries")):
-        cost["session_usd"] = before["usd"]
+    found = before.get("usd")
+    fell = isinstance(found, (int, float)) and any(
+        isinstance(r.get("total_cost_usd"), (int, float)) for r in results
+        ) and "usd" not in cost
+    if "session_usd" not in cost and isinstance(found, (int, float)) and (
+            fell or (not before.get("partial") and conversation is not None
+                     and conversation.entries == before.get("entries"))):
+        cost["session_usd"] = found
     fields: Entry = {"cost": cost}
     if before:
         if before.get("turn") is not None:
