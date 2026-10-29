@@ -55,10 +55,10 @@ continuation is a separate, dependent change.
   scheduled locally.
 - Setup and rate preset helpers are supplied to the terms change's publication
   adapters. A preset is a combination of parts and terms, not a runtime class.
-  Setup ends at activation through a qualified trigger linked to the rate
-  `start`; until that is qualified, setup-bearing presets refuse and a seller may
-  explicitly opt out. A lawful pre-activation stop returns setup in full with no
-  seller-fault attribution.
+  Setup is an ordinary `once` part owed by the buyer from approval, ending at the
+  later of the Agreement start and approval; a buyer's stop before or after
+  activation leaves it with the seller, and only the seller's self-penalty for
+  non-delivery returns it.
 - The hosted rate `authorize` hook for commit, dispatch, start and disclose
   consumes the foundation's versioned activation envelope; convergence composes it.
   Delivery authorization is pure. The separate post-activation `start_billing`

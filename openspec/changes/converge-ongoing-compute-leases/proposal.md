@@ -30,7 +30,8 @@ kept signed bytes even when the seller is dishonest or absent.
 - Earlier evidence becomes revision-bound dispute work through the dispute adapter's
   mapping and verified prior ruling effects, never a seller-direct stop or reverse and
   never local end-pricing arithmetic; the payment authority computes each stopper's
-  partial-period term, and setup ends at activation.
+  partial-period term, and setup is owed from approval and returns only on the
+  seller's non-delivery.
 - Operator recovery is stateless: a seller-authenticated evidence export and an
   immutable command envelope drive the injected adapters, with no offline second
   storefront database writer. The site-report ingestion and the buyer's stop, hint,

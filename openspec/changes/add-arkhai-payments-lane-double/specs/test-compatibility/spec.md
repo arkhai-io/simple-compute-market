@@ -184,7 +184,7 @@ The double MUST expose exceptional_end and its pinned mapping. Only payee reques
 - **WHEN** the seller half journals exceptional_end(at) with the end and files through the Agreement's dispute adapter and authority
 - **THEN** the seller sends no stop or reverse of its own and the qualifying payee self-penalty is mechanically ruled through mediation's own `{account, notice: PT0S, partialPeriod: chosen}` stop entry
 - **AND** it stops rate parts now returned, always returned for on-demand, reverses earnings since at and reverses unserved once share by time
-- **AND** setup's term ends at activation so all is reversed if undelivered and none once delivered
+- **AND** setup is owed from approval, so all of it is reversed if the seller never delivered and none once it has
 - **AND** then min(premature_stop_penalty, earned amounts still held) is reversed to payer across parts in mandate order; bond award stays reserved for hosted bonds
 - **AND** the authority records the dispute and owns the whole remedy, with no seller exceptional-end direct effects to reconcile
 

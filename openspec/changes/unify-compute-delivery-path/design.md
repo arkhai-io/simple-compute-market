@@ -260,8 +260,8 @@ parts now with `returned`, reverses their earnings since `at`, returns the unser
 share of once parts by time, then reverses `min(premature_stop_penalty, earned
 amounts still held)` to the payer across parts in mandate order; a bond award is
 reserved for hosted bonds. On-demand always uses `returned`: that is its contract.
-Setup's term ends at activation, so it returns wholly if undelivered and not at all
-once delivered. These are dispute-authority rules the foundation and mediation own,
+Setup is owed from approval, so it returns wholly if the seller never delivered and
+not at all once it has. These are dispute-authority rules the foundation and mediation own,
 never amounts or payment operations for delivery to implement. The package of stop,
 refunds and capped penalty needs one ruling; a partial seller-direct path would
 still need a dispute, and the authority records disputes so it can act on bad

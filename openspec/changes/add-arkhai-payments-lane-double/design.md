@@ -171,10 +171,10 @@ rate-part behavior owned by `spot-deals-through-arkhai-payments`:
   `maxHoldExtension` caps them (null means unbounded). Report the contract's
   `hold_not_extendable`, `extension_not_found` and `extension_closed` refusals.
 - Mixed setup `once` plus `rate` mandates are supported when the selected contract
-  supports them. Setup ends at activation/provisioning and pays out one dispute
-  window later, only through an immutable authority event/anchor defined by the
-  selected candidate; the authority does not observe compute activation itself.
-  Missing representability refuses setup support rather than inventing an end.
+  supports them. Setup is an ordinary `once` part ending at the later of the Agreement start
+  and approval and paying out one dispute window later; the authority never
+  observes compute activation, and the setup part needs no event the published
+  contract lacks.
   Published mode always follows its publication's actual earning/hold semantics.
   Started-period arithmetic follows the selected contract; per-part reversal uses
   the same pinned arithmetic, not storefront estimates.
@@ -243,8 +243,9 @@ authority identity. Knowing a transaction or case ref grants no permission.
   and mediation's request vocabulary and published mapping. Through mediation's own
   `{account, notice: PT0S, partialPeriod: chosen}` stop entry, the standard request
   stops rate parts now with returned (always returned for on-demand), reverses their
-  earnings since at, and reverses the unserved share of once parts by time. Setup's
-  term ends at activation: all is returned if undelivered, none once delivered. Then
+  earnings since at, and reverses the unserved share of once parts by time. Setup is
+  owed from approval: all of it is returned if the seller never delivered, none once
+  it has. Then
   reverse min(premature_stop_penalty, earned amounts still held) to the payer across
   parts in mandate order. This applies to spot emergency exits too, not entitled
   notice stops. A person applies the same cap in a buyer's unentitled-seller-end case.

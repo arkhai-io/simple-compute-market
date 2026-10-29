@@ -75,8 +75,6 @@ rate part's `start`, no activation-anchored end, no fallback. A `once` end has n
 rate `partialPeriod`. The buyer is told before approval that the setup charge is
 kept if they stop and returned only if the seller never delivers.
 
-through a case.
-
 | Preset | Parts | Entitlements |
 |---|---|---|
 | On-demand | setup `once` by default + time rate | payer `{notice_seconds: 0, settles_through: started_period}`; no seller stop entry |
@@ -141,7 +139,8 @@ interim revision these fields are absent and the vector-qualified fixed charged
 semantics apply, dispute stops included; chosen-entry treatment is unavailable.
 Only the dispute authority extends and lifts holds. Reverse permissions remain the
 payee's and the dispute authority's. Setup uses the foundation's `once` permissions
-and activation end, without rate start or period arithmetic. Parts are ordered
+and its own end, the later of the Agreement start and approval, without rate start
+or period arithmetic. Parts are ordered
 deterministically: setup when present, then rate.
 
 There is one notice per entitled party, the accepted entitlement's `notice_seconds`.
@@ -355,8 +354,8 @@ Arkhai mediation's only mechanical ruling is a payee-filed self-penalty request 
 least as strong as the published standard. Through its own rate stop entry
 `{account, notice: PT0S, partialPeriod: chosen}` the standard ruling stops rate
 parts now with `returned` (always `returned` for on-demand), reverses rate earnings
-since `at`, reverses the time-unserved share of `once` parts (all of setup if
-undelivered, none once delivered, because its term ends at activation), then
+since `at`, reverses the time-unserved share of `once` parts (all of setup if the seller
+never delivered, none once it has: setup is owed from approval), then
 reverses `min(premature_stop_penalty, earned amounts still held)` to the payer
 across parts in mandate order. Bond award stays reserved for hosted bonds, and an
 unsupported hosted bond is a publication refusal. These amounts and effects belong

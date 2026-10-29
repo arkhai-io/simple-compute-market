@@ -16,8 +16,9 @@ including `partialPeriod`; the setup part is an ordinary once part and needs no 
 Unsupported terms fail closed; once-only work does not wait for unsupported rate terms.
 Sections 9–15 are round 2 (seller servicing and domain wiring); section 16 is the closeout.
 
-Wire and persistence breaks, all forward-only (design.md, D5 and "Rollout"): options carrying
-`adjudication` or `early_termination` have new option IDs and Agreement bytes; every hosted
+Wire and persistence breaks, all forward-only (design.md, D5 and "Rollout"): the option's shape
+becomes `price`, `settlement` and `lifecycle` in 2.5, so every option ID and Agreement's bytes
+change, Alkahest and contact-exchange included, and every listing is republished; every hosted
 mandate hash and test vector changes in section 8; `[Settlement.arkhai_payments].dispute_authority`
 is rejected from section 3; `[Settlement.alkahest]`'s two release flags are migrated in section 4.
 
@@ -78,8 +79,8 @@ End-to-end: none; the check runs in CI only.
 
 Delivers `kit/deal-lifecycle-contracts` and `kit/deal-lifecycle`: wire models, the term codec
 and semantics, adapter protocols and tables, deal-level intents, and the evidence-store
-interface. Implements D1–D3, D5 (terms, codec, semantics table, entitlements as stop
-authorities), D6 (commands, outcomes, events, adapter families), D9 (evidence record shape) and
+interface. Implements D1–D3, D5 (the option's shape, terms, codec, semantics table, entitlements
+as stop authorities), D6 (commands, outcomes, events, adapter families), D9 (evidence record shape) and
 D10 (case payload, outcome shape, intents), and the deal-lifecycle requirements "Payment events
 are per part", "An outcome is a list of per-part effects", "Requests are intents or interface
 requests", "Lifecycle terms are part of the selected option", "The adjudication term names the
@@ -129,9 +130,20 @@ by dispute interface", "Evidence is keyed by negotiation" and "A dispute is one 
       when no adapter exists. Define buyer_end(at) as the buyer-filed and exceptional_end(at) as the seller-filed
       dispute intent, neither a payments event. Verify refusal of supplied at, receipt preservation on retry,
       Agreement-principal signature binding and exact report bytes. Gates 7, 10 and 13.
+- [ ] 2.5 Reshape core's `SettlementOption` to `{option_id, price: {asset, rates}, settlement:
+      {schema, ...}, lifecycle?}` per D5 ("The option's shape"), with the option ID the hash of
+      the canonical payload of `price`, `settlement` and `lifecycle`, the last omitted when
+      absent; move every builder (hosted, Alkahest, contact-exchange, API credits), the buyer's
+      selection mirror and the registry carrier onto it, with no reader of the old `mechanism`,
+      `asset`, `rates` or `params` keys left. Verify: each existing mechanism's deal
+      negotiates, commits and is fulfilled under the new shape in its unit and
+      application-integration suites; a client that does not recognize the shape refuses at
+      selection, before approval or escrow funding, never during fulfillment; `e2e_deal`,
+      `e2e_bare_metal_mock_deal` and `e2e_credits_payment_deal` pass on republished listings.
 
 Verification point: unit tests in both kits; `make check-packaging`; `make check-architecture`;
-`make test`. End-to-end: none; nothing composes the kits yet.
+`make test`. End-to-end: `e2e_deal`, `e2e_bare_metal_mock_deal` and `e2e_credits_payment_deal`
+on the republished listings of 2.5; nothing composes the kits yet.
 
 ## 3. Dispute authority configuration and registry recommendations
 
@@ -365,7 +377,7 @@ settle by negotiation". Files: `kit/arkhai-payments/schema/`, `src/market_arkhai
       kit-to-tooling dependency. Verify: `test_receipt_fixture.py` and the
       vector conformance tests pass against the new content hash.
 - [ ] 8.2 Derive each part's authorities and holds from the terms: prepaid `once` end at term end,
-      setup `once` end at activation (gated on contract expressibility), hold `{afterStop: dispute_window}`;
+      setup `once` end at the later of the Agreement start and approval, hold `{afterStop: dispute_window}`;
       each party's stop notice exactly its entitlement's notice_seconds; derive the dispute
       authority's {account, notice: PT0S, partialPeriod: chosen} entry here, not again in spot;
       entitlements' and term end's `settles_through` mapping to stop-authority and `end.partialPeriod`
@@ -377,7 +389,7 @@ settle by negotiation". Files: `kit/arkhai-payments/schema/`, `src/market_arkhai
       derived", "A bounded case hold is derived", "An unbounded case hold is derived" and "A
       mandate's extend authorities are derived".
 - [ ] 8.3 Extend the buyer's mandate check to the derived authorities, holds and dispute
-      authority,  Verify:
+      authority. Verify:
       `test_buyer.py` cases including the payee-as-stop-authority refusal.
 - [ ] 8.4 Emit `adjudication` from the storefront's first offered authority advertising the
       option's mechanism (or one option per offered authority), publish nothing hosted with an
