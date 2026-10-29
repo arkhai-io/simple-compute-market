@@ -1139,7 +1139,7 @@ Delivers D5 and the payments qualification in "Context". Files:
 `domains/bare_metal/buyer/tests/test_cli_completion.py`, or a new test module beside
 it.
 
-- [ ] 6.1 Test: `buy_bare_metal` writes a real run log under one temporary XDG state
+- [x] 6.1 Test: `buy_bare_metal` writes a real run log under one temporary XDG state
       directory, with its module factories replaced:
       - `fresh_identity`, `registry_client`, and `payment_approval` for the write;
       - `recovery_identity` for the read.
@@ -1148,18 +1148,130 @@ it.
       log back under the same directory. It recovers the same publisher principals,
       publisher, and registry binding. The test fails if the producer's form changes
       without the consumer's.
-- [ ] 6.2 Qualify the payments upgrade with no code change:
+
+      Done, as `test_a_deal_bought_is_recovered_from_the_run_log_buy_wrote` in a new
+      `domains/bare_metal/buyer/tests/test_run_log_recovery.py`.
+      - **What is replaced.** Only the four factories, on `cli`. The configuration
+        is a file read by the real loader. The registry factory returns the
+        registry client's own `ListingSummary`. The payment factory returns the
+        payments kit's real `PaymentApproval` over its in-memory
+        `FakePaymentsClient`, so the mandate check, approval, and receipt
+        verification run for real.
+      - **The seller.** `negotiate_with_seller` and the settlement and fulfillment
+        transports are the command's own collaborators, not factories, and reach
+        the seller over HTTP. So the seller is a fake served on loopback HTTP. It
+        verifies each request's version 2 proof against the buyer's principal,
+        accepts at round zero with an Agreement whose mandate the payments kit's
+        seller stage derives, and signs each response as the listing's
+        publisher. No imported name is replaced.
+      - **The write.** `buy` runs through negotiation, approval, and settlement, and
+        writes its run log under the temporary state directory.
+      - **The read.** With `fresh_identity` now refusing, `_recovered_deal`
+        resolves the recorded run through `recovery_identity`. It reads back:
+        - the publisher principals `buy` recorded, equal to the listing's;
+        - the publisher;
+        - the registry URL and authority, which match the configuration;
+        - the seller URL, listing, and negotiation.
+
+        It refreshes the publisher from the registry once and records no
+        refreshed trust. `market bare-metal access --run-id` then reads the
+        fake seller's access answer through the same recovery.
+      - **Level.** Unit, under `TESTING.md`'s command-module convention: the real
+        commands, a temporary filesystem, and fakes at the registry, payments, and
+        seller boundaries. It is not a live purchase, a real storefront, or
+        delivery.
+      - **No red.** It passed on its first run. The producer correction is on the
+        branch's base, so this qualifies it and changes no behaviour (D5). A
+        negative control was run once and not kept. It had `buy` record
+        `publisher_principals` in the retired list form, and the test then failed
+        at recovery with "malformed publisher_principals", the historical refusal.
+      - **Fixtures.** Deterministic development keys, accounts, and a documentation
+        address. Every one is marked as never for a public network.
+- [x] 6.2 Qualify the payments upgrade with no code change:
       - run `make -C kit/arkhai-payments test`;
       - rebuild the bare-metal buyer environment through `make dist` and its
         `reinit`;
       - record in this section's notes that the kit verifies `livemode`, refuses a
         mismatched mode, and refuses unknown receipt fields.
-- [ ] 6.3 Verification:
+
+      Done, with no code change.
+      - **The rebuild.** `make dist` passed. `make -C domains/bare_metal/buyer test`
+        runs `reinit` first, which reinstalled the lock's internal packages from
+        the wheelhouse and left `uv.lock` unchanged. Afterwards the installed
+        `arkhai-kit-arkhai-payments` 0.3.0 and `arkhai-core-buyer` 0.6.0 equal
+        their source file for file, and so do their wheels. One `core_buyer`
+        file had differed before the rebuild, in an environment built before
+        `dev` was merged. The bare-metal buyer installs its own project editable.
+      - **The kit's suite,** `make -C kit/arkhai-payments test`: 92 passed (unit).
+        - **Signed `livemode`.** The published receipt vector carries
+          `livemode`, and the fixture reproduces it byte for byte
+          (`test_receipt_fixture.py`). `test_tampering_with_any_signed_field_breaks_the_signature`
+          shows that the signature covers the receipt's fields.
+        - **Mismatched mode.**
+          - `test_a_receipt_from_the_other_mode_is_refused`;
+          - the buyer's `test_an_approval_receipt_verifies_only_in_the_configured_mode`
+            and `test_a_polled_receipt_is_verified_apart_from_the_approval_receipt`;
+          - the seller's `test_a_receipt_verifies_only_in_the_configured_mode`.
+        - **Unknown fields.** The generated `Receipt`, `SignedReceipt`, and
+          `TransactionSnapshot` models forbid extra fields. No suite test isolates
+          an unknown receipt field: `test_responses_outside_the_contract_are_protocol_errors`
+          gives a response whose one field is unknown, but that response also
+          lacks every required field.
+      - **The captured receipt.** It was replayed once through the rebuilt buyer
+        environment, locally and not kept, printing only outcomes. It parses, and
+        its signature, transaction, deal, and test mode verify. A live-mode
+        expectation, a flipped `livemode`, a tampered proof, another mandate, and
+        an unknown extra field are each refused. The historical run log's retired
+        list form is still refused, as D5 intends.
+- [x] 6.3 Verification:
       - `make -C domains/bare_metal/buyer test` (unit);
       - `make -C kit/arkhai-payments test` (unit).
 
       No package changes, so there is no packaging step. End-to-end:
       `e2e_bare_metal_payment_deal` re-drives a recorded run.
+
+      Done:
+      - `make -C domains/bare_metal/buyer test`: 17 passed, 1 of them new (unit).
+      - `make -C kit/arkhai-payments test`: 92 passed (unit).
+      - Only a test module and these notes changed, so no version, pin, or lock
+        moves. `make check-packaging` still ran before the section's checkpoint,
+        as below.
+
+      **End-to-end, corrected.**
+      - `e2e_bare_metal_payment_deal` runs `market bare-metal buy` and reads its
+        run log back with `read_run`. It re-drives settlement with the typed
+        client's `settle_agreement`, and reads delivery through the fulfillment
+        transport. It never runs `access`, `result`, or `teardown --run-id`, so it
+        does not reach `_recovered_deal`. With no payments target configured,
+        which is the repository's default, it reports a blocked skip.
+      - `e2e_bare_metal_unbacked_introduction` does reach `_recovered_deal`, through
+        `market bare-metal settlement contact introduce --run-id`. That is a run
+        `request-introduction` wrote, which records the publisher as `buy` does.
+      - `e2e_bare_metal_deal`, the real-host scenario no lane selects, calls
+        `result` and `access` with `--from` and `--json`. The commands take
+        `--run-id` and no `--json`, and refuse those options. This is left as it is:
+        no lane runs it, and fixing it is outside this section. The live
+        bare-metal lane uses `--run-id`.
+      - Owed by validation: none. No workflow that only a push triggers is owed.
+
+      **Coverage classification correction.** The new case exercises the buyer
+      command's orchestration and real run-log persistence across producer and
+      consumer, so it is CLI component integration under the hierarchy's
+      orchestration rule. Its seller and payments service remain fakes; it does
+      not validate a real storefront's server contract or a live purchase. The
+      buyer suite's 17 passes therefore include this integration case, rather
+      than being 17 isolated unit cases.
+
+      **Handoff.**
+      - This section ran in a session of its own: the session that implemented
+        Section 5 had grown too large to also hold this section's full reads.
+      - Under the owner's cadence, Round 1's one full `make test` and one
+        independent implementation review follow this section's commit.
+      - `test_cli_completion.py` replaces imported names
+        (`negotiate_with_seller`, `BUYER_STAGES`, the settlement transport, and the
+        configuration loader), not only the module's factories, as
+        `TESTING.md`'s command-module convention says. It was left as it is; the
+        new module replaces only the four factories.
 
 ## 7. The fulfillment kit begins a compensating teardown
 
