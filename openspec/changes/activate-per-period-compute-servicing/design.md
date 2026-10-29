@@ -137,6 +137,16 @@ seller exceptional_end filing and sole mechanical payee self-penalty, human-tria
 extension/lift and partial reverse after stop, including restart and lost-response
 recovery where the target's supported test controls allow it.
 
+The buyer's independent recovery is live evidence of its own, five observations each
+a blocker if unrun: a payer stop with the storefront stopped, not flagged absent; a
+case filed from the exact accepted Agreement and the buyer's kept evidence with
+nothing retrieved from the seller; a restart after an unknown stop result that reuses
+the original operation key and opens no second stop; a seller that never files its
+exceptional end, remedied by the buyer's stop and case alone (convergence row 12); and
+a case accepted over money already paid out, reported `not_held` per part and shown
+as such (row 13). An accepted case is not recoverable money; the authority's per-part
+answer is what the buyer sees.
+
 end_delivery carries no at; the storefront signs receipt time and retains exact
 signed request/receipt as evidence, with no authority to stop billing for the buyer.
 The buyer half stops at payments first. During outage it journals/retries that stop

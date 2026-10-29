@@ -147,7 +147,7 @@ revisions before code starts; `unify-compute-delivery-path` lands before this ch
 ## 4. Lane qualification and pre-closeout review
 
 - [ ] 4.1 Extend e2e-tests/tests/e2e/roles/scenarios and shared stages with D's full
-      rate matrix (0–11), executing spot's prepared entry points, including:
+      rate matrix (0–13), executing spot's prepared entry points, including:
       - scenario 4, stop between start and disclosure, both domains: the
         activate/start/disclose races, no start before activation and no duplicate
         start key across crashes (formerly unify's task 4.4);
@@ -157,7 +157,10 @@ revisions before code starts; `unify-compute-delivery-path` lands before this ch
       Record maximum
       term plus on-demand/spot emergency exceptional_end filings, sole mechanical
       payee self-penalty and on-demand returned treatment. Record buyer case/held
-      money plus premature-stop-penalty remedy, not mandate-enforced non-preemption. Exercise buyer-half
+      money plus premature-stop-penalty remedy, not mandate-enforced non-preemption. Record
+      rows 12 and 13: the seller that never files, remedied by the buyer's stop and case from
+      kept evidence alone with the storefront stopped, not flagged; and the case over paid-out
+      money, accepted, `not_held` per part, displayed as such. Exercise buyer-half
       same-key payment-stop retry with billing until landing; end_delivery receipt
       grants no storefront payment authority. Rows 7/9 record interim non-default
       buyer acceptance, separate default-policy refusal and returned-capable acceptance once vendored. Once-only

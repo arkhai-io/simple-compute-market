@@ -311,8 +311,10 @@ under a rate hook, are this change's.
 | 9 | Maximum term | absolute authority end with its own partialPeriod, including late start and a mid-period end; physical recovery, no exceptional_end |
 | 10 | Seller emergency | on-demand and spot file exceptional_end; mediation mechanically rules only qualifying payee self-penalty through its chosen entry; seller sends no stop/reverse; on-demand emergency pays premature_stop_penalty capped by earned amounts still held after refunds in mandate order, shown at both ends of the cap: late in a deal, the stated amount; minutes after activation with the started period returned, the setup charge alone, and zero with no setup charge; entitled spot notice pays none |
 | 11 | Identity rotation overlap | old receipt verified during overlap, current snapshot re-anchors the running rate deal before retirement, exact old bytes retained; once-only dependencies drain; revoked/stale anchors and livemode changes refused |
+| 12 | Seller never files | an unentitled end the storefront never reports and never files; the buyer's own stop and a case filed from the exact accepted Agreement and kept evidence alone, with the storefront absent throughout, are the whole remedy; the ruling rests on the buyer's record |
+| 13 | Case over paid-out money | a case filed after a part has paid out is accepted, reports `not_held` per part with the reason, may still end delivery, and moves no paid-out money; the buyer display shows per-part `held` / `not_held`, never a pending refund |
 
-The nine diagram pairs under `diagrams/` illustrate cases 0–8; cases 9–11 extend the
+The nine diagram pairs under `diagrams/` illustrate cases 0–8; cases 9–13 extend the
 matrix without duplicating diagrams.
 
 A lane interruption is a loop pause and resume, not evidence of process restart.

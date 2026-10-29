@@ -22,7 +22,7 @@ before approval.
 
 ### Requirement: Buyer display separates billing guarantees from cooperation
 
-Both compute buyers MUST distinguish reserve from spend, billing start from observed delivery, and authority guarantees from cooperative seller behavior. They MUST NOT present reserve-ahead as a dishonest-seller billing cap.
+Both compute buyers MUST distinguish reserve from spend, billing start from observed delivery, and authority guarantees from cooperative seller behavior. A filed case MUST be shown by the authority's per-part `held` / `not_held` answer and MUST NOT be shown as a pending refund. They MUST NOT present reserve-ahead as a dishonest-seller billing cap.
 
 #### Scenario: Reserve is displayed
 

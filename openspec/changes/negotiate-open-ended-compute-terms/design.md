@@ -229,7 +229,10 @@ N of your approval, or the seller has not delivered"), payer/payee entitlements,
 per-stopper and term-end `settles_through` treatment, the premature-stop penalty as
 "up to N, taken from what the seller has earned and not yet been paid — at the start of a
 deal, the setup charge" with its worst case (nothing earned, nothing taken) stated rather
-than implied, dispute authority/window/case-hold cap and evidence retention. Values come from the selected option, not a stored class. Asking rate keeps its stated unit.
+than implied, dispute authority/window/case-hold cap and evidence retention. A filed case
+is shown by the authority's per-part answer, `held` with its extension or `not_held`
+with the reason, never as a refund pending: an accepted case over paid-out money
+recovers none of it. Values come from the selected option, not a stored class. Asking rate keeps its stated unit.
 The seller's side of the same display is the default-buyer refusal diagnostic (D3), so
 seller and buyer read one policy.
 
