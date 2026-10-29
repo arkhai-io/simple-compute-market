@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Hosted rate parameters are explicit and unit-safe
-SCM MUST admit period and reserve_ahead_seconds together or neither, require positive fixed-unit period and reservation lead, and enforce reserve_ahead_seconds at least exposure_seconds. Optional setup_amount MUST be a disclosed positive minor-unit amount in the selected asset; omission MUST mean no setup part. Approval expiry and dispute holds MUST remain separate.
+SCM MUST admit period and reserve_ahead_seconds together or neither and require positive fixed-unit values. Rate options MUST have a finite maximum term and whole-second Agreement start. Optional setup_amount MUST be a disclosed positive minor-unit amount in the selected asset; omission MUST mean no setup part. Approval expiry and dispute holds MUST remain separate.
 
 #### Scenario: Only one rate parameter is set
 - **WHEN** an option supplies period without reserve_ahead_seconds or the converse
@@ -11,23 +11,34 @@ SCM MUST admit period and reserve_ahead_seconds together or neither, require pos
 - **WHEN** an option declares a calendar month or year period
 - **THEN** the kit refuses it rather than approximating it in seconds
 
+#### Scenario: A rate Agreement has a fractional start
+- **WHEN** rate acceptance would bind a fractional-second start_utc under an integer-second payment contract
+- **THEN** it refuses rather than round upward past the accepted capacity window or rewrite signed Agreement bytes
+- **AND** once-only fractional timestamp handling is unchanged
+
+#### Scenario: Rate end treatment is explicit
+- **WHEN** a rate option is published or accepted
+- **THEN** end_partial_period is explicitly charged, returned or prorated and checked against vendored end capabilities
+- **AND** an unknown value or unexpressible treatment refuses instead of defaulting from current configuration
+
 #### Scenario: A seller opts out of setup
 - **WHEN** a complete rate option omits setup_amount
 - **THEN** derivation emits no setup part
 - **AND** neither compute domain requires a minimum spend
 
 ### Requirement: Rate materialization requires a servicing contract declaration
-SCM MUST refuse rate mandate materialization without a composition's rate-servicing declaration. A proposed declaration MUST be accepted only under the explicit lane profile bound to its in-lane double and test mode; SCM MUST refuse it for other endpoints or livemode evidence. Published production activation MUST wait for the deployed hosted contract revision.
+SCM MUST refuse rate mandate materialization without a composition's rate-servicing declaration validated under the terms capability's declaration contract. This gate MUST also apply to accepted-but-unmaterialized work. Removing publication enablement MUST NOT abandon already materialized deals.
 
 #### Scenario: An accepted option outlives its declaration
 - **GIVEN** a previously accepted rate option and no current servicing declaration
 - **WHEN** settlement attempts to materialize its mandate
 - **THEN** materialization refuses before approval or delivery
 
-#### Scenario: Proposed configuration points outside the lane
-- **WHEN** a proposed declaration is used outside the lane profile or with a target other than its double
-- **THEN** startup refuses that configuration
+#### Scenario: The declaration validator refuses a target
+- **GIVEN** a proposed declaration rejected by the terms-owned lane/target/mode validator
+- **WHEN** the materialization door is called
+- **THEN** it refuses before deriving or approving a rate mandate
 
-#### Scenario: Proposed evidence claims live mode
-- **WHEN** a proposed-contract run receives livemode true
-- **THEN** the evidence is refused even if another setting would accept live mode
+#### Scenario: Publication is disabled after materialization
+- **WHEN** a previously materialized rate deal is recovered with new publication disabled
+- **THEN** its existing servicing continues under accepted terms

@@ -24,14 +24,21 @@ foundation; this design's D1–D7.
 - [ ] 1.2 Confirm negotiate-open-ended-compute-terms supplies the price accessor
       with its period unit, common term shape, listing bounds and two front-door
       servicing gates. Freeze period plus reserve_ahead_seconds and the recommended
-      setup_amount shape with that consumer.
-- [ ] 1.3 Confirm add-arkhai-payments-lane-double supplies payment and mediation
-      doubles, the revised per-part behavior, and deterministic clocks/outage controls.
-      Freeze operation descriptors, target/delta inputs, rate observations and
-      re-anchoring output for converge-ongoing-compute-leases to consume.
+      setup_amount shape with that consumer. Require the accepted rate-structure
+      carrier/digest from negotiation-driven-capacity-resize gate 2.1a; refuse an
+      unresolved pricing reference rather than read the current listing.
+- [ ] 1.3 Freeze operation descriptors, ActivatedDeliveryRef, verified rate
+      observations and rate re-anchoring output for convergence. Foundation
+      in-process contract fakes cover kit library integration; the HTTP lane
+      doubles gate only lane/e2e execution. No kit depends on runnable tooling.
 - [ ] 1.4 Obtain or explicitly gate on published signed snapshot/start/mixed-part
       vectors and partial-reversal-before/after-stop traces. Identify missing
       authority conformance evidence without replacing it with a double claim.
+      Freeze partialPeriod/prorated rounding, setup activation-end representation,
+      timestamp precision and per-end partialPeriod/late-start semantics with
+      the vendored contract. Unexpressible terms fail closed; never hand-edit
+      generated models. The authority, not SCM, computes a returned/prorated
+      partial period at the unchanged absolute end.
 
 Validation: published-contract conformance using kit/arkhai-payments check-vectors
 and check-generated targets. The foundation owns proof implementation/negative
@@ -48,22 +55,30 @@ publication configuration/builders and their focused publication suites.
 
 - [ ] 2.1 Add paired period/reserve_ahead_seconds validation, fixed-unit/positive
       constraints, optional setup_amount, the finite term requirement and
-      reserve-ahead/exposure check. Keep approval_window distinct from adjudication.
+      explicit end_partial_period, whole-second rate Agreement start and
+      partialPeriod capability check. Reject fractional rate starts rather than
+      rewriting signed Agreement bytes; once-only rounding stays unchanged.
+      Keep approval_window distinct from adjudication.
       Verify malformed pairs, calendar periods, setup opt-out and insufficient lead.
 - [ ] 2.2 Derive setup-once then rate deterministically through the accessor and
       codec. Include rate end, afterStop hold, maxHoldExtension and exact per-part
       authorities/notices. Keep start payee-only; omit payee stop on on-demand.
-      Verify maximum term is absolute even after late start.
+      Verify setup end is activation, and absolute capacity bounds are never
+      extended after late activation/start. Map end_partial_period to the end's
+      partialPeriod: intended preset returned; recommend explicitly disclosed
+      charged for interim spot/on-demand when only charged is expressible.
+      Refuse unsupported terms rather than round term durations or downgrade.
 - [ ] 2.3 Extend the buyer's exact mandate check for mixed parts, ordering, price,
       asset, hold, cap and stop authorities. Verify explicit zero payer notice is
-      not silently replaced by exposure or charged twice.
+      preserved exactly. Use the foundation's notice_seconds/settles_through
+      authority mapping; reject retired exposure_seconds and stop+exposure.
 - [ ] 2.4 Supply default setup-bearing on-demand/spot presets with explicit setup
       pricing and seller opt-out. Bind setup and rate terms into option identity.
       Do not invent a setup amount or impose a bare-metal minimum-spend gate.
-- [ ] 2.5 Wire the common builder into VM and bare-metal publication so the same
-      pool can offer independently priced options. Preserve accepted option bytes
-      across later publication changes and leave reserved/API-credit once options
-      alone.
+- [ ] 2.5 Supply the preset helper to the terms-owned VM/bare-metal publication
+      adapters; do not implement generic option emission a second time. Prove
+      accepted option plus bound rate structure survive repricing before
+      materialization/restart; preserve reserved/API-credit once behavior.
 - [ ] 2.6 Add the materialization servicing-declaration gate: refuse undeclared
       rate servicing, including for accepted options after declaration withdrawal.
       The terms change retains publication/acceptance gate ownership.
@@ -75,18 +90,20 @@ and domains/bare_metal/storefront/tests/integration for each publication adapter
 Run kit/arkhai-payments typecheck and the affected domain typing targets.
 No running continuation is required for these option/approval seams.
 
-## 3. Stateless rate adapter and correction mechanics
+## 3. Stateless rate adapter and authority-enforced period treatment
 
 Files: kit/arkhai-payments/src/market_arkhai_payments/client.py, the foundation's
-hosted adapter module, new operations.py and rate_math.py;
+hosted adapter module and new operations.py;
 kit/arkhai-payments/tests/test_client.py, test_seller.py and
 tests/integration/ for real journal consumers injected at the public adapter seam.
 Journal persistence itself belongs to convergence.
 
 - [ ] 3.1 Translate rate start, entitled stop/notice and partial reverse into
       explicit per-part commands with operation-derived stable keys. Require
-      provisioned-delivery evidence for start. Verify lost response and identical
-      retry against the HTTP double; changed-content key reuse is refused locally.
+      ActivatedDeliveryRef after verified site activation for start. Missing,
+      malformed or mismatched evidence refuses before effects. Verify lost response
+      and identical retry against the in-process contract fake; changed-content
+      key reuse is refused locally.
 - [ ] 3.2 Expose verified per-part start/pendingStop/stop, funded-through, extension
       refs, releaseAt and event ordering to lifecycle read/watch. Verify exhaustion
       and maximum-term causes, missing pre-start funding as unknown, and refusal to
@@ -95,19 +112,22 @@ Journal persistence itself belongs to convergence.
       then resolve unknown from authority events before another monetary delta.
       Implement D4's refusal classification, including transaction_stopped start
       failure, read-before-insufficient-funds reconciliation and matured shortfall.
-- [ ] 3.4 Implement the pure half-open period helper and cumulative return target:
-      buyer incomplete period retained, seller incomplete period returned, exact
-      boundaries and no-start cases, reservation return distinguished from earned
-      reversal, all actors' confirmed returns counted, no negative delta/clawback.
-- [ ] 3.5 Expose lawful-preemption correction descriptors for post-stop voluntary
-      reverse while held. Use the dispute adapter's exceptional_end intent for
-      unentitled/past physical ends, without computing ruling amounts or inventing
-      a post-release refund operation.
+- [ ] 3.4 Map settles_through to partialPeriod through the foundation codec:
+      started_period/charged, last_boundary/returned, stop/prorated. Gate each
+      value on vendored capability at publication and acceptance; interim spot
+      uses charged for payer and payee. Qualify boundary/no-start/terms stops,
+      superseded and equal-time requests from authority vectors; compute no
+      local end-correction delta or clawback.
+- [ ] 3.5 Keep exceptional_end filing with the dispute adapter for unentitled or
+      past physical ends, without computing ruling amounts. No automatic lawful
+      notice reverse, target API or correction-obligation journal remains.
+      Independent discounts and ruling effects are not end-pricing credits.
 
-Validation: unit arithmetic/serialization cases in the kit, shared vector
-conformance and library-integration through its HTTP boundary for unknown retry,
-another actor's reversal, later target increase, partial reversal before/after
-stop and held-money extensions. Verify no mechanism import of kit/deal-servicing
+Validation: unit derivation/serialization cases, shared vector conformance and
+library integration with in-process contract fakes for unknown retry, per-stopper
+partialPeriod, winning-record attribution, independent discounts, partial reversal
+before/after stop and held-money extensions. Lane HTTP doubles test deployed wiring,
+not kit library behavior. Verify no mechanism import of kit/deal-servicing
 or either domain with make check-architecture. Do not replicate the foundation's
 cryptographic proof test matrix.
 
@@ -117,11 +137,12 @@ Files: kit/deal-lifecycle-contracts command/outcome models and route contracts,
 kit/deal-lifecycle-client typed methods, the hosted adapter's notice admission;
 domains/vms/storefront/src/market_storefront/cli.py and operator command group;
 domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/cli.py and
-admin_cli.py. Reuse the foundation seller-half submit/journal seam; do not add a
+admin_cli.py; kit/deal-lifecycle-buyer and each domain's canonical buyer end verbs.
+Reuse the foundation's command identity/recovery contract; do not add a
 second preemption endpoint or a local payment-stop scheduler.
 
 - [ ] 4.1 Admit notice against the accepted payee entitlement and adapter support,
-      journal its operation/correction obligation, and immediately submit stop
+      preserve its command operation identity, and immediately submit stop
       with explicit parts and optional at. Return the authority's effective time
       and pending/unknown/refused status. Verify current listing edits cannot
       grant or revoke the accepted permission.
@@ -137,13 +158,26 @@ second preemption endpoint or a local payment-stop scheduler.
       under the lane profile, with default setup price, paired on-demand/spot
       options, explicit authority entries, test mode and double selector. Document
       one runnable invocation per domain that lands on its preemption surface.
+      Before convergence, use lane-only approval/command fixtures and assert
+      delivery refuses without the rate hook; do not commit/deliver an unserviced
+      live rate option. This fixture is the explicit lane-only door exception.
+- [ ] 4.5 Re-drive both domains' canonical rate buyer end: stop then hint, keep
+      service during nonzero payer notice, and end through watch at effective
+      stop. Keep explicit end-now-regardless and unreachable-authority
+      end_delivery/buyer_end(at) paths distinct. Preserve signed evidence and
+      report stop, delivery and case progress separately. Coordinate terms display.
+- [ ] 4.6 Verify the foundation-owned VM admin route delegates notice for accepted
+      payee entitlement and exceptional_end otherwise; request a foundation fix
+      rather than implement a second entitlement switch here.
 
 Validation: lifecycle client/contract unit suites; application-integration at each
 storefront for seller authentication, accepted-option admission, refusal before
 adapter effect and response-loss read; each domain's focused operator CLI suite.
-First use runs deals preempt against a double-backed accepted spot deal and reads
-the pending stop. Before convergence lands, this proves the command and authority
-record only, not domain teardown.
+Buyer-half and canonical buyer-CLI cases re-drive priced notice, explicit immediate
+surrender, hint failure, payment-authority outage and both-authorities-down retry.
+First use runs deals preempt against a double-backed approved spot fixture and
+reads pending stop while asserting delivery is refused without the rate hook.
+Before convergence lands, this proves command and authority record, not teardown.
 
 ## 5. Proposed declarations and identity re-anchoring
 
@@ -153,8 +187,8 @@ test_receipts.py as verifier consumers (not proof implementation);
 lane profile configuration under e2e-tests/config. Foundation evidence stores and
 convergence persist outputs through their existing ports.
 
-- [ ] 5.1 Bind proposed servicing to the explicit lane profile's double target and
-      test mode. Refuse external endpoint substitution and livemode evidence.
+- [ ] 5.1 Consume the terms-owned proposed-declaration validator at materialization,
+      including its lane target and test-mode binding; do not duplicate it.
       Keep published production enablement with activate-per-period-compute-servicing,
       gated only on deployment of the contract revision, never a horizon.
 - [ ] 5.2 Add configured retiring identities with retirement dates alongside the
@@ -164,43 +198,44 @@ convergence persist outputs through their existing ports.
 - [ ] 5.3 Integrate durable anchor replacement via the evidence-store port while
       keeping original bytes; expose dependent/unanchored deals for convergence's
       status. Refuse stale-anchor rollback and mode-change re-anchoring. Document
-      retirement only after dependent deals re-anchor or drain.
+      retirement only after rate deals re-anchor or drain and once-only deals
+      drain. Inventory all dependent hosted deals; do not claim durable once-only
+      re-anchoring without a consumer.
 
 Validation: configuration unit cases for invalid proposed composition and mode;
-kit integration with the double rotating identities across an existing deal.
+kit integration with the in-process contract fake rotating identities across a
+rate deal.
 Use the foundation's verified-snapshot fixtures. Consumer persistence/restart
 evidence waits for convergence; do not claim it from a stateless adapter test.
 
 ## 6. Qualification scenarios and pre-closeout review
 
 Files: kit/arkhai-payments/test-vectors and vector runner, README.md,
-examples/local_e2e.py; e2e-tests/tests/e2e/roles/helpers/payments.py and
-compute_deal_stages.py; scenarios under each compute lane; e2e-tests/README.md.
+examples/local_e2e.py; focused lifecycle/CLI integration suites. Convergence owns
+consumer scenario files and selectors under each compute lane; activation owns
+hosted-target evidence.
 
 - [ ] 6.1 Update examples/fixtures to USD/6 without hardcoding a production asset.
       Keep published vectors content-identified and separate from proposed
       qualification traces. Run make -C kit/arkhai-payments check-vectors,
       check-generated, test-unit and typecheck as appropriate to changed seams.
-- [ ] 6.2 Add readiness-gated entry points and evidence metadata for both compute
-      lanes. Record contract revision, target class/mode, hashes and control trace;
-      missing deployment, credentials or hardware is an explicit prerequisite.
-      Stop before browser/scenario execution on an unready deployment.
-- [ ] 6.3 Deliver shared scenario entry points for buyer stop including priced
-      notice; seller notice with storefront down past due time; earlier buyer stop
-      during notice; exhaustion; maximum term; on-demand payee refusal then
-      mechanical exceptional end; stop/start race; rotation overlap. Hand their
-      execution to converge-ongoing-compute-leases when it composes the consumer:
-      that change must observe authority records and actual capacity/access end
-      in both domains. Record consumer-dependent execution as unrun here rather
-      than create a reverse archival dependency.
+- [ ] 6.2 Supply evidence metadata at the adapter/command first-use boundary:
+      contract revision, target class/mode, hashes and control trace. Readiness
+      gates scenario runs, not a claim that the target was prepared here.
+- [ ] 6.3 Confirm convergence owns the full D8 scenario table, its lane entry
+      points and execution; activation owns hosted four-path qualification.
+      Transfer maximum-term, on-demand refusal/self-filing and rotation-overlap
+      rows explicitly, requiring proven physical release/access closure rather
+      than a lease_ended intent report. Promote no unrun consumer requirement here.
 - [ ] 6.4 Check the changed imports, comments and public artifacts before code
       review. Move touched local imports to module level where safe, retaining
       only verified circularity or deliberate lazy-load reasons. Run focused
       domain integration and typing, then make check-packaging; fix failures
       before committing implementation.
 - [ ] 6.5 Obtain pre-closeout code review. Confirm adapter/servicing ownership and
-      that cooperative reversal never replaces the buyer's authority/dispute
-      guarantee. Verify the command/publication seams here; consumer-enabled
+      that partialPeriod is enforceable at the payment authority, with no local
+      correction substituted for the buyer's authority/dispute guarantee. Verify
+      the command/preset seams here; consumer-enabled
       cross-service acceptance gates convergence and hosted live qualification
       gates activation, not this prerequisite change's archival.
 
@@ -244,9 +279,9 @@ change to implementation and review.
       acceptance and hosted scenarios gate activation; record their transfer here
       without making this prerequisite wait for a dependent's archival.
 - [ ] 7.9 **Promotion.** Write openspec/specs/settlement-servicing/architecture.md
-      (rate operations, arithmetic and rotation), storefront-publication/
+      (rate operations, partialPeriod and rate-only rotation), storefront-publication/
       architecture.md (presets and independent pricing), deal-lifecycle/
-      architecture.md (notice and External authorities), test-compatibility/
+      architecture.md (notice, rate buyer-end flow and External authorities), test-compatibility/
       architecture.md (evidence classes), docs/development/ARCHITECTURE.md
       (Kit areas, Settlement servicing and Release),
       docs/development/DEPLOYMENT_AND_CONFIG.md (servicing and identity overlap),

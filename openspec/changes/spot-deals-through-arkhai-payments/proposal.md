@@ -24,15 +24,21 @@ continuation is a separate dependent change.
   Use part end, {afterStop: dispute_window} and maxHoldExtension.
 - Extend the hosted adapter's command translation, reads and watch source with
   per-part start, pending/final stop, funding and maximum-term observations.
-  Expose immutable operation descriptors and cumulative correction-target
-  arithmetic for caller-owned journals, including half-open periods and the
-  seller-caused started-period reversal rule.
+  Expose immutable operation descriptors for caller-owned journals. Started-period
+  treatment is a per-stopper partialPeriod payment term, not a storefront refund.
+  Term end also carries partialPeriod: compute presets use returned. Fail closed
+  on unexpressible terms; interim spot commits charged on both sides. Recommend
+  explicitly disclosed charged term ends for interim spot/on-demand rate options.
 - Add the seller half's notice command through the existing seller-authenticated,
   negotiation-keyed lifecycle submit; a typed client method and a deals preempt
   operator CLI verb in both domains. Submit stop immediately to the payment
   authority, which hosts the pending stop. Never schedule a payment stop locally.
-- Publish independently priced spot and on-demand options from one pool in both
-  domains. They are combinations of parts and terms, not runtime classes.
+- Supply setup/rate preset helpers to the terms change's publication adapters.
+  Presets are combinations of parts and terms, not runtime classes. Setup ends
+  at activation and its self-penalty returns all before delivery, none after.
+- Re-drive the canonical rate buyer-end flow: stop then hint, continue delivery
+  during priced notice, and end through authority watch. Keep end_delivery for
+  explicit immediate surrender and unreachable-payment-authority buyer_end(at).
 - Support service-identity overlap and re-anchoring through the foundation's
   verified-snapshot interface. Snapshot-proof verification itself remains owned
   by agreed-evidence-and-early-termination round 2.
@@ -49,7 +55,7 @@ publish-and-preempt-spot-compute; their directories are removed.
 ### Modified Capabilities
 
 - settlement-servicing: rate mandates, adapter events, start/stop translation,
-  cumulative correction arithmetic and identity re-anchoring.
+  authority-enforced started-period terms and rate-deal identity re-anchoring.
 - settlement-configuration: typed rate parameters and servicing declaration.
 - storefront-publication: both-domain rate presets and per-option prices.
 - deal-lifecycle: seller notice command, status and operator surface, extending
@@ -68,20 +74,24 @@ Implementation gates on:
    and once-part adapter, lifecycle commands, evidence stores and verified snapshots
    (round 2). This change consumes, and does not duplicate, those facilities.
 2. negotiate-open-ended-compute-terms: agreed-price accessor and period unit,
-   listing bounds, accepted option shape and publication/acceptance gates.
-3. add-arkhai-payments-lane-double: payment and mediation doubles with the
-   revised contract and deterministic controls.
+   listing bounds, accepted-price carrier and option shape, declaration contract and
+   publication/acceptance gates. Only those sections gate mechanics; the terms
+   change must not wait for this change's door-3 evidence to archive.
+3. The foundation's in-process contract fakes gate kit library integration.
+   add-arkhai-payments-lane-double supplies HTTP doubles and deterministic controls
+   only for lane/e2e evidence, not as a whole-change implementation prerequisite.
 
 converge-ongoing-compute-leases depends on this change: it owns rate servicing
 in kit/deal-servicing, funding timers, journal persistence/replay, start admission
-and domain lease effects. The spot e2e scenarios are specified here and run once
-that consumer is composed; execution gates convergence's acceptance, not this
-prerequisite's archival. Deliver their runnable entry points here and record
-consumer-dependent execution as unrun, without a reverse implementation dependency. activate-per-period-compute-servicing owns switch-on and hosted
-qualification after the contract revision is deployed.
+and domain lease effects. Convergence owns the complete spot e2e matrix and runnable
+entry points when that consumer is composed; no unrun consumer requirement is
+promoted here. This design's scenario-ownership table records the handoff without
+a reverse implementation dependency. activate-per-period-compute-servicing owns
+switch-on and hosted qualification after the contract revision is deployed.
 
 Complete here means exact buyer/seller derivation, usable adapter mechanics and
-both-domain publication/notice surfaces, with vector, kit and application evidence.
+both-domain preset/notice surfaces plus the rate buyer-end re-drive, with vector,
+kit and application evidence.
 Cross-service spot acceptance additionally needs the continuation consumer. Passing
 a double-backed scenario never qualifies the external payment or dispute authority.
 
@@ -91,8 +101,10 @@ a double-backed scenario never qualifies the external payment or dispute authori
   payment-stop scheduler.
 - Storefront continuation loops, queues, funding timers, site deadline/renewal
   policy, provisioning or teardown implementation.
-- Snapshot-proof implementation, buyer end_delivery implementation, evidence
-  capture or mediation rulings (foundation-owned).
+- Snapshot-proof implementation, immediate end_delivery transport/evidence capture
+  or mediation rulings (foundation-owned). The rate buyer-end re-drive is in scope.
+- Automatic end-correction reversals or a seller-command correction journal.
+- Durable once-only identity re-anchoring; those deals must drain before key retirement.
 - Discovery sugar, automated preemption strategy, Alkahest splitter execution,
   API-credit rate servicing, metering other than time, or reserved fixed-interval
   deals expressed as rate parts.
@@ -125,9 +137,9 @@ the persistence-owning servicing kit.
 - Servicing declarations and identity-overlap configuration:
   openspec/specs/settlement-configuration/spec.md and
   docs/development/DEPLOYMENT_AND_CONFIG.md.
-- Presets, setup pricing and independent spot/on-demand publication:
+- Preset helpers, setup pricing and their terms-owned publication integration:
   openspec/specs/storefront-publication/spec.md and its architecture companion.
-- Seller notice command and pending-stop observation:
+- Seller notice command, pending-stop observation and the rate buyer-end re-drive:
   the foundation-created deal-lifecycle spec.md (see its
   [delta](../agreed-evidence-and-early-termination/specs/deal-lifecycle/spec.md))
   and its architecture companion before this change lands.

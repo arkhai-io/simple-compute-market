@@ -1,13 +1,11 @@
 ## ADDED Requirements
 
-### Requirement: Both compute domains publish rate presets per option
-VM and bare-metal storefronts MUST support independently priced on-demand and spot rate options from one pool through the same hosted option builder. Presets MUST be combinations of parts and lifecycle terms, not class-specific servicing branches. Default presets MUST disclose an explicitly priced setup once part, with seller opt-out, and MUST NOT require minimum spend.
+### Requirement: Compute rate preset helpers disclose setup pricing
+The hosted preset helper consumed by both compute domains MUST construct presets from parts and lifecycle terms, not runtime classes. Default presets MUST disclose an explicitly priced setup once part with seller opt-out, and MUST NOT require minimum spend. The helper MUST disclose setup's activation end and the authority's standard self-penalty treatment: all returned for undelivered setup, none once delivered.
 
-#### Scenario: One pool offers spot beside on-demand
-- **GIVEN** a servicing-capable VM or bare-metal storefront and valid lifecycle terms
-- **WHEN** a pool offers both presets at different rates
-- **THEN** publication emits distinct options with their own prices and option IDs
-- **AND** only the spot option grants the payee a stop entitlement
+#### Scenario: The terms-owned publication adapter consumes presets
+- **WHEN** either compute publication adapter requests on-demand and spot preset parts
+- **THEN** the helper supplies setup/rate and the corresponding accepted terms without emitting listings or creating a second publication path
 
 #### Scenario: A default setup price is missing
 - **WHEN** a seller selects the default setup-bearing preset without a setup price
@@ -15,9 +13,10 @@ VM and bare-metal storefronts MUST support independently priced on-demand and sp
 - **AND** explicit setup opt-out permits a valid rate-only option
 
 #### Scenario: Accepted pricing survives publication changes
-- **GIVEN** a committed spot option
-- **WHEN** its pool changes the spot rate or removes the payee entitlement
-- **THEN** mandate derivation and notice admission still use the accepted option
+- **GIVEN** an accepted spot option and its signed-acceptance-bound rate structure
+- **WHEN** its pool is repriced or removes the payee entitlement before materialization or recovery
+- **THEN** derivation and buyer checking use the bound rate structure, and notice admission uses the accepted entitlement
+- **AND** an unavailable bound structure refuses instead of falling back to the current listing
 
 #### Scenario: Another domain uses a once option
 - **WHEN** a reserved compute or API-credit option uses only once parts

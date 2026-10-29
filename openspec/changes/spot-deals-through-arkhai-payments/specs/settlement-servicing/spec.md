@@ -1,3 +1,27 @@
+## MODIFIED Requirements
+
+### Requirement: The payments mandate is derived exactly from the Agreement
+The mandate MUST bind sha256(JCS(agreement)) as deal, sha256(JCS(mandate)) as transaction ID, settlement_params.payer_account as from and selected payee account as to, the published fee policy and nonce arkhai.payments.v1. Once-only options MUST derive one once part; rate options MUST derive the selected rate and optional setup parts. Every part MUST use the foundation's entitlement/adjudication authority derivation and hold cap; hosted bond remains unsupported.
+
+#### Scenario: Hold and approval expiry follow the accepted timing
+- **WHEN** a once-only mandate is derived from an Agreement accepted at accepted_at
+- **THEN** its hold is ceil(start_utc - accepted_at) + duration_seconds + dispute_window_seconds whole seconds and approval expires at floor(accepted_at) + approval_window
+- **AND** fractional timestamps remain unchanged in Agreement bytes and its deal hash
+
+#### Scenario: A once mandate is derived
+- **WHEN** the option has only one once part and no early_termination
+- **THEN** it authorizes no start or stop, authorizes reverse for payee and the option's dispute authority, and extend/lift only for that dispute authority
+- **AND** its hold lasts through term end plus dispute window and maxHoldExtension comes from case_hold_max_seconds, null when unbounded
+
+#### Scenario: A hosted option names a bond
+- **WHEN** a hosted option includes bond
+- **THEN** publication refuses the unsupported term
+
+#### Scenario: A mixed mandate is derived
+- **WHEN** a rate option includes setup_amount
+- **THEN** setup once precedes rate, each with per-part authorities and maxHoldExtension
+- **AND** setup end is activation, rate hold is afterStop plus dispute window, and approval expiry still uses approval_window
+
 ## ADDED Requirements
 
 ### Requirement: Hosted rate mandates are derived from the selected option
@@ -15,21 +39,21 @@ SCM MUST derive time rate parts through the agreed-price accessor and lifecycle 
 - **THEN** the mandate is refused before approval
 
 #### Scenario: Notice is explicitly priced
-- **GIVEN** a payer entitlement with notice_seconds zero and a nonzero exposure_seconds
-- **WHEN** the adapter derives stop authorities
-- **THEN** payer notice is zero, not exposure added to or substituted for the accepted notice
-- **AND** reserve_ahead_seconds must still cover exposure_seconds
+- **GIVEN** a payer entitlement with notice_seconds zero and settles_through started_period
+- **WHEN** the adapter derives the rate part using the foundation codec
+- **THEN** payer notice remains zero and partialPeriod is charged, without a second hidden tail
 
 #### Scenario: Provisioning starts late
 - **GIVEN** a finite maximum term equal to accepted duration_seconds
 - **WHEN** rate start occurs after Agreement start_utc
-- **THEN** the derived part end remains start_utc plus max_term_seconds
+- **THEN** the derived part end instant remains start_utc plus max_term_seconds
+- **AND** its own partialPeriod determines the final period's charge, not a rounded-down term
 
 ### Requirement: Hosted rate commands preserve part identity and uncertain outcomes
-The hosted adapter MUST translate lifecycle commands into explicit per-part events with stable operation-derived request identities. It MUST require provisioned-delivery evidence for rate start, reject key reuse with changed content, and expose unknown outcomes for resolution by verified reads before another monetary delta is issued.
+The hosted adapter MUST translate lifecycle commands into explicit per-part events with stable operation-derived request identities. It MUST require a matching ActivatedDeliveryRef for rate start, reject key reuse with changed content, and expose unknown outcomes for resolution by verified reads before another monetary delta is issued.
 
 #### Scenario: A start response is lost
-- **GIVEN** a caller-journaled start operation with provisioned-delivery evidence
+- **GIVEN** a caller-journaled start operation with verified activation and provisioning-ready evidence
 - **WHEN** its response is lost
 - **THEN** the adapter reports unknown and exposes the authority event through read
 - **AND** retry uses the same part, bytes and request identity
@@ -44,46 +68,66 @@ The hosted adapter MUST translate lifecycle commands into explicit per-part even
 - **THEN** the adapter confirms satisfaction only from a verified same-or-earlier effective stop
 - **AND** it never reports a later local timestamp as the authority's end
 
-### Requirement: Rate corrections use a cumulative target and half-open periods
-SCM's rate correction helper MUST evaluate intervals from the authority start as half-open periods. Buyer-caused ends keep an incomplete started period; seller-caused ends return it. The helper MUST subtract confirmed earned-money returns by every actor from a cumulative target, exclude returned unearned reservations, and produce only a positive remaining delta.
+### Requirement: Rate stops bind started-period treatment at the payment authority
+SCM MUST derive rate stop treatment through the shared lifecycle codec's settles_through/partialPeriod mapping. Publication and acceptance MUST refuse terms the vendored contract cannot express. SCM MUST NOT compute or submit automatic end-correction reversals; exceptional ends use the dispute adapter's exceptional_end(at).
 
-#### Scenario: The end crosses a period boundary
-- **GIVEN** start 0, period 60 and amount 100
-- **WHEN** end is 60
-- **THEN** buyer-caused and seller-caused permitted charges are both 100
-- **WHEN** end is 61
-- **THEN** buyer-caused permitted charge is 200 and seller-caused permitted charge is 100
-- **AND** end at start permits zero charge
+#### Scenario: The contract has no partialPeriod field yet
+- **WHEN** an interim spot preset is offered against a contract supporting only charged behavior
+- **THEN** payer and payee entitlements both commit started_period
+- **AND** last_boundary or stop terms, or an authority policy requiring returned, refuse before publication or acceptance
 
-#### Scenario: A reversal acknowledgement is lost and another actor reverses
-- **GIVEN** an unresolved operation and a later target increase
-- **WHEN** the caller requests the next delta
-- **THEN** it must first resolve the earlier operation from verified records
-- **AND** the next operation subtracts all confirmed earned-money returns, including the other actor's reversal
+#### Scenario: The stop crosses a period boundary
+- **GIVEN** authority start 0, period 60 and amount 100
+- **WHEN** effective stop is 60
+- **THEN** charged, returned and prorated each charge 100
+- **WHEN** effective stop is 61
+- **THEN** charged charges 200, returned charges 100, and prorated follows the published authority rounding vector
+- **AND** SCM issues no compensating reverse for any of them
 
 #### Scenario: A part never started
-- **GIVEN** an approved rate part without authority start
-- **WHEN** it stops and the reserved batch returns
-- **THEN** earned charge and earned-money reversal target are zero
-- **AND** the returned reservation is not counted again as a refund of earnings
+- **WHEN** an approved unstarted rate part stops
+- **THEN** its earned charge is zero and reservations return at the authority
+- **AND** SCM does not treat returned reservations as earnings to reverse
 
-### Requirement: Rate correction respects the dispute authority boundary
-SCM MUST journal lawful preemption's cooperative started-period correction for voluntary reverse while held. Exceptional ends MUST instead be filed as exceptional_end(at) through the dispute adapter, not realized by backdated payee stop or a locally computed ruling. A paid-out shortfall MUST be reported rather than queued as an unsupported post-release refund.
+#### Scenario: Another stop wins during seller notice
+- **GIVEN** a pending seller stop and a winning earlier payer stop
+- **WHEN** verified authority records expose the winner
+- **THEN** SCM observes that payer entry's partialPeriod, not a locally journaled seller correction
+- **AND** equal-time requests use the authority's recorded winner, not local arrival order
 
-#### Scenario: The storefront recovers after lawful notice matured
-- **GIVEN** a journaled seller notice and its started-period correction obligation
-- **WHEN** verified records show effective stop while rate earnings remain held
-- **THEN** the caller can submit the remaining voluntary reverse after stop under its immutable operation identity
+#### Scenario: Exhaustion or a ruling stops a part
+- **WHEN** exhaustion stops a rate part
+- **THEN** fundedThrough is a period boundary with no partial period to price
+- **WHEN** a dispute authority applies a stop and reversal
+- **THEN** SCM observes the ruling without a second correction
+
+#### Scenario: An independent discount already exists
+- **GIVEN** a prior discount or penalty on a running rate part
+- **WHEN** an entitled stop takes effect
+- **THEN** SCM neither absorbs that effect into a cumulative end target nor submits an overlapping correction
 
 #### Scenario: A site reports an earlier exceptional end
 - **WHEN** the seller learns service ended without an entitlement covering that end
 - **THEN** it files exceptional_end at the reported instant
 - **AND** the dispute authority determines the stop-now and reversal effects
 
-#### Scenario: Held money has already matured
-- **WHEN** a voluntary reverse cannot reach paid-out money
-- **THEN** SCM reports the unrecoverable local shortfall and case path
-- **AND** it does not invent a refund command or retry unsupported forever
+#### Scenario: Start evidence is absent or mismatched
+- **WHEN** rate start has no valid ActivatedDeliveryRef matching the deal, commitment and activated lease
+- **THEN** the adapter refuses start before contacting the payment authority
+
+### Requirement: Absolute rate ends bind their own started-period treatment
+SCM MUST bind the rate option's explicit end_partial_period to the payment end's partialPeriod, preserving start_utc plus max_term_seconds as its instant. Compute presets MUST use returned when expressible. Publication and acceptance MUST refuse unexpressible end treatments; an explicitly disclosed charged interim option MUST NOT be presented as returned or repaired by a local refund.
+
+#### Scenario: A late start leaves an incomplete final period
+- **GIVEN** authority start 10, period 60, amount 100 and absolute end 120 with returned treatment
+- **WHEN** that end is reached
+- **THEN** billing keeps 100 for [10,70) and returns the incomplete [70,130) period
+- **AND** delivery still ends at 120 without rounding down the accepted duration
+
+#### Scenario: Only charged absolute ends are expressible
+- **WHEN** an interim spot or on-demand rate preset is published
+- **THEN** its option explicitly commits charged end treatment and discloses the final partial-period charge
+- **AND** an option requesting returned or prorated refuses publication and acceptance
 
 ### Requirement: Rate observations require verified authority state
 The hosted adapter MUST consume the foundation's verified snapshot interface before interpreting start, funding, pending stop, stop, extensions, releaseAt or event sequence. It MUST expose per-part changes to lifecycle read/watch without treating a courtesy hint or a missing funding field as an authoritative stop.
@@ -98,8 +142,8 @@ The hosted adapter MUST consume the foundation's verified snapshot interface bef
 - **WHEN** snapshot verification fails or its known sequence regresses
 - **THEN** no rate state from it is used for billing, start admission or funding renewal
 
-### Requirement: Running hosted deals can re-anchor during identity overlap
-SCM MUST support bounded overlap of current and retiring payment identities. It MUST provide fresh current-key verified snapshot evidence bound to the persisted mandate for durable re-anchoring, preserve original signed bytes, and report deals still dependent on a retiring identity. A mode change MUST require draining rather than re-anchoring.
+### Requirement: Running hosted rate deals can re-anchor during identity overlap
+SCM MUST provide current-key verified snapshot evidence for durable rate-deal re-anchoring during bounded identity overlap, preserving original signed bytes. Its retirement inventory MUST include all hosted deals: rate deals MUST re-anchor or drain, and once-only deals MUST drain before their key is removed. A mode change MUST require draining, not re-anchoring.
 
 #### Scenario: An old-key receipt is embedded in a new-key snapshot
 - **GIVEN** an old receipt verified during the configured overlap

@@ -1,12 +1,12 @@
 ## ADDED Requirements
 
 ### Requirement: Seller notice uses lifecycle submit and authority-hosted stop
-The seller half MUST admit a negotiation-keyed notice command only under the accepted payee entitlement. It MUST use the existing seller-authenticated lifecycle submit contract and journal seam, submit stop immediately through the payment adapter, and return authority status rather than claim a locally scheduled payment end.
+The seller half MUST admit a negotiation-keyed notice command only under the accepted payee entitlement. It MUST use the foundation's lifecycle submit command contract, submit stop immediately through the payment adapter, and return authority status rather than claim a locally scheduled payment end.
 
 #### Scenario: A seller preempts an accepted spot deal
 - **GIVEN** an authenticated seller and an accepted payee notice entitlement
 - **WHEN** the seller submits notice with a stable operation key
-- **THEN** the seller half journals the command and cooperative started-period correction obligation
+- **THEN** the seller half preserves the command identity without a correction obligation
 - **AND** the adapter submits explicit affected-part stops to the payment authority
 - **AND** read/list expose the verified pending stop and its effective time
 
@@ -35,6 +35,19 @@ Both compute storefront operator CLIs MUST provide deals preempt by negotiation 
 - **THEN** the CLI delegates the same command through lifecycle submit
 - **AND** displays pending, unknown or accepted authority state without bypassing notice
 
-#### Scenario: An unauthenticated caller submits notice
-- **WHEN** a caller without the seller route's administrator-principal authentication invokes submit
-- **THEN** the route refuses before any adapter event or correction is issued
+### Requirement: Canonical rate buyer end preserves service during notice
+The buyer half MUST normally submit rate stop at the payment authority and send hint, allowing delivery until effective stop reaches end service through watch. It MUST reserve end_delivery for explicit immediate surrender or the foundation's unreachable-payment-authority buyer_end(at) path. Immediate surrender MUST disclose that paid notice may outlast service.
+
+#### Scenario: A payer has nonzero notice
+- **GIVEN** an accepted rate option with payer notice 300 seconds
+- **WHEN** the buyer invokes normal end and stop is accepted pending
+- **THEN** the buyer sends hint, not end_delivery, and service continues until the effective authority stop
+- **AND** losing the hint does not cancel or postpone that stop
+
+#### Scenario: The buyer explicitly gives up remaining notice service
+- **WHEN** the buyer chooses end-now-regardless
+- **THEN** the buyer half submits stop and sends end_delivery with the immediate-surrender disclosure
+
+#### Scenario: The payment authority cannot be reached
+- **WHEN** the buyer invokes end but payment stop is unknown or unavailable
+- **THEN** the foundation's signed end_delivery and buyer_end(at) evidence/retry path is used

@@ -13,16 +13,11 @@ SCM's rate-part qualification MUST distinguish published-vector conformance, pro
 - **THEN** the corresponding authority-conformance claim is recorded as unproven
 - **AND** double-generated traces are not relabelled published vectors
 
-### Requirement: Both compute lanes qualify rate stops through the consumer
-SCM MUST exercise cross-service rate behavior in both compute lanes after rate continuation is composed: buyer stop, seller notice surviving storefront outage, earlier buyer stop during notice, exhaustion, maximum term and on-demand exceptional end. Each scenario MUST observe authority records and actual domain release; hosted runs MUST check readiness before execution.
+#### Scenario: The adapter is tested without lane services
+- **WHEN** kit rate integration tests run
+- **THEN** they exercise the contract fake and verified vector fixtures without starting lane HTTP tooling
 
-#### Scenario: A spot seller disappears after notice
-- **GIVEN** an accepted pending stop and a stopped storefront process
-- **WHEN** the lane clock passes its effective time
-- **THEN** payment read shows the authority-applied stop without a second seller command
-- **AND** after storefront recovery the continuation ends domain access/capacity and corrects the incomplete seller-started period while held
-
-#### Scenario: Hosted prerequisites are missing
-- **WHEN** the hosted revision, accounts, credentials or required hardware are unavailable
-- **THEN** the scenario reports the exact unmet prerequisite before driving the deal
-- **AND** it reports no successful hosted qualification or mechanism fallback
+#### Scenario: Consumer behavior is not yet composed
+- **WHEN** adapter or notice first use succeeds before rate continuation is installed
+- **THEN** evidence claims only command/authority mechanics and delivery fails closed without the rate hook
+- **AND** no both-lane release or hosted qualification is claimed
