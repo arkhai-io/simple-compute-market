@@ -186,13 +186,19 @@ Before availability, refusal, provisioning failure, elapsed window or activation
 - **WHEN** a never-delivered deal fails before its accepted start
 - **THEN** delivery supplies both accepted start and the fixed failure-observation time
 - **AND** delivery retains the returned operation reference and supplies those fixed inputs once, without locally choosing a future at or recomputing on retry
-- **AND** consumes deal-lifecycle's exceptional-end timing policy
+- **AND** consumes deal-lifecycle's exceptional-end filing/timing policy through the dispute adapter, without issuing a seller payment stop or reverse
 
 #### Scenario: Settlement arrives after the window without established buyer fault
 
 - **WHEN** the window has elapsed and no resource became available
 - **THEN** delivery does not dispatch and supplies never-delivered evidence
 - **AND** does not infer a buyer-fault exemption from settlement lateness alone
+
+#### Scenario: Buyer delivery-end receipt is evidence, not billing authority
+
+- **WHEN** a buyer end_delivery request arrives without at
+- **THEN** delivery consumes the storefront's signed receipt evidence and lifecycle admission result
+- **AND** does not issue a billing stop for the buyer or duplicate buyer-side stop retry or buyer_end triage policy
 
 #### Scenario: An end overlaps dispatch
 

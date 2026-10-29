@@ -16,7 +16,7 @@ identity. The shared path runs inside that hook, never beside or instead of it.
 Payment settle and Alkahest's ready continuation reach the same hook. This change
 does not replace settlement-stage evidence validation.
 
-The foundation owns end service and its durable admission/end-plus-correction operations.
+The foundation owns end service and its durable admission/end-plus-filing operations.
 These are dependency contracts, not implemented capabilities on this branch.
 
 ## Goals / Non-Goals
@@ -75,7 +75,7 @@ reservation/fulfillment IDs, servicing-decision references, delivery-owned inten
 acknowledgements and checkpoints.
 It holds no credentials, payment balances, final-request log or financial end.
 End service owns the revision-bearing admission port and single end-plus-optional-
-self-correction operation from agreed-evidence-and-early-termination. Delivery consumes
+filing operation from agreed-evidence-and-early-termination. Delivery consumes
 those operations in the same storefront transaction for admission/CAS; no transaction
 spans remote I/O and neither owner imports the other's concrete repository.
 
@@ -197,13 +197,18 @@ driving across mechanisms, and consumes this path rather than reimplementing it.
 
 Supply cause, actor, source, accepted start, observed failure time, identities and
 evidence to foundation's record_end operation with optional exceptional_end
-self-correction. That owner selects/records the earliest final request and journals
+filing through the agreement's dispute adapter. That owner selects/records the earliest final request and journals
 the command atomically.
 Delivery neither writes a second end log nor computes amounts or payment corrections.
-end_delivery carries no buyer at: consume the storefront's signed receipt instant.
-Its cooperative payer-notice/partialPeriod billing stop is journaled by end service
-under E-E even if payments was unreachable; no acknowledgement becomes a mechanical
-mediation ruling. This caller references that foundation behavior, not a second rule.
+end_delivery carries no at; the storefront signs its receipt time as evidence.
+It grants the storefront no authority to stop billing for the buyer. The buyer half
+first stops at the payment authority using its own entitlement. If unreachable,
+the buyer half journals that stop and retries under the same key; billing continues
+until the stop lands. The buyer may additionally file buyer_end with the signed
+request and receipt. That case carries the exact Agreement verified against the
+mandate's deal hash, goes to a person in triage, and is realized as the payer's own
+stop at at with its notice and partialPeriod. There is no mechanical buyer_end ruling.
+Delivery consumes the foundation's evidence/admission result, not a second policy.
 
 | Observed evidence before availability | Authority-backed cause input | Caller handoff |
 |---|---|---|
@@ -215,7 +220,7 @@ mediation ruling. This caller references that foundation behavior, not a second 
 
 **Recommendation (04 F4):** foundation alone classifies these inputs. Compare an
 earlier buyer/payer-stop/ruling record with the never-delivered basis (Agreement
-start), not arrival order; only one that controls that basis suppresses correction.
+start), not arrival order; only one that controls that basis suppresses a seller self-penalty filing.
 Terms end or payee stop alone does not suppress non-delivery. Foundation D8 owns
 this policy and the never-delivered timing. Delivery supplies the
 accepted start and fixed failure-observation time; it does not choose `at`. That
@@ -229,16 +234,41 @@ only authority records and kept signed bytes establish buyer actions.
 No-dispatch proof permits end service's release without teardown; dispatched work
 is adopted and ended, not replaced. The site report is end intent/evidence, not proof
 of hardware release. Proven release is a separate completion fact. Physical recovery
-does not wait for authorities. Under E-C the seller's payment adapter, not delivery or mediation, translates
-exceptional_end into payee stop-now (partialPeriod returned), reversals since at,
-unserved once-part returns and any bond award. This is self-correction, not a
-dispute; a buyer disputing the seller's account still files a case. Setup ends at activation under the foundation;
-its unserved-share rule is not delivery arithmetic.
+does not wait for authorities. The seller half files exceptional_end(at) with the
+Agreement's dispute authority through the dispute adapter, journaled with the end.
+The seller sends no stop or reverse of its own for that filing. Its fixed timing
+above remains: never future-dated; a pre-start failure journals immediately and
+files at Agreement start. The authority need not reconcile seller-side effects.
 
-An Alkahest deal with no exceptional-end adapter reports unsupported self-correction and retains its
-existing recovery/reclaim semantics; no fictitious authority success is reported.
-After availability, foundation's actual service-end rule applies instead.
-Cooperative seller correction is not a guarantee about arbitrary sellers.
+**Final owner supersession (04 F4):** this replaces E-A, E-C and E-E as amended,
+the explicit-entry correction and the favourable-stop note. Arkhai mediation's only
+mechanical ruling is a payee-filed self-penalty request at least as strong as the
+standard request. Through mediation's own stop entry
+`{account, notice: PT0S, partialPeriod: "chosen"}`, the standard request stops rate
+parts now with returned, reverses their earnings since at, returns the unserved
+share of once parts by time, and awards any bond in full once bonds exist.
+On-demand always uses returned: that is the on-demand contract. Setup's term ends
+at activation, so its return is all if undelivered and none once delivered.
+These are dispute-authority rules to reference from foundation/mediation, never
+amounts or payment operations for delivery to implement.
+
+Restore exceptional_end to dispute-adapter intents and mediation's request vocabulary
+and published mapping. The package of stop, refunds and bond needs one ruling;
+a partial seller-direct path would still need a dispute. Arkhai also records disputes
+to act on bad sellers. On-demand's "won't preempt" is enforced by remedy—a buyer's
+case over held money and bond—not by mandate restrictions. The seller's own exit
+is this mechanically ruled self-penalty.
+
+Remove the explicit seller restitution entry, payee-stop-without-entry/favourable
+rule, payee notice waiver, payer early release and several-stop-entries-per-account
+dependency/spot gate. Seller stop entries represent entitlements only (for example
+spot's notice entry); a spot seller's emergency exit is exceptional_end filing.
+No exceptional-end self-correction through the payment adapter remains accepted.
+
+An Alkahest deal with no exceptional-end dispute adapter reports unsupported filing
+and retains existing recovery/reclaim semantics; no fictitious authority success
+is reported. After availability, foundation's actual service-end rule applies instead.
+Cooperative seller filing is not a guarantee about arbitrary sellers.
 
 ### D6. Reservation-only activation before billing
 
@@ -336,6 +366,11 @@ authority stops into local ends. Foundation supplies ordering, not another cache
 - Billing horizons, local notice schedulers, direct refunds and a second end journal:
   contradict the authority boundary. Authority stops/holds/cases protect buyers.
 - Retained credential-response replay: bypasses local admission after an end.
+- Compound termination authority at payments: deferred by the owner until hosted
+  bonds are designed. A transaction-level event could end billing at an authorized
+  past time, settle rate parts returned, refund unserved once parts and forfeit a
+  bond, but would still need dispute-authority recording for action on bad sellers.
+  Foundation owns this rejected/deferred alternative; delivery adds no such port.
 
 ## Second-review coordination
 
@@ -346,11 +381,11 @@ These are required sibling edits, reported rather than made outside this change:
 | 03 F2 / 04 F8 | capacity-reservation-lifecycle-hardening section 3: normalized request equivalence (dimensions/attributes, pool/site, mode, lease window), conflict refusal, identity/state recovery across held/committed/released; distinguish explicit expired-hold replacement from unresolved-effect replay |
 | 04 F1 | redesign-authenticated-requests: consume/generalize this identity retry declaration, preserve reservation/skew/changed-reuse/signing and credential re-run/no-body clauses; unify then redesign archive order, or re-diff as supersets if reversed |
 | 04 F3/F5/F6 | foundation: ActivatedDeliveryRef with all D3 fields; sole servicing decision journal and delivery references; named begin_billing entry before adapter start_billing; shared phase enum and explicit evidence-gated no-financial-action for current Alkahest |
-| 04 F4 | foundation: classify verified refusal/payment records against never-delivered start basis, not event kind/arrival; clock or payee stop cannot erase unserved non-delivery; E-C seller payment-adapter correction, never mediation exceptional_end |
-| 04 F5 | spot: implement adapter authorize/start_billing and per-part exceptional_end; converge: compose/drive journals and reference those implementations, never duplicate them |
+| 04 F4 | foundation: classify verified refusal/payment records against never-delivered start basis, not event kind/arrival; clock or payee stop cannot erase unserved non-delivery; final owner supersession: exceptional_end is a journaled dispute filing; mediation alone rules the seller self-penalty; align buyer_end triage and end_delivery evidence, remove seller-direct correction/extra-stop-entry gates |
+| 04 F5 | spot: implement payment authorize/start_billing and dispute-adapter exceptional_end filing, with emergency exit by filing not a restitution stop; converge: compose/drive journals and reference those implementations, never duplicate them |
 | 04 F7 | kit-owned-listing-and-fulfillment-lifecycles design/proposal/spec/tasks: calling convergence goes in domains/compute/delivery or above, not compute_provisioning base; consume protected checkpoints/access retirement here and keep obligation discovery there |
 | 04 F10 | parent-owned index: domains/compute/delivery, reservation-only current-end activation, section-level foundation/renewable/hardening and lane/rate qualification gates; retain in-design status pending coordinated review |
-| 04 F10 | parent-owned roadmap: Goal 8 current-end activation and self-correction (not mediation filing); amend only missing-start fallback clause of capacity row, keep start-on-activation gap; converge D4 current end, not original Agreement end |
+| 04 F10 | parent-owned roadmap: Goal 8 current-end activation and seller self-penalty dispute filing (mediation's only mechanical ruling); amend only missing-start fallback clause of capacity row, keep start-on-activation gap; converge D4 current end, not original Agreement end |
 
 Archive ordering: foundation -> renewable -> unify for site/event/default overlap;
 unify -> redesign-authenticated-requests for identity. Every later MODIFIED block

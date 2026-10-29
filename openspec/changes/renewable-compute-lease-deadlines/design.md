@@ -127,11 +127,13 @@ If the dependency stalls, reconsider the port contract with its owner; passing a
 storefront-selected allowance is not an authorized fallback.
 
 An allowance overrun enters ordinary guarded release. The storefront supplies
-classified failure evidence to the foundation's single end-plus-optional-self-correction
+classified failure evidence to the foundation's single end-plus-optional-filing
 operation. The foundation owns cause classification and the financial intent's
 fixed timing basis. Consume D8's pre-start exception (journal now, act at accepted
-start), never a future-dated command. E-C makes exceptional_end a seller payment-
-adapter self-correction, not a dispute or mechanical mediation ruling. The site
+start), never a future-dated command. The final owner supersession restores
+exceptional_end as the seller's dispute-adapter filing, journaled with the end;
+the seller sends no stop/reverse. Mediation alone mechanically rules its standard-
+or-stronger self-penalty request, not buyer_end, which goes to human triage. The site
 computes no financial instant/amount and its report is not a refund prerequisite.
 The caller supplies verified buyer/ruling/payment evidence for classification;
 term clock or payee stop alone does not erase established non-delivery. Rate billing
@@ -163,8 +165,9 @@ Retained option for that future design:
 
 **Cost of active reclaim:** `reclaim` can destroy a working VM merely because the
 storefront crashed. Billing does not stop on site silence or on that reclaim.
-Honest recovery is `exceptional_end(at)` at the physical end: a self-penalty, including
-awarding any bond in full, even though the original failure was only bookkeeping.
+Honest recovery files `exceptional_end(at)` at the physical end through the dispute
+adapter: mediation rules the self-penalty, including awarding any bond in full once
+bonds exist, even though the original failure was only bookkeeping.
 `grace` only delays that cost; `continue` leaves unpaid-service exposure with the
 seller until the agreed end or a recovered end-service action. None is a buyer
 guarantee. Renewal must be justified by a separate operator's concrete needs before
@@ -196,9 +199,14 @@ delivery. Delivery admission must also honor an expiry claim that wins activatio
   lease policy with payment; activate every deal to its agreed end and defer renewal.
 - Site-event-triggered refund — the foundation classifies delivery failure and
   supplies a valid command instant, with the buyer's case as backstop; reports are evidence.
-- Backdated/effective-time payee stop — stops are never backdated; the seller's
-  payment adapter stops now with partialPeriod returned and reverses held earnings
-  since at as self-correction, separate from a buyer's dispute.
+- Seller-direct exceptional-end correction or backdated payee stop — the seller
+  files a dispute, not its own stop/reverse. Mediation alone uses its own stop entry
+  to stop rate parts now returned, reverse earnings since at, return unserved once
+  shares and award any bond in full. On-demand always uses returned; setup's term
+  ends at activation (all returned if undelivered, none once delivered).
+- Compound payment termination authority — deferred until hosted bonds are designed;
+  foundation records this alternative and its required dispute-authority recording,
+  not a new site capability.
 - Minimum-spend requirement — churn is the seller's pricing/acceptance choice;
   a setup `once` part is the recommended default, not a site allowance rule.
 - Storefront-local scheduled stop — authority-hosted pending stops survive a dead
@@ -262,9 +270,16 @@ only then unify's repository composition-default edit. Renewable's introduced de
 remains false; its resource-pool requirement is amended by unify after qualification.
 Unify 03 F2 / 04 F8 strengthens the hardening slice to normalized exact-request/state
 reconciliation; expired unresolved reserve effects cannot silently create a hold.
-E-C removes any seller dispute/mechanical-ruling dependency: activation lapse remains
-site evidence passed to the seller payment-adapter self-correction. No site payment
-logic or new buyer guarantee is introduced. Keep in design for the coordinated review.
+The final owner decision supersedes E-A/E-C/E-E as amended and the restitution-entry/
+favourable-stop notes: activation lapse is evidence for journaled exceptional_end
+filing through the dispute adapter, not seller payment self-correction. Mediation
+alone mechanically rules the standard-or-stronger seller self-penalty. No site payment
+logic or new buyer guarantee is introduced. "Won't preempt" is enforced by remedy
+over held money and bond, not the mandate. end_delivery has no at and gives signed
+receipt evidence only; the buyer half owns payment-stop retry while billing continues
+until it lands, with optional buyer_end human triage. Remove restitution stop entries,
+notice waiver/early release and multiple-stop-entry gates; seller stops are entitlements
+only, and a spot seller's emergency exit is a filing. Keep in design for the coordinated review.
 
 ## Open questions
 

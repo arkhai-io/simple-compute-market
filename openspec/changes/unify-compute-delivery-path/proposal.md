@@ -13,8 +13,8 @@ ends the resource through lifecycle before any credential disclosure.
 One compute-family path removes those divergences without making the market-neutral
 fulfillment kit own commercial deal state. It builds on the lifecycle and end-service
 boundary of `agreed-evidence-and-early-termination`: money moves at authorities,
-end service orders delivery admission, and the cooperative seller self-corrects through its payment adapter when it fails to
-deliver, not through a dispute filing. This is the delivery portion of Goal 8 in
+end service orders delivery admission, and the cooperative seller files exceptional_end
+through the dispute adapter when it fails to deliver; mediation rules its self-penalty. This is the delivery portion of Goal 8 in
 [`docs/development/ROADMAP.md`](../../../docs/development/ROADMAP.md#goal-8--sell-compute-by-the-period-until-either-party-stops).
 
 ## What Changes
@@ -45,14 +45,18 @@ deliver, not through a dispute filing. This is the delivery portion of Goal 8 in
   `started`, `available` and `converged`, with stable effect identities and recovery
   at each acknowledgement gap. Availability does not depend on a buyer reading it.
 - Delivery supplies classified actor/cause/source, accepted start and fixed failure
-  time to the foundation's single end-plus-optional-self-correction operation. Lawful
+  time to the foundation's single end-plus-optional-filing operation. Lawful
   buyer/payer-stop/ruling evidence is classified by foundation against the non-delivery
   basis; a clock or payee stop alone cannot erase non-delivery. A genuine
   never-delivered failure uses the foundation's fixed min(start, failure-observation)
   basis after start; before a future start it journals now and acts at Agreement
-  start, never future-dating a command. End service journals the self-correction; the seller's payment adapter applies
-  its per-part payee effects, not mediation. The path does not implement its own refund,
-  stop, correction journal or end-deal route.
+  start, never future-dating a command. End service journals the filing; the seller half submits it through the dispute
+  adapter, never its own payment stop/reverse. Mediation alone rules the self-penalty.
+  end_delivery carries no at, only signed receipt evidence, and grants no billing
+  authority: the buyer half stops at payments, journaling/retrying under the same key
+  if unreachable while billing continues until it lands. Optional buyer_end is human
+  triage, not a mechanical ruling. The path implements no refund, stop, second filing
+  journal or end-deal route.
 - Credential reads enforce the delivery checkpoint and end service's recorded end,
   ordered with local end admission. They fetch access material live and recheck
   local eligibility before returning it, never checking payment snapshots on each
@@ -87,7 +91,7 @@ deliver, not through a dispute filing. This is the delivery portion of Goal 8 in
 
 `fulfillment` continues to own provider-neutral execution, not commercial delivery
 state. `physical-provisioning`'s activation primitive is specified by
-`renewable-compute-lease-deadlines`. The lifecycle final-request and self-correction
+`renewable-compute-lease-deadlines`. The lifecycle final-request and exceptional-end filing
 requirements belong to `agreed-evidence-and-early-termination`, not a second delta here.
 
 ## Non-Goals
@@ -107,7 +111,7 @@ requirements belong to `agreed-evidence-and-early-termination`, not a second del
 ## Dependencies and Acceptance Boundary
 
 - Implementation requires `agreed-evidence-and-early-termination`'s seller half,
-  end-service admission and journaled self-correction interface, and
+  end-service admission and journaled dispute-filing interface, and
   `renewable-compute-lease-deadlines`' activation half, including its signed site-end
   report. Buyer termination is folded into the former, not a separate dependency.
   The foundation also owns neutral delivery protocols and pre-start command policy;
@@ -134,11 +138,11 @@ requirements belong to `agreed-evidence-and-early-termination`, not a second del
 Acceptance: both domains and every compute mechanism use the shared protected
 transitions; the Agreement window survives retries; every delivered lease activates
 to its current site end before billing; genuine seller non-delivery durably reaches
-the classified end/correction operation, while lawful ends retain their attribution;
+the classified end/filing operation, while lawful ends retain their attribution;
 no locally ended deal discloses access, including exact authenticated retries;
 restart recovers each effect without
 replacement resources. Reserved VM and bare-metal deals prove activation beyond the
-pool allowance, expiry before activation proves recovery plus the journaled self-correction,
+pool allowance, expiry before activation proves recovery plus the journaled exceptional-end filing,
 and API-credit delivery remains unchanged. Rate-path qualification is explicitly
 blocked until its implementation dependencies are ready; no prepaid result proves it.
 

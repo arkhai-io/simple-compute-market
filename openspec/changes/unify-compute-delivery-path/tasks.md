@@ -7,7 +7,7 @@ are later amended.
 ## Dependency gates and validation scope
 
 - Before sections 1–3 execute: land `agreed-evidence-and-early-termination`'s seller
-  half, final-request admission, joint end/self-correction journal and end-domain port;
+  half, final-request admission, joint end/filing journal and end-domain port;
   neutral delivery authorization/effect protocols and opaque evidence envelope;
   land `renewable-compute-lease-deadlines`' activation half with its composition
   safeguard off (transitively gated by `inject-site-pool-authority`).
@@ -85,7 +85,7 @@ Do not change provisioning's physical aggregate schema to hold commercial state.
       fulfillment IDs, verified activation reference/active instant and ready digest/
       versioned envelope, never credentials. Spot implements payment authorize/
       start_billing; converge composes/drives the neutral journals.
-      Inject foundation-owned admission and single end-plus-correction ports.
+      Inject foundation-owned admission and single end-plus-filing ports.
       Verify: family-library integration that an end admitted
       before dispatch defeats financial allow and unknown hook results stay pending.
 - [ ] 1.4 Coordinate local end admission and checkpoint/disclosure CAS through the
@@ -174,7 +174,7 @@ Files: family delivery orchestration and the same domain composition/recovery ad
 implement its internals in this change. No edits to the payment authority contract.
 
 - [ ] 3.1 Wire D5's cause table into the foundation-owned single end-plus-optional-
-      self-correction operation. Supply actor/cause/source, accepted start, fixed failure
+      filing operation. Supply actor/cause/source, accepted start, fixed failure
       observation time, resource identities and evidence; retain signed site bytes.
       Supply verified refusal reasons/payment records, not event-kind classification:
       payer stop or mandate state is not automatically seller failure; missing
@@ -193,16 +193,22 @@ implement its internals in this change. No edits to the payment authority contra
       Verify: existing release/admission integration at
       `provisioning/compute/tests/integration/test_release.py`, plus application
       drive after the storefront restarts with a due site-end report.
-- [ ] 3.3 Reuse the joint end/correction journal across a crash, retaining the same command
-      key. Display pending/unsupported/repair-required outcomes honestly; an Alkahest
-      deal with no exceptional-end payment adapter retains its accepted failure/reclaim behavior.
-      Verify: library integration uses the shared kit-owned clock-injected engine; HTTP
-      application/lane qualification waits for the runnable payments/mediation doubles
-      that the path supplies an intent and no correction amounts, direct stop or
-      alternate refund log; self-correction retries are the lifecycle owner's operation. E-C uses the seller's
-      payment adapter, not mediation filing; buyer cases still go to mediation triage.
+- [ ] 3.3 Reuse the joint end/filing journal across a crash, retaining the same command
+      key. Submit exceptional_end through the Agreement's dispute adapter; the seller
+      sends no payment stop/reverse. Display pending/unsupported/repair-required honestly;
+      an Alkahest deal without that dispute adapter retains accepted failure/reclaim.
+      Verify: library integration uses shared kit-owned clock-injected fixtures; HTTP
+      application/lane qualification waits for runnable payments/mediation doubles.
+      Observe that delivery supplies an intent, not correction amounts, direct stop or
+      alternate refund log. Filing retries belong to the lifecycle owner; mediation's
+      only mechanical ruling is the payee-filed standard-or-stronger self-penalty.
+      Confirm end_delivery has no at and yields signed receipt evidence, not a storefront
+      billing stop. Buyer-side unreachable-authority retry keeps the same key and billing
+      continues until it lands; optional buyer_end goes to human triage with the exact
+      Agreement checked against the mandate's deal hash. Keep these lifecycle scenarios
+      with their owning foundation/spot suites, consuming their outcomes here.
 
-Acceptance property: recovery cannot lose an owed self-correction after recording the
+Acceptance property: recovery cannot lose an owed exceptional-end filing after recording the
 local end; the lifecycle owner selects its fixed valid instant from cause/start/failure
 evidence, never payment start or retry time. Lawful ends do not create seller penalties. Financial amounts and authority ruling policy
 are qualified by the lifecycle/rate changes, not duplicated here.
@@ -229,7 +235,7 @@ pass. New persisted scenarios remain subject to the explicit approval gate above
 - [ ] 4.3 Drive crash/restart at every adjacent delivery checkpoint and every
       external intent/acknowledgement gap with deterministic controls. Drive a crash
       before activation until the site's awaiting-activation expiry, recover and
-      observe physical release plus the journaled exceptional-end self-correction. Keep
+      observe physical release plus the journaled exceptional-end dispute filing. Keep
       authority-application results distinct from local command evidence.
 - [ ] 4.4 After the rate dependencies are ready, compose their hook and drive
       activate/start/disclose races and a post-activation start refusal in both
