@@ -197,3 +197,14 @@ deployment boundary.
   charge?** A penalty bond is the existing vocabulary for it, and
   the settlement runtime already models seller-funded bonds. Deferrable and better
   decided once hold charging is real.
+
+## Related decision recorded by Goal 8
+
+`renewable-compute-lease-deadlines` (Goal 8) gives every compute lease an activation
+deadline equal to the commit plus a per-pool provisioning allowance the site reads itself, so
+provisioning time is bounded and accounted apart from billable time but is not priced.
+Once held time is priced here, the provisioning window is a candidate for the same
+machinery — an allowance that costs the buyer, rather than one that only
+expires — and the minimum charge a per-period option may state
+(`settle-ongoing-compute-through-arkhai-payments`) is the goal's interim answer to
+repeated provisioning. Revisit both when this change is designed.
