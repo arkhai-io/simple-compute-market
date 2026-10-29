@@ -116,8 +116,8 @@ by dispute interface", "Evidence is keyed by negotiation" and "A dispute is one 
       after commitment validation. Verify: unit tests for "A mechanism has
       no adapter for a command", "A deal names an interface with no adapter", "An interface has
       no buyer-end request", "A retry changes content" and the on-demand stop-authority scenario,
-      using fake adapters. Include the counterparty-interest protocol operations from D5,
-      with fail-before-I/O refusal until vendored; no extra entitlement or mediation mapping.
+      using fake adapters. Include the explicit-entry protocol rule from D5 (stop only under a stated entry, no notice waiver,
+      no early release), with fail-before-I/O refusal until vendored; no extra entitlement or mediation mapping.
 
 - [ ] 2.4 Extend peer/route/read contracts with receipt-only end_delivery (no at), signed
       acknowledgement binding request identity, seller-recorded receipt, selected end,
@@ -342,11 +342,12 @@ settle by negotiation". Files: `kit/arkhai-payments/schema/`, `src/market_arkhai
 `buyer.py`, `seller.py`, `test-vectors/`, the VM, bare-metal and API-credit storefronts'
 `settlement_composition.py`, and the API-credit buyer.
 
-- [ ] 8.1 Vendor the counterparty-interest capabilities with explicit contract/vector gates:
-      payee returned stop without a stop entry, discretionary payer-notice waiver, payer early
-      release waiving dispute window, and existing payee reverse/refund. Confirm receipt-based
-      cooperative billing realization after outages without a second retry-time notice. Spot
-      implements rate commands; this foundation supplies the protocol and coherent vendoring.
+- [ ] 8.1 Derive the seller's restitution stop entry `{account: seller, notice: PT0S,
+      partialPeriod: returned}` on every part, visible to the buyer's mandate check, with
+      existing reverse authority; gate several stop entries per account per part (spot needs both
+      its notice entry and this one; until then a spot seller's immediate stop is unavailable).
+      Confirm receipt-based stop realization after outages without a second retry-time notice.
+      Spot implements rate commands; this foundation supplies the protocol and coherent vendoring.
       Vendor the contract revision (`extend` authorities key, `maxHoldExtension`,
       per-extension refs, per-part authorities with stop notice durations and `partialPeriod`,
       `end` with its own `partialPeriod`, `afterStop`
@@ -510,9 +511,8 @@ authority's; this change's suites claim neither). Files: `kit/arkhai-payments/sr
       Implement exceptional_end(at) in this payment adapter for once parts as ordinary
       `reverse {part, amount}` events only (no exceptional-end payments field): compute
       unserved share from each mandate term, setup all if undelivered/none after activation,
-      stable per-part keys and verified unknown-result recovery. No mediation call. Expose
-      counterparty-interest voluntary reverse/early-release operations only when the vendored
-      contract expresses them. Spot extends this adapter to emit `stop {part, partialPeriod: "returned"}`, immediate and entry-independent, and rate reversals.
+      stable per-part keys and verified unknown-result recovery. No mediation call. Spot extends this adapter to emit `stop {part}` under the seller's restitution entry and
+      rate reversals.
       Verify test_seller.py, test_reconciliation.py and adapter library-integration cases for
       an administrator end, delayed report, pre-start deferred execution and crash replay.
 
@@ -736,7 +736,7 @@ The remaining D1–D15 destinations are listed in proposal.md and task 16.9.
 |---|---|
 | D6 neutral authorization/evidence envelope, sole end-service billing-start intent; D8 cause classification, pre-start timing exception and revised-remedy netting | New `deal-lifecycle` spec/architecture and settlement-servicing spec/architecture at closeout |
 | D8 receipt-only canonical end, cooperative billing action, stop-or-case and both CLI paths | `openspec/specs/buyer-orchestration/spec.md` and `architecture.md` |
-| D5 counterparty-interest actions; D8 exceptional-end payment self-correction and stable effects; D9 retained signed evidence; D10 case-carried Agreement and human triage | New `deal-lifecycle` capability's spec and architecture companion (created at archive/closeout) |
+| D5 explicit restitution entry; D8 exceptional-end payment self-correction and stable effects; D9 retained signed evidence; D10 case-carried Agreement and human triage | New `deal-lifecycle` capability's spec and architecture companion (created at archive/closeout) |
 | D8 site-signed intended-end report, transactional event/outbox and recovery | `openspec/specs/site-capacity/spec.md`, `openspec/specs/physical-provisioning/spec.md` and their architecture companions |
 | D8 intended end versus proven release; terminate versus future truncate | `docs/development/ARCHITECTURE.md`, "Site authority", "Fulfillment status and results", "Release"; `openspec/specs/site-capacity/architecture.md` |
 | D8 VM buyer end and second-precision lease effects | `openspec/specs/vm-storefront-fulfillment/spec.md` |

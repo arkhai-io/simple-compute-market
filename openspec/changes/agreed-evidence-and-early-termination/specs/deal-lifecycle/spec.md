@@ -116,19 +116,19 @@ A mechanism adapter MUST translate each deal-level command into the events of th
 - **WHEN** a seller submits `reverse` of an amount on a hosted deal
 - **THEN** the adapter sends one `reverse` event naming the `once` part and that amount
 
-### Requirement: Payment adapters distinguish counterparty-interest actions
+### Requirement: Payment adapters act only through explicit mandate entries
 
-The payment-adapter protocol MUST distinguish entitled own-interest commands from voluntary counterparty-interest actions: payee returned stop without a stop entry, payer-notice waiver, refund/reverse, and payer early release waiving the dispute window. Unsupported contract capabilities MUST reject before I/O; they MUST NOT invent an entitlement or dispute. The dispute authority MUST act through its own entries.
+The payment-adapter protocol MUST send a stop only under a stop entry the mandate states for that account, and a reverse only under the reverse authority. It MUST NOT assume an implicit rule about whose favour an action serves, waive a payer's notice, or release held money early. Unsupported contract capabilities MUST reject before I/O; they MUST NOT invent an entitlement or dispute. The dispute authority MUST act through its own entries.
 
-#### Scenario: The payer voluntarily releases held money
+#### Scenario: A stop has no entry
 
-- **WHEN** a payer requests early release and the vendored contract can express it
-- **THEN** the adapter sends the authenticated counterparty-interest action without claiming a seller refund right for the buyer
+- **WHEN** the adapter is asked to send a stop for which the mandate states no entry for the sender
+- **THEN** it rejects before I/O rather than sending it or changing a priced entitlement
 
-#### Scenario: A capability is not vendored
+#### Scenario: Several entries are not vendored
 
-- **WHEN** voluntary notice waiver cannot be expressed by the vendored contract
-- **THEN** the adapter rejects before I/O rather than silently changing a priced entitlement
+- **WHEN** a spot seller must hold both its notice entry and its restitution entry on one part and the vendored contract allows one stop entry per account per part
+- **THEN** the seller's immediate stop is unavailable and its emergency exit waits out its notice
 
 ### Requirement: Lifecycle terms are part of the selected option
 
@@ -201,12 +201,12 @@ An unknown `version`, initiator key, or `settles_through` value, a `dispute` who
 
 ### Requirement: Entitlements are the stop authorities
 
-The adapter MUST derive entitled stop entries and the option's dispute authority on stoppable parts. Only the dispute authority MAY use its entry for outcomes. No early_termination MUST mean no stop entries; absent payee entitlement MUST NOT disable voluntary returned stops in the payer's interest. Builders MUST refuse terms their mechanism cannot realize, including unsupported seller-funded bonds.
+The adapter MUST derive entitled stop entries and the option's dispute authority on stoppable parts. Only the dispute authority MAY use its entry for outcomes. The adapter MUST also add the seller's restitution entry `{account: seller, notice: PT0S, partialPeriod: returned}` to every part's stop authorities, visible to the buyer's mandate check and not an entitlement. No early_termination MUST mean no entitled stop entries. Builders MUST refuse terms their mechanism cannot realize, including unsupported seller-funded bonds.
 
 #### Scenario: An on-demand option is derived
 
 - **WHEN** an option's `early_termination` has a `payer` entitlement only
-- **THEN** the payer and dispute authority have the derived stop entries and no payee entitled reclaim entry is derived; the adapter retains the payee's independent voluntary returned-stop capability
+- **THEN** the payer and dispute authority have the derived stop entries, the seller holds only its restitution entry and no payee notice entry, and the mandate does not enforce that the seller will not preempt
 
 ### Requirement: Each party has one priced stop notice
 
@@ -219,7 +219,7 @@ The adapter MUST carry each party's entitlement `notice_seconds` unchanged into 
 
 ### Requirement: Started-period treatment is a committed payment term
 
-The codec MUST map `settles_through` values `started_period`, `last_boundary`, `stop` to payments `partialPeriod` values `charged`, `returned`, `prorated` respectively. Publication and buyer acceptance MUST refuse values the vendored contract cannot express. SCM MUST NOT replace an entitled stop's committed treatment with a storefront refund; voluntary exceptional-end self-correction remains separate.
+The codec MUST map `settles_through` values `started_period`, `last_boundary`, `stop` to payments `partialPeriod` values `charged`, `returned`, `prorated` respectively. Publication and buyer acceptance MUST refuse values the vendored contract cannot express. SCM MUST NOT replace an entitled stop's committed treatment with a storefront refund; seller self-correction uses its restitution entry.
 
 #### Scenario: Returned treatment is not expressible
 
@@ -374,17 +374,22 @@ SCM MUST NOT depend on mechanical rulings. Filing a case MUST NOT itself change 
 
 ### Requirement: A seller's exceptional end is a payment-adapter command
 
-The seller half MUST journal exceptional_end(at) with a delivery end and send it only to its payment adapter; the payments vocabulary MUST NOT contain an exceptional-end event kind or field, and the cause MUST stay in end service's record and the evidence store. The adapter MUST translate it into ordinary payee events: `stop {part, partialPeriod: "returned"}` per rate part, immediate and independent of any stop entry or notice, and `reverse {part, amount}` for earnings since at and each once part's unserved time share, with amounts it computes. Setup MUST reverse all if undelivered, none after activation. Future at MUST refuse; unknown effects MUST resolve before retry.
+The seller half MUST journal exceptional_end(at) with a delivery end and send it only to its payment adapter; the payments vocabulary MUST NOT contain an exceptional-end event kind or field, and the cause MUST stay in end service's record and the evidence store. The adapter MUST translate it into ordinary payee events: `stop {part}` per rate part under the seller's `PT0S`/returned restitution entry, and `reverse {part, amount}` for earnings since at and each once part's unserved time share, with amounts it computes. Setup MUST reverse all if undelivered, none after activation. Future at MUST refuse; unknown effects MUST resolve before retry.
 
 #### Scenario: An administrator ends a once-only deal
 
 - **WHEN** the seller administrator issues exceptional_end(now) for a hosted once-only deal
 - **THEN** end service records the attributed delivery end and the payment adapter reverses its unserved share with stable keys, without filing a case or awaiting a ruling
 
-#### Scenario: Hardware fails under a payee notice entry
+#### Scenario: Hardware fails on an on-demand deal
 
-- **WHEN** the seller's hardware fails on a rate deal whose accepted payee entry carries a notice
-- **THEN** the adapter sends an immediate returned stop with no notice and `reverse` events for the amounts it computes, and the payments service receives no cause or exceptional-end field
+- **WHEN** the seller's hardware fails on a rate deal whose seller holds only the restitution entry
+- **THEN** the adapter sends `stop {part}` under that entry and `reverse` events for the amounts it computes, and the payments service receives no cause or exceptional-end field
+
+#### Scenario: Hardware fails on a spot deal before several entries exist
+
+- **WHEN** the seller's hardware fails on a deal whose seller holds a notice entry and the contract allows one stop entry per account per part
+- **THEN** the seller's stop waits out its notice and the adapter reverses the amounts it computes
 
 ### Requirement: The seller corrects ends its terms do not entitle
 

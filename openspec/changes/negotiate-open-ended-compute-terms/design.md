@@ -80,11 +80,13 @@ Keep the foundation's exact shapes and names:
 
 A payee entitlement means the seller may interrupt; the payment authority enforces
 its notice as a pending stop on that stop authority, not a local schedule.
-On-demand has no payee entitled reclaim entry. The seller can still act in the buyer's
-interest without such an entry: exceptional_end(at) is the seller's payment-adapter
-self-correction, not a dispute, and the payments service never sees it as one. The adapter sends
-only ordinary payee events: an immediate `stop {part, partialPeriod: returned}` per rate part
-(always permitted to a payee, with or without a stop entry or notice) and `reverse {part, amount}`
+On-demand has no payee notice entry; its seller holds only the restitution entry
+`{account: seller, notice: PT0S, partialPeriod: returned}` that SCM derives on every part, visible
+to the buyer's mandate check. The mandate therefore does not enforce that the seller won't preempt;
+the buyer's remedy is a case over held money and the bond. exceptional_end(at) is the seller's
+payment-adapter self-correction, not a dispute, and the payments service never sees it as one. The
+adapter sends only ordinary payee events: `stop {part}` under that entry per rate part and
+`reverse {part, amount}`
 for earnings since at and each once part's unserved time share, with amounts it computes.
 Setup reverses all if undelivered and none after activation; the cause stays in end service's record. A buyer contesting the account
 files a case; mediation triages all cases for a person. There is no compensation enum.
@@ -196,7 +198,7 @@ the buyer's stop/case is its backstop. Normal buyer end submits payment-authorit
 service until the effective stop is watched. `end_delivery` means end now regardless;
 it has no at and the storefront records/signs its own receipt. Our seller journals a billing
 stop for receipt plus payer notice with payer treatment even during payment outages,
-optionally waiving notice; the buyer's outage case buyer_end(at) is human-triaged with kept
+never waiving the payer's notice; the buyer's outage case buyer_end(at) is human-triaged with kept
 evidence, preserving notice/treatment and netting recorded stops, not ruled mechanically. Setup ends
 at activation, pays out one dispute window later and is fully returned for an
 undelivered deal but not after delivery.
@@ -214,7 +216,7 @@ the rate change derives it.
 - Stored class: it can disagree with selected terms.
 - `interruption {seller_may_interrupt, notice_seconds, compensation}`: duplicates the shared codec.
 - Terms as typed fields beside `params`: widens the shared option wire for terms only some mechanisms enforce, against the payment-mechanism-primary rule (D4).
-- Payee entitled reclaim entry on on-demand: makes won't-preempt unenforceable; a returned voluntary self-correction in the buyer's interest is not that right.
+- Payee notice entry on on-demand: grants the seller a priced reclaim. On-demand carries only the seller's restitution entry, so won't-preempt is not mandate-enforced; the remedy is a buyer case and the bond. A spot seller holding both its notice and restitution entries needs several stop entries per account per part, a gated payments dependency.
 - Bare-metal minimum spend/new payments primitive: churn is seller pricing/refusal policy.
 - Rejecting setup once because it is not minimum spend: name the additive fee honestly.
 - Banning principal-blacklist policy: goodwill is not a decentralized protocol guarantee.
