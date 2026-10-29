@@ -33,7 +33,10 @@ stays with its owners.
       only until vendored and only with explicit buyer policy opt-in), absolute maximum
       terms with their own partialPeriod and no rounding, chosen dispute-stop entry,
       period-end/part-stop earning and {for} payout anchoring, activation-before-start,
-      setup once end at activation and full-undelivered/zero-delivered self-penalty.
+      setup once end at the later of the Agreement start and approval, and the
+      full-undelivered/zero-delivered self-penalty. Record the hosted authority's published
+      description against D1: repeat/concurrent-case and dismissal policy, key-retention and
+      origin-continuity commitment; a missing item is a blocker, not a caveat.
       Requalify foundation's exceptional_end dispute-adapter intent and mediation
       published mapping; journal with end, never future-date and file pre-start
       failure at Agreement start. Seller sends no stop/reverse. Verify mediation's

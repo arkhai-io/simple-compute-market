@@ -101,6 +101,15 @@ is an internal product prerequisite, not a request for another payments capabili
 Missing credentials or an unavailable target block the live checks; they are not
 passing double evidence.
 
+The hosted dispute authority is qualified against the foundation's published
+description (D13), not only against its vectors: its policy on repeated and
+concurrent cases on one agreement and on closing a case nobody advances, and its
+key-retention and origin-continuity commitment for the life of a deal plus its
+dispute window and open cases, must be published. An authority whose description
+lacks either blocks activation however its doubles behave: the architecture rests
+on this authority's fairness and continuity, and the code neither limits filings
+nor follows a rotated key.
+
 After hosted checks pass, both production compositions declare servicing against
 the published revision. The same declaration is checked at publication, acceptance
 and materialization. Do not change service identity/mode or redirect accepted
