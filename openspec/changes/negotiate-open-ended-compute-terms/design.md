@@ -87,7 +87,10 @@ Keep the foundation's exact shapes and names:
   without it — the buyer benefits and enforces it, with an explicit opt-out — so the
   derivation log and listing diagnostics name it like the penalty: "a default buyer
   refuses this option: no delivery deadline". Changing the pool's value changes
-  future options' IDs, never a committed deal's deadline.
+  future options' IDs, never a committed deal's deadline; a deal accepted before the
+  change commits with its accepted value, which the site enforces where the pool still
+  grants that much and refuses where it does not (renewable D1), so publication
+  republishes on a pool change rather than letting the two readings drift.
 
 A payee entitlement means the seller may interrupt; the payment authority enforces
 its notice as a pending stop on that stop authority, not a local schedule.

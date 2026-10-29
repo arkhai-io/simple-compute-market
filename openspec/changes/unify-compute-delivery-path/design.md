@@ -124,8 +124,9 @@ durable wake time and the retry owner D1 records, and rechecks admission on wake
 so hardware is never used outside the admission window; a nonzero lead time would
 need explicitly accounted capacity, not a timer. The renewable change anchors the
 activation deadline at `max(committed_at_utc, lease_start_utc) + delivery_deadline_seconds`,
-the deal's commitment instant that delivery supplies with the site commit and the
-option's published deadline, which the site reads from its pool under the same name.
+the deal's commitment instant and accepted deadline that delivery supplies with the
+site commit, the latter enforced where the pool's current policy still grants it and
+refused where it does not.
 Available never means early access. Settlement after the end enters D5, without guessing
 which party caused the lateness.
 
@@ -230,6 +231,7 @@ admission result, not a second policy.
 |---|---|---|
 | Buyer `end_delivery`, verified payer stop or ruling | Signed request or authority record and instant | Supply the existing final request and evidence for the foundation to compare with the non-delivery basis |
 | Start refused | Verified refusal reason or payment record: payer stop, mandate state, exhaustion, seller fault or unknown | Pass the reason and record; never classify by event name; missing pre-start funding is not exhaustion |
+| Site commit refused for the accepted delivery deadline | The site's refusal: the accepted `delivery_deadline_seconds` exceeds the pool's current policy or the pool enforces none | Seller failure before dispatch, no capacity used; supply the refusal with the accepted terms for the foundation's never-delivered filing at the Agreement start |
 | Provisioning failure or activation lapse | Fixed observation and any earlier buyer or ruling record | Supply seller non-delivery evidence for the foundation's classification |
 | Window elapsed or payee stopped before availability | Start basis and never-delivered evidence, unserved setup included | The clock or the seller's own stop never erases non-delivery |
 | Late settlement with no independently established cause | No proof of buyer fault | Do not dispatch; supply never-delivered evidence without inventing an exemption |

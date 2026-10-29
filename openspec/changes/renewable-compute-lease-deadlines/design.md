@@ -40,8 +40,18 @@ The names do not imply an active renewal operation: only activation ships here.
 
 - On first commit with a resolved delivery deadline, record `awaiting_activation` and
   `renew_by_utc = max(committed_at_utc, lease_start_utc) + delivery_deadline_seconds`,
-  where `committed_at_utc` is the deal's commitment instant the storefront supplies
-  with the commit — the payment authority's record of the buyer's approval on a hosted
+  where `delivery_deadline_seconds` is the deal's accepted value, supplied with the
+  commit as a fact of the deal like its window, and the pool's current effective value
+  is its ceiling: the site refuses a commit whose accepted deadline exceeds what the
+  pool now grants, or that carries one where the pool now enforces none, since the
+  seller cannot ask its site for more time than the site gives — a refusal that
+  delivery classifies as seller failure before dispatch, using no capacity. A pool
+  lengthened after acceptance changes nothing for the deal; a pool shortened below an
+  accepted deal's value refuses that deal rather than reclaiming it early, and the
+  listing republishes with the new value. A commit carrying no accepted deadline (a
+  buyer that opted out of the term) takes the pool's current policy as the site's own
+  capacity safeguard. `committed_at_utc` is the deal's commitment instant the storefront
+  supplies with the commit — the payment authority's record of the buyer's approval on a hosted
   deal, the mechanism's commitment act otherwise. The site refuses an anchor after its
   own clock, so a storefront cannot lengthen the deadline by sitting on an approved deal.
   This protects a forward reservation without expiring it before its admitted start;
@@ -99,9 +109,13 @@ only after a provider action.
 max(commitment instant, lease start) within which the site activates the lease. It is
 also the buyer's term: the storefront publishes the pool's effective value as the
 option's `lifecycle.delivery_deadline_seconds` (foundation D5), under the same name,
-and the site enforces exactly what was published, so the activation deadline is a
-promise the buyer read and the dispute authority can check, not a seller-internal
-timer. It is not money or a minimum spend.
+and the site enforces exactly what was accepted, bounded by its own current policy
+(D1), so the activation deadline is a promise the buyer read and the dispute authority
+can check, not a seller-internal timer. It is not money or a minimum spend. The two
+readings of the tag — publication's and commit's — can differ when an operator edits
+it between them; the accepted value wins where the pool still grants it, and the
+commit is refused where it does not, so no deal is silently given more time than it
+promised or less than it was promised.
 Each provider declares, as plain composition-supplied data, whether it supports
 a delivery deadline and its default. Compute providers `vm.ansible` and
 `bare_metal.ansible` declare one; the API-credits provider declares none.

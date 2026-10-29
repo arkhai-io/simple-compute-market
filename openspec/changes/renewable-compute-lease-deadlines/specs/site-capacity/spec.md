@@ -2,7 +2,7 @@
 
 ### Requirement: Commit snapshots an activation deadline when the pool resolves a delivery deadline
 
-On first commit, an effective pool-resolved delivery deadline MUST set renew_by_utc to max(committed_at_utc, lease_start_utc) plus that deadline, where committed_at_utc is the deal's commitment instant supplied with the commit and MUST NOT be later than the site's commit time, and renewal_phase to awaiting_activation. Such a commit MUST require a finite end. Recommit MUST preserve both fields. No effective delivery deadline and migrated existing leases MUST retain null fields and end-only expiry.
+On first commit, the site MUST set renew_by_utc to max(committed_at_utc, lease_start_utc) plus the deal's accepted delivery_deadline_seconds supplied with the commit, and renewal_phase to awaiting_activation; committed_at_utc is the deal's commitment instant supplied with the commit and MUST NOT be later than the site's commit time. The site MUST refuse a commit whose accepted deadline exceeds the pool's current effective delivery deadline or carries one where the pool resolves none. A commit supplying no accepted deadline MUST take the pool's current effective deadline when one resolves. Such a commit MUST require a finite end. Recommit MUST preserve both fields. No effective delivery deadline and migrated existing leases MUST retain null fields and end-only expiry.
 
 #### Scenario: A compute reservation is committed
 
@@ -13,6 +13,16 @@ On first commit, an effective pool-resolved delivery deadline MUST set renew_by_
 
 - **WHEN** a commit carries a commitment instant later than the site's clock
 - **THEN** the site refuses the commit
+
+#### Scenario: The pool was lengthened after acceptance
+
+- **WHEN** a deal accepted with a 1800-second deadline is committed after the pool's deadline was raised to 3600
+- **THEN** the site enforces 1800 seconds from the anchor
+
+#### Scenario: The pool was shortened below the accepted deadline
+
+- **WHEN** a deal accepted with an 1800-second deadline is committed after the pool's deadline was lowered to 900, or after the pool stopped enforcing one
+- **THEN** the site refuses the commit without using capacity, and the storefront classifies the refusal as seller failure before dispatch
 
 #### Scenario: A commit is retried after the pool policy changes
 
