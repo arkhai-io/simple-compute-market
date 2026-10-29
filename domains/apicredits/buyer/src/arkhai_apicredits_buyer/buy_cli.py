@@ -44,6 +44,7 @@ from arkhai_apicredits.negotiation import (
     make_api_credits_provision_terms,
 )
 
+from . import common
 from .buyer_client import load_buyer_chain
 from .cli_helpers import resolve_prices_from_matches
 from .common import resolve_config_value
@@ -57,6 +58,11 @@ from .settlement_composition import (
     validate_buyer_acceptance,
     select_buyer_proposal,
 )
+
+
+def chain_address_book(chain_name: str) -> str | None:
+    """The Alkahest address book the buyer names for ``chain_name``."""
+    return common.chain_address_book(chain_name)
 
 
 def _confirm_settlement_interactive(
@@ -412,7 +418,7 @@ def register(credits_app: typer.Typer) -> None:
                 )
                 selected_chain_name = chain_cfg.name
                 rpc = chain_cfg.rpc_url
-                addr_cfg = chain_cfg.alkahest_address_config_path
+                addr_cfg = chain_address_book(chain_cfg.name)
                 alkahest_available = True
         missing = [name for name, value in (("registry_urls", reg_urls),) if not value]
         if alkahest_enabled and not payments_enabled and not alkahest_available:

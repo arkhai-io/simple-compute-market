@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from compute_provisioning.hosts import ExecutionHost
+from compute_provisioning.hosts import ConnectionCodecs, ExecutionHost
 from compute_provisioning.hosts.service import POOL_UNSTATED
-from compute_provisioning_ansible import DEFAULT_KEY_PATH, SshConnectionCodec, parse_inventory_ini
+from compute_provisioning_ansible import DEFAULT_KEY_PATH, parse_inventory_ini, ssh_connection_codecs
 from compute_provisioning_ansible.runner import AnsibleRunner, inventory_target
 
 _INI = """
@@ -117,14 +117,19 @@ def test_a_tenant_facing_port_is_read_and_a_malformed_one_rejects_only_its_entry
 def test_an_inventory_round_trips_through_the_rendered_execution_inventory() -> None:
     """What an entry states survives registration and rendering, so the
     inventory a job runs against reads back as the entry it came from."""
-    codec = SshConnectionCodec()
+    codecs = ConnectionCodecs(ssh_connection_codecs())
     parsed = parse_inventory_ini(_ROUTED_INI)
     targets = [
         inventory_target(
             ExecutionHost(
                 host.host_id,
                 None,
-                codec.build(host.connection.public, host.connection.secrets),
+                codecs.build(
+                    host.connection.kind,
+                    host.connection.version,
+                    host.connection.public,
+                    host.connection.secrets,
+                ),
             )
         )
         for host in parsed
@@ -133,6 +138,17 @@ def test_an_inventory_round_trips_through_the_rendered_execution_inventory() -> 
     with AnsibleRunner(SimpleNamespace()).write_inventory(targets, group="nodes") as inventory:
         reparsed = parse_inventory_ini(inventory.path.read_text())
 
-    assert [(host.host_id, dict(host.connection.public)) for host in reparsed] == [
-        (host.host_id, dict(host.connection.public)) for host in parsed
-    ]
+    def stated(hosts):
+        return [
+            (host.host_id, host.connection.version, dict(host.connection.public))
+            for host in hosts
+        ]
+
+    assert stated(reparsed) == stated(parsed)
+    # An entry stating a tenant-facing port is submitted at version 2, the
+    # version that carries it, and every other entry at version 1.
+    assert {host.connection.version for host in parsed} == {1, 2}
+    assert all(
+        (host.connection.version == 2) == ("public_port" in host.connection.public)
+        for host in parsed
+    )

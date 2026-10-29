@@ -1,7 +1,7 @@
 # VM seller quickstart
 
 How to bring up a compute storefront, publish typed settlement options under a
-canonical marketplace identity, and optionally provision real KVM VMs.
+canonical marketplace identity, and provision KVM VMs on your own hosts.
 
 For the buyer side see [`buyer-quickstart.md`](./buyer-quickstart.md).
 To run your own listing registry instead of pointing at an existing one,
@@ -27,9 +27,9 @@ buyer-side escrow requirements.
   token required to publish.
 - For Alkahest settlement only: an EVM wallet funded with gas and the accepted
   token, an RPC URL, and the deployed Alkahest address file.
-- **Live provisioning only** — KVM-capable host: `egrep -c "(vmx|svm)"
-  /proc/cpuinfo > 0`, `libvirtd` running, your ansible user has
-  passwordless sudo and is in the `libvirt` group.
+- A KVM-capable host: `egrep -c "(vmx|svm)" /proc/cpuinfo > 0`, `libvirtd`
+  running, your ansible user has passwordless sudo and is in the `libvirt`
+  group.
 
 ## 1. Get the code and build
 
@@ -63,7 +63,6 @@ identifier = "<unpadded-base64url-public-key>"
 
 [provisioning]
 service_url = "http://seller-provisioning:8081"
-mode = "http"                            # "mock" for a dry run
 
 [capacity.sites]
 # Each site the storefront sells from, by stable ID, and its authority's origin.
@@ -101,11 +100,17 @@ priority = ["alkahest.v1"]
 
 [Settlement.alkahest]
 enabled = true
-address_config_path = "/path/to/alkahest.json"
+
+[Settlement.alkahest.address_books]
+# One entry per chain whose Alkahest contracts are a deployment of your own;
+# a chain not listed uses the SDK's built-in addresses.
+# base_sepolia = "/path/to/alkahest.json"
 
 [wallet]
-address = "0x<YOUR_SELLER_ADDRESS>"
-# Supply private_key through the deployment Secret overlay.
+# Supply private_key through the deployment Secret overlay. The address is
+# derived from it; state one only to check it, since an address naming another
+# account leaves Alkahest unready.
+# address = "0x<YOUR_SELLER_ADDRESS>"
 
 [chains.base_sepolia]
 chain_id = 84532
@@ -253,92 +258,13 @@ A host's GPU count and model are descriptive and never change what is sold:
 editing a host's inventory line leaves its declaration as it is. Change the
 declaration instead.
 
-## 4. Bring it up
+## 4. Prepare your KVM hosts
 
-`compose/seller.yml` bundles the storefront and provisioning services.
-For mock mode it needs one operator-provided file, `config.seller.toml`. Pass
-an absolute path via env to avoid docker compose's
-relative-path-resolves-from-the-compose-file gotcha:
+The provisioning service creates VMs by running Ansible against your KVM hosts
+over SSH, so the stack needs a key that reaches them and an inventory naming
+them before it starts.
 
-```bash
-SELLER_CONFIG_PATH="$PWD/config.seller.toml" \
-docker compose -f compose/seller.yml up -d
-
-docker compose -f compose/seller.yml logs -f seller-storefront
-```
-
-Keep `admin_api_key`, `ARKHAI_IDENTITY_CREDENTIAL`, and any Alkahest wallet
-private key in the deployment's secret boundary rather than a committed
-configuration. `[provisioning].mode` selects mock versus live behavior.
-
-There is no publisher preregistration step. Every publication is signed by the
-configured canonical marketplace principal, and the registry creates the
-stable publisher subject on its first valid publication.
-
-## 5. Preview and publish
-
-Legacy settlement configuration and publication pricing require separate,
-explicit migrations:
-
-```bash
-market-storefront config migrate --scope settlement --check
-market-storefront config migrate --scope settlement --write --backup
-market-storefront config migrate --scope publication --check
-market-storefront config migrate --scope publication --write --backup
-```
-
-The storefront then publishes on its own. It derives listings from every
-advertisable pool its trusted sites project, publishes them, refreshes open
-listings when their terms change, and closes those whose source no longer
-supports them. To see what its next publication cycle would do, or to run one
-now rather than wait for the timer:
-
-```bash
-docker compose -f compose/seller.yml exec seller-storefront \
-  market-storefront publish --dry-run
-docker compose -f compose/seller.yml exec seller-storefront \
-  market-storefront publish
-```
-
-`market-storefront publish --abort-all` closes every open listing as the seller.
-Publication never reopens a listing its seller closed; resume a listing to re-list
-it. The storefront's lifecycle pause (`POST /api/v1/admin/lifecycle/pause`) holds
-publication with its other loops without affecting trading, and a cycle can still
-be run or previewed while held. Inspect readiness without publishing:
-
-```bash
-market-storefront settlement status --json
-```
-
-The storefront does not wait for its registry, chain, or site at startup: a
-registry it cannot reach marks its system status `degraded`, a chain its Alkahest
-probe cannot reach leaves Alkahest unready until a probe reaches it, and a site
-it cannot reach holds that site's listings. An Alkahest section that cannot
-settle — no trusted oracle for `oracle_gated`, an oracle equal to the seller
-wallet, no wallet address or key, no `[Chains]` — leaves Alkahest unready rather
-than stopping the storefront; system status's `settlement` names each mechanism's
-blockers. `GET /api/v1/system/status` also reports, under `publication_derivation`,
-each site's `holds`, `refusals`, and `reports` from the last publication cycle,
-each a reason code with the pool it concerns: `pool_region_missing` for a pool
-stating no region; `no_settlement_option` for a pool whose configuration rules
-out every settlement mechanism its clauses name, whose open listings then close
-until an option returns; `settlement_mechanism_unknown` while such a mechanism
-only cannot be reached, its open listings held. A site no cycle has derived since
-start is absent, and an entry is logged when it first appears and when it clears.
-
-A buyer can now run
-`market buy --resource 'gpu_model=H200' --settlement 'mechanism=alkahest.v1'`
-and, in mock mode, receive simulated VM credentials.
-
-## 6. Live KVM provisioning
-
-Mock mode validates the storefront ↔ chain ↔ registry surface without
-touching libvirt. To create real VMs:
-
-1. Set `[provisioning].mode = "http"` in the TOML (the default for fresh
-   configs).
-
-2. Generate an SSH keypair the provisioning container will use to reach
+1. Generate an SSH keypair the provisioning container will use to reach
    your KVM hosts, install the pubkey on each host, and put the privkey
    at `./keys/id_ed25519`:
 
@@ -348,7 +274,7 @@ touching libvirt. To create real VMs:
    chmod 600 ./keys/id_ed25519
    ```
 
-3. List the execution hosts the service registers:
+2. List the execution hosts the service registers:
 
    ```bash
    cd domains/vms/provisioning/iac/ansible/inventory
@@ -400,32 +326,100 @@ touching libvirt. To create real VMs:
    make build-seller
    ```
 
-4. Bring the stack up with the live overlay — adds the SSH-key
-   bind-mount that mock mode doesn't need:
-
-   ```bash
-   SELLER_CONFIG_PATH="$PWD/config.seller.toml" \
-   SELLER_SSH_PRIVKEY="$PWD/keys/id_ed25519" \
-   docker compose -f compose/seller.yml -f compose/seller.live.yml \
-     up -d --force-recreate seller-provisioning
-   ```
-
-5. KVM host prerequisites: ansible user has passwordless sudo
+3. KVM host prerequisites: ansible user has passwordless sudo
    (`sudo -n true && echo ok`), is in the `libvirt` group, and
    `libvirtd` is running. The playbook handles cloud-init, virt-install,
    and SSH port-forward NAT.
 
-6. Smoke-test reachability:
+## 5. Bring it up
 
-   ```bash
-   docker compose -f compose/seller.yml -f compose/seller.live.yml exec \
-     seller-provisioning ansible \
-     -i /opt/domains/vms/provisioning/iac/ansible/inventory/provisioning-hosts.ini \
-     <your_host_alias> -m ping
-   ```
+`compose/seller.yml` bundles the storefront and provisioning services. It needs
+two operator-provided files: `config.seller.toml` and the SSH private key from
+the previous section. Pass absolute paths via env to avoid docker compose's
+relative-path-resolves-from-the-compose-file gotcha:
 
-   `SUCCESS / ping: pong` means the next buy will actually create a VM.
+```bash
+SELLER_CONFIG_PATH="$PWD/config.seller.toml" \
+SELLER_SSH_PRIVKEY="$PWD/keys/id_ed25519" \
+docker compose -f compose/seller.yml up -d
 
+docker compose -f compose/seller.yml logs -f seller-storefront
+```
+
+Smoke-test that the provisioning service reaches each host:
+
+```bash
+docker compose -f compose/seller.yml exec seller-provisioning ansible \
+  -i /opt/domains/vms/provisioning/iac/ansible/inventory/provisioning-hosts.ini \
+  <your_host_alias> -m ping
+```
+
+`SUCCESS / ping: pong` means a settled deal will create a VM on that host.
+
+Keep `admin_api_key`, `ARKHAI_IDENTITY_CREDENTIAL`, and any Alkahest wallet
+private key in the deployment's secret boundary rather than a committed
+configuration. The storefront has no provisioning mode: whether a deal's
+delivery is mocked or live is the provisioning service's to decide.
+
+There is no publisher preregistration step. Every publication is signed by the
+configured canonical marketplace principal, and the registry creates the
+stable publisher subject on its first valid publication.
+
+## 6. Preview and publish
+
+Legacy settlement configuration and publication pricing require separate,
+explicit migrations:
+
+```bash
+market-storefront config migrate --scope settlement --check
+market-storefront config migrate --scope settlement --write --backup
+market-storefront config migrate --scope publication --check
+market-storefront config migrate --scope publication --write --backup
+```
+
+The storefront then publishes on its own. It derives listings from every
+advertisable pool its trusted sites project, publishes them, refreshes open
+listings when their terms change, and closes those whose source no longer
+supports them. To see what its next publication cycle would do, or to run one
+now rather than wait for the timer:
+
+```bash
+docker compose -f compose/seller.yml exec seller-storefront \
+  market-storefront publish --dry-run
+docker compose -f compose/seller.yml exec seller-storefront \
+  market-storefront publish
+```
+
+`market-storefront publish --abort-all` closes every open listing as the seller.
+Publication never reopens a listing its seller closed; resume a listing to re-list
+it. The storefront's lifecycle pause (`POST /api/v1/admin/lifecycle/pause`) holds
+publication with its other loops without affecting trading, and a cycle can still
+be run or previewed while held. Inspect readiness without publishing:
+
+```bash
+market-storefront settlement status --json
+```
+
+The storefront does not wait for its registry, chain, or site at startup: a
+registry it cannot reach marks its system status `degraded`, a chain its Alkahest
+probe cannot reach leaves Alkahest unready until a probe reaches it, and a site
+it cannot reach holds that site's listings. An Alkahest section that cannot
+settle — no trusted oracle for `oracle_gated`, an oracle equal to the seller
+wallet, no wallet key, a wallet address naming another account than the key's, an
+address book for a chain not under `[Chains]`, no `[Chains]` — leaves Alkahest unready rather
+than stopping the storefront; system status's `settlement` names each mechanism's
+blockers. `GET /api/v1/system/status` also reports, under `publication_derivation`,
+each site's `holds`, `refusals`, and `reports` from the last publication cycle,
+each a reason code with the pool it concerns: `pool_region_missing` for a pool
+stating no region; `no_settlement_option` for a pool whose configuration rules
+out every settlement mechanism its clauses name, whose open listings then close
+until an option returns; `settlement_mechanism_unknown` while such a mechanism
+only cannot be reached, its open listings held. A site no cycle has derived since
+start is absent, and an entry is logged when it first appears and when it clears.
+
+A buyer can now run
+`market buy --resource 'gpu_model=H200' --settlement 'mechanism=alkahest.v1'`
+and receive the connection details of a VM created on one of your hosts.
 
 ## Upgrading from CSV inventory
 

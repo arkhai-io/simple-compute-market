@@ -7,13 +7,19 @@ the domain composition boundary.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 import os
 import subprocess
 
 from typing import Any
 import typer
-from market_config.config_loader import ChainConfig, chains_from_config
+from market_alkahest import (
+    alkahest_address_book,
+    retired_address_book_keys,
+    retired_address_book_refusal,
+)
+from market_config.config_loader import ChainConfig, chains_from_config, load_user_config
 
 # Generic buyer config remains core-owned; chain selection below is VM-owned.
 from core_buyer.buyer_config import (  # noqa: F401
@@ -61,6 +67,54 @@ COMPUTE_SCHEMA_ID = "compute.market"
 def buyer_chains() -> dict[str, "ChainConfig"]:
     """Return the VM buyer's configured chain tables."""
     return chains_from_config()
+
+
+def chain_address_book(
+    chain_name: str, config: Mapping[str, Any] | None = None
+) -> str | None:
+    """The Alkahest address book the buyer names for ``chain_name``.
+
+    Read from ``[Settlement.alkahest.address_books]`` through the Alkahest kit;
+    ``None`` for a chain the table names no book for, which uses the SDK's
+    built-in addresses.
+    """
+    document = load_user_config() if config is None else config
+    refuse_retired_address_book_keys(document)
+    settlement = document.get("Settlement")
+    section = settlement.get("alkahest") if isinstance(settlement, Mapping) else None
+    return alkahest_address_book(
+        section if isinstance(section, Mapping) else None, chain_name
+    )
+
+
+def refuse_retired_address_book_keys(document: Mapping[str, Any]) -> None:
+    """Refuse a buyer configuration stating a retired address-book key.
+
+    Nothing reads those keys any more, so a chain whose book one still named
+    would otherwise go without it. Raises ``ValueError`` naming each key and
+    ``[Settlement.alkahest.address_books]``.
+    """
+    settlement = document.get("Settlement")
+    chains = {
+        name: chain
+        for table in ("chains", "Chains")
+        if isinstance(document.get(table), Mapping)
+        for name, chain in document[table].items()
+    }
+    retired = retired_address_book_keys(
+        settlement if isinstance(settlement, Mapping) else None, chains
+    )
+    if retired:
+        raise ValueError("; ".join(map(retired_address_book_refusal, retired)))
+
+
+def chain_address_books(config: Mapping[str, Any] | None = None) -> dict[str, str | None]:
+    """:func:`chain_address_book` for every configured chain, by chain name."""
+    document = load_user_config() if config is None else config
+    return {
+        name: chain_address_book(name, document)
+        for name in chains_from_config(dict(document))
+    }
 
 
 def select_chain_for_listing(

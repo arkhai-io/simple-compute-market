@@ -14,7 +14,7 @@ from change_workflow_fixtures import COMMIT, VALID, clock, log_file
 # Step outcomes as a workflow log carries them, without the fields the wrapper adds
 # around them.
 EXAMPLE_OUTCOMES = [
-    {"outcome": "returned", "return_to": "design",
+    {"outcome": "returned", "next": {"step": "design"},
      "message": "The patch has no provider field; refusing it needs a decision the "
                 "design does not make.",
      "evidence": "the section's notes"},
@@ -24,7 +24,7 @@ EXAMPLE_OUTCOMES = [
      "awaiting": "environmental remedy"},
 ]
 REQUIRED = {"finished": ["next"], "question": ["awaiting"],
-            "returned": ["return_to", "evidence"], "blocked": ["blocked_on"],
+            "returned": ["next", "evidence"], "blocked": ["blocked_on"],
             "stopped": ["reason", "denials"]}
 
 
@@ -60,11 +60,11 @@ def test_a_field_the_schema_does_not_define_is_rejected() -> None:
         "outcome has verdict, which the schema does not define"]
 
 
-def test_a_return_to_a_phase_that_is_not_earlier_is_rejected() -> None:
-    outcome = {**VALID["returned"], "return_to": "closeout"}
+def test_a_return_names_no_phase_beside_its_target() -> None:
+    outcome = {**VALID["returned"], "return_to": "design"}
 
     assert outcome_problems(outcome) == [
-        "outcome.return_to is 'closeout', not one of design, planning, implementation"]
+        "outcome has return_to, which the schema does not define"]
 
 
 def test_a_schema_keyword_the_check_cannot_enforce_fails_loudly() -> None:
@@ -101,6 +101,76 @@ def test_a_malformed_mapping_of_rounds_is_rejected(rounds, problem: str) -> None
     problems = outcome_problems({**VALID["finished"], "rounds": rounds})
 
     assert any(problem in found for found in problems), problems
+
+
+# An exit is a target naming a node of the workflow graph.
+
+@pytest.mark.parametrize("target", [
+    {"step": "plan"}, {"step": "review", "kind": "pre-closeout"},
+    {"step": "triage", "kind": "implementation"}, {"step": "round"},
+    {"step": "implement", "sections": [["5"], [6]]},
+    {"step": "validate", "target": {"step": "closeout"}},
+    {"step": "validate", "target": {"step": "triage", "kind": "implementation"}},
+    {"step": "done"},
+], ids=lambda target: str(target))
+def test_an_object_next_naming_a_node_is_accepted(target: dict) -> None:
+    assert outcome_problems({**VALID["finished"], "next": target}) == []
+
+
+def test_a_finished_step_saying_what_comes_next_in_words_is_refused() -> None:
+    # What follows, in words, is the message's: `next` is only ever a target.
+    assert outcome_problems({**VALID["finished"], "next": "the plan's next round"}) == [
+        "outcome.next is not of type object"]
+
+
+@pytest.mark.parametrize("target,problem", [
+    ({"step": "review"}, "a review is a node only with the kind of review it is"),
+    ({"step": "triage"}, "a triage is a node only with the kind of review it triages"),
+    ({"step": "review", "kind": "owner"}, "review:owner is no node"),
+    ({"step": "triage", "kind": "validation"}, "triage:validation is no node"),
+    ({"step": "validate"}, "a validation names the target it is for"),
+    ({"step": "validate", "target": {"step": "review"}}, "kind of review it is"),
+    ({"step": "validate", "target": {"step": "validate", "target": {"step": "plan"}}},
+     "other than another validation"),
+    ({"step": "implement"}, "an implementation names its sessions"),
+    ({"step": "plan", "kind": "design"}, "only a review or a triage names a kind"),
+    ({"step": "plan", "sections": [[1]]}, "only an implementation names sections"),
+    ({"step": "deploy"}, "'deploy' is no node"),
+], ids=lambda value: str(value))
+def test_an_object_next_naming_no_node_is_refused(target: dict, problem: str) -> None:
+    problems = outcome_problems({**VALID["finished"], "next": target})
+
+    assert len(problems) == 1 and problems[0].startswith("outcome.next names no node")
+    assert problem in problems[0]
+
+
+def test_an_empty_kind_is_refused_by_the_schema() -> None:
+    problems = outcome_problems({**VALID["finished"], "next": {"step": "review", "kind": ""}})
+
+    assert problems and "outcome.next" in problems[0] and "shorter than 1" in problems[0]
+
+
+def test_a_return_names_the_step_it_returns_to() -> None:
+    returned = {"outcome": "returned", "message": "Needs a decision.",
+                "evidence": "the section's notes", "next": {"step": "design"}}
+
+    assert outcome_problems(returned) == []
+    # A return names its target as a node, never as words.
+    assert outcome_problems({**returned, "next": "back to design"}) == [
+        "outcome.next is not of type object"]
+    assert outcome_problems({key: value for key, value in returned.items()
+                             if key != "next"}) == ["outcome has no next"]
+    # A phase is not a step: a return to planning names the plan.
+    problems = outcome_problems({**returned, "next": {"step": "planning"}})
+    assert len(problems) == 1 and problems[0].startswith("outcome.next names no node")
+
+
+def test_a_triage_names_the_records_it_triaged_as_strings() -> None:
+    triaged = {**VALID["finished"], "next": {"step": "plan"}, "triaged": ["13-design"]}
+
+    assert outcome_problems(triaged) == []
+    assert outcome_problems({**triaged, "triaged": [13]}) == [
+        "outcome.triaged[0] is not of type string"]
 
 
 def test_claude_code_is_given_no_top_level_combinator() -> None:

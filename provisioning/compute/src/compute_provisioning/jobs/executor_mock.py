@@ -24,6 +24,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from compute_provisioning.route_errors import ProvisioningRouteError
+from compute_provisioning_contracts import (
+    MockRuleAdded,
+    MockRuleCreate,
+    MockRuleDeleted,
+    MockRuleResumed,
+    MockRuleView,
+)
 
 
 @dataclass
@@ -212,6 +219,8 @@ class MockRuleRouteService:
 
     Each adapter binds these into its own router under its own prefix, so a rule
     installed through one adapter's routes never matches another adapter's jobs.
+    Every answer is one of the family's mock-rule models, whichever adapter
+    bound the routes.
     """
 
     def __init__(self, rules: Callable[[], MockRuleSet | None]) -> None:
@@ -225,28 +234,28 @@ class MockRuleRouteService:
             )
         return rule_set
 
-    def add(self, body: Mapping[str, Any]) -> dict[str, Any]:
+    def add(self, request: MockRuleCreate) -> MockRuleAdded:
         rule = self._rule_set().add(
             MockRule(
-                rule_id=str(body.get("rule_id") or ""),
-                match=dict(body.get("match") or {}),
-                pause_before_result=bool(body.get("pause_before_result", False)),
-                result_stdout=body.get("result_stdout"),
-                fail_with=body.get("fail_with"),
+                rule_id=request.rule_id,
+                match=dict(request.match),
+                pause_before_result=request.pause_before_result,
+                result_stdout=request.result_stdout,
+                fail_with=request.fail_with,
             )
         )
-        return {"rule_id": rule.rule_id, "status": "added"}
+        return MockRuleAdded(rule_id=rule.rule_id, status="added")
 
-    def list(self) -> list[dict[str, Any]]:
-        return self._rule_set().list()
+    def list(self) -> list[MockRuleView]:
+        return [MockRuleView.model_validate(rule) for rule in self._rule_set().list()]
 
-    def delete(self, rule_id: str) -> dict[str, Any]:
-        return {"rule_id": rule_id, "deleted": self._rule_set().delete(rule_id)}
+    def delete(self, rule_id: str) -> MockRuleDeleted:
+        return MockRuleDeleted(rule_id=rule_id, deleted=self._rule_set().delete(rule_id))
 
-    def resume(self, rule_id: str) -> dict[str, Any]:
+    def resume(self, rule_id: str) -> MockRuleResumed:
         if not self._rule_set().resume(rule_id):
             raise ProvisioningRouteError(404, f"Rule {rule_id!r} not found or not paused")
-        return {"rule_id": rule_id, "resumed": True}
+        return MockRuleResumed(rule_id=rule_id, resumed=True)
 
 
 __all__ = [

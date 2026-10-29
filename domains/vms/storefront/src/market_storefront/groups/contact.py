@@ -39,7 +39,15 @@ def _contact_exchange() -> tuple[Any, Any]:
     from market_storefront.utils.sqlite_client import get_sqlite_client
 
     sites, _placement = _capacity_settings()
-    db = get_sqlite_client(registry=storefront_domain_registry())
+    try:
+        db = get_sqlite_client(registry=storefront_domain_registry())
+    except ValueError as exc:
+        # Opening a database whose listings predate `accepted_escrows`
+        # synthesizes them from each chain's address book, which refuses a retired
+        # address-book key; this command runs without the server's startup
+        # refusal, so it reports that refusal itself.
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(2) from exc
     delivery = build_vm_introduction_delivery(
         known_origins=tuple(sites), signer=resolve_marketplace_signer()
     )

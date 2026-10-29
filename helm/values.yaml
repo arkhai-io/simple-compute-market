@@ -278,8 +278,6 @@ storefront:
         # retryable. Production releases keep the shipped window.
         capacity:
           source_confirmation_seconds: 3600
-        provisioning:
-          mode: mock
         negotiation:
           policies:
             - has_matching_inventory_guard

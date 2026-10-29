@@ -16,9 +16,14 @@ from vm_provisioning_operator.relays import (
     RelayTokenRotate,
     RelayUpdate,
 )
-from vm_provisioning_operator.routes import VM_PROVISIONING_ROUTES, vm_route
+from vm_provisioning_operator.routes import (
+    VM_MOCK_ROUTE_MOUNT,
+    VM_PROVISIONING_ROUTES,
+    vm_route,
+)
 
 __all__ = [
+    "VM_MOCK_ROUTE_MOUNT",
     "VM_PROVISIONING_ROUTES",
     "vm_route",
     "SyncVmOperatorClient",

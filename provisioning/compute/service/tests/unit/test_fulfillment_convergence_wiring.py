@@ -14,6 +14,9 @@ from compute_provisioning_service import container as container_module
 from compute_provisioning_service import main
 
 
+_DIAGNOSTICS = {"per_state": {}, "failed_count": 0, "teardown_failed_count": 0}
+
+
 class _Watchdog:
     is_paused = True
 
@@ -23,11 +26,11 @@ class _Watchdog:
 
     async def run_cycle(self) -> dict[str, object]:
         self.cycles += 1
-        return {"converged": 1}
+        return {"before": _DIAGNOSTICS, "after": _DIAGNOSTICS}
 
     async def advance_cycle(self) -> dict[str, object]:
         self.advances += 1
-        return {"converged": 1}
+        return {"before": _DIAGNOSTICS, "after": _DIAGNOSTICS}
 
 
 class _LeaseLifecycle:
@@ -36,7 +39,7 @@ class _LeaseLifecycle:
 
     async def force_check_leases(self) -> dict[str, int]:
         self.cycles += 1
-        return {"checked": 0}
+        return {"checked": 0, "released": 0, "release_failed": 0, "skipped": 0}
 
 
 def _endpoint(path: str):

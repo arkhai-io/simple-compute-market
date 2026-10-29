@@ -499,6 +499,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "20261023_001_vm_pool_playbook_optional",
         "20261023_002_hosts_pool_optional",
         "20261027_001_vm_fulfillment_request_carries_no_connectivity",
+        "20261028_001_retired_reservation_states",
     }
 
 

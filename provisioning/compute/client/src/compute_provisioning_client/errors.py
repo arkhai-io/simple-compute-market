@@ -15,6 +15,18 @@ class ComputeProvisioningAuthenticationError(ComputeProvisioningError):
     """A request the caller may not sign, or a response without a valid authority proof."""
 
 
+class ComputeProvisioningUnauthenticatedResponseError(
+    ComputeProvisioningAuthenticationError
+):
+    """The answer carried no response authentication at all.
+
+    Refused like any unverifiable answer, and reported by its status alone:
+    an unsigned answer is what the service gives a request it cannot route,
+    and also what anything between the client and the service may give, so
+    nothing it says is repeated.
+    """
+
+
 class ComputeProvisioningJobError(ComputeProvisioningError):
     """A polled job ended ``failed`` or ``cancelled``."""
 
@@ -28,4 +40,5 @@ __all__ = [
     "ComputeProvisioningError",
     "ComputeProvisioningJobError",
     "ComputeProvisioningTimeoutError",
+    "ComputeProvisioningUnauthenticatedResponseError",
 ]

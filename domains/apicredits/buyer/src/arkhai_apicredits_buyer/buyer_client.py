@@ -14,6 +14,7 @@ from core_buyer.negotiation_client import (
 )
 from arkhai_apicredits.negotiation import ApiCreditsProvisionTerms
 from market_alkahest.schemas import EscrowProposal
+from .common import chain_address_books
 from .escrow_client import encode_escrow_proposal
 from .settlement_composition import validate_buyer_acceptance
 
@@ -28,16 +29,9 @@ def _validate_model(model_type, value):
 
 
 def load_buyer_chain(**kwargs):
-    """Load negotiation middleware with API-credit-owned chain config."""
-    from .common import buyer_chains
-
-    kwargs.setdefault(
-        "chain_config_paths",
-        lambda: {
-            name: chain.alkahest_address_config_path
-            for name, chain in buyer_chains().items()
-        },
-    )
+    """Load negotiation middleware with each configured chain's Alkahest
+    address book, as the buyer's Alkahest section names it."""
+    kwargs.setdefault("chain_config_paths", chain_address_books)
     return _core_load_buyer_chain(**kwargs)
 
 

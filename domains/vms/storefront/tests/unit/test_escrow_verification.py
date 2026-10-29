@@ -178,7 +178,7 @@ async def _verify(decoded: Any, *, plan=None, client=_DUMMY_CLIENT, now_unix=1_7
         alkahest_client=client,
         chain_name=CHAIN,
         escrow_address=_ESCROW_ADDR,
-        alkahest_address_config_path=CONFIG_PATH,
+        address_book=CONFIG_PATH,
         now_unix=now_unix,
         get_obligation_fn=_get_obligation,
     )

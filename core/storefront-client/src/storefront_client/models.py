@@ -940,6 +940,7 @@ class SettleWaitResponse:
     status: str = ""
     provisioning_job_id: str | None = None
     elapsed_ms: int = 0
+    last_error: str | None = None
 
     @classmethod
     def from_dict(cls, d: dict) -> "SettleWaitResponse":
@@ -948,4 +949,5 @@ class SettleWaitResponse:
             status=str(d.get("status", "")),
             provisioning_job_id=d.get("provisioning_job_id"),
             elapsed_ms=int(d.get("elapsed_ms", 0)),
+            last_error=d.get("last_error"),
         )

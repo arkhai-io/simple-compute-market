@@ -304,6 +304,52 @@ host's `public_port`.
 
 No networking is widened. An operator records the route that already exists.
 
+**Compatibility, as settled after merging `dev`.** This supersedes the bullets
+above. `RELEASING.md`'s versioning policy says a contract that carries its own
+version is never changed in place, and that incompatibility is signalled by the
+version numbers. A version-1 `ssh` reader refuses a record stating `public_port`, so
+adding the field to version 1 broke that rule. The field therefore belongs to a new
+version:
+- **Version 1 is unchanged.** It never carries `public_port`, not even as null. A
+  version-1 submission or stored record is read and stored exactly as before.
+- **Version 2 is version 1 with the optional `public_port`.** An explicit version-2
+  connection that states no port stays version 2, stored without the key.
+- **What writes which.** `ssh_connection()`, and the INI import through it, submit
+  version 2 when a port is stated and version 1 otherwise. A caller that states no
+  version keeps submitting version 1, which the contracts default to.
+- **Dispatch.** The host authority's codec registry is keyed by kind and version, and
+  the provisioning service registers the `ssh` codec once per supported version. A
+  submission at a version no codec serves is refused, naming the versions served, and
+  so is a duplicate kind-and-version registration. The `ConnectionCodec` protocol is
+  unchanged: each instance serves one version.
+- **Reading.** `SshConnectionCodec.parse`, the strict read that execution and probes
+  use, checks the envelope's kind and version before its fields, and refuses a
+  version it does not serve.
+- **Credentials.** A protected key is carried forward across an update whatever the
+  previous record's version.
+- **Rollback.** Before an older provisioning service runs, rewrite every version-2
+  host to version 1 without `public_port`, through `PUT /api/v1/hosts/{host_id}` or an
+  INI re-import without `public_port=`. An older service is not relied on to read a
+  version-2 record: it would ignore the version rather than support it. Nothing
+  rewrites stored hosts automatically.
+
+Alternatives rejected:
+- *Additive to version 1.* This was the earlier choice, and it is the change in place
+  the policy forbids.
+- *Write version 2 only.* This refuses every existing version-1 registration,
+  including callers that state no version. That is a larger incompatible boundary than
+  the field needs.
+- *One codec declaring a set of versions.* The codec's `build` would need the version,
+  which changes the protocol for every codec. Two instances of one implementation
+  need no protocol change.
+
+**Completed results are not rewritten.** A grant's endpoint is computed when its job
+completes and stored in the job's result. The delivery is read back from that
+stored result. A host's later route edit does not change an active lease's reported
+endpoint, and a job completed before this change keeps its stored result. The
+bare-metal storefront's recorded result carries no endpoint, so the storefront's
+delivery-conflict refusal cannot be triggered by the change.
+
 ### D4. A failed create that dispatched is compensated by its domain's teardown
 
 Today a `failed` aggregate is terminal, and its lease waits for an operator to
@@ -888,11 +934,26 @@ This change is implemented against its pinned base. Whichever change lands secon
 reconciles the overlap when it merges `dev`, without importing the other's unfinished
 sections.
 
+`resolve-compute-family-findings` landed first. This change merged `dev` after
+Section 4, so it is the one that reconciles. The merge changed no decision above,
+and the plan's remaining sections carry its corrections in `tasks.md`:
+- the VM codec tests, moved unchanged to the VM adapter (Section 5);
+- the scenario rules, now built as typed `MockRuleCreate` models (Section 5);
+- the terminal-state sets, which no longer hold `provisioning_failed` (Section 8);
+- the dead administrator surfaces removed beside the reservation response
+  (Section 12).
+
+The site's reservation states also changed under D10. The provisioning service
+migrates the retired `provisioning` state to `unmanaged` and `provisioning_failed` to
+`force_released`. The states that hold capacity are therefore `reserved`, `leased`,
+`releasing`, `release_failed`, and `unmanaged`, and D10's read-backs in the runbook use
+those (Section 14.9).
+
 ## Compatibility, migration, and rollback
 
 - **No schema migration.** `public_port` lives in the connection envelope's public
   fields, and the compensation marker is a value of the existing `failure_reason`
-  column.
+  column. Each host row already records its connection's version.
 - **Wire.**
   - The fulfillment status and result reads are unchanged in shape. A compensated
     aggregate reads `torn_down` with `failure_reason` `create_compensation`.
@@ -901,6 +962,9 @@ sections.
 - **Rollback.**
   - Remove `public_port` from host records before running an older provisioning
     service.
+
+    Correction after merging `dev`: `public_port` is now `ssh` version 2's. Rewrite
+    every version-2 host to version 1 without the port, as D3 says.
   - An older service treats a compensating teardown already recorded as an ordinary
     teardown. Its teardown-failure write replaces the marker with
     `provider_reported_failure`, so an in-flight compensation completes and is still
@@ -930,6 +994,19 @@ validated before the next starts.
   response; the aarch64 guest recipe; and the VM teardown repairs (D9).
 - **Closeout.**
 
+Round 1's merge of `dev`, between Sections 4 and 5, was resolved in a session of its
+own, by the same role. The writer session that had implemented Sections 2 to 4 could
+not also hold the full read of the guidance that the merge requires. Its sections
+stay as they were recorded. Section 5 continues from the merge.
+
+From that merge on, the owner set the round's test cadence:
+- Focused suites and packaging gate each intermediate commit, sections and merges
+  alike.
+- One full `make test` and one independent implementation review run on each frozen
+  round candidate, Round 1's after Sections 5 and 6.
+- A passing result is reused while its candidate is unchanged.
+- Validation and the live lanes remain required.
+
 ## Open questions
 
 - **D7's resource type and registry advisory.** Both stay with
@@ -948,7 +1025,7 @@ closeout, under the heading named.
 |---|---|
 | D1 fact reading, block boundaries, and linkage | `openspec/specs/physical-provisioning/spec.md` ("A create succeeds only with readable delivery evidence", and "A bare-metal reclaim's printed fact is a diagnostic" for the reclaim's result and the job status's authority over teardown, by the archive); rationale in `openspec/specs/physical-provisioning/architecture.md` under "Durable jobs, transient workers" |
 | D2 mocks print the shipped form, rendered for the job, and pipeline scenarios use it | `docs/development/TESTING.md` under "4. System Integration Tests (End-to-End)", beside its paragraph on the compute lanes' mock profile |
-| D3 tenant-facing port | `openspec/specs/physical-provisioning/spec.md` ("The tenant-facing host address falls back to the connection address", for the fallback and the delivery endpoint, and "Host registry records the connection port", for the INI `public_port=` rule, rendering, and the record stored without the field; both by the archive); `openspec/specs/physical-provisioning/architecture.md` under "The host registry owns the connection"; `docs/development/DEPLOYMENT_AND_CONFIG.md` under "Definition documents", in its host-inventory paragraph (`public_port=`) |
+| D3 tenant-facing port | `openspec/specs/physical-provisioning/spec.md` ("The tenant-facing host address falls back to the connection address", for the fallback and the delivery endpoint, and "Host registry records the connection port", for the INI `public_port=` rule, rendering, and the record stored without the field; both by the archive); `openspec/specs/physical-provisioning/architecture.md` under "The host registry owns the connection"; `docs/development/DEPLOYMENT_AND_CONFIG.md` under "Definition documents", in its host-inventory paragraph (`public_port=`, and a host API connection stating `public_port` at `ssh` version 2); the versioned `ssh` connection and the codec registry keyed by kind and version: `openspec/specs/physical-provisioning/spec.md` ("Host connections are typed by their implementation's codec", by the archive) and `openspec/specs/physical-provisioning/architecture.md` under "The host registry owns the connection". `docs/development/RELEASING.md` is unchanged |
 | D4 compensating teardown, its marker, and the compute seam | `openspec/specs/fulfillment/spec.md` and `openspec/specs/physical-provisioning/spec.md` (by the archive); `openspec/specs/fulfillment/architecture.md` under "Durable persistence and recovery"; `openspec/specs/physical-provisioning/architecture.md` under "Proof-driven release"; `docs/development/ARCHITECTURE.md` under "Release", whose table's `failed` row splits into compensable and not |
 | D5 run-log round trip | None: a test that qualifies the producer's existing form. No behaviour changes |
 | D6 an exhausted teardown job is not re-run | `openspec/specs/physical-provisioning/architecture.md` under "Proof-driven release", whose `teardown_failed` requeue sentence is corrected |

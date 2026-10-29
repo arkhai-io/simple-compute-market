@@ -348,13 +348,13 @@ def test_chains_from_config_chain_id_zero_when_unknown_and_omitted():
     assert chains["some_random_chain"].chain_id == 0
 
 
-def test_chains_from_config_alkahest_path_preserved():
-    cfg = {"chains": {"anvil": {
-        "rpc_url": "http://localhost:8545",
-        "alkahest_address_config_path": "/etc/arkhai/alkahest.json",
-    }}}
-    chains = config_loader.chains_from_config(cfg)
-    assert chains["anvil"].alkahest_address_config_path == "/etc/arkhai/alkahest.json"
+def test_a_chain_carries_no_alkahest_address_book():
+    """A chain's Alkahest address book is named in the Alkahest section, so a
+    chain table holds only the chain's own resources."""
+    chains = config_loader.chains_from_config(
+        {"chains": {"anvil": {"rpc_url": "http://localhost:8545"}}}
+    )
+    assert set(vars(chains["anvil"])) == {"name", "rpc_url", "chain_id"}
 
 
 def test_chains_from_config_name_field_matches_dict_key():

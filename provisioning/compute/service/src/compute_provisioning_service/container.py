@@ -17,9 +17,9 @@ from compute_provisioning_ansible import (
     ANSIBLE_COMPONENT,
     SSH_CONNECTION_KIND,
     MockAnsibleRunner,
-    SshConnectionCodec,
     ansible_readiness_component,
     probe_connectivity,
+    ssh_connection_codecs,
 )
 from compute_provisioning_ansible.runner import AnsibleRunner
 from compute_provisioning.leases import LeaseRouteService
@@ -164,14 +164,14 @@ def _merge_host_requirements(*requirements: Mapping[str, bool]) -> Mapping[str, 
 def _make_host_authority(session_factory, cfg, pool_change_hooks):
     """The one host authority: every connection kind's codec and every hook.
 
-    The ``ssh`` codec is the Ansible implementation's, protecting a submitted
-    key with the service's decryption key; pool-change hooks are the adapters'
-    static declarations, merged here because the authority exists before any
-    runtime does.
+    The ``ssh`` codecs are the Ansible implementation's, one per version it
+    serves, protecting a submitted key with the service's decryption key;
+    pool-change hooks are the adapters' static declarations, merged here because
+    the authority exists before any runtime does.
     """
     return HostAuthority(
         session_factory,
-        codecs=ConnectionCodecs([SshConnectionCodec(cfg.ssh_decryption_key)]),
+        codecs=ConnectionCodecs(ssh_connection_codecs(cfg.ssh_decryption_key)),
         pool_change_hooks=tuple(pool_change_hooks),
     )
 

@@ -41,7 +41,9 @@ def _buyer_chain(tmp_path, monkeypatch) -> None:
     (config_dir / "buyer.toml").write_text(
         "[chains.anvil]\n"
         'rpc_url = "http://anvil.test"\n'
-        f'alkahest_address_config_path = "{anvil_address_book_path()}"\n'
+        "\n"
+        "[Settlement.alkahest]\n"
+        f'address_books = {{ anvil = "{anvil_address_book_path()}" }}\n'
     )
     monkeypatch.setenv("XDG_CONFIG_HOME", str(config_dir.parent))
 

@@ -36,6 +36,9 @@ paths resolve from the project's own location, a README that describes what exis
 proof that training and evaluation each run once. The design decides:
 
 - the project's shape and its place among the tooling projects `ARCHITECTURE.toml` skips;
+- what `domains/vms/negotiation/src/arkhai_vms_negotiation/rl/policy-making.md` says, since
+  it still documents `market policy train` and `market policy eval`, which no longer
+  exist;
 - whether `market-policy`'s three commands return, over the scripts, or the scripts'
   own arguments suffice;
 - how pufferlib's Python 3.12 constraint and native build are met, and whether any CI job

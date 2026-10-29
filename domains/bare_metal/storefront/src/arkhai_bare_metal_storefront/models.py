@@ -193,10 +193,14 @@ class BareMetalEvaluateSettleResponse(BaseModel):
 
 
 class BareMetalSettleWaitResponse(BaseModel):
+    """A settle wait's answer. ``last_error`` is the error of its last status
+    read when that read failed and the wait ended unready."""
+
     ready: bool
     status: str
     elapsed_ms: int
     fulfillment_state: str | None = None
+    last_error: str | None = None
 
 
 class BareMetalReserveCapacityRequest(BaseModel):

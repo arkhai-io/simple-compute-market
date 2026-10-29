@@ -8,6 +8,7 @@ separate connections, over one database file.
 from __future__ import annotations
 
 import asyncio
+import time
 
 import pytest
 
@@ -322,6 +323,247 @@ async def _adopted_without_fulfillment(tmp_path, client):
         mechanism_ref="escrow",
     )
     return repository, runtime, record
+
+
+def _deferring(runtime: SettlementRuntime, calls: list[str]):
+    """A ready hook whose delivery is never ready: it reserves, then defers."""
+
+    async def on_ready(ready, worker_id):
+        calls.append(worker_id)
+        reserved = await runtime.reserve_fulfillment(
+            ready.obligation_ref, local_principal=SELLER, worker_id=worker_id
+        )
+        if reserved.status == "pending":
+            await runtime.defer_fulfillment(
+                ready.obligation_ref, local_principal=SELLER, worker_id=worker_id
+            )
+
+    return on_ready
+
+
+def _completing(runtime: SettlementRuntime):
+    async def on_ready(ready, worker_id):
+        reserved = await runtime.reserve_fulfillment(
+            ready.obligation_ref, local_principal=SELLER, worker_id=worker_id
+        )
+        if reserved.status == "pending":
+            await runtime.complete_fulfillment(
+                ready.obligation_ref,
+                "fulfillment-1",
+                local_principal=SELLER,
+                worker_id=worker_id,
+            )
+
+    return on_ready
+
+
+async def _fulfill_operation(repository, record) -> dict:
+    operation = await repository.load_settlement_operation(
+        record.obligation_ref, "fulfill"
+    )
+    assert operation is not None
+    return operation
+
+
+async def test_a_ready_step_awaiting_delivery_is_due_every_cycle(tmp_path) -> None:
+    """Several deferrals in a row: due each next cycle, no attempt counted."""
+    repository, runtime, record = await _adopted_without_fulfillment(
+        tmp_path, PollingClient()
+    )
+    calls: list[str] = []
+    worker = SettlementServicingWorker(
+        runtime,
+        repository,
+        worker_id="w",
+        interval_seconds=1,
+        on_ready=_deferring(runtime, calls),
+    )
+
+    for cycle in range(1, 4):
+        assert await worker.run_once() == 1
+        operation = await _fulfill_operation(repository, record)
+        assert operation["state"] == "pending"
+        assert operation["attempts"] == 0
+        assert operation["lease_owner"] is None
+        assert operation["next_attempt_unix"] <= time.time()
+        # Honoured, so consumed: the next step writes its own.
+        assert operation["awaiting_delivery"] is False
+        assert len(calls) == cycle
+
+    delivered = SettlementServicingWorker(
+        runtime, repository, worker_id="w", interval_seconds=1,
+        on_ready=_completing(runtime),
+    )
+    assert await delivered.run_once() == 1
+    stored = await repository.load_settlement_obligation(record.obligation_ref)
+    assert stored["fulfillment_ref"] == "fulfillment-1"
+
+
+async def test_a_restarted_worker_finds_an_obligation_awaiting_delivery_due(
+    tmp_path,
+) -> None:
+    """The mark is written and the process stops before scheduling anything."""
+    repository, runtime, record = await _adopted_without_fulfillment(
+        tmp_path, PollingClient()
+    )
+    await _deferring(runtime, [])(record, "stopped-worker")
+
+    reopened = SettlementSQLiteRepository(str(tmp_path / "one.db"))
+    due = await reopened.list_due_settlement_obligations(now_unix=time.time())
+    assert [row["obligation_ref"] for row in due] == [record.obligation_ref]
+    operation = await _fulfill_operation(reopened, record)
+    assert operation["lease_owner"] is None
+    assert operation["lease_until_unix"] is None
+    assert operation["attempts"] == 0
+
+    restarted_runtime = SettlementRuntime(reopened, {"test.v1": PollingClient()})
+    restarted = SettlementServicingWorker(
+        restarted_runtime,
+        reopened,
+        worker_id="restarted",
+        interval_seconds=1,
+        on_ready=_completing(restarted_runtime),
+    )
+    assert await restarted.run_once() == 1
+    stored = await reopened.load_settlement_obligation(record.obligation_ref)
+    assert stored["fulfillment_ref"] == "fulfillment-1"
+
+
+async def test_a_lease_clears_the_awaiting_delivery_mark(tmp_path) -> None:
+    repository, runtime, record = await _adopted_without_fulfillment(
+        tmp_path, PollingClient()
+    )
+    await _deferring(runtime, [])(record, "w")
+
+    reserved = await runtime.reserve_fulfillment(
+        record.obligation_ref, local_principal=SELLER, worker_id="w"
+    )
+
+    assert reserved.status == "pending"
+    operation = await _fulfill_operation(repository, record)
+    assert operation["state"] == "in_progress"
+    assert operation["awaiting_delivery"] is False
+    assert operation["attempts"] == 1
+
+
+async def test_retry_scheduling_and_wake_treat_an_awaiting_operation_as_pending(
+    tmp_path,
+) -> None:
+    """Due query, retry schedule, and wake read no mark: what an older release reads."""
+    repository, runtime, record = await _adopted_without_fulfillment(
+        tmp_path, PollingClient()
+    )
+    await _deferring(runtime, [])(record, "w")
+    now = time.time()
+
+    await repository.schedule_settlement_retry(
+        obligation_ref=record.obligation_ref,
+        operation="fulfill",
+        next_attempt_unix=now + 600,
+    )
+    assert await repository.list_due_settlement_obligations(now_unix=now) == []
+
+    await repository.wake_settlement_obligation(record.obligation_ref)
+    due = await repository.list_due_settlement_obligations(now_unix=now)
+    assert [row["obligation_ref"] for row in due] == [record.obligation_ref]
+
+
+async def test_a_ready_step_returning_without_the_mark_backs_off(tmp_path) -> None:
+    repository, runtime, record = await _adopted_without_fulfillment(
+        tmp_path, PollingClient()
+    )
+
+    async def released_unmarked(ready, worker_id):
+        await runtime.reserve_fulfillment(
+            ready.obligation_ref, local_principal=SELLER, worker_id=worker_id
+        )
+        await runtime.retry_fulfillment(
+            ready.obligation_ref,
+            RuntimeError("not started"),
+            local_principal=SELLER,
+            worker_id=worker_id,
+        )
+
+    worker = SettlementServicingWorker(
+        runtime, repository, worker_id="w", interval_seconds=1,
+        on_ready=released_unmarked,
+    )
+    before = time.time()
+    assert await worker.run_once() == 1
+
+    operation = await _fulfill_operation(repository, record)
+    assert operation["awaiting_delivery"] is False
+    assert operation["next_attempt_unix"] >= before + 30
+    assert await repository.list_due_settlement_obligations(now_unix=time.time()) == []
+
+
+async def test_a_mark_an_earlier_step_wrote_does_not_spare_a_later_one(
+    tmp_path,
+) -> None:
+    """A step that neither starts nor waits backs off, after any earlier wait."""
+    repository, runtime, record = await _adopted_without_fulfillment(
+        tmp_path, PollingClient()
+    )
+    waiting = SettlementServicingWorker(
+        runtime, repository, worker_id="w", interval_seconds=1,
+        on_ready=_deferring(runtime, []),
+    )
+    assert await waiting.run_once() == 1
+
+    async def neither(_ready, _worker_id):
+        return None
+
+    idle = SettlementServicingWorker(
+        runtime, repository, worker_id="w", interval_seconds=1, on_ready=neither
+    )
+    before = time.time()
+    assert await idle.run_once() == 1
+
+    operation = await _fulfill_operation(repository, record)
+    assert operation["next_attempt_unix"] >= before + 30
+
+
+class _PredatesTheMark:
+    """A repository read as a release that does not know the mark reads it."""
+
+    def __init__(self, repository: SettlementSQLiteRepository) -> None:
+        self._repository = repository
+
+    def __getattr__(self, name):
+        return getattr(self._repository, name)
+
+    async def load_settlement_operation(self, obligation_ref, operation):
+        row = await self._repository.load_settlement_operation(obligation_ref, operation)
+        if row is not None:
+            row.pop("awaiting_delivery")
+        return row
+
+
+async def test_a_worker_without_the_mark_backs_off_an_awaiting_operation(
+    tmp_path,
+) -> None:
+    """Rollback degrades to the error backoff and never strands the obligation."""
+    repository, runtime, record = await _adopted_without_fulfillment(
+        tmp_path, PollingClient()
+    )
+    worker = SettlementServicingWorker(
+        runtime,
+        _PredatesTheMark(repository),
+        worker_id="older",
+        interval_seconds=1,
+        on_ready=_deferring(runtime, []),
+    )
+    before = time.time()
+
+    assert await worker.run_once() == 1
+
+    operation = await _fulfill_operation(repository, record)
+    assert operation["state"] == "pending"
+    assert operation["next_attempt_unix"] >= before + 30
+    later = await repository.list_due_settlement_obligations(
+        now_unix=operation["next_attempt_unix"]
+    )
+    assert [row["obligation_ref"] for row in later] == [record.obligation_ref]
 
 
 async def test_service_obligation_starts_fulfillment_through_the_ready_hook(

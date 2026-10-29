@@ -44,6 +44,11 @@ shape.
       giving `resize_reservation` its first caller.
 - [ ] 3.2 Respect that method's documented ordering constraint: resize before
       `schedule_resource()` runs for the affected reservation, never after.
+- [ ] 3.2a Make `resize_reservation`'s release step honour `site-capacity`'s "Only a
+      forced release MAY free an `unmanaged` reservation": it frees the old
+      reservation with the release guard's permission alone, so an `unmanaged`
+      reservation can be superseded today. Refuse to resize one, and add a focused
+      test that a resize of an `unmanaged` reservation leaves it held.
 - [ ] 3.3 Confirm exactly one live reservation per negotiation across a multi-round
       shape negotiation, rather than one per round.
 - [ ] 3.4 Focused tests: shape change supersedes; ten rounds leave one live reservation;

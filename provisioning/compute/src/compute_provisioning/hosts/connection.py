@@ -73,7 +73,8 @@ class ConnectionEnvelope:
 
 
 class ConnectionCodec(Protocol):
-    """One connection kind, as the implementation distribution supporting it defines it."""
+    """One connection kind at one payload version, as the implementation
+    distribution supporting it defines it."""
 
     kind: str
     version: int
@@ -87,9 +88,10 @@ class ConnectionCodec(Protocol):
     ) -> ConnectionEnvelope:
         """Validate submitted public fields and protect submitted secrets.
 
-        ``previous`` is the connection being replaced, if any: a protected value
-        the submission still needs and does not resubmit is carried forward from
-        it. Raises ``ValueError`` naming the problem.
+        ``previous`` is the connection being replaced, if any, at whatever
+        version it was stored: a protected value the submission still needs and
+        does not resubmit is carried forward from it. Raises ``ValueError``
+        naming the problem.
         """
 
     def validate(self, envelope: ConnectionEnvelope) -> ConnectionEnvelope:
@@ -97,23 +99,56 @@ class ConnectionCodec(Protocol):
 
 
 class ConnectionCodecs:
-    """The connection codecs a deployment supports, by kind."""
+    """The connection codecs a deployment supports, by kind and version.
+
+    A kind served at several versions has one codec registered per version, and
+    a connection is built only by the codec for its own kind and version: a
+    version's fields are that version's contract, so no version stands in for
+    another.
+    """
 
     def __init__(self, codecs: list[ConnectionCodec] | tuple[ConnectionCodec, ...]) -> None:
-        by_kind: dict[str, ConnectionCodec] = {}
+        by_key: dict[tuple[str, int], ConnectionCodec] = {}
         for codec in codecs:
-            if codec.kind in by_kind:
-                raise ValueError(f"duplicate connection codec for kind {codec.kind!r}")
-            by_kind[codec.kind] = codec
-        self._codecs = by_kind
+            key = (codec.kind, codec.version)
+            if key in by_key:
+                raise ValueError(
+                    f"duplicate connection codec for kind {codec.kind!r} "
+                    f"at version {codec.version}"
+                )
+            by_key[key] = codec
+        self._codecs = by_key
 
-    def codec(self, kind: str) -> ConnectionCodec:
-        try:
-            return self._codecs[kind]
-        except KeyError:
+    def versions(self, kind: str) -> tuple[int, ...]:
+        """The versions of ``kind`` this deployment serves, ascending."""
+        return tuple(sorted(version for known, version in self._codecs if known == kind))
+
+    def codec(self, kind: str, version: int | None = None) -> ConnectionCodec:
+        """The codec for ``kind`` at ``version``.
+
+        ``version`` may be omitted only while ``kind`` is served at exactly one
+        version; a kind served at several needs it stated, since no version
+        stands in for another.
+        """
+        served = self.versions(kind)
+        if not served:
             raise ValueError(
                 f"connection kind {kind!r} is not supported; supported: "
-                f"{sorted(self._codecs)}"
+                f"{sorted({known for known, _ in self._codecs})}"
+            )
+        if version is None:
+            if len(served) > 1:
+                raise ValueError(
+                    f"connection kind {kind!r} is served at several versions; "
+                    f"state one of {list(served)}"
+                )
+            (version,) = served
+        try:
+            return self._codecs[(kind, version)]
+        except KeyError:
+            raise ValueError(
+                f"connection kind {kind!r} is not supported at version {version}; "
+                f"supported versions: {list(served)}"
             ) from None
 
     def build(
@@ -125,11 +160,7 @@ class ConnectionCodecs:
         *,
         previous: ConnectionEnvelope | None = None,
     ) -> ConnectionEnvelope:
-        codec = self.codec(kind)
-        if version != codec.version:
-            raise ValueError(
-                f"connection kind {kind!r} is at version {codec.version}, not {version}"
-            )
+        codec = self.codec(kind, version)
         if previous is not None and previous.kind != kind:
             previous = None
         return codec.build(public, secrets, previous=previous)

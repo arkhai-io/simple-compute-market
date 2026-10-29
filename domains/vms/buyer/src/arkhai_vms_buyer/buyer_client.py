@@ -38,6 +38,7 @@ from market_identity import Identity, Signer, TrustedIdentitySet
 
 from arkhai_vms import VmProvisionTerms
 
+from .common import chain_address_books
 from .escrow_client import encode_escrow_proposal
 from .settlement_composition import validate_buyer_acceptance
 
@@ -66,16 +67,9 @@ set_rl_middleware_registrar(_register_rl_middleware)
 
 
 def load_buyer_chain(**kwargs):
-    """Load negotiation middleware with VM-owned chain address config."""
-    from .common import buyer_chains
-
-    kwargs.setdefault(
-        "chain_config_paths",
-        lambda: {
-            name: chain.alkahest_address_config_path
-            for name, chain in buyer_chains().items()
-        },
-    )
+    """Load negotiation middleware with each configured chain's Alkahest
+    address book, as the buyer's Alkahest section names it."""
+    kwargs.setdefault("chain_config_paths", chain_address_books)
     return _core_load_buyer_chain(**kwargs)
 
 

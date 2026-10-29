@@ -27,6 +27,8 @@ from core_buyer.deal_helpers import (
     load_negotiation_resume_point as _core_load_negotiation_resume_point,
 )
 
+from .common import chain_address_book
+
 if TYPE_CHECKING:
     from market_config.config_loader import ChainConfig
 
@@ -280,7 +282,7 @@ def resolve_chain_settings(
         ssh_public_key=ssh,
         rpc_url=chain.rpc_url,
         chain_name=chain.name,
-        alkahest_addr_config=chain.alkahest_address_config_path,
+        alkahest_addr_config=chain_address_book(chain.name),
         token_contract=token_contract,
         token_decimals=decimals,
     )

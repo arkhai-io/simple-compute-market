@@ -2,7 +2,7 @@
 
 The strict per-field equality check is a seller policy expressed as a
 middleware (``market_policy.negotiation_middleware.escrow_shape_guard``).
-Operators swap in softer matching by editing ``[negotiation].chain`` in
+Operators swap in softer matching by editing ``[negotiation].policies`` in
 their seller config — no code changes needed.
 
 These tests pin the default (strict) behaviour against the middleware

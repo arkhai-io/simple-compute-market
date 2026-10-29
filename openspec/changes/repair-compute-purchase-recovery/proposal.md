@@ -42,7 +42,8 @@ unsafe after a partial create.
 - **Tenant endpoint (D3).** An `ssh` connection may state a tenant-facing
   `public_port`, falling back to its `ssh_port`, as `public_host` falls back to
   `ssh_host`. A bare-metal grant's delivery endpoint is built from the host record's
-  tenant-facing address and port.
+  tenant-facing address and port. The port belongs to a new version, `ssh` version 2;
+  version 1 is unchanged and still accepted.
 - **Compensating teardown (D4).** A failed create that was dispatched is torn down
   through its domain's ordinary teardown when its provider can prepare that teardown
   from durable state:
@@ -133,8 +134,9 @@ None.
   - `domains/vms/provisioning/adapter` (codec, mock output) and its IaC (guest recipe,
     teardown);
   - `kit/fulfillment` (transition and compensating operation);
-  - `provisioning/compute` (eligibility, release decision and status, teardown port,
-    and the lease lifecycle's refusal handling);
+  - `provisioning/compute` (the host authority's codec registry keyed by kind and
+    version; eligibility, release decision and status, teardown port, and the lease
+    lifecycle's refusal handling);
   - `provisioning/compute/service` (convergence's teardown-failure write,
     composition, and integration tests);
   - `domains/compute`, `domains/vms/domain`, `domains/vms/listings`,
@@ -147,14 +149,16 @@ None.
   - Each changed package bumps its minor version. Dependants' pins and locks are
     refreshed.
 - **Wire and persistence:**
-  - The `ssh` connection envelope gains an optional public field.
+  - The `ssh` connection envelope gains version 2, which adds the optional
+    `public_port`. Version 1 is unchanged and still accepted, and the host
+    registry dispatches a connection by its kind and version.
   - A compensated fulfillment ends `torn_down` with the failure reason
     `create_compensation`, a value of an existing field.
   - The VM administrator reservation response's `gpu_count` becomes optional.
   - VM listings may omit GPU fields.
   - No schema migration.
-  - Rollback removes `public_port` from host records first (`design.md`,
-    "Compatibility, migration, and rollback").
+  - Rollback first rewrites version-2 host records to version 1, without
+    `public_port` (`design.md`, D3).
 - **Deployment:** none required by the code. Qualifying the lanes needs rebuilt
   buyer environments and images, and records the buyer route in host records.
 

@@ -22,9 +22,13 @@ from .connection import (
     PRIVATE_KEY,
     SSH_CONNECTION_KIND,
     SSH_CONNECTION_VERSION,
+    SSH_CONNECTION_VERSIONS,
+    SSH_PUBLIC_PORT_VERSION,
     SshConnection,
     SshConnectionCodec,
+    SshConnectionV1,
     ssh_connection,
+    ssh_connection_codecs,
 )
 from .executor import TRANSPORT_FAILURES, AnsibleJobExecutor
 from .inventory import DEFAULT_KEY_PATH, parse_inventory_ini
@@ -63,13 +67,17 @@ __all__ = [
     "PRIVATE_KEY",
     "SSH_CONNECTION_KIND",
     "SSH_CONNECTION_VERSION",
+    "SSH_CONNECTION_VERSIONS",
+    "SSH_PUBLIC_PORT_VERSION",
     "SshConnection",
     "SshConnectionCodec",
+    "SshConnectionV1",
     "TRANSPORT_FAILURES",
     "matches_any",
     "parse_inventory_ini",
     "read_fact",
     "render_extra_vars",
     "ssh_connection",
+    "ssh_connection_codecs",
     "write_extra_vars",
 ]

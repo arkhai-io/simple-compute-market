@@ -19,7 +19,9 @@ The name must satisfy every use VM's playbooks make of it
   contains the guest's, so no guest's name may contain another's. Every derived
   name has the same length, which guarantees it.
 
-domains/vms/provisioning/iac/README.md, "Guest names", states the same rules for
+An operator's own guest name, for a VM created directly, is checked against the
+same rules (``VmOperationsService.create_vm``).
+domains/vms/provisioning/iac/README.md, "Guest names", states them for
 operators.
 """
 

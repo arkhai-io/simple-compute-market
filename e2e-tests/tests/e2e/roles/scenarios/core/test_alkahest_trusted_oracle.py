@@ -63,9 +63,10 @@ async def test_an_escrow_released_by_a_trusted_oracle_is_collected() -> None:
             enabled=True,
             oracle_gated=True,
             trusted_oracle_addresses=(oracle_address,),
+            address_books={_CHAIN_NAME: _ALKAHEST_ADDRESSES_PATH},
         ),
         chain_names={_CHAIN_NAME},
-        chains={_CHAIN_NAME: {"alkahest_address_config_path": _ALKAHEST_ADDRESSES_PATH}},
+        chains={_CHAIN_NAME: {}},
         wallet_address=seller_address,
     )
     arbiter_address, demand = encode_authorized_release_condition(

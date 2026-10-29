@@ -44,34 +44,27 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
 
 from compute_provisioning.jobs.executor_mock import (
     MockRuleRouteService,
     MockRuleSet,
 )
 from compute_provisioning_ansible import MockAnsibleRunner
+from compute_provisioning_contracts import (
+    MockJobEvaluation,
+    MockRuleAdded,
+    MockRuleCreate,
+    MockRuleDeleted,
+    MockRuleResumed,
+    MockRuleView,
+)
 from vm_provisioning_adapter.controllers.route_binding import routed
 from vm_provisioning_adapter.models.jobs_model import VmJobParams
-from vm_provisioning_adapter.models.system_model import EvaluateJobRequest, EvaluateJobResponse  # server-only test controller models
-
-
-# ---------------------------------------------------------------------------
-# Request models
-# ---------------------------------------------------------------------------
-
-
-class MockRuleRequest(BaseModel):
-    """Body for POST /test/mock-rules."""
-
-    rule_id: str = ""
-    match: dict[str, Any] = {}
-    pause_before_result: bool = False
-    result_stdout: Optional[str] = None
-    fail_with: Optional[str] = None
+from vm_provisioning_adapter.models.system_model import EvaluateJobRequest
+from vm_provisioning_operator import VM_MOCK_ROUTE_MOUNT
 
 
 def make_mock_router(
@@ -83,9 +76,10 @@ def make_mock_router(
 
     ``vm_runner`` resolves the runner VM jobs run on, which has rules only
     under the mock profile; ``host_authority`` resolves the host registry a
-    dry run checks the host against. Both are read per request.
+    dry run checks the host against. Both are read per request. The routes'
+    signed contracts are ``VM_MOCK_ROUTE_MOUNT``'s declarations.
     """
-    router = APIRouter(prefix="/test", tags=["test"])
+    router = APIRouter(prefix=VM_MOCK_ROUTE_MOUNT.prefix, tags=["test"])
 
     def vm_mock_rules() -> MockRuleSet | None:
         """The VM mock's rules, or ``None`` when the mock profile is not active."""
@@ -97,26 +91,26 @@ def make_mock_router(
     rule_routes = MockRuleRouteService(vm_mock_rules)
 
     @router.post("/mock-rules", summary="Add a mock rule")
-    def add_mock_rule(body: MockRuleRequest) -> dict:
+    def add_mock_rule(body: MockRuleCreate) -> MockRuleAdded:
         """Add a when→then mock rule for VM jobs.
 
         Rules are evaluated in insertion order.  The first rule whose ``match``
         dict is a subset of the incoming job params wins.
         """
-        return routed(lambda: rule_routes.add(body.model_dump()))
+        return routed(lambda: rule_routes.add(body))
 
     @router.get("/mock-rules", summary="List active mock rules")
-    def list_mock_rules() -> list[dict]:
+    def list_mock_rules() -> list[MockRuleView]:
         """Return the current set of VM mock rules in evaluation order."""
         return routed(rule_routes.list)
 
     @router.delete("/mock-rules/{rule_id}", summary="Remove a mock rule")
-    def delete_mock_rule(rule_id: str) -> dict:
+    def delete_mock_rule(rule_id: str) -> MockRuleDeleted:
         """Remove a rule by ID.  No-op if the rule does not exist."""
         return routed(lambda: rule_routes.delete(rule_id))
 
     @router.post("/mock-rules/{rule_id}/resume", summary="Release a paused job gate")
-    def resume_mock_rule(rule_id: str) -> dict:
+    def resume_mock_rule(rule_id: str) -> MockRuleResumed:
         """Release the gate of a rule with ``pause_before_result=true``.
 
         The job held by this rule's gate proceeds to its result or failure
@@ -126,10 +120,9 @@ def make_mock_router(
 
     @router.post(
         "/evaluate-job",
-        response_model=EvaluateJobResponse,
         summary="Dry-run: would this job be accepted and which mock rule would match?",
     )
-    async def evaluate_job(body: EvaluateJobRequest) -> EvaluateJobResponse:
+    async def evaluate_job(body: EvaluateJobRequest) -> MockJobEvaluation:
         """Evaluate a provisioning job spec without creating a job.
 
         Checks the host is registered and which of the VM mock's rules the job
@@ -159,6 +152,6 @@ def make_mock_router(
             host_lookup=hosts.get_host,
             required=("vm_action",),
         )
-        return EvaluateJobResponse(**report)
+        return MockJobEvaluation(**report)
 
     return router

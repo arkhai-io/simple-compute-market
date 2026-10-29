@@ -22,8 +22,10 @@ branch may have moved, and follow every step below for the new work.
 
 ## Running unattended
 
-Run interactively, as most runs are, this section does not apply, and nothing else
-in the skill changes. When this skill runs through `scripts/run_change_step.py` —
+Run interactively, as most runs are, this section does not apply but for the
+outcome it describes, which an interactive run records itself ("Running
+interactively"); nothing else in the skill changes.
+When this skill runs through `scripts/run_change_step.py` —
 `make implement UNATTENDED=1`, or the orchestrating session — nobody can answer in
 the session, and every turn ends with an outcome matching
 `.agents/change-outcome.schema.json`, whose `message` the owner reads as written:
@@ -65,16 +67,49 @@ the session, and every turn ends with an outcome matching
   when it ends, repeated when the call times out — never with Monitor, a wake-up,
   or a shell loop.
 - **The end is an outcome.** When the sections you were given are committed and
-  pushed, end with `finished`, `next` naming what the round needs next; a merge's
-  conflicts resolved, committed, and pushed end `finished` too ("Resolving a
-  merge's conflicts"). When the plan is wrong (step 4), commit and push the
-  section's work in progress, no task checked, and end with `returned`,
-  `return_to` `design` or `planning`, and `evidence` naming the section's notes,
-  leaving the status as it is: the owner confirms the return, and the step started
-  then sets it. An external input the change cannot supply, and a section far
-  larger than its plan once its handoff is recorded (step 4), are each a
-  `question`. A `stopped` run commits nothing: its work waits uncommitted for the
-  resumed session.
+  pushed, end with `finished`, `next` naming implementation's exit, the round's
+  triage, `{"step": "triage", "kind": "implementation"}`, and what the round needs
+  next in `message`: the computation reads the round's join from its records and
+  names its next session, the owner's reading, validation and the review, or the
+  triage. A merge's conflicts resolved, committed, and pushed end `finished` too
+  ("Resolving a merge's conflicts"). When the plan is wrong (step 4), commit and
+  push the section's work in progress, no task checked, and end with `returned`,
+  `next` the step it returns to, `{"step": "design"}` or `{"step": "plan"}`, and
+  `evidence` naming the section's notes, leaving the status as it is: the owner
+  confirms the return, and the step started then sets it. An external input the
+  change cannot supply, and a section far larger than its plan once its handoff is
+  recorded (step 4), are each a `question`. A `stopped` run commits nothing: its
+  work waits uncommitted for the resumed session.
+
+## Running interactively
+
+Run in an interactive session — `make implement` without `UNATTENDED=1`, or the
+slash command — no wrapper records the run, so its last act records the outcome
+it would end with unattended, as "Running unattended" gives it:
+
+```text
+python3 scripts/run_change_step.py record <change> implement --outcome '<the outcome, as JSON>'
+```
+
+`record` checks the outcome against `.agents/change-outcome.schema.json` and
+appends it to the change's workflow log with the session's id, `HEAD`, and
+`interactive: true`, and the next-step computation routes on it as on an
+unattended run's. It reads the session's id from `CLAUDE_CODE_SESSION_ID`, which
+`printenv CLAUDE_CODE_SESSION_ID` shows; where the variable is unset it refuses,
+and `--session <id>` gives the id. Record the outcome the session ends with —
+`finished` or `returned` — never a question or a stop, which the owner, present,
+settles in the session: a recorded stop would wait for a resume only the wrapper
+makes. When `record` refuses, correct what it names and run it again. A
+session closed before it records loses its report, and any return it would have
+proposed: the computation reads a round's progress from the task list and the
+records, not from its outcome, and names what they say comes next.
+
+The round's join reads the round from its line in the log, which the orchestrating
+session writes as a round starts. Interactively you write it: when `python3
+scripts/change_next_step.py <change>` names `round`, record that round, as it
+names it, before implementing — `python3 scripts/run_change_step.py note <change>
+round --sections '<its sessions, as 1,2;3>' --by <its by>` — and implement its
+first session. When it names `implement`, the round is recorded already.
 
 ## Resolving a merge's conflicts
 
@@ -106,8 +141,12 @@ and it checks no task.
    concludes the merge without opening an editor: the subject is the one Git
    wrote for it (`Merge branch 'dev' into <branch>`), and the paragraph names each
    conflicted file and how it was resolved. Push it with `make push-branch`; if it refuses, stop and report its
-   reasons. Report each file's resolution, and end — unattended, `finished`, the
-   orchestrating session recomputing what comes next.
+   reasons. Report each file's resolution, and end `finished`. A merge is the
+   owner's intervention, so where the change goes after it is theirs, not this
+   run's: `next` is `{"step": "round"}`, an exit implementation does not declare,
+   which the computation brings to the owner rather than taking, and `message`
+   says where the change stood — what `python3 scripts/change_next_step.py
+   <change>` names once the merge is concluded — for the owner to direct it.
 
 ## 1. Check that this section may start
 

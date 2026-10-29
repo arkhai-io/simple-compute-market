@@ -34,6 +34,15 @@ Its verification then runs `make check-packaging`, which includes
 
 No output, identifier, address, or key from a real host or purchase enters a test.
 
+**Test cadence (owner's decision, after Section 4).** For the rest of this change:
+- Focused suites and packaging gate every intermediate commit, whether a section or a
+  merge of `dev`.
+- The full `make test` and one independent implementation review run once per frozen
+  round candidate. Round 1 runs them after Sections 5 and 6, and they cover the merge.
+- A passing result is reused while its candidate is unchanged.
+- Validation, the live lanes, and the owner's approval before merging to `dev` are
+  unchanged.
+
 **End-to-end evidence.** Validation runs the Helm checks and the pipeline on every
 commit. Each section names the scenarios (pytest markers in `e2e-tests/`) that
 exercise it, or says that none does. No section owes evidence from a CI workflow that
@@ -442,6 +451,158 @@ tenant-facing host address falls back to the connection address". Files:
       ssh_host` and `public_port or ssh_port`. The bare-metal codec already
       receives the `InventoryTarget`.
 
+**Correction after merging `dev`: `public_port` belongs to `ssh` version 2.** The
+tasks above added `public_port` to version 1 of the self-versioned `ssh`
+connection. `RELEASING.md`'s versioning policy forbids that change in place, so D3's
+compatibility is settled again (`design.md`, D3, "Compatibility, as settled after
+merging `dev`"). These tasks correct it, after 3.1–3.4 and before Section 5. Files:
+- `provisioning/compute/src/compute_provisioning/hosts/connection.py` (the registry
+  keyed by kind and version) and its unit tests;
+- `provisioning/compute/ansible/src/compute_provisioning_ansible/connection.py` (one
+  codec per version, a strict read per version, and the factory's version choice) and
+  `__init__` exports;
+- the service's composition in `container.py` and its test fixtures;
+- the tests and fixtures that state a port: the Ansible kit's, the bare-metal adapter's
+  `tests/execution.py`, and the service's `test_hosts_api.py`.
+
+- [x] 3.5 The host authority's `ConnectionCodecs` keys codecs by kind and version.
+      `build` dispatches to the codec for the submission's own kind and version, and
+      carries a previous connection's protected values forward whatever its version.
+      A duplicate kind-and-version registration is refused, and so is a version no
+      codec of the kind serves, naming the versions served. The `ConnectionCodec`
+      protocol is unchanged. Unit tests cover dispatch, both refusals, and the
+      single-version registration every existing caller makes.
+
+      Done (unit), in `hosts/connection.py`, with `versions(kind)` naming what a
+      kind is served at. `codec` now takes the version. Its only production caller
+      is `build`. Seven cases in `provisioning/compute/tests/unit/test_connection_codecs.py`
+      cover dispatch, a lone version, an unserved version, an unknown kind, a
+      duplicate pair, and a previous connection at another version or of another
+      kind.
+
+      Correction: `codec` takes the version optionally again, while the kind is
+      served at one version, with three more cases (3.8's corrections).
+- [x] 3.6 `SshConnectionCodec` serves one version, given at construction: version 1
+      without `public_port` (`extra="forbid"`, so a stated field is refused even as
+      null), or version 2 with it. `parse` checks the envelope's kind and version
+      before its fields, and refuses any other. `ssh_connection()`, and the INI
+      import through it, submit version 2 when a port is stated and version 1
+      otherwise. The service registers the codec at both versions. Unit tests cover:
+      - each version's fields, including version 1's refusal of a port and its record
+        stored as before version 2 existed;
+      - version 2's port bounds and an explicit version 2 without a port;
+      - an unsupported version refused by `parse` and `build`;
+      - the factory's and the INI import's version choice;
+      - a protected key carried from a version-1 record into a version-2 update.
+
+      Done (unit):
+      - **The models.** `SshConnectionV1` has version 1's fields in their original
+        order, so a version-1 record is stored exactly as before. `SshConnection`
+        is version 2's model and the view executors read at either version.
+      - **The codec.** `SshConnectionCodec(key, version=...)` defaults to version
+        1, as every earlier caller registered it. `ssh_connection_codecs(key)`
+        gives one codec per served version, and the service's composition
+        registers them.
+      - **`parse`.** It refuses an unserved kind or version before reading any
+        field.
+      - **Exports.** `SSH_CONNECTION_VERSION` is replaced by
+        `SSH_CONNECTION_VERSIONS` and `SSH_PUBLIC_PORT_VERSION`. Nothing outside
+        the kit read it. Corrected: it stays exported, at 1, beside them (3.8's
+        corrections).
+      - **Tests.** `test_ssh_connection.py` covers each case listed above.
+        `test_inventory.py`'s round trip now builds through the registry and shows
+        that an INI entry stating a port is submitted at version 2 and every other
+        entry at version 1. `test_runner.py`'s routed host is at version 2.
+- [x] 3.7 Fixtures that state a port move to version 2, and nothing else changes for
+      callers that state none. Application integration through the typed host
+      client covers:
+      - a version-1 registration stored unchanged;
+      - a version-2 route stored and rendered;
+      - a version-1 connection stating a port refused;
+      - an unsupported version refused.
+
+      Done (application integration), in `test_hosts_api.py`:
+      - `TestTenantFacingRoute`'s routed host is read back and stored at version 2,
+        and its plain host at version 1;
+      - `TestConnectionVersions` covers a registration stating no version (stored at
+        version 1 with its original mapping), a version-1 connection stating a port
+        or a null (400 naming `public_port`, nothing stored), and version 3 (400
+        naming versions 1 and 2, nothing stored).
+
+      The service's fixtures register `ssh_connection_codecs`. The bare-metal
+      adapter's `host_with` states version 2 when it adds a port. Callers that
+      state no port changed nothing: the e2e helpers, the validation runbook's
+      requests, and the issue-discovery tool's configuration all submit version 1.
+- [x] 3.8 Verification:
+      - the family kit's, the Ansible kit's, and the bare-metal adapter's suites (unit
+        and library integration);
+      - the service's unit and integration suites under `ACTIVE_PROFILES=mock`;
+      - `make lock`, `make check-packaging`, and `make check-change`.
+
+      **Packaging.** `arkhai-compute-provisioning` takes its one bump for this change
+      against `dev`, from 0.21.0 to 0.22.0. Only the provisioning service composes the
+      registry with two versions of a kind, so its floor on the family kit rises. The
+      Ansible kit, the service, and the bare-metal adapter are already bumped once for
+      this change, so none is bumped again.
+
+      Promotion: the D3 row of `design.md`'s promotion record.
+
+      Done, on the final source:
+      - `make -C provisioning/compute test`: 250 passed (unit and library
+        integration);
+      - `make -C provisioning/compute/ansible test`: 133 passed (unit);
+      - `make -C domains/bare_metal/provisioning/adapter test`: 77 passed (unit);
+      - `make -C domains/vms/provisioning/adapter test`: 256 passed (unit);
+      - `make -C provisioning/compute/service test`: 607 unit and 461 application
+        integration passed;
+      - `make lock`: only `arkhai-compute-provisioning`'s version and the
+        service's floor changed, in five locks;
+      - `make check-packaging`: passed.
+
+      The 0.22.0 family kit, 0.5.0 Ansible kit, 0.20.0 service, and 0.12.0
+      bare-metal adapter wheels equal their source. Under the owner's cadence, the
+      full `make test` is Round 1's, after Sections 5 and 6.
+
+      End-to-end: no scenario states a tenant-facing port, so every pipeline host
+      stays at version 1. Owed by validation: none.
+
+      **Corrections after the parent's review of this task.**
+      - **Suite levels.** The counts above name mixed levels, which a folder name
+        does not settle:
+        - the family kit's 250 include library integration against real SQLite,
+          such as `tests/integration/test_host_authority.py`;
+        - the VM adapter's 256 include its `tests/integration` suite;
+        - the service's 461 combine application integration through the typed
+          clients with direct-storage migration tests, such as
+          `test_retired_reservation_states_migration.py`, and startup-lifecycle
+          checks. They are not all application integration.
+
+        The same holds for the service counts Sections 3 and 4 recorded earlier
+        (669 and 542, 669 and 544).
+      - **Two additive API corrections, made after the service suite passed.**
+        - `SSH_CONNECTION_VERSION` stays exported, at 1. It is the version a
+          connection stating no port is submitted at, and the default of
+          `SshConnectionCodec`, at class and instance; a stated version overrides
+          it.
+        - `ConnectionCodecs.codec(kind)` keeps its one-argument form while the kind
+          is served at one version. A kind served at several needs the version
+          stated, and its refusal names the versions; `build` still passes the
+          version explicitly.
+
+        They changed only `hosts/connection.py` and the Ansible kit's
+        `connection.py` and `__init__.py`, with their unit tests. Their evidence:
+        - `make -C provisioning/compute test`: 253 passed (unit and library
+          integration);
+        - `make -C provisioning/compute/ansible test`: 134 passed (unit);
+        - the service's `TestConnectionVersions`, `TestTenantFacingRoute`, and
+          `test_test_router_mounting.py`, after its environment was refreshed: 9
+          passed (application integration through the typed client, and the
+          fixtures' mounting).
+
+        The service's full 607 and 461 ran on the source before these
+        corrections. No path that service composition takes changed: the service
+        registers both versions explicitly, and `build` states the version.
+
 ## 4. Bare-metal grants yield evidence linked to their job, on the buyer's route
 
 Delivers D1's bare-metal linkage, D2's shipped-form mock, and D3's endpoint, for the
@@ -729,6 +890,37 @@ until `resolve-compute-family-findings` moves them to
 `domains/vms/provisioning/adapter/tests/unit/`. Add the cases wherever the file is when
 this section starts, and record in this section's notes where they went.
 
+**Correction after merging `dev`, before this section started.**
+`resolve-compute-family-findings` landed first and is archived. This branch merged
+`dev` after Section 4 and before this section, and these corrections come from that
+merge:
+- **The VM codec tests.** They moved, unchanged, to
+  `domains/vms/provisioning/adapter/tests/unit/test_vm_codec.py`. Add 5.5's codec
+  cases there. `make -C domains/vms/provisioning/adapter test` runs them, and the
+  provisioning service's suite no longer does.
+- **The scenario rules.** Each of the five scenario modules now builds its create
+  rule as a typed `MockRuleCreate`, from `compute_provisioning_contracts`, through the
+  family's mock-rule client. 5.4 still applies: drop the `result_stdout` argument and
+  keep `rule_id`, `match`, and `pause_before_result`.
+- **The fixed output.** The fixed create output these rules print still names
+  `vmuser` and a guest that is not the job's. A search at the merge
+  (`rg -n "vmuser|e2e-test-vm|e2e-shapes-vm|e2e-buy-vm" e2e-tests/`) found those values
+  only inside that output, and no assertion on them. 5.4 re-runs the search at
+  section start.
+- **The service's `vm_mock_output` users.** The provisioning service's integration
+  conftest, `test_test_controller.py`, and `test_system_api.py` use it. 5.6's
+  `make -C provisioning/compute/service test` therefore still covers the mock profile,
+  though not the codec tests.
+- **The service's integration fixtures.** They mounted the test routers on the shared
+  app whenever `app.routes` did not list the routers' paths. FastAPI lists an
+  included router as one entry, not by its paths, so every fixture setup included
+  the routers again and wrapped the app's lifespan once more.
+  `test_retired_settings_startup.py` then exhausted the stack entering the lifespan.
+  The fixtures now mount through `mount_unless_served`, in the service's integration
+  conftest, which asks the app's own routing whether each route is served.
+  `tests/integration/test_test_router_mounting.py` holds that a second mount changes
+  nothing.
+
 - [ ] 5.1 Replace `extract_vm_fact`'s private `msg:` fallback with Section 2's
       reader. The codec supplies the expected action from its own mapping, beside
       `VM_RESULT_FACTS`: the job's `vm_action`, which is `create` for a create and
@@ -784,6 +976,10 @@ this section starts, and record in this section's notes where they went.
       - `make -C provisioning/compute/service test` (unit and application
         integration, including the VM codec tests and the service's mock-profile
         cases that use `vm_mock_output`);
+
+        Correction after merging `dev`: the VM codec tests now run in the
+        adapter's suite above, not the service's. The service's suite still
+        runs the mock-profile cases that use `vm_mock_output`.
       - `make -C e2e-tests test-unit` (the scenario helpers still import and pass);
       - `make check-packaging`.
 
@@ -907,6 +1103,15 @@ what its fulfillment proves". Files:
 neither `TERMINAL_FAILURE_STATES` nor `_TERMINAL_RESERVATION_STATES` (`design.md`,
 "Coordination with `resolve-compute-family-findings`"). Record in this section's notes
 whether either change landed first.
+
+**Correction after merging `dev`.** `resolve-compute-family-findings` landed first,
+and this branch merged it before Section 5. In the files this section edits it changed:
+- `TERMINAL_FAILURE_STATES`, which no longer holds `provisioning_failed`;
+- `_TERMINAL_RESERVATION_STATES`, likewise;
+- convergence's diagnostics line.
+
+`_begin_recorded_teardown`, `_mark_release_failed`, the releasing pass, and
+convergence's teardown-failure write are as this section's tasks describe them.
 
 - [ ] 8.1 Add `compensable(state, failure_reason, provider_metadata)` to
       `compute_provisioning.release`. It is true when the state is `failed`, the
@@ -1108,6 +1313,17 @@ source declaration". Files:
 The administrator controller is also in `resolve-compute-family-findings`'s plan
 (`_INTERRUPTIBLE_HELD_STATES`). This section edits only the reservation response.
 
+**Correction after merging `dev`.** `resolve-compute-family-findings` landed first.
+Its edits to these files:
+- **The controller and `capacity_admin_models.py`.** They lost dead surfaces: the
+  fulfillment, usage, and release event routes and their request models, and a
+  duplicate set of pool-override routes.
+- **`_INTERRUPTIBLE_HELD_STATES`.** It is now `reserved`, `leased`, and `releasing`.
+
+Neither `ReserveCapacityResponse` changed. `reserve_capacity` still coerces the
+response's `gpu_count` with `or 1`, which 12.2 removes. The files 12.2 names are
+unchanged in their paths.
+
 - [ ] 12.1 Reconciler member usage keeps each member that has a resource type and
       declared capacity, for stated shapes:
       - GPU totals are optional, and are reported only for default generation, which
@@ -1292,6 +1508,13 @@ change to implementation.
         - every accepted deal drained, with no refund taken as proof;
         - the precondition that a refresh or reopen under the same identity keeps
           the pause.
+
+        Correction after merging `dev`: the provisioning service now migrates the
+        retired states. A `provisioning` reservation becomes `unmanaged`, and a
+        `provisioning_failed` one becomes `force_released`. The site's held states
+        are `reserved`, `leased`, `releasing`, `release_failed`, and `unmanaged`
+        (`HELD_RESERVATION_STATES`). The runbook names those, and names neither
+        retired state.
       - `openspec/specs/README.md`: no new capability or companion, so no edit.
         Confirm it.
       - Complete the promotion record.

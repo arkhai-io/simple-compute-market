@@ -8,8 +8,10 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from market_contact_exchange import (
     CONTACT_EXCHANGE_MIGRATIONS,
+    CONTACT_EXCHANGE_SELLER_DISPATCH_CLAIMS_MIGRATION_ID,
     IntroductionPayloadsDeletedError,
     IntroductionRecord,
+    claim_seller_dispatch,
     delete_introduction_payloads,
     format_introduction_timestamp,
     insert_introduction,
@@ -139,6 +141,51 @@ def test_expired_selection_is_inclusive_of_the_cutoff_and_skips_tombstones(
 def test_expired_selection_requires_a_positive_limit(conn) -> None:
     with pytest.raises(ValueError, match="positive limit"):
         select_expired_introductions(conn, cutoff=_DELETED_AT, limit=0)
+
+
+def _seller_dispatch_claims(conn: sqlite3.Connection) -> list[tuple[str]]:
+    return conn.execute(
+        "SELECT obligation_ref FROM contact_introduction_seller_dispatches"
+    ).fetchall()
+
+
+def test_a_fresh_database_holds_an_empty_seller_dispatch_claim_table(conn) -> None:
+    assert _seller_dispatch_claims(conn) == []
+
+
+def test_a_rerun_keeps_every_claim_and_every_introduction(conn) -> None:
+    insert_introduction(conn, _RECORD)
+    assert claim_seller_dispatch(conn, _RECORD.obligation_ref) is True
+    conn.commit()
+    for migration in CONTACT_EXCHANGE_MIGRATIONS:
+        migration.apply(conn)
+    conn.commit()
+    assert _seller_dispatch_claims(conn) == [(_RECORD.obligation_ref,)]
+    assert load_introduction(conn, _RECORD.obligation_ref) == _RECORD
+    assert claim_seller_dispatch(conn, _RECORD.obligation_ref) is False
+
+
+def test_a_database_holding_introductions_gains_an_empty_claim_table(tmp_path) -> None:
+    """Earlier migrations applied and an introduction revealed, then the claim
+    migration: the introduction is unclaimed, and its first claim wins."""
+    connection = sqlite3.connect(str(tmp_path / "earlier.db"))
+    try:
+        earlier = [
+            migration
+            for migration in CONTACT_EXCHANGE_MIGRATIONS
+            if migration.id != CONTACT_EXCHANGE_SELLER_DISPATCH_CLAIMS_MIGRATION_ID
+        ]
+        for migration in earlier:
+            migration.apply(connection)
+        insert_introduction(connection, _RECORD)
+        connection.commit()
+        for migration in CONTACT_EXCHANGE_MIGRATIONS:
+            migration.apply(connection)
+        assert _seller_dispatch_claims(connection) == []
+        assert load_introduction(connection, _RECORD.obligation_ref) == _RECORD
+        assert claim_seller_dispatch(connection, _RECORD.obligation_ref) is True
+    finally:
+        connection.close()
 
 
 def test_timestamps_render_in_the_column_text_form() -> None:

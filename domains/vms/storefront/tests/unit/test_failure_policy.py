@@ -235,11 +235,7 @@ async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch,
     )
     monkeypatch.setattr(
         "market_storefront.utils.config.CHAINS",
-        {
-            "anvil": SimpleNamespace(
-                rpc_url="http://rpc", alkahest_address_config_path="/addr.json"
-            )
-        },
+        {"anvil": SimpleNamespace(rpc_url="http://rpc")},
     )
     monkeypatch.setattr(
         "market_storefront.failure_actions.get_escrow_codec_for",

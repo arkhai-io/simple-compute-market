@@ -8,8 +8,9 @@ Coverage:
   - GET /api/v1/system/status — operator status: storefront checks, watchdog
     state, the contract pin, execution, and the Ansible readiness component,
     composed from the harness's executors as production composes them
-  - the convergence and lease-watchdog controls, including the advance refused
-    while convergence runs
+  - the convergence and lease-watchdog controls, each answering its typed
+    model, including the advance refused while convergence runs
+  - the identity rotation route (``main.py``), answering its typed model
 
 What is NOT covered here (unit test jurisdiction):
   - the readiness component's playbook, key, and version rules
@@ -31,10 +32,14 @@ from compute_provisioning_client import ComputeProvisioningError
 from compute_provisioning_contracts import (
     COMPUTE_PROVISIONING_CONTRACT_VERSION,
     SUPPORTED_COMPUTE_PROVISIONING_MAJOR_VERSIONS,
+    ConvergenceCycleResponse,
     HealthResponse,
+    LeaseCheckResponse,
+    PrincipalRotationResponse,
     SystemStatusResponse,
     WorkerPauseResponse,
 )
+from market_identity import Ed25519Signer, RotationIntent, sign_rotation
 import pytest
 from vm_provisioning_adapter.services.mock_output import vm_mock_output
 
@@ -43,6 +48,8 @@ from compute_provisioning_service.services.system_status import (
     COMPONENT_FAILURE_KIND,
     StatusComponentProvider,
 )
+
+from .conftest import STOREFRONT_SIGNER
 
 
 class TestHealthEndpoint:
@@ -242,7 +249,11 @@ class TestWorkerControls:
         assert paused == WorkerPauseResponse(paused=True, at_gate=True)
         assert again == WorkerPauseResponse(paused=True, at_gate=True)
         assert resumed == WorkerPauseResponse(paused=False, at_gate=False)
-        assert isinstance(advanced, dict) and isinstance(ran, dict)
+        for cycle in (advanced, ran):
+            assert isinstance(cycle, ConvergenceCycleResponse)
+            assert cycle.after.failed_count == 0
+            assert cycle.after.teardown_failed_count == 0
+            assert all(counts.total == 0 for counts in cycle.after.per_state.values())
 
     async def test_a_paused_lease_watchdog_is_at_its_gate_and_still_checks(
         self, client_and_queue
@@ -259,7 +270,36 @@ class TestWorkerControls:
         assert paused == WorkerPauseResponse(paused=True, at_gate=True)
         assert again == WorkerPauseResponse(paused=True, at_gate=True)
         assert resumed == WorkerPauseResponse(paused=False, at_gate=False)
-        assert cycle["checked"] == 0
+        assert cycle == LeaseCheckResponse(checked=0, released=0, release_failed=0, skipped=0)
+
+
+class TestIdentityRotation:
+    """The rotation route answers its typed model through the family client."""
+
+    async def test_a_seller_rotation_answers_the_replacement_and_its_generation(
+        self, client_and_queue
+    ):
+        client, _ = client_and_queue
+        # A deterministic development key; never use it on a public network.
+        replacement = Ed25519Signer(b"\x77" * 32)
+        request = sign_rotation(
+            current_signer=STOREFRONT_SIGNER,
+            replacement_signer=replacement,
+            intent=RotationIntent(
+                current=STOREFRONT_SIGNER.identity,
+                replacement=replacement.identity,
+                subject="provisioning:storefront",
+                authority="provisioning",
+                nonce="rotate-seller-typed",
+                overlap_seconds=60,
+                expires_at=2_000_000_000,
+            ),
+        )
+
+        rotated = await client.family.rotate_trusted_principal("seller", request)
+
+        assert isinstance(rotated, PrincipalRotationResponse)
+        assert (rotated.role, rotated.replacement) == ("seller", replacement.identity)
 
 
 class TestMockedExecution:
@@ -285,40 +325,35 @@ class TestMockedExecution:
 
 
 class TestEvaluateJob:
-    """POST /test/evaluate-job — dry-run job evaluation via AsyncProvisioningTestClient."""
+    """POST /test/evaluate-job — VM's dry run, through the family's mock-rule client.
 
-    async def test_returns_expected_fields(self, test_client):
-        """Endpoint returns a dict with params_valid, host_exists, rule_matched, would_pause, errors."""
-        resp = await test_client.evaluate_job(
-            "non-existent-host",
-            vm_target="eval-target",
-            vm_action="create",
-        )
-        assert isinstance(resp, dict)
-        assert "params_valid" in resp
-        assert "host_exists" in resp
-        assert "rule_matched" in resp
-        assert "would_pause" in resp
-        assert "errors" in resp
+    The client parses each answer into the family's ``MockJobEvaluation``.
+    """
+
+    async def test_the_answer_states_every_field(self, test_client):
+        """The route states each field rather than leaving the model's defaults
+        to fill it."""
+        resp = await test_client.evaluate_job("non-existent-host", vm_action="create")
+        assert resp.model_fields_set == set(type(resp).model_fields)
 
     async def test_unknown_host_returns_host_exists_false(self, test_client):
         """Host not in inventory → host_exists=False, errors mentions inventory."""
         resp = await test_client.evaluate_job(
             "definitely-not-a-real-host",
+            vm_target="eval-target",
             vm_action="create",
         )
-        assert resp.get("host_exists") is False
-        assert resp.get("params_valid") is False
-        errors = resp.get("errors", [])
-        assert any("host" in e.lower() or "inventory" in e.lower() for e in errors), (
-            f"Expected an error mentioning host/inventory, got: {errors}"
+        assert resp.host_exists is False
+        assert resp.params_valid is False
+        assert any("host" in e.lower() or "inventory" in e.lower() for e in resp.errors), (
+            f"Expected an error mentioning host/inventory, got: {resp.errors}"
         )
 
     async def test_no_armed_rule_returns_rule_matched_none(self, test_client):
         """When no mock rules are armed, rule_matched=None and would_pause=False."""
         resp = await test_client.evaluate_job("some-host", vm_action="create")
-        assert resp.get("rule_matched") is None
-        assert resp.get("would_pause") is False
+        assert resp.rule_matched is None
+        assert resp.would_pause is False
 
     async def test_armed_rule_is_reflected(self, test_client):
         """After arming a mock rule, evaluate_job returns rule_matched and would_pause."""
@@ -330,9 +365,7 @@ class TestEvaluateJob:
         )
         try:
             resp = await test_client.evaluate_job("any-host", vm_action="create")
-            assert resp.get("rule_matched") == rule_id, (
-                f"Expected rule_matched={rule_id!r}, got {resp.get('rule_matched')!r}"
-            )
-            assert resp.get("would_pause") is True
+            assert resp.rule_matched == rule_id
+            assert resp.would_pause is True
         finally:
             await test_client.delete_mock_rule(rule_id)

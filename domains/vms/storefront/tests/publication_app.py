@@ -63,6 +63,7 @@ from market_storefront.services.publication_terms import (
 )
 import market_storefront.negotiation_runtime as negotiation_runtime
 from market_storefront.contact_exchange import build_vm_contact_exchange
+from market_storefront.controllers.admin_controller import pool_overrides_router
 from market_storefront.controllers.admin_controller import router as admin_router
 from market_storefront.controllers.introductions_controller import (
     router as introductions_router,
@@ -102,7 +103,7 @@ SITE_B = "site-b"
 ADMIN_SIGNER = Ed25519Signer(b"\x71" * 32)
 BUYER_SIGNER = Ed25519Signer(b"\x72" * 32)
 REGISTRY_SIGNER = Ed25519Signer(b"\x73" * 32)
-#: The provisioning service's signer, for fulfillment-event callbacks.
+#: The provisioning service's signer, for the capacity-released callback.
 SERVICE_SIGNER = Ed25519Signer(b"\x74" * 32)
 _ADMINISTRATORS = TrustedIdentitySet(identities=(ADMIN_SIGNER.identity,))
 _PUBLISHERS = TrustedIdentitySet(identities=(TEST_MARKETPLACE_SIGNER.identity,))
@@ -131,7 +132,11 @@ STOREFRONT_DOMAINS = [
 SETTLEMENT = {
     "schema_version": 1,
     "priority": ["alkahest.v1"],
-    "alkahest": {"enabled": True},
+    # The development chain's address book, which the kit installs.
+    "alkahest": {
+        "enabled": True,
+        "address_books": {"anvil": str(anvil_address_book_path())},
+    },
 }
 
 
@@ -584,14 +589,8 @@ async def publication_app(
     # the capacity-event cursor is process-wide; a cursor left by an earlier app
     # would skip this site's first events.
     reset_site_event_cursors()
-    address_config = anvil_address_book_path()
     chains = {
-        "anvil": ChainConfig(
-            name="anvil",
-            rpc_url="http://anvil.test",
-            chain_id=31337,
-            alkahest_address_config_path=str(address_config),
-        )
+        "anvil": ChainConfig(name="anvil", rpc_url="http://anvil.test", chain_id=31337)
     }
     with contextlib.ExitStack() as stack:
         recording = stack.enter_context(recorded_registries())
@@ -617,7 +616,6 @@ async def publication_app(
                 )
             )
         stack.enter_context(patch.dict(storefront_config.CHAINS, chains, clear=True))
-        stack.enter_context(patch.object(negotiation_runtime, "CHAINS", chains))
 
         stack.enter_context(
             patch.object(
@@ -754,8 +752,9 @@ async def publication_app(
             routers = (*routers, introductions_router)
         try:
             admin_identity.initialize_administrator_identities(db.db_path)
-            # The provisioning service's callbacks authenticate as a service
-            # peer trusted for the home site, seeded as the lifespan seeds it.
+            # The provisioning service's capacity-released callback authenticates
+            # as a service peer trusted for the home site, seeded as the lifespan
+            # seeds it.
             service_peer_trust = ServicePeerTrust(
                 db.db_path,
                 {
@@ -772,6 +771,7 @@ async def publication_app(
             for router in (
                 system_router,
                 admin_router,
+                pool_overrides_router,
                 listings_router,
                 listings_admin_router,
                 *routers,

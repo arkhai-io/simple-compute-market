@@ -21,10 +21,11 @@ HEAD = "0123456789abcdef0123456789abcdef01234567"
 SESSION = "9c07d1e2-0000-4000-8000-000000000000"
 
 VALID = {
-    "finished": {"outcome": "finished", "message": "The sections are committed.", "next": "triage"},
+    "finished": {"outcome": "finished", "message": "The sections are committed.",
+                 "next": {"step": "triage", "kind": "implementation"}},
     "question": {"outcome": "question", "message": "Delete the volume?", "awaiting": "remedy"},
-    "returned": {"outcome": "returned", "message": "Needs a decision.", "return_to": "design",
-                 "evidence": "the section's notes"},
+    "returned": {"outcome": "returned", "message": "Needs a decision.",
+                 "next": {"step": "design"}, "evidence": "the section's notes"},
     "blocked": {"outcome": "blocked", "message": "Waits on its prerequisite.",
                 "blocked_on": "split-pools"},
     "stopped": {"outcome": "stopped", "message": "Denied make lock.", "reason": "denied",
@@ -65,6 +66,18 @@ def log_file(tmp_path: Path) -> Path:
     directory = tmp_path / "openspec/changes" / CHANGE
     directory.mkdir(parents=True)
     return directory / "reviews" / "workflow.jsonl"
+
+
+def descriptors_of(path: Path) -> int:
+    """How many of this process's open descriptors name `path` as it is now: a
+    thread's opening of the log is observed as one more, through `/proc`."""
+    named = 0
+    for descriptor in Path("/proc/self/fd").iterdir():
+        try:
+            named += os.readlink(descriptor) == str(path)
+        except OSError:
+            continue
+    return named
 
 
 # Running a step: the wrapper's command, its stream, and the outcome it logs.

@@ -82,6 +82,10 @@ retired because the service stopped needing it, such as
 `default_pool_inventory_group` and `default_host_id`, is not refused, since
 ignoring it changes nothing the service does.
 
+Before a package reaches 1.0.0, the meaning of a configuration key it reads may
+change incompatibly in a minor release (see
+[`RELEASING.md`, "Versioning policy"](RELEASING.md#versioning-policy)).
+
 ## Kubernetes: ConfigMap and Secret mounting
 
 All application configuration travels through mounted files, never
@@ -171,7 +175,9 @@ registry pins `registry.authority_id` and `registry.identifier`, which are what 
 release's clients trust (`global.registryIdentity`), carried only for the internal
 registry and only for an EIP-191 identity, the one scheme the registry smoke test
 verifies; `buyer.wallet_address`, from the e2e-tests chart's development buyer
-identity; `seller.wallet_address`, from the target agent's `[Wallet].address`; and
+identity; `seller.wallet_address`, from the target agent's `[Wallet].address` when its
+configuration states one, and absent when the agent derives its address from
+its key; and
 `provisioning.authority_scheme` and `provisioning.authority_identifier`, the
 provisioning signer the release's clients trust (`global.provisioningIdentity`),
 which the provisioning chart's own identity must equal. The provisioning smoke
@@ -258,9 +264,13 @@ service default and does not validate the storefront's own settings.
 
 An agent's `alkahestAddressBook` (`configMapName`, empty mounting nothing; `key`;
 `mountPath`, default `/etc/arkhai/alkahest`) mounts an existing ConfigMap's
-address book read-only at `<mountPath>/<key>`, and the agent's
-`Chains.<name>.alkahest_address_config_path` and
-`[Settlement.alkahest].address_config_path` name that file. The `dev-env` chart,
+address book read-only at `<mountPath>/<key>`, and the agent's `config` names that
+file as its chain's entry in `[Settlement.alkahest.address_books]`; the chart
+renders the entry as stated and derives none. A retired address-book key —
+`alkahest_address_config_path` under a `[Chains]` table, or `address_config_path`
+under `[Settlement.alkahest]` — is refused by the storefront's own startup refusal,
+which the chart's render tests run over the rendered `storefront.json` (see
+"Settlement consumer configuration and cutover"). The `dev-env` chart,
 which deploys the Anvil state the book describes, renders its copy of
 `kit/alkahest`'s development address book as `<release>-dev-env-alkahest-addresses`.
 
@@ -1327,6 +1337,13 @@ and stored overrides: a constraint left
 in place makes the older storefront hold the pool, and the older provisioning service
 refuse any write that keeps it.
 
+The compute provisioning contract is at major 3, and every party accepts major 3
+alone: a provisioning service, the storefronts that call it, and the family and
+domain clients they use upgrade together and roll back together. A mismatched pair
+does not half-work; each request is refused by its contract version, naming the
+supported major (see
+[`compute-provisioning-contract`](../../openspec/specs/compute-provisioning-contract/spec.md)).
+
 Upgrading to listing shapes is fail-forward. Every VM listing's identity now
 includes its shape, so the first publication cycle after upgrade closes each
 listing and publishes its successor once; a seller's close and pause carry to the
@@ -1409,6 +1426,37 @@ discloses both principals, the listing, amount, timing, and provision terms, so 
 either only where that disclosure to the payments service is intended.
 
 Stripe consumer settings are rejected with removal diagnostics; they are not migrated to Arkhai accounts, credentials, or transactions. Role CLIs reject legacy settlement keys and expose the same explicit migration contract. The storefront additionally rejects legacy publication pricing that would synthesize options from `min_price`, `token`, or raw `accepted_escrows`. A check is read-only and reports paths and actions with values redacted. A write requires `--backup`, validates the complete candidate before mutation, creates a restrictive same-directory `.bak`, fsyncs, and atomically replaces the source. Conflicting old and new values fail rather than choosing one. Repeating a completed migration is a no-op.
+
+An Alkahest address book — one deployment's contract addresses, overriding the
+SDK's built-in addresses for a chain such as Anvil — is named per chain in
+`[Settlement.alkahest.address_books]`, a table from chain name to path; a chain not
+listed uses the built-in addresses, and a key naming no configured chain makes
+Alkahest unready (`alkahest.address_book_chain_unknown`). `[Chains]` holds only
+chain resources. Every role — storefront and buyer, seller and payer — resolves a
+chain's book through `kit/alkahest` and uses it for client construction,
+publication, release conditions, escrow verification, refunds, and claim
+servicing alike. The two retired keys, `[Chains.<name>].alkahest_address_config_path`
+and `[Settlement.alkahest].address_config_path`, are refused before the settlement
+section is resolved, with a diagnostic naming the table. The settlement migration
+commands, `market-storefront config migrate --scope settlement` and the buyer's
+`market config migrate --scope settlement`, move them into it; the bare-metal and
+API-credit storefronts have no such command, and their operators move the key by
+hand. A chain's own key moves to that chain's entry, and the
+section key to the one configured chain, or else to the chains whose own keys name
+the same book. Where it cannot tell which chains the section key served, or a chain
+would be given two different books, it refuses and names the keys; an empty key is
+removed. The section key named the book claims were serviced against on every
+chain, so on any other configured chain a seller's claims move to that chain's own entry, or to the
+built-in addresses where it has none; a seller's migration report names each such
+chain before anything is written. A release that predates the table refuses it,
+since `[Settlement]` is strict.
+
+A seller's `[Wallet].address` is the recipient its release conditions name, and its
+`[Wallet].private_key` signs every chain transaction, so the two name one account.
+The address is optional: absent, it is derived from the key. An address that names
+another account than the key's makes Alkahest unready
+(`alkahest.wallet_address_mismatch`) and leaves the storefront running. A buyer's
+address names nothing an escrow pays, and is not compared with its key.
 
 Publication config migrates separately from the `[Settlement]` hierarchy. The migration converts an unambiguous single-mechanism legacy price into one complete typed clause. It refuses a dual-mechanism source whose one scalar price has no authoritative asset scale, and refuses per-model legacy pricing, which needs manual clauses.
 
@@ -1596,7 +1644,7 @@ The bare-metal storefront reads its configuration as every storefront does: `$XD
 
 `[capacity.sites]` maps each site to its authority URL, and each site is bound to exactly one `[Identity.service_peers.<peer>]`, seeded at the server's start and rotated through the identity routes (see "Storefront startup and site trust"). Health and status report each site by its ID, its service peer, and the peer's active principals, primary first, never its URL; a site's error text in status may name the URL, which is public configuration refused at startup when it carries credentials. `[capacity].poll_interval` (5 s), `[capacity].publication_interval_seconds` (30 s), and `[capacity].source_confirmation_seconds` (three poll intervals unless stated) time the projection poller, the publication loop, and the opening recheck's confirmation window. `[pricing].settlements` compile when the storefront starts, so a clause that cannot be read refuses startup naming the key; an empty list is not a refusal. `[negotiation].policies` names the seller chain.
 
-`[Settlement]` is the strict shared settlement root. A configured Alkahest section, enabled or disabled, settles with the seller's public address (`[Wallet].address`), at least one chain (`[Chains.<name>]`, its `rpc_url` and optional `alkahest_address_config_path`), and the wallet key (`[Wallet].private_key`, in the Secret overlay only); a section missing any of them starts, and Alkahest readiness names each missing input as a blocker, since disabled sections still service accepted obligations. Those inputs supplied with no Alkahest section are refused at startup. Payments-only configuration supplies none of them and constructs no Alkahest wallet, chain, or RPC client; its payment credentials remain behind the secret boundary. The storefront delivers the `recipient` and `oracle_gated` release models; configured as `interruptible`, Alkahest is unready (see "Storefront startup and site trust"). Publication additionally requires authenticated registry trust, exact typed clauses, freshly confirmed site projections for its source checks, and a maximum lease duration per pool.
+`[Settlement]` is the strict shared settlement root. A configured Alkahest section, enabled or disabled, settles with at least one chain (`[Chains.<name>]` and its `rpc_url`, with an optional address book under `[Settlement.alkahest.address_books]`) and the wallet key (`[Wallet].private_key`, in the Secret overlay only), whose account is the seller's address; `[Wallet].address` may state it, and one naming another account is a blocker (see "Settlement consumer configuration and cutover"). A section missing any input starts, and Alkahest readiness names each missing input as a blocker, since disabled sections still service accepted obligations. Those inputs supplied with no Alkahest section are refused at startup. Payments-only configuration supplies none of them and constructs no Alkahest wallet, chain, or RPC client; its payment credentials remain behind the secret boundary. The storefront delivers the `recipient` and `oracle_gated` release models; configured as `interruptible`, Alkahest is unready (see "Storefront startup and site trust"). Publication additionally requires authenticated registry trust, exact typed clauses, freshly confirmed site projections for its source checks, and a maximum lease duration per pool.
 
 The Compose wrapper mounts the operator's `storefront.toml` and the Secret overlay and reads the identity credential from its own environment file. The Helm chart, `helm/charts/bare-metal-storefront`, is the storefront chart's agent shape with one agent's keys at its top level: `config` rendered into `storefront.json` in a ConfigMap with null-valued keys removed (see "Storefront agents: pass-through configuration"); `secret` naming an existing Secret whose key is mounted as `storefront.secrets.toml`; `identity.credentialSecret`; `alkahestAddressBook` mounting an existing ConfigMap read-only; `port`, which the container, probes, and Service share; persistence; and scheduling. The pod's environment carries only `XDG_CONFIG_HOME` and the credential, and service links are off. The chart derives only what the release knows, and only where `config` states none: `port` always (a different stated value refused), `base_url` as the Service's URL, `db_path` under `persistence.mountPath`, and, in an umbrella release, the internal registry's URL with the chart-level `internalRegistryTrust` under it and `[capacity.sites]` as `{default: <provisioning URL>}`. A site bound to the release's provisioning service must have a role-`service` peer naming `global.provisioningIdentity`, which the chart checks and never adds. Installed alone, with no umbrella globals, it derives the first three only and refuses `internalRegistryTrust`. Its values schema is closed: the top level refuses every value it does not know, retired ones by name, and `config` is typed by a definition generated from the storefront's settings models, each section closed, so a misspelled or secret key is refused at render. A key stated in two spellings is refused at render too, since the loader would merge them silently. The chart validates no service semantics; the storefront's startup refusal does.
 

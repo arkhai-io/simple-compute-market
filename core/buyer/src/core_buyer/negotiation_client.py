@@ -92,8 +92,9 @@ def set_rl_middleware_registrar(fn: Callable[[], None] | None) -> None:
 def _maybe_register_rl_middleware() -> None:
     """Trigger self-registration of the RL middleware, if a domain
     package installed a registrar. Best-effort — if the strategy's
-    dependencies aren't installed, the chain loader raises its own
-    actionable KeyError pointing at the extras."""
+    dependencies aren't installed, the middleware stays unregistered and
+    the chain loader's KeyError names it and the entry-point group that
+    would provide it."""
     if _RL_MIDDLEWARE_REGISTRAR is None:
         return
     try:

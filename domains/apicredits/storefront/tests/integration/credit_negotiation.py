@@ -23,6 +23,7 @@ from market_core.schemas import (
     derive_settlement_option_id,
 )
 from market_identity import Ed25519Signer
+from tests._settings_overrides import replaced_setting
 from tests.listing_bindings import upsert_bound_listing
 
 BUYER_SIGNER = Ed25519Signer(bytes.fromhex("11" * 32))
@@ -44,14 +45,17 @@ CONDITION = {
 
 @contextmanager
 def anvil_chain():
-    """The storefront's anvil chain, naming the address book the condition uses."""
-    chain = ChainConfig(
-        name="anvil",
-        rpc_url="http://anvil.test",
-        chain_id=31337,
-        alkahest_address_config_path=str(anvil_address_book_path()),
-    )
-    with patch.dict(storefront_config.CHAINS, {"anvil": chain}, clear=True):
+    """The storefront's anvil chain, its Alkahest section naming the address
+    book the condition uses."""
+    chain = ChainConfig(name="anvil", rpc_url="http://anvil.test", chain_id=31337)
+    settlement = storefront_config.settlement_config_mapping()
+    settlement["alkahest"] = {
+        **dict(settlement.get("alkahest") or {}),
+        "address_books": {"anvil": str(anvil_address_book_path())},
+    }
+    with patch.dict(storefront_config.CHAINS, {"anvil": chain}, clear=True), (
+        replaced_setting("settlement", settlement)
+    ):
         yield
 
 

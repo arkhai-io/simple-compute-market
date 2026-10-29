@@ -130,24 +130,31 @@ class ProbedChain:
     name: str
     rpc_url: str
     chain_id: int | None = None
-    address_config_path: str | None = None
+    #: The chain's Alkahest address book; ``None`` for the SDK's built-in addresses.
+    address_book: str | None = None
 
     @classmethod
-    def from_config(cls, name: str, chain: Any) -> ProbedChain:
+    def from_config(
+        cls, name: str, chain: Any, *, address_book: str | None
+    ) -> ProbedChain:
         """One configured chain, given as a mapping or an object with the
-        ``rpc_url``, ``chain_id``, and ``alkahest_address_config_path`` a
-        ``[Chains.<name>]`` table states."""
+        ``rpc_url`` and ``chain_id`` a ``[Chains.<name>]`` table states.
+
+        ``address_book`` is the chain's book as
+        :func:`~market_alkahest.settlement_config.alkahest_address_book`
+        resolves it, ``None`` for the SDK's built-in addresses. A chain table
+        names no book, so the caller supplies it.
+        """
 
         def value(key: str) -> Any:
             return chain.get(key) if isinstance(chain, Mapping) else getattr(chain, key, None)
 
         chain_id = value("chain_id")
-        path = value("alkahest_address_config_path")
         return cls(
             name=name,
             rpc_url=str(value("rpc_url") or ""),
             chain_id=int(chain_id) if chain_id is not None else None,
-            address_config_path=str(path) if path else None,
+            address_book=address_book or None,
         )
 
 
@@ -175,7 +182,7 @@ def required_contract_addresses(chain: ProbedChain) -> dict[str, str]:
     """
     network = get_alkahest_network(chain.name)
     config = resolve_alkahest_address_config(
-        network, config_path=chain.address_config_path
+        network, config_path=chain.address_book
     )
     if config is None:
         config = _sdk_addresses_for_chain(network)

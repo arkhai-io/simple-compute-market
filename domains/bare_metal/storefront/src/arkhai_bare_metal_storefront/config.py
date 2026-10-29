@@ -40,6 +40,7 @@ from core_storefront.identity_config import IdentityConfig, resolve_storefront_s
 from core_storefront.multi_registry_client import RegistryAuthorityTrust
 from core_storefront.service_peers import ServicePeerConfigs
 from dynaconf import Dynaconf
+from market_alkahest import retired_address_book_keys, retired_address_book_refusal
 from market_config.config_loader import storefront_config_files
 from market_config.registry_url import normalize_registry_url
 from market_config.setting_types import PositiveSeconds, positive_seconds
@@ -240,11 +241,14 @@ class WalletSettings(_Section):
 
 
 class ChainSettings(_Section):
-    """One ``[Chains.<name>]``: an EVM chain the storefront settles Alkahest on."""
+    """One ``[Chains.<name>]``: an EVM chain the storefront settles Alkahest on.
+
+    Its Alkahest address book is named in ``[Settlement.alkahest.address_books]``;
+    the settings model refuses the retired key a chain table once stated it.
+    """
 
     rpc_url: str = Field(min_length=1)
     chain_id: StrictInt | None = None
-    alkahest_address_config_path: str | None = None
 
 
 class BareMetalStorefrontSettings(_Section):
@@ -276,6 +280,24 @@ class BareMetalStorefrontSettings(_Section):
     @classmethod
     def _settlement_in_any_case(cls, value: Any) -> Any:
         return {} if value is None else _lowered(value)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_retired_address_book_keys(cls, value: Any) -> Any:
+        # Unrefused, a key the storefront no longer reads would leave its chain
+        # without the book the operator meant it to use.
+        if not isinstance(value, Mapping):
+            return value
+        sections = {str(key).lower(): item for key, item in value.items()}
+        settlement = sections.get("settlement")
+        chains = sections.get("chains")
+        retired = retired_address_book_keys(
+            settlement if isinstance(settlement, Mapping) else None,
+            chains if isinstance(chains, Mapping) else None,
+        )
+        if retired:
+            raise ValueError("; ".join(map(retired_address_book_refusal, retired)))
+        return value
 
     @property
     def storefront_url(self) -> str:

@@ -17,7 +17,7 @@ from market_settlement_runtime import (
     SettlementConfigurationRegistry,
 )
 
-from .common import resolve_fresh_buyer_identity
+from .common import refuse_retired_address_book_keys, resolve_fresh_buyer_identity
 from .settlement_stages import AlkahestBuyerStage, PaymentBuyerStage
 
 BUYER_STAGES = SettlementStageTable({
@@ -86,6 +86,7 @@ def resolve_buyer_settlement_policy(
             "legacy [settlement] configuration is not supported; run "
             "`market config migrate --scope settlement --write --backup`"
         )
+    refuse_retired_address_book_keys(document)
     raw = document.get("Settlement", {})
     if not isinstance(raw, Mapping):
         raise ValueError("[Settlement] must be a table")

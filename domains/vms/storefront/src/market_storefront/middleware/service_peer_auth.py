@@ -43,13 +43,9 @@ class ServiceCallback:
 
 
 _CALLBACK_OPERATIONS = {
-    "/api/v1/admin/fulfillment/events/started": "fulfillment_started",
-    "/api/v1/admin/fulfillment/events/release-started": "fulfillment_release_started",
     "/api/v1/admin/fulfillment/events/capacity-released": (
         "fulfillment_capacity_released"
     ),
-    "/api/v1/admin/fulfillment/events/usage-started": "fulfillment_usage_started",
-    "/api/v1/admin/fulfillment/events/failed": "fulfillment_failed",
 }
 
 
@@ -73,9 +69,9 @@ def _callback(request: Request, body: Any) -> ServiceCallback | None:
     # the asserted role: the administrator middleware hands a request asserting
     # `service` straight through to this one. A service peer reads status to
     # confirm its own signing path works, which is the only side-effect-free
-    # service operation there is — the rest are fulfillment callbacks. The read
-    # names no site and returns readiness alone, so every configured site's
-    # peer may make it.
+    # service operation there is — the other is the capacity-released
+    # callback. The read names no site and returns readiness alone, so every
+    # configured site's peer may make it.
     if request.method == "GET" and path == "/api/v1/system/status":
         site_ids = tuple(
             sorted(

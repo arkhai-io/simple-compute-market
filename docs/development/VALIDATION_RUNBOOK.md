@@ -1062,7 +1062,6 @@ helm upgrade --install "$RELEASE" "$APP_REPO/helm" \
   --values "$APP_REPO/helm/values.yaml" \
   --values "$OPS_REPO/helm/argocd-apps/envs/dev/simple-market-service-values.yaml" \
   --set provisioning.mockMode=false \
-  --set storefront.agents.arkhai.config.provisioning.mode=real \
   --namespace default \
   --wait \
   --timeout 10m

@@ -213,7 +213,7 @@ Rendered inventories MUST emit `ansible_port` for every host, including hosts on
 
 An `ansible_port` supplied through the INI input format MUST be preserved rather than discarded. A value that is not a port number between 1 and 65535 MUST cause its entry to be rejected rather than replaced with a default, because a substituted port produces an unreachable host whose failure resembles a network fault rather than a bad inventory line.
 
-The registry MAY also record a tenant-facing port, `public_port`, for a host. A rendered inventory MUST emit `public_port` for a host whose record states one, and MUST NOT emit it for a host whose record states none. A host whose record states no tenant-facing port MUST be stored with no `public_port` field, not even a null one, so that a reader that does not know the field still reads the record. A `public_port` supplied through the INI input format MUST be preserved, and a value that is not a port number between 1 and 65535 MUST cause its entry to be rejected, as for `ansible_port`.
+The registry MAY also record a tenant-facing port, `public_port`, for a host. The port belongs to version 2 of the `ssh` connection, which is version 1 with that one optional field. Version 1 MUST NOT carry `public_port`, not even as null, and a version-1 connection stating it MUST be refused. A version-1 connection MUST be accepted and stored as it was before version 2 existed. A rendered inventory MUST emit `public_port` for a host whose record states one, and MUST NOT emit it for a host whose record states none. A host whose record states no tenant-facing port MUST be stored with no `public_port` field, not even a null one. A `public_port` supplied through the INI input format MUST be preserved, and a value that is not a port number between 1 and 65535 MUST cause its entry to be rejected, as for `ansible_port`. A connection built from the INI format or the typed connection factory MUST be submitted at version 2 when it states a tenant-facing port, and at version 1 otherwise.
 
 #### Scenario: A host is registered on a tunnel port
 
@@ -249,6 +249,62 @@ The registry MAY also record a tenant-facing port, `public_port`, for a host. A 
 
 - **WHEN** a host is registered with no tenant-facing port
 - **THEN** its stored connection carries no `public_port` field, and rendered inventories for it emit no `public_port`
+
+#### Scenario: A version-1 connection states a tenant-facing port
+
+- **WHEN** a host is submitted with an `ssh` connection at version 1 stating `public_port`, with a value or as null
+- **THEN** the submission is refused naming the field, and nothing is stored
+
+#### Scenario: An existing version-1 registration is submitted
+
+- **WHEN** a host is submitted with an `ssh` connection at version 1, or stating no version, and no tenant-facing port
+- **THEN** it is stored at version 1 exactly as before version 2 existed
+
+### Requirement: Host connections are typed by their implementation's codec
+
+A host's connection MUST be held as a connection envelope (a kind, a version, public
+fields, and protected values) whose kind names the codec of the implementation
+distribution that supports it. Compute provisioning MUST NOT define per-kind connection
+fields; it validates an envelope through its codec. An executor MUST receive an immutable
+execution-host value, not the persistence record, and MUST refuse a connection kind it
+does not support.
+
+A codec MUST be registered for one kind at one version, and a kind MAY be served at
+several versions by one codec registered once per version. A connection MUST be built
+by the codec registered for its own kind and version, never by another version's.
+Composition MUST refuse two codecs registered for one kind and version. A connection
+at a kind no codec serves, or at a version no codec of its kind serves, MUST be refused
+naming the kinds or versions that are served. A reader of a stored connection MUST check
+its kind and version before reading its fields, and MUST refuse a version it does not
+serve rather than read it as another. A protected value MUST be carried forward across
+an update whose submission does not resubmit it, whatever the previous connection's
+version. A stored connection MUST NOT be rewritten to another version except by a
+submission that states that version.
+
+#### Scenario: A compute domain needs another connection kind
+
+- **WHEN** a domain's executor reaches its targets by a means other than SSH
+- **THEN** an implementation distribution adds a codec for that kind, and neither the host
+  authority's model nor the executor contract changes
+
+#### Scenario: A connection states a version no codec serves
+
+- **WHEN** a host is submitted with an `ssh` connection at a version no registered `ssh`
+  codec serves
+- **THEN** the submission is refused naming the versions served, and nothing is stored
+
+#### Scenario: A stored connection is at an unsupported version
+
+- **WHEN** an execution path reads a stored connection whose version its codec does not
+  serve
+- **THEN** it refuses the connection before any playbook runs, rather than reading it
+  under another version's fields
+
+#### Scenario: A host moves to version 2
+
+- **WHEN** a version-1 host whose key is protected is updated with a version-2
+  connection stating a tenant-facing port and no key
+- **THEN** the host is stored at version 2 with the port, and its protected key is kept
 
 ### Requirement: An undelivered lease is released by what its fulfillment proves
 

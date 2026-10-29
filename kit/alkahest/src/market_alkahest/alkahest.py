@@ -132,8 +132,8 @@ def resolve_alkahest_address_config(
         return None
     if selected == NETWORK_ANVIL:
         raise ValueError(
-            "chain_name='anvil' requires an explicit alkahest_address_config_path "
-            "with deployed local addresses."
+            "chain_name='anvil' requires an address book with its deployed local "
+            "addresses, named under [Settlement.alkahest.address_books]."
         )
     return _sdk_addresses_for_chain(selected)
 
@@ -151,8 +151,8 @@ def _arbiter_address(
         return str(override["arbiters_addresses"][arbiter_field])
     if selected == NETWORK_ANVIL:
         raise ValueError(
-            "chain_name='anvil' requires an explicit alkahest_address_config_path "
-            "with deployed local addresses."
+            "chain_name='anvil' requires an address book with its deployed local "
+            "addresses, named under [Settlement.alkahest.address_books]."
         )
     cfg = _sdk_addresses_for_chain(selected)
     return str(getattr(cfg.arbiters_addresses, arbiter_field))
@@ -271,8 +271,8 @@ def _escrow_obligation_address(
         return str(category_override[field])
     if selected == NETWORK_ANVIL:
         raise ValueError(
-            "chain_name='anvil' requires an explicit alkahest_address_config_path "
-            "with deployed local addresses."
+            "chain_name='anvil' requires an address book with its deployed local "
+            "addresses, named under [Settlement.alkahest.address_books]."
         )
     cfg = _sdk_addresses_for_chain(selected)
     address_category = getattr(cfg, category)
@@ -509,8 +509,8 @@ def _override_reverse_address_map(
     override = _load_override_config(config_path)
     if override is None:
         raise ValueError(
-            "chain_name='anvil' requires an explicit alkahest_address_config_path "
-            "with deployed local addresses."
+            "chain_name='anvil' requires an address book with its deployed local "
+            "addresses, named under [Settlement.alkahest.address_books]."
         )
 
     result: dict[str, str] = {}
@@ -571,8 +571,8 @@ def address_to_slot(
         ).get(address.lower())
     if selected == NETWORK_ANVIL:
         raise ValueError(
-            "chain_name='anvil' requires an explicit alkahest_address_config_path "
-            "with deployed local addresses."
+            "chain_name='anvil' requires an address book with its deployed local "
+            "addresses, named under [Settlement.alkahest.address_books]."
         )
     return _sdk_address_to_slot(selected, address)
 

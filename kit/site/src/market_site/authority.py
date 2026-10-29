@@ -64,22 +64,26 @@ class SiteAuthorityLedger(Protocol):
         self, capacity_reservation_id: str, *, release_job_id: str | None = None
     ) -> dict[str, Any] | None: ...
 
-    def update_reservation_state(
+    def record_release_failed(
         self,
         capacity_reservation_id: str,
         *,
-        state: str,
-        failure_reason: str | None = None,
-        failure_message: str | None = None,
+        reason: str,
+        message: str | None = None,
+        release_job_id: str | None = None,
     ) -> dict[str, Any] | None: ...
 
     def release(
         self,
         *,
         capacity_reservation_id: str,
-        state: str = "released",
+        forced: bool = False,
         failure_reason: str | None = None,
         failure_message: str | None = None,
+    ) -> dict[str, Any] | None: ...
+
+    def record_unmanaged(
+        self, capacity_reservation_id: str, *, reason: str, message: str | None = None
     ) -> dict[str, Any] | None: ...
 
     def events_after(
@@ -139,7 +143,7 @@ class LedgerSiteAuthority:
         """
         return self._ledger.release(
             capacity_reservation_id=capacity_reservation_id,
-            state="force_released" if forced else "released",
+            forced=forced,
             failure_reason=reason,
             failure_message=message,
         )

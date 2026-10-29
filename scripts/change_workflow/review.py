@@ -17,9 +17,11 @@ each model passed over; and the commit it reviewed, `HEAD` when its run started.
 pre-closeout review refuses to start unless the latest validation record names
 `HEAD`, or an ancestor from which `HEAD` changes only changes' records — after an
 earlier pre-closeout review's triage, only paths under `openspec/` and `docs/` —
-with the result `passed`; the owner may override that. The review's outcome is `finished`,
-naming the record this run published, or `stopped` with the runner's reason; an
-earlier record never counts.
+with the result `passed`; the owner overrides that by `--unvalidated`, or by their
+direction to the review in the workflow log, until a review of that kind has run on
+it. The review's outcome is `finished`,
+naming the record this run published and, as its exit, the triage of its kind, or
+`stopped` with the runner's reason; an earlier record never counts.
 """
 
 from __future__ import annotations
@@ -36,8 +38,8 @@ from change_workflow.cost import review_cost
 from change_workflow.harness import (NETWORK_RETRIES, CodexRunner, Reached, Runner,
                                      claude_command, codex_command, missing_program,
                                      resume_command, run_claude, run_codex, unreachable)
-from change_workflow.log import LOG, log_path, record_outcome
-from change_workflow.records import (NUMBERED, TRANSCRIPTS, ChangedSince, changed_since,
+from change_workflow.log import LOG, log_path, read_log, record_outcome, unused_direction
+from change_workflow.records import (TRANSCRIPTS, ChangedSince, changed_since,
                                      is_documentation, is_record, next_number,
                                      validation_problem)
 from change_workflow.running import recorded_run, runs_directory
@@ -187,10 +189,13 @@ def prior_session(reviews: Path, kind: str) -> tuple[str, str, str] | None:
     review of `kind`.
 
     Records are ordered by number, not by name: `101-` sorts before `94-` as text.
+    The kind is matched whole, since one kind may end another's name: a glob for
+    `*-closeout.md` also takes `NN-pre-closeout.md`.
     """
+    record_of_kind = re.compile(rf"^(\d+)-{re.escape(kind)}\.md$")
     records = sorted((int(match.group(1)), entry) for entry in
-                     (reviews.glob(f"[0-9]*-{kind}.md") if reviews.is_dir() else [])
-                     if (match := NUMBERED.match(entry.name)))
+                     (reviews.iterdir() if reviews.is_dir() else [])
+                     if (match := record_of_kind.match(entry.name)))
     for _, record in reversed(records):
         # The last marker is the record's own; an earlier one may be quoted.
         if sessions := _SESSION_MARKER.findall(record.read_text("utf-8")):
@@ -298,6 +303,12 @@ def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str |
                           "change, so finish closeout, which archives it, first")
     reviews = directory / "reviews"
     reviewed = head(root)
+    # The owner's direction to this review, not yet used by a run of it, overrides
+    # the validation check as `--unvalidated` does: the check is the review's
+    # waivable entry guard.
+    directed = unused_direction(read_log(reviews / LOG))
+    if directed is not None and directed["next"] == {"step": "review", "kind": kind}:
+        unvalidated = True
     if kind == "pre-closeout" and not unvalidated:
         # After an earlier pre-closeout review, as the next-step computation reads
         # it, closeout is next and its own checks read the documentation again.
@@ -306,7 +317,8 @@ def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str |
         if problem := validation_problem(reviews, reviewed, root, changed_since,
                                          exempt=is_documentation if earlier else is_record):
             raise ReviewError(f"a pre-closeout review needs a passing validation of HEAD: "
-                              f"{problem}; validate first, or set UNVALIDATED=1 to override")
+                              f"{problem}; validate first, or override it: UNVALIDATED=1, or "
+                              "the owner's direction to this review in the workflow log")
     steps = load_steps(steps_path)
     if "review" not in steps:
         raise ReviewError(f"{steps_path} has no review row naming the review's models")
@@ -397,9 +409,10 @@ def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str |
     return output
 
 
-def review_outcome(path: Path) -> tuple[Entry, str | None, str | None, Entry]:
-    """A published review's outcome, with its reviewer session, its reviewed commit,
-    and what the line records of its reviewer.
+def review_outcome(path: Path, kind: str) -> tuple[Entry, str | None, str | None, Entry]:
+    """A published review's outcome, naming the triage of its `kind` as its exit, with
+    its reviewer session, its reviewed commit, and what the line records of its
+    reviewer.
 
     Each is read back from the markers the record ends with, so the line names what
     this run published and nothing an earlier record says. A review on Claude also
@@ -412,7 +425,7 @@ def review_outcome(path: Path) -> tuple[Entry, str | None, str | None, Entry]:
     commits = _REVIEWED_COMMIT.findall(text)
     reviewers = _REVIEWER.findall(text)
     closing = text.rstrip("\n").rsplit("\n\n", 1)[-1]
-    outcome: Entry = {"outcome": "finished", "next": "triage",
+    outcome: Entry = {"outcome": "finished", "next": {"step": "triage", "kind": kind},
                       "message": f"{path.name} written; triage is next"}
     extra: Entry = {}
     if reviewers:
@@ -483,7 +496,7 @@ def _review_and_log(change: str, kind: str, *, root: Path, clock: Clock,
         if not isinstance(exc, Exception):
             raise
         return line
-    outcome, session, commit, reviewer = review_outcome(path)
+    outcome, session, commit, reviewer = review_outcome(path, kind)
     reviewer.update(review_cost(path.parent / TRANSCRIPTS / path.with_suffix(".log").name,
                                 log, session, reviewer.get("harness"), started))
     return record_outcome(log, "review", outcome, session=session, commit=commit,

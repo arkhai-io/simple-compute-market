@@ -271,6 +271,35 @@ async def test_an_unsigned_request_is_refused_with_a_signed_refusal(client):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path", "allowed"),
+    (
+        ("/api/v1/capacity/snapshot", "GET"),
+        ("/api/v1/keys/key-1/revoke", "POST"),
+    ),
+    ids=("site-route", "credits-route"),
+)
+async def test_a_known_path_under_another_method_answers_405(client, path, allowed):
+    """Rejection path: the typed clients never send a method a contract lacks.
+
+    Asserts the status and `Allow` only. The site's table and the credits
+    table extended over it answer alike, since one middleware reads both.
+    """
+    response = await client.delete(
+        path,
+        headers=_headers(
+            signer=STOREFRONT_SIGNER,
+            role="seller",
+            method="DELETE",
+            operation="unserved",
+            resource="",
+        ),
+    )
+    assert response.status_code == 405
+    assert response.headers["Allow"] == allowed
+
+
+@pytest.mark.asyncio
 async def test_the_gated_application_may_consume_but_not_issue(client):
     """The role split the widening was for.
 

@@ -131,7 +131,7 @@ def test_a_tenant_facing_route_is_carried_into_the_rendered_inventory() -> None:
     """``public_host=`` and ``public_port=`` render as host variables when the
     connection states them, and neither renders when it does not."""
     public = {**_host().connection.public, "public_host": "192.0.2.10", "public_port": 2222}
-    routed = ExecutionHost("kvm1", "default", ConnectionEnvelope(kind="ssh", version=1, public=public))
+    routed = ExecutionHost("kvm1", "default", ConnectionEnvelope(kind="ssh", version=2, public=public))
     runner = AnsibleRunner(SimpleNamespace())
 
     target = inventory_target(routed)

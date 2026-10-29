@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from vm_provisioning_operator.models import CreateVmRequest, VmActionRequest
+from compute_provisioning.route_errors import ProvisioningRouteError
 from compute_provisioning_contracts import JobSubmitResponse
 from vm_provisioning_adapter.services.vm_operations_service import VmOperationsService
 
@@ -27,6 +28,18 @@ async def test_create_vm_submits_create_params_under_the_request_operation():
     assert "contract" not in submitted
     assert submitted["params"]["vm_target"] == "vm-1"
     assert submitted["params"]["vm_ram"] == 2048
+
+
+@pytest.mark.asyncio
+async def test_create_vm_refuses_a_guest_name_the_playbooks_refuse():
+    service, submission = _service("job-unused")
+
+    with pytest.raises(ProvisioningRouteError) as refused:
+        await service.create_vm(host="kvm1", body=CreateVmRequest(vm_target="a" * 33))
+
+    assert refused.value.status_code == 422
+    assert "useradd" in refused.value.detail
+    submission.submit.assert_not_awaited()
 
 
 @pytest.mark.asyncio

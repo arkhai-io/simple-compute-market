@@ -167,6 +167,10 @@ class SettleWaitResponse(BaseModel):
     fulfillment path (there is no executor job id in that architecture).
     ``fulfillment_id`` is that path's durable identity and is the field a
     caller should prefer once available.
+
+    ``last_error`` is the error of the wait's last status read, when that read
+    failed: a wait polls through a failed read and reports one only when it
+    ends unready.
     """
 
     ready: bool
@@ -174,3 +178,4 @@ class SettleWaitResponse(BaseModel):
     provisioning_job_id: str | None = None
     fulfillment_id: str | None = None
     elapsed_ms: int
+    last_error: str | None = None

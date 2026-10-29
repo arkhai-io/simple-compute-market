@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
+from compute_provisioning_contracts import MockRuleCreate
 from market_alkahest.dev_chain import anvil_address_book_path
 from alkahest_py import AlkahestClient
 from eth_account.signers.local import LocalAccount
@@ -30,6 +31,7 @@ from tests.e2e.roles.helpers.compute_deal import (
     wait_for_stage_event,
 )
 from tests.e2e.roles.helpers.escrow import ensure_ws_rpc_url
+from tests.e2e.roles.scenarios.vms.compute_deal_driver import vm_job_evaluation
 from tests.e2e.roles.scenarios.vms.conftest import (
     _signer,
     capacity_source_for,
@@ -438,31 +440,33 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     )
     log.info("[%s] Created on-chain escrow %s", case.name, escrow_uid)
 
+    rules = provisioning_test_client.vm_rules
     delete_mock_rules_if_present(
-        provisioning_test_client,
+        rules,
         "e2e-buy-create",
         "e2e-create-pause",
         "e2e-non-erc20-native-create",
         "e2e-non-erc20-erc1155-create",
         case.rule_id,
     )
-    provisioning_test_client.add_mock_rule(
-        rule_id=case.rule_id,
-        match={"vm_action": "create"},
-        pause_before_result=True,
-        # The create fact the VM playbook prints, with the forwarded port and
-        # the time access became ready: a create reporting neither says
-        # nothing a buyer can use, and fails.
-        result_stdout=(
-            'ok: [kvm1] => {\n    "vm_creation_data": '
-            '{"action": "create", "vm_name": "e2e-test-vm", "tenant_user": "vmuser", '
-            '"external_ssh_port": "2222", "timestamp": "2030-01-01T00:00:01Z", '
-            '"tenant_ssh_key_path": "/tmp/e2e.key", "frp": {"enabled": false}, '
-            '"authentication": {"tenant": {"ssh_commands": '
-            '{"external": "ssh vmuser@localhost", '
-            '"internal": "ssh vmuser@10.0.0.1"}}}}\n}\n'
-        ),
-        fail_with=None,
+    rules.add_rule(
+        MockRuleCreate(
+            rule_id=case.rule_id,
+            match={"vm_action": "create"},
+            pause_before_result=True,
+            # The create fact the VM playbook prints, with the forwarded port
+            # and the time access became ready: a create reporting neither says
+            # nothing a buyer can use, and fails.
+            result_stdout=(
+                'ok: [kvm1] => {\n    "vm_creation_data": '
+                '{"action": "create", "vm_name": "e2e-test-vm", "tenant_user": "vmuser", '
+                '"external_ssh_port": "2222", "timestamp": "2030-01-01T00:00:01Z", '
+                '"tenant_ssh_key_path": "/tmp/e2e.key", "frp": {"enabled": false}, '
+                '"authentication": {"tenant": {"ssh_commands": '
+                '{"external": "ssh vmuser@localhost", '
+                '"internal": "ssh vmuser@10.0.0.1"}}}}\n}\n'
+            ),
+        )
     )
 
     evaluate = storefront_admin_client.evaluate_settle(
@@ -476,10 +480,10 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     host_id = evaluate.get("host_id")
     assert host_id
 
-    job_eval = provisioning_test_client.evaluate_job(host_id, vm_action="create")
-    assert job_eval.get("params_valid") is True, job_eval
-    assert job_eval.get("rule_matched") == case.rule_id, job_eval
-    assert job_eval.get("would_pause") is True, job_eval
+    job_eval = rules.evaluate_job(vm_job_evaluation(host_id, vm_action="create"))
+    assert job_eval.params_valid is True, job_eval
+    assert job_eval.rule_matched == case.rule_id, job_eval
+    assert job_eval.would_pause is True, job_eval
 
     settle = storefront_client.settle_evm(
         escrow_uid,
@@ -508,7 +512,7 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     fulfillment_id = status.fulfillment_id
     assert fulfillment_id == event.data["fulfillment_id"], status
 
-    provisioning_test_client.resume_rule(case.rule_id)
+    rules.resume_rule(case.rule_id)
     provisioning_test_client.drain(timeout=30)
     # `advance` rather than `run`: a plain cycle cannot reach a row whose
     # claim lease is still live, which is the case straight after a pending

@@ -35,6 +35,7 @@ import pytest
 
 from .conftest import ProvisioningClients, TEST_CONNECTION_KEY
 from compute_provisioning_contracts import (
+    ConnectionSubmission,
     HostCreate,
     HostListResponse,
     HostResponse,
@@ -558,10 +559,14 @@ class TestTenantFacingRoute:
             ),
         ))
 
-        public = (await client.family.get_host("routed")).connection.public
+        connection = (await client.family.get_host("routed")).connection
+        public = connection.public
         assert (public["ssh_port"], public["public_host"], public["public_port"]) == (6000, "192.0.2.10", 22)
+        # The port is version 2's field, so the connection is stored at version 2.
+        assert connection.version == 2
         with session_factory() as db:
-            assert db.get(Host, "routed").connection_public["public_port"] == 22
+            stored = db.get(Host, "routed")
+            assert (stored.connection_version, stored.connection_public["public_port"]) == (2, 22)
 
         await self._run_a_job(client, "routed")
 
@@ -582,9 +587,12 @@ class TestTenantFacingRoute:
         rendered = self._render_for_real(fake_ansible)
         await _register(client)
 
-        public = (await client.family.get_host("kvm1")).connection.public
+        connection = (await client.family.get_host("kvm1")).connection
+        public = connection.public
         assert public["public_host"] is None and "public_port" not in public
+        assert connection.version == 1
         with session_factory() as db:
+            assert db.get(Host, "kvm1").connection_version == 1
             assert db.get(Host, "kvm1").connection_public == {
                 "ssh_host": "10.0.0.1",
                 "public_host": None,
@@ -600,3 +608,63 @@ class TestTenantFacingRoute:
         assert (host_vars["ansible_host"], host_vars["ansible_port"], host_vars["ansible_user"]) == (
             "10.0.0.1", "22", "ubuntu",
         )
+
+
+class TestConnectionVersions:
+    """The ``ssh`` connection is served at versions 1 and 2, and only version 2
+    carries ``public_port``. Addresses are RFC 5737 documentation values, fixture
+    values that must never be used on a public network."""
+
+    _PUBLIC = {"ssh_host": "198.51.100.1", "ssh_user": "ubuntu", "key_path": "/home/appuser/.ssh/id_ed25519"}
+
+    async def test_a_registration_stating_no_version_is_stored_at_version_1(
+        self, client_and_queue, session_factory,
+    ):
+        client, _ = client_and_queue
+        await client.family.register_host(HostCreate(
+            host_id="unversioned",
+            connection=ConnectionSubmission(kind="ssh", public=self._PUBLIC),
+        ))
+
+        assert (await client.family.get_host("unversioned")).connection.version == 1
+        with session_factory() as db:
+            stored = db.get(Host, "unversioned")
+            assert stored.connection_version == 1
+            assert stored.connection_public == {
+                "ssh_host": "198.51.100.1",
+                "public_host": None,
+                "ssh_port": 22,
+                "ssh_user": "ubuntu",
+                "key_path": "/home/appuser/.ssh/id_ed25519",
+            }
+
+    @pytest.mark.parametrize("port", [22, None], ids=["a port", "a null"])
+    async def test_a_version_1_connection_stating_a_public_port_is_refused(
+        self, client_and_queue, port,
+    ):
+        client, _ = client_and_queue
+        with pytest.raises(ComputeProvisioningError) as refused:
+            await client.family.register_host(HostCreate(
+                host_id="v1-port",
+                connection=ConnectionSubmission(
+                    kind="ssh", version=1, public={**self._PUBLIC, "public_port": port}
+                ),
+            ))
+        assert refused.value.status_code == 400
+        assert "public_port" in str(refused.value)
+        with pytest.raises(ComputeProvisioningError) as missing:
+            await client.family.get_host("v1-port")
+        assert missing.value.status_code == 404
+
+    async def test_an_unsupported_version_is_refused(self, client_and_queue):
+        client, _ = client_and_queue
+        with pytest.raises(ComputeProvisioningError) as refused:
+            await client.family.register_host(HostCreate(
+                host_id="v3",
+                connection=ConnectionSubmission(kind="ssh", version=3, public=self._PUBLIC),
+            ))
+        assert refused.value.status_code == 400
+        assert "supported versions: [1, 2]" in str(refused.value)
+        with pytest.raises(ComputeProvisioningError) as missing:
+            await client.family.get_host("v3")
+        assert missing.value.status_code == 404

@@ -8,9 +8,9 @@ from typing import Sequence
 
 import pytest
 
-from change_workflow.log import log_path, read_log
-from change_workflow.review import (ReviewError, claim_record, review_and_log, review_models,
-                                    run_review)
+from change_workflow.log import log_path, note_orchestrator, read_log
+from change_workflow.review import (ReviewError, claim_record, prior_session, review_and_log,
+                                    review_models, run_review)
 from change_workflow.running import live_runs
 from change_workflow.steps import Model, load_steps
 from change_workflow_fixtures import (CHANGE, HEAD, RECORDS, VALIDATED, FakeClaude,
@@ -294,6 +294,21 @@ def test_a_review_of_another_kind_does_not_continue(tmp_path: Path) -> None:
     assert "resume" not in calls[0]
 
 
+def test_a_closeout_review_does_not_continue_a_pre_closeout_reviewer(tmp_path: Path) -> None:
+    reviews = tmp_path / "reviews"
+    reviews.mkdir()
+    (reviews / "28-pre-closeout.md").write_text(
+        review_text("pre-closeout") + "\n<!-- reviewer-session: codex:pre -->\n", "utf-8")
+
+    assert prior_session(reviews, "closeout") is None
+
+    (reviews / "35-closeout.md").write_text(
+        review_text("closeout") + "\n<!-- reviewer-session: codex:close -->\n", "utf-8")
+
+    assert prior_session(reviews, "closeout") == ("codex", "close", "35-closeout")
+    assert prior_session(reviews, "pre-closeout") == ("codex", "pre", "28-pre-closeout")
+
+
 def test_an_external_review_is_never_continued(tmp_path: Path) -> None:
     root = repository(tmp_path)
     (reviews_of(root) / "01-design-external.md").write_text(review_text(), "utf-8")
@@ -406,6 +421,35 @@ def test_the_owner_may_run_a_pre_closeout_review_unvalidated(tmp_path: Path) -> 
     assert path.name == "01-pre-closeout.md"
 
 
+def test_the_owners_direction_overrides_a_failed_validation_until_the_review_runs(
+        tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    (reviews_of(root) / "03-validation.md").write_text(validation_text(HEAD, "failed"), "utf-8")
+    log = reviews_of(root) / "workflow.jsonl"
+    note_orchestrator(log, "review over the failure", "the failure is the pipeline's",
+                      by="owner", next_step="review", kind="pre-closeout")
+
+    line = review_and_log(CHANGE, "pre-closeout", root=root, clock=clock, head=lambda _: HEAD,
+                          runner=writing(review_text("pre-closeout")))
+
+    assert (line["outcome"], line["record"]) == ("finished", "04-pre-closeout.md")
+    # Used by the review it directed: the next one is held to the validation again.
+    with pytest.raises(ReviewError, match="result is failed"):
+        run_review(CHANGE, "pre-closeout", root=root, head=lambda _: HEAD,
+                   runner=writing(review_text("pre-closeout")))
+
+
+def test_a_direction_to_another_node_overrides_nothing(tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    (reviews_of(root) / "03-validation.md").write_text(validation_text(HEAD, "failed"), "utf-8")
+    note_orchestrator(reviews_of(root) / "workflow.jsonl", "closeout", "r", by="owner",
+                      next_step="closeout")
+
+    with pytest.raises(ReviewError, match="result is failed"):
+        run_review(CHANGE, "pre-closeout", root=root, head=lambda _: HEAD,
+                   runner=writing(review_text("pre-closeout")))
+
+
 def test_an_implementation_review_never_waits_for_validation(tmp_path: Path) -> None:
     root = repository(tmp_path)
 
@@ -474,10 +518,11 @@ def test_a_published_review_is_logged_finished_naming_its_record_and_commit(
                           runner=writing(review_text(), session="codex-1"),
                           head=lambda _: HEAD)
 
-    assert line == {"seq": 1, "at": "2026-10-21T09:15:40Z", "step": "review",
+    assert line == {"seq": 1, "at": "2026-10-21T09:15:40Z", "format": 2, "step": "review",
                     "session": "codex:codex-1", "commit": HEAD, "kind": "design",
                     "record": f"01-{kind}.md", "harness": "codex", "model": "gpt-6-sol",
-                    "effort": "high", "outcome": "finished", "next": "triage",
+                    "effort": "high", "outcome": "finished",
+                    "next": {"step": "triage", "kind": "design"},
                     "message": f"01-{kind}.md written; triage is next"}
 
 

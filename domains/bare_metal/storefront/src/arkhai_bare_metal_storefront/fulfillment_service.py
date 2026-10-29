@@ -21,6 +21,7 @@ from compute_provisioning_contracts import (
     FulfillmentScheduleRequest,
 )
 from core_storefront import StorefrontFulfillmentContext
+from core_storefront.domain_registry import StorefrontDomainBindingError
 from market_capacity_publication import (
     CapacityBindingError,
     CapacityEffects,
@@ -50,10 +51,21 @@ _TEARDOWN_STATES = frozenset(
 
 
 class BareMetalFulfillmentError(RuntimeError):
-    def __init__(self, detail: str, *, status_code: int = 409) -> None:
+    """A fulfillment request refused with ``status_code``.
+
+    ``error`` is the refusal's machine-readable code, when it has one; the
+    routes then answer ``{"error": error, "reason": detail}`` as the detail,
+    so a client tells refusals apart by their contract rather than by
+    message text.
+    """
+
+    def __init__(
+        self, detail: str, *, status_code: int = 409, error: str | None = None
+    ) -> None:
         super().__init__(detail)
         self.detail = detail
         self.status_code = status_code
+        self.error = error
 
 
 @dataclass(frozen=True)
@@ -294,12 +306,14 @@ class BareMetalFulfillmentService:
                 raise BareMetalFulfillmentError(
                     "selected bare-metal resource resolved to an unexpected executor"
                 )
-            publication = scheduled.attributes.get("bare_metal_publication")
+            # The scheduled resource's own identity: the host its declaration
+            # names, and the machine among its top-level attributes. A
+            # resource naming no host, or another host or machine, is not the
+            # one the terms sold.
             if (
-                not isinstance(publication, dict)
-                or publication.get("enabled") is not True
-                or publication.get("host_id") != terms.host_id
-                or publication.get("physical_host_id") != terms.physical_host_id
+                scheduled.host_id is None
+                or scheduled.host_id != terms.host_id
+                or scheduled.attributes.get("physical_host_id") != terms.physical_host_id
             ):
                 raise BareMetalFulfillmentError(
                     "scheduled resource conflicts with accepted bare-metal terms"
@@ -402,6 +416,32 @@ class BareMetalFulfillmentService:
         except ValueError as exc:
             raise BareMetalFulfillmentError(str(exc)) from exc
 
+    async def _record_result(
+        self, *, negotiation_id: str, result: BareMetalResult
+    ) -> None:
+        """Record the delivered result, which is written once.
+
+        A site that later reports another delivery does not replace it: the
+        recorded result stands, and the read is refused as a delivery
+        conflict. The store refuses any other mismatch with the same error,
+        so the conflict is named only once the recorded result is shown to
+        differ.
+        """
+        try:
+            await self.db.save_bare_metal_result(
+                negotiation_id=negotiation_id, result=result
+            )
+        except StorefrontDomainBindingError:
+            recorded = await self.db.load_bare_metal_result(
+                negotiation_id=negotiation_id
+            )
+            if recorded is None or recorded == result:
+                raise
+            raise BareMetalFulfillmentError(
+                "the site reports a delivery other than the recorded result",
+                error="delivery_conflict",
+            ) from None
+
     async def status(
         self,
         *,
@@ -476,7 +516,7 @@ class BareMetalFulfillmentService:
                 )
             # The stored result names no endpoint: where to connect is served
             # live by ``access`` while the lease is active.
-            await self.db.save_bare_metal_result(
+            await self._record_result(
                 negotiation_id=negotiation_id,
                 result=BareMetalResult(
                     access_method=materialization.access_method,
