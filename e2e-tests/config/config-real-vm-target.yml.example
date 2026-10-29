@@ -1,0 +1,35 @@
+# ---------------------------------------------------------------------------
+# Profile: real-vm-target — EXAMPLE ONLY
+#
+# The real host the real-provisioning VM scenario provisions on. Every value
+# here is a fictitious example: the addresses are RFC 5737 documentation
+# addresses and the names are invented. Never use them for a real host.
+#
+# An environment owner renders the real file, config-real-vm-target.yml, into
+# this directory, and a run selects it with ACTIVE_PROFILES=local,real-vm-target.
+# The real file is ignored by Git and is never committed: it describes a real
+# host. The fields are documented by the model in
+# src/e2e_harness/real_vm_target.py; unknown or missing fields are refused.
+# ---------------------------------------------------------------------------
+
+REAL_VM_TARGET:
+  version: 1
+  host:
+    host_id: example-kvm-1
+    # Where the provisioning service connects to the host.
+    ssh_host: 192.0.2.10
+    ssh_user: provisioner
+    ssh_port: 22
+    # Where the provisioning service reads the key it reaches the host with:
+    # a path in the service's filesystem, never the key itself.
+    ssh_key_path: /run/secrets/example-host-key
+    # Where a buyer reaches the host's guests.
+    public_host: 192.0.2.10
+    # What the host sells — its hardware less what is kept for the host
+    # itself — not the hardware.
+    capacity:
+      vcpu_count: 7
+      ram_gb: 28
+      disk_gb: 160
+  access:
+    mode: direct

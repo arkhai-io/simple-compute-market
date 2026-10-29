@@ -296,7 +296,7 @@ the example profile `config-real-vm-target.yml.example` in `e2e-tests/config/`; 
 `e2e-tests/tests/unit/test_real_vm_target.py`; `e2e-tests/pyproject.toml` when the
 model needs a dependency not yet declared.
 
-- [ ] 4.1 A typed model of `REAL_VM_TARGET` version 1: `version` exactly 1; one `host`
+- [x] 4.1 A typed model of `REAL_VM_TARGET` version 1: `version` exactly 1; one `host`
       mapping (`host_id`, `ssh_host`, `ssh_user`, `ssh_port`, `ssh_key_path`,
       `public_host`, `capacity` with `vcpu_count`, `ram_gb`, `disk_gb` each a positive
       integer, all required); `access.mode` admitting only `direct`; unknown fields
@@ -306,21 +306,56 @@ model needs a dependency not yet declared.
       invalid section raises an error naming the field. The model's field descriptions
       are the format's documentation. Declare any distribution the module imports that
       `e2e-tests/pyproject.toml` does not already declare. (D1)
-- [ ] 4.2 Commit `config-real-vm-target.yml.example` in the D1 shape with RFC 5737
+      `e2e-tests/src/e2e_harness/real_vm_target.py`: `RealVmTarget` (frozen pydantic
+      models, `extra="forbid"`; counts strict positive integers, so a string or a
+      boolean is refused; text fields non-empty; `ssh_port` 1–65535; `AccessMode =
+      Literal["direct"]`); `load_real_vm_target(settings)` returns the target or
+      `TargetNotConfigured(reason)`, and raises `TargetInvalid` whose message names
+      each field as `REAL_VM_TARGET.<path>`. The version is checked first, as an
+      `int` (so `true` and `1.0` are refused), so a newer section is refused for its
+      version alone. "Not configured" means the settings hold no section at all —
+      the profile unselected, or selected with its file missing (the loader skips a
+      missing include) or naming no `REAL_VM_TARGET`, which the reason says; an
+      empty section is refused as invalid. Declared `pydantic>=2.0` (previously only
+      transitive) and relocked; the lock gains the dependency and its specifier.
+      The root `.dockerignore` excludes the real profile file in the e2e config directory,
+      since the e2e image copies the whole config directory and an operator's
+      checkout holds the rendered file.
+- [x] 4.2 Commit `config-real-vm-target.yml.example` in the D1 shape with RFC 5737
       addresses and fictitious names, and a header saying it is an example, that an
       environment owner renders the real file, and that the real file is never
       committed. (D1)
-- [ ] 4.3 Ignore `config-real-vm-target.yml` in `e2e-tests/.gitignore`. (D1)
-- [ ] 4.4 Unit (`test_real_vm_target.py`): the example loads and validates; a missing
+      Committed in `e2e-tests/config/`; its `.example` suffix keeps the settings
+      loader from reading it as a profile.
+- [x] 4.3 Ignore `config-real-vm-target.yml` in `e2e-tests/.gitignore`. (D1)
+- [x] 4.4 Unit (`test_real_vm_target.py`): the example loads and validates; a missing
       field, a misspelled field, and an unknown nested field each fail naming the field;
       version 2 is refused; `access.mode: relay` is refused; a zero or negative
       capacity is refused; an absent section yields "not configured" naming the profile
       and file. (scenarios "A field is misspelled", "A newer target reaches an older
       reader", "Relay access is requested under version 1")
-- [ ] 4.5 Verification: `make -C e2e-tests test-unit`; `git check-ignore -v` on the
+      Unit, `e2e-tests/tests/unit/test_real_vm_target.py` (31 cases): the example,
+      copied as `config-real-vm-target.yml` into a temporary config directory
+      beside the repository's `config.yml` and `config-local.yml`, loads through
+      the harness's bootstrap (`_load_bootstrap` with `CONFIG_DIRECTORY` and
+      `ACTIVE_PROFILES=local,real-vm-target`) with the `local` settings still
+      present, and validates; under `local` alone, and with the profile selected
+      but its file absent, there is no target; an empty section loaded the same
+      way is refused. The listed refusals each assert the field's
+      `REAL_VM_TARGET.<path>` in the message, plus a missing `access`, an unknown
+      top-level field, versions 0, `"1"`, `true`, `1.0`, an explicit null, and a
+      removed key, a string or fractional capacity, and a section that is not a
+      mapping; these pass the section as a plain mapping, not through the loader.
+- [x] 4.5 Verification: `make -C e2e-tests test-unit`; `git check-ignore -v` on the
       real profile file's path in the e2e config directory names the rule; `make test`; `make
       check-packaging` when 4.1 declared a dependency.
       End-to-end: none until section 6.
+      `make -C e2e-tests test-unit`: 213 passed (unit). `git check-ignore -v` on the
+      real profile file's path names `e2e-tests/.gitignore:18`; the `.example` is
+      not ignored. `make lock`, then `make check-packaging`: passed. `make test`:
+      passed, before and after the review fixes.
+      End-to-end markers confirmed: none. No CI workflow beyond the pipeline is
+      owed.
 
 ## 5. SSH access helper
 
