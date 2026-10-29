@@ -18,7 +18,10 @@ import asyncio
 import pytest
 from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTION
 
-from bare_metal_provisioning_adapter.services.mock_output import bare_metal_mock_output
+from bare_metal_provisioning_adapter.services.mock_output import (
+    bare_metal_mock_output,
+    shipped_output,
+)
 from compute_provisioning_service import container as _container_module
 from compute_provisioning_ansible import MockAnsibleRunner
 from compute_provisioning.jobs.queue import AsyncJobQueue
@@ -32,6 +35,7 @@ from compute_provisioning_contracts import (
 
 from .bare_metal_deal import (
     HOST_ID,
+    PHYSICAL_HOST_ID,
     SSH_HOST,
     bare_metal_capacity,
     begin,
@@ -238,3 +242,78 @@ async def test_a_grant_is_delivered_through_convergence_and_reclaimed_from_its_p
     await _converge(clients)
 
     assert (await clients.family.get_fulfillment_status(fulfillment_id)).state == "torn_down"
+
+
+# A tenant-facing route on RFC 5737 documentation addresses: development fixture
+# values that must never be used on a public network.
+TENANT_HOST = "198.51.100.20"
+TENANT_PORT = 22
+
+
+async def test_a_shipped_form_grant_becomes_active_on_the_hosts_tenant_route(
+    test_client, client_and_queue
+) -> None:
+    """The default mock output is the shipped YAML form, read through the real
+    codec; the fulfillment becomes active, and its delivery names the host's
+    tenant-facing address and port rather than the provisioner's route."""
+    clients, _ = client_and_queue
+    await bare_metal_capacity(clients, public_host=TENANT_HOST, public_port=TENANT_PORT)
+    capacity_reservation_id = committed_reservation("escrow-bm-route")
+    await schedule(clients, capacity_reservation_id)
+    fulfillment_id = await begin(clients, capacity_reservation_id, "escrow-bm-route")
+    granted = await test_client.wait_for_job(create_job_id(capacity_reservation_id), timeout=5.0)
+    assert granted["status"] == "succeeded", granted
+
+    await _converge(clients)
+
+    assert (await clients.family.get_fulfillment_status(fulfillment_id)).state == "active"
+    result = await clients.family.get_fulfillment_result(fulfillment_id)
+    delivery = AccessDelivery.model_validate(result.payload["domain_result"]["payload"])
+    (endpoint,) = delivery.endpoints
+    assert (endpoint.protocol, endpoint.host, endpoint.port) == ("ssh", TENANT_HOST, TENANT_PORT)
+    created = CreateJobResult.model_validate(granted["result"]["value"])
+    assert endpoint.user == created.detail["ssh_user"]
+    # The fact's own host and port, the provisioner's route, are detail only.
+    assert (created.detail["host"], created.detail["port"]) == (SSH_HOST, "2201")
+
+
+async def test_a_grant_naming_another_tenant_leaves_the_fulfillment_failed(
+    test_client, client_and_queue
+) -> None:
+    """A grant whose printed fact names a tenant account other than the job's
+    succeeds as a job, carries no evidence, and fails its fulfillment."""
+    clients, _ = client_and_queue
+    capacity_reservation_id = await _scheduled(clients, "escrow-bm-other-tenant")
+    other_tenant = shipped_output(
+        HOST_ID,
+        "node_grant_access_data",
+        {
+            "action": NODE_GRANT_ACCESS_ACTION,
+            "host_id": HOST_ID,
+            "physical_host_id": PHYSICAL_HOST_ID,
+            "ssh_user": "tenant-other",
+            "escrow_uid": "escrow-bm-other-tenant",
+            "timestamp": "2030-01-01T00:00:01Z",
+            "host": SSH_HOST,
+            "port": "2201",
+            "status": "success",
+        },
+    )
+    await test_client.add_bare_metal_mock_rule(
+        rule_id="other-tenant",
+        match={"action": NODE_GRANT_ACCESS_ACTION},
+        result_stdout=other_tenant,
+    )
+
+    fulfillment_id = await begin(clients, capacity_reservation_id, "escrow-bm-other-tenant")
+    granted = await test_client.wait_for_job(create_job_id(capacity_reservation_id), timeout=5.0)
+    assert granted["status"] == "succeeded", granted
+    created = CreateJobResult.model_validate(granted["result"]["value"])
+    assert created.evidence is None
+    assert created.detail["mismatch"].startswith("ssh_user:")
+
+    await _converge(clients)
+
+    status = await clients.family.get_fulfillment_status(fulfillment_id)
+    assert status.state == "failed"
+    assert "delivery evidence" in (status.failure_message or "")

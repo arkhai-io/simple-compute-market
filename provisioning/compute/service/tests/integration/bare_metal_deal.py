@@ -30,8 +30,13 @@ PHYSICAL_HOST_ID = "host-physical-1"
 POOL_ID = "bare-metal-pool"
 
 
-async def bare_metal_capacity(clients) -> None:
-    """The pool, host, and declaration one bare-metal machine is sold from."""
+async def bare_metal_capacity(
+    clients, *, public_host: str | None = None, public_port: int | None = None
+) -> None:
+    """The pool, host, and declaration one bare-metal machine is sold from.
+
+    ``public_host`` and ``public_port`` give the host a tenant-facing route.
+    """
     await clients.pools.create_pool(
         PoolCreate(
             id=POOL_ID,
@@ -48,7 +53,12 @@ async def bare_metal_capacity(clients) -> None:
         HostCreate(
             host_id=HOST_ID,
             connection=ssh_connection(
-                ssh_host=SSH_HOST, ssh_user="root", ssh_port=2201, key_path="/fake/id_ed25519"
+                ssh_host=SSH_HOST,
+                ssh_user="root",
+                ssh_port=2201,
+                public_host=public_host,
+                public_port=public_port,
+                key_path="/fake/id_ed25519",
             ),
         )
     )

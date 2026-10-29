@@ -312,7 +312,9 @@ async def test_a_mock_grant_is_delivered_and_reclaimed_through_the_family_provid
     assert status.state is ProviderOperationState.succeeded
     assert provider.resolve_provisioned_resources(metadata) == (HOST.host_id,)
     endpoint = delivery.endpoints[0]
-    assert (endpoint.protocol, endpoint.host, endpoint.port) == ("ssh", "10.0.0.5", 2201)
+    # The host's tenant-facing address, with its connection port: it states no
+    # tenant-facing port.
+    assert (endpoint.protocol, endpoint.host, endpoint.port) == ("ssh", "203.0.113.5", 2201)
     assert endpoint.user and endpoint.user.startswith("arkhai-")
     assert delivery.credentials == ()
     assert reclaim.provider_metadata["create_job_id"] == metadata["create_job_id"]

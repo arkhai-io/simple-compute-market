@@ -175,7 +175,19 @@ A bare-metal grant's fact yields delivery evidence only when:
 - its `physical_host_id`, when the job names one, is that machine's;
 - its `status` is `success`.
 
-A bare-metal reclaim's fact is checked the same way, and its result stays the fact.
+A bare-metal reclaim's fact is checked the same way, and its result is a diagnostic:
+- a selected fact that matches the job is the result, unchanged;
+- a selected fact that does not match is replaced by `{"mismatch": ...}`, naming
+  what differs, so an unlinked document is never recorded as the reclaim's result;
+- with no fact selected, the job carries no result.
+
+The mismatch decides nothing about the teardown. Whether the teardown succeeded or
+failed is still the reclaim job's status, and no evidence or linkage gate is added
+to teardown. That keeps proof-driven release as the release requirement states it:
+the release follows the fulfillment aggregate, which follows the teardown job. No
+production code reads a reclaim's result value. A mismatch therefore records what
+the run printed for an operator. It does not prove the cleanup was safe, and it does
+not stop one.
 
 A VM create's fact yields delivery evidence only when:
 - its `action` is `create`;
@@ -934,7 +946,7 @@ closeout, under the heading named.
 
 | Accepted decision | Permanent location |
 |---|---|
-| D1 fact reading, block boundaries, and linkage | `openspec/specs/physical-provisioning/spec.md` ("A create succeeds only with readable delivery evidence", by the archive); rationale in `openspec/specs/physical-provisioning/architecture.md` under "Durable jobs, transient workers" |
+| D1 fact reading, block boundaries, and linkage | `openspec/specs/physical-provisioning/spec.md` ("A create succeeds only with readable delivery evidence", and "A bare-metal reclaim's printed fact is a diagnostic" for the reclaim's result and the job status's authority over teardown, by the archive); rationale in `openspec/specs/physical-provisioning/architecture.md` under "Durable jobs, transient workers" |
 | D2 mocks print the shipped form, rendered for the job, and pipeline scenarios use it | `docs/development/TESTING.md` under "4. System Integration Tests (End-to-End)", beside its paragraph on the compute lanes' mock profile |
 | D3 tenant-facing port | `openspec/specs/physical-provisioning/spec.md` ("The tenant-facing host address falls back to the connection address", for the fallback and the delivery endpoint, and "Host registry records the connection port", for the INI `public_port=` rule, rendering, and the record stored without the field; both by the archive); `openspec/specs/physical-provisioning/architecture.md` under "The host registry owns the connection"; `docs/development/DEPLOYMENT_AND_CONFIG.md` under "Definition documents", in its host-inventory paragraph (`public_port=`) |
 | D4 compensating teardown, its marker, and the compute seam | `openspec/specs/fulfillment/spec.md` and `openspec/specs/physical-provisioning/spec.md` (by the archive); `openspec/specs/fulfillment/architecture.md` under "Durable persistence and recovery"; `openspec/specs/physical-provisioning/architecture.md` under "Proof-driven release"; `docs/development/ARCHITECTURE.md` under "Release", whose table's `failed` row splits into compensable and not |

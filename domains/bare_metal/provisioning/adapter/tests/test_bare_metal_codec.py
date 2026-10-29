@@ -20,7 +20,7 @@ from bare_metal_provisioning_adapter.codec import (
     reclaim_policy_from,
 )
 
-from execution import HOST, job_run
+from execution import HOST, host_with, job_run, json_output, shipped_output
 
 _ANSIBLE_ROOT = Path(__file__).resolve().parents[2] / "iac" / "ansible"
 
@@ -105,21 +105,53 @@ def test_parameters_in_another_shape_are_refused() -> None:
         )
 
 
-def _granted(fact: str) -> AnsibleResult:
-    stdout = "ok: [bm-node-1] => {\n" f'    "node_grant_access_data": {fact}\n}}\n'
+def _fact(action: str = NODE_GRANT_ACCESS_ACTION, **changes) -> dict:
+    """The access fact the role prints for ``_grant()``'s job: development
+    values only, never for use on a public network."""
+    fact = {
+        "action": action,
+        "host_id": HOST.host_id,
+        "physical_host_id": "physical-1",
+        "ssh_user": "tenant-a",
+        "escrow_uid": "escrow-1",
+        "timestamp": "2030-01-01T00:00:01Z",
+        "host": "10.0.0.5",
+        "port": "2201",
+        "status": "success",
+    }
+    fact.update(changes)
+    return fact
+
+
+def _output(stdout: str) -> AnsibleResult:
     return AnsibleResult(stdout=stdout, stderr="", process_id=1)
 
 
-def test_a_grant_reports_delivery_evidence_and_no_credential() -> None:
-    outcome = BareMetalAnsibleCodec().interpret(
-        job_run(_grant()),
-        inventory_target(HOST),
-        _granted(
-            '{"action": "node_grant_access", "host": "10.0.0.5", "port": "2201", '
-            '"ssh_user": "tenant-a", "timestamp": "2030-01-01T00:00:01Z", '
-            '"physical_host_id": "physical-1"}'
-        ),
-    )
+def _interpret(params: BareMetalJobParams, stdout: str, host=HOST):
+    return BareMetalAnsibleCodec().interpret(job_run(params, host), inventory_target(host), _output(stdout))
+
+
+_GRANT_FACT = "node_grant_access_data"
+_RECLAIM_FACT = "node_reclaim_access_data"
+_DETAIL = {
+    "action": "node_grant_access",
+    "status": "success",
+    "host_id": "bm-node-1",
+    "physical_host_id": "physical-1",
+    "ssh_user": "tenant-a",
+    "escrow_uid": "escrow-1",
+    "host": "10.0.0.5",
+    "port": "2201",
+    "timestamp": "2030-01-01T00:00:01Z",
+}
+
+
+@pytest.mark.parametrize("render", [shipped_output, json_output], ids=["shipped yaml", "json"])
+def test_a_grant_reports_its_hosts_tenant_route_and_no_credential(render) -> None:
+    """The endpoint is the registered host's tenant-facing address, else its
+    connection address, with its tenant-facing port, else its connection port.
+    The fact's own host and port, the provisioner's route, stay detail."""
+    outcome = _interpret(_grant(), render(_GRANT_FACT, _fact()))
 
     assert outcome.credentials == ()
     assert outcome.result.result_kind == CREATE_JOB_RESULT_KIND
@@ -127,71 +159,138 @@ def test_a_grant_reports_delivery_evidence_and_no_credential() -> None:
     assert outcome.result.value == {
         "evidence": {
             "endpoints": [
-                {"protocol": "ssh", "host": "10.0.0.5", "port": 2201, "user": "tenant-a"}
+                {"protocol": "ssh", "host": "203.0.113.5", "port": 2201, "user": "tenant-a"}
             ],
             "ready_at": "2030-01-01T00:00:01Z",
         },
-        "detail": {
-            "action": "node_grant_access",
-            "host": "10.0.0.5",
-            "port": "2201",
-            "ssh_user": "tenant-a",
-            "timestamp": "2030-01-01T00:00:01Z",
-            "physical_host_id": "physical-1",
-        },
+        "detail": _DETAIL,
     }
 
 
-def test_a_grant_whose_fact_cannot_say_how_to_connect_reports_no_evidence() -> None:
-    """The family's provider then fails the create, and an operator can still
-    read the fact's named fields; anything else the role printed is not kept."""
-    fact = (
-        '{"action": "node_grant_access", "host": "10.0.0.5", "port": "2201", '
-        '"unvetted": "x"}'
-    )
+@pytest.mark.parametrize(
+    "public,endpoint",
+    [
+        ({"public_host": "192.0.2.10", "public_port": 22}, ("192.0.2.10", 22)),
+        ({"public_host": None, "public_port": 22}, ("10.0.0.5", 22)),
+        ({"public_host": None}, ("10.0.0.5", 2201)),
+    ],
+    ids=["tenant route", "tenant port only", "connection route"],
+)
+def test_the_endpoint_falls_back_field_by_field_to_the_connection(public, endpoint) -> None:
+    host = host_with(**public)
 
-    outcome = BareMetalAnsibleCodec().interpret(
-        job_run(_grant()), inventory_target(HOST), _granted(fact)
-    )
+    outcome = _interpret(_grant(), shipped_output(_GRANT_FACT, _fact()), host)
+
+    (reached,) = outcome.result.value["evidence"]["endpoints"]
+    assert (reached["host"], reached["port"]) == endpoint
+
+
+@pytest.mark.parametrize(
+    "changes,named",
+    [
+        ({"action": NODE_RECLAIM_ACCESS_ACTION}, "action"),
+        ({"host_id": "bm-node-2"}, "host_id"),
+        ({"ssh_user": "tenant-b"}, "ssh_user"),
+        ({"physical_host_id": "physical-2"}, "physical_host_id"),
+        ({"status": "failed"}, "status"),
+    ],
+    ids=["action", "host", "tenant", "machine", "status"],
+)
+def test_a_grant_whose_fact_does_not_match_its_job_reports_no_evidence(changes, named) -> None:
+    """The JSON form, which the reader returns whatever action it names, so the
+    codec's own check is what refuses another action's fact."""
+    outcome = _interpret(_grant(), json_output(_GRANT_FACT, _fact(**changes)))
 
     assert outcome.result.result_kind == CREATE_JOB_RESULT_KIND
-    assert outcome.result.value == {
-        "evidence": None,
-        "detail": {"action": "node_grant_access", "host": "10.0.0.5", "port": "2201"},
+    assert outcome.result.value["evidence"] is None
+    assert outcome.result.value["detail"]["mismatch"].startswith(f"{named}:")
+
+
+def test_every_mismatch_is_named() -> None:
+    outcome = _interpret(
+        _grant(), shipped_output(_GRANT_FACT, _fact(ssh_user="tenant-b", status="failed"))
+    )
+
+    mismatch = outcome.result.value["detail"]["mismatch"]
+    assert "ssh_user:" in mismatch and "status:" in mismatch
+
+
+def test_a_grant_whose_job_names_no_machine_does_not_compare_one() -> None:
+    outcome = _interpret(
+        _grant(physical_host_id=None), shipped_output(_GRANT_FACT, _fact(physical_host_id=""))
+    )
+
+    assert outcome.result.value["evidence"]["endpoints"][0]["user"] == "tenant-a"
+
+
+def test_a_grant_whose_job_names_no_tenant_account_reports_no_evidence() -> None:
+    outcome = _interpret(_grant(ssh_user=None), shipped_output(_GRANT_FACT, _fact()))
+
+    assert outcome.result.value["evidence"] is None
+    assert outcome.result.value["detail"]["mismatch"].startswith("ssh_user:")
+
+
+def test_another_actions_document_alone_is_no_fact() -> None:
+    stdout = shipped_output(_RECLAIM_FACT, _fact(NODE_RECLAIM_ACCESS_ACTION))
+
+    assert _interpret(_grant(), stdout).result is None
+
+
+def test_a_grant_whose_fact_does_not_name_its_job_reports_no_evidence_and_drops_unvetted_fields() -> None:
+    """A fact naming no host, tenant account, or status does not match its job,
+    so it yields no evidence and the family's provider fails the create. An
+    operator can still read the fact's named fields; anything else the role
+    printed is not kept."""
+    fact = {"action": "node_grant_access", "host": "10.0.0.5", "port": "2201", "unvetted": "x"}
+
+    outcome = _interpret(_grant(), json_output(_GRANT_FACT, fact))
+
+    assert outcome.result.result_kind == CREATE_JOB_RESULT_KIND
+    value = outcome.result.value
+    assert value["evidence"] is None
+    assert {key: item for key, item in value["detail"].items() if key != "mismatch"} == {
+        "action": "node_grant_access", "host": "10.0.0.5", "port": "2201",
     }
+    assert "unvetted" not in value["detail"]
 
 
-def test_a_grant_naming_no_tenant_account_reports_no_evidence() -> None:
-    fact = (
-        '{"action": "node_grant_access", "host": "10.0.0.5", "port": "2201", '
-        '"ssh_user": "", "timestamp": "2030-01-01T00:00:01Z"}'
-    )
-
-    outcome = BareMetalAnsibleCodec().interpret(
-        job_run(_grant()), inventory_target(HOST), _granted(fact)
-    )
+def test_a_grant_naming_an_unusable_time_reports_no_evidence() -> None:
+    outcome = _interpret(_grant(), json_output(_GRANT_FACT, _fact(timestamp="soon")))
 
     assert outcome.result.value["evidence"] is None
 
 
-def test_a_reclaim_reports_its_fact() -> None:
-    reclaim = _grant().model_copy(
-        update={"action": NODE_RECLAIM_ACCESS_ACTION, "reclaim_policy": "remove_lease_key"}
-    )
-    stdout = (
-        "ok: [bm-node-1] => {\n"
-        '    "node_reclaim_access_data": {"action": "node_reclaim_access", '
-        '"status": "success"}\n}\n'
-    )
+def _reclaim(**changes) -> BareMetalJobParams:
+    return _grant(action=NODE_RECLAIM_ACCESS_ACTION, reclaim_policy="remove_lease_key", **changes)
 
-    outcome = BareMetalAnsibleCodec().interpret(
-        job_run(reclaim),
-        inventory_target(HOST),
-        AnsibleResult(stdout=stdout, stderr="", process_id=1),
-    )
+
+@pytest.mark.parametrize("render", [shipped_output, json_output], ids=["shipped yaml", "json"])
+def test_a_reclaim_reports_its_fact(render) -> None:
+    fact = _fact(NODE_RECLAIM_ACCESS_ACTION, reclaim_policy="remove_lease_key", host="bm-node-1")
+
+    outcome = _interpret(_reclaim(), render(_RECLAIM_FACT, fact))
 
     assert outcome.result.result_kind == "bare_metal_access"
-    assert outcome.result.value == {"action": "node_reclaim_access", "status": "success"}
+    assert outcome.result.value == fact
+
+
+@pytest.mark.parametrize(
+    "changes,named",
+    [
+        ({"host_id": "bm-node-2"}, "host_id"),
+        ({"ssh_user": "tenant-b"}, "ssh_user"),
+        ({"status": "failed"}, "status"),
+    ],
+    ids=["host", "tenant", "status"],
+)
+def test_a_reclaim_whose_fact_does_not_match_its_job_reports_only_the_mismatch(changes, named) -> None:
+    fact = _fact(NODE_RECLAIM_ACCESS_ACTION, **changes)
+
+    outcome = _interpret(_reclaim(), shipped_output(_RECLAIM_FACT, fact))
+
+    assert outcome.result.result_kind == "bare_metal_access"
+    assert list(outcome.result.value) == ["mismatch"]
+    assert outcome.result.value["mismatch"].startswith(f"{named}:")
 
 
 def test_a_run_that_printed_no_fact_reports_no_result() -> None:

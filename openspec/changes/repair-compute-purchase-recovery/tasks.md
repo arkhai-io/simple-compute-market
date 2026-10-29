@@ -453,7 +453,7 @@ tenant-facing host address falls back to the connection address". Files:
 - `domains/bare_metal/provisioning/adapter/tests/test_bare_metal_mock_output.py`
 - `provisioning/compute/service/tests/integration/test_bare_metal_mock_profile.py`
 
-- [ ] 4.1 The codec reads its fact through Section 2's reader, with the job's action.
+- [x] 4.1 The codec reads its fact through Section 2's reader, with the job's action.
       A grant yields evidence only when its fact names:
       - the job's action and host;
       - the parameters' tenant account;
@@ -466,10 +466,80 @@ tenant-facing host address falls back to the connection address". Files:
         account.
       - The fact's own host and port are detail only.
       - A reclaim's fact is checked the same way.
-- [ ] 4.2 The mock output prints the form the shipped configuration prints, a YAML
+
+      Done, in `codec.py`.
+      - **Reading.** `interpret` reads the fact with
+        `read_fact(stdout, BARE_METAL_RESULT_FACTS[action], action=run.action)`.
+      - **Linkage.** `fact_mismatch` compares the fact with the job:
+        - `action` with the run's action;
+        - `host_id` with the execution host's `InventoryTarget.host_id`, which
+          the role echoes as `executor_target`;
+        - `ssh_user` with the parameters' tenant account;
+        - `physical_host_id` with the parameters' machine, only when they name
+          one;
+        - `status` with `success`.
+      - **Reporting a mismatch.** Every mismatch is named in one string. A job
+        naming no tenant account is itself a mismatch. Fulfillment always derives
+        one (`materialization_to_access_grant`), and the role refuses a grant
+        without one.
+      - **The grant's result.** On any mismatch it carries `evidence: null` and
+        the fact's named fields as detail, plus `mismatch`. Otherwise
+        `grant_evidence` builds the endpoint from the `InventoryTarget`
+        (`public_host or ssh_host`, `public_port or ssh_port`) with the confirmed
+        account, and the fact's `timestamp` as `ready_at`. An unusable time
+        still yields no evidence, as before. The fact's `host` and `port` stay
+        detail.
+      - **The reclaim's result.** When linked, it is its fact, unchanged in
+        shape. When not, its value is only `{"mismatch": ...}`, so an unlinked
+        document is never recorded as the reclaim's result.
+      - **Why a reclaim mismatch fails nothing.** Nothing reads a reclaim's
+        result value, and a teardown's success is its job's status, so this
+        refuses no teardown. That choice is this section's, as D1 says "checked
+        the same way" without naming the reclaim's mismatch shape; it is flagged
+        for review.
+      - `grant_evidence` now takes the host and the confirmed account, and
+        `fact_mismatch` is exported. Nothing outside the adapter used either.
+
+      Correction after the section's fresh-context compliance check: the reclaim's
+      result shape is no longer only this section's choice. D1 now states it in
+      `design.md`:
+      - a linked fact is the result;
+      - a mismatched fact is replaced by `{"mismatch": ...}`;
+      - no fact is no result.
+
+      It also states that the mismatch is diagnostic only, with the reclaim job's
+      status still deciding the teardown. The `physical-provisioning` delta adds
+      "A bare-metal reclaim's printed fact is a diagnostic". The code is
+      unchanged.
+- [x] 4.2 The mock output prints the form the shipped configuration prints, a YAML
       `var:` block and the `msg: |-` JSON document, rendered for the job as it is
       today.
-- [ ] 4.3 Unit tests:
+
+      Done, in `mock_output.py`.
+      - **The form.** `shipped_output(host_id, fact_name, fact)` prints the
+        `debug: var:` fact as YAML under an unquoted key, its values
+        single-quoted, then the `msg: |-` `to_nice_json` copy at the 4-space
+        indentation ansible-core 2.17 to 2.19 print (Section 2). The YAML part is
+        display only; the reader reads the JSON block.
+      - **The values.** `bare_metal_mock_output` renders them for the job, as
+        before. A grant still prints the provisioner's route, the host's
+        `ssh_host` and `ssh_port`, as the role prints `ansible_host` and
+        `ansible_port`.
+      - **A job naming no tenant.** The default still names `mocktenant` for
+        one. That fact matches no account the job names, so the grant yields no
+        evidence, as the role, which refuses such a grant, would.
+
+      Correction after the section's fresh-context compliance check: the sentence
+      above overstates the mock's fidelity.
+      - **The role** fails such a grant's job: it refuses a grant naming no
+        tenant account.
+      - **The mock** succeeds the job, and the codec yields no evidence.
+      - **The outcome is the same:** the fulfillment fails either way.
+      - **The route differs**: a failed job versus a succeeded job without
+        evidence. This is a known limitation of the mock and is left as it is.
+      - A fulfillment always derives a tenant account, so a real grant job never
+        names none.
+- [x] 4.3 Unit tests:
       - a grant from shipped-form output;
       - each mismatch: action, host, tenant, machine, and status;
       - another action's document only;
@@ -477,13 +547,76 @@ tenant-facing host address falls back to the connection address". Files:
       - a reclaim in both forms.
 
       Existing JSON-form cases stay.
-- [ ] 4.4 Application integration, through the provisioning service's typed client
+
+      Done (unit). At the section's start the adapter suite passed 57. With the
+      rewritten and new tests and no source change, the red run had 22 failed and
+      55 passed. Green: 77 passed.
+      - **The shipped-form cases** failed at red because the previous codec read
+        nothing from that form. That is the purchase's regression at the codec,
+        on synthetic output.
+      - **`test_bare_metal_codec.py`:**
+        - a grant in the shipped form and in the JSON form, each with its
+          endpoint on the host's tenant-facing address;
+        - the endpoint falling back field by field: both stated, the port
+          alone, neither;
+        - each mismatch (action, host, tenant, machine, status), in the JSON
+          form, since the reader returns that form whatever action it names;
+        - all mismatches named together;
+        - no machine compared when the job names none;
+        - a job naming no tenant account;
+        - another action's document alone, which is no fact;
+        - the existing case of a fact that cannot say how to connect;
+        - an unusable time;
+        - a reclaim in both forms;
+        - a reclaim mismatch, on host, tenant, and status.
+
+        Correction after the section's fresh-context compliance check: "the
+        existing case of a fact that cannot say how to connect" overstates that
+        test. Its fact names no host, tenant, or status, so the mismatch is found
+        before any endpoint is built. It shows that a mismatched fact yields no
+        evidence and that unnamed fields are not kept. It is now named
+        `test_a_grant_whose_fact_does_not_name_its_job_reports_no_evidence_and_drops_unvetted_fields`,
+        with its body unchanged. The fact that cannot say when access became
+        ready is the separate unusable-time case.
+      - **`test_bare_metal_mock_output.py`:**
+        - the default output in the shipped form for both actions, read by
+          `read_fact` and not by `extract_fact`;
+        - a grant's endpoint on the host's tenant route;
+        - a job naming no tenant, failing closed.
+      - **One test outside the plan's file list** pinned the old endpoint:
+        `test_bare_metal_fulfillment_plan.py`, the family provider with the mock.
+        It now expects the tenant-facing address `203.0.113.5` with the
+        connection port. It also shows that a fulfillment's derived tenant
+        account passes linkage.
+      - **Fixtures.** New fixtures extend `tests/execution.py`'s sample host,
+        whose addresses stay as they were, with `shipped_output`, `json_output`,
+        and `host_with`. New routes use RFC 5737 addresses. All are development
+        values that must never be used on a public network.
+- [x] 4.4 Application integration, through the provisioning service's typed client
       under the mock profile:
       - A grant whose mock output is the shipped form reaches an `active`
         fulfillment, and its result's endpoint is the host's tenant-facing route.
       - A grant whose output names another tenant leaves the fulfillment `failed`,
         with no evidence.
-- [ ] 4.5 Verification:
+
+      Done (application integration), in `test_bare_metal_mock_profile.py`,
+      through the typed clients under the mock profile.
+      - **`test_a_shipped_form_grant_becomes_active_on_the_hosts_tenant_route`.**
+        The host is registered with `public_host` 198.51.100.20 and
+        `public_port` 22. Begin and one convergence step make the fulfillment
+        `active`. Its delivery's endpoint is the tenant route and the job's
+        confirmed account. The fact's host and port are the connection's, in
+        detail.
+      - **`test_a_grant_naming_another_tenant_leaves_the_fulfillment_failed`.** A
+        bare-metal rule supplies shipped-form output naming another tenant. The
+        job succeeds with `evidence: null` and a `ssh_user` mismatch, and
+        convergence fails the fulfillment for lack of delivery evidence.
+      - **The shared helper.** `bare_metal_deal.bare_metal_capacity` takes an
+        optional route, and its other callers are unchanged.
+      - **No integration red.** The service environment's previous adapter lacks
+        `shipped_output`, so these cases could fail there only at import, which
+        is not behavioural evidence. The behavioural red is the unit one, 4.3.
+- [x] 4.5 Verification:
       - `make -C domains/bare_metal/provisioning/adapter test` (unit);
       - `make -C provisioning/compute/service test` (application integration);
       - `make check-packaging`.
@@ -493,6 +626,87 @@ tenant-facing host address falls back to the connection address". Files:
         bare-metal lane) arm no rule's stdout, so every grant and reclaim there
         reads the shipped-form default through the real read path.
       - The live bare-metal lane is the system evidence of a real grant.
+
+      Named checks passed on the final source:
+      - `make -C domains/bare_metal/provisioning/adapter test`: 77 passed (unit);
+      - `make -C provisioning/compute/service test`: 669 unit and 544 application
+        integration passed;
+      - `make check-packaging`: passed.
+
+      **End-to-end, confirmed.** No bare-metal scenario in `e2e-tests/` supplies
+      a rule's `result_stdout`, so `e2e_bare_metal_mock_deal` and
+      `e2e_bare_metal_payment_deal` read the shipped-form default. Neither
+      registers a tenant-facing route. The payment lane asserts that the
+      delivered host is the registered connection address, which still holds
+      through the fallback. Owed by validation: none.
+
+      **Packaging.**
+      - `arkhai-bare-metal-provisioning-adapter` goes from 0.10.0 to 0.11.0, and
+        its floor on the Ansible kit rises to `>=0.5.0`: its codec now needs
+        `read_fact` and `public_port`.
+      - The provisioning service's two floors on the adapter, its `adapters`
+        extra and its dev group, rise to `>=0.11.0`, since it composes this
+        adapter's codec and mock. The service is not bumped again: it is already
+        at 0.19.0 for this change.
+      - `make lock` changed only those versions and floors.
+
+      **The full `make test`, and a test fixture it needed.**
+      - **The first full run failed in one test**, outside this section's
+        packages:
+        `domains/apicredits/storefront/tests/unit/test_startup_seed_quota.py::test_the_seed_waits_while_the_credits_service_does_not_answer_its_availability_read`.
+        That test asserts that nothing logged an error. It caught asyncio's
+        "Task was destroyed but it is pending!" for a
+        `SettlementJobCoordinator.run_once` task that an earlier test had left
+        unfinished.
+      - **The same test failed again** in one of two reruns of that project's
+        suite. A further full run was stopped on purpose, and none of these
+        counts as a pass.
+      - **The producer.** It is a test in the same project's
+        `test_settlement_fulfillment.py`. The settlement coordinator's task
+        persists its outcome and then wakes servicing in a thread.
+      - **The race.** The tests waited only for the outcome to be stored, so a
+        test could end while its coordinator task was still waking servicing.
+        pytest-asyncio closes a test's event loop without cancelling its tasks,
+        so such a task could never finish. A later garbage collection then
+        destroyed it, inside whichever test was running.
+      - **The fix**, test-only, in `test_settlement_fulfillment.py`:
+        - The composition helper's injected `persist` registers a done
+          callback on the coordinator's own task, `asyncio.current_task()`
+          there, before it persists.
+        - The three tests that start a background settlement wait for that
+          task to finish, with a timeout, and take its `result()`, so a failure
+          or cancellation fails the test. They also assert that it fulfilled.
+        - The two tests that start no background work are unchanged. No
+          production code, dependency, or lock changed.
+      - **Evidence** (unit): a two-test reproduction, the producer and then
+        the seed test, with a real garbage collection forced when each test
+        starts:
+        - before the fix, red in about one run in six, each time with exactly
+          that record;
+        - after it, 0 red in 30 runs, with no task left pending on a closed
+          loop;
+        - the module and the project's suite then passed.
+      - The full `make test` on the fixed source then passed, exit 0.
+
+      **Still owed:** this section's fresh-context compliance check, before it
+      commits.
+
+      Corrections after the section's fresh-context compliance check, which found
+      no blocking defect:
+      - **The two-test reproduction's level.** It drives the coordinator and the
+        settlement runtime directly against a real SQLite database, with no
+        application or HTTP. So it is library integration, though its tests sit
+        in the project's `unit/` folder. The module's 19 and the suite's 241
+        counts mix unit and integration levels.
+      - **The fixture renderer.** `tests/execution.py` keeps a shipped-form
+        renderer of its own, independent of the adapter's production one. Its
+        docstring now says why.
+      - **The task notes** under 4.1, 4.2, and 4.3 carry the corrections for
+        the reclaim's result, the mock's fidelity, and one test's name.
+      - **No runtime change.** Only `design.md`, the `physical-provisioning`
+        delta, this file, and two adapter test files changed: a renamed test and
+        two docstrings. The full `make test` above therefore stands for the same
+        runtime and test bodies, and these edits were checked by focused runs.
 
 ## 5. VM reads facts through the shared reader, linked to its guest
 
@@ -1044,7 +1258,9 @@ change to implementation.
       - `docs/development/ARCHITECTURE.md` "Release": the table's `failed` row splits
         into compensable and not.
       - `openspec/specs/physical-provisioning/architecture.md`:
-        - "Durable jobs, transient workers": fact reading and linkage;
+        - "Durable jobs, transient workers": fact reading and linkage, and a
+          bare-metal reclaim's diagnostic result, whose teardown the reclaim
+          job's status decides;
         - "The host registry owns the connection": the tenant-facing port;
         - "Proof-driven release": compensation, and the corrected `teardown_failed`
           requeue sentence, which says the requeue re-observes the same failed job

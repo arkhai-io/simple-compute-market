@@ -17,6 +17,38 @@ delete the account, as its policy says.
 - **WHEN** a reclaim under the default policy runs for an account holding the lease's key
 - **THEN** that key is removed and the account is otherwise unchanged
 
+### Requirement: A bare-metal reclaim's printed fact is a diagnostic
+
+A bare-metal reclaim's fact MUST be read through the compute family's fact reader
+for the reclaim's action, and checked against the job as a grant's is: its action,
+execution host, tenant account, the physical machine when the job names one, and
+success. A fact that matches MUST be the reclaim's result unchanged. A fact that
+does not match MUST NOT be recorded as the result; the result MUST name only the
+mismatch. With no fact read, the reclaim carries no result.
+
+The result is diagnostic. Whether the teardown succeeded or failed MUST be decided
+by the reclaim job's status alone, as for any teardown, and the reclaim's result
+MUST NOT add an evidence or linkage condition to the teardown or to the release
+that follows it.
+
+#### Scenario: A reclaim's fact matches its job
+
+- **WHEN** a reclaim succeeds and its printed fact names the job's action, host,
+  tenant account, and machine, and reports success
+- **THEN** the reclaim's result is that fact
+
+#### Scenario: A reclaim's fact names another tenant
+
+- **WHEN** a reclaim job succeeds and its printed fact names a tenant account
+  other than the job's
+- **THEN** the reclaim's result names only the mismatch, and the teardown is
+  judged by the job's success as any teardown is
+
+#### Scenario: A reclaim prints no fact
+
+- **WHEN** a reclaim job's output carries no fact for the reclaim's action
+- **THEN** the job carries no result, and the teardown is judged by the job's status
+
 ### Requirement: A VM teardown removes only what its guest created
 
 A VM teardown MUST remove only artifacts attributable to its own guest: its libvirt

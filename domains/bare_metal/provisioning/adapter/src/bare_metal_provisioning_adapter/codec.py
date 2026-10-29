@@ -6,14 +6,25 @@ on the whole host the lease sells; a reclaim removes access by the configured
 reclaim policy. Each job stores a ``BareMetalJobParams``, which names the access
 playbook frozen when the job was prepared, or none, leaving the executor's.
 
+The fact the ``bare-metal-access`` role prints is read through the compute
+family's fact reader, whichever result format the callback uses, and is taken
+for the job only when it names the job's action, its execution host, the tenant
+account its parameters name, the physical machine they name, if any, and
+success. That guards against taking another document from the run's output; it
+is not proof of provenance across runs.
+
 A grant's result is the compute family's ``CreateJobResult``: the delivery
-evidence (the host and port the buyer connects to, the tenant account, and when
-access became ready), read from the fact the ``bare-metal-access`` role prints,
-and the fact's named fields as operator detail. A grant whose fact cannot say
-how to connect reports no evidence, so the family's provider fails the create
-while an operator can still read the detail. A reclaim's result is its fact. No
-result carries a credential: the buyer already holds the private half of the
-key that was installed.
+evidence and the fact's named fields as operator detail. The evidence's endpoint
+is the registered host's tenant-facing route, its ``public_host`` else its
+``ssh_host`` and its ``public_port`` else its ``ssh_port``, with the tenant
+account the fact confirmed: the host registry owns how tenants reach the host,
+and the fact's own host and port describe the provisioner's route, so they stay
+detail. A grant whose fact does not match its job, or cannot say when access
+became ready, reports no evidence, its detail naming any mismatch, so the
+family's provider fails the create while an operator can still read why. A
+reclaim's result is its fact, or only the mismatch when the fact does not match
+its job. No result carries a credential: the buyer already holds the private
+half of the key that was installed.
 """
 
 from __future__ import annotations
@@ -35,12 +46,8 @@ from compute_provisioning_contracts import (
     ResultEnvelope,
 )
 from compute_provisioning.jobs import JobRun
-from compute_provisioning_ansible import AnsibleJobInterpretation, AnsibleJobPlan
-from compute_provisioning_ansible.runner import (
-    AnsibleResult,
-    InventoryTarget,
-    extract_fact,
-)
+from compute_provisioning_ansible import AnsibleJobInterpretation, AnsibleJobPlan, read_fact
+from compute_provisioning_ansible.runner import AnsibleResult, InventoryTarget
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 #: The inventory group the bare-metal access playbook targets.
@@ -54,7 +61,8 @@ BARE_METAL_ACCESS_RESULT_KIND = "bare_metal_access"
 BARE_METAL_RECLAIM_POLICIES = frozenset({"remove_lease_key", "lock_user", "delete_user"})
 DEFAULT_BARE_METAL_RECLAIM_POLICY = "remove_lease_key"
 
-#: The fact the access role prints for each action.
+#: The fact the access role prints for each action. The role prints the job's
+#: action as the fact's own ``action``, which is what the fact reader selects by.
 BARE_METAL_RESULT_FACTS: Mapping[str, str] = {
     NODE_GRANT_ACCESS_ACTION: "node_grant_access_data",
     NODE_RECLAIM_ACCESS_ACTION: "node_reclaim_access_data",
@@ -105,24 +113,51 @@ BARE_METAL_GRANT_DETAIL = (
 )
 
 
-def grant_evidence(fact: Mapping[str, Any]) -> DeliveryEvidence | None:
-    """What a grant's access fact says about reaching the host, or ``None``.
+def fact_mismatch(
+    fact: Mapping[str, Any], action: str, host: InventoryTarget, params: BareMetalJobParams
+) -> str | None:
+    """How an access fact differs from the job that printed it, or ``None``.
 
-    The role prints the port as a string and the time as an ISO 8601 UTC
-    instant; a fact missing the host, the port, the account, or the time says
-    nothing a buyer can use.
+    The role echoes the job's action, its target host, the tenant account, and
+    the physical machine it was given, and reports ``success``. Each value
+    compared is one the job itself passed to the role, and none is secret.
     """
-    user = fact.get("ssh_user")
-    if not isinstance(user, str) or not user.strip():
-        return None
+    expected = {
+        "action": action,
+        "host_id": host.host_id,
+        "ssh_user": params.ssh_user,
+    }
+    if params.physical_host_id:
+        expected["physical_host_id"] = params.physical_host_id
+    found = []
+    for name, value in expected.items():
+        if value is None:
+            found.append(f"{name}: the job names none")
+        elif fact.get(name) != value:
+            found.append(f"{name}: the fact names {fact.get(name)!r}, the job {value!r}")
+    if fact.get("status") != "success":
+        found.append(f"status: the fact reports {fact.get('status')!r}, not 'success'")
+    return "; ".join(found) or None
+
+
+def grant_evidence(
+    fact: Mapping[str, Any], host: InventoryTarget, user: str
+) -> DeliveryEvidence | None:
+    """How the buyer reaches the granted host, or ``None`` when the fact cannot
+    say when access became ready.
+
+    The endpoint is the host's tenant-facing route, each part falling back to
+    the connection's; ``user`` is the tenant account the fact confirmed. The
+    role prints the time as an ISO 8601 UTC instant.
+    """
     try:
         return DeliveryEvidence(
             endpoints=(
                 AccessEndpoint(
                     protocol="ssh",
-                    host=str(fact.get("host") or ""),
-                    port=int(str(fact.get("port") or "0")),
-                    user=user.strip(),
+                    host=host.public_host or host.ssh_host,
+                    port=host.public_port or host.ssh_port,
+                    user=user,
                 ),
             ),
             ready_at=fact.get("timestamp"),
@@ -155,17 +190,25 @@ class BareMetalAnsibleCodec:
     def interpret(
         self, run: JobRun, host: InventoryTarget, output: AnsibleResult
     ) -> AnsibleJobInterpretation:
-        fact = extract_fact(output.stdout, BARE_METAL_RESULT_FACTS[run.action])
+        fact = read_fact(output.stdout, BARE_METAL_RESULT_FACTS[run.action], action=run.action)
         if fact is None:
             return AnsibleJobInterpretation(result=None)
+        params = BareMetalJobParams.model_validate(dict(run.parameters))
+        mismatch = fact_mismatch(fact, run.action, host, params)
         if run.action == NODE_GRANT_ACCESS_ACTION:
+            detail = {
+                name: fact[name]
+                for name in BARE_METAL_GRANT_DETAIL
+                if fact.get(name) not in (None, "")
+            }
+            if mismatch is not None:
+                detail["mismatch"] = mismatch
             created = CreateJobResult(
-                evidence=grant_evidence(fact),
-                detail={
-                    name: fact[name]
-                    for name in BARE_METAL_GRANT_DETAIL
-                    if fact.get(name) not in (None, "")
-                },
+                evidence=(
+                    None if mismatch is not None
+                    else grant_evidence(fact, host, str(params.ssh_user))
+                ),
+                detail=detail,
             )
             return AnsibleJobInterpretation(
                 result=ResultEnvelope(
@@ -178,7 +221,7 @@ class BareMetalAnsibleCodec:
             result=ResultEnvelope(
                 offering_mode=run.offering_mode,
                 result_kind=BARE_METAL_ACCESS_RESULT_KIND,
-                value=fact,
+                value=fact if mismatch is None else {"mismatch": mismatch},
             )
         )
 
@@ -216,6 +259,7 @@ __all__ = [
     "BareMetalAnsibleCodec",
     "BareMetalJobParams",
     "DEFAULT_BARE_METAL_RECLAIM_POLICY",
+    "fact_mismatch",
     "grant_evidence",
     "reclaim_policy_from",
 ]
