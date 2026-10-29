@@ -365,29 +365,90 @@ Files: a new `e2e-tests/tests/e2e/roles/helpers/ssh_access.py`; a new
 `e2e-tests/tests/unit/test_ssh_access.py`; `e2e-tests/pyproject.toml` (declare
 `cryptography` if it is not declared).
 
-- [ ] 5.1 Generate an ed25519 key pair per run with `cryptography` into an owner-only
+- [x] 5.1 Generate an ed25519 key pair per run with `cryptography` into an owner-only
       temporary directory, returning the private key's path and the OpenSSH public
       line; the directory is removed when the run ends. (D7, "Keys")
-- [ ] 5.2 Run a command over SSH with the system `ssh`: `BatchMode=yes`,
+      `e2e-tests/tests/e2e/roles/helpers/ssh_access.py`: `ssh_session()` yields an
+      `SshSession` over a `0700` temporary directory and removes it on exit;
+      `new_key(name)` writes the private key `0600` (`O_EXCL`) and returns an
+      `SshKey(private_key, public_line)`. Declared `cryptography>=42.0`
+      (previously only transitive) and relocked.
+- [x] 5.2 Run a command over SSH with the system `ssh`: `BatchMode=yes`,
       `ConnectTimeout`, `IdentitiesOnly=yes` (so only the given key is offered, which
       the refused-key check depends on), `StrictHostKeyChecking=accept-new`, and a
       run-scoped `UserKnownHostsFile`; retry connection failures within a named bound to
       absorb the guest's cloud-init reboot; log the host-key fingerprint on first
       contact; fail when a later connection presents another host key. (D7, "Client",
       "Host key")
-- [ ] 5.3 Assert a connection is refused, or times out, within a named bound — used both
+      `SshSession.run(endpoint, key, command)`. Beyond the listed options, so the
+      result does not depend on the operator's machine: `-F /dev/null`,
+      `IdentityAgent=none`, `GlobalKnownHostsFile=/dev/null`, and
+      `HashKnownHosts=no` (so the fingerprint can be read from the run's
+      `known_hosts`). Any `ssh` failure (exit 255) is retried within
+      `CONNECT_RETRY_SECONDS` (600) every `RETRY_INTERVAL_SECONDS` (5), which
+      covers both a guest not yet listening and one not yet holding the key; a
+      changed host key raises `HostKeyChanged` at once; a command failing once
+      connected is not retried. An attempt that outlives `attempt_seconds` (70)
+      counts as a connection failure. The fingerprint is the unpadded base64 SHA256
+      of the trusted key's blob, the form `ssh-keygen -l` prints; that equivalence
+      is read, not checked against `ssh-keygen`. The clock, the sleep, the attempt
+      timeout, and the `ssh` executable are constructor parameters.
+- [x] 5.3 Assert a connection is refused, or times out, within a named bound — used both
       for the unrelated key and for access after teardown. (D7)
-- [ ] 5.4 Probes returning the remote user (`id -un`), vCPU count (`nproc`), memory in
+      `SshSession.assert_refused(endpoint, key, bound=REFUSAL_BOUND_SECONDS)` (120):
+      returns the refusal's reason on the first `ssh` failure; a connection still
+      accepted when the bound closes fails. It is for access after teardown, where
+      unreachable is the expected outcome. For the unrelated key, a timeout would
+      prove nothing about the key, so `assert_key_refused(endpoint, key)` (added
+      beyond the plan) requires the host to answer `Permission denied`, retrying
+      an unreachable host within the connect window and failing at its end, and
+      failing at once if the key is accepted. Section 6 should use it for 6.6's
+      refused key. Left as is: after teardown, a host presenting another key on
+      the forwarded port raises `HostKeyChanged` rather than counting as refused.
+- [x] 5.4 Probes returning the remote user (`id -un`), vCPU count (`nproc`), memory in
       GiB from `MemTotal`, and the root disk's size in GiB, with the memory tolerance a
       named constant that starts strict. (D7, "What a connection proves")
-- [ ] 5.5 Unit (`test_ssh_access.py`) with a fake `ssh` on `PATH`: the argv carries every
+      `SshSession.probe` runs one labelled command and returns a `GuestShape`. The
+      root disk is the whole device holding `/` (its partition's parent, through
+      `findmnt` and `lsblk`), since the partition and filesystem are smaller than the
+      disk the guest was given. `MEMORY_SHORTFALL_TOLERANCE = 0.05`;
+      `memory_within_tolerance(memory_gib, ram_gb)` admits up to 5% below and
+      nothing above.
+- [x] 5.5 Unit (`test_ssh_access.py`) with a fake `ssh` on `PATH`: the argv carries every
       option in 5.2 and only the given identity; connection failures are retried until
       success and fail at the bound; a changed host key fails; refusal and timeout are
       reported as refused; probe output is parsed, including `MemTotal` in kB; the key
       directory is owner-only and gone afterwards. (D7)
-- [ ] 5.6 Verification: `make -C e2e-tests test-unit`; `make test`; `make
+      Unit, `e2e-tests/tests/unit/test_ssh_access.py` (24 cases): the fake `ssh` is an
+      executable the session is given by path rather than found on `PATH`; it records
+      each argv, answers from a plan, and writes or refuses `known_hosts` entries as
+      `accept-new` does, printing the refusal OpenSSH prints — that real `ssh` prints
+      it is OpenSSH's behaviour, read, not tested. Covered as listed (every 5.2
+      option, `HashKnownHosts` included), plus a fake clock (no test waits on
+      retries), a failing command not retried, the first fingerprint logged and its
+      form, an attempt hanging past its timeout (half a second of real time)
+      retried by `run` and counted as refused by `assert_refused`, refusal after
+      access was briefly still accepted, `assert_key_refused`'s three outcomes,
+      four malformed probe outputs, and a `bash -n` parse of the probe command. The
+      host keys are generated per test run. These tests cross a subprocess
+      boundary to the fake from the unit directory: the e2e package has no
+      integration tier, and the IaC suite's shell harness does the same. The
+      probe command is not run anywhere here; section 8's live run is its first
+      execution.
+- [x] 5.6 Verification: `make -C e2e-tests test-unit`; `make test`; `make
       check-packaging` when 5.x declared a dependency.
       End-to-end: none until section 6.
+      `make -C e2e-tests test-unit`: 238 passed (unit). `make lock`, then `make
+      check-packaging`: passed. `make test`: passed (before the review fixes,
+      which touched only the helper and its test; the unit suite reran).
+      End-to-end markers confirmed: none. No CI workflow beyond the pipeline is
+      owed. Handoff: the helper is not yet used by any scenario; section 6 builds
+      an `SshEndpoint` from the delivered access, negotiates
+      `new_key("buyer").public_line`, checks `GuestShape` against the target's
+      capacity with `memory_within_tolerance`, refuses `new_key("unrelated")` with
+      `assert_key_refused`, and after teardown calls `assert_refused` with the
+      buyer key. The fake-ssh fixture in the test is local to it; a real-lane
+      unit test needing one can lift it into a shared helper.
 
 ## 6. The real-provisioning lane
 
