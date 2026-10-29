@@ -27,12 +27,17 @@ from tests.e2e.roles.helpers.compute_deal_stages import DURATION_HOURS
 from tests.e2e.roles.scenarios.vms.host_registry import (
     E2E_DEAL_HOST,
     E2E_DEAL_POOL_ID,
+    claim_attributes,
     provision_e2e_executor,
     refresh_storefront_projections,
 )
 
 #: The storefront resource and site capacity declaration this deal sells.
 E2E_RESOURCE_ID = "compute-e2e-deal-001"
+#: The GPUs this deal's shape carries: what its declaration states and what a
+#: claim on the released resource requires.
+E2E_DEAL_GPU_MODEL = "RTX 5080"
+E2E_DEAL_GPU_COUNT = 1
 #: Mock rule that holds the VM create job before it reports.
 PROV_RULE_ID = "e2e-create-pause"
 #: Mock rule that holds the VM removal (provider teardown).
@@ -93,9 +98,9 @@ class VmComputeDealDriver:
             host=E2E_DEAL_HOST,
             pool_id=E2E_DEAL_POOL_ID,
             resource_id=E2E_RESOURCE_ID,
-            sellable_units=1,
+            sellable_units=E2E_DEAL_GPU_COUNT,
             attributes={
-                "gpu_model": "RTX 5080",
+                "gpu_model": E2E_DEAL_GPU_MODEL,
                 "region": "California, US",
                 "sla": "90.0",
             },
@@ -243,14 +248,17 @@ class VmComputeDealDriver:
         self, storefront_admin_client: Any, *, listing_id: str, escrow_uid: str
     ) -> Any:
         reserved = storefront_admin_client.admin_reserve_capacity(
-            required_attributes={"resource_id": E2E_RESOURCE_ID, "gpu_count": 1},
+            required_attributes=claim_attributes(
+                {"gpu_model": E2E_DEAL_GPU_MODEL, "gpu_count": E2E_DEAL_GPU_COUNT},
+                resource_id=E2E_RESOURCE_ID,
+            ),
             listing_id=listing_id,
             escrow_uid=escrow_uid,
         )
         # Whether a reservation came back at all is the shared stage's
         # assertion; what it holds is VM's.
         if reserved.capacity_reservation_id:
-            assert reserved.gpu_count == 1, reserved
+            assert reserved.gpu_count == E2E_DEAL_GPU_COUNT, reserved
         return reserved
 
     def release_reserved(self, reservation: Any) -> None:

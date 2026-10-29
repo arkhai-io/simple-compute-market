@@ -59,6 +59,7 @@ from tests.e2e.roles.helpers.compute_deal import SiteCapacity
 from tests.e2e.roles.helpers.compute_deal_stages import ComputeDealState
 from tests.e2e.roles.helpers.domain_deal import require_state
 from tests.e2e.roles.scenarios.vms.compute_deal_driver import VmComputeDealDriver
+from tests.e2e.roles.scenarios.vms.host_registry import resource_gpus
 
 log = logging.getLogger(__name__)
 
@@ -174,10 +175,15 @@ def capacity_source_for(resource: dict[str, Any], *, site_id: str | None = None)
     resource publishes, so this is derived from the resource rather than
     restated alongside it — a hand-written copy is a second place that has to
     stay in sync.
+
+    The GPU family appears only for a resource that carries GPUs
+    (`resource_gpus`); a GPU-less shape states its CPU, memory, and storage
+    alone.
     """
-    shape: dict[str, dict[str, Any]] = {
-        "gpu": {"count": resource.get("gpu_count", 1), "model": resource["gpu_model"]},
-    }
+    shape: dict[str, dict[str, Any]] = {}
+    gpus = resource_gpus(resource)
+    if gpus is not None:
+        shape["gpu"] = {"count": gpus[0], "model": gpus[1]}
     for family, field_name, published in (
         ("cpu", "count", "vcpu_count"),
         ("memory", "gib", "ram_gb"),

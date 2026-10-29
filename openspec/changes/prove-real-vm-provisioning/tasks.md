@@ -139,20 +139,48 @@ Files: `e2e-tests/tests/e2e/roles/scenarios/vms/conftest.py`,
 `…/vms/compute_deal_driver.py`, `…/vms/host_registry.py`; a new unit test under
 `e2e-tests/tests/unit/`.
 
-- [ ] 2.1 `capacity_source_for` emits the GPU family only when the resource carries a
+- [x] 2.1 `capacity_source_for` emits the GPU family only when the resource carries a
       positive `gpu_count` and a `gpu_model`, and otherwise emits `cpu.count`,
       `memory.gib`, and `storage.gib` from `vcpu_count`, `ram_gb`, and `disk_gb`. If the
       function cannot be imported by a unit test from the scenarios' `conftest.py`,
       move it into `host_registry.py` unchanged in behaviour and import it back.
       (D1, D6)
-- [ ] 2.2 The VM driver's provision terms and required attributes name GPU fields only
+      The predicate is `resource_gpus` in `host_registry.py`; `capacity_source_for`
+      stays in the VM `conftest.py`, which a unit test imports without trouble. Two
+      behaviours change for inputs no caller passes: a resource naming `gpu_model`
+      without `gpu_count` used to publish one GPU and now publishes none, and one
+      naming `gpu_count` without `gpu_model` used to raise `KeyError` and now yields
+      a GPU-less shape; every caller states both.
+- [x] 2.2 The VM driver's provision terms and required attributes name GPU fields only
       when its shape carries them; the mock lanes keep their GPU shapes, so their terms
       are unchanged. (D6)
-- [ ] 2.3 Unit: a GPU-less resource (`vcpu_count: 7, ram_gb: 28, disk_gb: 160`) yields
+      The VM driver's provision terms name no GPU field already. Its re-reservation
+      claim is built by `claim_attributes` (`host_registry.py`), which requires
+      `gpu_count` only of a GPU shape; the mock driver's shape is always its GPU
+      constants (`E2E_DEAL_GPU_MODEL`, `E2E_DEAL_GPU_COUNT`), so its claim
+      (`{"resource_id": …, "gpu_count": 1}`) and its count assertion are unchanged.
+      No test drives the driver's re-reservation; only the helper is unit-tested.
+      Handoff: `resource_gpus` and `claim_attributes` are there for section 6's real
+      driver to build its GPU-less shape and claim from the target's capacity.
+- [x] 2.3 Unit: a GPU-less resource (`vcpu_count: 7, ram_gb: 28, disk_gb: 160`) yields
       a shape with no `gpu` family and those three dimensions; a GPU resource yields the
       same shape as before; a resource with `gpu_count: 0` yields no `gpu` family. (D6)
-- [ ] 2.4 Verification: `make -C e2e-tests test-unit`; `make test`.
+      Unit, `e2e-tests/tests/unit/test_vm_shapes.py`: the GPU-less case; two GPU
+      cases (one GPU with CPU, four GPUs with memory and storage), whose expected
+      shapes were checked against the previous function by reading it; `gpu_count:
+      0`; the predicate (model alone, count alone, both); and `claim_attributes`
+      with and without GPUs.
+- [x] 2.4 Verification: `make -C e2e-tests test-unit`; `make test`.
       End-to-end: `e2e_deal`, `e2e_listing_shapes` — unchanged in outcome.
+      `make -C e2e-tests test-unit`: 182 passed (unit). `make test`: passed (before
+      the review fixes, which touched only e2e-tests code the unit suite reran).
+      `make check-packaging`: passed. No end-to-end run here; the pipeline's VM lane
+      is the evidence that outcomes are unchanged. Markers
+      corrected: `capacity_source_for` is called by `e2e_deal`,
+      `e2e_deal_buyer_cli`, `e2e_buy`, `multi_registry`, `e2e_non_erc20_settlement`,
+      and `e2e_compute_dynamic_listings`, all with GPU resources, so their shapes
+      are unchanged; `e2e_listing_shapes` does not call it and is unaffected. No
+      CI workflow beyond the pipeline is owed.
 
 ## 3. Host preparation and VM creation fail closed
 
