@@ -35,7 +35,10 @@ continuation is a separate dependent change.
   authority, which hosts the pending stop. Never schedule a payment stop locally.
 - Supply setup/rate preset helpers to the terms change's publication adapters.
   Presets are combinations of parts and terms, not runtime classes. Setup ends
-  at activation and its self-penalty returns all before delivery, none after.
+  at activation and its self-penalty returns all for seller non-delivery, none
+  once delivered. A lawful end before disclosure does not itself trigger self-filing.
+- Keep delivery authorization pure. Translate the separate post-activation
+  start_billing effect using delivery's stable operation key, not a second start key.
 - Re-drive the canonical rate buyer-end flow: stop then hint, continue delivery
   during priced notice, and end through authority watch. Keep end_delivery for
   explicit immediate surrender and unreachable-payment-authority buyer_end(at).

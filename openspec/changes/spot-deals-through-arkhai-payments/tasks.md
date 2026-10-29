@@ -100,7 +100,10 @@ Journal persistence itself belongs to convergence.
 
 - [ ] 3.1 Translate rate start, entitled stop/notice and partial reverse into
       explicit per-part commands with operation-derived stable keys. Require
-      ActivatedDeliveryRef after verified site activation for start. Missing,
+      ActivatedDeliveryRef after verified site activation for start. Delivery
+      authorization remains pure; implement the separate start_billing effect using
+      delivery's supplied stable operation key. Derive per-part keys from it;
+      the servicing journal replays that intent, never a second keyed start. Missing,
       malformed or mismatched evidence refuses before effects. Verify lost response
       and identical retry against the in-process contract fake; changed-content
       key reuse is refused locally.
@@ -118,8 +121,10 @@ Journal persistence itself belongs to convergence.
       uses charged for payer and payee. Qualify boundary/no-start/terms stops,
       superseded and equal-time requests from authority vectors; compute no
       local end-correction delta or clawback.
-- [ ] 3.5 Keep exceptional_end filing with the dispute adapter for unentitled or
-      past physical ends, without computing ruling amounts. No automatic lawful
+- [ ] 3.5 Keep exceptional_end filing with the dispute adapter for seller
+      non-delivery or unentitled past physical failure, without computing ruling
+      amounts. A controlling lawful end before disclosure preserves attribution
+      and does not self-file solely because delivery never became available. No automatic lawful
       notice reverse, target API or correction-obligation journal remains.
       Independent discounts and ruling effects are not end-pricing credits.
 
@@ -148,7 +153,8 @@ second preemption endpoint or a local payment-stop scheduler.
       grant or revoke the accepted permission.
 - [ ] 4.2 Surface verified pendingStop in lifecycle read/list. Preserve an earlier
       buyer stop, immutable retry identity and the authority's notice minimum.
-      On-demand refusal points to exceptional_end, not an override payment stop.
+      On-demand refusal points to exceptional_end only for seller non-delivery,
+      not an override payment stop or automatic filing after a lawful end.
 - [ ] 4.3 Add the typed notice method and recommended deals preempt CLI verb to
       both domains, taking negotiation ID, operation key and optional --at.
       Delegate through lifecycle submit and its existing seller authentication.

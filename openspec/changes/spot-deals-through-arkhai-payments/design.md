@@ -46,7 +46,9 @@ populate it from an explicitly configured setup price, and refuse an incomplete
 preset rather than inventing an amount. This is an additional once charge, not
 max(setup, usage). Sellers may opt out. It is visible before approval and bound
 into the option ID. On successfully delivered lawful preemption it remains earned;
-failure before delivery is handled by exceptional_end, including the setup part.
+seller non-delivery is handled by exceptional_end, including the setup part.
+A controlling lawful end before disclosure is not seller non-delivery: preserve
+its attribution and do not self-file merely because availability was not reached.
 The setup part's end is activation (provisioning), not the maximum compute term;
 it pays out one dispute window after activation. The standard self-penalty returns
 all setup for an undelivered deal and none once delivered. This requires an
@@ -161,16 +163,21 @@ credentials, not possession of a handle, authorize commands.
 
 Provide rate start with activated-delivery evidence, entitled stop (seller
 notice translates to stop), voluntary partial reverse, and verified state/event
-reads. Activation precedes rate start: start is an effect after activation, not
-an authorization step before it. Recommendation (02 F7): the neutral
+reads. Delivery authorization is pure and performs no payment mutation.
+After activation, delivery invokes the separately keyed start_billing(effect_id,
+evidence) effect. Delivery durably supplies its stable operation key; convergence
+replays that key through this adapter and derives per-part request identities
+from it, never allocating another independently keyed start. Recommendation (02 F7): the neutral
 ActivatedDeliveryRef contains the
 negotiation, commitment, reservation and fulfillment identities, the site's
 verified activation record reference/instant and a provisioning-ready evidence
 digest, without credentials. The shared delivery path produces it; convergence
-journals and passes it through the adapter protocol. Missing, malformed or
+passes it through the adapter protocol under delivery's supplied effect key. Missing, malformed or
 mismatched references refuse start before an authority call.
-The consumer journals start before calling, adopts unknown start from authority
-records on recovery, and ends the resource if start fails. Admission/disclosure
+The consumer's start journal replays delivery's durable intent/key, adopts unknown
+start from authority records on recovery, and ends the resource if start fails.
+If a lawful end already controls, retain its attribution without self-filing;
+only seller non-delivery follows the classified exceptional_end handoff. Admission/disclosure
 races and durable journals belong to convergence, not the adapter.
 
 Export immutable operation descriptors (part, event kind, amount or at,
@@ -235,7 +242,7 @@ separate effects; SCM neither absorbs them into end pricing nor computes a
 cumulative target. Removing that target also removes the cross-actor read/compute/
 reverse race, not merely its duplicate-retry symptom.
 
-Exceptional ends or earlier physical ends use journaled exceptional_end(at)
+Seller-caused unentitled ends or earlier physical failures use journaled exceptional_end(at)
 through the dispute adapter. The authority realizes past ends with stop-now plus
 reverse; SCM does not compute ruling amounts, backdate stops or maintain a second
 financial end. Existing voluntary reverse commands remain, but are not automatic
@@ -264,8 +271,9 @@ deadline. No bespoke preemption route is needed. Lifecycle read/list expose
 pendingStop during notice. A seller may hint after acting, but push notice and a
 live storefront are not safety dependencies.
 
-On-demand refusal points to exceptional_end, the seller's dispute against itself,
-not an override stop. The foundation-owned VM admin interrupt route submits
+On-demand refusal identifies exceptional_end for actual seller non-delivery,
+not an override stop or an automatic filing on refusal. Lawful ends before
+disclosure retain their cause without self-filing. The foundation-owned VM admin interrupt route submits
 notice when the accepted option grants payee entitlement; it files exceptional_end
 only otherwise. Alkahest splitter execution and defects remain outside this work.
 

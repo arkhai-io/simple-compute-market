@@ -53,10 +53,15 @@ SCM MUST derive time rate parts through the agreed-price accessor and lifecycle 
 The hosted adapter MUST translate lifecycle commands into explicit per-part events with stable operation-derived request identities. It MUST require a matching ActivatedDeliveryRef for rate start, reject key reuse with changed content, and expose unknown outcomes for resolution by verified reads before another monetary delta is issued.
 
 #### Scenario: A start response is lost
-- **GIVEN** a caller-journaled start operation with verified activation and provisioning-ready evidence
+- **GIVEN** delivery's durably keyed start_billing intent with verified activation and provisioning-ready evidence
 - **WHEN** its response is lost
 - **THEN** the adapter reports unknown and exposes the authority event through read
-- **AND** retry uses the same part, bytes and request identity
+- **AND** retry uses the same part, bytes and request identity derived from delivery's supplied operation key, not a separately allocated start
+
+#### Scenario: Delivery authorizes before starting billing
+- **WHEN** delivery requests authorization to attempt billing start
+- **THEN** authorization is a pure decision with no payment mutation
+- **AND** only the separate post-activation start_billing effect translates to authority start commands
 
 #### Scenario: Start loses to a stop
 - **GIVEN** the rate part is already stopped at the authority
@@ -105,6 +110,12 @@ SCM MUST derive rate stop treatment through the shared lifecycle codec's settles
 - **GIVEN** a prior discount or penalty on a running rate part
 - **WHEN** an entitled stop takes effect
 - **THEN** SCM neither absorbs that effect into a cumulative end target nor submits an overlapping correction
+
+#### Scenario: A lawful end precedes disclosure
+- **GIVEN** a controlling buyer end, entitled authority stop, terms end or ruling before disclosure
+- **WHEN** delivery reports that availability was not reached
+- **THEN** its lawful end attribution is preserved without exceptional_end self-filing merely for non-availability
+- **AND** only seller non-delivery follows the classified self-filing handoff
 
 #### Scenario: A site reports an earlier exceptional end
 - **WHEN** the seller learns service ended without an entitlement covering that end
