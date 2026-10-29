@@ -146,14 +146,7 @@ Recovery MUST use a seller export, original authority-bound credentials and an i
 #### Scenario: Seller emergency uses the dispute authority
 
 - **WHEN** an operator requests emergency recovery for an on-demand or spot deal
-- **THEN** the seller files exceptional_end with the Agreement dispute authority and sends no stop or reverse of its own; mediation's sole mechanical ruling is a qualifying payee self-penalty
-- **AND** on-demand non-preemption is remedied by the premature-stop penalty and buyer case over held money, not enforced by the mandate
-
-#### Scenario: Buyer ends delivery during payment outage
-
-- **WHEN** end_delivery reaches the storefront after the buyer's payment stop could not reach the authority
-- **THEN** the storefront signs receipt time as evidence, never stops billing for the buyer, and the buyer half journals/retries the same stop key with billing until it lands
-- **AND** an additional buyer_end case carries exact Agreement and signed request/receipt for human triage, not a mechanical ruling
+- **THEN** the runner's exceptional-end descriptors target only the dispute adapter
 
 ### Requirement: Rotation evidence has a durable servicing consumer
 

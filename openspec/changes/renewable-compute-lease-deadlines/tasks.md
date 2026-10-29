@@ -150,10 +150,11 @@ implementation. Follow `openspec/README.md#plan-closeout-requirements` in this o
   bare-metal and API-credit complete-deal scenarios (`test_full_deal.py`,
   `test_bare_metal_mock_deal.py`, `test_credits_payment_deal.py` under
   `e2e-tests/tests/e2e/roles/scenarios/`). Coordinate activation-specific traces with
-  `unify-compute-delivery-path`: a reserved deal survives allowance after activation,
-  a crash before activation expires, and quota holds remain unchanged. If caller
-  wiring or lane readiness is absent, name its owning change as an explicit blocker
-  and record those validations unrun, not passed. No renewal scenario is owed.
+  `unify-compute-delivery-path`: the traces for a reserved deal surviving allowance
+  after activation, pre-activation crash expiry and unchanged quota holds transfer
+  to unify tasks 4.2 and 4.3 and do not block renewable's archive. Record those
+  transferred validations as unrun here, not passed. Missing readiness for this
+  change's own pipeline scenarios remains an explicit blocker. No renewal scenario is owed.
 - [ ] 5.9 **Promotion:** write D1–D2 to
   `openspec/specs/site-capacity/architecture.md`; update capacity reservation,
   recovery workers and authority boundaries in `docs/development/ARCHITECTURE.md`;

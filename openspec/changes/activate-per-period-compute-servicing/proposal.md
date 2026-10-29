@@ -6,7 +6,7 @@ production can use its required payment semantics. Its external gate is the
 and hold extensions**, including afterStop holds and partial reversals after stop,
 and support for the stop terms actually offered. Unsupported started-period terms fail closed; the
 payment authority computes them, never a storefront corrective refund. A supported
-charged/charged subset may ship before partialPeriod is vendored only with explicit
+charged/charged subset may ship before the hosted deployment supports returned only with explicit
 buyer-policy opt-in for payee and charged term ends, and only if every required
 term is supported. On-demand always returns the partial period through the dispute
 authority's qualifying mechanical self-penalty ruling.

@@ -26,8 +26,8 @@ Activation MUST requalify foundation/spot's payment and dispute contracts, not i
 #### Scenario: A seller files an exceptional end
 
 - **WHEN** an unentitled seller end is handled through the dispute adapter
-- **THEN** the seller files exceptional_end with the Agreement authority, journaled with the end, never future-dated; pre-start failures journal immediately and file at Agreement start, without seller stop/reverse
-- **AND** a payee request at least as strong as standard receives mediation's only mechanical ruling: returned rate stops now through mediation's PT0S/chosen entry, rate reversals since at, once unserved-share refunds by time, then min(premature_stop_penalty, earned amounts still held) to payer across parts in mandate order; bond award stays reserved for hosted bonds
+- **THEN** hosted observations satisfy deal-lifecycle's “The standard seller self-penalty refunds unearned money” and “Premature-stop penalties consume only held earnings”
+- **AND** qualification records the hosted authority responses, not a second activation-owned mapping
 
 #### Scenario: On-demand non-preemption is remedied
 
@@ -38,8 +38,8 @@ Activation MUST requalify foundation/spot's payment and dispute contracts, not i
 #### Scenario: Buyer stop is journaled while payments is down
 
 - **WHEN** the buyer cannot reach payments and end_delivery reaches the storefront
-- **THEN** the storefront signs its receipt time as evidence for the request with no at, never stops buyer billing, and the buyer half journals/retries its stop under the same key with billing until landing
-- **AND** an additional buyer_end carries exact Agreement verified against mandate deal hash and signed request/receipt for human triage, realized as payer stop at at with payer notice/partialPeriod, never a mechanical ruling
+- **THEN** hosted observations satisfy buyer-orchestration's “The buyer's end is backed by its own stop or a case”
+- **AND** qualification records payment/case progress against the hosted deployment rather than defining another outage path
 
 ### Requirement: Rate activation preserves existing commitment servicing
 

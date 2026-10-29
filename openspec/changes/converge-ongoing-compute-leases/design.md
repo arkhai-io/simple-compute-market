@@ -129,7 +129,7 @@ seller fault when the authority can verify it. Missing pre-start funding is not 
 **Recommendation supplied here (external F4):** the neutral kit asks the injected payment adapter for a deal-level
 `authorize(phase, evidence)` decision, never interprets hosted per-part snapshot
 fields. The foundation payment protocol owns that operation and
-`start_billing(activated_delivery_evidence)`; spot implements rate checks and
+`start_billing(operation_key, activated_delivery_evidence)`; spot implements rate checks and
 once-only adapters return allow/no-op. Publication/acceptance must fail closed if
 the installed adapter cannot supply the required contract.
 
@@ -170,8 +170,8 @@ The seller half files `exceptional_end(at)` with the Agreement's dispute authori
 through the dispute adapter. Journal the filing with the end. It is never future-
 dated: pre-start failures journal immediately and file at Agreement start. The
 seller sends no stop or reverse of its own for this self-penalty. The dispute
-adapter owns intent-to-request mapping; restore exceptional_end to its intents and
-to mediation's request vocabulary and published mapping.
+adapter owns intent-to-request mapping; foundation 12.3 supplies exceptional_end
+in its intents and mediation's request vocabulary/published mapping.
 
 Arkhai mediation's only mechanical ruling is a payee-filed self-penalty request at
 least as strong as the standard request. Through mediation's own stop entry
@@ -279,7 +279,9 @@ This change is the single owner of the rate-servicing lane matrix. Execute spot'
 prepared entry points, including maximum term, on-demand and spot emergency
 self-penalty filings; spot records preparation, not duplicate qualification.
 Unify owns once-only activation expiry and the path seam; its consumer-dependent
-rate qualification uses this matrix after the section handoff in D1.
+rate qualification maps to rows 4 and 8, executed only here at task 4.1 after
+converge 3.1 composes the hook. Unify 4.4 consumes those results and retains only
+its non-rate delivery qualification.
 
 | # | Scenario | Required observation |
 |---|---|---|
@@ -287,11 +289,11 @@ rate qualification uses this matrix after the section handoff in D1.
 | 1 | Buyer end with payments down | pre/during/post dispatch, receipt-timed end_delivery evidence, buyer-half same-key stop retry with billing until it lands; buyer_end triage and both-down replay |
 | 2 | Site withdraws with storefront absent | buyer independent stop/case; late report, classified seller self-penalty filing; release proven separately |
 | 3 | Interrupted authority effects | same case/effect-key resolution, partial reverse after stop; earlier evidence during partial correction or append/close race remains unresolved until verified revision effects |
-| 4 | Stop between start and disclosure | local admission blocks disclosure; measured remote observation windows |
+| 4 | Stop between start and disclosure | activate/start/disclose races in both domains; no start before activation or duplicate start key across crashes; local admission blocks disclosure; measured remote observation windows |
 | 5 | Rate deal activation deadline expires | no-dispatch proof or adoption/release; exceptional_end at start, setup entirely returned |
 | 6 | Funding expiry and last-poll top-up | read before end; reachable renewal replaces timer and verified exhaustion is an authority end; only outage/unverifiable state ends on bare timer, with hidden top-up requiring later self-penalty filing |
 | 7 | Spot notice then earlier payer stop | authority hosts pending stop during absence; earliest wins, authority partial-period terms |
-| 8 | Activated and started but never disclosed | disclosure fails, exceptional_end filing at deal start, buyer-case backstop |
+| 8 | Activated but never disclosed | post-activation start refusal and started-but-undisclosed failure in both domains; no start before activation or duplicate start key across crashes; classified exceptional_end filing at deal start, buyer-case backstop |
 | 9 | Maximum term | absolute authority end with its own partialPeriod, including late start and a mid-period end; physical recovery, no exceptional_end |
 | 10 | Seller emergency | on-demand and spot file exceptional_end; mediation mechanically rules only qualifying payee self-penalty through its chosen entry; seller sends no stop/reverse; on-demand emergency pays premature_stop_penalty capped by earned amounts still held after refunds in mandate order; entitled spot notice pays none |
 | 11 | Identity rotation overlap | old receipt verified during overlap, current snapshot re-anchors the running rate deal before retirement, exact old bytes retained; once-only dependencies drain; revoked/stale anchors and livemode changes refused |
@@ -346,31 +348,31 @@ Scenario boundaries go to test-compatibility; diagram pairs to
 `docs/development/diagrams/`. Tasks record exact promotion destinations. No permanent
 document is changed while this remains design-stage work.
 
-## Second-review handoff
+## Applied second-review coordination
 
-The collector must reconcile the prerequisite-owned contracts before implementation:
+The prerequisite-owned plans were reconciled before implementation:
 
-- Foundation: keep closed source classification/timing and the end/filing journal;
-  add pending classification and atomic later filing resolution (D5); remove the
-  executable funding-timer requirement/scenarios owned here. Restore exceptional_end
-  dispute intent/request mapping and the sole mechanical payee self-penalty ruling.
-  Bind safe same-intent case discovery and revised-request/prior-ruling mapping.
-  Buyer half alone journals/retries its payment stop; storefront signs receipt only.
-  Cases carry exact Agreement verified against mandate deal hash. Record the
-  rejected compound payments termination alternative, deferred until hosted bonds
-  are designed; any future path also needs dispute-authority recording.
-- Spot: keep authorize/start_billing, entitled seller notice and re-anchoring
-  evidence production. Emergency exit is an exceptional_end dispute filing; remove
-  seller restitution entries, direct correction and multi-stop-entry gates. Keep
-  only kit/vector qualification, not duplicate rate-lane time/evidence definitions.
-- Unified delivery: name foundation protocol, spot interpretation and convergence
-  composition separately; rate qualification waits for spot adapter plus this wiring.
-- Terms: retain declaration/three-door rules; transfer startup/continued-servicing
-  execution to this change. Activation consumes that contract rather than restating it.
+- Foundation retained closed source classification/timing and the end/filing
+  journal, with pending classification and atomic later filing resolution (D5).
+  Executable funding-timer requirements were removed there; they are owned here.
+  Exceptional_end intent/request mapping and the sole mechanical payee self-penalty
+  ruling are present in foundation 12.3, alongside safe same-intent case discovery
+  and revised-request/prior-ruling mapping. Buyer half owns payment-stop retries;
+  storefront signs receipt evidence only. Cases bind the exact Agreement to the
+  mandate hash. Compound payment termination was deferred pending hosted bonds
+  and dispute-authority recording.
+- Spot retained authorize/start_billing, entitled notice and re-anchoring evidence;
+  emergency exit consumes foundation's filing path. Seller restitution entries,
+  direct correction and multi-stop-entry gates were removed. Spot retains kit/vector
+  qualification; this change owns rate-lane execution and evidence references.
+- Unified delivery separates foundation protocol, spot interpretation and this
+  composition; its rate drives map to this matrix's rows 4/8 after task 3.1.
+- Terms retained declaration/three-door rules; startup/continued-servicing execution
+  is owned here and activation consumes that contract.
 
 Recommendations supplied for 03 F1 / 04 F6/F12 are the read-only seller export,
 immutable caller-retained envelope, shared original semantic filing identities,
 dispute-record adoption and qualified revised-case/prior-ruling mapping. These add
 no payments primitive. Missing safe filing/revision evidence blocks that work with
-repair required. Keep this change in design for coordinated review of the final
-dispute path and recovery/journal interfaces; the parent chooses advancement and edits the index.
+repair required. The focused cross-change re-check leaves this change ready for
+implementation subject to the recorded section and qualification gates.

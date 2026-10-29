@@ -3,7 +3,7 @@
 Pending implementation plan. Hosted deployment must support per-part authorities,
 hold extensions and every required stop term. Seller exceptional_end is a journaled
 dispute filing with a qualifying mechanical payee self-penalty, never seller payment
-correction. On-demand always returns its partial period. No seller restitution
+correction. On-demand always returns its partial period in the seller self-penalty ruling. No seller restitution
 entry or several-stop-entries payments dependency remains. Product implementation
 stays with its owners.
 
@@ -34,19 +34,20 @@ stays with its owners.
       terms with their own partialPeriod and no rounding, chosen dispute-stop entry,
       period-end/part-stop earning and {for} payout anchoring, activation-before-start,
       setup once end at activation and full-undelivered/zero-delivered self-penalty.
-      Restore exceptional_end to dispute-adapter intents and mediation vocabulary/
+      Requalify foundation's exceptional_end dispute-adapter intent and mediation
       published mapping; journal with end, never future-date and file pre-start
       failure at Agreement start. Seller sends no stop/reverse. Verify mediation's
       only mechanical ruling: payee request at least as strong as standard, through
       its PT0S/chosen entry for returned rates, rate earnings since at, once unserved
       shares by time, then min(premature_stop_penalty, earned amounts still held) across
-      parts in mandate order; bond award stays reserved for hosted bonds. On-demand always returns partial
-      period. buyer_end is human triage using payer stop at at with payer notice and
+      parts in mandate order; bond award stays reserved for hosted bonds. On-demand
+      always returns its partial period in the seller self-penalty ruling. buyer_end is human triage using payer stop at at with payer notice and
       partialPeriod; cases carry exact Agreement verified against mandate deal hash.
       Verify seller stop entries only for entitlements such as spot notice; spot
       emergency files exceptional_end. On-demand non-preemption remedy is buyer case/
-      held money plus the premature-stop penalty, not mandate prevention. Remove seller restitution entry,
-      implicit favourable stop, notice waiver, early release and multi-entry gate.
+      held money plus the premature-stop penalty, not mandate prevention. Verify no seller
+      stop entry beyond entitlements is derived, and no implicit favourable stop,
+      notice waiver, early release or multi-entry gate remains.
       Verify storefront signs end_delivery receipt (request has no at), never stops
       buyer billing; buyer half stops first, journals/retries same key through
       outage with billing until landing, and may additionally file buyer_end.

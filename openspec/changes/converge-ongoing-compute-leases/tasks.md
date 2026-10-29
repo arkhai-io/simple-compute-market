@@ -86,14 +86,15 @@ before code starts; no superseded Goal 8 change is an implementation gate.
 ## 3. Delivery and authority work
 
 - [ ] 3.1 Compose and verify foundation's phase/decision protocol and spot's hosted
-      authorize/start_billing implementation through provisioning/compute/delivery;
+      authorize/start_billing implementation through domains/compute/delivery;
       do not define the protocol or interpret hosted part fields here. Bind both
       storefront composition roots and drive the shared start journal from the loop.
       Accept activation to the Agreement end or verified earlier end, including
       truncation before activation and between lost acknowledgement and retry.
       Consume foundation's sole intent and unify's reference/undelivered handoff;
       verify both storefront integration suites. Spot's adapter plus this composition
-      gate unify 4.4; foundation's protocol precedes unify 1–3.
+      gate unify 4.4's consumption of matrix rows 4 and 8, executed only in task 4.1
+      here; foundation's protocol precedes unify 1–3.
 - [ ] 3.2 Consume foundation's classified end/self-penalty filing journal for
       unentitled site/operator/failed delivery, never future-dated; pre-start failure
       journals immediately and files at Agreement start. Route exceptional_end only
@@ -145,7 +146,11 @@ before code starts; no superseded Goal 8 change is an implementation gate.
 ## 4. Lane qualification and pre-closeout review
 
 - [ ] 4.1 Extend e2e-tests/tests/e2e/roles/scenarios and shared stages with D's full
-      rate matrix (0–11), executing spot's prepared entry points and recording maximum
+      rate matrix (0–11), executing spot's prepared entry points. Rows 4 and 8 own
+      unify 4.4's activate/start/disclose races and post-activation start refusal in
+      both domains, proving no start before activation or duplicate start key across
+      crashes after task 3.1's hook composition; do not repeat these drives in unify.
+      Record maximum
       term plus on-demand/spot emergency exceptional_end filings, sole mechanical
       payee self-penalty and on-demand returned treatment. Record buyer case/held
       money plus premature-stop-penalty remedy, not mandate-enforced non-preemption. Exercise buyer-half

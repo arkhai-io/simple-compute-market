@@ -260,9 +260,9 @@ resolved by the off-by-default composition switch and unify-owned final enableme
 The owner additionally fixes the distinction between site end intent and proven
 physical completion (D-G), and activation-before-billing order (D-F). These are
 coordinated design edits, not evidence that caller or site code is implemented.
-Recommend another design review of the coordinated contracts before planning;
-keep this change in design. The review/triage records live with unify, which owns
-those findings.
+That review requested a coordinated re-check before advancement; the focused
+cross-change re-check below resolves it. The review/triage records live with unify,
+which owns those findings.
 
 ## Coordinated second-review triage
 
@@ -278,9 +278,10 @@ alone mechanically rules the standard-or-stronger seller self-penalty. No site p
 logic or new buyer guarantee is introduced. "Won't preempt" is enforced by remedy
 over held money plus the premature-stop penalty, not the mandate. end_delivery has no at and gives signed
 receipt evidence only; the buyer half owns payment-stop retry while billing continues
-until it lands, with optional buyer_end human triage. Remove restitution stop entries,
-notice waiver/early release and multiple-stop-entry gates; seller stops are entitlements
-only, and a spot seller's emergency exit is a filing. Keep in design for the coordinated review.
+until it lands, with optional buyer_end human triage. Restitution stop entries,
+notice waiver/early release and multiple-stop-entry gates were removed; seller stops
+are entitlements only, and a spot seller's emergency exit is a filing. The focused
+cross-change re-check leaves implementation ready subject to the recorded section gates.
 
 ## Open questions
 

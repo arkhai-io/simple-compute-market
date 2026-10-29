@@ -237,12 +237,14 @@ pass. New persisted scenarios remain subject to the explicit approval gate above
       before activation until the site's awaiting-activation expiry, recover and
       observe physical release plus the journaled exceptional-end dispute filing. Keep
       authority-application results distinct from local command evidence.
-- [ ] 4.4 After the rate dependencies are ready, compose their hook and drive
-      activate/start/disclose races and a post-activation start refusal in both
-      domains against the in-lane payments and mediation doubles. Prove no start
-      before activation and no duplicated start key across crashes.
-      Name this client qualification against the double, not proof of live authority
-      behavior. Keep live contract qualification with the activation campaign gate.
+- [ ] 4.4 After converge task 3.1 composes the rate hook, consume convergence's
+      single rate-servicing lane matrix execution at its task 4.1. The delivery
+      activate/start/disclose race maps to row 4; post-activation start refusal and
+      never-disclosed recovery map to row 8. Both rows there prove no start before
+      activation and no duplicated start key across crashes in both domains against
+      the in-lane doubles. Do not compose another hook or run duplicate rate drives
+      here; unify retains only non-rate delivery qualification. Live authority
+      qualification remains with activation.
 - [ ] 4.5 After 4.2/4.3 qualify every commit/recovery caller, change the repository's
       compute-composition activation_deadlines_enabled default introduced by renewable
       in `provisioning/compute/service/src/compute_provisioning_service/container.py`

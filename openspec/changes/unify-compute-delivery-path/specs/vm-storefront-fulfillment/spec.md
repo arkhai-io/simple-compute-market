@@ -12,7 +12,7 @@ The storefront MUST retry and report failed checkpoints without abandoning an ot
 
 ### Requirement: Full settlement convergence ownership
 
-The VM storefront MUST own reservation, fulfillment, access and delivery progress through the shared compute path. It MUST hold/commit capacity under deal_ref.negotiation_id without a settlement reference, activate before billing/availability, and send ends through end service. Selected stages MUST own attestation/readiness/claim binding; the claims engine owns submission/collection. Common delivery MUST consume evidence, not compare mechanism IDs.
+The VM storefront MUST own reservation, fulfillment, access and delivery progress through the shared compute path. It MUST hold/commit capacity under deal_ref.negotiation_id without a settlement reference and commit the deal's reservation before fulfillment begins, which begins the lease. Afterwards only end service writes to the lease, except journaled activation before billing/availability. Ends MUST use end service. Selected stages MUST own attestation/readiness/claim binding; the claims engine owns submission/collection, not physical recovery. Common delivery MUST consume evidence, not compare mechanism IDs.
 
 #### Scenario: An escrow-settled deal's reservation is looked up
 
