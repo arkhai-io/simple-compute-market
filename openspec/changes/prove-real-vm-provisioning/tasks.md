@@ -40,14 +40,16 @@ Files: `e2e-tests/tests/e2e/roles/helpers/compute_deal_stages.py`;
 `…/bare_metal/test_bare_metal_mock_deal.py`; `e2e-tests/tests/unit/test_compute_deal_stages.py`
 and `e2e-tests/tests/unit/stage_sources.py`.
 
-- [ ] 1.1 Add a `MockGates` protocol beside `ComputeDealDriver` and move to it
+- [x] 1.1 Add a `MockGates` protocol beside `ComputeDealDriver` and move to it
       `create_rule_id`, `teardown_rule_id`, `arm_create_gate`, `release_create_gate`,
       `evaluate_create_job`, `arm_teardown_gate`, and `release_teardown_gate`. Both mock
       drivers (VM and bare metal) implement both protocols, unchanged in behaviour. The
       module docstring and `ComputeDealDriver`'s say a shared stage never uses
       `MockGates` and why (D4a: a gate hook answered by a no-op would make a shared
       assertion vacuous under one driver). (D4a)
-- [ ] 1.2 Split each gated stage at its gate, as D4a names them: 07 into the shared
+      Done; the drivers' bodies are unchanged, only their docstrings name both parts.
+      A marker base, `MockLaneStage`, identifies the mock-lane stages in source.
+- [x] 1.2 Split each gated stage at its gate, as D4a names them: 07 into the shared
       on-chain escrow stage and a mock-only create-gate arm; 09a into a mock-only create
       release-and-drain and the shared advance to `active`; 10a into a mock-only
       teardown-gate arm and the shared expiry; 11b into a mock-only teardown
@@ -55,26 +57,77 @@ and `e2e-tests/tests/unit/stage_sources.py`.
       `Stage00e_ProvisioningMockMode` stays mock-only. Mock-only stages take the driver
       as `MockGates`; shared stages take it as `ComputeDealDriver`. Each new class name
       says what the stage does. (D4a)
-- [ ] 1.3 Replace 08b's prerequisite `_provision_job_evaluated` with a readiness field
+      Shared: `Stage07_OnChainEscrow`, `Stage09a_FulfillmentConvergesToActive`,
+      `Stage10a_LeaseExpirySetup` (test renamed `test_10a_expire_lease`),
+      `Stage11b_TeardownCompletion`. Mock-lane: `Stage07a_ArmCreateGate`,
+      `Stage08b2_ReleaseCreateGateAndDrain`, `Stage09c2_ArmTeardownGate`,
+      `Stage11a2_ReleaseTeardownGateAndDrain`, plus 00e and 08c. Beyond the plan, so
+      that a real lane can run every shared stage: 00e's output field
+      `_provisioning_mock_mode` became the lane-neutral `_provisioning_execution_confirmed`
+      (00f1 and 07 require it; section 6's VM-execution check writes it), and the VM
+      buyer-CLI scenarios, which declare their own stages, keep `_provisioning_mock_mode`
+      on VM's `DealState`. Two more readiness fields follow 08b's pattern so a failed
+      release or poll skips its dependent rather than letting it fail:
+      `_create_job_completed` (08b2 → 09a) and `_teardown_job_completed` (11a2 → 11b);
+      the arms write `provisioning_gate_armed` and `_teardown_gate_armed`, which the
+      releases require.
+- [x] 1.3 Replace 08b's prerequisite `_provision_job_evaluated` with a readiness field
       `_settle_preflight_passed` on `ComputeDealState`; 08c writes it once its
       assertions pass and no longer writes `_provision_job_evaluated` (remove the field
       if nothing else reads it). 08b's assertion message says the fulfillment is
       dispatched and not yet converged. 08b and 11a stay shared, unchanged otherwise.
       (D4a; scenario "The preflight before settlement fails")
-- [ ] 1.4 List the new stages in both mock lane modules in the mock-lane order D4a
+      `_provision_job_evaluated` removed; nothing else read it.
+- [x] 1.4 List the new stages in both mock lane modules in the mock-lane order D4a
       gives, so each lane runs the same assertions in the same order as before.
       (D4a; scenario "A mock lane holds a job")
-- [ ] 1.5 Unit (`test_compute_deal_stages.py`, `stage_sources.py`):
+      The stages module defines every stage in the mock-lane order, so a mock lane
+      declares them all in definition order; VM's 09a2 and 09bb and bare metal's own
+      stages sit where they did. That the order and assertions match the lanes'
+      before the split was checked by hand against the planning commit, not by a
+      test: the unit test holds the lanes to the new definition order. One step
+      moved: 11b's stage-event mark is now taken after teardown's release and
+      drain, which is sound because convergence and the lease watchdog are held.
+      09c2's arm takes 10a's prerequisites, as the arm did inside 10a.
+- [x] 1.5 Unit (`test_compute_deal_stages.py`, `stage_sources.py`):
       `test_every_compute_state_field_is_consumed_after_it_is_produced` passes with the
       new field; a new test fails if any shared stage's source references a `MockGates`
       member or the mock test client; a new test that 08b skips when
       `_settle_preflight_passed` is unset; the existing stage-list tests are updated for
       the new classes in both lanes. (D4a; scenarios "A mock lane holds a job", "A real
       lane runs the canonical deal")
-- [ ] 1.6 Verification: `make -C e2e-tests test-unit`; `make test`.
+      Unit, `e2e-tests/tests/unit/test_compute_deal_stages.py`: the stage-list test now
+      requires a mock lane to declare every stage in definition order;
+      `test_no_shared_stage_touches_a_mock_gate` (a `MockGates` member or
+      `provisioning_test_client` named as an attribute, argument, or name, or the
+      `MockGates` name, in a shared stage's own source — a gate reached through a
+      helper the stage calls, or through another attribute such as a driver's
+      `vm_rules`, is beyond it); `test_each_stage_takes_the_driver_part_its_kind_may_use` (annotations);
+      `test_the_shared_driver_part_names_no_mock_gate`;
+      `test_settlement_skips_until_the_preflight_before_it_passes` calls 08b's body
+      with mocks and asserts the skip names the field and nothing was settled. The
+      gate check was confirmed to fail by temporarily adding a gate call to shared
+      09a. `stage_sources.py` needed no change.
+- [x] 1.6 Verification: `make -C e2e-tests test-unit`; `make test`.
       End-to-end: `e2e_deal` (VM lane) and `e2e_bare_metal_mock_deal` (bare-metal
       lane) run the reordered stages; their outcome must be unchanged, so the
       validation pipeline's result for both lanes is this section's evidence.
+      `make -C e2e-tests test-unit`: 176 passed (unit). `make test`: passed. No
+      end-to-end run was made here: the pipeline's run of the lanes, which
+      validation dispatches, is this section's end-to-end evidence that the
+      outcome is unchanged. Markers confirmed: `e2e_deal` and
+      `e2e_bare_metal_mock_deal` run the split stages; `e2e_deal_buyer_cli` and
+      `e2e_buy` (VM lane) are touched only by `_provisioning_mock_mode` moving to
+      VM's `DealState`, which keeps their behaviour. No CI workflow beyond the
+      pipeline is owed.
+      Handoff: `TESTING.md` ("The canonical compute deal", "One part, zoomed in")
+      and the diagrams `docs/development/diagrams/e2e-settle-zoom.drawio` (settle
+      requires "the gate is armed"), `e2e-compute-deal.drawio`, and
+      `e2e-stage-discipline.drawio` still draw gates inside shared parts; 9.9's
+      promotion owes them (amended there). The stage-set unit test's
+      field-consumption test is held to the mock lanes: section 6's real lane
+      produces none of the gate fields, so its row needs a lane-scoped variant
+      (fields it produces are consumed) rather than `COMPUTE_FIELDS`.
 
 ## 2. GPU-less shapes in the VM helpers
 
@@ -381,6 +434,10 @@ The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
       `physical-provisioning` specifications are written by the archive (9.11).
       `docs/development/ARCHITECTURE.md` has no change, as the proposal records. Complete
       the design-promotion record in `design.md`.
+      Amended during section 1: the canonical-deal diagrams under
+      `docs/development/diagrams/` (`e2e-compute-deal`, `e2e-settle-zoom`,
+      `e2e-stage-discipline`, `.drawio` and their `.svg` exports) and TESTING.md's
+      "One part, zoomed in" are redrawn with the mock gates as mock-lane stages.
 - [ ] 9.10 **Documentation citations.** `make check-doc-citations
       CHANGE=prove-real-vm-provisioning`; `openspec validate prove-real-vm-provisioning
       --strict`.

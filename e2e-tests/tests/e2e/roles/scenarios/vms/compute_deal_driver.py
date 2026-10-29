@@ -1,13 +1,13 @@
 """VM's part of the canonical compute deal: what the shared stages ask of it.
 
-The shared stages in ``helpers/compute_deal_stages.py`` hold the deal's control
-flow and every assertion that is not VM's. This driver holds VM's: the executor
+The stages in ``helpers/compute_deal_stages.py`` hold the deal's control flow
+and every assertion that is not VM's. This driver holds VM's: the executor
 host and capacity it declares, the ``compute.v1`` provision terms, the VM
-playbook's create and removal mock rules and their release, the settlement
-preview's arguments and expectations, what settle answers and where the
-dispatched fulfillment is read, the tenant credentials and escrow claim a ready
-VM delivers, the lease view over VM's site, and the claim that re-reserves the
-released resource and its release.
+playbook's create and removal mock rules and their release (its ``MockGates``,
+which only the mock-lane stages use), the settlement preview's arguments and
+expectations, what settle answers and where the dispatched fulfillment is read,
+the tenant credentials and escrow claim a ready VM delivers, the lease view over
+VM's site, and the claim that re-reserves the released resource and its release.
 """
 
 from __future__ import annotations
@@ -64,7 +64,7 @@ def vm_job_evaluation(
 
 @dataclass
 class VmComputeDealDriver:
-    """VM's ``ComputeDealDriver``, over the VM lane's clients."""
+    """VM's ``ComputeDealDriver`` and ``MockGates``, over the VM lane's clients."""
 
     provisioning_client: Any
     provisioning_test_client: Any

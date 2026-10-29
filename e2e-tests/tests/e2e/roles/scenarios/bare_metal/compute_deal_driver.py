@@ -1,14 +1,15 @@
 """Bare metal's part of the canonical compute deal: what the shared stages ask of it.
 
-The shared stages in ``helpers/compute_deal_stages.py`` hold the deal's control
-flow and every assertion that is not bare metal's. This driver holds bare
-metal's: a backed pool, the host record, and one whole machine declared at the
-site; the ``bare_metal.v2`` provision terms; the access playbook's grant and
-reclaim mock rules, on the bare-metal mock's own routes; the settlement
-preview's expectations; what settle answers and where the dispatched
-fulfillment is read; the delivery a ready lease serves, through the buyer's own
-fulfillment transport; the lease view over the lane's site; and the claim that
-re-reserves the released machine and its release at the site.
+The stages in ``helpers/compute_deal_stages.py`` hold the deal's control flow
+and every assertion that is not bare metal's. This driver holds bare metal's: a
+backed pool, the host record, and one whole machine declared at the site; the
+``bare_metal.v2`` provision terms; the access playbook's grant and reclaim mock
+rules, on the bare-metal mock's own routes (its ``MockGates``, which only the
+mock-lane stages use); the settlement preview's expectations; what settle
+answers and where the dispatched fulfillment is read; the delivery a ready lease
+serves, through the buyer's own fulfillment transport; the lease view over the
+lane's site; and the claim that re-reserves the released machine and its release
+at the site.
 """
 
 from __future__ import annotations
@@ -67,7 +68,8 @@ class BareMetalDealLease(DealLease):
 
 @dataclass
 class BareMetalComputeDealDriver:
-    """Bare metal's ``ComputeDealDriver``, over the bare-metal lane's clients."""
+    """Bare metal's ``ComputeDealDriver`` and ``MockGates``, over the bare-metal
+    lane's clients."""
 
     site_operator: Any
     site_capacity_admin: Any

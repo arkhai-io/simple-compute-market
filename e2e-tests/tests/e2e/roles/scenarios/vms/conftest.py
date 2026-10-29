@@ -80,9 +80,11 @@ class DealState(ComputeDealState):
     # VM's own stage of the typed-client deal: 03a validates the publish 03b
     # performs.
     _registry_validate_passed: bool = False
-    # The buyer-CLI and one-shot scenarios' own sentinels: the listing resumed
-    # into publication, the executor host registered, and the capacity-event
-    # loop stepped (`B4c` and the buyer-CLI deal's capacity-event stage).
+    # The buyer-CLI and one-shot scenarios' own sentinels: provisioning runs its
+    # mock profile, the listing resumed into publication, the executor host
+    # registered, and the capacity-event loop stepped (`B4c` and the buyer-CLI
+    # deal's capacity-event stage).
+    _provisioning_mock_mode: bool = False
     resume_confirmed: bool = False
     _executor_host_registered: bool = False
     _capacity_events_advanced: bool = False

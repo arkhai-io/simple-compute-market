@@ -1,10 +1,11 @@
 """Full buyer-seller deal lifecycle — sequential e2e test suite.
 
-VM's run of the compute family's canonical deal. The stages VM shares with
-bare metal are defined once in ``helpers/compute_deal_stages.py`` and declared
-here, in order, by subclassing; VM's own stages (02b, 03a, 03b, 09a2, 09bb)
-are inserted in place, and ``VmComputeDealDriver`` supplies VM's part of the
-shared ones.
+VM's run of the compute family's canonical deal, through the provisioning mock
+profile. The stages VM shares with bare metal, and the mock-lane stages that hold
+and release its jobs at the mock rules' gates, are defined once in
+``helpers/compute_deal_stages.py`` and declared here, in order, by subclassing;
+VM's own stages (02b, 03a, 03b, 09a2, 09bb) are inserted in place, and
+``VmComputeDealDriver`` supplies VM's part of them.
 
 Stage map
 ---------
@@ -53,10 +54,13 @@ Phase 6 — Negotiation settlement
                                           escrows=[] (none until phase 7)
 
 Phase 7 — On-chain escrow + provisioning gate setup
-  07   Create real escrow_uid; add provisioning mock rule (pause_before_result=True)
+  07   Create real escrow_uid
+  07a  Add provisioning mock rule (pause_before_result=True)
   07b  Verify escrow via storefront dry-run
 
 Phase 8 — Settlement pipeline
+  08a  Evaluate settle dry-run → would_submit=True, host chosen
+  08c  Evaluate provisioning job dry-run → the create rule would match and pause
   08b  Settlement submitted + fulfillment dispatched:
          POST /api/v1/settle/{uid} → status=provisioning
          wait_for_stage_event(provision, job_submitted)
@@ -64,7 +68,8 @@ Phase 8 — Settlement pipeline
          (resource identity is confirmed later, via admin introspection, at 09c)
 
 Phase 9 — Provisioning completion
-  09a  Release gate + job completes: resume_rule; wait_for_job → succeeded
+  08b2 Release the create gate and drain the job
+  09a  Advance convergence → fulfillment active
   09b  Settlement ready + credentials + listing closed:
          wait_for_settlement (server-side long-poll) → ready=True, status=ready
          GET /settle/{uid}/status → status=ready, tenant_credentials present
@@ -75,17 +80,19 @@ Phase 9 — Provisioning completion
          GET provisioning /api/v1/leases/by-escrow/{uid} -> active/pending lease
 
 Phase 10 — Lease expiry and durable teardown
-  10a  Assert the module's lease-watchdog hold, arm the provider teardown gate,
-       and back-date the lease end so the watchdog reads it as expired. Expiry is
-       what ends a lease in production; admin interruption is an escape hatch
-       for a deal sold as interruptible and is covered elsewhere.
+  09c2 Arm the provider teardown gate.
+  10a  Assert the module's lease-watchdog hold and back-date the lease end so
+       the watchdog reads it as expired. Expiry is what ends a lease in
+       production; admin interruption is an escape hatch for a deal sold as
+       interruptible and is covered elsewhere.
   10b  Run one lease cycle → reservation releasing, fulfillment id recorded,
        fulfillment teardown_dispatch_pending, capacity still held.
 
 Phase 11 — Fulfillment convergence and resource release
   11a  Run one fulfillment cycle → tearing_down while capacity remains held.
-  11b  Complete provider teardown, converge to torn_down, run one lease cycle →
-       released; observe storefront release, capacity reuse, and cleanup.
+  11a2 Release the teardown gate and drain provider teardown.
+  11b  Converge to torn_down, run one lease cycle → released; observe
+       storefront release, capacity reuse, and cleanup.
 """
 
 from __future__ import annotations
@@ -119,16 +126,20 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     Stage05a_EvaluateNegotiate,
     Stage05b_NegotiationStartsAndVisible,
     Stage06b_ForceAcceptAndTerminal,
-    Stage07_OnChainEscrowAndProvGate,
+    Stage07_OnChainEscrow,
+    Stage07a_ArmCreateGate,
     Stage07b_VerifyEscrow,
     Stage08a_EvaluateSettle,
+    Stage08b2_ReleaseCreateGateAndDrain,
     Stage08b_SettlementSubmittedAndJobQueued,
     Stage08c_EvaluateProvisioningJob,
-    Stage09a_ProvisioningCompletes,
+    Stage09a_FulfillmentConvergesToActive,
     Stage09b_SettlementReadyAndCredentials,
+    Stage09c2_ArmTeardownGate,
     Stage09c_LeaseRecorded,
     Stage10a_LeaseExpirySetup,
     Stage10b_LeaseCycleBeginsTeardown,
+    Stage11a2_ReleaseTeardownGateAndDrain,
     Stage11a_TeardownDispatch,
     Stage11b_TeardownCompletion,
 )
@@ -392,7 +403,11 @@ class TestStage06b_ForceAcceptAndTerminal(Stage06b_ForceAcceptAndTerminal):
     pass
 
 
-class TestStage07_OnChainEscrowAndProvGate(Stage07_OnChainEscrowAndProvGate):
+class TestStage07_OnChainEscrow(Stage07_OnChainEscrow):
+    pass
+
+
+class TestStage07a_ArmCreateGate(Stage07a_ArmCreateGate):
     pass
 
 
@@ -412,7 +427,11 @@ class TestStage08b_SettlementSubmittedAndJobQueued(Stage08b_SettlementSubmittedA
     pass
 
 
-class TestStage09a_ProvisioningCompletes(Stage09a_ProvisioningCompletes):
+class TestStage08b2_ReleaseCreateGateAndDrain(Stage08b2_ReleaseCreateGateAndDrain):
+    pass
+
+
+class TestStage09a_FulfillmentConvergesToActive(Stage09a_FulfillmentConvergesToActive):
     pass
 
 
@@ -570,6 +589,10 @@ class TestStage09c_LeaseRecorded(Stage09c_LeaseRecorded):
 # Phases 10 and 11 — lease expiry, teardown, and release
 # ===========================================================================
 
+class TestStage09c2_ArmTeardownGate(Stage09c2_ArmTeardownGate):
+    pass
+
+
 class TestStage10a_LeaseExpirySetup(Stage10a_LeaseExpirySetup):
     pass
 
@@ -579,6 +602,10 @@ class TestStage10b_LeaseCycleBeginsTeardown(Stage10b_LeaseCycleBeginsTeardown):
 
 
 class TestStage11a_TeardownDispatch(Stage11a_TeardownDispatch):
+    pass
+
+
+class TestStage11a2_ReleaseTeardownGateAndDrain(Stage11a2_ReleaseTeardownGateAndDrain):
     pass
 
 

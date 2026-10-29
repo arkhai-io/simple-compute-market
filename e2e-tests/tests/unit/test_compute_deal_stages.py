@@ -1,8 +1,15 @@
 """The canonical compute deal's stage set is declared, ordered, and wired.
 
-Read from source rather than collected, so a scenario module is checked without
-its lane's settings or services. Each compute domain's scenario is one row of
-``DOMAINS``; a domain that runs the shared stages adds its row.
+The stage set is read from source rather than collected, so a scenario module is
+checked without its lane's settings or services; one stage's body is run with
+injected mocks where its skip is the behaviour under test. Each compute lane's
+scenario is one row of ``LANES``; a lane that runs the canonical deal adds its
+row.
+
+The stages module defines two kinds of stage: shared stages, which every lane
+runs, and mock-lane stages (subclasses of ``MockLaneStage``), which only a lane
+delivering through the provisioning mock profile runs. Both are defined in the
+mock lanes' run order, so a mock lane declares every stage in definition order.
 """
 
 from __future__ import annotations
@@ -10,9 +17,14 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
+from tests.e2e.roles.helpers.compute_deal_stages import (
+    ComputeDealState,
+    Stage08b_SettlementSubmittedAndJobQueued,
+)
 from tests.unit.stage_sources import (
     StateUse,
     base_names,
@@ -31,151 +43,242 @@ ROLES = TESTS / "e2e" / "roles"
 SHARED = ROLES / "helpers" / "compute_deal_stages.py"
 DOMAIN_DEAL = ROLES / "helpers" / "domain_deal.py"
 STATE = "deal_state"
+DRIVER = "deal_driver"
+#: The fixture only a mock lane provides: the provisioning service's mock routes.
+MOCK_TEST_CLIENT = "provisioning_test_client"
+MOCK_LANE_MARKER = "MockLaneStage"
 
 
 @dataclass(frozen=True)
-class Domain:
+class Lane:
     name: str
     scenario: Path
-    #: The module and class of the state the domain's stages write.
+    #: The module and class of the state the lane's stages write.
     state_module: Path
     state_class: str
 
 
-DOMAINS = (
-    Domain(
+LANES = (
+    Lane(
         "vms",
         ROLES / "scenarios" / "vms" / "test_full_deal.py",
         ROLES / "scenarios" / "vms" / "conftest.py",
         "DealState",
     ),
-    Domain(
+    Lane(
         "bare_metal",
         ROLES / "scenarios" / "bare_metal" / "test_bare_metal_mock_deal.py",
         ROLES / "scenarios" / "bare_metal" / "conftest.py",
         "BareMetalDealState",
     ),
 )
+#: The lanes that deliver through the provisioning mock profile.
+MOCK_LANES = LANES
 
 
-SHARED_TREE = tree(SHARED)
-SHARED_STAGES = [node for node in classes(SHARED_TREE) if is_stage(node)]
+STAGES_TREE = tree(SHARED)
+STAGES = [node for node in classes(STAGES_TREE) if is_stage(node)]
+STAGE_NAMES = [node.name for node in STAGES]
+MOCK_LANE_STAGES = [node for node in STAGES if MOCK_LANE_MARKER in base_names(node)]
+SHARED_STAGES = [node for node in STAGES if MOCK_LANE_MARKER not in base_names(node)]
 SHARED_NAMES = [node.name for node in SHARED_STAGES]
-COMPUTE_FIELDS = fields(class_named(SHARED_TREE, "ComputeDealState"))
+COMPUTE_FIELDS = fields(class_named(STAGES_TREE, "ComputeDealState"))
 DOMAIN_DEAL_FIELDS = fields(class_named(tree(DOMAIN_DEAL), "DomainDealState"))
-SHARED_USE = state_use(SHARED_STAGES, state=STATE)
+STAGES_USE = state_use(STAGES, state=STATE)
 
 
-def _domain_own_stages(domain: Domain) -> list[ast.ClassDef]:
+def _members(protocol: str) -> set[str]:
+    node = class_named(STAGES_TREE, protocol)
+    return {
+        item.name for item in node.body if isinstance(item, ast.FunctionDef)
+    } | fields(node)
+
+
+MOCK_GATES = _members("MockGates")
+
+
+def _lane_own_stages(lane: Lane) -> list[ast.ClassDef]:
     return [
-        node for node in domain_stages(domain.scenario)
-        if not set(base_names(node)) & set(SHARED_NAMES)
+        node for node in domain_stages(lane.scenario)
+        if not set(base_names(node)) & set(STAGE_NAMES)
     ]
 
 
-def _scenario(domain: Domain) -> list[tuple[str, StateUse]]:
-    return run_order(domain.scenario, SHARED_STAGES, state=STATE)
+def _scenario(lane: Lane) -> list[tuple[str, StateUse]]:
+    return run_order(lane.scenario, STAGES, state=STATE)
 
 
-def test_the_shared_stages_are_not_collected_where_they_are_defined():
-    assert SHARED_STAGES, "the shared module defines no stage"
-    collected = [node.name for node in classes(SHARED_TREE) if node.name.startswith("Test")]
+def _driver_annotation(stage: ast.ClassDef) -> str | None:
+    """The annotation of the driver a stage's test takes, if it takes one."""
+    for item in stage.body:
+        if isinstance(item, ast.FunctionDef) and item.name.startswith("test_"):
+            for arg in item.args.args:
+                if arg.arg == DRIVER:
+                    assert isinstance(arg.annotation, ast.Name), (
+                        f"{stage.name} takes {DRIVER} without naming its protocol"
+                    )
+                    return arg.annotation.id
+    return None
+
+
+def test_the_stages_are_not_collected_where_they_are_defined():
+    assert SHARED_STAGES, "the stages module defines no shared stage"
+    assert MOCK_LANE_STAGES, "the stages module defines no mock-lane stage"
+    collected = [node.name for node in classes(STAGES_TREE) if node.name.startswith("Test")]
     assert collected == [], collected
 
 
-@pytest.mark.parametrize("domain", DOMAINS, ids=lambda domain: domain.name)
-def test_a_domain_declares_every_shared_stage_once_in_order(domain: Domain):
+@pytest.mark.parametrize("lane", MOCK_LANES, ids=lambda lane: lane.name)
+def test_a_mock_lane_declares_every_stage_once_in_order(lane: Lane):
     declared: list[str] = []
-    for node in domain_stages(domain.scenario):
-        shared = [name for name in base_names(node) if name in SHARED_NAMES]
-        if not shared:
+    for node in domain_stages(lane.scenario):
+        defined = [name for name in base_names(node) if name in STAGE_NAMES]
+        if not defined:
             continue
-        (base,) = shared
+        (base,) = defined
         assert node.name == "Test" + base, (
-            f"{domain.name} declares {base} as {node.name}; the stage's ID and "
+            f"{lane.name} declares {base} as {node.name}; the stage's ID and "
             "test names come from its name"
         )
         assert len(node.body) == 1 and isinstance(node.body[0], ast.Pass), (
-            f"{domain.name}'s {node.name} has a body of its own; a shared stage's "
-            "body is defined once, and a domain's part goes through its driver"
+            f"{lane.name}'s {node.name} has a body of its own; a stage's body is "
+            "defined once, and a domain's part goes through its driver"
         )
         declared.append(base)
-    assert declared == SHARED_NAMES, (
-        f"{domain.name} declares the shared stages {declared}; expected each once, "
-        f"in the shared order {SHARED_NAMES}"
+    assert declared == STAGE_NAMES, (
+        f"{lane.name} declares the stages {declared}; a mock lane declares each "
+        f"once, in the defined order {STAGE_NAMES}"
     )
 
 
-@pytest.mark.parametrize("domain", DOMAINS, ids=lambda domain: domain.name)
-def test_a_domain_state_extends_the_compute_state(domain: Domain):
-    node = class_named(tree(domain.state_module), domain.state_class)
+def test_no_shared_stage_touches_a_mock_gate():
+    """A shared stage runs in a real lane too, whose driver has no gates and
+    whose stack serves no mock routes.
+
+    Read from each shared stage's own source: a gate reached through a helper
+    the stage calls is beyond what this sees.
+    """
+    offending = {}
+    for stage in SHARED_STAGES:
+        used = set()
+        for node in ast.walk(stage):
+            if isinstance(node, ast.Attribute) and (
+                node.attr in MOCK_GATES | {MOCK_TEST_CLIENT}
+            ):
+                used.add(node.attr)
+            if isinstance(node, ast.arg) and node.arg == MOCK_TEST_CLIENT:
+                used.add(MOCK_TEST_CLIENT)
+            if isinstance(node, ast.Name) and node.id in {MOCK_TEST_CLIENT, "MockGates"}:
+                used.add(node.id)
+        if used:
+            offending[stage.name] = sorted(used)
+    assert offending == {}, offending
+
+
+def test_each_stage_takes_the_driver_part_its_kind_may_use():
+    wrong = {}
+    for stage in STAGES:
+        annotation = _driver_annotation(stage)
+        if annotation is None:
+            continue
+        expected = "MockGates" if stage in MOCK_LANE_STAGES else "ComputeDealDriver"
+        if annotation != expected:
+            wrong[stage.name] = annotation
+    assert wrong == {}, wrong
+
+
+def test_the_shared_driver_part_names_no_mock_gate():
+    assert MOCK_GATES, "MockGates declares no member"
+    assert _members("ComputeDealDriver") & MOCK_GATES == set()
+
+
+def test_settlement_skips_until_the_preflight_before_it_passes():
+    """08b submits settlement, so a failed preflight must stop it, not let it
+    submit onto a deal nothing checked."""
+    storefront = MagicMock()
+    provisioning = MagicMock()
+    driver = MagicMock()
+    state = ComputeDealState(
+        domain_identity="compute", negotiation_id="negotiation", real_escrow_uid="0xescrow",
+    )
+    with pytest.raises(pytest.skip.Exception, match="_settle_preflight_passed"):
+        Stage08b_SettlementSubmittedAndJobQueued().test_08b_settlement_submitted_and_provisioning_job_queued(
+            storefront, provisioning, {"wallet_address": "0xbuyer"}, driver, state,
+        )
+    storefront.settle_evm.assert_not_called()
+    driver.settle_dispatched.assert_not_called()
+
+
+@pytest.mark.parametrize("lane", LANES, ids=lambda lane: lane.name)
+def test_a_lane_state_extends_the_compute_state(lane: Lane):
+    node = class_named(tree(lane.state_module), lane.state_class)
     assert "ComputeDealState" in base_names(node), base_names(node)
 
 
-@pytest.mark.parametrize("domain", DOMAINS, ids=lambda domain: domain.name)
-def test_every_prerequisite_is_produced_by_an_earlier_stage(domain: Domain):
+@pytest.mark.parametrize("lane", LANES, ids=lambda lane: lane.name)
+def test_every_prerequisite_is_produced_by_an_earlier_stage(lane: Lane):
     """A stage requiring a field no earlier stage writes skips forever."""
     produced: set[str] = set()
-    for name, use in _scenario(domain):
+    for name, use in _scenario(lane):
         missing = use.required - produced
         assert missing == set(), (
-            f"{domain.name}'s {name} requires {sorted(missing)}, which no "
+            f"{lane.name}'s {name} requires {sorted(missing)}, which no "
             "earlier stage produces"
         )
         produced |= use.written
 
 
-@pytest.mark.parametrize("domain", DOMAINS, ids=lambda domain: domain.name)
-def test_every_field_read_is_produced_first(domain: Domain):
+@pytest.mark.parametrize("lane", LANES, ids=lambda lane: lane.name)
+def test_every_field_read_is_produced_first(lane: Lane):
     produced: set[str] = set()
-    for name, use in _scenario(domain):
+    for name, use in _scenario(lane):
         missing = use.read - produced - use.written - DOMAIN_DEAL_FIELDS
         assert missing == set(), (
-            f"{domain.name}'s {name} reads {sorted(missing)} before any stage "
+            f"{lane.name}'s {name} reads {sorted(missing)} before any stage "
             "writes it"
         )
         produced |= use.written
 
 
-@pytest.mark.parametrize("domain", DOMAINS, ids=lambda domain: domain.name)
-def test_each_compute_state_field_has_one_producer(domain: Domain):
+@pytest.mark.parametrize("lane", LANES, ids=lambda lane: lane.name)
+def test_each_compute_state_field_has_one_producer(lane: Lane):
     """A handoff written by two stages lets a consumer read the first
     producer's value when the second fails, instead of skipping."""
     producers: dict[str, list[str]] = {}
-    for name, use in _scenario(domain):
+    for name, use in _scenario(lane):
         for field_name in use.written & COMPUTE_FIELDS:
             producers.setdefault(field_name, []).append(name)
     repeated = {name: stages for name, stages in producers.items() if len(stages) > 1}
     assert repeated == {}, repeated
 
 
-@pytest.mark.parametrize("domain", DOMAINS, ids=lambda domain: domain.name)
-def test_every_compute_state_field_is_consumed_after_it_is_produced(domain: Domain):
+@pytest.mark.parametrize("lane", MOCK_LANES, ids=lambda lane: lane.name)
+def test_every_compute_state_field_is_consumed_after_it_is_produced(lane: Lane):
     """A field no later stage reads records nothing a later stage needs."""
     produced: set[str] = set()
     consumed: set[str] = set()
-    for _name, use in _scenario(domain):
+    for _name, use in _scenario(lane):
         consumed |= (use.read | use.required) & produced
         produced |= use.written
     unconsumed = COMPUTE_FIELDS - consumed
     assert unconsumed == set(), (
-        f"{domain.name}: no stage after its producer reads {sorted(unconsumed)}"
+        f"{lane.name}: no stage after its producer reads {sorted(unconsumed)}"
     )
 
 
-def test_the_shared_stages_use_only_declared_fields():
+def test_the_stages_use_only_declared_fields():
     declared = COMPUTE_FIELDS | DOMAIN_DEAL_FIELDS
-    used = SHARED_USE.written | SHARED_USE.required
+    used = STAGES_USE.written | STAGES_USE.required
     assert used - declared == set(), used - declared
 
 
-@pytest.mark.parametrize("domain", DOMAINS, ids=lambda domain: domain.name)
-def test_a_domain_stage_uses_only_its_states_fields(domain: Domain):
+@pytest.mark.parametrize("lane", LANES, ids=lambda lane: lane.name)
+def test_a_lane_stage_uses_only_its_states_fields(lane: Lane):
     declared = (
-        fields(class_named(tree(domain.state_module), domain.state_class))
+        fields(class_named(tree(lane.state_module), lane.state_class))
         | COMPUTE_FIELDS
         | DOMAIN_DEAL_FIELDS
     )
-    use = state_use(_domain_own_stages(domain), state=STATE)
+    use = state_use(_lane_own_stages(lane), state=STATE)
     used = use.written | use.required
     assert used - declared == set(), used - declared
