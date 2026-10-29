@@ -51,7 +51,7 @@ None. The shared lifecycle codec/projections are owned by the foundation change.
 
 - `agreed-evidence-and-early-termination`: shared projections, exact authority identity
   checks and clause correlation. Consume them, do not implement a second evaluator.
-- `negotiate-open-ended-compute-terms`: bound/class semantics and final option shape.
+- `negotiate-open-ended-compute-terms`: bound/class semantics and the option shape.
 - `store-registry-listings-as-published`, transitively
   `add-database-migration-commands`: carrier policy gates registry implementation.
 - `drop-escrow-from-shared-wire`: coordinate its server clause pushdown when present;

@@ -67,9 +67,9 @@ SCM MUST derive time rate parts through the agreed-price accessor and lifecycle 
 - **THEN** the mediation self-penalty returns all of setup to the buyer while it is held
 
 #### Scenario: Provisioning starts late
-- **GIVEN** a finite maximum term equal to accepted duration_seconds
+- **GIVEN** a finite accepted duration_seconds
 - **WHEN** rate start occurs after Agreement start_utc
-- **THEN** the derived part end instant remains start_utc plus max_term_seconds
+- **THEN** the derived part end instant remains start_utc plus duration_seconds
 - **AND** its own partialPeriod determines the final period's charge, not a rounded-down term
 
 ### Requirement: Hosted rate commands preserve part identity and uncertain outcomes
@@ -169,7 +169,7 @@ The hosted rate adapter MUST consume the deal-lifecycle stop-authority mapping a
 - **THEN** the adapter refuses start before contacting the payment authority
 
 ### Requirement: Absolute rate ends preserve the accepted capacity bound
-The rate adapter MUST derive end.partialPeriod only from early_termination.settles_through under deal-lifecycle's “Term ends carry their own partial-period treatment”, preserving start_utc plus max_term_seconds as its instant. Late activation MUST NOT shorten or extend that accepted bound.
+The rate adapter MUST derive end.partialPeriod only from early_termination.settles_through under deal-lifecycle's “Term ends carry their own partial-period treatment”, preserving start_utc plus duration_seconds as its instant. Late activation MUST NOT shorten or extend that accepted bound.
 
 #### Scenario: A late start leaves an incomplete final period
 - **GIVEN** authority start 10, period 60, amount 100 and absolute end 120 with returned treatment

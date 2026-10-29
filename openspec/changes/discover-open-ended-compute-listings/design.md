@@ -66,8 +66,7 @@ period is not an instruction to rewrite the advertised hourly rate.
 
 Every predicate in one clause must match the same option. A listing survives iff at
 least one eligible option satisfies the complete clause; preserve the surviving
-advertised option IDs through selection and correlate the final canonical ID under
-terms D5's bounded refinement. If registry pushdown is available, use the same
+advertised option IDs through selection; the accepted option carries the advertised ID. If registry pushdown is available, use the same
 projections and correlation there. Otherwise evaluate after the resource query and
 say so in explanation. Any coarse server filtering must be conservative: it may
 return extra options, never discard one that local evaluation would accept.

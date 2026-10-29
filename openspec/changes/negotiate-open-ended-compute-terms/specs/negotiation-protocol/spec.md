@@ -55,25 +55,19 @@ Reserved duration MUST be positive and fit both bounds. Recurring horizons MAY b
 - **THEN** the final identity-bound option and Agreement both bind 10 hours before acceptance
 - **AND** no cached or accepted option is silently mutated
 
-### Requirement: Final recurring options only narrow advertised horizons
+### Requirement: The horizon is the Agreement's, and the option is unchanged by it
 
-The seller's signed acceptance MUST carry the final recurring option and its canonical ID. The buyer MUST verify the ID and equality to an advertised option except for max_term_seconds and the resulting ID; Agreement duration_seconds MUST equal that max term, which MUST NOT exceed the advertised bound. Every other option field MUST remain equal. Cached options and accepted bytes MUST NOT be mutated.
+A recurring selection MUST resolve its horizon into `Agreement.duration_seconds` at acceptance — the buyer's stated horizon, else the earliest listing bound at the agreed start — and the seller's signed acceptance MUST carry the advertised option unchanged, with its advertised ID. The option MUST NOT carry a maximum term of its own. The buyer MUST check `duration_seconds` against both listing bounds at `start_utc` before committing.
 
-#### Scenario: Final horizon is within the advertised bound
+#### Scenario: Two buyers accept one option
 
-- **WHEN** signed acceptance carries a canonical final option with a 10-hour max term under an advertised 20-hour bound and no other option field changed
-- **THEN** the buyer accepts the refinement if Agreement duration is also 10 hours and both listing bounds hold
-- **AND** selection retains the advertised-to-final option correlation
+- **WHEN** two buyers accept the same recurring option at different starts under a 20-hour relative bound
+- **THEN** each Agreement carries its own `duration_seconds` and the same option with the same ID
 
-#### Scenario: Final horizon exceeds the advertised bound
+#### Scenario: A horizon exceeds the advertised bound
 
-- **WHEN** signed acceptance carries a 21-hour max term under an advertised 20-hour bound
-- **THEN** the buyer refuses even if the final option has a valid canonical ID
-
-#### Scenario: Another option field changes
-
-- **WHEN** signed acceptance narrows the max term but changes any other option field, such as price, asset, notice or adjudication
-- **THEN** the buyer refuses even if duration equals max term and the canonical ID is valid
+- **WHEN** a signed acceptance carries `duration_seconds` of 21 hours under an advertised 20-hour bound
+- **THEN** the buyer refuses to commit
 
 ### Requirement: Recurring starts resolve before signature
 

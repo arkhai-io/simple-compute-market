@@ -64,7 +64,7 @@ implementation that rejects every repository reader found during migration.
 
 Keep the foundation's exact shapes and names:
 
-- `early_termination = {version, entitlements, max_term_seconds, settles_through, premature_stop_penalty?}`;
+- `early_termination = {version, entitlements, settles_through, premature_stop_penalty?}` — the deal's horizon is not in it (D5);
   its top-level `settles_through` is the sole term-end treatment carrier (no mechanism-specific duplicate), separate from
   entitlements keyed by `payer`/`payee`, each `{notice_seconds, settles_through}`.
   Foundation D5 owns the `settles_through` mapping: `started_period` ↔ charged,
@@ -138,7 +138,7 @@ derivation with a diagnostic, not a guessed default.
 
 At resolved `start_utc`, let `B = min(positive max_duration_seconds,
 available_until_utc - start_utc)` over stated bounds. Default recurring selection
-binds `duration_seconds = max_term_seconds = B`.
+binds `duration_seconds = B`.
 If one bound is absent use the other. Require at least one whole period, but do not
 round the horizon. Bind an explicit shorter buyer horizon unchanged, show the
 effective horizon before signature, and refuse a longer, expired or sub-period
@@ -157,16 +157,13 @@ needs no separate rule: reserve-ahead places it on a period boundary.
 
 Recurring start_utc must resolve to whole-second precision before the final signature;
 refuse a fractional rate start rather than round signed bytes. Preserve once-only
-fractional handling. The selected option's max term and Agreement duration must agree before signature
-and commitment. Adopted recommendation, which the owner may revise: resolve start
-and effective horizon before the seller's signed acceptance, which carries the final
-option and its canonical ID. The buyer verifies that ID and accepts only if the
-option equals an advertised option except for max_term_seconds (and the equal
-Agreement duration_seconds), which must not exceed the advertised bound. Only the
-canonical ID changes as a consequence of that refinement; every other option field
-stays equal. Preserve the advertised-to-final option correlation, never mutate a
-cached option or rewrite identity after acceptance. The negotiation-protocol delta
-specifies this bounded refinement.
+fractional handling. The horizon is the Agreement's `duration_seconds` and nothing
+else: the option carries no maximum term, so the same option serves every buyer and
+its ID is stable from the registry to the Agreement; the seller's signed acceptance
+carries the advertised option unchanged and the resolved `duration_seconds`, which the
+buyer checks against both listing bounds at the agreed start. The rate part's end is
+`start_utc + duration_seconds` (spot D2). No option is minted at acceptance and no
+identity changes.
 
 An unbounded recurring candidate yields no option and a derivation close reason,
 not a hold merely for being unbounded; valid reserved candidates remain. Bare
@@ -251,6 +248,7 @@ the rate change derives it.
 - Early_termination on every option: once/unsupported mechanisms cannot bind it.
 - One bound only or a second offer-end date: relative and absolute capacity bounds suffice.
 - One listing per class: existing capacity/shape identity can carry multiple options.
+- A maximum term in the option, with the seller's acceptance minting a final option whose ID differs from the advertised one: the horizon is the deal's, already in `duration_seconds`; an option identity that changes between listing and Agreement needs a protocol amendment and a correlation step in discovery to carry a number the Agreement already carries.
 - New Agreement rate field, zero duration or hourly reinterpretation: preserve scalar semantics and finite lease window.
 - Publication-only/materialization-only gates: either permits an unserviceable accepted deal.
 - Reserve-ahead as worst-case buyer-loss cap: guarantees require authority actions, holds and evidence.
@@ -260,7 +258,7 @@ the rate change derives it.
 
 Foundation codec, authority validation and release-model migration precede wire edits. Reverify resize before accessor migration. Freeze recurring
 `period`, `reserve_ahead_seconds`, setup pricing and servicing declaration with the
-rate change. Implement D5's adopted bounded final-option refinement in acceptance.
+rate change. Resolve the horizon into `duration_seconds` at acceptance (D5).
 Sections 1–2's accessor/codec and 3.1's declaration are section-level handoffs to spot.
 This change can archive with its own declaration/publication/acceptance/display evidence;
 spot's materialization and convergence's continuation evidence are not prerequisites.
@@ -272,7 +270,7 @@ not buyer protocol guarantees.
 
 ## Goal 8 review triage
 
-No standalone review of this terms change was supplied this round. Applied the terms-facing findings from spot external F1/F9/F10/F12 and convergence external F6: foundation-owned `settles_through` values and fail-closed expressibility, one notice without exposure, unrounded horizons with explicit term-end billing treatment, accepted pricing evidence, truthful stop-and-hint and setup display. Rejected: a seller-only started-period refund, because only a committed payment term survives an adversarial seller and independent dispute execution. The focused cross-change re-check adopts D5's owner-revisable recommendation as the bounded final-option refinement, with an explicit negotiation-protocol delta rather than an unresolved identity gate.
+No standalone review of this terms change was supplied this round. Applied the terms-facing findings from spot external F1/F9/F10/F12 and convergence external F6: foundation-owned `settles_through` values and fail-closed expressibility, one notice without exposure, unrounded horizons with explicit term-end billing treatment, accepted pricing evidence, truthful stop-and-hint and setup display. Rejected: a seller-only started-period refund, because only a committed payment term survives an adversarial seller and independent dispute execution. The owner's 2026-10-29 review moved the horizon out of the option: D5's bounded final-option refinement and its negotiation-protocol requirement were replaced by the horizon as the Agreement's `duration_seconds` with a stable option ID.
 
 Second-review triage applies foundation 18 F4/F13/F14 and spot 03 F2: one term-end carrier,
 terms-owned default buyer policy, all interim charged term ends refused by default, and no
@@ -301,7 +299,7 @@ Destinations are planned, not claims of implemented behavior.
 |---|---|
 | D1, D2 classes and quote unit | `docs/development/ARCHITECTURE.md`; `openspec/specs/negotiation-protocol/spec.md` |
 | D3 penalty preset default (24 periods) and buyer acceptance recommendations; D4 placement result | `openspec/specs/settlement-configuration/spec.md`; foundation-owned lifecycle contract |
-| D5 bounded final-option refinement, listing bounds and omission | `openspec/specs/negotiation-protocol/spec.md`; `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md`; `openspec/specs/resource-pool-management/spec.md` |
+| D5 the horizon as the Agreement's, listing bounds and omission | `openspec/specs/negotiation-protocol/spec.md`; `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md`; `openspec/specs/resource-pool-management/spec.md` |
 | D6 servicing doors | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/storefront-publication/architecture.md` |
 | D7, D8 display and seller-policy distinction | `openspec/specs/buyer-orchestration/spec.md`; `openspec/specs/buyer-orchestration/architecture.md` |
 | Goal/dependency currency | `docs/development/ROADMAP.md`; `openspec/changes/README.md` at integration/closeout |

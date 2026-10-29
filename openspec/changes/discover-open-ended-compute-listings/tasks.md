@@ -37,8 +37,8 @@ approval. No tests are added by this reconciliation.
   and round-trip publication using the canonical typed registry client.
 - [ ] 2.2 In buyer query/selection and registry pushdown where supported, consume
   common `early_termination.*`/`adjudication.*` fields and registered
-  `arkhai_payments.period`, retaining eligible advertised option IDs and their
-  correlation to the final ID under terms D5's bounded refinement. Consume the
+  `arkhai_payments.period`, retaining eligible advertised option IDs through
+  selection. Consume the
   foundation's premature_stop_penalty projection with same-option, asset-correlated
   comparisons; a positive discovery match is not acceptance or a held-money guarantee.
   Do not create a second evaluator or `interruption.*` alias. Unit targets:

@@ -18,7 +18,7 @@ do not express these products across mechanisms or bound them by an absolute dat
   outside the accessor and declared raw negotiation hooks.
 - Keep listing-level `max_duration_seconds` and add `available_until_utc`, through
   hints, storefront overrides and configured defaults. For an unnamed recurring
-  horizon, at the resolved start, `max_term_seconds = duration_seconds =
+  horizon, at the resolved start, `duration_seconds =
   min(max_duration, available_until - start)` over stated finite bounds, without
   rounding and with at least one whole period. Reserved deals must also satisfy both bounds.
 - Publish one listing per existing capacity/shape identity with separately priced

@@ -111,7 +111,7 @@ and chain-name payment sentinels are never copied or trusted.
 
 Commit `lease_start_utc = Agreement.start_utc` and `lease_end_utc = start +
 duration` at settlement, under the same reservation identity on every attempt. The
-terms change owns `max_term_seconds == duration_seconds` and the foundation's single
+terms change owns the horizon as `duration_seconds` and the foundation's single
 term-end `early_termination.settles_through`; delivery introduces no end-treatment
 field and no local billing arithmetic. There is no now or missing-duration
 fallback and no replacement resource on ambiguous old timing. Late settlement

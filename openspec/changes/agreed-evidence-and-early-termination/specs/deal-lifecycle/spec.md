@@ -127,7 +127,7 @@ The payment-adapter protocol MUST send a stop only under a stop entry the mandat
 
 ### Requirement: Lifecycle terms are part of the selected option
 
-A settlement option MUST state its `price` (`asset`, `rates`; absent on a rateless option), its `settlement` (a `schema` naming the mechanism, with that schema's own parameters flat beside it, none named `schema`), and optionally its `lifecycle`, which MAY carry adjudication (version, dispute, dispute_window_seconds, case_hold_max_seconds), early_termination (version, payer/payee entitlements with notice_seconds/settles_through, max_term_seconds, term-end settles_through, premature_stop_penalty), and reserved bond (version, amount). The option ID MUST be the hash of the canonical payload of `price`, `settlement` and `lifecycle`, omitting `lifecycle` when absent. The shared codec MUST decode `lifecycle` as Agreement bytes and option identity; no settlement mechanism's model may own its keys; bond MUST remain reserved until a mechanism can hold seller-funded stake.
+A settlement option MUST state its `price` (`asset`, `rates`; absent on a rateless option), its `settlement` (a `schema` naming the mechanism, with that schema's own parameters flat beside it, none named `schema`), and optionally its `lifecycle`, which MAY carry adjudication (version, dispute, dispute_window_seconds, case_hold_max_seconds), early_termination (version, payer/payee entitlements with notice_seconds/settles_through, term-end settles_through, premature_stop_penalty), and reserved bond (version, amount). The option ID MUST be the hash of the canonical payload of `price`, `settlement` and `lifecycle`, omitting `lifecycle` when absent. The shared codec MUST decode `lifecycle` as Agreement bytes and option identity; no settlement mechanism's model may own its keys; bond MUST remain reserved until a mechanism can hold seller-funded stake.
 
 #### Scenario: A term changes the option ID
 
@@ -182,17 +182,17 @@ An unknown `version`, initiator key, or `settles_through` value, a `dispute` who
 
 ### Requirement: Term values agree with the Agreement and the seller's budget
 
-`max_term_seconds` MUST equal the Agreement's `duration_seconds`. Seller servicing-budget diagnostics MUST NOT introduce another notice or publication/acceptance refusal. `exposure_seconds` and `stop+exposure` MUST be rejected as retired codec values.
+The deal's horizon is the Agreement's `duration_seconds`; `early_termination` MUST NOT carry a maximum term of its own, and every rate part's `end` MUST be `start_utc + duration_seconds`. Seller servicing-budget diagnostics MUST NOT introduce another notice or publication/acceptance refusal. `exposure_seconds` and `stop+exposure` MUST be rejected as retired codec values.
 
 #### Scenario: Reserve is below the servicing budget
 
 - **WHEN** a storefront polls every 290 seconds with a 60-second teardown budget and the seller chooses a 300-second reserve
 - **THEN** it warns about the budget without inventing a paid tail or stopping lifecycle loops
 
-#### Scenario: Maximum term disagrees with the Agreement
+#### Scenario: The horizon is the Agreement's
 
-- **WHEN** an accepted Agreement's `duration_seconds` differs from its option's `max_term_seconds`
-- **THEN** the buyer refuses to commit
+- **WHEN** two buyers accept the same recurring option at different starts
+- **THEN** each Agreement carries its own `duration_seconds`, each mandate's rate part ends at its own `start_utc + duration_seconds`, and both Agreements carry the same option with the same ID
 
 ### Requirement: Entitlements are the stop authorities
 

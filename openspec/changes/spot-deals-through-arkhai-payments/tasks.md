@@ -25,9 +25,8 @@ foundation; this design's D1–D7.
       Do not edit generated models to mimic an unvendored contract.
 - [ ] 1.2 Confirm negotiate-open-ended-compute-terms supplies the price accessor
       with its period unit, common term shape, listing bounds and two front-door
-      servicing gates. Gate on terms 1.3/2.1/2.2/3.1/3.2 implementing D5's settled
-      bounded final-option refinement before signature, including whole-second rate
-      starts. Freeze period plus reserve_ahead_seconds and the recommended setup_amount shape with that consumer. Require the accepted rate-structure
+      servicing gates. Gate on terms 1.3/2.1/2.2/3.1/3.2 resolving the horizon into
+      `duration_seconds` before signature, including whole-second rate starts. Freeze period plus reserve_ahead_seconds and the recommended setup_amount shape with that consumer. Require the accepted rate-structure
       carrier/digest from negotiation-driven-capacity-resize gate 2.1a; refuse an
       unresolved pricing reference rather than read the current listing.
 - [ ] 1.3 Freeze operation descriptors, consume the foundation-owned versioned

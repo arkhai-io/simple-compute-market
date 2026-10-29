@@ -5,8 +5,8 @@
 The lifecycle foundation, [`agreed-evidence-and-early-termination`](../agreed-evidence-and-early-termination/),
 is the frame: the protocol ends at commitment, and everything after it is
 authority records and the signed bytes each party keeps. The terms a deal
-carries — `early_termination {version, entitlements, max_term_seconds,
-settles_through, premature_stop_penalty?}` and `adjudication` — live under the
+carries — `early_termination {version, entitlements, settles_through,
+premature_stop_penalty?}` and `adjudication` — live under the
 selected option's `lifecycle`, beside its `price` and `settlement` (foundation D5,
 "The option's shape"; terms D4). Payment derivation consumes that shared codec; it
 keeps no mechanism-specific copy of the terms.
@@ -98,9 +98,9 @@ spot at different rates.
 ### D2. Exact per-part mandate derivation
 
 For each rate part the adapter derives `amount`, `asset`, `period`, `reserveAhead`,
-the end instant `start_utc + max_term_seconds` with its own `partialPeriod`,
+the end instant `start_utc + duration_seconds` with its own `partialPeriod`,
 `hold = {afterStop: dispute_window}` and `maxHoldExtension = case_hold_max_seconds`.
-The accepted `duration_seconds` equals `max_term_seconds`; the listing bounds
+The accepted `duration_seconds` is the deal's horizon; the listing bounds
 already limit that term to `min(max_duration, available_until − start)`, and a
 late start never extends it. The terms runtime resolves a whole-second Agreement
 start before the rate signature, because the payment wire is integer-second, and

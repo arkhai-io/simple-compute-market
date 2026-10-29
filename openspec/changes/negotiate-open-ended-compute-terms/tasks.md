@@ -18,10 +18,9 @@ added by this reconciliation.
   codec (D4). Do not implement a mechanism-specific term codec. Start from `placement-probe.md`.
 - [ ] 1.3 With the reconciled rate change (`spot-deals-through-arkhai-payments`),
   freeze the injected preset-helper interface (D3), `period`, `reserve_ahead_seconds`, separate setup pricing, accessor unit and
-  servicing-declaration contracts. Implement D5's bounded final-option refinement:
-  signed seller acceptance carries the final option and canonical ID; buyer checks
-  equality to an advertised option except for the narrowed max term and equal duration.
-  Retain advertised-to-final option correlation.
+  servicing-declaration contracts. The option carries no maximum term: the horizon
+  is resolved into `duration_seconds` at acceptance and the option's ID is unchanged
+  from the registry to the Agreement (D5).
 
 ## 2. Quote and capacity terms
 
@@ -56,7 +55,7 @@ added by this reconciliation.
   uses each storefront's typed client and real persistence to prove the cached-option
   refusal has no acceptance side effect.
 - [ ] 3.2 In both negotiation runtimes/policies, resolve start/bounds before final
-  signature according to D5's bounded final-option refinement; require whole-second recurring starts,
+  signature per D5, resolving the horizon into `duration_seconds`; require whole-second recurring starts,
   refusing fractional values without rewriting accepted bytes; bind equal duration/max term
   without rounding, require at least one whole period for recurring horizons, and
   refuse expired/excessive horizons and missing reserved duration. Carry term-end
@@ -112,7 +111,7 @@ closeout tasks, not authorization to promote unimplemented behavior now.
   comments describe current invariants, not change provenance.
 - [ ] 5.2 **Import placement:** confirm touched imports are module-level unless an
   experimentally verified circularity or deliberate lazy-load reason is recorded.
-- [ ] 5.3 **Documentation compliance:** classify D1–D8, including bounded final-option
+- [ ] 5.3 **Documentation compliance:** classify D1–D8, including the horizon as the Agreement's
   refinement; verify each permanent home and no duplicated codec/authority ownership.
 - [ ] 5.4 **Narrative compression:** reduce completed-task notes to behavior, material
   evidence, residual work and permanent destinations; retain reasoning in design.
