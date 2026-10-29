@@ -14,34 +14,38 @@ Production compositions MUST NOT declare rate servicing until the hosted deploym
 - **WHEN** hosted behavior and consumer conformance pass for the required revision
 - **THEN** VM and bare-metal production compositions may declare published-contract rate servicing and enforce the declaration at all three doors
 
-### Requirement: Partial-period qualification cannot use local end corrections
+### Requirement: Activation requalifies the owned payment and lifecycle contracts
 
-Activation MUST verify SCM started_period, last_boundary and stop map to authority charged, returned and prorated respectively. Unsupported terms MUST fail closed. Before the revision is vendored spot MUST offer only charged/charged, not a corrective end refund. Setup once MUST end at activation and its self-penalty MUST return all when undelivered and none after delivery.
+Activation MUST requalify foundation/spot's terms and payment-adapter contracts, not supply another pricing implementation. Observations MUST cover per-stopper and term-end treatment, fail-closed unsupported terms, activation-before-start, setup once end and exceptional-end self-correction. No storefront end-pricing correction MAY substitute for an unsupported term.
 
 #### Scenario: Published schema cannot express returned
 
 - **WHEN** a preset asks for payee last_boundary but the vendored contract cannot encode it
-- **THEN** publication and acceptance refuse the term rather than rely on a later storefront reversal
+- **THEN** publication and acceptance refuse rather than rely on later correction; interim charged acceptance records explicit buyer-policy opt-in
 
-#### Scenario: A maximum term cuts a billing period
+#### Scenario: A seller corrects an exceptional end
 
-- **WHEN** late activation leaves an incomplete period at the absolute term end
-- **THEN** the end's own partialPeriod determines billing without rounding duration, and default buyers refuse any treatment except last_boundary
-- **AND** dispute stops use chosen with event-supplied treatment; rate earning and {for} payouts anchor at period end or part stop
+- **WHEN** an unentitled end is corrected through the payment adapter
+- **THEN** hosted records show unconditional returned stops, rate reversals since at, once unserved-share reversals and any full bond award, without an exceptional-end dispute case
 
-#### Scenario: Delivery activates successfully
+#### Scenario: Counterparty-beneficial actions are available
 
-- **WHEN** setup completes and the lease activates
-- **THEN** rate start follows activation, setup once ends there and pays one dispute window later
+- **WHEN** hosted qualification exercises foundation's party-action contract
+- **THEN** payee stop without entitlement returns the partial period, payee may waive payer notice, payer may release held money early and payee may reverse held money, without replacing dispute-authority entries
+
+#### Scenario: Cooperative stop is journaled while payments is down
+
+- **WHEN** end_delivery reaches the storefront during payment outage
+- **THEN** the signed receipt time governs delivery end and the retained seller command later stops billing at receipt plus payer notice with payer partialPeriod, subject to seller notice waiver
 
 ### Requirement: Rate activation preserves existing commitment servicing
 
-Enabling or withdrawing new rate-deal publication MUST NOT reinterpret accepted terms, redirect an existing commitment to another authority, or remove its lifecycle loops. Deployment preparation MUST confirm target selectors and readiness before seeding and live execution, and credential values MUST remain outside public configuration and evidence.
+The production switch MUST NOT reinterpret accepted terms or redirect an existing commitment to another authority. Startup coherence and continued servicing after withdrawal MUST consume convergence's market-composition contract. Deployment preparation MUST confirm target selectors and readiness before seeding and live execution, and credential values MUST remain outside public configuration and evidence.
 
 #### Scenario: Operator withdraws the declaration
 
 - **WHEN** new per-period deals are disabled after activation
-- **THEN** accepted commitments continue watching authority records, executing end effects and retaining evidence under their original Agreement
+- **THEN** accepted terms and authorities remain unchanged and convergence's continued-servicing contract is requalified
 
 #### Scenario: Target readiness fails
 

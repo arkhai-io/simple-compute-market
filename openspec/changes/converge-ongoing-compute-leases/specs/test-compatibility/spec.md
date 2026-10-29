@@ -7,8 +7,14 @@ VM and bare-metal lanes MUST execute the rate-servicing matrix against the runna
 #### Scenario: The full matrix runs
 
 - **WHEN** either compute lane qualifies rate servicing
-- **THEN** it covers baseline, payment-outage buyer end, absent-storefront withdrawal, interrupted effects, stop/disclosure races, rate activation expiry, exhaustion/hidden top-up, notice/earlier payer stop, start without disclosure, absolute maximum term with its own treatment, on-demand refused payee stop followed by exceptional_end, and identity-rotation overlap/re-anchoring
-- **AND** it records both completion facts and authority/evidence references for every row
+- **THEN** it covers baseline, payment-outage buyer end, absent-storefront withdrawal, interrupted effects, stop/disclosure races, rate activation expiry, exhaustion/hidden top-up, notice/earlier payer stop, start without disclosure, absolute maximum term with its own treatment, on-demand refused entitled notice followed by payment-adapter exceptional_end, and identity-rotation overlap/re-anchoring
+- **AND** it records both completion facts and authority/evidence references for every row, including read-before-end on last-poll top-up and outage-only bare-timer correction
+
+#### Scenario: Interim spot needs explicit buyer policy
+
+- **WHEN** rows 7 or 9 use interim charged payee or term-end treatment
+- **THEN** the run records explicit non-default buyer acceptance and separately observes default-policy refusal
+- **AND** returned-capable terms have a distinct acceptance observation once vendored
 
 #### Scenario: A notice outlives servicing
 

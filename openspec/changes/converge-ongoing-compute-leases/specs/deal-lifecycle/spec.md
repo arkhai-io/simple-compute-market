@@ -45,7 +45,7 @@ End service MUST persist physical completion independently of money. It requires
 
 ### Requirement: Financial completion is end-revision scoped
 
-Financial completion MUST require terminal required parts, resolved end-related cases/effects/corrections and no pending or unknown operation. It MUST be bound to the selected earliest request and relevant case/ruling revisions. Watches and retention MUST continue after completion; earlier evidence or relevant case changes MUST reopen financial work while preserving history. Once-only deals MUST use the same facts.
+Financial completion MUST require terminal required parts, resolved end work and no pending/unknown operation. Terminal means a verified authority stop/end, not payout; once parts use their own term end or earlier stop, and unstarted rates still require stop/end. Completion MUST bind the earliest request and relevant correction/case revisions. Watches/retention MUST continue; earlier evidence or case changes MUST reopen financial work with history. Once-only deals MUST use these facts.
 
 #### Scenario: Earlier evidence follows completion
 
@@ -54,17 +54,17 @@ Financial completion MUST require terminal required parts, resolved end-related 
 
 #### Scenario: A once-only deal has no financial work
 
-- **WHEN** delivery has ended and its once parts are terminal with no end-related case or pending effect
-- **THEN** its financial completion is true without a rate-servicing special case
+- **WHEN** delivery has ended and its once parts have verified authority ends with no end-related case or pending effect
+- **THEN** financial completion is true even if an ordinary dispute-window hold has not paid out
 
 ### Requirement: Lifecycle completion diagnostics are explicit
 
-Seller read/list MUST expose both facts and evidence references, end revision, gap ages, pending operations/cases, repair reason and manual provenance. A due end with either fact false MUST be ending; both true MUST be ended. Permanent refusal or missing required evidence/credentials MUST show repair required without erasing facts. Warning thresholds MUST NOT disable servicing.
+Seller read/list MUST expose both facts and evidence references, end revision, gap ages, pending operations/cases, repair reason and manual provenance. A due end with either fact false MUST be ending; both true MUST be ended. Permanent refusal or missing required evidence/credentials MUST show repair required without erasing facts. Pending cooperative stops and billing after delivery end MUST be named. Warning thresholds MUST NOT disable servicing.
 
 #### Scenario: Priced notice leaves a financial gap
 
-- **WHEN** physical recovery is proven while priced notice or a case remains outstanding
-- **THEN** diagnostics identify the outstanding work without labelling the entire gap overcharge or claiming a reserve-ahead billing cap
+- **WHEN** physical recovery is proven while a cooperative billing stop with priced payer notice or a case remains outstanding
+- **THEN** diagnostics identify that work without labelling the entire gap overcharge or claiming a reserve-ahead billing cap
 
 #### Scenario: Delivery is still running
 
@@ -73,7 +73,7 @@ Seller read/list MUST expose both facts and evidence references, end revision, g
 
 ### Requirement: Manual physical acknowledgement is an audited command
 
-Seller submit MUST support acknowledge_physical_recovery only for an authenticated storefront administrator. Its payload MUST bind the deal, resource/end revision and reason under a stable operation key. Changed reuse MUST be rejected. The acknowledgement MUST record principal and evidence provenance as manual, not site evidence or financial completion.
+Seller submit MUST dispatch acknowledge_physical_recovery locally to end service only for an authenticated administrator. Its payload MUST bind deal, resource/end revision and reason under a stable key; at MUST be the observed recovery instant, never future. Changed reuse MUST be rejected. Acceptance MUST name a local audit record, manual principal/provenance and updated physical fact, never site evidence or financial completion. Contracts and typed client MUST carry this local result.
 
 #### Scenario: An operator confirms recovery without site evidence
 
@@ -87,89 +87,81 @@ Seller submit MUST support acknowledge_physical_recovery only for an authenticat
 
 ### Requirement: Funding deadlines remain renewable timers
 
-Rate servicing MUST keep verified funded-through as a replaceable local timer, never a speculative lease truncation. Expiry without verified renewal MUST journal a final request and pending authority classification. A future authority stop MUST retain its effective time. Invalid, stale, wrong-transaction or regressed observations MUST establish no new timer or financial fact.
+Rate servicing MUST keep verified funded-through as a replaceable timer, never speculative lease truncation. Expiry MUST first attempt a bounded payment read. Renewal MUST replace the timer; verified exhaustion MUST supply an authority end without classification. Only unreachable/unverifiable authority MUST cause a bare-timer end with pending classification. Future stops MUST keep their effective times. Invalid/stale/mismatched/regressed evidence MUST establish no timer or financial fact.
 
-#### Scenario: Funding advances
+#### Scenario: A last-poll top-up is reachable
 
-- **WHEN** a verified observation advances funded-through before expiry
-- **THEN** the timer is replaced without an irreversible end from the old deadline
+- **WHEN** funding advances within one polling interval before expiry and the expiry read verifies it
+- **THEN** the timer is replaced without ending delivery or creating seller self-correction
 
-#### Scenario: Exhaustion is confirmed after local expiry
+#### Scenario: Exhaustion is verified at expiry
 
-- **WHEN** the verified payment record shows exhaustion stopped billing at or before the timer's end T
-- **THEN** the pending classification resolves without exceptional_end
+- **WHEN** the expiry read verifies the authority's exhaustion stop
+- **THEN** its effective time supplies the final request and no pending classification is created
 
 #### Scenario: An outage concealed a top-up
 
-- **WHEN** the timer ended service at T but verified recovery shows billing continued past T
-- **THEN** the seller journals exceptional_end(T) under a stable key and keeps financial completion false until its effects resolve
+- **WHEN** a bare timer ended service at T during an outage and verified recovery shows billing continued past T
+- **THEN** foundation resolve_correction atomically journals exceptional_end(T) through the payment adapter and financial work stays unresolved until verified effects complete
 
 #### Scenario: Classification cannot be verified
 
-- **WHEN** no trustworthy payment record resolves a timer-expiry end
-- **THEN** classification stays pending without blocking physical recovery or fabricating an exhaustion stop
+- **WHEN** no trustworthy payment record resolves a bare-timer end
+- **THEN** foundation's pending classification remains durable without blocking physical recovery or fabricating an exhaustion stop
 
-### Requirement: Rate admission uses a neutral adapter decision
+### Requirement: Both storefronts compose the rate delivery adapter
 
-Rate servicing MUST implement the foundation-owned delivery authorization protocol via the injected payment adapter's authorize operation, not hosted part-field interpretation. Refusal MUST supply classified evidence through unified delivery to the foundation end/filing policy. Local admission and credential revocation MUST use that shared path.
+Both compositions MUST bind foundation's neutral authorization and billing-start contracts to spot's payment adapter and unified delivery's ports. End service MUST drive the shared journaled start effect from its loop. Composition MUST consume foundation's admission, start identity, evidence and correction contracts. Activation validation MUST accept the Agreement end or a verified earlier end recorded by end service, but MUST suppress start on activation failure or unexplained mismatch.
 
-#### Scenario: Adapter evidence is unavailable
+#### Scenario: Notice shortens the lease before activation
 
-- **WHEN** the rate adapter cannot establish financial admission from verified authority evidence
-- **THEN** the hook returns pending/refuse with reason and evidence references, not an invented allow
+- **WHEN** an entitled future stop shortens the lease before provisioning completes
+- **THEN** activation to that verified earlier end is valid and start may proceed while the end is still future
 
-### Requirement: Billing start is one activation-following effect
+#### Scenario: Activation response is lost before truncation
 
-Rate servicing MUST implement start_billing under the foundation's sole end-service intent/key and activated-delivery envelope. It MUST translate through the injected payment adapter, preserve delivery's intent reference, and resolve unknown rate start through authority read/same-key retry before disclosure. Refusal MUST enter the foundation's classified undelivered handoff.
-
-#### Scenario: Activation fails
-
-- **WHEN** the lease cannot activate to the agreed end
-- **THEN** rate start is not issued and unified delivery supplies start/failure evidence to the foundation's filing-timing policy
-
-#### Scenario: Start acknowledgement is lost
-
-- **WHEN** an activated lease's rate start may have succeeded but the response is lost
-- **THEN** disclosure waits for resolution of the same journaled operation, with no second owner or fresh start key
-
-### Requirement: Revised end remedies are not discharged by append
-
-Rate servicing MUST consume the foundation's revised-remedy filing/netting contract. Earlier evidence MUST remain unresolved financial work until a verified authority remedy covers its revision; neither an append nor skipped-closed append MUST count as completion. Qualification MUST exercise prior partial effects and append/close races without local remedy arithmetic.
-
-#### Scenario: Earlier evidence arrives during partial ruling application
-
-- **WHEN** a prior case is open with some applied effects and earlier end evidence arrives
-- **THEN** prior effects remain tracked, unknown outcomes resolve under their original keys, and a revision-bound filing carries those records rather than assuming append changes the ruling
-
-#### Scenario: Append races case closure
-
-- **WHEN** an evidence append is skipped because the case closed
-- **THEN** the new revision remains unresolved and uses its filing path rather than completing on the skipped append
-
-#### Scenario: Repeated self-penalty cannot be safely qualified
-
-- **WHEN** the authority contract does not establish netting prior returns and bond awards across revision filings
-- **THEN** the deal remains repair required with kept evidence and no local substitute ruling or fabricated completion
+- **WHEN** activation succeeded but its response was lost and end service then recorded a verified earlier end
+- **THEN** retry consumes unified delivery's current-end evidence rather than restoring the old end or refusing valid activation
 
 ### Requirement: Offline authority recovery has no storefront writer
 
-Operator recovery MUST use injected adapters with the kept commitment bundle, original authority-bound seller credentials and caller-retained operation key. It MUST submit entitled notice or exceptional_end directly without opening storefront persistence, retaining exact results and principal/reason. Unknown outcomes MUST use authority read and same-key retry. Ordinary watch MUST discover those actions on restart.
+Recovery MUST use a seller export, original authority-bound credentials and a durable immutable command envelope written before I/O. It MUST fix key, kind/time/payload, authority, evidence references, principal/reason and per-part descriptors. Replay MUST read first and reuse identical descriptors without opening storefront persistence. Results MUST be retained separately. Foundation/spot's correction contract MUST govern adoption, semantic effect identities and overlapping revisions.
 
-#### Scenario: Operator acts while storefront is stopped
+#### Scenario: A seller prepares recovery evidence
 
-- **WHEN** the seller submits a permitted notice through the recovery runner
-- **THEN** the authority hosts the notice and the storefront later observes it without a second database writer
+- **WHEN** an authenticated seller exports a committed deal through lifecycle read-only export and its typed client/CLI
+- **THEN** the bundle contains exact Agreement, mandate/commitment, authority bindings and kept signed evidence/effect references, without credentials; missing required bytes refuses recovery
+
+#### Scenario: Recovery is interrupted before result export
+
+- **WHEN** an entitled notice or exceptional_end may have succeeded but no result was saved
+- **THEN** the runner consumes the retained envelope and resolves its original effects by read/same-key retry without reconstructing time or payload
+
+#### Scenario: Recovery overlaps online replay
+
+- **WHEN** the runner corrected an end whose journaled intent is replayed after storefront restart
+- **THEN** watch discovers the payment effects, matching semantic identities are adopted and no effect is duplicated under a different caller key
+- **AND** different correction bases use qualified overlapping/revision reconciliation or remain repair required, never a speculative extra reversal or duplicate exceptional-end case
 
 #### Scenario: The option grants no payee entitlement
 
 - **WHEN** an operator requests emergency recovery for an on-demand deal
-- **THEN** the runner files exceptional_end, not an invented payee stop
+- **THEN** the payment adapter uses unconditional payee returned stops and exceptional-end reversals, not entitled notice or a dispute filing
+
+### Requirement: Rotation evidence has a durable servicing consumer
+
+During identity overlap the loop MUST request spot's verified re-anchoring evidence for running rate deals and persist it in the evidence store before retiring dependence on the old key. Seller read/list MUST expose unanchored rate deals and once-only must-drain dependencies as retirement repair reasons. Spot MUST remain the owner of verification and rotation policy.
+
+#### Scenario: A retiring key still anchors a running deal
+
+- **WHEN** overlap begins and no current verified snapshot has re-anchored the rate deal
+- **THEN** servicing requests and persists re-anchoring evidence and read/list report the remaining dependency until it is resolved
 
 ## MODIFIED Requirements
 
 ### Requirement: The seller half lists deals
 
-The seller half MUST offer submit, read, bounded paginated list and watch. Each listed deal MUST carry negotiation ID, commitment reference, domain, mechanism, entitlements, lifecycle state, current deadline, open-extension status and open cases, plus the completion diagnostics defined here. Once-only deals MUST run from verified commitment until delivery ends. Lifecycle states MUST be unstarted, running, ending, ended or repair required.
+The seller half MUST offer submit, read, bounded paginated list with a continuation token and watch. Each listed deal MUST carry negotiation ID, commitment reference, domain, mechanism, entitlements, lifecycle state, current deadline, open-extension status and open cases, plus the completion diagnostics and rotation dependencies defined here. Once-only deals MUST run from verified commitment until delivery ends. Lifecycle states MUST be unstarted, running, ending, ended or repair required.
 
 #### Scenario: A seller lists its deals
 

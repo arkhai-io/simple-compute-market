@@ -32,9 +32,18 @@ additional payment capability is requested. Product implementation remains in it
       only until vendored and only with explicit buyer policy opt-in), absolute maximum
       terms with their own partialPeriod and no rounding, chosen dispute-stop entry,
       period-end/part-stop earning and {for} payout anchoring, activation-before-start,
-      setup once end at activation and full-undelivered/zero-delivered self-penalty.
+      setup once end at activation and full-undelivered/zero-delivered self-correction.
+      exceptional_end is payment-adapter returned stops plus per-part reversals,
+      never a dispute filing; no mechanical mediation rulings remain. buyer_end
+      is human triage with payer notice/treatment; the exact Agreement is carried
+      in the case and verified against the mandate deal hash.
       Never add a storefront end-refund correction. A required product decision
-      returns to its owning change. Kit tests use vector-derived in-process fakes.
+      returns to its owning change. Kit tests use the kit-owned clock-injected authority engine directly, while HTTP
+      doubles wrap it with controls and mediation; no kit depends on tooling.
+      Requalify payee stop without entitlement (returned), payee waiver of payer
+      notice, payer early release of held money and payee reverse/refund under the
+      foundation contract. These are counterparty-beneficial actions, not new
+      self-interested entitlements.
 
 ## 2. Reproducible qualification and target preparation
 
@@ -63,7 +72,8 @@ additional payment capability is requested. Product implementation remains in it
 - [ ] 3.1 Run both-domain live complete deals and the hosted payment/dispute matrix
       in design D4: activation then start, priced payer stop plus hint, authority
       partialPeriod billing, setup once, seller notice surviving storefront
-      absence, exhaustion, exceptional_end, acknowledged buyer_end, case extend/lift
+      absence, exhaustion/read-before-timer-end, payment-adapter exceptional_end,
+      receipt-timed cooperative stop during outage, human-triaged buyer_end, case extend/lift
       and partial reverse after stop. Use supported test controls for uncertainty/
       restart; annotate races/outages qualified only in the double. Every required
       live scenario must pass or remain explicitly blocking activation.
@@ -76,8 +86,8 @@ additional payment capability is requested. Product implementation remains in it
       acceptance and materialization all enforce the declaration. Preserve identity/
       mode and original authorities for running deals; use existing drain/cutover
       rules if a coordinated deployment change is necessary.
-- [ ] 3.4 Verify declaration withdrawal disables new deals but keeps existing watch,
-      end work and evidence retention. Run focused composition tests in both
+- [ ] 3.4 Requalify convergence's startup/withdrawal contract under the production
+      switch; verify accepted terms and authorities remain unchanged. Run focused composition tests in both
       storefronts, affected config/schema/Helm render tests, kit contract tests and
       affected typing checks. Run `make check-packaging` before code review; fix
       changed comments/import placement during implementation, not closeout.

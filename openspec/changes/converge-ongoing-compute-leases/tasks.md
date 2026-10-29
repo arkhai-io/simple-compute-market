@@ -8,12 +8,19 @@ before code starts; no superseded Goal 8 change is an implementation gate.
 
 - [ ] 1.1 Confirm `agreed-evidence-and-early-termination` supplies lifecycle commands,
       read/list/watch, per-record cursors, evidence stores, end-service admission,
-      buyer stop/end_delivery/buyer_end and mediation request mapping. Record exact
+      buyer stop/end_delivery/buyer_end and mediation request mapping (buyer_end only).
+      Verify payment-adapter exceptional_end, receipt-timed cooperative stops,
+      record_end's none/intent/pending_classification correction slot and atomic
+      resolve_correction(end_revision, intent|discharged, evidence_ref). Foundation
+      owns these neutral interfaces and start journal before unify consumes them. Record exact
       contract bindings; stop on a missing interface rather than duplicating it.
 - [ ] 1.2 Confirm spot supplies verified rate authorize/start_billing adapter operations,
       per-stopper and term-end partialPeriod mapping without term rounding, afterStop holds
       and rotation re-anchoring. Foundation supplies the neutral adapter protocol
-      and source-classified seller self-filing. Unify tasks 1–3 supply the path,
+      and source-classified seller self-correction. Verify shared semantic effect keys
+      and a version/vector-bound payment-adapter correction capability for prior
+      reversals, bond awards and overlapping runner/storefront revisions; no
+      exceptional_end dispute mapping or mechanical mediation ruling remains. Unify tasks 1–3 supply the path,
       protocol consumption, activation/undelivered ports and start-journal reference.
       This is a section handoff, not an archive gate; converge tasks 1–3 then feed
       unify 4.4/converge 4 qualification. Gate scenarios on runnable double sections.
@@ -32,61 +39,87 @@ before code starts; no superseded Goal 8 change is an implementation gate.
       bytes in the evidence store. Financial completion is end-revision-scoped;
       watching/retention continues after both facts, reopening on earlier evidence.
       Physical completion requires proven capacity release/no dispatch/manual audit,
-      not lease_ended intent; apply both facts to once-only deals too.
+      not lease_ended intent; apply both facts to once-only deals too. Persist spot-produced re-anchoring
+      evidence and retiring-key dependency status for rate and once-only deals.
 - [ ] 2.2 Implement one registered loop step with physical, bounded authority and
       second physical passes (D3), independent errors, and foundation cursor/journal
       reuse so a newly due end runs without another polling interval. Outages skip
       unverified facts, never pending physical work. Reuse foundation watch and journal mechanisms.
 - [ ] 2.3 Implement replaceable funding timers without speculative lease truncation;
-      persist final requests and pending authority classification on expiry. Confirm
-      exhaustion at/before T without filing; billing beyond T journals exceptional_end(T).
+      read payments before ending at expiry. Verified renewal replaces the timer;
+      verified exhaustion supplies an authority end without classification. Only an
+      unreachable/unverifiable read journals a bare-timer end with pending
+      classification through foundation record_end. Later resolve_correction
+      discharges exhaustion at/before T or journals exceptional_end(T) if billing
+      continued. No synthetic final request or second journal.
       Unverifiable classification stays pending. Preserve future effective notice times
       from authority records and compose earliest-final-request semantics.
 - [ ] 2.4 Expose both completion facts, gap ages, pending operations/cases and manual
       recovery provenance on lifecycle read/list. Implement D2's recommended warning
       policy using deployment retry/watchdog budgets; leave loops running on warning.
       Bind diagnostics/state mapping to the deal-lifecycle read/list contract, with
-      manual principal/reason and revision identity. Measure cadence/teardown budgets
+      manual principal/reason and revision identity. Terminal parts mean verified
+      stop/end, not payout. Surface cooperative stop/billing-after-delivery work,
+      unanchored rate deals and once-only must-drain retirement dependencies. Measure cadence/teardown budgets
       as seller risk recommendations, never another notice or codec/config gate.
 - [ ] 2.5 Validate at the lowest meaningful level: pure timer/fact/revision selection
       in unit coverage; database journal/cursor/restart and queue independence in
       `kit/deal-servicing/tests` library-integration coverage. Exercise no dispatch,
       unknown dispatch adoption, physical failure, authority outage and late evidence
       after completion, intent/release_failed without release proof, partial-ruling
-      earlier evidence, append/close race and hidden top-up after timer expiry.
+      earlier evidence, append/close race, reachable last-poll top-up (no end) and outage-hidden top-up
+      after bare-timer expiry. Include runner/online correction adoption and
+      interruption before result export without reconstructing command bytes.
       Prove restart by rebuilding each production application over the same database;
-      kits use vector-derived in-process fakes, not runnable tooling dependencies.
+      kits use the kit-owned clock-injected payments authority engine directly,
+      not runnable tooling dependencies; HTTP doubles wrap that same engine.
       Use injected deterministic clocks/ports, not sleeps.
 
 ## 3. Delivery and authority work
 
-- [ ] 3.1 Define phase/decision protocol in kit/deal-servicing, imported downward by
-      provisioning/compute. Implement hook via injected adapter authorize decisions,
-      never hosted part-field interpretation. Provision/activate before start_billing;
-      end service alone journals its stable key/activated evidence before I/O, while
-      unify stores a reference. Resolve unknown start before disclosure; refusal
-      uses unify's undelivered handoff. Verify both storefront integration suites.
-- [ ] 3.2 Consume foundation's classified self-filing journal for unentitled site/
-      operator/failed delivery, never buyer end_delivery or ordinary authority stops.
-      Add timer-expiry deferred classification (D5). Resolve unknown original case
-      effects before a revision-bound filing; append/closed append alone cannot
-      discharge a revised remedy. Reverify authority netting across multiple cases,
-      including prior once returns/bond awards; stop with repair required if absent.
-      Payments compute partialPeriod; no local end-correction arithmetic or reverse.
+- [ ] 3.1 Compose and verify foundation's phase/decision protocol and spot's hosted
+      authorize/start_billing implementation through provisioning/compute/delivery;
+      do not define the protocol or interpret hosted part fields here. Bind both
+      storefront composition roots and drive the shared start journal from the loop.
+      Accept activation to the Agreement end or verified earlier end, including
+      truncation before activation and between lost acknowledgement and retry.
+      Consume foundation's sole intent and unify's reference/undelivered handoff;
+      verify both storefront integration suites. Spot's adapter plus this composition
+      gate unify 4.4; foundation's protocol precedes unify 1–3.
+- [ ] 3.2 Consume foundation's classified payment self-correction journal for
+      unentitled site/operator/failed delivery, with unchanged never-future timing.
+      Consume its receipt-timed cooperative stop for end_delivery (payer notice and
+      partialPeriod), journaled even during outage. Add timer classification via
+      foundation's atomic resolution interface. Resolve unknown original effects
+      before revision work; consume the payment adapter's qualified overlapping/
+      revision correction capability and shared semantic keys. Exercise adoption of
+      runner effects without duplicate reversals/awards; missing coverage is repair
+      required. This is SCM adapter qualification, not a new payment-service primitive.
+      Buyer cases remain human triage; no exceptional_end case is filed.
+      Payment adapters alone compute per-part stops/reversals from the mandate;
+      end service performs no local pricing or monetary delta arithmetic.
 - [ ] 3.3 Consume foundation site-report ingestion as a final-request source and
       attribution evidence, not completion proof; use capacity-release proof for that.
       Exercise, do not reimplement, its buyer evidence projection, stop-plus-hint for
       nonzero notice, explicit end-now and buyer_end fallback. Verify outage and
       late-evidence paths with injected payment and mediation adapters in library/service integration coverage.
 - [ ] 3.4 Add stateless recovery runner in kit/deal-servicing and domain CLI adapter
-      composition. Take kept commitment bundle, bound seller credentials, stable key
-      and administrator/reason; submit directly to authorities, export exact results,
-      resolve unknown by read/same-key retry and never open storefront persistence.
-      Verify watch rediscovers entitled notice or exceptional_end on restart.
-      Add online seller submit acknowledge_physical_recovery with administrator auth,
-      reason/resource/revision binding and audited idempotency; never confirm money.
+      composition. Add seller-authenticated read-only evidence export through
+      kit/deal-lifecycle-contracts, kit/deal-lifecycle-client and both storefronts;
+      retain exact Agreement/mandate/commitment and evidence, never credentials.
+      Persist D6's immutable command envelope/descriptors before I/O and replay from
+      it after interruption before result export. Read/adopt effects and enforce
+      shared semantic identities plus qualified overlapping correction; never open
+      storefront persistence offline. Export exact results and verify watch adoption
+      after restart. Extend contracts/client with local administrator submit kind
+      acknowledge_physical_recovery, observed non-future at, local audit acceptance,
+      principal/reason/resource/revision binding and same-key result recovery; it
+      cannot certify money.
 - [ ] 3.5 Implement startup coherence and declaration withdrawal behavior in both
-      compositions. Reuse spot identity-rotation re-anchoring. Run relevant existing
+      compositions. During overlap request spot's rate re-anchoring evidence, persist it before
+      retirement and expose unanchored rate / once-only must-drain dependencies.
+      This change solely owns startup/continued-servicing qualification; terms
+      supplies declarations and activation consumes this behavior. Run relevant existing
       tests in `kit/arkhai-payments/tests`, `kit/deal-servicing/tests`,
       `domains/vms/storefront/tests/integration` and
       `domains/bare_metal/storefront/tests/integration`, plus affected package typing.
@@ -96,7 +129,9 @@ before code starts; no superseded Goal 8 change is an implementation gate.
 
 - [ ] 4.1 Extend e2e-tests/tests/e2e/roles/scenarios and shared stages with D's full
       rate matrix (0–11), executing spot's prepared entry points and recording maximum
-      term plus on-demand refused stop/exceptional_end explicitly. Drop once-only
+      term plus on-demand refused entitled notice/payment-adapter exceptional_end
+      explicitly. Rows 7/9 record interim non-default buyer acceptance, separate
+      default-policy refusal and returned-capable acceptance once vendored. Drop once-only
       activation duplication (unify owns it). Gate on readiness and coherent UTC/skew
       checks; consume typed due-work barriers with per-authority watermarks, pending
       effects and blocked dependencies (never completed while blocked). Doubles use
@@ -106,7 +141,7 @@ before code starts; no superseded Goal 8 change is an implementation gate.
 - [ ] 4.2 Exercise additional remote-stop windows, both-authority outage replay,
       lost acknowledgement plus earlier evidence, stale/invalid/regressed snapshots,
       buyer ends before/during/after provisioning, late evidence after completion
-      with a revision filing during partial effects or append/close races, manual
+      with a revision correction during partial effects or append/close races, manual
       recovery, declaration checks, setup once churn pricing and rotation across a running deal. Reuse lowest-level
       adapter coverage for arithmetic rather than cloning it in e2e.
 - [ ] 4.3 Record each run as proposed- or published-contract qualification; no double
@@ -174,8 +209,8 @@ All destinations below are planned, not yet promoted.
 | D2 two facts, revision-scoped finance, diagnostics/manual command | deal-lifecycle spec/architecture |
 | D3 three-pass loop, timers and classification | deal-lifecycle spec/architecture |
 | D4 neutral adapter hook and activation-following start | deal-lifecycle spec/architecture; ARCHITECTURE authority boundaries |
-| D5 timer classification, revision filing, honest residual | deal-lifecycle spec/architecture; ARCHITECTURE settlement servicing |
-| D6 stateless recovery, foundation buyer/evidence consumption | deal-lifecycle spec/architecture |
+| D5 timer classification, payment revision correction, honest residual | deal-lifecycle spec/architecture; ARCHITECTURE settlement servicing |
+| D6 stateless recovery/export/envelope, foundation buyer/evidence consumption | deal-lifecycle spec/architecture |
 | Adapter-journal exception and stage-owned continuation | settlement-servicing spec/architecture; market-composition architecture |
 | D7 activation/declaration boundary | market-composition spec/architecture; activation-owned configuration docs cross-reference |
 | Full rate matrix, integration restart boundary and coherent lane time | test-compatibility spec/architecture; docs/development/diagrams/ |

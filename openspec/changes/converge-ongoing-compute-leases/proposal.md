@@ -13,16 +13,17 @@ bytes even when the seller is dishonest or absent.
 - Persist separate physical and revision-scoped financial completion. End intent
   is not release proof; lifecycle diagnostics and audited administrator recovery
   expose unfinished work without inventing money movement.
-- Implement the neutral rate authorization hook through adapter decisions. Activate
+- Compose foundation's neutral authorization protocol with spot's rate adapter. Activate
   before billing start, with one end-service-owned operation key and a delivery
   checkpoint reference. Consume the unified path's admission/disclosure guarantees.
-- Keep funding renewable until expiry, then classify against verified authority
-  records before self-filing. Consume foundation self-filing for unentitled ends;
+- Keep funding renewable until expiry, read payments at expiry, and end on the bare timer only when
+  unreachable/unverifiable. Consume foundation payment self-correction for unentitled ends;
   buyer end_delivery and authority stops do not become seller self-penalties.
-- Reconcile earlier evidence through revision-bound authority filings, not assumed
-  append amendment or storefront end-refund arithmetic. Payments compute each
+- Reconcile earlier evidence through payment-adapter revision corrections with
+  verified prior effects, not dispute self-filing or storefront end-pricing arithmetic. Payments compute each
   stopper's partial-period term; setup once ends at activation.
-- Supply stateless operator authority recovery through injected adapters, never an
+- Supply retained seller evidence export and immutable command envelopes for
+  stateless operator authority recovery through injected adapters, never an
   offline second storefront database writer. Consume foundation site-report ingestion
   and buyer stop/hint/end-now/fallback paths without reimplementing them.
 - Own the complete rate lane matrix, including spot's prepared maximum-term and
@@ -60,8 +61,9 @@ risk recommendations, not buyer billing promises or codec gates.
 
 ## Impact
 
-Planned code: kit/deal-servicing state, loop, hook protocol and recovery runner;
-both storefront composition roots and domain physical ports; compute delivery's
+Planned code: kit/deal-servicing state, loop, adapter composition and recovery runner;
+both storefront composition roots and domain physical ports; seller lifecycle
+contracts/client export and audited local recovery command; compute delivery's
 reference to the shared start journal; both lanes' scenario stages/fixtures.
 Mechanism and dispute operations remain in injected kit/arkhai-payments and
 kit/arkhai-mediation adapters. No runtime changes are made at this design stage.
@@ -82,4 +84,4 @@ and startup coherence go to market-composition; scenario jurisdiction and time g
 to test-compatibility. Repository architecture describes neutral ownership and
 mechanism-owned adapter continuation. Closeout updates Goal 8/campaign dependencies
 and promotes the nine illustrative diagram pairs; qualification also covers the
-two additional matrix rows without duplicating diagrams.
+three additional matrix rows without duplicating diagrams.

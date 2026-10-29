@@ -26,7 +26,14 @@ Per-stopper partialPeriod is required when offering returned/prorated terms, not
 an unconditional delay to a charged/charged product. Verify the vendored contract: payee-only start after lease activation on rate parts, stop authority
 notices hosted as pending stops, per-stopper started-period treatment, afterStop
 dispute-window holds, partial reverse before and after stop, and per-case extend/lift. The on-demand mandate has no payee stop entitlement;
-unentitled seller exits use self-filed exceptional_end, not a new stop primitive.
+unentitled seller exits use payment-adapter exceptional_end: unconditional payee
+returned stops, rate reversals since at, once unserved-share reversals and any full
+bond award. No exceptional_end dispute filing or mechanical ruling is involved.
+Requalify foundation's counterparty-beneficial payment actions: payee stop without
+an entitlement always returns the partial period, payee may waive payer notice,
+payer may release held money early, and payee may reverse/refund held money.
+Dispute authority actions still use its own entries; these party actions do not
+grant a unilateral self-interested exit.
 
 A deployment must demonstrate those semantics, not merely advertise a version.
 The vendored snapshot schema/proof and vectors are checked through the existing
@@ -38,11 +45,15 @@ Unsupported offered terms fail closed. Until the partialPeriod revision is
 vendored, spot offers only charged on both sides, never a corrective storefront
 refund. That supported charged/charged subset may activate if all other gates pass
 and the buyer explicitly accepts started_period for payee and charged term ends.
-Seller-stop treatment is negotiated; mediation does not mandate returned. Client
+Entitled seller-stop treatment is negotiated; exceptional_end always returns the
+partial period independently of that entitlement. Client
 presets prefer payer charged/payee returned, and default buyers refuse payee or
 term-end treatment other than last_boundary. Each absolute term end has its own
 partialPeriod, without term rounding; exhaustion is period-boundary aligned.
-The dispute authority's stop entry uses chosen and its event supplies treatment.
+The dispute authority's stop entry uses chosen and each human ruling supplies
+treatment. buyer_end preserves the payer's priced notice and partialPeriod;
+mediation has no mechanical rulings. Cases carry the exact Agreement verified
+against the mandate's deal hash, not a required attachment.
 Periods are earned at period end or part stop, not period start. Verify setup once
 ends at activation, releases one dispute window later, and self-penalty returns
 all before delivery and none after delivery.
@@ -91,8 +102,9 @@ After hosted checks pass, both production compositions declare servicing against
 the published revision. The same declaration is checked at publication, acceptance
 and materialization. Do not change service identity/mode or redirect accepted
 deals as part of flipping it; any required coordinated cutover follows existing
-drain/recovery rules. Withdrawing the declaration stops new deals only; lifecycle
-watching and end work remain composed for all existing commitments. Accepted
+drain/recovery rules. Convergence owns startup coherence and continued servicing
+after withdrawal; activation consumes and requalifies that contract, not another
+copy of its implementation. Accepted
 deals recover forward from kept records and operation keys, never by mechanism
 priority fallback.
 
@@ -109,16 +121,24 @@ are published-contract qualification, not live evidence. Hosted runs exercise th
 same payment-boundary transitions with real authority responses: activation then start,
 payer stop with priced notice and hint (delivery continues until effective stop),
 per-stopper partial-period billing, seller notice surviving storefront absence, exhaustion,
-self-filed exceptional_end, buyer_end with signed acknowledgement, case
+payment-adapter exceptional_end, human-triaged buyer_end with signed acknowledgement, case
 extension/lift and partial reverse after stop, including restart and lost-response
 recovery where the target's supported test controls allow it.
+
+On end_delivery the storefront signs receipt time (no buyer at) and journals its
+cooperative stop at receipt plus payer notice with payer partialPeriod, including
+during payment outage; seller policy may waive notice. Verify this separately from
+the buyer's stop-first path and human buyer_end case. At funding expiry verify the
+payment read: renewal replaces the timer, exhaustion is an authority end, only
+unreachable/unverifiable evidence permits a bare-timer end and later correction.
 
 For nonzero notice, end_delivery is explicit end-now or the unreachable-payment
 authority fallback, not the normal immediate follow-up to payer stop. Operator
 VM interrupt uses entitled payee notice when granted, exceptional_end otherwise.
 Setup-part and earlier-evidence checks must observe authority-calculated remedies,
 not local end-correction arithmetic. Runnable doubles qualify lanes; kit tests keep
-vector-derived in-process fakes and no dependency on runnable tooling.
+the kit-owned clock-injected authority engine directly and no tooling dependency;
+the HTTP double wraps that same engine.
 
 Live reports name the observed authority effects, physical recovery, evidence
 kept and remaining cases/holds separately. Do not claim a race/outage was tested
