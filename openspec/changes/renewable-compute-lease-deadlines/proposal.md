@@ -84,7 +84,10 @@ None.
   the allowance, undelivered leases expire, and API credits remain unchanged.
 - `capacity-reservation-lifecycle-hardening` owns hold expiry indexing on the same
   table. Coordinate migration order; use a separate lease-deadline due query/index.
-  This is not a behavior dependency.
+  Index coordination is not a behavior dependency. Reservation acknowledgement-gap
+  qualification additionally consumes only its negotiation-keyed exact-request
+  reservation-idempotency slice, not the whole hardening change; site-local
+  activation implementation need not wait for that integration slice.
 - `converge-ongoing-compute-leases` uses end service to end an active lease earlier;
   it does not renew this site's deadline.
 

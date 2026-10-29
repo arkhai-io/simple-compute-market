@@ -221,7 +221,10 @@ delivery. Delivery admission must also honor an expiry claim that wins activatio
 
 One site-focused implementation round after `inject-site-pool-authority`: schema,
 allowance validation/provider declarations, activation, conditional expiry and typed
-views. Event integration waits for `agreed-evidence-and-early-termination`'s signed
+views. Reservation acknowledgement-gap qualification consumes only
+`capacity-reservation-lifecycle-hardening`'s negotiation-keyed exact-request
+reservation-idempotency slice, not its whole implementation or archive; site-local
+activation work can proceed before that integration gate. Event integration waits for `agreed-evidence-and-early-termination`'s signed
 record/outbox. `unify-compute-delivery-path` then wires activation and supplies the
 cross-service delivery evidence. No dependency on a rate-part contract revision is introduced. Renewable ships `activation_deadlines_enabled`
 false. Unify owns enablement after compatible storefronts deploy first, the updated

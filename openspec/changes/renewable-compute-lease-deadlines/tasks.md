@@ -17,7 +17,10 @@ dependency lands rather than preserving a forbidden import to fit this plan.
   implement a second event format, end service or site-triggered refund.
 - [ ] 1.3 Coordinate the service migration order with
   `capacity-reservation-lifecycle-hardening`; select a separate leased-deadline
-  query/index, rather than extending its reserved-hold expiry index. Confirm
+  query/index, rather than extending its reserved-hold expiry index. Before
+  reservation acknowledgement-gap qualification, require only that change's
+  negotiation-keyed exact-request reservation-idempotency slice; do not gate
+  site-local activation work on its whole implementation/archive. Confirm
   `unify-compute-delivery-path` consumes the activation call without a target time
   and wires every commit caller before deployed enablement. Renewable ships the
   explicit compute composition setting `activation_deadlines_enabled` false; unify
