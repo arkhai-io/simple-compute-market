@@ -1,91 +1,98 @@
+# In-lane payment and dispute authority doubles
+
 ## Why
 
-Every payment scenario in the end-to-end lanes skips: `e2e-tests/settings.toml`'s
-`[payments]` target is blank by default, and the only stand-in for the service is
-`kit/arkhai-payments`' `FakePaymentsClient`, an in-process fake with a placeholder
-proof that emits parts `held` or `reversed`, no `fundedThrough`, no stop, no event
-sequence, and no `stop` call. Nothing in the pipeline can drive a transaction to
-exhaustion, serve a stale or wrong-transaction snapshot, regress an event sequence, or
-rotate the signing identity — the cases that decide whether a storefront's handling of
-the contract is safe — and the live service cannot be driven to any of them on demand.
-
-This is the first change of the roadmap goal that sells compute by the period until
-either party stops ([`ROADMAP.md`, Goal 8](../../../docs/development/ROADMAP.md#goal-8--sell-compute-by-the-period-until-either-party-stops))
-on the kit side: it lands before the mechanism it tests, so that every later change
-is proven against it from its first round rather than against a double built last.
+The end-to-end lanes have no default payments target, so their payment scenarios
+skip. The payments kit's in-process fake supplies a receipt and a placeholder
+snapshot proof, not a service that can exercise authority records, transport
+failures, rate stops, or case holds. A buyer's protection must rest on its own stop,
+held money and kept signed bytes, including when the storefront fails or misbehaves.
+Those paths need independently controllable payment and dispute authorities in the
+lane, not a cooperative storefront masquerading as an authority.
 
 ## What Changes
 
-- The fake grows into an **in-lane HTTP double** of the payments service the lane
-  stacks can run, built on the kit's models and signers, with a development signing
-  key that is a well-known fixture value and says so, trusted by no production
-  configuration. It serves approve, `GET /transactions/{id}` with a verifiable proof
-  over the snapshot frame, `fundedThrough`, `stop`, and the event sequence; `start`,
-  `stop`, partial and whole `reverse`; attachments; and the period clock from `start`.
-- It implements **two contracts under one flag**: the published contract as vendored,
-  and the proposed horizon extension
-  ([`settle-ongoing-compute-through-arkhai-payments`](../settle-ongoing-compute-through-arkhai-payments/)
-  D5) — a payee-only `vouch {part, through}` on a rate part, periods beginning only
-  inside `vouchedThrough`, and a `terms` stop when it lapses — so the per-period
-  scenarios can run before the service ships it. Under the published contract the
-  double releases on stop and never returns released funds, so the collection case
-  fails as it should; under the proposed extension it also accepts a `refund` of
-  released funds, so the `refund` journal kind has something to drain into in the
-  lane.
-- **Test controls**: exhaust a payer's funds at a chosen instant; serve a stale,
-  equal-sequence, regressed, or wrong-transaction snapshot; delay or drop a response;
-  rotate the signing identity with an overlap; and refuse chosen commands with chosen
-  error codes, so the refusal table is exercised.
-- `e2e-tests`' `[payments]` target points at the double under the lane profiles, so
-  the existing bare-metal and credits payment scenarios run in the pipeline and stop
-  skipping. A `livemode: true` snapshot is never produced by the double.
-
-The double proves the marketplace's use of the contract; live qualification stays the
-payments service's. Evidence produced against the proposed extension is recorded as
-*qualification against a proposed contract*, never as live evidence.
+- Own both runnable HTTP boundary doubles: `arkhai.payments.v1` and
+  `arkhai.mediation.v1`, in one lane-only tooling image with separate services,
+  identities, records and availability controls. Production adapters, contract
+  vendoring and signing/verification primitives remain in their owning kits.
+- Preserve two explicit contract modes, `published` and `proposed`. Published mode
+  implements the exact vendored publication; proposed mode implements a pinned,
+  labelled candidate where that publication lacks the target revision. The payments
+  target is per-part authorities, payee-only rate start, pending stops with notice,
+  term/exhaustion stops, `{afterStop: dispute_window}` holds and `extend`/`lift`.
+  There is no horizon, `vouch`, backdated stop or released-funds refund extension.
+- Add the dispute authority's file, append and read/watch boundary with signed
+  per-agreement records. It extends holds as the authority, mechanically rules a
+  sufficient seller self-penalty and an acknowledged `buyer_end(at)`, and sends
+  everything else to controllable triage. Only the authority double applies a
+  ruling's effects at the payment double.
+- Keep mid-scenario control routes: exhaustion, snapshot sequence/provenance faults,
+  delay/drop/refusal, independent outages and signing-identity rotation. Add a
+  deterministic clock and triage/effect-retry controls rather than sleeps.
+- Wire lane-scoped targets, accounts, credentials and authority advertisements into
+  the existing VM, bare-metal and API-credit lanes. Existing bare-metal and credits
+  payment scenarios stop skipping; later compute lifecycle scenarios reuse the same
+  services. API-credit dispute servicing is not added here.
+- Attribute each run as qualification against the published contract, qualification
+  against a proposed contract, or live evidence. Neither double can produce live
+  evidence or `livemode: true`.
 
 ## Capabilities
 
 ### Modified Capabilities
 
-Expected: `test-compatibility` (the double, its controls, and the evidence class).
-`.openspec.yaml` sets `skip_specs` until design adds the deltas.
+- `test-compatibility`: runnable boundary doubles, authority separation, controls,
+  contract provenance, lane readiness and evidence attribution.
 
 ### New Capabilities
 
-None expected.
-
-## Non-Goals
-
-- Any change to the kit's production code paths: derivation, verification, and the
-  lifecycle operations are `settle-ongoing-compute-through-arkhai-payments`'.
-- A stand-in for live qualification; the double never substitutes for the service's
-  own tests, and the activation follow-on verifies it against the service's published
-  vectors before any live evidence is claimed.
+None. These are test collaborators, not new production authorities.
 
 ## Dependencies and Related Changes
 
-- Depends on nothing. The vendored contract is what it implements.
-- `settle-ongoing-compute-through-arkhai-payments` depends on it and reconciles the
-  double's snapshot frame against the service's published vector in its design
-  session; `activate-per-period-compute-servicing` re-verifies the double against the
-  vendored revision before servicing is declared live.
+- `agreed-evidence-and-early-termination` owns the lifecycle interfaces, payment and
+  dispute adapters, evidence stores, contract vendoring, and shared signed-frame
+  primitives. Its schema/model work gates this change's corresponding published
+  mode, not design. A pinned draft permits proposed-only qualification until then.
+- This change alone owns the executable payment and mediation doubles and their
+  controls. The foundation change consumes them in adapter integration tests; its
+  section 12 does not build another mediation double. Design D7 gives the precise
+  non-cyclic implementation gates and requested coordination edits.
+- `spot-deals-through-arkhai-payments` consumes both doubles for rate-part client
+  integration and compute scenarios; it owns production rate arithmetic and adapters.
+- `activate-per-period-compute-servicing` compares the doubles with the vendored
+  publication and qualifies the ready hosted deployment before claiming live
+  servicing. Hosted deployment is not a gate on building or using lane doubles.
+
+## Non-Goals
+
+Production payment/dispute services, production derivation or verification changes,
+new payment primitives, bonds before the contract supports them, automated decisions
+beyond the mediation contract's two mechanical classes, and live provider or ledger
+qualification. Seller site deadlines and churn/pricing policy are not protocol
+requirements and are not simulated as authority guarantees.
 
 ## Impact
 
-`kit/arkhai-payments/fixtures` or a tooling project the lanes build (settled in
-design against `BUILD_AND_PACKAGING.md`'s image rules), the e2e lane stacks that gain
-the double, and `e2e-tests`' payment settings.
+A new tooling distribution and image under `tools/authority-lane-doubles`, a shared
+lane overlay, root and e2e build/run targets, lane payment/dispute profiles and public
+development identities, and existing payment scenario setup/reporting. The kits
+remain independently scoped; only test tooling composes both interfaces.
 
 ## Permanent documentation impact
 
-- [ ] `docs/development/ARCHITECTURE.md`
+- [ ] `docs/development/ARCHITECTURE.md` (no new production layer or authority)
 - [x] Existing subsystem specification: `test-compatibility`
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
 ### Knowledge to promote
 
-- The in-lane payments double, its two contracts, what it proves and what it does
-  not — `test-compatibility` spec and `docs/development/TESTING.md`, "Payment
-  Receipts in Tests".
+- Double ownership, contracts, controls and evidence boundaries:
+  `openspec/specs/test-compatibility/spec.md` and its architecture companion.
+- How to run, configure and interpret lane qualification:
+  `docs/development/TESTING.md`, "Payment Receipts in Tests" and "Private Service
+  Dependencies", plus `e2e-tests/README.md`.
+- Build and lock conventions are followed, not changed. The external authority
+  contract itself remains documented by the foundation change, not by a test double.
