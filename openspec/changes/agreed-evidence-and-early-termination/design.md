@@ -541,6 +541,7 @@ Arkhai mediation, the `arkhai.mediation.v1` interface: a dispute authority opera
 
 ## Open questions
 
+- **Who rules a receipt-backed `buyer_end`.** D10 sends every `buyer_end(at)` to a person. When the case carries the storefront's signed receipt of surrender at *T* — signed by the Agreement's seller principal over the buyer's signed request, verifiable from the Agreement alone — and `at` is no earlier than *T*, the seller has signed the fact and nothing is left for a person to weigh; a mechanical ruling (stop the rate parts at *T* under the payer's entry, reverse what they earned since) would give the payment-outage path an automatic remedy, with `at` before *T* and unacknowledged ends staying a person's. Whether Arkhai mediation publishes that rule, or the design says *person-ruled until it does*, is with the service's maintainers.
 - **Case transport.** Where an automated authority receives a case, and how privately held evidence is disclosed only to it, deferred with D11.
 
 ## Status
