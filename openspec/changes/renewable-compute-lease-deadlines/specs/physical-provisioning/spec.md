@@ -19,14 +19,15 @@ The lease watchdog MUST consider the earlier of the agreed lease end and a non-n
 - **WHEN** activation lapse is claimed for a lease whose create operation is still in flight
 - **THEN** the lifecycle adopts its result and completes the ordinary teardown path rather than freeing capacity ahead of proven release
 
-### Requirement: Activation lapse is signed physical-end evidence
+### Requirement: Activation lapse is signed lease-end evidence
 
-The signed `lease_ended` record MUST support `activation_deadline_lapsed` with the claimed deadline and phase alongside the base record's identity, correlation and actual end time. Deadline expiry MUST NOT fabricate an earlier physical end. The durable outbox MUST preserve record identity and signed content across retries. This evidence MUST NOT itself authorize a payment stop, reversal or refund.
+The signed lease_ended record MUST carry activation_deadline_lapsed, claimed deadline/phase and the base identity, correlation and intended effective end. It MUST NOT claim proven physical completion; guarded release supplies that separate fact. The outbox MUST preserve identity and signed bytes across retries. This evidence MUST NOT authorize payment effects.
 
 #### Scenario: The watchdog releases for activation lapse
 
-- **WHEN** the deadline wins the due comparison and its claim leads to a physical end
-- **THEN** the event records the activation-lapse cause, claimed deadline and phase, and the actual end instant under the base event contract
+- **WHEN** the deadline wins the due comparison and its claim records an end intent
+- **THEN** the event records the activation-lapse cause, claimed deadline and phase, and intended effective end under the base event contract
+- **AND** physical completion remains pending until guarded release is proven
 
 #### Scenario: Event acknowledgement is lost
 

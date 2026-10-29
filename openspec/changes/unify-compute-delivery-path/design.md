@@ -2,290 +2,296 @@
 
 ## Context
 
-This change reconciles Goal 8's delivery design with
-`agreed-evidence-and-early-termination` (D6–D10). That frame owns commitment,
-lifecycle, end service, final requests, the payment/dispute adapter tables and the
-evidence stores. Its authority model wins: buyer guarantees rest on authority records
-and kept signed bytes, not on a cooperative storefront's local checkpoints.
+VM and bare metal currently commit, dispatch and disclose through different paths.
+Bare metal commits from now; VM recovery substitutes 3600 seconds twice, and
+vm_fulfillment_service._parse_start_utc substitutes now for missing start and accepts
+legacy minute-format timing. The accepted Agreement, not those fallbacks, owns the
+window. Exact normalized requests and recorded resource identities remain recovery
+inputs; legacy minute-format persisted timestamps remain readable, not a reason to
+guess a new Agreement start.
 
-The current tree still has distinct paths:
+Provisioning owns physical fulfillment and live results. Core forms
+StorefrontFulfillmentContext and invokes the domain hook, validating its returned
+identity. The shared path runs inside that hook, never beside or instead of it.
+Payment settle and Alkahest's ready continuation reach the same hook. This change
+does not replace settlement-stage evidence validation.
 
-- `domains/vms/storefront/src/market_storefront/payment_settlement.py` verifies a
-  receipt, inserts delivery and launches `_provision`. VM derives its lease end from
-  Agreement timing. `services/fulfillment_resume_runtime.py` substitutes 3600 seconds
-  in two recovery paths when duration is absent.
-- `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/fulfillment_service.py`
-  commits from `now`, then persists the returned window and begins fulfillment.
-- Both already have refund/admission ordering and durable provisioning identities to
-  preserve. The provider-neutral fulfillment aggregate owns physical execution and
-  live result reads; it explicitly does not own commercial agreement identity or
-  storefront deal state (`openspec/specs/fulfillment/spec.md`).
-- The existing VM delivery-priority requirement allows live progress after a failed
-  checkpoint; durable admission and external-operation intent must become explicit
-  exceptions. Otherwise a restart could repeat a protected effect without its intent.
-
-These are design inputs, not claims that the dependency changes are implemented.
-Reverify the composition seams after those changes land, without reopening the
-settled authority boundary.
+The foundation owns end service and its durable admission/end-plus-filing operations.
+These are dependency contracts, not implemented capabilities on this branch.
 
 ## Goals / Non-Goals
 
-**Goals:** one delivery implementation for both compute domains; the Agreement's
-absolute window on every attempt; activation of every delivered lease; durable
-protected transitions; an undelivered handoff into the existing end/self-filing path;
-no new credential disclosure after the locally admitted end.
+One compute-family delivery implementation, immutable Agreement windows, activation
+before billing and availability, stable effect recovery, classified end handoff,
+and no credential replay after a locally admitted end.
 
-**Non-goals:** implementing a second end service, lifecycle route, payment journal,
-rate adapter or dispute policy; a billing horizon; active-lease renewal; generalized
-settlement-start/evidence-publication unification; an Alkahest dispute adapter.
+No second end service, payment journal, dispute policy, billing horizon, renewal,
+Alkahest dispute adapter, or broader obligation-discovery/evidence extraction.
 
 ## Decisions
 
-### D1. Compute-family placement and one delivery record
+### D1. A separate compute-family delivery distribution and one record
 
-**Recommendation:** put the path in `provisioning/compute/src/compute_provisioning/`
-as a `delivery` module/package beside the existing family mechanisms, with a
-storefront-side delivery repository and injected client/port interfaces. It is
-compute-family code: it speaks site leases, activation and provisioning results.
-Do not put it in `kit/fulfillment`, make the vocabulary-only `domains/compute` own
-persistence, or import a storefront or deployed provisioning service into it.
-The family module does not read provisioning repositories; it calls the public
-provisioning client supplied by composition. If dependency weight requires a later
-split, the API remains family-scoped; no new distribution is needed for this plan.
+**Recommendation (02 F5/F11/F12):** create the library distribution
+provisioning/compute/delivery, source compute_delivery, rather than add commercial
+orchestration to arkhai-compute-provisioning. It depends on compute contracts/client
+interfaces and neutral lifecycle libraries, not storefronts or deployed services.
+Teach scripts/architecture.py the normal compute-family provisioning subtree
+classification and register that convention in docs/development/ARCHITECTURE.toml;
+do not add an override that closeout cannot discharge.
+This avoids adding servicing/persistence dependencies to the site service's install.
+The vocabulary-only domains/compute and neutral kit/fulfillment remain unsuitable.
 
-**Recommendation:** keep one delivery record per negotiation in the storefront's
-database, also for prepaid deals. It holds accepted timing/site binding, capacity
-reservation and fulfillment identities, delivery checkpoints, authorization decisions
-and stable external-effect intents/acknowledgements. It does not hold payment balances,
-a second final-request log, a financial end instant, credentials or a rate-servicing
-state machine. Rate servicing references it by negotiation ID. Existing domain rows
-become adapters/projections or are migrated; they must not remain competing writers.
+The neutral authorization/effect protocols, phase vocabulary and opaque evidence
+envelope belong in kit/deal-lifecycle; the foundation owns that shared port slice.
+An envelope carries identity, digest, kind/version and a domain payload. Generic
+servicing does not interpret compute payloads; a compute-scoped adapter validates
+ready evidence and is injected by composition. No upward family import is required.
 
-End service in `kit/deal-servicing` remains the one owner of the earliest final
-request and its journal. Its narrow admission/domain port coordinates with the
-delivery repository. **Recommendation:** implement local admission, checkpoint CAS
-and end recording through a shared storefront transaction boundary with a revision
-check. Neither generic servicing nor the family path imports the other one's concrete
-repository. There is no database transaction across authority or provider I/O.
+Each domain fulfillment hook delegates to this path through
+StorefrontFulfillmentPorts. Core's identity validation remains in force.
+Available maps to fulfilled; pending, persistence retry and repair-required map to
+deferred (repair-required is operator-visible, never an automatic retry that invents
+terms). A terminal result maps to failed only after the D5 handoff is durable.
+Mechanism-specific evidence/claim continuations remain outside the shared path.
+
+One negotiation-keyed record in the storefront database holds accepted window/site,
+reservation/fulfillment IDs, decisions, intents, acknowledgements and checkpoints.
+It holds no credentials, payment balances, final-request log or financial end.
+End service owns the revision-bearing admission port and single end-plus-optional-
+self-filing operation from agreed-evidence-and-early-termination. Delivery consumes
+those operations in the same storefront transaction for admission/CAS; no transaction
+spans remote I/O and neither owner imports the other's concrete repository.
+
+**Recommendation (01 F6 / 02 F9): additive projection cutover.** Introduce the shared
+record additively. Keep immutable evidence/exact requests and real Alkahest state in
+their owners; make old VM delivery-progress rows read-only projections, not writers.
+Under one migration transaction adopt negotiation, accepted digest/window, reservation
+and fulfillment identities after authoritative reconciliation: held/committed -> exact
+commit intent; dispatched -> dispatched; provider-ready -> ready evidence only.
+Never infer activation, billing start or availability from old credentials or a
+physical active flag. Revalidate live readiness, activation and admission before
+availability. Ambiguous/missing/conflicting evidence stays repair-required and keeps
+its resource. Already-disclosed access is not retroactively revoked by this migration.
+
+Enable live result reads for adopted resources before deleting all stored access
+material, including authenticated response bodies. Switch every foreground/recovery
+writer together and record a minimum writer/schema version; old binaries refuse
+startup after cutover. Downgrade requires a reviewed forward repair or explicit
+development reset, never a silent return to old writers. This supersedes VM's
+blanket reset-only delivery-schema rule, not its fail-closed evidence validation.
 
 ### D2. The Agreement window survives every retry
 
-Use `lease_start_utc = Agreement.start_utc` and
-`lease_end_utc = start_utc + duration_seconds`. Commit/recommit the exact same window
-and reservation identity after restart, including the Alkahest path. For rate deals,
-terms validation owns `max_term_seconds == duration_seconds`; delivery consumes it,
-not a second term codec. The seller's listing bounds have already been materialized
-into the Agreement by `negotiate-open-ended-compute-terms`. The earlier recommendation
-to consider a prorated provisioning-time credit on prepaid deals remains seller
-pricing work for that terms design, not a new delivery/refund rule here.
+Commit lease_start_utc = Agreement.start_utc and lease_end_utc = start + duration,
+at settlement, under the same reservation identity on every attempt. Terms owns
+max_term_seconds == duration_seconds and whole-period maximums, not delivery.
+No now/missing-duration fallback and no replacement resource on ambiguous old timing.
+Late settlement shortens service, never shifts the absolute end.
 
-Bare metal's commit from `now` and VM's two one-hour substitutions are removed. A
-missing/invalid timing record is repair-required; it does not invent a new window or
-replace a running resource. An elapsed end before delivery takes D5. A late settlement
-shortens service rather than moving the seller's absolute bound. Existing in-flight
-rows with a resource are adopted by their recorded identity; an irreconcilable old
-window is surfaced for repair, never silently recommitted to different terms.
+**Recommendation (02 F2):** keep forward reservations, with zero early-provisioning
+lead time in this plan: dispatch, activation, billing start and disclosure occur no
+earlier than Agreement.start_utc. Before then, a committed deal is deferred with a
+durable wake time and rechecks admission on wake. This avoids using hardware outside
+the admission window; a future nonzero lead time would need explicitly accounted
+capacity, not just a timer. Renewable anchors the provisional deadline at
+max(commit_time, lease_start_utc) + allowance. Available never means early access.
+Settlement after the end enters D5, without guessing which party caused lateness.
 
-### D3. Authorization composes end admission and payment policy
+Reservation acknowledgement-gap recovery consumes the negotiation-keyed exact-request
+idempotency slice of capacity-reservation-lifecycle-hardening. It is a section-1/2
+implementation gate, not a dependency on that change's entire hardening scope.
+Reserve, commit, schedule and begin all resolve the same authoritative identity.
 
-`authorize_delivery(deal, phase)` runs before `commit`, `dispatch`, `start` and
-`disclose`. The `disclose` phase admits initial availability, not each subsequent
-credential read; those use D7's recorded local guard. Each decision records
-negotiation, phase, attempt/operation identity,
-allow/refuse/pending outcome, reason and evidence references before the caller uses
-it. A refused transition takes D5 where delivery has not become available; `pending`
-or an unknown authority result stays pending and resolves through the owning
-adapter, never by assuming refusal or success. A decision applies to one transition
-attempt, not permanent authorization for all later retries.
+### D3. Pure authorization and a separate billing-start effect
 
-Every transition also uses end service's admission port, including reconciliation and
-restart. The final request is not copied into a hook-owned log. A fresh financial
-allow is insufficient if end service refuses admission; a request that wins after
-dispatch makes recovery adopt and end that fulfillment under the existing lifecycle
-rule. The path owns the call sites; `agreed-evidence-and-early-termination` owns
-"delivery admission ordered against final requests" and how the earliest request wins.
+authorize_delivery(deal, phase) is a decision, not a payment mutation. Phases are
+commit, dispatch, start and disclose. Each attempt durably records allow/refuse/
+pending, reason, operation ID and evidence references before use. Start means
+permission to attempt billing start, not the start effect itself. Unknown authority
+outcomes stay pending. The prepaid hook performs no additional financial action;
+it does not bypass selected-stage typed/versioned commitment evidence validation.
 
-The default prepaid hook performs no additional financial work and answers allow
-once recorded. It does not bypass existing commitment-evidence validation or local end
-admission, and a `once` part acquires no artificial `start` event.
+Every protected transition, activation included, rechecks foundation admission
+and its revision; a financial allow never overrides a local due end.
+D7 reuses that port for subsequent credential reads.
 
-The rate implementation belongs to `converge-ongoing-compute-leases`, using the
-payment adapter from `spot-deals-through-arkhai-payments`:
+After ready evidence and activation, invoke start_billing(effect_id, evidence)
+separately. The path persists one stable effect intent/key before calling.
+Rate servicing implements it through the seller half/payment adapter under the
+supplied key, derives per-part keys deterministically, and resolves unknown outcomes
+without allocating another start identity. Its existing effect journal is a replay
+implementation of this intent, not an independently keyed delivery decision.
+Prepaid start_billing is a no-op and creates no artificial once-part start.
 
-- At commit/dispatch, verify the payment authority's commitment/reservation and
-  start/stop records, not a horizon. Before `start`, approval reserves the first batch;
-  a missing funded-through time on an unstarted part is not a refusal by itself.
-- At `start`, verified provisioning evidence is supplied (commit and fulfillment
-  identities plus the provider's ready result and evidence digest, no credentials).
-  The hook journals and issues payee-only `start` through the seller half/payment
-  adapter; `started` requires the verified authority record. An unknown outcome is
-  resolved under that same operation key, not a second start.
-- At disclose, verify the recorded start and the authority's current stop/pending-stop
-  records, plus local delivery eligibility. A future pending stop is not an immediate
-  end: its effective instant is authority-hosted, and `watch`/end service own action
-  at that instant. Do not locally schedule an authority stop or override its notice.
+The family supplies commitment and fulfillment identities plus validated ready-
+evidence digest/envelope, never access secrets. Converge owns rate authorization,
+authority start/stop/pending-stop interpretation and the start-port implementation;
+spot-deals owns adapter/part translation. Their requirements are referenced, not
+copied here. Neither a funded horizon nor a payee vouch is required.
+A remote authority read and local admission are not globally atomic.
 
-This describes the seam's obligations, not a second implementation of rate mechanics.
-There is no payee vouch or renewable billing horizon. Payment truth is the authority's
-verified records read by the adapter. A remote stop can race any read; the local
-admission check does not claim atomicity with a remote authority.
+### D4. Acknowledged checkpoints and recoverable effect intents
 
-### D4. Checkpoints and effect intents are different
+| Checkpoint | Meaning / recovery |
+|---|---|
+| authorized | commit decision and exact commit intent durable; resolve same reserve/commit |
+| dispatched | fulfillment dispatch acknowledged; query/adopt the recorded fulfillment |
+| activated | validated provider readiness and site activation acknowledged; preserve any earlier end |
+| started | billing-start effect acknowledged (verified authority record for rate; no-op for prepaid) |
+| available | disclose authorization and readiness durable; no buyer read required |
+| converged | selected stage's required evidence/readiness/claim-binding continuation acknowledged, or explicitly no continuation for that stage |
 
-The delivery checkpoints advance on acknowledgements, while an effect intent with
-its stable key is persisted **before** each external call. This avoids calling a
-checkpoint "activated" before the site has acknowledged it. Provider-ready is
-separate from buyer-available. The names are storefront delivery state, not the
-provisioning aggregate's `active` or the seller half's lifecycle-state vocabulary.
+Order: commit gate/commit; wait until start; dispatch gate/dispatch/ready; local
+admission/activate; start gate/start_billing; disclose gate/available; converged.
+The old ambiguous delivery active name is retired; physical active and site
+renewal_phase active remain their owners' distinct facts. Converged does not wait
+for unrelated collection/payout or move claims-engine submission into delivery.
+Access uses available/converged and D7, not convergence alone.
 
-| Checkpoint | Meaning | Recovery obligation |
+Persist intents before remote reserve, commit, dispatch, activation and billing
+calls. Acknowledgements advance checkpoints. Recovery checks authority state under
+the same keys and repeats admission at every gap. Required writes defer effects;
+bookkeeping alone never abandons a running resource. Local claim expiry permits
+recovery, not duplication. This change recovers each checkpoint effect.
+Kit-owned listing/fulfillment lifecycles owns obligation discovery and terminal
+driving across mechanisms, and consumes this path rather than reimplementing it.
+
+### D5. Classified delivery-end handoff, never a refund implementation
+
+Supply cause, actor, source, accepted start, observed failure time, identities and
+evidence to the foundation's single end-plus-optional-self-filing operation.
+That owner selects/records the earliest final request and journals filing atomically.
+Delivery neither writes a second end log nor computes amounts or payment corrections.
+
+| Observed cause before availability | Earlier controlling end | Caller handoff |
 |---|---|---|
-| `authorized` | commit gate and exact commit intent recorded; no resource dispatched | reconcile/retry the same commit; repeat admission and the dispatch gate before dispatch |
-| `dispatched` | fulfillment acceptance/dispatch acknowledged under its recorded identity; provisioning may still be pending | query/adopt that fulfillment; an unacknowledged dispatch intent is resolved with the same reservation/request, never a replacement |
-| `started` | ready provisioning evidence validated and the start gate acknowledged; rate start verified at the authority, prepaid financial step a no-op | resolve the same start operation, recheck end admission, then retry activation |
-| `activated` | site acknowledged activation to the agreed end | a lost activation acknowledgement is retried idempotently; expiry instead takes D5 |
-| `available` | disclose gate passed and service readiness recorded durably | no buyer read is needed; continue toward steady state unless end service has ended it |
-| `active` | normal delivery convergence complete | ongoing servicing owns observation; credential reads still enforce D6 |
+| Buyer end_delivery, entitled authority stop, terms end, or ruling | Same or earlier lawful request | Reuse/request end only; no seller self-penalty merely because not yet available |
+| Seller-side provisioning failure, terminal start refusal, activation lapse | No lawful end preceding failure | Seller-failure classification with evidence for exceptional_end |
+| Seller failure discovered after an already controlling lawful end | Earlier buyer/terms/ruling request | Preserve attribution; do not manufacture a second undelivered penalty |
+| Settlement observed after the window with no prior end/failure record | No independently established prior cause | Request end at term; supply never-delivered evidence for cooperative self-filing, not a guessed buyer-fault exemption |
 
-The actual order is commit gate/commit, dispatch gate/dispatch and provision, start
-gate/start, activate, disclose gate/availability, active. `authorized` is **not** an
-early disclose authorization. External-operation keys and admission revisions survive
-restart; local claim expiry permits recovery but not duplication. At each adjacent
-checkpoint and each intent/ack gap, recovery reads authoritative state and resumes or
-ends the same resource. No network I/O holds the local transaction open.
+**Recommendation (01 F4 / 02 F2/F8):** for genuinely never-delivered failure the
+foundation uses at = min(Agreement.start_utc, failure_observed_at). Persist that
+instant with the failure; retry does not recompute now. Before a future start this
+is a valid immediate intent and returns the entire unserved term/setup share; after
+start it preserves the original start basis. Delivery supplies both instants rather
+than silently clamping authority commands. Foundation/dispute policy owns that mapping.
+A prior term end does not erase an already established seller non-delivery obligation.
+Reject an unsupported assertion of buyer-caused lateness as a reason to keep payment:
+only authority records and kept signed bytes establish buyer actions.
 
-A required journal/checkpoint failure leaves protected effects pending and loudly
-reported. Commercial delivery is not abandoned solely due to bookkeeping failure,
-but it cannot proceed unjournaled. Existing physical resources remain adopted while
-persistence is retried. This narrows the VM delivery-priority requirement without
-weakening its no-abandonment goal.
+No-dispatch proof permits end service's release without teardown; dispatched work
+is adopted and ended, not replaced. The site report is end intent/evidence, not proof
+of hardware release. Proven release is a separate completion fact. Physical recovery
+does not wait for authorities. The dispute authority, not this path, applies any
+stop/reversal under held money. Setup ends at activation under the foundation;
+its unserved-share rule is not delivery arithmetic.
 
-### D5. Undelivered is an end-service input, not a refund implementation
+An Alkahest deal with no adapter reports unsupported self-filing and retains its
+existing recovery/reclaim semantics; no fictitious authority success is reported.
+After availability, foundation's actual service-end rule applies instead.
+Cooperative seller filing is not a guarantee about arbitrary sellers.
 
-A terminal delivery failure before `available` records a local final request with
-actor, cause and source and supplies the seller half an `exceptional_end(at)` intent,
-where `at = Agreement.start_utc`, as D8 of
-`agreed-evidence-and-early-termination` requires. Triggers include terminal hook
-refusal, provisioning failure, an elapsed Agreement window, and the site's signed
-end report showing expiry in `awaiting_activation`.
+### D6. Reservation-only activation before billing
 
-The final request's physical time is the failure/end time; the intent's `at` is the
-deal's start. They are not two competing storefront end decisions. End service owns
-the journal that commits the filing with the final request and retries it after a
-crash. No dispatch means proof-driven release without teardown; dispatched work is
-adopted and terminated through end service's existing domain port. A local failure
-does not wait for the payment or dispute authority to recover before ending delivery.
+Activate after provider-ready evidence, no earlier than Agreement start, and before
+billing start and availability. The request names only the reservation.
+Validate the site's returned end against the immutable commit end or a verified
+earlier end recorded by end service. An unexplained mismatch is repair-required;
+a valid earlier truncation is adopted, never extended to the original Agreement end.
+The active instant is the site's fact. Journal/retry unknown acknowledgements under
+the same identity; expiry claimed first refuses activation and enters D5.
+A truncation before activation or between a lost acknowledgement and retry must
+survive unchanged. Never activate to a funded horizon.
 
-The dispute adapter maps the intent; the dispute authority realizes its outcome as
-stop now plus reversal since `at`, within the holds, and applies it. The path sends
-no amounts, direct payee stop or refund command. This covers a rate part started but
-never made available and the held `once` parts, including a setup part. An already
-observed lawful authority stop still goes through end service; it is not replaced by
-a seller-created financial instant. Self-filing an undelivered failure does not erase
-the stop's actor/cause or supersede the earliest final request.
+**Recommendation (02 F4): staged enablement.** Renewable ships the explicit compute
+composition safeguard switch off, while provider support/default validation remains.
+This change owns enablement only after every storefront/recovery caller is deployed.
+Deploy compatible storefronts first, then the updated site with the switch off;
+qualify callers, then enable for new commits. Existing null-phase leases stay null.
 
-For deals with no lifecycle/dispute adapter (today's Alkahest), retain the accepted
-mechanism's existing failure/reclaim behavior and report unsupported self-filing,
-not fictitious authority success. The physical path and activation are still shared.
-This change does not create that adapter or promise a new refund guarantee for it.
+For a verified legacy null-phase leased view, activation is a no-op; an absent
+activation route is tolerated only with that verified legacy view/capability.
+An awaiting-activation lease with no route, unknown phase, unverified legacy
+assumption, or an end mismatch is deferred repair-required. Never guess that an
+unreachable activation endpoint succeeded. This permits rolling deployment without
+unactivated delivered leases being reclaimed. Site-only evidence cannot enable it.
+Renewal remains a deferred seller-side option, not buyer protection.
 
-A cooperative seller files; it is not the buyer's guarantee. A seller who disappears
-or refuses still leaves the buyer its own stop/case over held money. Site reports,
-authority records and kept signed bytes, not storefront honesty, support that case.
-Post-availability site failure uses the lifecycle's actual service-end instant, not
-this undelivered-at-start rule; D8 owns that behavior too.
+### D7. Live credential reads, including authenticated replay
 
-### D6. Activation always names the agreed end
+VM settle/settle-status remains its buyer access surface: fetch live through the
+shared guard while preserving the existing response model. Bare metal's access/
+result surface uses the same guard. VM buyer's hosted path and core buyer's
+orchestrator continue polling the typed settle-status contract; no new endpoint,
+CLI or persisted-credential fallback is introduced. Coordinate client changes with
+buyers-use-the-storefront-client if that change lands first.
 
-After the start checkpoint and before availability, call the activation operation
-from `renewable-compute-lease-deadlines` with the original Agreement end, for reserved,
-on-demand and spot deals, including Alkahest. Persist the intent before the call and
-retry the same call after a lost acknowledgement. The site stamps the active instant;
-the storefront does not infer it from a buyer read. If expiry already claimed the
-lease, do not resurrect it: take D5.
+Require available/converged, start reached and foundation's local time/revision
+admission. Fetch provider credentials outside the transaction, then recheck the
+revision and due end before signing/authorizing the response. Discard fetched bytes
+if an end wins. Physical termination revokes previously disclosed material.
 
-The awaiting-activation allowance, deadline/expiry race, signed `lease_ended` report
-and site's lapse policy belong to that dependency. The activation deadline becomes
-the agreed end for every delivered deal; no rate hook supplies a shorter deadline.
-The renewal half is deferred until independently needed by a site operator. These
-seller-side deadlines do not cap billing or guarantee recovery when a seller is
-adversarial; authority stops, disputes and holds do that.
+Both VM seller_auth and bare-metal response_auth must exempt credential-capable
+settle/status/access/result responses from retained response bodies. Retain the
+request digest/identity needed to reject changed requests, and response signing;
+exact retry re-enters the read/guard and may now be refused. Existing cached access
+bodies are purged at cutover; no credentials appear in replay storage, decisions,
+logs or projections. Replay of mutation acknowledgements is otherwise unchanged.
+Coordinate this narrow policy with redesign-authenticated-requests; do not wait on
+that whole redesign or weaken changed-request rejection.
 
-### D7. Credential reads use local admission, not live payment snapshots
-
-The buyer-authenticated access/result routes require `available` or `active` and
-local eligibility under end service's recorded earliest final request. They use the
-same local admission ordering as delivery transitions. A due end or an earlier
-undelivered failure refuses disclosure, even when provisioning still reports active.
-A future final request admits reads only before its time; a local clock check is
-still needed if teardown is delayed.
-
-Read provider credentials outside a database transaction, then recheck the delivery
-revision/end admission before authorizing the response; discard fetched material
-when the check loses to a local end. **Recommendation:** use the shared transaction/
-revision seam from D1 as the disclosure linearization point. A read admitted before
-an end may already be in flight on the network when that end commits: the guarantee
-orders local authorization, not receipt of bytes on a remote machine.
-
-Keep the provisioning result API's existing read-only/no-payment semantics. This is
-a storefront access guard, not a change to the provisioning aggregate. Never cache
-access material or put it in evidence/decision records. Do not fetch a payment
-snapshot on every credential read. Remote stops become local ends through rate
-servicing; its healthy observation bound is not an absolute no-access-after-remote-stop
-promise. Credentials already disclosed are revoked by physical termination, not by
-blocking a later read. `converge-ongoing-compute-leases` owns the remaining servicing
-and access-bound discussion.
+No payment snapshot on each read. Local authorization, not receipt of in-flight
+bytes or an absolute remote-stop access bound, is the guarantee. Watch turns remote
+authority stops into local ends. Foundation supplies ordering, not another cache.
 
 ## Ownership and dependency gates
 
-| Owner | Owns | This change consumes |
-|---|---|---|
-| `agreed-evidence-and-early-termination` / `kit/deal-servicing` | final requests, earliest end, admission rule, end effects and journaled self-filing, routes/evidence | admission/domain port and one final-request plus exceptional-end handoff |
-| `renewable-compute-lease-deadlines` | awaiting-activation deadline and site activation/expiry/report | activation to Agreement end and observed awaiting-activation expiry |
-| This change / compute family | protected transition call sites, delivery record, activation callers, access admission | injected ports, never mechanism-ID branches |
-| `spot-deals-through-arkhai-payments` | rate payment adapter, operation identity, verified authority records | payment effects reached through the seller half |
-| `converge-ongoing-compute-leases` | rate hook implementation and ongoing servicing in `kit/deal-servicing` | D3 hook contract and delivery evidence/checkpoints |
-| `kit-owned-listing-and-fulfillment-lifecycles` | broader start/evidence/verification extraction | the one compute delivery path, not a competing path |
-
-Implementation of prepaid delivery requires the first two dependencies. Rate
-composition/qualification additionally requires the rate adapter and servicing;
-publication remains fail-closed without them. The archived
-`resolve-compute-family-findings` is the current recovery/admission baseline; preserve
-its safeguards rather than introducing a competing recovery owner.
+- Foundation: neutral delivery ports/evidence envelope, revision-bearing admission,
+  one end-plus-filing operation and cause/timing semantics. No local substitutes.
+- Renewable: activation/conditional expiry/report extension; transitively requires
+  inject-site-pool-authority. This change owns final deployed safeguard enablement.
+- Capacity-reservation-lifecycle-hardening: negotiation-keyed reserve replay slice.
+- Converge and spot-deals: rate decisions/effects/adapters. Prepaid implementation
+  need not wait for rate qualification; publication stays fail-closed until composed.
+- Add-arkhai-payments-lane-double: HTTP lane qualification in tasks 3.3/4.3/4.4.
+  Library integration uses in-process contract fakes from the same vectors, not a
+  tooling dependency.
+- Kit-owned listing/fulfillment: broader convergence discovery/terminal driving,
+  dependent on this path for protected-effect recovery and access retirement.
 
 ## Rejected alternatives
 
-- Billing horizon or payee vouch: it protects only against an honest crash, not a seller that keeps advancing it; the buyer's stop and case are the guarantee.
-- A rate-specific activation horizon or active renewal loop: no authority guarantee depends on it; activation to the agreed end closes the immediate gap and renewal is deferred.
-- Direct undelivered refund/stop, a post-stop refund journal or reverse-before-stop: end service journals `exceptional_end(start)` and the dispute authority applies the correction under the holds.
-- Backdated/effective-time payee stop: stops are never backdated; the dispute authority stops now and reverses since the evidenced instant.
-- Minimum spend or its refund rule: provisioning cost is seller pricing/acceptance policy; presets may use an honestly named setup `once` part.
-- Storefront-local notice scheduling: pending stops and notice live at the payment authority and survive a dead storefront.
-- A second end-deal route, final-request log or financial end decision: lifecycle/end service owns them; buyer ends use `end_delivery` and authority actions.
-- A gate only in polling or only once at delivery start: it misses later protected transitions and recovery races.
-- `authorized` meaning disclose was allowed before provisioning: authorization is phase-scoped and availability must follow verified start and activation.
-- Starting rate billing after disclosure: recovery would serve access without a recorded start.
-- A storefront provisioning timer duplicating the site: expiry is the site's clock and claim; a dead storefront cannot run such a timer.
-- A live payment snapshot per credential read or absolute no-access-after-remote-stop: neither makes two authorities atomic, and the former couples physical reads to payment availability.
-- A family-neutral path in `kit/fulfillment`: commercial delivery and site activation are compute-family responsibilities, separate from provider execution.
+- Provisioning base-kit placement: unnecessary lifecycle/persistence install weight.
+- Start hidden in authorization or before activation: ambiguous keys and avoidable
+  billing-before-expiry races; start is a separately keyed post-activation effect.
+- Early dispatch without accounted lead-time capacity: can exceed the agreed window.
+- Restoring the original end on activation: resurrects an earlier admitted end.
+- Self-penalty for every refused transition: conflates lawful ends with seller failure.
+- A buyer-fault guess for late settlement: no authority-backed evidence supports it.
+- Billing horizons, local notice schedulers, direct refunds and a second end journal:
+  contradict the authority boundary. Authority stops/holds/cases protect buyers.
+- Retained credential-response replay: bypasses local admission after an end.
 
 ## Open questions
 
-None blocking this implementation basis. Placement, separate delivery record and the
-local transaction/revision technique above are recommendations supplied here; revisit
-the technique if dependency implementation exposes a different durable admission seam
-that preserves the same ordering, without introducing another end owner.
+No unowned design choice in this change. Recommendations above are the defaults
+supplied under owner delegation. Reverify exact neutral-port names and schema
+bindings when the foundation lands; a missing port remains a gate, not license to
+implement it twice. Obtain another design review before planning because placement,
+cutover, timing and effect ordering changed materially.
 
 ## Design promotion record
 
-Planned destinations; promotion follows implementation review, not this design edit.
+Planned, not current-state documentation:
 
 | Accepted decision | Permanent destination |
 |---|---|
-| D1 family ownership and ports | `docs/development/ARCHITECTURE.md` (Family kits, Fulfillment); new `compute-delivery` architecture companion |
-| D1 delivery record; D2 window; D3 hook; D4 recovery | new `compute-delivery` spec and architecture companion; `openspec/specs/fulfillment/architecture.md` (boundary only) |
-| D4 delivery-priority exception; D6 activation caller | `openspec/specs/vm-storefront-fulfillment/spec.md` and architecture companion; new `compute-delivery` spec |
-| D5 undelivered caller of lifecycle | new `compute-delivery` spec/architecture; `docs/development/ARCHITECTURE.md` (Release), referencing the lifecycle owner |
-| D6 activation to agreed end; D7 access admission | new `compute-delivery` spec/architecture; `docs/development/ARCHITECTURE.md` (Authority boundaries, Fulfillment status and results) |
-| Capability documentation | `openspec/specs/README.md` adds `compute-delivery`; planned spec/companion created under that capability at closeout |
-| Goal/campaign currency | `docs/development/ROADMAP.md` Goal 8 and `openspec/changes/README.md` delivery row, at implementation closeout |
+| D1 distribution, neutral protocol boundary, core hook | docs/development/ARCHITECTURE.md (Family kits, Fulfillment), ARCHITECTURE.toml; compute-delivery architecture |
+| D1 additive adoption, credential retirement, downgrade refusal | vm-storefront-fulfillment spec/architecture; compute-delivery spec/architecture |
+| D2 windows and future starts; D3 ports; D4 checkpoints/recovery | compute-delivery spec/architecture; fulfillment architecture (boundary only) |
+| D5 caller classification | compute-delivery spec/architecture; reference deal-lifecycle policy |
+| D6 activation/enablement; D7 access and replay | compute-delivery spec/architecture; vm-storefront-fulfillment; docs/development/DEPLOYMENT_AND_CONFIG.md; ARCHITECTURE.md authority/results sections |
+| Capability index | openspec/specs/README.md adds compute-delivery |
+| Goal/campaign currency | ROADMAP.md Goal 8 and missing-start-at-commit row; changes/README.md dependency/status rows |

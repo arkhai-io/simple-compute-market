@@ -18,14 +18,17 @@ fails to deliver. This is the delivery portion of Goal 8 in
 
 ## What Changes
 
-- Both compute storefronts compose one path for capacity commit, dispatch, payment
-  start, site activation, availability and access, retaining domain preparation,
+- Both compute storefronts compose one path for capacity commit, dispatch, site
+  activation, post-activation billing start, availability and access, retaining domain preparation,
   result codecs and route surfaces.
 - Every fresh or recovered commit uses `start_utc` and
   `start_utc + duration_seconds` from the Agreement. Missing timing is repair-required,
   not a one-hour default; an exhausted window takes the undelivered path.
-- Every compute lease, whatever its payment structure or mechanism, activates to
-  its agreed end. There is no billing horizon and no periodic lease renewal here.
+- Future-start deals commit at settlement but defer dispatch, activation, billing
+  and access until the accepted start. The site deadline is anchored at the later
+  of commit and lease start plus its allowance.
+- Every compute lease, whatever its payment structure or mechanism, activates by
+  reservation identity, adopting the current end (including verified earlier truncation). There is no billing horizon and no periodic lease renewal here.
   The site owns the awaiting-activation deadline under
   `renewable-compute-lease-deadlines`; it is seller-side risk management, not a buyer
   guarantee.
@@ -33,19 +36,26 @@ fails to deliver. This is the delivery portion of Goal 8 in
   `dispatch`, `start` and `disclose`, with durable decisions. The prepaid hook has no
   additional financial action; all deals still pass end service's admission check.
   Rate servicing supplies the hook's payment-authority checks through its injected
-  payment adapter, including journaled payee-only `start` after provisioning.
-- The durable delivery checkpoints are `authorized`, `dispatched`, `started`,
-  `activated`, `available` and `active`, with stable effect identities and recovery
+  payment adapter, with a separate keyed `start_billing` effect after provisioning and activation.
+  Neutral protocol/evidence types belong to the foundation lifecycle kit.
+- The durable delivery checkpoints are `authorized`, `dispatched`, `activated`,
+  `started`, `available` and `converged`, with stable effect identities and recovery
   at each acknowledgement gap. Availability does not depend on a buyer reading it.
-- A failed or never-started delivery supplies a local final request and an
-  `exceptional_end(at)` intent, with `at` the Agreement's start, to the seller half.
-  End service journals the filing with the end; the dispute authority decides and
-  applies the financial correction. The path does not implement its own refund,
+- Delivery supplies classified actor/cause/source, accepted start and fixed failure
+  time to the foundation's single end-plus-optional-self-filing operation. Lawful
+  buyer/terms/ruling ends do not automatically incur a seller penalty. A genuine
+  never-delivered failure before a future start needs a valid immediate filing;
+  the recommended lifecycle mapping is the earlier of accepted start and failure.
+  End service journals the filing; the dispute authority applies any correction. The path does not implement its own refund,
   stop, correction journal or end-deal route.
 - Credential reads enforce the delivery checkpoint and end service's recorded end,
   ordered with local end admission. They fetch access material live and recheck
   local eligibility before returning it, never checking payment snapshots on each
-  read. Physical teardown remains revocation for credentials already disclosed.
+  read. VM settle/status remains its access surface. Both authentication middlewares
+  retain request identity but exclude credential-capable response bodies, so exact
+  retries re-run admission. Physical teardown revokes already disclosed credentials.
+- Additive adoption retains exact requests/resource identities and makes old progress
+  read-only projections; cutover refuses old writers and purges retained credentials.
 
 ## Capabilities
 
@@ -87,6 +97,16 @@ requirements belong to `agreed-evidence-and-early-termination`, not a second del
   end-service admission and journaled self-filing interface, and
   `renewable-compute-lease-deadlines`' activation half, including its signed site-end
   report. Buyer termination is folded into the former, not a separate dependency.
+  The foundation also owns neutral delivery protocols and pre-start filing policy;
+  renewable transitively waits on `inject-site-pool-authority`.
+- Sections 1–2 require only the negotiation-keyed reservation-idempotency slice of
+  `capacity-reservation-lifecycle-hardening`. Sections 3.3/4.3/4.4 require
+  `add-arkhai-payments-lane-double` for HTTP qualification; library integration uses
+  in-process contract-vector fakes with no dependency on runnable tooling.
+- Renewable ships its compute composition safeguard off. This change owns final
+  enablement: deploy compatible storefronts first, then the site off, qualify every
+  caller, then enable for new commits. Verified legacy null-phase views remain
+  compatible; protected leases without working activation are repair-required.
 - The prepaid path and hook interface can be implemented before rate servicing.
   Per-period composition and its qualification wait for
   `spot-deals-through-arkhai-payments` and `converge-ongoing-compute-leases`; publication
@@ -99,8 +119,10 @@ requirements belong to `agreed-evidence-and-early-termination`, not a second del
 
 Acceptance: both domains and every compute mechanism use the shared protected
 transitions; the Agreement window survives retries; every delivered lease activates
-to that end; undelivered lifecycle deals durably reach end service and self-filing;
-no locally ended deal discloses access; restart recovers each effect without
+to its current site end before billing; genuine seller non-delivery durably reaches
+the classified end/filing operation, while lawful ends retain their attribution;
+no locally ended deal discloses access, including exact authenticated retries;
+restart recovers each effect without
 replacement resources. Reserved VM and bare-metal deals prove activation beyond the
 pool allowance, expiry before activation proves recovery plus the journaled filing,
 and API-credit delivery remains unchanged. Rate-path qualification is explicitly
@@ -108,9 +130,11 @@ blocked until its implementation dependencies are ready; no prepaid result prove
 
 ## Impact
 
-Recommended home: a storefront-delivery module of the existing compute family kit,
-`provisioning/compute`, with a repository in the storefront's database, not a new
-market-neutral fulfillment state machine. Both storefront composition roots inject
+Recommended home: a separate compute-family library distribution at
+`provisioning/compute/delivery`, with its repository in the storefront database.
+It depends downward on neutral lifecycle protocols and compute contracts, without
+adding commercial orchestration to the physical provisioning base distribution.
+Both storefront composition roots inject
 provisioning clients, domain preparation/result ports and lifecycle ports. VM payment
 and Alkahest recovery paths, bare-metal fulfillment paths, their access routes and
 lane deal stages change. API credits is a regression consumer, not a caller.
@@ -132,5 +156,9 @@ lane deal stages change. API credits is a regression consumer, not a caller.
   architecture companion.
 - Cross-system flow and one end-service owner: `docs/development/ARCHITECTURE.md`,
   with links to the compute delivery and lifecycle contracts, not duplicated rules.
+- Staged activation enablement, legacy compatibility and deployment order:
+  `docs/development/DEPLOYMENT_AND_CONFIG.md` and `compute-delivery` architecture.
+- Additive cutover/downgrade refusal and credential-replay retirement:
+  `vm-storefront-fulfillment` and `compute-delivery` specifications/companions.
 - Update `fulfillment`'s architecture companion to distinguish its physical aggregate
   from the storefront delivery record. No new neutral fulfillment requirement.

@@ -2,11 +2,11 @@
 
 ### Requirement: Providers declare provisioning allowance support and defaults
 
-Provider declarations supplied by composition MUST state a positive integer provisioning allowance default or no allowance support. VM and bare-metal compute providers MUST declare defaults; the API-credits provider MUST declare none. A supporting pool MUST resolve its `provisioning_allowance_seconds` override or the provider default. A provider declaring none MUST resolve no allowance. The site MUST receive the resolved fact through its session-scoped pool-authority port.
+Composition MUST declare a positive integer allowance default for VM/bare-metal providers and no support for API credits. A supporting pool MUST resolve its provisioning_allowance_seconds override or provider default; unsupported providers MUST resolve none. The site MUST receive the effective allowance through its session-scoped pool-facts port, not caller input.
 
 #### Scenario: A compute pool has no explicit override
 
-- **WHEN** a VM or bare-metal pool omits provisioning_allowance_seconds
+- **WHEN** an enabled VM or bare-metal pool omits provisioning_allowance_seconds
 - **THEN** it resolves its provider's declared default, not an absent deadline
 
 #### Scenario: A quota provider declares none
@@ -18,6 +18,21 @@ Provider declarations supplied by composition MUST state a positive integer prov
 
 - **WHEN** the site commits a reservation
 - **THEN** it reads the allowance through the injected pool-facts port in the commit transaction without importing the pool authority
+
+### Requirement: Activation safeguards are explicitly enabled by composition
+
+The compute composition MUST expose activation_deadlines_enabled, default false. While false, the pool-facts port MUST supply no effective allowance without disabling provider support or pool validation. Enablement MUST affect only new commits; disabling MUST NOT clear snapshotted deadlines. Production enablement MUST wait for the delivery caller owner's qualification.
+
+#### Scenario: Site code lands before compatible callers
+
+- **WHEN** the site upgrades with the default setting
+- **THEN** new commits retain null deadline and phase and existing leases stay unchanged
+
+#### Scenario: Protection is enabled then disabled
+
+- **WHEN** a qualified deployment enables protection, commits a lease, then disables it
+- **THEN** that lease retains its deadline and later new commits receive null fields
+- **AND** invalid pool overrides remain invalid in either setting
 
 ### Requirement: Provisioning allowance overrides are strictly validated and snapshotted
 

@@ -2,12 +2,12 @@
 
 ### Requirement: Commit snapshots an activation deadline when the pool resolves an allowance
 
-On first commit, a pool-resolved provisioning allowance MUST set `renew_by_utc` to commit time plus the allowance and `renewal_phase` to `awaiting_activation`. Such a commit MUST require a finite lease end. Recommit MUST preserve both fields. A pool resolving no allowance and a migrated existing lease MUST retain null deadline and phase, with their existing end-only expiry behavior.
+On first commit, an effective pool-resolved allowance MUST set renew_by_utc to max(commit_time, lease_start_utc) plus that allowance and renewal_phase to awaiting_activation. Such a commit MUST require a finite end. Recommit MUST preserve both fields. No effective allowance and migrated existing leases MUST retain null fields and end-only expiry.
 
 #### Scenario: A compute reservation is committed
 
 - **WHEN** a reservation in a pool resolving a provisioning allowance is first committed with a finite agreed end
-- **THEN** the site records the provisional deadline from commit time and the awaiting-activation phase without receiving payment terms
+- **THEN** the site records the provisional deadline from max(commit time, lease start) and the awaiting-activation phase without receiving payment terms
 
 #### Scenario: A commit is retried after the pool policy changes
 
@@ -24,9 +24,15 @@ On first commit, a pool-resolved provisioning allowance MUST set `renew_by_utc` 
 - **WHEN** a pool resolving an allowance is asked to commit with no finite end
 - **THEN** the site refuses without committing the lease
 
+#### Scenario: A future lease starts after commit
+
+- **WHEN** a lease starting at 12:00 commits at 10:00 with a 30-minute allowance
+- **THEN** its provisional deadline is 12:30, not 10:30
+- **AND** its agreed window and admission accounting are unchanged
+
 ### Requirement: Activation replaces the provisional deadline with the agreed end
 
-Activation MUST conditionally move a `leased` reservation from `awaiting_activation` to `active`, setting its deadline to its current `lease_end_utc`. The caller MUST NOT supply a target deadline or payment fact. Activation of a `leased` active or null-phase lease MUST return it unchanged. Activation from any other state MUST be refused without mutation. An elapsed but unclaimed deadline MUST NOT itself prevent activation.
+Activation MUST move a leased awaiting_activation reservation conditionally to active with deadline equal to its current lease_end_utc. It MUST accept no target deadline or payment fact. Leased active/null-phase retries MUST return unchanged; other states MUST refuse mutation. An elapsed unclaimed deadline MUST NOT itself prevent activation.
 
 #### Scenario: Each compute billing shape activates
 
@@ -37,6 +43,12 @@ Activation MUST conditionally move a `leased` reservation from `awaiting_activat
 
 - **WHEN** an active lease is truncated and activation is retried
 - **THEN** the site returns the current lease without extending its end or resetting its deadline
+
+#### Scenario: A shortened awaiting lease activates and acknowledgement is lost
+
+- **WHEN** end service truncates a lease before activation and activation then succeeds without a persisted acknowledgement
+- **THEN** retry returns the current shorter end and original active instant
+- **AND** neither call extends the lease to the original commit end
 
 #### Scenario: Activation arrives after the deadline but before expiry claims it
 

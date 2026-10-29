@@ -2,178 +2,204 @@
 
 ### Requirement: Compute storefronts share one protected delivery path
 
-VM and bare-metal storefronts MUST compose one compute-family implementation of capacity commit, dispatch, start authorization, activation and availability. Domain preparation, result codecs and authenticated route surfaces MUST remain injected contributions. The family path MUST consume selected-stage evidence and injected lifecycle ports rather than branch on mechanism IDs or import domain/storefront implementations.
+VM and bare-metal storefront fulfillment hooks MUST delegate protected compute delivery to one compute-family library through injected ports. Core hook-result identity validation MUST remain in force. Domain preparation and result codecs MUST remain injected. The path MUST consume selected-stage evidence without mechanism-ID branching; API-credit issuance MUST remain outside it.
 
-#### Scenario: Both compute domains deliver
+#### Scenario: Both entry points deliver
 
-- **WHEN** a VM or bare-metal deal reaches verified commitment evidence
-- **THEN** its storefront uses the same protected-transition implementation
-- **AND** only its domain preparation, result interpretation and route model differ
+- **WHEN** payment settle or the selected Alkahest continuation invokes either domain's fulfillment hook
+- **THEN** the hook delegates to the same protected-transition implementation
+- **AND** core still validates its returned negotiation and fulfillment identities
 
-#### Scenario: An API-credit deal delivers
+#### Scenario: API credits delivers
 
-- **WHEN** an API-credit deal reaches delivery
-- **THEN** its existing issuance path is used without compute lease or activation requirements
+- **WHEN** an API-credit deal reaches issuance
+- **THEN** its existing path has no compute activation requirement
 
 ### Requirement: Delivery commits the Agreement window
 
-Compute delivery MUST derive its lease window from the accepted Agreement's `start_utc` and `duration_seconds`, and MUST repeat that exact window and reservation identity on recovery. It MUST NOT substitute `now` or a default duration. Missing or conflicting timing MUST be reported as repair-required without replacing an existing resource. An elapsed window before availability MUST take the undelivered handoff.
+Delivery MUST commit and recover the accepted Agreement's exact start and duration under the same reservation identity. It MUST NOT substitute now or a default duration. Missing or conflicting timing MUST be repair-required without replacing an existing resource. An elapsed window before availability MUST enter the classified end handoff.
 
-#### Scenario: Settlement completes late but before the end
+#### Scenario: Settlement completes late
 
-- **GIVEN** an Agreement starting at 12:00 with a two-hour duration
-- **WHEN** settlement completes at 12:30 in either compute domain
-- **THEN** delivery commits 12:00 through 14:00, not 12:30 through 14:30
-- **AND** a retry repeats 12:00 through 14:00
-
-#### Scenario: Settlement completes after the end
-
-- **WHEN** commitment is observed after the Agreement window has elapsed with nothing dispatched
-- **THEN** no new fulfillment is dispatched
-- **AND** delivery takes the undelivered handoff
+- **GIVEN** an Agreement from 12:00 through 14:00
+- **WHEN** settlement completes at 12:30
+- **THEN** both domains commit 12:00 through 14:00 on first attempt and retry
 
 #### Scenario: Recovery lacks timing
 
-- **WHEN** an unfinished delivery has no valid accepted duration
-- **THEN** it is repair-required rather than assigned an hour
-- **AND** an existing fulfillment is retained by identity, not replaced
+- **WHEN** an unfinished delivery lacks valid accepted timing
+- **THEN** it remains repair-required with its recorded resource, not a replacement or a guessed hour
 
-### Requirement: Authorization is recorded per protected transition
+### Requirement: Future-start delivery waits inside its admitted window
 
-The family path MUST call `authorize_delivery(deal, phase)` before each `commit`, `dispatch`, `start` and initial-availability `disclose` attempt, not every later credential read. It MUST record outcome, reason, operation identity and evidence references durably before using the result. Each attempt MUST also use end service's admission port under the lifecycle contract's final-request ordering, including reconciliation and restart. A financial allow MUST NOT bypass a local end.
+Capacity MAY be committed at settlement before the Agreement start. Dispatch, activation, billing start and availability MUST NOT precede that start. The path MUST retain a durable wake time and recheck admission on wake. Credential reads MUST NOT disclose before the start.
 
-#### Scenario: A prepaid deal is admitted
+#### Scenario: A forward reservation waits
 
-- **WHEN** a prepaid deal passes its selected stage's evidence checks and local end admission
-- **THEN** the default financial hook records allow without issuing a payment start
-- **AND** the path still checks end admission at later protected transitions
+- **WHEN** a 12:00 Agreement commits at 10:00
+- **THEN** it remains deferred until 12:00 without dispatch or early access
+- **AND** recovery repeats the same commit and wake time
+- **AND** the site's provisional deadline is anchored by the activation-deadline contract
+
+### Requirement: Delivery authorization is a decision separate from billing effects
+
+The path MUST call the injected neutral authorization protocol before commit, dispatch, billing start and initial disclose. It MUST record outcome, reason, operation identity and evidence references before use. Pending and unknown outcomes MUST remain pending. The prepaid decision MUST issue no financial mutation.
+
+#### Scenario: A prepaid deal passes authorization
+
+- **WHEN** selected-stage evidence and local admission permit delivery
+- **THEN** the prepaid financial decision allows without a payment start
+
+#### Scenario: An outcome is unknown
+
+- **WHEN** the authorization adapter cannot establish its outcome
+- **THEN** delivery stays pending and resolves the same attempt
+
+### Requirement: Protected transitions consume lifecycle admission
+
+Each protected transition, activation, recovery and credential-response authorization MUST consume the lifecycle owner's revision-bearing admission port. The path MUST use its transaction boundary for checkpoint/disclosure CAS without remote I/O in the transaction. A financial allow MUST NOT override a due local end.
 
 #### Scenario: An end wins before dispatch
 
-- **WHEN** end service has admitted a due final request before the dispatch attempt
-- **THEN** the path does not dispatch even if its financial hook previously allowed commit
-- **AND** it uses end service's existing no-dispatch recovery path
+- **WHEN** lifecycle admission records a due end before dispatch
+- **THEN** delivery does not dispatch despite an earlier financial allow
+- **AND** hands recovery to the lifecycle owner
 
-#### Scenario: Authorization is uncertain
+### Requirement: Billing start follows activation under one effect identity
 
-- **WHEN** the hook reports pending or an unknown authority result
-- **THEN** the protected transition remains pending
-- **AND** recovery resolves the same operation rather than assuming refusal or success
+After acknowledged activation and start authorization, delivery MUST persist one billing-start intent and invoke the injected start effect under its stable identity. It MUST supply commitment/fulfillment identities and validated ready-evidence envelope/digest without credentials. Unknown results MUST resolve under that identity. Rate servicing owns payment interpretation; prepaid start MUST be a no-op.
 
-### Requirement: The rate hook uses authority records through adapters
+#### Scenario: Rate start acknowledgement is lost
 
-The rate hook MUST be injected by rate servicing, not implemented in the compute path. Its evidence contract MUST support verified commitment/reservation and start/stop records through the payment adapter, including pending stops' effective times. At `start` the path MUST supply verified provisioning evidence without credentials. The hook MUST NOT require a billing horizon, payee vouch or a lease renewal.
+- **WHEN** the authority accepted start but its acknowledgement was not persisted
+- **THEN** recovery resolves the same start key and adopts its verified record
+- **AND** does not start billing again or allocate a second resource
 
-#### Scenario: A provisioned rate deal starts
+#### Scenario: Activation fails
 
-- **WHEN** provisioning is ready and local admission still permits delivery
-- **THEN** the hook receives the commit and fulfillment identities plus verified ready evidence
-- **AND** delivery reaches `started` only after the hook confirms the authority's start record
-
-#### Scenario: An unstarted rate part has reservations but no funded-through time
-
-- **WHEN** the adapter verifies commitment and the first reserved batch with no effective stop
-- **THEN** absence of a running-part funded-through time alone does not refuse commit or dispatch
-
-#### Scenario: A stop is pending at the authority
-
-- **WHEN** the payment adapter reports a future pending stop
-- **THEN** the hook evaluates its effective time rather than treating it as an immediate end
-- **AND** no local stop scheduler replaces authority-hosted notice
+- **WHEN** expiry claims the lease before activation succeeds
+- **THEN** no billing-start effect has been issued
+- **AND** delivery enters the classified end handoff
 
 ### Requirement: Delivery checkpoints recover stable effects
 
-Each negotiation MUST have one durable storefront delivery record with ordered checkpoints `authorized`, `dispatched`, `started`, `activated`, `available`, `active`. External-effect intents and stable identities MUST be persisted before calls; acknowledgements advance checkpoints. Recovery MUST reconcile the same effect/resource and recheck admission. Required persistence failure MUST defer protected effects without abandoning an existing resource solely for bookkeeping failure.
+Each negotiation MUST have one durable delivery record with ordered checkpoints authorized, dispatched, activated, started, available and converged. Intents and stable identities MUST precede remote reserve, commit, dispatch, activation and billing effects; acknowledgements advance checkpoints. Recovery MUST reconcile the same effect and resource, including reservation creation, and recheck admission.
 
-#### Scenario: Recovery crosses an intent acknowledgement gap
+#### Scenario: Reserve acknowledgement is lost
 
-- **WHEN** the storefront restarts after commit, dispatch, start or activation was sent but before its acknowledgement was persisted
-- **THEN** it resolves or retries the recorded effect under the same identity
-- **AND** it does not create replacement capacity or assume a payment start succeeded
-
-#### Scenario: Recovery crosses adjacent checkpoints
-
-- **WHEN** either compute storefront restarts between any two adjacent delivery checkpoints
-- **THEN** it resumes from the persisted checkpoint and effect intent using authoritative state
-- **AND** it reaches availability only after verified provisioning, start authorization and site activation
+- **WHEN** reserve succeeds before its returned identity is persisted
+- **THEN** negotiation-keyed exact-request replay recovers the same reservation
+- **AND** a conflicting request is refused rather than creating a second hold
 
 #### Scenario: A protected write fails
 
-- **WHEN** the required decision or effect-intent write cannot be persisted
-- **THEN** the next protected effect is deferred and the persistence failure is reported
-- **AND** an existing physical resource remains adopted while persistence is retried
+- **WHEN** an admission or intent write cannot be persisted
+- **THEN** the next protected effect is deferred
+- **AND** any existing physical resource remains adopted while persistence is retried
 
-#### Scenario: A buyer never reads its result
+#### Scenario: Adjacent checkpoints are interrupted
 
-- **WHEN** provisioning, start authorization, activation and disclose authorization complete
-- **THEN** the storefront records `available` without waiting for a buyer read
+- **WHEN** either storefront restarts between adjacent checkpoints or an intent and acknowledgement
+- **THEN** it reconciles authoritative state before advancing
+- **AND** reaches availability only after ready evidence, activation and billing-start acknowledgement
 
-### Requirement: Every delivered compute lease activates to the agreed end
+### Requirement: Availability and convergence have explicit meanings
 
-After `started` and before `available`, the path MUST call the site's activation operation with the Agreement's lease end for every compute deal, regardless of payment structure. It MUST journal the intent and retry idempotently after an unknown acknowledgement. The active instant MUST come from the site. A lease whose expiry has already been claimed MUST NOT be resurrected and MUST take the undelivered handoff.
+Available MUST mean that readiness and disclose authorization are durable without waiting for a buyer read. Converged MUST additionally mean the selected stage's required evidence, readiness and claim-binding continuation is acknowledged or explicitly absent. Pending, persistence retry and repair-required MUST map to deferred hook outcomes; terminal failure MUST map to failed only after the end handoff is durable.
 
-#### Scenario: A reserved lease runs beyond the provisioning allowance
+#### Scenario: A buyer never reads
 
-- **WHEN** a reserved VM or bare-metal lease activates successfully before its awaiting-activation deadline
-- **THEN** activation names the Agreement end and records the site's active instant
-- **AND** the lease may remain active beyond the pool's provisioning allowance without renewal
+- **WHEN** ready evidence, activation, billing-start acknowledgement and disclose authorization complete
+- **THEN** delivery records available without waiting for a credential read
 
-#### Scenario: A rate lease activates
+#### Scenario: Evidence publication remains pending
 
-- **WHEN** a rate deal's start is verified and its lease can still activate
-- **THEN** activation names the Agreement end, not a funded horizon
+- **WHEN** availability is durable but the selected continuation is unfinished
+- **THEN** delivery is not converged and retries that continuation without another physical delivery
 
-#### Scenario: Activation loses to expiry
+### Requirement: Activation consumes the reservation's current end
 
-- **WHEN** the site has already claimed expiry before activation is accepted
-- **THEN** delivery never becomes available
-- **AND** the path adopts the site-end evidence and takes the undelivered handoff
+Before billing start and availability, every compute delivery MUST invoke reservation-only activation and journal retries. It MUST validate the returned end as the immutable commit end or a verified earlier end recorded by end service, and adopt the site's active instant. Unexplained mismatches MUST remain repair-required. A claimed expiry MUST NOT be resurrected.
 
-### Requirement: Undelivered lifecycle deals hand off an end and a self-filing intent
+#### Scenario: Truncation precedes activation
 
-A terminal failure before `available` MUST hand end service a local final request and the seller half an `exceptional_end(at)` intent with `at` equal to the Agreement's start. The handoff MUST use the lifecycle owner's joint end/filing journal, not a separate refund or end log. The path MUST supply cause/source evidence and MUST NOT compute per-part corrections. Without an adapter it MUST report unsupported self-filing and retain the mechanism's existing recovery behavior.
+- **WHEN** end service has recorded and applied an earlier future end before activation
+- **THEN** activation supplies no target deadline and preserves that shorter end
 
-#### Scenario: Provisioning fails before dispatch
+#### Scenario: Activation acknowledgement is lost before truncation
 
-- **WHEN** provisioning fails terminally with proof that nothing was dispatched
-- **THEN** the path hands off the local end and exceptional-end intent
-- **AND** end service can complete physical recovery without teardown
+- **WHEN** activation succeeds, its acknowledgement is lost and end service then truncates
+- **THEN** retry adopts the current shorter end without extension or a replacement lease
 
-#### Scenario: An activation deadline expires while the storefront is down
+#### Scenario: A reserved lease survives allowance
 
-- **WHEN** recovery observes the site's signed end report for an awaiting-activation lease that never became available
-- **THEN** it supplies that report as evidence for the local end and `exceptional_end` at the Agreement's start
-- **AND** the lifecycle journal owns retry of the filing even if an authority is unavailable
+- **WHEN** a reserved lease activates and its former provisional deadline passes before its current end
+- **THEN** it remains active without renewal or a funded horizon
 
-#### Scenario: Billing started but delivery never became available
+### Requirement: Safeguard enablement follows compatible callers
 
-- **WHEN** activation fails after the authority recorded a rate start
-- **THEN** the undelivered intent still names the Agreement's start, not the payment start or the later failure
-- **AND** the path issues no direct stop, refund amount or backdated payment event
+This change MUST enable the compute composition's activation safeguard only after all delivery and recovery callers are deployed and qualified. A verified null-phase legacy leased view MUST use unchanged legacy behavior. Missing activation support MUST be tolerated only for that verified legacy case; non-null or unknown phase without working activation MUST be repair-required.
 
-#### Scenario: A final request overlaps dispatch
+#### Scenario: Storefronts upgrade before the site
 
-- **WHEN** a due final request is recorded after dispatch was sent
-- **THEN** the path adopts that fulfillment and hands its identity to end service rather than scheduling another
-- **AND** any undelivered self-filing retains the final request's actor, cause and source
+- **WHEN** the path observes a verified legacy null-phase leased view and no activation route
+- **THEN** it preserves legacy delivery behavior without claiming a new site activation
 
-### Requirement: Storefront credential disclosure is ordered with local ends
+#### Scenario: A protected site has no working activation route
 
-Buyer-authenticated credential reads MUST require delivery `available` or `active` and admission under end service's recorded end. They MUST fetch credentials live outside a database transaction and recheck local eligibility before authorizing a response. They MUST NOT read payment snapshots per credential request, cache credentials or treat blocked reads as revocation of material already disclosed. The ordering guarantee is local response authorization, not remote receipt of in-flight bytes.
+- **WHEN** a lease is awaiting activation but activation is unavailable
+- **THEN** delivery stays pending and reports repair-required, not assumed success
 
-#### Scenario: An end wins during a credential fetch
+### Requirement: Delivery supplies classified evidence to the single end operation
 
-- **WHEN** a due local end is admitted after a credential fetch begins but before its response is authorized
-- **THEN** the storefront discards the fetched material and refuses disclosure
-- **AND** no cached credentials are returned
+Before availability, terminal refusal, provisioning failure, elapsed window and activation lapse MUST enter the lifecycle owner's single end-plus-optional-filing operation. Delivery MUST supply actor, cause, source, accepted start, fixed observed failure time, resource identities and evidence. It MUST NOT compute corrections or duplicate that owner's cause/timing policy. Unsupported adapters MUST be reported honestly.
 
-#### Scenario: A recorded future end has arrived but teardown is delayed
+#### Scenario: A lawful end wins before availability
 
-- **WHEN** the recorded end time has arrived and provisioning still reports an active resource
-- **THEN** the storefront refuses credential disclosure without consulting a payment snapshot
+- **WHEN** a buyer request, entitled stop, terms end or ruling already controls the end
+- **THEN** delivery preserves that cause and supplies the existing final request
+- **AND** does not request a seller self-penalty solely because availability was not reached
 
-#### Scenario: An earlier credential response is in flight
+#### Scenario: Seller failure occurs before a future start
 
-- **WHEN** local disclosure authorization precedes the local end but the response is still in transit
-- **THEN** the end does not claim to retract those bytes
-- **AND** end service's physical teardown remains the revocation path
+- **WHEN** a never-delivered deal fails before its accepted start
+- **THEN** delivery supplies both accepted start and the fixed failure-observation time
+- **AND** the lifecycle owner journals a valid immediate intent under its pre-start policy, not a future-dated command or a retry-time recomputation
+
+#### Scenario: Settlement arrives after the window without established buyer fault
+
+- **WHEN** the window has elapsed and no resource became available
+- **THEN** delivery does not dispatch and supplies never-delivered evidence
+- **AND** does not infer a buyer-fault exemption from settlement lateness alone
+
+#### Scenario: An end overlaps dispatch
+
+- **WHEN** a final request wins after dispatch was sent
+- **THEN** delivery adopts that fulfillment and supplies its identity to end service
+- **AND** keeps signed site evidence without treating end intent as proven release
+
+### Requirement: Credential disclosure uses live local admission even on exact retry
+
+Buyer-authenticated credential responses MUST require available or converged, a reached start and lifecycle admission. They MUST fetch live outside the transaction and recheck revision/time before response authorization. Credential-capable response bodies MUST NOT be retained in replay storage; exact retries MUST re-enter the guard while changed requests remain rejected. No payment snapshot is required per read.
+
+#### Scenario: An end wins during fetch
+
+- **WHEN** a due end is admitted after fetching starts but before response authorization
+- **THEN** the fetched access material is discarded and disclosure refused
+
+#### Scenario: A successful credential response is retried after end
+
+- **WHEN** an exact authenticated retry arrives after a due end
+- **THEN** it re-runs eligibility rather than replaying the earlier credential body
+- **AND** replay storage retains no access material
+
+#### Scenario: The buyer polls VM settlement status
+
+- **WHEN** the VM buyer reads credentials through settle status
+- **THEN** the existing typed response is populated by the live guarded read, not a stored fallback
+
+#### Scenario: A response is already in flight
+
+- **WHEN** response authorization precedes end admission
+- **THEN** no claim is made to retract in-flight bytes
+- **AND** physical termination remains revocation for disclosed material

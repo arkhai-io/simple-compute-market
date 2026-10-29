@@ -39,7 +39,9 @@ The names do not imply an active renewal operation: only activation ships here.
 `lease_end_utc` keeps meaning the agreed end and moves only through truncation.
 
 - On first commit with a resolved allowance, record `awaiting_activation` and
-  `renew_by_utc = commit_time + provisioning_allowance_seconds`.
+  `renew_by_utc = max(commit_time, lease_start_utc) + provisioning_allowance_seconds`.
+  This protects a forward reservation without expiring it before its admitted start;
+  unify defers dispatch/activation/access until that start (no early lead time).
 - Activation is one conditional transition from `leased` and
   `awaiting_activation` to `active`. It replaces the deadline, earlier or later,
   with the reservation's current `lease_end_utc`. **Every deal activates to that
@@ -90,8 +92,8 @@ only after a provider action.
 
 ### D3. Provider-declared provisioning allowance, read through the pool port
 
-`provisioning_allowance_seconds` is a Resource Pool policy tag: time from site
-commit to activation, not money, minimum spend, a listing term or a buyer SLA.
+`provisioning_allowance_seconds` is a Resource Pool policy tag: allowance after
+max(commit time, lease start) to activation, not money, minimum spend, a listing term or a buyer SLA.
 Each provider declares, as plain composition-supplied data, whether it supports
 an allowance and its default. Compute providers `vm.ansible` and
 `bare_metal.ansible` declare one; the API-credits provider declares none.
@@ -110,22 +112,29 @@ and refuses an explicit override. Validation-only and applying writes agree and
 imports remain atomic. Commit snapshots the resolved duration into its deadline;
 later pool edits do not alter existing leases.
 
+**Recommendation (unify 02 F4):** add the explicit compute-composition setting
+`activation_deadlines_enabled`, default false. Provider support/defaults and pool
+validation remain declared even while disabled; an invalid override never becomes
+valid because the switch is off. The injected pool-facts port resolves no effective
+allowance while disabled, so new leases retain null deadline/phase. This is an
+operator composition setting, not a pool tag or caller-supplied commit flag. Enabling
+applies only to new commits; disabling does not clear deadlines already snapshotted.
+
 The session-scoped pool-facts port from `inject-site-pool-authority` supplies the
-resolved allowance in the commit transaction. The site does not import the pool
+effective allowance in the commit transaction. The site does not import the pool
 authority or infer a provider from a domain or billing kind. API-credit quota holds
 therefore receive no deadline by the same generic rule, with no site exemption.
 If the dependency stalls, reconsider the port contract with its owner; passing a
 storefront-selected allowance is not an authorized fallback.
 
-An allowance overrun enters the ordinary guarded release path. A delivery that
-fails or never starts is handled by the seller's self-filed `exceptional_end(at)`
-at the **deal's start**, journaled with end service's final request under the
-foundation's D8. This is not a site-event-triggered refund: the storefront can
-know delivery failed without receiving an event, the site cannot move money, and
-the buyer's case remains the adversarial backstop. The dispute authority realizes
-any past financial end by stop now plus reversal of held earnings, never by a
-backdated payee stop. Rate billing starts only at the payee's `start`; provisioning
-allowance does not authorize an early start or change prepaid term arithmetic.
+An allowance overrun enters ordinary guarded release. The storefront supplies
+classified failure evidence to the foundation's single end-plus-optional-filing
+operation. The foundation owns lawful-end versus seller-failure classification and
+the financial intent, including a valid immediate pre-start case (recommended
+at = min(accepted start, fixed failure-observation time)). The site never computes
+that instant, corrections or amounts and its report is not a refund prerequisite.
+A controlling buyer/terms/ruling end is not automatically seller failure. Rate billing
+starts after ready evidence and activation in unify; allowance authorizes no billing.
 
 ### D4. Renewal and renewal-lapse policy are deferred seller options
 
@@ -160,13 +169,14 @@ seller until the agreed end or a recovered end-service action. None is a buyer
 guarantee. Renewal must be justified by a separate operator's concrete needs before
 this trade-off is reintroduced.
 
-### D5. Physical-end evidence and lease inspection
+### D5. Lease-end intent evidence and lease inspection
 
 The foundation supplies the signed `lease_ended` record and durable outbox; this
 change adds `activation_deadline_lapsed`. The record carries the reservation/deal
-correlation, the claimed deadline and phase, and the actual delivery-end instant
-under the base event contract. The deadline is the reason release was claimed,
-not a fabricated earlier instant of VM teardown. A term end that wins the due
+correlation, the claimed deadline and phase, and the base report's intended effective end instant.
+The report is recorded before teardown: it is not proof of physical completion.
+Proven guarded release remains a separate completion fact, including on failures. The deadline is the reason release was claimed,
+not a fabricated instant of proven VM teardown. A term end that wins the due
 comparison keeps its ordinary cause. Retrying the event preserves its identity
 and signed content; the evidence store keeps the original bytes.
 
@@ -183,8 +193,8 @@ delivery. Delivery admission must also honor an expiry claim that wins activatio
   not a dishonest seller; the buyer's own stop and disputes over held money suffice.
 - Funded-horizon activation or active renewal now — conflates the seller's internal
   lease policy with payment; activate every deal to its agreed end and defer renewal.
-- Site-event-triggered refund — delivery failure requires seller self-filing at the
-  deal's start, with the buyer's case as backstop; site events only supply evidence.
+- Site-event-triggered refund — the foundation classifies delivery failure and
+  supplies a valid filing instant, with the buyer's case as backstop; reports are evidence.
 - Backdated/effective-time payee stop — stops are never backdated; the dispute
   authority stops now and reverses held earnings since the ruled instant.
 - Minimum-spend requirement — churn is the seller's pricing/acceptance choice;
@@ -215,14 +225,34 @@ allowance validation/provider declarations, activation, conditional expiry and t
 views. Event integration waits for `agreed-evidence-and-early-termination`'s signed
 record/outbox. `unify-compute-delivery-path` then wires activation and supplies the
 cross-service delivery evidence. No dependency on a payments horizon or rate-part
-contract revision is introduced. Do not enable the safeguard in a deployed compute
-composition without the activation callers; site-only validation is not campaign
-readiness.
+contract revision is introduced. Renewable ships `activation_deadlines_enabled`
+false. Unify owns enablement after compatible storefronts deploy first, the updated
+site deploys with protection off, and every commit/recovery caller is qualified.
+New storefronts treat verified null-phase legacy leases as already active/no-op;
+absence of an activation route is tolerated only with a verified legacy view.
+A protected/unknown phase without activation support is repair-required. Existing
+null-phase leases remain unchanged when enabling. Site-only evidence never enables
+protection or proves campaign readiness. This avoids a whole-change dependency cycle.
+
+## Coordinated first-review triage
+
+The unify review's 01 F3 / 02 F1 are resolved by reservation-only activation and
+explicit truncation/lost-acknowledgement scenarios. Its 01 F4 / 02 F2 are resolved
+by the max(commit,start) deadline anchor, zero early-dispatch lead time at the
+caller, and foundation-owned valid immediate pre-start filing. Its 02 F4 is
+resolved by the off-by-default composition switch and unify-owned final enablement.
+The owner additionally fixes the distinction between site end intent and proven
+physical completion (D-G), and activation-before-billing order (D-F). These are
+coordinated design edits, not evidence that caller or site code is implemented.
+Recommend another design review of the coordinated contracts before planning;
+keep this change in design. The review/triage records live with unify, which owns
+those findings.
 
 ## Open questions
 
 None in the active scope. Default values, strict override validation, finite-end
-refusal and tie attribution above are recommendations supplied by this design;
+refusal, tie attribution, forward-start anchor and off-by-default composition
+switch above are recommendations supplied by this design;
 implementation re-verifies them against
 the landed dependency interfaces. D4's policy choices remain explicitly deferred.
 

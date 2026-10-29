@@ -19,7 +19,9 @@ dependency lands rather than preserving a forbidden import to fit this plan.
   `capacity-reservation-lifecycle-hardening`; select a separate leased-deadline
   query/index, rather than extending its reserved-hold expiry index. Confirm
   `unify-compute-delivery-path` consumes the activation call without a target time
-  and wires every commit caller before deployed enablement.
+  and wires every commit caller before deployed enablement. Renewable ships the
+  explicit compute composition setting `activation_deadlines_enabled` false; unify
+  owns final enablement after storefront-first/site-off deployment and qualification.
 
 ## 2. Allowance declaration and validation
 
@@ -34,6 +36,10 @@ dependency lands rather than preserving a forbidden import to fit this plan.
   `provisioning/compute/service/src/compute_provisioning_service/seed/pools.yaml`.
   Keep the API-credits composition's provider declaration empty. Existing pool
   rows need no data backfill; their absent overrides resolve the provider default.
+  Add/configure `activation_deadlines_enabled` false in the compute composition;
+  effective pool facts resolve no allowance while off without disabling support or
+  validation. Snapshot only new commits when enabled; turning it off never clears
+  an existing deadline. Document deployment and caller qualification ownership.
 - [ ] 2.3 Validate at the lowest meaningful level: parsing in the existing hints
   unit suite (`kit/resource-pools-contracts/tests/unit/test_hints.py`); provider
   fallback, refusal and atomic imports in
@@ -50,7 +56,7 @@ dependency lands rather than preserving a forbidden import to fit this plan.
   must not become awaiting activation during upgrade.
 - [ ] 3.2 Extend `kit/site/src/market_site/ledger.py` commit to snapshot the resolved
   allowance inside the same transaction, require a finite end where one resolves,
-  and set the provisional deadline from commit time. Recommit preserves it. Add
+  and set the provisional deadline from max(commit_time, lease_start_utc). Recommit preserves it. Add
   activation from `leased` / `awaiting_activation` to `active`, setting the deadline
   to the current agreed end without a caller-supplied time. Active retries return
   unchanged; no-allowance/legacy leases return unchanged. All other states refuse.
@@ -68,7 +74,8 @@ dependency lands rather than preserving a forbidden import to fit this plan.
   jurisdiction is the public ledger API with a real embedded database: extend
   `kit/site/tests/integration/test_ledger.py` for the two claim orderings,
   elapsed-but-unclaimed activation, retry after truncation, full-window admission,
-  no-allowance behavior and non-resurrection. Use deterministic two-session controls,
+  no-allowance behavior and non-resurrection. Cover forward-start commits, switch-off
+  new commits, enabled new commits and unchanged already-snapshotted deadlines. Use deterministic two-session controls,
   not sleeps. Migration behavior belongs in the compute service's existing
   migration integration suite, with new tests subject to maintainer approval.
 
@@ -79,7 +86,9 @@ dependency lands rather than preserving a forbidden import to fit this plan.
   effect, including direct-free and deferred-create paths. Keep provider I/O outside
   transactions and capacity held until guarded release succeeds. Extend the base
   event/outbox supplied by the foundation with the activation cause, claimed
-  deadline/phase and actual end instant; retries preserve the original evidence.
+  deadline/phase and intended effective end instant; retries preserve the original
+  evidence. It is not proven release: retain the independent guarded physical
+  completion fact, including release failure.
 - [ ] 4.2 Extend lease views/control in `provisioning/compute/contracts/src/compute_provisioning_contracts/contracts.py`,
   `provisioning/compute/client/src/compute_provisioning_client/client.py`, and the
   compute service lease controller/composition. Keep activation typed and
@@ -93,7 +102,10 @@ dependency lands rather than preserving a forbidden import to fit this plan.
 - [ ] 4.4 Prepare first use through the existing site/compute typed clients with a
   mock provider, seeded finite compute pool, caller service principal and controlled
   watchdog. Commit the reproducible setup/entry point with the implementation.
-  Observe commit -> awaiting activation -> activation to agreed end -> survival
+  Explicitly enable the switch in the owned site-only fixture, not in deployment
+  defaults; prove off leaves null fields. Observe a future-start commit surviving
+  until max(commit,start)+allowance and commit -> awaiting activation -> activation
+  to the current agreed end (including prior truncation/lost acknowledgement) -> survival
   past allowance, and a separate unactivated lease -> claimed expiry -> guarded
   release. Readiness must pass before network scenarios. Hand this setup to the
   delivery-path owner; no storefront or payment service is needed for the site trace.
@@ -141,7 +153,8 @@ implementation. Follow `openspec/README.md#plan-closeout-requirements` in this o
   `openspec/specs/site-capacity/architecture.md`; update capacity reservation,
   recovery workers and authority boundaries in `docs/development/ARCHITECTURE.md`;
   put provider defaults/overrides and deadline snapshot semantics in
-  `docs/development/DEPLOYMENT_AND_CONFIG.md`. Archive synchronizes the four
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`, including off-by-default switch,
+  forward-start anchor, mixed-version compatibility and unify-owned enablement. Archive synchronizes the four
   delta-covered `spec.md` files (`site-capacity`, `resource-pool-management`,
   `physical-provisioning`, `compute-provisioning-contract`). Update
   `openspec/specs/README.md` if its descriptions change and complete the promotion
@@ -162,7 +175,7 @@ No promotion yet: this is the implementation plan, not implemented architecture.
 |---|---|
 | D1–D2 deadline, activation, claim and admission | `openspec/specs/site-capacity/spec.md`, `openspec/specs/site-capacity/architecture.md`; capacity reservation in `docs/development/ARCHITECTURE.md` |
 | D3 allowance support/default/override validation | `openspec/specs/resource-pool-management/spec.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
-| D5 watchdog and physical-end evidence | `openspec/specs/physical-provisioning/spec.md`; recovery workers in `docs/development/ARCHITECTURE.md` |
+| D5 watchdog, lease-end intent and proven-release distinction | `openspec/specs/physical-provisioning/spec.md`; recovery workers in `docs/development/ARCHITECTURE.md` |
 | D5 typed activation and inspection | `openspec/specs/compute-provisioning-contract/spec.md` |
 | D4 deferred renewal | Not promoted; retained in archived design with its revisit condition |
 | Goal/campaign status | Goal 8 in `docs/development/ROADMAP.md`; campaign row in `openspec/changes/README.md` |

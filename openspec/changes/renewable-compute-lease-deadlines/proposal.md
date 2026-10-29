@@ -15,7 +15,8 @@ held money and kept signed bytes, not on a deadline inside the seller's site.
 ## What Changes
 
 - Add a nullable lease deadline and activation phase beside `lease_end_utc`. Commit
-  sets `awaiting_activation` and a deadline from the pool's provisioning allowance.
+  sets `awaiting_activation` only when the composition safeguard is enabled, with
+  deadline max(commit time, lease start) plus the pool's provisioning allowance.
   Existing leases retain null fields and their current behavior.
 - Add an idempotent activation transition. Every compute deal activates to its
   current agreed end, regardless of payment mechanism or billing shape. There is no
@@ -30,7 +31,12 @@ held money and kept signed bytes, not on a deadline inside the seller's site.
   resolve none. Read the allowance through the injected pool-authority port.
 - Expose the deadline, phase and active instant, and extend the signed `lease_ended`
   record with `activation_deadline_lapsed` and the deadline that caused the claim.
-  This is evidence of a physical end, not authority to move money.
+  This records intended lease end, not proven physical completion or authority to
+  move money. Guarded release supplies the separate completion fact.
+- Ship the explicit compute composition setting `activation_deadlines_enabled`
+  false. Provider support/default validation stays active. The injected port resolves
+  no effective allowance while off; enabling affects only new commits and never
+  backfills legacy leases. Unify owns deployed enablement after compatible callers.
 
 Renewal and the site's `reclaim` / bounded `grace` / `continue` lapse policy are
 **deferred**, with their design and revisit condition retained in D4. Without a
@@ -43,7 +49,7 @@ honest storefront a self-penalty awarding any bond in full.
 
 - `site-capacity`: commit deadline, activation, expiry claim and admission rules.
 - `resource-pool-management`: provider-declared provisioning allowance and validation.
-- `physical-provisioning`: watchdog enforcement and physical-end evidence.
+- `physical-provisioning`: watchdog enforcement and lease-end intent evidence.
 - `compute-provisioning-contract`: typed activation and lease inspection.
 
 ### New Capabilities
@@ -56,7 +62,8 @@ None.
 - Billing horizons, payee-advanced vouches, or any funded-through fact at the site.
 - A buyer-facing provisioning SLA or a minimum-spend rule.
 - A site-event-triggered refund. Under end service, a delivery that fails or never
-  starts makes the seller self-file `exceptional_end(at)` at the deal's start;
+  starts is classified by the foundation's single end-plus-optional-filing operation,
+  including a valid immediate pre-start failure intent;
   the buyer's own case is the backstop. The site event may supply evidence, but is
   neither the refund trigger contract nor a payment operation.
 - Wiring every compute delivery caller: `unify-compute-delivery-path` owns that work.
@@ -73,7 +80,9 @@ None.
   wait for the foundation.
 - `unify-compute-delivery-path` depends on this change and activates every compute
   commit caller once, including recovery and Alkahest. Campaign enablement waits
-  for those callers. Its complete-deal evidence proves activated leases survive
+  for those callers. Deploy storefronts first, then the site off, qualify all paths,
+  then enable. Legacy null-phase delivery tolerates absent activation support only
+  with a verified legacy view; protected leases without activation require repair. Its complete-deal evidence proves activated leases survive
   the allowance, undelivered leases expire, and API credits remain unchanged.
 - `capacity-reservation-lifecycle-hardening` owns hold expiry indexing on the same
   table. Coordinate migration order; use a separate lease-deadline due query/index.
@@ -108,7 +117,7 @@ recorded deferred option, not an implementation task.
 - D3: allowance declaration/validation to
   `openspec/specs/resource-pool-management/spec.md` and
   `docs/development/DEPLOYMENT_AND_CONFIG.md`.
-- D5: watchdog and signed physical-end evidence to
+- D5: watchdog, signed lease-end intent and separate proven-release facts to
   `openspec/specs/physical-provisioning/spec.md`; activation/view contracts to
   `openspec/specs/compute-provisioning-contract/spec.md`.
 - Seller-internal deadline versus payment/dispute authority boundaries to

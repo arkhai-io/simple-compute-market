@@ -2,43 +2,111 @@
 
 ### Requirement: Accepted-deal delivery priority
 
-Once a deal has been accepted, commercial delivery takes priority over local bookkeeping durability. The storefront MUST retry and loudly report failed local checkpoint writes and MUST NOT abandon an otherwise deliverable VM solely because storefront-local persistence failed. Required admission decisions and external-effect intents are exceptions to live progress: a protected effect MUST remain pending until its prerequisite writes succeed. Recovery MUST reconcile authoritative external state when local checkpoints are absent or stale, without replacing an existing resource.
+The storefront MUST retry and report failed checkpoints without abandoning an otherwise deliverable VM solely for local persistence failure. Protected effects MUST wait for durable admission and intents. Recovery MUST reconcile authoritative state and adopt existing resources rather than replace them.
 
 #### Scenario: Local checkpoint failure does not abandon delivery
 
-- **WHEN** an accepted deal can still deliver a VM but a storefront-local checkpoint write exhausts its retries
-- **THEN** the storefront reports the missing checkpoint at high severity and retries persistence
-- **AND** does not tear down or discard the deliverable VM solely because of that write failure
-- **AND** defers any further protected effect whose required admission or intent has not been persisted
+- **WHEN** an accepted VM can deliver but a required decision or intent write fails
+- **THEN** the storefront reports and retries persistence without discarding the VM
+- **AND** defers the protected effect until the write succeeds
 
 ### Requirement: Full settlement convergence ownership
 
-The VM storefront MUST own capacity reservation, physical fulfillment, credential delivery and listing/delivery progress through the shared compute-family delivery path. It MUST commit the deal's reservation before fulfillment begins and activate the delivered lease to the Agreement end before availability; lease-ending effects MUST go through end service. The selected settlement stage MUST own mechanism-specific attestation, readiness and claim binding; the claims engine retains submission/collection, not physical recovery. Common delivery MUST consume evidence and MUST NOT compare mechanism IDs. The storefront MUST hold and commit site capacity under `deal_ref.negotiation_id` whatever the settlement mechanism, without a settlement reference in the reservation.
+The VM storefront MUST own reservation, fulfillment, access and delivery progress through the shared compute path. It MUST hold/commit capacity under deal_ref.negotiation_id without a settlement reference, activate before billing/availability, and send ends through end service. Selected stages MUST own attestation/readiness/claim binding; the claims engine owns submission/collection. Common delivery MUST consume evidence, not compare mechanism IDs.
 
 #### Scenario: An escrow-settled deal's reservation is looked up
 
-- **WHEN** an operator or test looks up the site reservation of a VM deal settled through Alkahest
-- **THEN** it finds the reservation by the negotiation its hold names, not by the escrow
+- **WHEN** an Alkahest VM's site reservation is looked up
+- **THEN** it is found by negotiation, not escrow identity
 
 #### Scenario: Physical success converges commercial delivery
 
-- **WHEN** physical fulfillment reaches an active result
-- **THEN** common delivery validates readiness, completes start authorization and site activation, and records availability without persisting credentials
-- **AND** refreshes capacity and updates listing/delivery progress
-- **AND** the selected Alkahest continuation reconciles on-chain fulfillment, escrow readiness and settlement claims when applicable
-- **AND** every step is safe to revisit after interruption
+- **WHEN** physical fulfillment reaches ready evidence
+- **THEN** shared delivery activates, completes billing start and records availability without storing credentials
+- **AND** selected Alkahest continuation reconciles evidence, readiness and claims when applicable
+- **AND** every interrupted step is safe to revisit
 
 #### Scenario: Payment physical success requires no chain step
 
-- **WHEN** verified payment evidence produces an active VM
-- **THEN** common delivery returns the same domain result without creating an escrow claim or choosing a no-chain path by mechanism ID
+- **WHEN** verified payment evidence produces a ready VM
+- **THEN** common delivery uses the same path without an escrow claim or mechanism-ID branch
 
 #### Scenario: Terminal settlement ends a lease
 
-- **WHEN** a VM deal's settlement reaches a terminal state before its lease end
-- **THEN** the storefront requests end service, which truncates or terminates the lease
+- **WHEN** settlement reaches a terminal state before lease end
+- **THEN** end service drives truncation or termination
 
 #### Scenario: An Alkahest delivery activates
 
-- **WHEN** an Alkahest-settled VM reaches verified physical readiness and local end admission permits delivery
-- **THEN** the shared path activates its lease to the Agreement end before availability without issuing a hosted payment start
+- **WHEN** Alkahest delivery reaches ready evidence with local admission
+- **THEN** the shared path activates its reservation before availability without issuing hosted billing start
+
+### Requirement: A step after physical fulfillment defers a VM deal, never fails it
+
+Recoverable bookkeeping or evidence-publication failures after provisioning MUST defer delivery and resume the same fulfillment. They MUST NOT alone mark delivery failed. Journaled activation MAY write the lease after physical readiness; lease endings MUST use end service. Terminal start refusal, activation expiry and other genuine delivery failures MUST use the classified end handoff before reporting failed.
+
+#### Scenario: Evidence publication fails after provisioning
+
+- **WHEN** a VM is running and evidence publication fails
+- **THEN** delivery is deferred and recovery publishes evidence without another fulfillment
+
+#### Scenario: Restart convergence recovers a reservation never committed
+
+- **WHEN** recovery finds an uncommitted reservation
+- **THEN** it commits the exact accepted window before dispatch
+- **AND** earlier commits retain their window and identity
+
+#### Scenario: Activation loses to expiry
+
+- **WHEN** a physically ready VM cannot activate because expiry claimed it
+- **THEN** delivery enters the classified lifecycle handoff rather than deferring forever as bookkeeping failure
+
+### Requirement: A VM deal records only how to reach its VM
+
+The VM storefront MUST persist readiness and resource identities, not access material. Settle and settle-status MUST obtain buyer-facing connection details live through compute delivery's admission guard. Missing buyer-facing host MUST remain omitted. Authenticated replay storage MUST retain no credential-capable response bodies; exact retries MUST recheck eligibility without weakening signing or changed-request rejection.
+
+#### Scenario: A VM becomes ready
+
+- **WHEN** fulfillment becomes ready
+- **THEN** the storefront records readiness and resource identities
+- **AND** its authenticated settlement response fetches eligible access material live
+
+#### Scenario: A former access response is retried
+
+- **WHEN** exact retry arrives after a locally admitted end
+- **THEN** it is refused without replaying stored connection material
+
+### Requirement: VM evidence and delivery progress are not payment escrows
+
+Evidence MUST remain negotiation-scoped, not a sentinel escrow. Shared delivery MUST own protected progress; legacy domain rows MAY be read-only projections. Additive cutover MUST adopt verified exact requests/identities, defer ambiguous rows for repair, purge access material and reject old writers. Unknown or conflicting evidence MUST fail closed; real Alkahest state MAY stay with its owner.
+
+#### Scenario: Payment delivery is pending
+
+- **WHEN** verified payment awaits fulfillment
+- **THEN** evidence, immutable context and shared delivery progress are recoverable without a payment escrow row
+
+#### Scenario: Evidence is reused for another accepted state
+
+- **WHEN** an evidence write changes established mechanism, Agreement digest or settlement reference
+- **THEN** storage rejects it before protected delivery
+
+#### Scenario: A legacy row is adopted
+
+- **WHEN** cutover reconciles an in-flight VM's exact request, window and resource identities
+- **THEN** the shared record adopts that resource and legacy progress becomes a read-only projection
+- **AND** provider-active or stored credentials alone never imply activation, billing start or availability
+
+#### Scenario: An old binary attempts downgrade
+
+- **WHEN** an old writer starts after cutover's minimum schema/writer version
+- **THEN** startup refuses rather than resuming competing delivery writes
+
+#### Scenario: A fresh VM schema boots
+
+- **WHEN** introducing migrations bootstrap and rerun
+- **THEN** tables exist idempotently with no legacy rows required
+
+#### Scenario: Verified VM evidence is malformed
+
+- **WHEN** proposed verified evidence lacks SHA-256 Agreement digest, authoritative source or supported validated vm.delivery-facts version 1 payload
+- **THEN** storage refuses before freezing evidence or delivery progress
