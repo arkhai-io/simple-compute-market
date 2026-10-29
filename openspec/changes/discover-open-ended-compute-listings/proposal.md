@@ -1,84 +1,83 @@
 ## Why
 
-Once a listing can carry per-period options with an interruption policy and a date
-the seller's offer ends
-([`negotiate-open-ended-compute-terms`](../negotiate-open-ended-compute-terms/)), a
-buyer still cannot find them. The registry (`core/registry/filter-spec.yaml`, compute
-schema v2) stores `max_duration_seconds` but cannot filter on it, knows nothing of
-`available_until_utc`, and does not index settlement-option fields at all; the publish
-route persists an explicit carrier set — `listing_resource`, `accepted_escrows`,
-`settlement_options`, `demands`, `max_duration_seconds`, `oracle_address` — and
-discards any other top-level field, the defect `store-registry-listings-as-published`
-owns. Both buyer CLIs can name a listing by ID and nothing else.
-
-This is the discovery change of the roadmap goal that sells compute by the period until
-either party stops ([`ROADMAP.md`, Goal 8](../../../docs/development/ROADMAP.md#goal-8--sell-compute-by-the-period-until-either-party-stops)),
-split from the terms change so that the registry's carrier policy gates the product's
-switch-on rather than its terms: a dark product needs no filter.
+Compute buyers need to discover the recurring and seller-stoppable options published
+by `negotiate-open-ended-compute-terms`, distinguish their price/notice tradeoffs,
+and find capacity available through a required date. Current registry carriers and
+filters do not expose both seller bounds, and existing buyer CLIs have no class
+shortcut. Listing-level policy copies would misrepresent mixed-option listings.
 
 ## What Changes
 
-- `available_until_utc` becomes a declared top-level registry field, carried on the
-  model `store-registry-listings-as-published` produces, with a minimum-bound filter;
-  `max_duration_seconds` gains the filter it lacks.
-- The option's `interruption` and billing period are **buyer clause fields** —
-  `interruption.seller_may_interrupt`, `interruption.notice_seconds`,
-  `arkhai_payments.period` — evaluated locally after the registry query, as
-  `arkhai_payments.window` is today. Where `drop-escrow-from-shared-wire`'s
-  registry-side clause filtering has landed, the same fields are evaluated at the
-  registry; this change names that as where server-side filtering on preemptibility
-  arrives and adds no listing-level copy of the policy.
-- `--class reserved|on_demand|spot` on both buyer CLIs is sugar expanding to the
-  filters and clauses, never a listing term.
-- `asking_rate.period` keeps `[hour]`; a per-period option's `rates` keep `per: hour`,
-  and the billing `period` is the option's own param.
+- Add the listing-level UTC availability field and lower-bound filters on
+  `available_until_utc` and `max_duration_seconds`, using the carrier policy delivered
+  by `store-registry-listings-as-published`.
+- Consume the foundation codec's common option projections:
+  `early_termination.payer`, `early_termination.payee`,
+  `early_termination.payee.notice_seconds`, `adjudication.dispute.interface` and
+  `adjudication.dispute.account`. Do not add `interruption.*` or mechanism-owned
+  aliases for these fields.
+- Keep billing period under the rate registration's namespace,
+  `arkhai_payments.period`; approval expiry is `arkhai_payments.approval_window`,
+  not the old window name or a dispute-hold duration.
+- Add `--class reserved|on_demand|spot` to both compute buyer CLIs as explained
+  predicates over billing kind and entitlement, never a stored class. Correlate all
+  predicates against the same option, locally and in any registry pushdown.
+- Preserve asking-rate/option-rate units; do not silently normalize them to the
+  billing period. A period-sized charge is derived by the agreed-price accessor.
 
 ## Capabilities
 
 ### Modified Capabilities
 
-Expected: `registry-discovery` (the field and filters), `cli-query-language` (the
-clause fields), `buyer-orchestration` (`--class`). `.openspec.yaml` sets `skip_specs`
-until design adds the deltas.
+- `registry-discovery`: bound carriers and filters with existing filter-spec authority.
+- `cli-query-language`: common/registered projection use and correlated class expansion.
+- `buyer-orchestration`: `--class` and deterministic explanation in both domains.
 
 ### New Capabilities
 
-None expected.
+None. The shared lifecycle codec/projections are owned by the foundation change.
 
 ## Non-Goals
 
-- The terms themselves: `negotiate-open-ended-compute-terms`.
-- Registry-side filtering on option fields ahead of `drop-escrow-from-shared-wire`;
-  a listing-level summary of the policy for indexing (rejected there as a second
-  statement of one promise).
+- Defining terms, entitlements, setup fees, class display at approval or servicing:
+  the terms/foundation/rate changes own these.
+- A stored class, registry policy summary or another interruption codec.
+- Owning registry opaque-payload migration ahead of its carrier dependency.
+- Requiring server filtering before a locally filterable product can be developed.
+- Enabling a disabled mechanism, substituting an option after acceptance, or treating
+  a legacy splitter as an enforceable hosted entitlement.
 
-## Dependencies and Related Changes
+## Dependencies and gates
 
-- Depends on `negotiate-open-ended-compute-terms` (the terms exist) and on
-  `store-registry-listings-as-published`, gating design: its carrier policy decides how
-  `available_until_utc` is stored and served. That change depends on
-  `add-database-migration-commands`, so both precede this one — and gate only the
-  activation follow-on, not the build.
-- `drop-escrow-from-shared-wire` is where registry-side clause filtering arrives;
-  this change evaluates the clauses locally until then.
-- `publish-shape-bounds` also touches the registry's filter spec; coordinate.
+- `agreed-evidence-and-early-termination`: shared projections, exact authority identity
+  checks and clause correlation. Consume them, do not implement a second evaluator.
+- `negotiate-open-ended-compute-terms`: bound/class semantics and final option shape.
+- `store-registry-listings-as-published`, transitively
+  `add-database-migration-commands`: carrier policy gates registry implementation.
+- `drop-escrow-from-shared-wire`: coordinate its server clause pushdown when present;
+  local evaluation remains authoritative for predicates not pushed. Reverify
+  `publish-shape-bounds`'s filter-spec edits before changing the same file.
+- Freeze the rate registration's period/billing-kind projection before class wiring.
+  Discovery gates `activate-per-period-compute-servicing`, not dark term work.
 
 ## Impact
 
-`core/registry`'s filter spec, schema, and carrier model as its dependency leaves
-it; `core/buyer`'s clause evaluation; both buyer CLIs; the discovery end-to-end
-scenarios.
+`core/registry/filter-spec.yaml` and carrier/filter code, `core/src/market_core/query_dsl.py`,
+buyer discovery/selection, `kit/settlement-runtime` projections and both compute
+buyer CLIs. No new listing-level lifecycle-policy copy or stored class is added.
 
 ## Permanent documentation impact
 
 - [ ] `docs/development/ARCHITECTURE.md`
-- [x] Existing subsystem specification: `registry-discovery`, `cli-query-language`,
-  `buyer-orchestration`
+- [x] Existing subsystem specification
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
 ### Knowledge to promote
 
-- The seller's bounds are registry fields; the option's policy and billing period
-  are buyer clause fields; `--class` is sugar — `registry-discovery`,
-  `cli-query-language`, and `buyer-orchestration` specs.
+- Bound filter/carrier semantics: `registry-discovery` spec and architecture companion.
+- Correlated use of common term fields and period predicates: `cli-query-language`
+  spec and the existing settlement configuration contract.
+- Class shortcut and explanation: `buyer-orchestration` spec/architecture companion.
+- Repository-wide authority/namespace design stays foundation-owned; no additional
+  architecture decision is introduced here.
