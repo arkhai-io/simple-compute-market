@@ -582,12 +582,17 @@ The Agreement's `adjudication.dispute` MUST be the only source of a committed de
 
 ### Requirement: A role's authorities are its entries and its registry's recommendations
 
-A role's authorities MUST be its own `[[Dispute]]` entries in preference order, followed by the authorities its registry's descriptor recommends unless `use_registry_dispute_authorities` is false. Each authority MUST carry a copy of its advertisement, which publication and buyer checks read.
+A role's authorities MUST be its own `[[Dispute]]` entries in preference order, followed by the authorities its registry's descriptor recommends where `use_registry_dispute_authorities` is true, which it is by default for a storefront and not for a buyer. Each authority MUST carry a copy of its advertisement, which publication and buyer checks read.
 
 #### Scenario: A buyer uses its registry's recommendation
 
-- **WHEN** a buyer with no `[[Dispute]]` entries selects from a registry whose descriptor recommends one authority
+- **WHEN** a buyer with no `[[Dispute]]` entries and `use_registry_dispute_authorities = true` selects from a registry whose descriptor recommends one authority
 - **THEN** it accepts options naming exactly that authority and refuses others
+
+#### Scenario: A buyer has configured no authority
+
+- **WHEN** a buyer with no `[[Dispute]]` entries and the default setting selects from a registry that recommends an authority
+- **THEN** it refuses every hosted option, and the diagnostic says to list an authority or set `use_registry_dispute_authorities = true`
 
 ### Requirement: A buyer accepts an authority only on an exact identity match
 

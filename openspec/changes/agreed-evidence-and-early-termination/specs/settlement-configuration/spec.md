@@ -75,7 +75,7 @@ Alkahest options MUST carry their escrow policy in mechanism-owned parameters; l
 
 ### Requirement: Dispute authorities are configured as preferences
 
-`[[Dispute]]` entries MUST be ordered by preference, each naming one authority by `interface`, `origin`, `account` and `record_key`, with interface-owned `params` and a copy of its advertisement (payment mechanisms, minimum dispute window and case hold); an entry MAY be marked not offered or not accepted. `use_registry_dispute_authorities`, true by default, MUST append the registry descriptor's recommended authorities after the entries.
+`[[Dispute]]` entries MUST be ordered by preference, each naming one authority by `interface`, `origin`, `account` and `record_key`, with interface-owned `params` and a copy of its advertisement (payment mechanisms, minimum dispute window and case hold); an entry MAY be marked not offered or not accepted. `use_registry_dispute_authorities` MUST append the registry descriptor's recommended authorities after the entries when true; it MUST default to true for a storefront and to false for a buyer, and a buyer with no entries and the setting false MUST refuse every hosted option with a diagnostic naming both remedies. Shipped buyer profiles and development fixtures MUST set it explicitly.
 
 #### Scenario: A buyer prefers one authority
 

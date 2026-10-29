@@ -167,7 +167,8 @@ template writer), and `docs/development/DEPLOYMENT_AND_CONFIG.md`.
 
 - [ ] 3.1 Add typed `[[Dispute]]` entries (identity, `params`, advertisement copy, not-offered
       and not-accepted marks), `[[DisputeCredential]]` bindings (identity and an
-      environment-variable reference) and `use_registry_dispute_authorities` (default true) in
+      environment-variable reference) and `use_registry_dispute_authorities` (default true for a storefront, false for a buyer;
+      the shipped buyer profiles and fixtures set it explicitly) in
       `kit/deal-lifecycle`, with resolution of a role's ordered list from its entries and a
       supplied registry recommendation list. Verify: unit tests for ordering, marks, the
       opt-out, credential lookup by identity, and that resolved credentials never appear in a
@@ -187,7 +188,8 @@ template writer), and `docs/development/DEPLOYMENT_AND_CONFIG.md`.
 - [ ] 3.4 Fetch a registry's recommendations where roles already read its descriptor (buyer
       bootstrap and storefront publication), and report at startup when a role's list is empty.
       Verify: application-integration tests through the typed client: "A buyer uses its
-      registry's recommendation" and the startup report of "No authority is available".
+      registry's recommendation", "A buyer has configured no authority" and the startup
+      report of "No authority is available".
 - [ ] 3.5 Document `[[Dispute]]`, `[[DisputeCredential]]`, `use_registry_dispute_authorities`,
       the descriptor list and the retired key in `docs/development/DEPLOYMENT_AND_CONFIG.md`.
       Verify: `make check-doc-citations CHANGE=agreed-evidence-and-early-termination` reports
