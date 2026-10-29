@@ -174,7 +174,9 @@ rate-part behavior owned by `spot-deals-through-arkhai-payments`:
   supports them. Setup is an ordinary `once` part ending at the later of the Agreement start
   and approval and paying out one dispute window later; the authority never
   observes compute activation, and the setup part needs no event the published
-  contract lacks.
+  contract lacks. Carry the refusal vector for a window shorter than the delivery deadline
+  plus the authority's minimum (a one-hour window beside a three-hour deadline): the
+  double never sees such a mandate, because publication and the buyer refuse the option.
   Published mode always follows its publication's actual earning/hold semantics.
   Started-period arithmetic follows the selected contract; per-part reversal uses
   the same pinned arithmetic, not storefront estimates.

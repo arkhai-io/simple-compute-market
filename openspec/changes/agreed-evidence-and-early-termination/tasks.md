@@ -103,7 +103,8 @@ by dispute interface", "Evidence is keyed by negotiation" and "A dispute is one 
       values and `partialPeriod` mapping per D5, plus nonnegative minor-unit decimal-string `premature_stop_penalty`, absent/zero meaning none), positive-integer `delivery_deadline_seconds` (the "Delivery has a deadline" semantics; the compute builders in `negotiate-open-ended-compute-terms` emit it from the pool's tag) and reserved `bond`; malformed and bounded-term refusal
       (`case_hold_max_seconds` a nonnegative integer or `null`, minimums from an authority's
       advertisement copy); and the semantics table. Verify: unit tests for each refusal in the
-      "Malformed terms are refused" and "Dispute timing terms are bounded" scenarios, and that
+      "Malformed terms are refused" and "Dispute timing terms are bounded" scenarios (the window
+      shorter than the delivery deadline plus the authority's minimum included), and that
       a term change changes the option ID through the existing option-ID function.
 - [ ] 2.3 In `kit/deal-lifecycle`, define the payment-adapter and dispute-adapter protocols and
       their tables (payment by negotiation ID, mechanism and arbiter or oracle; dispute by

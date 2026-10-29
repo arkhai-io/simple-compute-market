@@ -110,7 +110,13 @@ Hosted once options carry adjudication but no early_termination: no part is
 stoppable. Recurring presets carry payer and optionally payee entitlement. Buyer
 notice is offered/priced and may be zero; it is the only paid stop tail.
 Polling/watchdog/teardown budgets are seller recommendations, not another term.
-Adjudication must use an accepted authority and satisfy its advertised minimums.
+Adjudication must use an accepted authority and satisfy its advertised minimums, and on a
+compute option its `dispute_window_seconds` must be at least `delivery_deadline_seconds`
+plus the authority's advertised minimum window (foundation D5): a setup part pays out one
+window after its end, non-delivery is provable one deadline after the anchor, and the
+margin is what the authority says a filer needs. Derivation refuses the option with the
+diagnostic "the dispute window ends before the delivery deadline can be filed on", and
+the buyer refuses one offered anyway.
 Unsupported/malformed terms and unknown versions fail closed in the shared codec.
 
 The shipped buyer acceptance policy is one object this change owns, so publication
