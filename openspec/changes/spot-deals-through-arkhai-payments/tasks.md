@@ -185,13 +185,14 @@ compute_deal_stages.py; scenarios under each compute lane; e2e-tests/README.md.
       lanes. Record contract revision, target class/mode, hashes and control trace;
       missing deployment, credentials or hardware is an explicit prerequisite.
       Stop before browser/scenario execution on an unready deployment.
-- [ ] 6.3 After converge-ongoing-compute-leases composes the consumer, execute
-      buyer stop including priced notice; seller notice with storefront down past
-      due time; earlier buyer stop during notice; exhaustion; maximum term;
-      on-demand payee refusal then mechanical exceptional end; stop/start race;
-      rotation overlap. Observe authority records and actual capacity/access end
-      in both domains. This is an acceptance evidence gate, not a reverse
-      implementation dependency.
+- [ ] 6.3 Deliver shared scenario entry points for buyer stop including priced
+      notice; seller notice with storefront down past due time; earlier buyer stop
+      during notice; exhaustion; maximum term; on-demand payee refusal then
+      mechanical exceptional end; stop/start race; rotation overlap. Hand their
+      execution to converge-ongoing-compute-leases when it composes the consumer:
+      that change must observe authority records and actual capacity/access end
+      in both domains. Record consumer-dependent execution as unrun here rather
+      than create a reverse archival dependency.
 - [ ] 6.4 Check the changed imports, comments and public artifacts before code
       review. Move touched local imports to module level where safe, retaining
       only verified circularity or deliberate lazy-load reasons. Run focused
@@ -199,8 +200,9 @@ compute_deal_stages.py; scenarios under each compute lane; e2e-tests/README.md.
       before committing implementation.
 - [ ] 6.5 Obtain pre-closeout code review. Confirm adapter/servicing ownership and
       that cooperative reversal never replaces the buyer's authority/dispute
-      guarantee. Archive only after the consumer-enabled scenario gate passes;
-      hosted live qualification remains the activation follow-on.
+      guarantee. Verify the command/publication seams here; consumer-enabled
+      cross-service acceptance gates convergence and hosted live qualification
+      gates activation, not this prerequisite change's archival.
 
 Evidence levels: conformance and kit integration qualify SCM's contract use;
 application integration qualifies both compositions; smoke qualifies wiring/auth;
@@ -236,9 +238,11 @@ change to implementation and review.
       resolving every failure/owned exception. Run make check-agent-skills if
       implementation touched agent instruction directories.
 - [ ] 7.8 **End-to-end pipeline.** Record the complete pipeline run/result and
-      both lanes' scenarios in section 6. Name exact prerequisites/owning changes
-      for any unrun hosted validation; do not mark them passed or substitute unit
-      evidence. Missing consumer-enabled lane evidence blocks this closeout.
+      applicable scenarios in section 6. Name exact prerequisites/owning changes
+      for unrun consumer-enabled or hosted validation; do not mark them passed or
+      substitute unit evidence. The rate-consumer scenarios gate convergence's
+      acceptance and hosted scenarios gate activation; record their transfer here
+      without making this prerequisite wait for a dependent's archival.
 - [ ] 7.9 **Promotion.** Write openspec/specs/settlement-servicing/architecture.md
       (rate operations, arithmetic and rotation), storefront-publication/
       architecture.md (presets and independent pricing), deal-lifecycle/

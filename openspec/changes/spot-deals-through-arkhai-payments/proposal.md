@@ -75,8 +75,9 @@ Implementation gates on:
 converge-ongoing-compute-leases depends on this change: it owns rate servicing
 in kit/deal-servicing, funding timers, journal persistence/replay, start admission
 and domain lease effects. The spot e2e scenarios are specified here and run once
-that consumer is composed; that is a verification gate, not a reverse implementation
-dependency. activate-per-period-compute-servicing owns switch-on and hosted
+that consumer is composed; execution gates convergence's acceptance, not this
+prerequisite's archival. Deliver their runnable entry points here and record
+consumer-dependent execution as unrun, without a reverse implementation dependency. activate-per-period-compute-servicing owns switch-on and hosted
 qualification after the contract revision is deployed.
 
 Complete here means exact buyer/seller derivation, usable adapter mechanics and

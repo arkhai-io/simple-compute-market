@@ -288,8 +288,9 @@ or fallback to another mechanism.
 ## Dependency and ownership gates
 
 The proposal names implementation prerequisites. Mechanics do not depend on
-convergence; cross-service scenario execution waits for that consumer. Convergence
-consumes the operation/target API rather than copying it, and introduces no vouch,
+convergence; cross-service scenario execution waits for and gates that consumer's
+acceptance, not this prerequisite's archival. This change delivers the scenario
+entry points and records consumer-dependent execution as unrun. Convergence consumes the operation/target API rather than copying it, and introduces no vouch,
 reverse-before-stop, refund queue or mutable financial end. Snapshot proofs/vectors
 come from the foundation; double implementation comes from its owning change.
 
