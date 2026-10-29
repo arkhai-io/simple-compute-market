@@ -21,6 +21,20 @@ present reserve-ahead as a dishonest-seller billing cap.
 - **THEN** the display says both stops charge the started period, not that seller preemption returns it
 - **AND** setup's own activation end and undelivered-only return are shown separately
 
+### Requirement: The buyer refuses seller ends that keep the started period
+
+The buyer's acceptance policy MUST by default refuse an option whose payee entitlement or term end has a `settles_through` other than `last_boundary`, and MUST let the buyer configure the treatments it accepts. The refusal MUST name the term.
+
+#### Scenario: A spot option charges the started period on a seller stop
+
+- **WHEN** a buyer with the default policy is offered a spot option whose payee entitlement settles through `started_period`
+- **THEN** the buyer refuses the option, naming the payee entitlement's `settles_through`
+
+#### Scenario: A buyer accepts charged seller stops
+
+- **WHEN** a buyer configures its policy to accept `started_period` on payee stops
+- **THEN** the same option is acceptable
+
 ### Requirement: Recurring purchase may omit a horizon
 
 Compute buyers MUST permit omitted duration for recurring selections and use the

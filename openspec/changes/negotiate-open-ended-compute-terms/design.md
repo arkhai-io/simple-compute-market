@@ -68,9 +68,11 @@ Keep the foundation's exact shapes and names:
   its top-level `settles_through` is the term end's treatment, separate from
   entitlements keyed by `payer`/`payee`, each `{notice_seconds, settles_through}`.
   Foundation D5 owns the `settles_through` mapping: `started_period` ↔ charged,
-  `last_boundary` ↔ returned, `stop` ↔ prorated. Presets choose payer charged and
-  payee returned; until the vendored contract expresses returned, spot explicitly
-  offers charged on both sides. Publication and acceptance fail closed on any
+  `last_boundary` ↔ returned, `stop` ↔ prorated. Seller presets offer payer charged and
+  payee returned; the buyer's default acceptance policy refuses a payee entitlement
+  or term end that is not returned (the buyer benefits, so the buyer enforces it in
+  negotiation), and a buyer may loosen it. Until the vendored contract expresses
+  returned, spot explicitly offers charged on both sides, which default buyers refuse. Publication and acceptance fail closed on any
   unsupported treatment. `exposure_seconds` and `stop+exposure` are retired.
 - `adjudication = {version, dispute, dispute_window_seconds, case_hold_max_seconds}`;
   `dispute = {interface, origin, account, record_key, params}`.
