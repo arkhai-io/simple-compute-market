@@ -1,11 +1,19 @@
 ---
 # VM Management - Full VM Removal
 #
-# Forcibly destroys the VM and runs the per-VM cleanup script that was written
-# to the host at create time.  The cleanup script removes the FRP proxy entry,
-# iptables/UFW port-forward rules, static DHCP lease, GPU passthrough
-# configuration, SSH keys, cloud-init artefacts, libvirt definition, and all
-# associated disk images.
+# Destroys the VM and removes what its create left on the host. The create
+# writes a cleanup script, /usr/local/bin/cleanup_vm_<name>.sh, recording that
+# guest's FRP proxy entry, port-forward rules, static DHCP lease, SSH keys,
+# cloud-init artefacts, libvirt definition, and disk images; when it is there,
+# this action runs it.
+#
+# A create that failed before writing the script may still have left effects,
+# so a missing script is never taken as proof that nothing is there. This action
+# then removes whatever it can attribute to the guest by its exact name and
+# marker, reports the guest absent only when it finds none of it, and fails,
+# naming them, on rules that may be some guest's but whose guest cannot be
+# told, removing nothing. A failed teardown leaves the reservation's capacity
+# held for an operator.
 #
 # This action is the authoritative teardown path.  It is invoked by:
 #   - The provisioning service LeaseWatchdog when a lease expires.
@@ -22,21 +30,6 @@
   delegate_to: "{{ target_host }}"
   when: vm_action == "vm_remove"
 
-- name: Fail loudly when cleanup script is missing
-  fail:
-    msg: >
-      Cleanup script not found at /usr/local/bin/cleanup_vm_{{ vm_name }}.sh
-      on host {{ target_host }}.
-      This script is written during VM creation.  Its absence indicates the
-      VM was not provisioned through this system, or the create job failed
-      before the script was written.
-      Manual intervention is required: verify the VM exists on the host
-      (virsh list --all), destroy it manually if present, and confirm no
-      FRP proxy entries, iptables rules, or disk images remain.
-  when:
-    - vm_action == "vm_remove"
-    - not cleanup_script_stat.stat.exists
-
 - name: Force-destroy VM (in case it is still running)
   shell: |
     if virsh domstate {{ vm_name }} 2>/dev/null | grep -q "running"; then
@@ -47,7 +40,9 @@
     fi
   register: vm_destroy_result
   delegate_to: "{{ target_host }}"
-  when: vm_action == "vm_remove"
+  when:
+    - vm_action == "vm_remove"
+    - cleanup_script_stat.stat.exists
 
 - name: Run cleanup script
   shell: |
@@ -60,6 +55,151 @@
     exit $EXIT_CODE
   register: vm_cleanup_result
   delegate_to: "{{ target_host }}"
+  when:
+    - vm_action == "vm_remove"
+    - cleanup_script_stat.stat.exists
+
+- name: Remove what the guest left without a cleanup script
+  shell: |
+    set -e
+    NAME="{{ vm_name }}"
+    MARKER="{{ vm_guest_rule_marker }}"
+    RELOAD_URL="http://127.0.0.1:{{ frp_admin_port | default(7400) }}/api/reload"
+
+    {{ lookup('file', 'guest_teardown.sh') }}
+
+    FOUND=0
+    found() {
+      FOUND=$((FOUND + 1))
+      echo "Removed: $1"
+    }
+
+    # Every guest's address comes from the default network's reservations. A
+    # host whose network cannot be read cannot tell what is this guest's, so
+    # the teardown stops here, before removing anything.
+    virsh net-dumpxml default >/dev/null
+
+    DOMAIN=""
+    if virsh dominfo "$NAME" >/dev/null 2>&1; then
+      DOMAIN="$NAME"
+    fi
+
+    # This guest's address: its domain's, else the reservation under its exact
+    # name.
+    ADDRESS=""
+    if [ -n "$DOMAIN" ]; then
+      ADDRESS="$(virsh domifaddr "$NAME" 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -1 || true)"
+    fi
+    if [ -z "$ADDRESS" ]; then
+      ADDRESS="$(_host_attribute "$(guest_dhcp_reservations "$NAME" | head -1)" ip)"
+    fi
+    echo "Guest address: ${ADDRESS:-unknown}"
+
+    # With this guest's address unknown, an unmarked rule of a create's shape
+    # may be this guest's, unless its address is reserved for another guest.
+    # One that could be is refused before anything is removed: removing it
+    # might take another guest's access, and leaving it might leave this one's.
+    if [ -z "$ADDRESS" ]; then
+      UNATTRIBUTABLE="$(unattributable_guest_rules "$(other_guests_reserved_addresses "$NAME")")"
+      if [ -n "$UNATTRIBUTABLE" ]; then
+        echo "Guest $NAME's address is unknown, and these rules may be its or another guest's; nothing was removed:" >&2
+        printf '%s\n' "$UNATTRIBUTABLE" >&2
+        exit 1
+      fi
+    fi
+
+    PORT="$(guest_forwarded_port "$MARKER" "$ADDRESS")"
+
+    if [ -n "$DOMAIN" ]; then
+      if virsh domstate "$NAME" 2>/dev/null | grep -q running; then
+        virsh destroy "$NAME"
+      fi
+      virsh undefine "$NAME" --remove-all-storage --nvram
+      found "domain $NAME, with its storage and firmware variables"
+    fi
+
+    for path in \
+      "/var/lib/libvirt/images/$NAME.qcow2" \
+      "/var/lib/libvirt/images/$NAME-init.iso" \
+      "/var/lib/libvirt/qemu/nvram/${NAME}_VARS.fd"; do
+      if [ -e "$path" ]; then
+        rm -f "$path"
+        found "$path"
+      fi
+    done
+
+    remove_guest_proxy /etc/frp/frpc-vms.toml "$NAME" "$RELOAD_URL"
+    case "$GUEST_PROXY" in
+      removed) found "relay proxy block" ;;
+      reload_failed) found "relay proxy block (the VM tunnel client did not reload)" ;;
+    esac
+
+    while IFS= read -r reservation; do
+      [ -n "$reservation" ] || continue
+      virsh net-update default delete ip-dhcp-host "$reservation" --live --config
+      found "DHCP reservation $reservation"
+    done <<< "$(guest_dhcp_reservations "$NAME")"
+
+    remove_guest_rules "$MARKER" "$ADDRESS" "$PORT"
+    if [ "$GUEST_RULES_REMOVED" -gt 0 ]; then
+      found "$GUEST_RULES_REMOVED iptables rules"
+    fi
+    remove_guest_ufw_rules "$MARKER" "$PORT"
+    if [ "$GUEST_UFW_RULES_REMOVED" -gt 0 ]; then
+      found "$GUEST_UFW_RULES_REMOVED UFW rules"
+    fi
+    # firewalld keeps no comment on a port, so its rule is this guest's only by
+    # the port the guest's own forwarding rule names.
+    if [ -n "$PORT" ] && command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld; then
+      if firewall-cmd --permanent --query-port="$PORT/tcp" >/dev/null 2>&1; then
+        firewall-cmd --permanent --remove-port="$PORT/tcp"
+        firewall-cmd --reload
+        found "firewalld port $PORT/tcp"
+      fi
+    fi
+    if [ "$GUEST_RULES_REMOVED" -gt 0 ] && command -v iptables-save >/dev/null 2>&1; then
+      if [ -f /etc/iptables/rules.v4 ]; then
+        iptables-save > /etc/iptables/rules.v4
+      elif [ -d /etc/sysconfig ]; then
+        iptables-save > /etc/sysconfig/iptables
+      else
+        iptables-save > /etc/iptables.rules
+      fi
+    fi
+
+    for path in \
+      "$HOME/.ssh/${NAME}_root_ed25519" "$HOME/.ssh/${NAME}_root_ed25519.pub" \
+      "$HOME/.ssh/${NAME}_tenant_ed25519" "$HOME/.ssh/${NAME}_tenant_ed25519.pub"; do
+      if [ -e "$path" ]; then
+        rm -f "$path"
+        found "$path"
+      fi
+    done
+    for path in /tmp/cloudinit_"$NAME"_*; do
+      if [ -d "$path" ]; then
+        rm -rf "$path"
+        found "$path"
+      fi
+    done
+
+    if [ "$FOUND" -gt 0 ]; then
+      echo "GUEST_PRESENT=true"
+    else
+      echo "Nothing of guest $NAME is on this host"
+      echo "GUEST_PRESENT=false"
+    fi
+  args:
+    executable: /bin/bash
+  register: vm_attributed_removal
+  delegate_to: "{{ target_host }}"
+  when:
+    - vm_action == "vm_remove"
+    - not cleanup_script_stat.stat.exists
+
+- name: Record the teardown that ran
+  set_fact:
+    vm_remove_run: "{{ vm_cleanup_result if cleanup_script_stat.stat.exists else vm_attributed_removal }}"
+    vm_guest_present: "{{ cleanup_script_stat.stat.exists or ('GUEST_PRESENT=true' in vm_attributed_removal.stdout_lines) }}"
   when: vm_action == "vm_remove"
 
 - name: Get current timestamp for vm_remove
@@ -77,13 +217,15 @@
       timestamp: "{{ vm_remove_timestamp.stdout }}"
       host: "{{ target_host }}"
       status: >-
-        {{ 'success' if (vm_cleanup_result is defined and vm_cleanup_result.rc == 0) else 'failed' }}
+        {{ 'success' if (vm_remove_run is defined and vm_remove_run.rc == 0) else 'failed' }}
+      cleanup_record: "{{ cleanup_script_stat.stat.exists | bool }}"
+      guest_present: "{{ vm_guest_present | bool }}"
       destroy_output: "{{ vm_destroy_result.stdout | default('') }}"
-      cleanup_output: "{{ vm_cleanup_result.stdout_lines | default([]) }}"
+      cleanup_output: "{{ vm_remove_run.stdout_lines | default([]) }}"
       error: >-
-        {{ vm_cleanup_result.stderr | default('')
-           if (vm_cleanup_result is defined and vm_cleanup_result.rc != 0)
+        {{ vm_remove_run.stderr | default('')
+           if (vm_remove_run is defined and vm_remove_run.rc != 0)
            else '' }}
   when:
     - vm_action == "vm_remove"
-    - vm_cleanup_result is defined
+    - vm_remove_run is defined

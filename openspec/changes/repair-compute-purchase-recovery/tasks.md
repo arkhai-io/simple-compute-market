@@ -2466,18 +2466,128 @@ created". It must land before any real guest is created on a lane's host. Files:
 - the role's tests in `domains/vms/provisioning/iac/tests/`, including
   `test_cleanup_script_relay_teardown.py`'s harness of the cleanup script
 
-- [ ] 13.1 Every firewall and NAT rule a create adds for a guest carries a comment
+- [x] 13.1 Every firewall and NAT rule a create adds for a guest carries a comment
       naming the guest:
       - the cleanup script removes rules by that exact comment;
       - unmarked rules are removed by the guest's `/32` address, never a prefix;
       - the subnet-wide masquerade rule is left alone.
-- [ ] 13.2 `vm_remove` with no cleanup script:
+
+      Done:
+      - **The marker.** It is `vm_guest_rule_marker`, `arkhai-vm:<guest>`, in
+        the role's `vars/main.yml`, and it is the only definition. A guest name
+        is lowercase letters, digits, and hyphens, so the marker never needs
+        quoting. `iptables -S` still quotes it because of the `:`, and the
+        reader strips the quotes.
+      - **The create** (the direct-forwarding path; a relay-backed create adds
+        no rule) gives `-m comment --comment` with the marker to:
+        - its DNAT rule;
+        - its per-guest masquerade;
+        - both FORWARD rules;
+        - the fallback INPUT rule.
+
+        Its `ufw allow` carries the marker as the rule's comment. The
+        subnet-wide masquerade stays unmarked. firewalld's `--add-port` takes
+        no comment.
+      - **One implementation**, `roles/vm-management/files/guest_teardown.sh`
+        (new). Every teardown path includes it with `lookup('file', ...)`:
+        - the cleanup script the create writes;
+        - `vm_remove`'s branch for a missing script (13.2);
+        - three `vm_undefine` tasks: the forwarded port, the rules, and the
+          firewall.
+
+        It holds no Jinja delimiter, so including it into templated text
+        changes nothing.
+      - **What is a guest's.** The library reads `iptables -S` for nat
+        PREROUTING and POSTROUTING and filter FORWARD and INPUT, and deletes a
+        rule by its exact specification, `-A` turned into `-D`. A rule is the
+        guest's when either:
+        - it carries the guest's marker; or
+        - it carries no comment at all and has one of the shapes a create
+          writes, naming exactly the guest's address. The shapes are: DNAT to
+          `<address>:22`; masquerade of `-d <address>/32 --dport 22`; FORWARD
+          `ACCEPT` of `-d <address>/32 --dport 22` or of
+          `-s <address>/32 --sport 22`. On INPUT, a tcp `ACCEPT` of exactly the
+          guest's forwarded port.
+
+        A rule carrying any other comment is not the guest's. The subnet
+        masquerade names no `/32` address, so it never matches. The forwarded
+        port is the `--dport` of the guest's own DNAT rule.
+      - **The cleanup script** now:
+        - also takes the guest's address from its reservation by exact name;
+        - takes its port from the guest's own forwarding rule;
+        - removes the rules through the library;
+        - removes UFW rules by the marker, or, for one with no comment, by the
+          exact `<port>/tcp`, IPv4 or IPv6;
+        - removes firewalld's rule by the exact port.
+
+        Each of these replaces a substring `grep`. Rules are removed directly,
+        not inside `$(...)`, where bash clears `set -e`, so a deletion the host
+        refuses fails the script.
+      - **Found on the way: the proxy block's prefix match.** The cleanup
+        script's `sed` range `/# BEGIN ... FOR VM $VM_NAME/,/# END .../d` also
+        matched every guest whose name begins with this one's. It would delete
+        that guest's block, and a relay registration with it. The library
+        removes a block only by its exact BEGIN and END lines. It refuses a
+        BEGIN without an END, which would otherwise take every later block. It
+        rewrites the file in place, through an owner-only temporary copy,
+        since the file holds the client's credential. It reloads the client,
+        never restarts it. Reload failure stays `partial`, as before.
+        `vm_undefine` already removed the block exactly, through
+        `blockinfile`.
+      - **`vm_undefine`** finds the forwarded port, removes the rules, and
+        removes UFW and firewalld rules through the library. Its UFW
+        verification lists what the library would still match, not a
+        substring of the port.
+- [x] 13.2 `vm_remove` with no cleanup script:
       - removes what it finds by the guest's name: the domain with its storage and
         firmware variables, the images, the relay proxy block, the DHCP
         reservation, and the marked rules;
       - reports the guest absent only when it finds none of them;
       - fails, naming the artifact, when it finds one it cannot attribute.
-- [ ] 13.3 Tests:
+
+      Done, in `vm-remove.yml`. The `fail` on a missing script is gone. The
+      force-destroy and the script run only when the script exists. Otherwise
+      the new shell task "Remove what the guest left without a cleanup script"
+      runs:
+      - **Reading first.** It fails at once if the `default` network cannot be
+        read. It takes the guest's domain by exact name, and its address from
+        the domain, else from the reservation named exactly for it.
+      - **What it cannot attribute.** With the guest's address unknown, it
+        lists every unmarked rule of a create's shapes. A rule whose address is
+        reserved for another name belongs to that guest and is set aside. Any
+        other such rule could be this guest's or an unknown one's. The task
+        fails naming each one, before anything is removed. With the address
+        known, a rule for another address is not this guest's, so nothing is
+        in doubt. Marked rules are attributed by the marker alone.
+      - **What it removes**, each counted:
+        - the domain, after a destroy if it is running, by `virsh undefine
+          --remove-all-storage --nvram`;
+        - `<guest>.qcow2`, `<guest>-init.iso`, and `<guest>_VARS.fd` by exact
+          path;
+        - the proxy block, exactly, with a reload;
+        - each DHCP reservation whose name is exactly the guest's;
+        - the guest's rules, UFW rules, and firewalld port, as 13.1 says;
+        - the guest's SSH key files and `/tmp/cloudinit_<guest>_*`
+          directories, which the create also leaves.
+
+        Rules are saved only when one was removed.
+      - **The report.** It prints `GUEST_PRESENT=true` when it removed
+        anything, and `GUEST_PRESENT=false` with "Nothing of guest ... is on
+        this host" when it removed nothing. `vm_remove_data` gains two fields:
+        - `cleanup_record`: whether the script existed;
+        - `guest_present`: true on the script path, and otherwise as the
+          branch reported.
+
+        Both print as text, as the bare-metal reclaim prints
+        `account_present`. The fact's status and output come from whichever
+        path ran. Each path registers its own result, since a skipped task's
+        `register` would overwrite the other's.
+      - **Beyond the plan's files: the mock.** D2 says the mock prints what
+        the role prints. So the VM adapter's default remove now prints
+        `cleanup_record` and `guest_present` as `"true"`, a delivered guest's
+        remove. The adapter is already 0.16.0 in this change, and nothing reads
+        either field, so it is not bumped.
+- [x] 13.3 Tests:
       - **Behaviour (unit, through `shell_harness`):** the cleanup script's rule
         removal, with two guests whose addresses share a prefix, removing only the
         first guest's rules and never the masquerade rule; and the missing-script
@@ -2490,13 +2600,150 @@ created". It must land before any real guest is created on a lane's host. Files:
 
       Owed outside this section: a real partial create's teardown is the live VM
       lane's evidence.
-- [ ] 13.4 Verification:
+
+      Done (unit). New `tests/host_fakes.py` and `tests/test_guest_teardown.py`,
+      21 cases, plus one case in the relay harness:
+      - **The fakes.** `host_fakes.FakeHost` keeps the host's state in files:
+        - `iptables -S` prints rules in `-S` form, quoting a comment as iptables
+          1.8 does, and `-D` deletes the first equal rule or fails as iptables
+          does;
+        - `virsh` keeps domains, with state, address, MAC, and storage that
+          `undefine --remove-all-storage` deletes, and the `default` network's
+          reservations in `net-dumpxml` form;
+        - `ufw` keeps numbered rules with comments;
+        - `curl`, `systemctl`, and `firewall-cmd` are faked too, so no real one
+          is reached.
+
+        Every call is logged.
+      - **The two guests.** `guest-1` at `192.0.2.1`, port 4000, and
+        `guest-12` at `192.0.2.12`, port 40001. They share a prefix in name,
+        address, and port. Guest A's rules are partly marked and partly not.
+        Guest B's rules are too, and beside them sit the subnet masquerade, the
+        management SSH `INPUT` rule, and a rule naming A's exact address under
+        another comment. Paths under `/etc`, `/var`, and `/usr/local`, and
+        `/tmp/cloudinit_`, are rewritten into a temporary tree, as the relay
+        harness rewrites `/etc/frp`.
+      - **Behaviour, each the real shell through `shell_harness`:**
+        - **The cleanup script**, whole, as the create renders it for A. It
+          removes exactly A's five rules, its domain, its storage, its ISO, its
+          lease, its proxy block, and its UFW rules, marked and v6-unmarked.
+          Every one of B's effects and of the host's own stays, the subnet
+          masquerade and the 40001 UFW rules among them. A host refusing a
+          `-D` fails the script before it reports the rules removed or
+          undefines the domain.
+        - **`vm_remove` without a script**, eight cases:
+          - a partial create (domain, disk, ISO, NVRAM, keys, cloud-init
+            directory, reservation, proxy, rules) is all removed, and B's
+            same-named cloud-init directory stays;
+          - a domain and its disk alone (the delta's scenario) are removed, and
+            it succeeds;
+          - nothing of the guest: `GUEST_PRESENT=false`, and no destructive
+            call is made;
+          - marked rules alone, with no address known, are removed by the
+            marker;
+          - an unmarked DNAT to an unreserved address, with the address
+            unknown: the task fails naming that rule, and the domain, disk,
+            proxy, and rule all stay, with no `-D` issued;
+          - with the address unknown, B's unmarked rules, reserved to B, cause
+            no doubt and stay;
+          - a reservation alone supplies the address for A's unmarked rules;
+          - an unreadable network fails before any `-D`.
+        - **`vm_undefine`**: its port task reads 4000, and its rule task
+          removes exactly A's five rules.
+        - **The relay harness** gains a neighbour, `agent-vm-012`, whose block
+          stays when `agent-vm-01`'s is removed. Its existing six cases now
+          include the library; the harness has seven cases.
+      - **Role structure:**
+        - the four per-guest rules carry the marker and the subnet masquerade
+          carries none;
+        - the UFW and INPUT openings carry it;
+        - the marker is defined once, in `vars/main.yml`;
+        - every teardown task includes the library;
+        - no teardown path keeps one of the substring greps or the unanchored
+          `sed` range;
+        - the library holds no Jinja delimiter;
+        - `vm_remove` has no `fail` task, runs each path on its own condition,
+          and reports `cleanup_record` and `guest_present`.
+      - **Updated:** `test_vm_management_contracts.py`'s undefine case pinned
+        the old line-number greps. It now pins the library's inclusion and
+        calls.
+      - **The VM adapter's mock** (unit): a new case asserts that the default
+        remove prints `cleanup_record` and `guest_present` as `"true"`.
+      - **Red.** Against `HEAD`'s task files, with only the new `files/` and
+        `vars/` added so the modules import, 20 of the new cases failed. Most
+        failed for want of the new tasks. Two reds are meaningful:
+        - the relay neighbour case failed, because `HEAD`'s `sed` range
+          deleted `agent-vm-012`'s block;
+        - a corroboration against real iptables 1.8.7 (nf_tables), run in an
+          unprivileged user and network namespace outside the repository.
+          `HEAD`'s cleanup block, run for `192.0.2.1`, also deleted
+          `192.0.2.12`'s masquerade and both its FORWARD rules. The library,
+          on the same seeded rules, deleted exactly `192.0.2.1`'s five and left
+          `192.0.2.12`'s, the subnet masquerade, and the management SSH rule.
+      - **Mutations, each on a temporary copy:**
+        - an address compared as a prefix fails 5 cases;
+        - the marker compared as a prefix fails 8;
+        - removing the unattributable refusal fails its case.
+      - **Real Ansible.**
+        - `validate-playbooks` and the throwaway `import_tasks` syntax check
+          (12.2) passed on 2.10.8, 2.17.14, and 2.19.14.
+        - Corroboration, outside the repository: `vm-remove.yml` ran through
+          `include_role` under ansible-core 2.17.14 and 2.19.14, against
+          `localhost`, with `host_fakes` on `PATH`. This exercised the library's
+          `lookup('file')` from the role's `files/`, the templating, and the
+          conditionals:
+          - a guest with nothing on the host printed `cleanup_record: false`
+            and `guest_present: false`;
+          - an unattributable DNAT failed, naming it, with "nothing was
+            removed".
+        - The system's ansible 2.10.8 cannot run this role at all: any filter
+          fails against the installed Jinja2 3.x, with `environmentfilter`
+          missing. So its run is not evidence either way.
+- [x] 13.4 Verification:
       - `make -C domains/vms/provisioning/iac test` (unit);
       - `make -C domains/vms/provisioning/adapter test`;
       - `make check-packaging`.
 
       End-to-end: the VM mock lanes run no playbook. The live VM lane is the system
       evidence. No version changes. Owed by validation: none.
+
+      Done:
+      - `make -C domains/vms/provisioning/iac test`: exit 0, 104 passed (unit):
+        82 before this section, 21 in the new module, and the relay harness's
+        new case.
+      - `make -C domains/vms/provisioning/adapter test`: exit 0, 263 passed (unit,
+        and library integration in its `tests/integration`), one new.
+      - **The mock's consumers in the service.** After `make dist` and the
+        service's `reinit`, five integration modules passed 95, exit 0, under
+        the mock profile: `test_system_api`, `test_fulfillment_api`,
+        `test_test_controller`, `test_vms_api`, and `test_lease_release_api`.
+        These are application integration through the typed clients, with
+        direct-storage setup in some. The service's whole suite was not re-run:
+        the mock's remove fact only gained two fields, which nothing reads.
+      - `make check-packaging`: exit 0, the architecture rules included. The
+        rebuilt 0.16.0 adapter wheel's 32 package files equal their source.
+      - **Versions.** None moved. The adapter is already 0.16.0 in this change.
+        The role ships in the provisioning service image's `COPY` of the IaC
+        tree, `files/` included, and in no wheel.
+      - **End-to-end, confirmed.** No mock lane runs a playbook. The VM lane's
+        default remove output gains two fields that no scenario reads. Owed by
+        validation: none.
+
+      **Handoff.**
+      - D9 is in place before any real guest. On the relay path a create adds
+        no rule. So the live lane's teardown exercises the proxy block, the
+        reservation, the domain, and its storage, not rules.
+      - Guests created before this section have cleanup scripts holding the
+        old substring matches. Those scripts run as written. Only a host's
+        fresh guests, and a teardown with no script, use the library.
+      - Not changed:
+        - the subnet masquerade the create appends on every direct-path
+          create, which accumulates duplicates;
+        - a failed reload of the relay client, which stays non-fatal (`partial`)
+          on both paths;
+        - the cleanup script's unconditional `iptables-save`.
+
+        Each predates this change and is outside D9.
 
 ## 14. A GPU guest's boot-GPU detection and opt-in, readiness wait, and autostart
 

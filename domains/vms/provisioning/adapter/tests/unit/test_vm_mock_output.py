@@ -116,3 +116,12 @@ def test_a_remove_prints_the_remove_fact_naming_the_jobs_guest() -> None:
     fact = read_fact(stdout, "vm_remove_data", action="vm_remove")
     assert (fact["action"], fact["vm_name"], fact["status"]) == ("vm_remove", _GUEST, "success")
     assert read_fact(stdout, "vm_creation_data", action="create") is None
+
+
+def test_a_remove_reports_the_guest_present_as_the_role_does_after_its_cleanup_script() -> None:
+    """The role reports whether the create's cleanup script ran and whether
+    anything of the guest was there, both as text. A default remove stands for
+    a delivered guest's; a case needing an absent guest arms a rule."""
+    fact = read_fact(_rendered(_parameters("vm_remove")), "vm_remove_data", action="vm_remove")
+
+    assert (fact["cleanup_record"], fact["guest_present"]) == ("true", "true")

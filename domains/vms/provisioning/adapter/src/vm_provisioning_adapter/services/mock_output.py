@@ -51,7 +51,15 @@ def vm_mock_output(playbook: MockPlaybook) -> str:
             "status": "success",
         }
         if params.vm_action == "vm_remove":
-            fact.update(destroy_output="", cleanup_output=[], error="")
+            # A default remove stands for a delivered guest's: its create wrote
+            # the cleanup script, which ran. The role prints booleans as text.
+            fact.update(
+                cleanup_record="true",
+                guest_present="true",
+                destroy_output="",
+                cleanup_output=[],
+                error="",
+            )
     fact_name = VM_RESULT_FACTS.get(params.vm_action, f"vm_{params.vm_action}_data")
     return shipped_output(playbook.limit, fact_name, fact)
 

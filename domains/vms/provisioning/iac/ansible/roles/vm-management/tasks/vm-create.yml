@@ -2086,18 +2086,24 @@
     EXT_INTERFACE=$(ip route | grep default | awk '{print $5}' | head -1)
     echo "Using external interface: $EXT_INTERFACE"
     
+    # Every rule added for this guest carries its marker, so its teardown
+    # removes exactly these rules and no other guest's
+    # (files/guest_teardown.sh).
+    MARKER="{{ vm_guest_rule_marker }}"
+
     # Add DNAT rule for incoming connections
-    iptables -t nat -A PREROUTING -p tcp --dport {{ external_ssh_port }} -j DNAT --to-destination {{ vm_ip }}:22
+    iptables -t nat -A PREROUTING -p tcp --dport {{ external_ssh_port }} -m comment --comment "$MARKER" -j DNAT --to-destination {{ vm_ip }}:22
     
     # Add SNAT rule for outgoing connections from specific VM
-    iptables -t nat -A POSTROUTING -p tcp -d {{ vm_ip }} --dport 22 -j MASQUERADE
+    iptables -t nat -A POSTROUTING -p tcp -d {{ vm_ip }} --dport 22 -m comment --comment "$MARKER" -j MASQUERADE
     
-    # Add general MASQUERADE rule for the libvirt subnet
+    # Add general MASQUERADE rule for the libvirt subnet. Shared by every guest,
+    # so it carries no guest's marker and no guest's teardown removes it.
     iptables -t nat -A POSTROUTING -s 192.168.122.0/24 -o $EXT_INTERFACE -j MASQUERADE
     
     # Allow forwarding for this specific connection
-    iptables -I FORWARD 1 -p tcp -d {{ vm_ip }} --dport 22 -j ACCEPT
-    iptables -I FORWARD 1 -p tcp -s {{ vm_ip }} --sport 22 -j ACCEPT
+    iptables -I FORWARD 1 -p tcp -d {{ vm_ip }} --dport 22 -m comment --comment "$MARKER" -j ACCEPT
+    iptables -I FORWARD 1 -p tcp -s {{ vm_ip }} --sport 22 -m comment --comment "$MARKER" -j ACCEPT
     
     echo "Port forwarding configured: External port {{ external_ssh_port }} -> VM {{ vm_ip }}:22"
   when:
@@ -2111,8 +2117,8 @@
     # Prioritize UFW (common on Ubuntu/Debian)
     if command -v ufw >/dev/null 2>&1; then
       echo "Using UFW firewall method"
-      echo "Command: ufw allow {{ external_ssh_port }}/tcp"
-      ufw allow {{ external_ssh_port }}/tcp
+      echo "Command: ufw allow {{ external_ssh_port }}/tcp comment '{{ vm_guest_rule_marker }}'"
+      ufw allow {{ external_ssh_port }}/tcp comment '{{ vm_guest_rule_marker }}'
       # Also ensure UFW allows forwarding
       if ! grep -q "DEFAULT_FORWARD_POLICY=\"ACCEPT\"" /etc/default/ufw; then
         sed -i 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
@@ -2131,8 +2137,8 @@
     # Fallback to iptables INPUT rule
     else
       echo "Using direct iptables method"
-      echo "Command: iptables -A INPUT -p tcp --dport {{ external_ssh_port }} -j ACCEPT"
-      iptables -A INPUT -p tcp --dport {{ external_ssh_port }} -j ACCEPT
+      echo "Command: iptables -A INPUT -p tcp --dport {{ external_ssh_port }} -m comment --comment '{{ vm_guest_rule_marker }}' -j ACCEPT"
+      iptables -A INPUT -p tcp --dport {{ external_ssh_port }} -m comment --comment '{{ vm_guest_rule_marker }}' -j ACCEPT
       echo "Direct iptables rule added for port {{ external_ssh_port }}"
       echo "FIREWALL_METHOD=IPTABLES"
     fi
@@ -2661,6 +2667,11 @@
         local status="$2"
         echo "STEP_STATUS|$step_name|$status|$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
       }
+
+      # What belongs to this guest, decided once for every teardown path.
+      {{ lookup('file', 'guest_teardown.sh') }}
+
+      MARKER="{{ vm_guest_rule_marker }}"
       
       log "=== Starting VM Cleanup for $VM_NAME ==="
       log "Log file: $LOG_FILE"
@@ -2683,6 +2694,11 @@
           VM_IP=$(virsh net-dumpxml default 2>/dev/null | grep "mac='$VM_MAC'" | grep -oE "ip='[^']+'" | cut -d"'" -f2)
         fi
       fi
+
+      # Method 3: the DHCP reservation the create made under this guest's exact name
+      if [ -z "$VM_IP" ]; then
+        VM_IP="$(_host_attribute "$(guest_dhcp_reservations "$VM_NAME" | head -1)" ip)"
+      fi
       
       log "VM IP: ${VM_IP:-NOT FOUND}"
       
@@ -2696,10 +2712,7 @@
       
       # Get external port before cleanup
       log "=== Getting external port for cleanup ==="
-      EXTERNAL_PORT=""
-      if [ -n "$VM_IP" ]; then
-        EXTERNAL_PORT=$(iptables -t nat -L PREROUTING -n | grep "to.*$VM_IP:22" | grep -oE 'dpt:[0-9]+' | cut -d: -f2 | head -1)
-      fi
+      EXTERNAL_PORT="$(guest_forwarded_port "$MARKER" "$VM_IP")"
       log "External port: ${EXTERNAL_PORT:-NOT FOUND}"
       track_step "get_external_port" "success"
       
@@ -2709,71 +2722,32 @@
       # separate file and unit, and this script must never touch it: it is the
       # path an operator uses to reach a host, and this script runs
       # unattended on the host itself.
-      if [ -f /etc/frp/frpc-vms.toml ]; then
-        if sed -i "/# BEGIN ANSIBLE MANAGED BLOCK FOR VM $VM_NAME/,/# END ANSIBLE MANAGED BLOCK FOR VM $VM_NAME/d" /etc/frp/frpc-vms.toml 2>/dev/null; then
-          log "Proxy stanza removed"
-          # Reload, not restart. A restart would drop every other buyer's
-          # established session on this host.
-          if curl -fsS "http://127.0.0.1:{{ frp_admin_port | default(7400) }}/api/reload" >/dev/null 2>&1; then
-            log "VM tunnel client reloaded"
-            track_step "remove_relay_proxy" "success"
-          else
-            log_error "Failed to reload the VM tunnel client"
-            track_step "remove_relay_proxy" "partial"
-          fi
-        else
-          log "No proxy stanza found for this VM"
+      # The block is matched by its exact BEGIN and END lines, so another
+      # guest's block, even one whose name begins with this one's, stays.
+      remove_guest_proxy /etc/frp/frpc-vms.toml "$VM_NAME" "http://127.0.0.1:{{ frp_admin_port | default(7400) }}/api/reload"
+      case "$GUEST_PROXY" in
+        removed)
+          log "Proxy stanza removed; VM tunnel client reloaded"
+          track_step "remove_relay_proxy" "success"
+          ;;
+        reload_failed)
+          log_error "Proxy stanza removed, but the VM tunnel client did not reload"
+          track_step "remove_relay_proxy" "partial"
+          ;;
+        *)
+          log "No proxy stanza for this VM"
           track_step "remove_relay_proxy" "skipped"
-        fi
-      else
-        log "VM tunnel client configuration not found"
-        track_step "remove_relay_proxy" "skipped"
-      fi
+          ;;
+      esac
       
       # Clean up iptables port forwarding rules
       log "=== Cleaning up port forwarding rules ==="
-      IPTABLES_CLEANUP_COUNT=0
-      if [ -n "$VM_IP" ]; then
-        log "Removing DNAT rules for VM IP $VM_IP..."
-        iptables -t nat -L PREROUTING -n --line-numbers | grep "to:$VM_IP:22" | awk '{print $1}' | sort -nr | while read line; do
-          if [ -n "$line" ]; then
-            log "Removing DNAT rule line $line"
-            iptables -t nat -D PREROUTING $line
-            IPTABLES_CLEANUP_COUNT=$((IPTABLES_CLEANUP_COUNT + 1))
-          fi
-        done
-        
-        log "Removing POSTROUTING MASQUERADE rules for VM IP $VM_IP..."
-        iptables -t nat -L POSTROUTING -n --line-numbers | grep "MASQUERADE.*$VM_IP" | awk '{print $1}' | sort -nr | while read line; do
-          if [ -n "$line" ]; then
-            log "Removing MASQUERADE rule line $line"
-            iptables -t nat -D POSTROUTING $line
-            IPTABLES_CLEANUP_COUNT=$((IPTABLES_CLEANUP_COUNT + 1))
-          fi
-        done
-        
-        log "Removing FORWARD rules for VM IP $VM_IP..."
-        iptables -L FORWARD -n --line-numbers | grep "ACCEPT.*$VM_IP.*dpt:22" | awk '{print $1}' | sort -nr | while read line; do
-          if [ -n "$line" ]; then
-            log "Removing FORWARD rule (incoming SSH) line $line"
-            iptables -D FORWARD $line
-            IPTABLES_CLEANUP_COUNT=$((IPTABLES_CLEANUP_COUNT + 1))
-          fi
-        done
-        
-        iptables -L FORWARD -n --line-numbers | grep "ACCEPT.*$VM_IP.*spt:22" | awk '{print $1}' | sort -nr | while read line; do
-          if [ -n "$line" ]; then
-            log "Removing FORWARD rule (outgoing SSH) line $line"
-            iptables -D FORWARD $line
-            IPTABLES_CLEANUP_COUNT=$((IPTABLES_CLEANUP_COUNT + 1))
-          fi
-        done
-        log "Removed $IPTABLES_CLEANUP_COUNT iptables rules"
-        track_step "cleanup_iptables" "success"
-      else
-        log "No VM IP available, skipping iptables cleanup"
-        track_step "cleanup_iptables" "skipped"
-      fi
+      # By this guest's marker, and, for a rule without one, by this guest's
+      # exact address or forwarded port. The subnet-wide masquerade carries no
+      # marker and names no single guest, so it stays.
+      remove_guest_rules "$MARKER" "$VM_IP" "$EXTERNAL_PORT"
+      log "Removed $GUEST_RULES_REMOVED iptables rules"
+      track_step "cleanup_iptables" "success"
       
       # Check if VM has attached GPU
       log "=== Checking for GPU attachment ==="
@@ -2791,47 +2765,20 @@
       
       # Clean up firewall rules for external ports
       log "=== Cleaning up firewall rules ==="
-      FIREWALL_RULES_REMOVED=0
-      if [ -n "$EXTERNAL_PORT" ] && [ "$EXTERNAL_PORT" != "22" ]; then
-        log "Cleaning up firewall rules for port $EXTERNAL_PORT"
-        
-        # UFW cleanup
-        if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
-          while ufw status numbered | grep -q "$EXTERNAL_PORT/tcp"; do
-            RULE_NUM=$(ufw status numbered | grep "$EXTERNAL_PORT/tcp" | head -1 | grep -oE '^\[ *[0-9]+' | grep -oE '[0-9]+')
-            if [ -n "$RULE_NUM" ]; then
-              log "Removing UFW rule number $RULE_NUM for port $EXTERNAL_PORT"
-              echo y | ufw delete "$RULE_NUM" || break
-              FIREWALL_RULES_REMOVED=$((FIREWALL_RULES_REMOVED + 1))
-            else
-              break
-            fi
-          done
+      remove_guest_ufw_rules "$MARKER" "$EXTERNAL_PORT"
+      FIREWALL_RULES_REMOVED=$GUEST_UFW_RULES_REMOVED
+      # firewalld keeps no comment on a port, so its rule is this guest's only
+      # by the port the guest's own forwarding rule names.
+      if [ -n "$EXTERNAL_PORT" ] && command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld; then
+        if firewall-cmd --permanent --query-port="$EXTERNAL_PORT/tcp" >/dev/null 2>&1; then
+          firewall-cmd --permanent --remove-port="$EXTERNAL_PORT/tcp"
+          firewall-cmd --reload
+          log "Removed firewalld rule for port $EXTERNAL_PORT"
+          FIREWALL_RULES_REMOVED=$((FIREWALL_RULES_REMOVED + 1))
         fi
-        
-        # firewalld cleanup
-        if command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld; then
-          if firewall-cmd --permanent --remove-port=$EXTERNAL_PORT/tcp 2>/dev/null; then
-            log "Removed firewalld rule for port $EXTERNAL_PORT"
-            firewall-cmd --reload 2>/dev/null || true
-            FIREWALL_RULES_REMOVED=$((FIREWALL_RULES_REMOVED + 1))
-          fi
-        fi
-        
-        # iptables INPUT rules
-        iptables -L INPUT -n --line-numbers | grep "dpt:$EXTERNAL_PORT" | awk '{print $1}' | sort -nr | while read line; do
-          if [ -n "$line" ]; then
-            log "Removing INPUT rule line $line"
-            iptables -D INPUT $line
-            FIREWALL_RULES_REMOVED=$((FIREWALL_RULES_REMOVED + 1))
-          fi
-        done
-        log "Removed $FIREWALL_RULES_REMOVED firewall rules"
-        track_step "cleanup_firewall" "success"
-      else
-        log "No external port to clean up"
-        track_step "cleanup_firewall" "skipped"
       fi
+      log "Removed $FIREWALL_RULES_REMOVED firewall rules"
+      track_step "cleanup_firewall" "success"
       
       # Save iptables rules
       log "=== Saving iptables rules ==="

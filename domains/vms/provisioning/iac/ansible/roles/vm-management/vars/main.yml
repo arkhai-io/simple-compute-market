@@ -19,3 +19,10 @@ vm_scratch_image_sha256: "04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b7
 vm_scratch_image_path: "/var/lib/libvirt/images/noble-server-cloudimg-amd64-{{ vm_scratch_image_release }}.img"
 # Only an x86-64 image is pinned, so a scratch create refuses any other host.
 vm_scratch_image_architecture: "x86_64"
+
+# The comment every firewall and NAT rule a create adds for a guest carries,
+# naming the guest. Teardown removes a guest's rules by this exact marker
+# (files/guest_teardown.sh), so it never matches another guest's. A guest name
+# is lowercase letters, digits, and hyphens, so the marker holds no space or
+# quote.
+vm_guest_rule_marker: "arkhai-vm:{{ vm_name }}"

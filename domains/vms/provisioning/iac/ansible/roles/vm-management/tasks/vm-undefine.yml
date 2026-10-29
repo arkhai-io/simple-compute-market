@@ -51,16 +51,13 @@
 
 - name: Get external port before cleanup (for firewall rule removal)
   shell: |
-    VM_IP="{{ vm_ip_for_cleanup.stdout | default('') | trim }}"
-    EXTERNAL_PORT=""
-    
-    if [ -n "$VM_IP" ]; then
-      # Find the external port by looking at DNAT rules
-      # iptables output: DNAT tcp -- 0.0.0.0/0 0.0.0.0/0 tcp dpt:7001 to:192.168.122.100:22
-      EXTERNAL_PORT=$(iptables -t nat -L PREROUTING -n | grep "to.*$VM_IP:22" | grep -oE 'dpt:[0-9]+' | cut -d: -f2 | head -1)
-    fi
-    
-    echo "$EXTERNAL_PORT"
+    {{ lookup('file', 'guest_teardown.sh') }}
+
+    # The --dport of this guest's own forwarding rule, by its marker or, for a
+    # rule without one, its exact address.
+    guest_forwarded_port "{{ vm_guest_rule_marker }}" "{{ vm_ip_for_cleanup.stdout | default('') | trim }}"
+  args:
+    executable: /bin/bash
   register: vm_external_port_for_cleanup
   ignore_errors: yes
   when: vm_action == "undefine"
@@ -92,60 +89,19 @@
   ignore_errors: yes
 
 - name: Clean up iptables port forwarding rules
+  # By this guest's marker, and, for a rule without one, by its exact address
+  # or forwarded port, never a prefix of either. The subnet-wide masquerade is
+  # shared by every guest and stays.
   shell: |
+    set -e
+    {{ lookup('file', 'guest_teardown.sh') }}
+
     echo "=== Cleaning up port forwarding rules for VM {{ vm_name }} ==="
-    
-    VM_IP="{{ vm_ip_for_cleanup.stdout | default('') | trim }}"
-    
-    if [ -n "$VM_IP" ]; then
-      echo "VM IP found: $VM_IP - removing specific rules"
-      
-      # Remove DNAT rules (PREROUTING chain) - targeting specific VM IP
-      echo "Removing DNAT rules for VM IP $VM_IP..."
-      iptables -t nat -L PREROUTING -n --line-numbers | grep "to:$VM_IP:22" | awk '{print $1}' | sort -nr | while read line; do
-        if [ -n "$line" ]; then
-          echo "Removing DNAT rule line $line"
-          iptables -t nat -D PREROUTING $line
-        fi
-      done
-      
-      # Remove POSTROUTING MASQUERADE rules for specific VM
-      echo "Removing POSTROUTING MASQUERADE rules for VM IP $VM_IP..."
-      iptables -t nat -L POSTROUTING -n --line-numbers | grep "MASQUERADE.*$VM_IP" | awk '{print $1}' | sort -nr | while read line; do
-        if [ -n "$line" ]; then
-          echo "Removing MASQUERADE rule line $line"
-          iptables -t nat -D POSTROUTING $line
-        fi
-      done
-      
-      # Remove FORWARD rules for specific VM (both directions)
-      echo "Removing FORWARD rules for VM IP $VM_IP..."
-      
-      # Remove FORWARD rules where VM IP is destination (incoming SSH)
-      iptables -L FORWARD -n --line-numbers | grep "ACCEPT.*$VM_IP.*dpt:22" | awk '{print $1}' | sort -nr | while read line; do
-        if [ -n "$line" ]; then
-          echo "Removing FORWARD rule (incoming SSH) line $line"
-          iptables -D FORWARD $line
-        fi
-      done
-      
-      # Remove FORWARD rules where VM IP is source (outgoing SSH)
-      iptables -L FORWARD -n --line-numbers | grep "ACCEPT.*$VM_IP.*spt:22" | awk '{print $1}' | sort -nr | while read line; do
-        if [ -n "$line" ]; then
-          echo "Removing FORWARD rule (outgoing SSH) line $line"
-          iptables -D FORWARD $line
-        fi
-      done
-      
-    else
-      echo "⚠ WARNING: VM IP not found - cannot automatically clean up iptables rules"
-      echo "The VM may have already been removed or never had an IP assigned"
-      echo "Please manually check iptables rules if needed:"
-      echo "  sudo iptables -t nat -L PREROUTING -n --line-numbers"
-      echo "  sudo iptables -L FORWARD -n --line-numbers"
-    fi
-    
+    remove_guest_rules "{{ vm_guest_rule_marker }}" "{{ vm_ip_for_cleanup.stdout | default('') | trim }}" "{{ vm_external_port_for_cleanup.stdout | default('') | trim }}"
+    echo "Removed $GUEST_RULES_REMOVED iptables rules"
     echo "=== Port forwarding cleanup completed ==="
+  args:
+    executable: /bin/bash
   delegate_to: "{{ target_host }}"
 
 - name: Check if VM has attached GPU before undefine
@@ -235,53 +191,27 @@
   delegate_to: "{{ target_host }}"
 
 - name: Clean up firewall rules for external ports
+  # UFW rules by this guest's marker, or, without one, by its exact forwarded
+  # port; firewalld keeps no comment on a port, so only that exact port. INPUT
+  # rules went with the iptables rules above.
   shell: |
     set -e
+    {{ lookup('file', 'guest_teardown.sh') }}
+
     echo "=== Cleaning up firewall rules ==="
-    
     EXTERNAL_PORT="{{ vm_external_port_for_cleanup.stdout | default('') | trim }}"
-    VM_IP="{{ vm_ip_for_cleanup.stdout | default('') }}"
-    
-    if [ -n "$EXTERNAL_PORT" ] && [ "$EXTERNAL_PORT" != "22" ]; then
-      echo "Found external port $EXTERNAL_PORT for VM (IP: $${VM_IP:-unknown})"
-      
-      if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
-        echo "Checking UFW rules for port $EXTERNAL_PORT"
-        
-        while ufw status numbered | grep -q "$EXTERNAL_PORT/tcp"; do
-          # Extract rule number from format: [ 2] 56620/tcp ...
-          RULE_NUM=$(ufw status numbered | grep "$EXTERNAL_PORT/tcp" | head -1 | grep -oE '^\[ *[0-9]+' | grep -oE '[0-9]+')
-          if [ -n "$RULE_NUM" ]; then
-            echo "Removing UFW rule number $RULE_NUM for port $EXTERNAL_PORT"
-            echo y | ufw delete "$RULE_NUM" || break
-          else
-            break
-          fi
-        done
-        
-        echo "All UFW rules for port $EXTERNAL_PORT removed"
+    remove_guest_ufw_rules "{{ vm_guest_rule_marker }}" "$EXTERNAL_PORT"
+    echo "Removed $GUEST_UFW_RULES_REMOVED UFW rules"
+    if [ -n "$EXTERNAL_PORT" ] && command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld; then
+      if firewall-cmd --permanent --query-port="$EXTERNAL_PORT/tcp" >/dev/null 2>&1; then
+        firewall-cmd --permanent --remove-port="$EXTERNAL_PORT/tcp"
+        firewall-cmd --reload
+        echo "Removed firewalld rule for port $EXTERNAL_PORT"
       fi
-      
-      if command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld; then
-        echo "Removing firewalld rule for port $EXTERNAL_PORT"
-        firewall-cmd --permanent --remove-port=$EXTERNAL_PORT/tcp || echo "Firewalld rule removal failed"
-        firewall-cmd --reload || echo "Firewalld reload failed"
-      fi
-      
-      echo "Removing iptables INPUT rules for port $EXTERNAL_PORT"
-      iptables -L INPUT -n --line-numbers | grep "dpt:$EXTERNAL_PORT" | awk '{print $$1}' | sort -nr | while read line; do
-        if [ -n "$line" ]; then
-          echo "Removing INPUT rule line $line"
-          iptables -D INPUT $line
-        fi
-      done
-      
-      echo "Firewall rules removed for port $EXTERNAL_PORT"
-    else
-      echo "No external port found for this VM"
     fi
-    
     echo "=== Firewall cleanup completed ==="
+  args:
+    executable: /bin/bash
   delegate_to: "{{ target_host }}"
   when: vm_action == "undefine"
 
@@ -370,30 +300,19 @@
 
 - name: Verify UFW cleanup for this VM only
   shell: |
-    set -e
+    {{ lookup('file', 'guest_teardown.sh') }}
+
     echo "=== Verifying UFW cleanup for VM {{ vm_name }} ==="
-    
-    EXTERNAL_PORT="{{ vm_external_port_for_cleanup.stdout | default('') | trim }}"
-    
-    if [ -n "$EXTERNAL_PORT" ] && [ "$EXTERNAL_PORT" != "22" ]; then
-      if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
-        echo "Checking if any UFW rules remain for port $EXTERNAL_PORT..."
-        
-        if ufw status numbered | grep -q "$EXTERNAL_PORT/tcp"; then
-          echo "⚠ WARNING: Found remaining UFW rules for port $EXTERNAL_PORT"
-          echo "These should have been cleaned up in the previous step."
-          ufw status numbered | grep "$EXTERNAL_PORT/tcp"
-        else
-          echo "✓ All UFW rules for port $EXTERNAL_PORT have been removed"
-        fi
-      else
-        echo "UFW not active, skipping verification"
-      fi
+    REMAINING="$(guest_ufw_rules "{{ vm_guest_rule_marker }}" "{{ vm_external_port_for_cleanup.stdout | default('') | trim }}")"
+    if [ -n "$REMAINING" ]; then
+      echo "⚠ WARNING: UFW still lists rules of this VM:"
+      printf '%s\n' "$REMAINING"
     else
-      echo "No external port was used by this VM, skipping UFW verification"
+      echo "✓ UFW lists no rule of this VM"
     fi
-    
     echo "=== UFW verification completed ==="
+  args:
+    executable: /bin/bash
   register: ufw_verification_result
   delegate_to: "{{ target_host }}"
   when: vm_action == "undefine"
