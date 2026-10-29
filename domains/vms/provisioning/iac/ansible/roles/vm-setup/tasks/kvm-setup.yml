@@ -1,19 +1,8 @@
 ---
-# KVM Installation and Enablement 
-
-- name: Check hardware virtualization support
-  shell: grep -E '(vmx|svm)' /proc/cpuinfo
-  register: cpu_virt_support
-  ignore_errors: yes
-  tags: kvm_config
-
-- name: Debug CPU virtualization support
-  debug:
-    msg: 
-      - "=== Hardware Virtualization Check ==="
-      - "CPU virtualization support: {{ 'Available' if cpu_virt_support.rc == 0 else 'Not available' }}"
-      - "CPU features found: {{ cpu_virt_support.stdout_lines | length }} virtualization extensions"
-  tags: kvm_config
+# KVM Installation and Enablement
+#
+# The role refuses a CPU without vmx or svm before it changes anything (main.yml),
+# so every task here runs on a host that offers hardware virtualization.
 
 - name: Check current KVM modules
   shell: lsmod | grep kvm
@@ -43,14 +32,14 @@
     echo "options kvm_intel nested=1" > /etc/modprobe.d/kvm.conf
     modprobe -r kvm_intel || true
     modprobe kvm_intel nested=1
-  when: cpu_vendor.stdout == "intel" and cpu_virt_support.rc == 0
+  when: cpu_vendor.stdout == "intel"
   register: intel_nested_result
   tags: kvm_config
 
 - name: Confirm Intel nested virtualization setup
   debug:
     msg: "Intel nested virtualization enabled successfully"
-  when: cpu_vendor.stdout == "intel" and cpu_virt_support.rc == 0 and intel_nested_result.rc == 0
+  when: cpu_vendor.stdout == "intel" and intel_nested_result.rc == 0
   tags: kvm_config
 
 - name: Enable nested virtualization for AMD CPUs
@@ -58,14 +47,33 @@
     echo "options kvm_amd nested=1" > /etc/modprobe.d/kvm.conf
     modprobe -r kvm_amd || true
     modprobe kvm_amd nested=1
-  when: cpu_vendor.stdout == "amd" and cpu_virt_support.rc == 0
+  when: cpu_vendor.stdout == "amd"
   register: amd_nested_result
   tags: kvm_config
 
 - name: Confirm AMD nested virtualization setup
   debug:
     msg: "AMD nested virtualization enabled successfully"
-  when: cpu_vendor.stdout == "amd" and cpu_virt_support.rc == 0 and amd_nested_result.rc == 0
+  when: cpu_vendor.stdout == "amd" and amd_nested_result.rc == 0
+  tags: kvm_config
+
+# The CPU flag says the processor offers virtualization; only the device says
+# the kernel exposes it. A hypervisor can pass the flag through and still deny
+# KVM, and the modules above are what create the device, so it is checked here.
+- name: Check the KVM device exists once its modules are loaded
+  stat:
+    path: /dev/kvm
+  register: kvm_device
+  tags: kvm_config
+
+- name: Refuse a host whose KVM device is absent
+  fail:
+    msg: >-
+      Hardware virtualization is unavailable: /dev/kvm does not exist after the
+      KVM modules were loaded, so this host cannot run KVM guests. Check that
+      virtualization is enabled in the firmware, or for a cloud instance that
+      nested virtualization is enabled.
+  when: not kvm_device.stat.exists
   tags: kvm_config
 
 - name: Check if IOMMU is currently active

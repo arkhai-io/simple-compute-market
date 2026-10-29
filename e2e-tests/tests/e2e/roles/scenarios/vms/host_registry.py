@@ -1,5 +1,8 @@
 """Shared capacity setup for the VM scenarios: pools, executor hosts, declarations.
 
+It also holds which GPUs a VM resource carries (`resource_gpus`), the one rule
+a scenario's listing shape and its claims on that supply both follow.
+
 Three separate records must exist before a VM deal can be negotiated, and they live
 in three different stores:
 
@@ -75,6 +78,30 @@ E2E_MULTI_REGISTRY_POOL_ID = "compute-e2e-multi-pool"
 E2E_NON_ERC20_POOL_ID = "compute-e2e-non-erc20-pool"
 E2E_LISTING_SHAPES_POOL_ID = "compute-e2e-listing-shapes-pool"
 E2E_LISTING_SHAPES_CPU_POOL_ID = "compute-e2e-listing-shapes-cpu-pool"
+
+
+def resource_gpus(resource: dict[str, Any]) -> tuple[int, str] | None:
+    """The GPU count and model a VM resource carries, or ``None`` for none.
+
+    A resource carries GPUs only when it states a positive `gpu_count` and a
+    `gpu_model`. A shape that declares no GPUs is sold and claimed without the
+    GPU family at all: a zero count or a model alone would publish, and claim,
+    a GPU dimension the machine does not have.
+    """
+    count = resource.get("gpu_count")
+    model = resource.get("gpu_model")
+    if isinstance(count, int) and count > 0 and model:
+        return count, str(model)
+    return None
+
+
+def claim_attributes(resource: dict[str, Any], *, resource_id: str) -> dict[str, Any]:
+    """What a claim pinned to `resource_id` requires of a resource of this shape.
+
+    The GPU count is required only of a shape that carries GPUs.
+    """
+    gpus = resource_gpus(resource)
+    return {"resource_id": resource_id, **({"gpu_count": gpus[0]} if gpus else {})}
 
 
 def _pools(provisioning_client: Any) -> SyncResourcePoolClient:

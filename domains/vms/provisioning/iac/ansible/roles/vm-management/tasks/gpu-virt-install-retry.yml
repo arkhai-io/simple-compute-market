@@ -7,6 +7,7 @@
     - name: Execute virt-install with alternative GPU
       shell: |
         virt-install \
+          --virt-type kvm \
           --name {{ vm_name }} \
           --ram {{ vm_ram }} \
           --disk path=/var/lib/libvirt/images/{{ vm_name }}.qcow2,format=qcow2 \

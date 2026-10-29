@@ -13,6 +13,9 @@ venv/
 
 # Secrets — NEVER commit real values
 .secrets.toml
+# A real host's description, rendered by an environment owner; the committed
+# config-real-vm-target.yml.example shows its shape.
+config/config-real-vm-target.yml
 
 # Pytest / coverage
 .pytest_cache/

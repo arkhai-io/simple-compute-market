@@ -1,6 +1,28 @@
 ---
 # VM Management - Create Tasks
 
+# A VM is never created under software emulation: every virt-install in this
+# role passes `--virt-type kvm`, and a host that has lost KVM since it was
+# prepared is refused here, naming the cause, before anything is created for
+# the guest.
+- name: Check the host provides KVM
+  stat:
+    path: /dev/kvm
+  register: kvm_device
+  when: vm_action == "create"
+  delegate_to: "{{ target_host }}"
+
+- name: Refuse to create a VM on a host without KVM
+  fail:
+    msg: >-
+      KVM is unavailable on {{ target_host }}: /dev/kvm does not exist, so the
+      VM could only run under software emulation. Restore hardware
+      virtualization on the host (nested virtualization on a cloud instance)
+      and prepare it again.
+  when:
+    - vm_action == "create"
+    - not kvm_device.stat.exists
+
 - name: Generate random string for unique filenames
   set_fact:
     random_string: "{{ lookup('password', '/dev/null chars=ascii_lowercase,digits length=8') }}"
@@ -1030,6 +1052,7 @@
     - name: Try virt-install with current GPU
       shell: |
         virt-install \
+          --virt-type kvm \
           --name {{ vm_name }} \
           --ram {{ vm_ram }} \
           --disk path=/var/lib/libvirt/images/{{ vm_name }}.qcow2,format=qcow2 \
@@ -1261,6 +1284,7 @@
 - name: Create VM with virt-install (without GPU)
   shell: |
     virt-install \
+      --virt-type kvm \
       --name {{ vm_name }} \
       --ram {{ vm_ram }} \
       --disk path=/var/lib/libvirt/images/{{ vm_name }}.qcow2,format=qcow2 \
@@ -1376,6 +1400,7 @@
     - name: Try virt-install with current GPU
       shell: |
         virt-install \
+          --virt-type kvm \
           --name {{ vm_name }} \
           --ram {{ vm_ram }} \
           --disk path=/var/lib/libvirt/images/{{ vm_name }}.qcow2,format=qcow2 \
@@ -1606,6 +1631,7 @@
 - name: Create VM from golden image (without GPU)
   shell: |
     virt-install \
+      --virt-type kvm \
       --name {{ vm_name }} \
       --ram {{ vm_ram }} \
       --disk path=/var/lib/libvirt/images/{{ vm_name }}.qcow2,format=qcow2 \
