@@ -152,6 +152,11 @@ def parse_probe(output: str) -> GuestShape:
     )
 
 
+def _failure(result: subprocess.CompletedProcess[str] | None) -> str:
+    """What a failed attempt reported, or that it ran out of time."""
+    return "the connection timed out" if result is None else result.stderr.strip()
+
+
 def _fingerprint(key_base64: str) -> str:
     digest = hashlib.sha256(base64.b64decode(key_base64)).digest()
     return "SHA256:" + base64.b64encode(digest).decode().rstrip("=")
@@ -214,19 +219,29 @@ class SshSession:
         ]
 
     def _attempt(
-        self, endpoint: SshEndpoint, key: SshKey, command: str
-    ) -> subprocess.CompletedProcess[str]:
+        self,
+        endpoint: SshEndpoint,
+        key: SshKey,
+        command: str,
+        *,
+        timeout: float | None = None,
+    ) -> subprocess.CompletedProcess[str] | None:
+        """One ``ssh`` run, or ``None`` when it ran out of time.
+
+        ``timeout`` defaults to a full attempt's time. ``ssh`` itself fails
+        within its ``ConnectTimeout`` when the host does not answer, so an
+        attempt runs out of time only once the host has answered and the
+        connection has not finished.
+        """
         try:
             result = subprocess.run(
                 self.argv(endpoint, key, command),
                 capture_output=True,
                 text=True,
-                timeout=self._attempt_seconds,
+                timeout=self._attempt_seconds if timeout is None else timeout,
             )
         except subprocess.TimeoutExpired:
-            return subprocess.CompletedProcess(
-                [], _SSH_FAILED, "", "the connection timed out"
-            )
+            return None
         if result.returncode == _SSH_FAILED and any(
             marker in result.stderr for marker in _HOST_KEY_REFUSED
         ):
@@ -236,6 +251,10 @@ class SshSession:
                 f"run: {result.stderr.strip()}"
             )
         return result
+
+    def _pause(self, deadline: float) -> None:
+        """Wait the retry interval, or what is left before ``deadline`` if less."""
+        self._sleep(max(0.0, min(RETRY_INTERVAL_SECONDS, deadline - self._clock())))
 
     def host_key_fingerprint(self, endpoint: SshEndpoint) -> str | None:
         """The SHA256 fingerprint of the host key this run trusted for ``endpoint``."""
@@ -252,22 +271,25 @@ class SshSession:
         """Run ``command`` as ``endpoint.user`` and return its output.
 
         A connection that cannot be made is retried until the retry window
-        closes. A host key other than the one this run trusted fails at once,
-        and so does the command failing once connected.
+        closes. The window bounds when the last attempt starts, not when it
+        ends: an attempt keeps its full time, since cutting a connected command
+        short would fail it for a reason unrelated to connecting. A host key
+        other than the one this run trusted fails at once, and so does the
+        command failing once connected.
         """
         first_contact = self.host_key_fingerprint(endpoint) is None
         deadline = self._clock() + self._connect_retry_seconds
         while True:
             result = self._attempt(endpoint, key, command)
-            if result.returncode != _SSH_FAILED:
+            if result is not None and result.returncode != _SSH_FAILED:
                 break
             if self._clock() >= deadline:
                 raise SshAccessError(
                     f"could not connect to {endpoint.user}@{endpoint.host}:"
                     f"{endpoint.port} within {self._connect_retry_seconds}s: "
-                    f"{result.stderr.strip()}"
+                    f"{_failure(result)}"
                 )
-            self._sleep(RETRY_INTERVAL_SECONDS)
+            self._pause(deadline)
         if first_contact:
             log.info(
                 "Trusting %s:%s's host key for this run: %s",
@@ -289,25 +311,38 @@ class SshSession:
     ) -> str:
         """Assert a connection with ``key`` is refused, or times out, within ``bound``.
 
-        Returns why it was refused. A connection still accepted when the bound
-        closes fails.
+        Returns why it was refused. The refusal must be seen by the time the
+        bound closes: no attempt starts after it, an attempt is cut short where
+        it would run past it, and a refusal that returns later fails. An
+        attempt cut short that runs out of time shows only that the connection
+        had not finished, so it fails too; only a full attempt's timeout counts
+        as refused. A connection still accepted when the bound closes fails.
         """
         deadline = self._clock() + bound
+        target = f"{endpoint.user}@{endpoint.host}:{endpoint.port}"
         while True:
-            result = self._attempt(endpoint, key, "true")
-            if result.returncode == _SSH_FAILED:
-                reason = result.stderr.strip() or "refused"
-                log.info(
-                    "%s@%s:%s refused the connection: %s",
-                    endpoint.user, endpoint.host, endpoint.port, reason,
-                )
-                return reason
-            if self._clock() >= deadline:
+            remaining = deadline - self._clock()
+            if remaining <= 0:
                 raise SshAccessError(
-                    f"{endpoint.user}@{endpoint.host}:{endpoint.port} still accepted "
-                    f"{key.private_key.name} after {bound}s"
+                    f"{target} still accepted {key.private_key.name} after {bound}s"
                 )
-            self._sleep(RETRY_INTERVAL_SECONDS)
+            limit = min(self._attempt_seconds, remaining)
+            result = self._attempt(endpoint, key, "true", timeout=limit)
+            if result is None and limit < self._attempt_seconds:
+                raise SshAccessError(
+                    f"{target} was not shown to refuse {key.private_key.name} within "
+                    f"{bound}s: the last attempt was still connected when it closed"
+                )
+            if result is None or result.returncode == _SSH_FAILED:
+                reason = _failure(result) or "refused"
+                if self._clock() > deadline:
+                    raise SshAccessError(
+                        f"{target} refused {key.private_key.name} only after {bound}s: "
+                        f"{reason}"
+                    )
+                log.info("%s refused the connection: %s", target, reason)
+                return reason
+            self._pause(deadline)
 
     def assert_key_refused(self, endpoint: SshEndpoint, key: SshKey) -> str:
         """Assert the host refuses ``key`` for ``endpoint.user``, and returns why.
@@ -315,17 +350,18 @@ class SshSession:
         Stricter than ``assert_refused``: the host must be reached and must
         deny the key. A connection that cannot be made says nothing about the
         key, so it is retried within the connect window like any other, and
-        fails at its end.
+        fails at its end; as in ``run``, the window bounds when the last
+        attempt starts.
         """
         deadline = self._clock() + self._connect_retry_seconds
         while True:
             result = self._attempt(endpoint, key, "true")
-            if result.returncode != _SSH_FAILED:
+            if result is not None and result.returncode != _SSH_FAILED:
                 raise SshAccessError(
                     f"{endpoint.user}@{endpoint.host}:{endpoint.port} accepted "
                     f"{key.private_key.name}, which it should refuse"
                 )
-            if "Permission denied" in result.stderr:
+            if result is not None and "Permission denied" in result.stderr:
                 reason = result.stderr.strip()
                 log.info(
                     "%s@%s:%s refused %s: %s",
@@ -337,9 +373,9 @@ class SshSession:
                 raise SshAccessError(
                     f"could not reach {endpoint.host}:{endpoint.port} to show it "
                     f"refuses {key.private_key.name} within "
-                    f"{self._connect_retry_seconds}s: {result.stderr.strip()}"
+                    f"{self._connect_retry_seconds}s: {_failure(result)}"
                 )
-            self._sleep(RETRY_INTERVAL_SECONDS)
+            self._pause(deadline)
 
     def probe(self, endpoint: SshEndpoint, key: SshKey) -> GuestShape:
         """The user, vCPU count, memory, and root disk a connection shows."""

@@ -449,6 +449,34 @@ Files: a new `e2e-tests/tests/e2e/roles/helpers/ssh_access.py`; a new
       `assert_key_refused`, and after teardown calls `assert_refused` with the
       buyer key. The fake-ssh fixture in the test is local to it; a real-lane
       unit test needing one can lift it into a shared helper.
+- [x] 5.7 Round-1 triage fix (25 F1): `assert_refused` must see the refusal by the time
+      its bound closes, and 5.3's "returns the refusal's reason on the first `ssh`
+      failure" overshot it by up to one attempt plus a retry interval.
+      `ssh_access.py`: `assert_refused` starts no attempt once the bound has passed,
+      caps each attempt's timeout at the time left, fails a refusal that returns after
+      the bound, and fails an attempt cut short by the bound that runs out of time
+      (that shows only that the connection had not finished); a full-length attempt's
+      timeout still counts as refused. `run` and `assert_key_refused` keep full-length
+      attempts — their window bounds when the last attempt starts, since cutting a
+      connected command short would fail it for a reason unrelated to connecting —
+      and every retry sleep stops at the window's end (`_pause`, never negative).
+      `_attempt` returns `None` when it runs out of time.
+      Unit, `test_ssh_access.py` (29 cases): the fake's plan steps can declare
+      `elapse`, simulated seconds the attempt takes, which the fake clock adds, so an
+      attempt runs past a deadline without the test waiting. New: no refusal attempt
+      starts after the bound; a refusal returned after the bound fails; an attempt cut
+      short by the bound (half a second of real time) is not a refusal; `run`'s and
+      `assert_key_refused`'s sleeps stop at the window. Each fails on the code before
+      the fix (reasoned from it, not run).
+      `make -C e2e-tests test-unit`: 243 passed (unit). `make test`: passed.
+      `make check-packaging`: passed. `make check-comment-hygiene`: passed.
+      Fresh-context check of the diff: no blocking defect. Fixed: a retry sleep
+      could go negative where an attempt cut short returned after the bound (clamped
+      in `_pause`); a timing-dependent call count in the cut-short test (removed);
+      `_attempt`'s docstring now says a timeout means the host answered and the
+      connection did not finish. Declined: a full-length timeout whose kill overhead
+      lands milliseconds past the bound fails as "only after" — consistent with the
+      bound as stated; `bound <= 0` fails without an attempt — no caller passes one.
 
 ## 6. The real-provisioning lane
 
