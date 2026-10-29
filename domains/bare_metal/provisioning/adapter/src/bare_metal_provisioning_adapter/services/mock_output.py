@@ -35,7 +35,7 @@ def bare_metal_mock_output(playbook: MockPlaybook) -> str:
     """The access fact a successful grant or reclaim of this job prints."""
     params = BareMetalJobParams.model_validate(dict(playbook.parameters))
     host = playbook.host
-    data = {
+    data: dict[str, str | bool] = {
         "action": params.action,
         "host_id": params.host_id,
         "physical_host_id": params.physical_host_id or "",
@@ -52,23 +52,25 @@ def bare_metal_mock_output(playbook: MockPlaybook) -> str:
         data["port"] = str((host.ssh_port if host is not None else None) or 22)
     else:
         # A default reclaim stands for one of a delivered grant, so its account
-        # was present; a reclaim of an account never created arms a rule.
+        # was present; a reclaim of an account never created arms a rule. The
+        # role prints account_present as a boolean.
         data.update(
             reclaim_policy=params.reclaim_policy or DEFAULT_BARE_METAL_RECLAIM_POLICY,
             host=params.host_id,
-            account_present="true",
+            account_present=True,
             account_locked="false",
             account_deleted="false",
         )
     return shipped_output(params.host_id, BARE_METAL_RESULT_FACTS[params.action], data)
 
 
-def shipped_output(host_id: str, fact_name: str, fact: Mapping[str, str]) -> str:
+def shipped_output(host_id: str, fact_name: str, fact: Mapping[str, str | bool]) -> str:
     """A run printing ``fact`` as the access role does under the packaged
     configuration's YAML result format.
 
-    The ``var:`` fact's YAML is display only, with each value quoted; the
-    ``msg:`` block is the role's ``to_nice_json`` copy, which is what is read.
+    The ``var:`` fact's YAML is display only, each value quoted but a boolean;
+    the ``msg:`` block is the role's ``to_nice_json`` copy, which is what is
+    read.
     """
     yaml_lines = [f"        {name}: {_quoted(value)}" for name, value in sorted(fact.items())]
     json_lines = [f"        {line}" for line in json.dumps(fact, indent=4).splitlines()]
@@ -90,8 +92,10 @@ def shipped_output(host_id: str, fact_name: str, fact: Mapping[str, str]) -> str
     )
 
 
-def _quoted(value: str) -> str:
-    """``value`` as a single-quoted YAML scalar."""
+def _quoted(value: str | bool) -> str:
+    """``value`` as a YAML scalar: a boolean bare, anything else single-quoted."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
     return "'" + str(value).replace("'", "''") + "'"
 
 

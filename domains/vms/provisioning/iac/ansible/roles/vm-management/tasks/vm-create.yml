@@ -882,8 +882,8 @@
     {{ lookup('file', 'gpu_eligibility.sh') }}
 
     # Only GPUs this create may pass through: none a defined guest has
-    # attached, and the boot GPU only by the pool's opt-in while bound to
-    # vfio-pci.
+    # attached, and the boot GPU only when the pool opts in and it is bound
+    # to vfio-pci.
     if ! AVAILABLE_UNATTACHED="$(eligible_gpus "$AVAILABLE_GPUS" "{{ vm_passthrough_boot_gpu | bool | lower }}")"; then
       echo "Cannot tell which GPUs a defined guest has attached" >&2
       exit 1
@@ -1999,7 +1999,7 @@
     echo "Using external interface: $EXT_INTERFACE"
     
     # Every rule added for this guest carries its marker, so its teardown
-    # removes exactly these rules and no other guest's
+    # removes exactly these rules and none of another guest
     # (files/guest_teardown.sh).
     MARKER="{{ vm_guest_rule_marker }}"
 
@@ -2010,7 +2010,7 @@
     iptables -t nat -A POSTROUTING -p tcp -d {{ vm_ip }} --dport 22 -m comment --comment "$MARKER" -j MASQUERADE
     
     # Add general MASQUERADE rule for the libvirt subnet. Shared by every guest,
-    # so it carries no guest's marker and no guest's teardown removes it.
+    # so it carries no guest marker and no guest teardown removes it.
     iptables -t nat -A POSTROUTING -s 192.168.122.0/24 -o $EXT_INTERFACE -j MASQUERADE
     
     # Allow forwarding for this specific connection

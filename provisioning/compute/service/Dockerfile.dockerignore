@@ -9,3 +9,28 @@
 !provisioning/compute/service/uv.lock
 !scripts/
 !scripts/uv_project.py
+
+# A .dockerignore beside a Dockerfile replaces the root one, so none of the root's
+# exclusions apply here. The IaC trees admitted whole above leave out what a
+# checkout generates or holds locally, by the repository's own ignore rules for
+# them: environments and caches, Ansible logs and retry files, and an operator's
+# keys, credentials, inventories, and variable files.
+**/.venv
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+**/*.log
+**/*.retry
+domains/vms/provisioning/iac/credentials
+domains/vms/provisioning/iac/ansible/credentials
+domains/vms/provisioning/iac/ansible/keys/*
+!domains/vms/provisioning/iac/ansible/keys/.gitignore
+domains/vms/provisioning/iac/ansible/inventory/hosts*
+domains/vms/provisioning/iac/ansible/inventory/provisioning-hosts*
+!domains/vms/provisioning/iac/ansible/inventory/hosts.example
+!domains/vms/provisioning/iac/ansible/inventory/provisioning-hosts.example
+domains/vms/provisioning/iac/ansible/inventory/management-vars.yaml
+domains/vms/provisioning/iac/ansible/build-vars*.yaml
+domains/vms/provisioning/iac/ansible/playbooks/frp-server-credentials*

@@ -157,6 +157,34 @@ class TestPlaybookStructure(unittest.TestCase):
         self.assertTrue(any("import_tasks" in task for task in tasks))
         self.assertFalse(any("include_tasks" in task for task in tasks))
 
+    def test_vm_management_task_files_are_imported_for_the_syntax_check(self) -> None:
+        """So that --syntax-check parses the task files a create, a remove, and an
+        undefine run, which the role reaches only through include_tasks.
+
+        Each is imported statically and in the role's context, the play refuses to
+        run before any import, and `make validate-playbooks` checks it.
+        """
+        path = ANSIBLE / "playbooks/single-tenant/vm-management-task-files.yaml"
+        tasks = yaml.safe_load(path.read_text(encoding="utf-8"))[0]["tasks"]
+        self.assertIn("fail", tasks[0])
+        self.assertFalse(any(
+            key in task for task in tasks
+            for key in ("include_tasks", "include_role", "import_tasks")
+        ))
+        role_tasks = ANSIBLE / "roles/vm-management/tasks"
+        imported = []
+        for task in tasks[1:]:
+            role = task["import_role"]
+            self.assertEqual(role["name"], "../../roles/vm-management")
+            self.assertTrue((role_tasks / f"{role['tasks_from']}.yml").is_file())
+            imported.append(role["tasks_from"])
+        self.assertEqual(sorted(imported), sorted([
+            "prerequisites", "vm-create", "gpu-virt-install-retry",
+            "gpu-virt-install-multi-retry", "vm-remove", "vm-undefine",
+        ]))
+        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+        self.assertIn(f"{path.relative_to(ROOT)} --syntax-check", makefile)
+
     def test_audit_playbook_writes_nothing(self) -> None:
         """The audit runs against hardware nothing else has touched.
 

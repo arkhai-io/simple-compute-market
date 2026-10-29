@@ -2042,6 +2042,9 @@ reclaim tolerates an account its grant never created". Files:
         as `"true"`, since a default reclaim stands for a delivered grant's. A case
         needing an absent account arms a rule. The adapter is already 0.12.0 in
         this change, so it is not bumped again.
+
+        Correction (14.10): the role prints `account_present` as a boolean, and
+        the mock now does too.
 - [x] 10.2 Tests:
       - role-structure unit tests that the existence check precedes every task
         reading the account, and that the reclaim fact carries `account_present`;
@@ -2300,6 +2303,10 @@ test code only, before the live bare-metal lane runs. Files:
       - Sections 12 to 14, the VM recipe, are next, in a fresh session. Round 2
         freezes after Section 14.
 
+      Correction (14.11): the scenario paragraph of `e2e-tests/tests/e2e/roles/README.md`
+      that 11's file list names was rewritten, and the paragraph after it still
+      described the old teardown and revocation; the two are folded into one.
+
 ## 12. An x86-64 guest is created from a pinned, verified image
 
 Delivers D11, for the delta requirement "A VM guest is created from a pinned, verified
@@ -2424,6 +2431,10 @@ image". Files:
           `prerequisites.yml`, `vm-create.yml`, `vm-remove.yml`,
           `vm-undefine.yml`, and both retry files, with the role's
           `vars/main.yml`. Its `--syntax-check` passed on both versions.
+          Correction (14.8): that check is now in the repository, run by
+          `validate-playbooks`. On Section 14's candidate it failed on three
+          tasks Sections 13 and 14 edited, whose comments carried apostrophes;
+          what the throwaway parsed is not known.
         - Corroboration, not a repository suite: the architecture check and the
           verification ran as tasks under ansible-core 2.19.14 against
           `localhost`, with the role's variables and a synthetic file, the
@@ -2449,7 +2460,10 @@ image". Files:
       - `make check-packaging`: exit 0, the architecture rules included.
       - **Delivery.** The role ships through the provisioning service image's
         `COPY` of `domains/vms/provisioning/iac`, whose `.dockerignore` admits
-        the whole tree, `vars/` included. It is not in any wheel, so no version,
+        the whole tree, `vars/` included.
+        Correction (14.12): that ignore file replaces the root one, so it also
+        admitted the checkout's environments and caches under the tree; it now
+        leaves them out. It is not in any wheel, so no version,
         floor, or lock moved. A wheel's contents say nothing about the role an
         image carries. Validation of a built image reads the role there.
       - **End-to-end, confirmed.** No mock lane runs a playbook. Owed by
@@ -2585,7 +2599,9 @@ created". It must land before any real guest is created on a lane's host. Files:
           branch reported.
 
         Both print as text, as the bare-metal reclaim prints
-        `account_present`. The fact's status and output come from whichever
+        `account_present`.
+        Correction (14.10): the role prints all three as booleans, from a
+        single `| bool` expression; the mocks now print them so too. The fact's status and output come from whichever
         path ran. Each path registers its own result, since a skipped task's
         `register` would overwrite the other's.
       - **Beyond the plan's files: the mock.** D2 says the mock prints what
@@ -2693,6 +2709,8 @@ created". It must land before any real guest is created on a lane's host. Files:
       - **Real Ansible.**
         - `validate-playbooks` and the throwaway `import_tasks` syntax check
           (12.2) passed on 2.10.8, 2.17.14, and 2.19.14.
+          Correction (14.8): on the role files as committed, the in-repository
+          check fails under 2.17.14 and 2.19.14, at a task this section edited.
         - Corroboration, outside the repository: `vm-remove.yml` ran through
           `include_role` under ansible-core 2.17.14 and 2.19.14, against
           `localhost`, with `host_fakes` on `PATH`. This exercised the library's
@@ -2988,6 +3006,9 @@ by its pool's operator". Files:
           boot GPU with it.
         - `validate-playbooks` and the `import_tasks` syntax check passed on
           2.10.8, 2.17.14, and 2.19.14.
+          Correction (14.8): on the role files as committed, the in-repository
+          check fails under 2.17.14 and 2.19.14, first at "Auto-select available
+          GPUs by count", whose comment this section added.
 - [x] 14.6 Verification:
       - `make -C domains/vms/provisioning/iac test` (unit);
       - `make -C domains/vms/provisioning/adapter test` (unit and library
@@ -3134,6 +3155,152 @@ review's amendment, and validation again.
       the per-job default, `dev`'s stage without GPUs included. Owed by validation:
       the pipeline and Helm on the new candidate.
 
+**Corrections after the Round 2 implementation review.** An independent review of
+Section 14's candidate, `928d4c0c8` over `99e55949`, raised F1 to F4, none blocking.
+It disclosed that it read `ARCHITECTURE.md`, `DEPLOYMENT_AND_CONFIG.md`, and
+`ROADMAP.md` only in part; its continuation completes those reads before it amends
+its judgement for the new candidate. Under the owner's delegated judgement the
+supervising session accepted all four, and added S1, found while checking the
+image's packaging. These are partial dispositions: no round outcome is recorded
+until the new candidate's validation and the amended review join.
+Each is fixed below, on top of the merge (14.7). They span Sections 10 to 14 and the
+service's image, and are recorded here, after the round's last section, with a
+pointer from each note they correct.
+
+- [x] 14.8 F1: a checked-in playbook, never run, statically imports the
+      `vm-management` role's `prerequisites.yml`, `vm-create.yml`, `vm-remove.yml`,
+      `vm-undefine.yml`, `gpu-virt-install-retry.yml`, and
+      `gpu-virt-install-multi-retry.yml`, and `make validate-playbooks` syntax-checks
+      it, so the repository's own check parses the task files the role reaches only
+      through `include_tasks`.
+
+      Done:
+      - **The playbook.**
+        `domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-management-task-files.yaml`
+        imports each file through `import_role` with `tasks_from`, so each is
+        parsed as part of the role, with its defaults, vars, and files. Its first
+        task is a `fail`, so a run reaches none of the imports. Its header says it
+        is parse-only and what a syntax check does not show. A task listing, which
+        runs nothing, shows the refusal first and the role's tasks resolved under
+        the role.
+      - **`validate-playbooks`** gains its `--syntax-check`.
+      - **It found three tasks that do not load.** On the role files of Section
+        14's candidate, the new check failed under ansible-core 2.17.14 and
+        2.19.14: Ansible splits a free-form `shell: |` string as module arguments,
+        and an apostrophe in a bash comment reads as an unbalanced quote, so the
+        whole task file fails as it loads. Sections 13 and 14 had added such
+        comments to three tasks:
+        - `vm-create.yml`, "Auto-select available GPUs by count" ("the pool's
+          opt-in");
+        - `vm-create.yml`, "Set up iptables port forwarding for SSH" ("no other
+          guest's", "no guest's marker");
+        - `vm-undefine.yml`, "Get external port before cleanup (for firewall rule
+          removal)" ("this guest's own").
+
+        `vm-create.yml` and `vm-undefine.yml` are loaded by `include_tasks` when a
+        create or an undefine runs, so every real VM create would have failed
+        before any task ran; no mock lane runs a playbook, and the shell harness
+        runs the scripts with bash, which accepts them. At `99e55949`, before Round
+        2, all three parsed. The four comments are reworded with no apostrophe and
+        no executable line changes. The playbook's header states the constraint.
+        A parse of every free-form `shell`/`command` string in the role, with
+        Ansible's own splitter, now finds one failure, `vm-check.yml`'s "Get total
+        GPU count", which already failed at `99e55949`, is outside this change's
+        files and the playbook's imports, and is left as it is.
+      - **A structural guard** (unit), beside the audit playbook's, in
+        `tests/test_ansible_structure.py`: the playbook refuses first, imports each
+        of the six files through `import_role` and nothing dynamically, each named
+        file exists, and `validate-playbooks` checks it. Replacing one
+        `import_role` with `include_role`, in a scratch copy, fails it.
+
+      Evidence:
+      - `make -C domains/vms/provisioning/iac validate-playbooks`, run with
+        isolated ansible-core 2.17.14 and 2.19.14 environments outside the
+        repository first on `PATH`, the bounds of the service image's
+        `ansible-core>=2.17,<2.20`: before the rewording, exit 2 at the first
+        failing task; after it, exit 0, every playbook parsed. The workstation's
+        ansible 2.10.8, below the supported range, also passes. No CI job runs
+        this target.
+      - `make -C domains/vms/provisioning/iac test`: 127 passed and 2 subtests
+        passed (unit), the shell-harness behaviour tests unchanged.
+
+      A syntax check renders no Jinja and runs nothing. That the role's templates
+      render, and that it works on a host, remains the live VM lane's evidence.
+- [x] 14.9 F2: D10's sixth condition lists the site's held states without the retired
+      `provisioning`, and names the site's `HELD_RESERVATION_STATES`
+      (`kit/site/src/market_site/db.py`) as the authority for the list, which holds
+      `reserved`, `leased`, `releasing`, `release_failed`, and `unmanaged`.
+
+      Done, in `design.md` only. The edit was made in this session before the
+      merge concluded, so it is in the merge commit with 14.7's documents. Closeout
+      task 15.9 already promotes those five states and names neither retired one.
+- [x] 14.10 F3: the three diagnostic fields this change added to the mocks print as
+      JSON booleans, as the roles print them: `account_present` in bare metal's
+      default reclaim, and `cleanup_record` and `guest_present` in VM's default
+      remove. The roles set each from a single `| bool` expression, which Ansible
+      templates as a boolean, so their `to_nice_json` copy prints `true` or
+      `false`. The older text fields beside them, `account_locked` and
+      `account_deleted`, are unchanged: nothing reads them.
+
+      Done:
+      - `bare_metal_provisioning_adapter/services/mock_output.py`:
+        `account_present=True`; its `var:` display prints a boolean bare.
+      - `vm_provisioning_adapter/services/mock_output.py`: `cleanup_record=True`
+        and `guest_present=True`, which its display already printed bare.
+      - The two producer tests assert `True` where they asserted `"true"`; against
+        the earlier mocks they fail.
+      - Neither adapter is bumped again: both are already above `dev` in this
+        change.
+
+      Evidence:
+      - `make -C domains/bare_metal/provisioning/adapter test`: 88 passed (unit);
+      - `make -C domains/vms/provisioning/adapter test`: 272 passed (unit, and
+        library integration in its `tests/integration`);
+      - after `make check-packaging` rebuilt the wheelhouse and the service's
+        `reinit`, the service's mock-profile consumers of these outputs,
+        `test_bare_metal_mock_profile`, `test_lease_release_api`, `test_system_api`,
+        `test_fulfillment_api`, `test_test_controller`, and `test_vms_api`: 103
+        passed (application integration through the typed clients, with
+        direct-storage setup in some). Nothing reads the three fields.
+- [x] 14.11 F4: `e2e-tests/tests/e2e/roles/README.md` describes
+      `e2e_bare_metal_deal` in one paragraph: teardown to `released`, revocation
+      only by the pinned host's public-key refusal, and a missing prerequisite
+      named and left unavailable. The paragraph after it, which still said the
+      scenario waits for a configured terminal status and counts any failed attempt
+      as revocation, is folded into it.
+- [x] 14.12 S1: the provisioning service's `Dockerfile.dockerignore` replaces the
+      root `.dockerignore` for that image, and admits both IaC trees whole, so the
+      root's exclusions never applied there. A checkout's `.venv`,
+      `__pycache__`, and `.pytest_cache` under the VM IaC tree were in the build
+      context. Late exclusions now leave out, by the repository's own ignore rules
+      for those trees, environments and caches, Ansible logs and retry files, and
+      the VM IaC tree's operator keys, credentials, local inventories, and variable
+      files, re-admitting the tracked `ansible/keys/.gitignore` and the two
+      inventory examples.
+
+      Done. Nothing secret was found in the context; the files that were admitted
+      are environments and caches. No test mirrors the patterns. Evidence, short of
+      an image:
+      - an emulation of Docker's ignore matching over the old and new rules: of 150
+        tracked files and wheels the image takes, none changes inclusion, every role
+        asset this round added among them; of 688 untracked files then under the
+        IaC trees, the old rules admitted all and the new admit none;
+      - `make check-packaging`, which reads the image's ignore file: passed.
+
+      Owed by validation: the candidate image's own contents, its IaC files equal
+      to the tracked ones and no local runtime artifact present.
+- [x] 14.13 Verification of 14.8 to 14.12:
+      - the suites named in each task above;
+      - `make check-packaging`: passed, the architecture rules included; every
+        changed distribution's wheel equals its source;
+      - `make check-change CHANGE=repair-compute-purchase-recovery`, with comment
+        hygiene: passed.
+
+      End-to-end: the VM lane's remove and the bare-metal lane's reclaim read the
+      changed mock fields, which no scenario asserts on. No scenario runs a
+      playbook. Owed by validation: the round's full `make test`, the pipeline,
+      Helm, and the image inspection in 14.12, on the new candidate.
+
 ## 15. Closeout
 
 The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
@@ -3213,6 +3380,12 @@ change to implementation.
       - `docs/development/TESTING.md` "4. System Integration Tests (End-to-End)":
         mock output prints the shipped form for the job, and the VM scenarios use
         the default.
+      - `docs/development/TESTING.md`, beside "Chart Render Tests", and
+        `domains/vms/provisioning/iac/README.md` "Validation", whose list of syntax
+        checks it extends: `make validate-playbooks` parses the `vm-management`
+        role's task files through the parse-only `vm-management-task-files.yaml`,
+        since a syntax check does not follow `include_tasks`; it renders no Jinja
+        and runs nothing (14.8).
       - `docs/development/DEPLOYMENT_AND_CONFIG.md` "Definition documents", the
         host-inventory paragraph: `public_port=`; every `ssh` host connection,
         through the API or an inventory, at version 2; and a host stored at version

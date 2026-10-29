@@ -119,14 +119,10 @@ recovers the purchase with `market bare-metal result`, `access`, and `teardown
 `state` is `released` within `BARE_METAL.TEARDOWN_TIMEOUT_SECONDS`, and fails at
 once on `teardown_failed`. Each SSH attempt is a fresh process that shares no
 connection and trusts only the pinned key; access counts as revoked only when that
-host refuses the public key, and any other SSH failure fails the scenario.
-
-The bare-metal scenario performs real SSH, requests teardown through
-`market bare-metal`, waits for the accepted terminal teardown status, and
-requires the same access attempt to fail afterward. If the buyer contribution,
-authority endpoint, selected site, credential, or real access target is absent,
-the scenario names that prerequisite and remains unavailable; static Compose or
-unit results are not substituted.
+host refuses the public key, and any other SSH failure fails the scenario. If the
+buyer contribution, authority endpoint, selected site, credential, or real access
+target is absent, the scenario names that prerequisite and remains unavailable;
+static Compose or unit results are not substituted.
 
 ## Alkahest deal scenario
 
