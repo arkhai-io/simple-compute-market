@@ -3,9 +3,9 @@
 ### Requirement: The payments mandate is derived exactly from the Agreement
 The mandate MUST bind sha256(JCS(agreement)) as deal, sha256(JCS(mandate)) as transaction ID, settlement_params.payer_account as from and selected payee account as to, the published fee policy and nonce arkhai.payments.v1. Once-only options MUST derive one once part for the agreed amount and asset; rate options MUST derive the selected rate and optional setup parts, all with per-part authorities.
 
-Every once hold MUST last at least until its own part end plus adjudication.dispute_window_seconds (prepaid service ends at Agreement term end; delivered setup ends at activation). Approval MUST expire after approval_window. Hosted options MUST NOT carry bond until seller-funded parts are supported. Once-only mandates without early-termination entitlements MUST authorize no start or stop. Reverse MUST be authorized for seller and the Agreement's dispute authority, whose account MUST come from the option's adjudication.dispute, never Settlement.arkhai_payments configuration. Only that authority MUST be listed under extend, also authorizing lift. Each part MUST carry maxHoldExtension from adjudication.case_hold_max_seconds, null when unbounded. Reverse MAY name a part and an amount up to what it still holds.
+Every once hold MUST last at least until its own part end plus adjudication.dispute_window_seconds (prepaid service ends at Agreement term end; setup ends at the later of the Agreement start and approval). Approval MUST expire after approval_window. Hosted options MUST NOT carry bond until seller-funded parts are supported. Once-only mandates without early-termination entitlements MUST authorize no start or stop. Reverse MUST be authorized for seller and the Agreement's dispute authority, whose account MUST come from the option's adjudication.dispute, never Settlement.arkhai_payments configuration. Only that authority MUST be listed under extend, also authorizing lift. Each part MUST carry maxHoldExtension from adjudication.case_hold_max_seconds, null when unbounded. Reverse MAY name a part and an amount up to what it still holds.
 
-Rate authorities and term ends MUST use the deal-lifecycle codec. Optional setup MUST bind a qualified activation trigger and bounded no-activation fallback in the approved mandate; an unexpressible setup contract MUST refuse publication and acceptance.
+Rate authorities and term ends MUST use the deal-lifecycle codec. An optional setup_amount MUST derive one ordinary once part for that amount, owed by the buyer from approval, with end the later of the Agreement start and the approval instant and hold afterStop plus the dispute window. A buyer-caused end, before or after activation, MUST leave it with the seller; it MUST return to the buyer only through the seller's self-penalty for non-delivery.
 
 #### Scenario: Hold and approval expiry follow the accepted timing
 - **WHEN** a once-only mandate is derived from an Agreement accepted at accepted_at
@@ -24,7 +24,7 @@ Rate authorities and term ends MUST use the deal-lifecycle codec. Optional setup
 #### Scenario: A mixed mandate is derived
 - **WHEN** a rate option includes setup_amount
 - **THEN** setup once precedes rate, each with per-part authorities and maxHoldExtension
-- **AND** setup end is activation, rate hold is afterStop plus dispute window, and approval expiry still uses approval_window
+- **AND** setup's end is the later of the Agreement start and approval, both holds are afterStop plus dispute window, and approval expiry still uses approval_window
 
 ## ADDED Requirements
 
@@ -55,13 +55,16 @@ SCM MUST derive time rate parts through the agreed-price accessor and lifecycle 
 - **THEN** the adapter uses the shared codec for rate stop entries and rate end, including the dispute authority's chosen entry
 - **AND** setup once ends carry no partialPeriod field
 
-#### Scenario: Setup is activated or lawfully cancelled
-- **GIVEN** a qualified setup contract linked to the rate part
-- **WHEN** payee start wins
-- **THEN** setup becomes served and its dispute-window release anchor is activation
-- **WHEN** a lawful rate stop or absolute end wins before activation
-- **THEN** setup returns in full, records terminal unserved status at cancellation, and can drain without seller-fault attribution
-- **AND** no setup payout is possible while awaiting the start trigger
+#### Scenario: A buyer stops before activation
+- **GIVEN** an approved mandate with a setup part
+- **WHEN** the buyer's stop takes effect before the seller activates the lease
+- **THEN** the setup part stays with the seller and pays out one dispute window after its end
+- **AND** no reverse of it is issued and no filing is made
+
+#### Scenario: The seller never delivers
+- **GIVEN** an approved mandate with a setup part
+- **WHEN** the seller files exceptional_end for non-delivery, including a term end that arrives before activation
+- **THEN** the mediation self-penalty returns all of setup to the buyer while it is held
 
 #### Scenario: Provisioning starts late
 - **GIVEN** a finite maximum term equal to accepted duration_seconds

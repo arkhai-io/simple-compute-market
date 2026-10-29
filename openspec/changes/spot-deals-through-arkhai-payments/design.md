@@ -57,34 +57,30 @@ cost churn imposes. VM's preset may default it to zero. Churn beyond the setup
 charge is the seller's to price differently or to refuse through its negotiation
 policy; neither domain has a required minimum spend.
 
-On a successfully delivered lawful preemption the setup charge stays earned. Seller
-non-delivery is filed as `exceptional_end` through the dispute adapter, and the
-mediation self-penalty package includes the setup part. A controlling lawful end
-before disclosure keeps its own attribution and is not seller fault. The setup
-part's term ends at activation, not at the maximum compute term, and it pays out
-one dispute window later; the standard self-penalty returns all of setup for an
-undelivered deal and none for a delivered one.
+The setup charge is owed by the buyer from approval: it prices the provisioning
+the buyer's commitment triggers, so a buyer who stops — before or after activation,
+seconds after approval or days later — leaves it with the seller, and a lawful
+preemption after delivery leaves it earned. It returns to the buyer on one ground
+only, the seller's own non-delivery: the seller files `exceptional_end` through the
+dispute adapter and the mediation self-penalty package returns all of setup for an
+undelivered deal and none for a delivered one; a term end that arrives before
+activation is non-delivery. A controlling lawful end before disclosure keeps its
+own attribution and is not seller fault, and keeps the setup charge.
 
-Setup is represented as conditional on the associated rate part's payee `start`,
-the seller's disputable assertion of activation, and that same authority event
-anchors setup's end. Before it, setup stays reserved and cannot pay out. If a
-lawful rate stop or the absolute term end wins before `start`, the authority
-returns setup in full and records a terminal unserved setup part; its cancellation
-instant anchors terminality and draining, not an earned charge. The first `start`,
-stop or end recorded at the authority decides that race, so a lawful
-pre-activation cancellation creates neither a charge nor seller-fault attribution.
-The accepted mandate names the linked rate part, the start trigger and the bounded
-fallback at approval. This is a contract and vector gate, not permission to mutate
-an immutable end or invent a local refund: until it is expressible and qualified,
-setup-bearing presets refuse publication and acceptance, and a seller's explicit
-setup opt-out gives the interim rate-only preset. A `once` end has no rate
-`partialPeriod`. The buyer may dispute an untrue payee assertion of activation
+The part is an ordinary `once` part with a fixed end, the later of the Agreement's
+`start_utc` and the approval instant, held through the dispute window after it;
+the window, days, covers provisioning, minutes to hours, so the self-penalty's
+reversal reaches it. It needs nothing the published contract lacks: no link to the
+rate part's `start`, no activation-anchored end, no fallback. A `once` end has no
+rate `partialPeriod`. The buyer is told before approval that the setup charge is
+kept if they stop and returned only if the seller never delivers.
+
 through a case.
 
 | Preset | Parts | Entitlements |
 |---|---|---|
-| On-demand | setup `once` by default + time rate (setup contract gated) | payer `{notice_seconds: 0, settles_through: started_period}`; no seller stop entry |
-| Spot | setup `once` by default + time rate (setup contract gated) | payer `{notice_seconds: 0, settles_through: started_period}`; payee with its priced notice |
+| On-demand | setup `once` by default + time rate | payer `{notice_seconds: 0, settles_through: started_period}`; no seller stop entry |
+| Spot | setup `once` by default + time rate | payer `{notice_seconds: 0, settles_through: started_period}`; payee with its priced notice |
 | Reserved | `once` for the committed term | existing `once` semantics |
 
 The shipped presets price the payer's notice at zero: a buyer who stops is charged
@@ -481,7 +477,7 @@ service's own suite qualifies its ledger and payouts. Examples and fixtures use
 
 | Scenario or prepared entry point | Executor | Evidence boundary |
 |---|---|---|
-| Derivation, authorize phases, setup trigger and fallback, exceptional-end filing; adapter and vector targets | this change's focused kit suites | pinned-vector support; published conformance only for published bytes |
+| Derivation, authorize phases, the setup part, exceptional-end filing; adapter and vector targets | this change's focused kit suites | pinned-vector support; published conformance only for published bytes |
 | Buyer stop and hint, seller preempt, setup and rate approval fixtures | this change's CLI and application first use | command mechanics against the named published or proposed contract |
 | Delivered on-demand and spot, due-work barriers, release and access closure; the rate matrix | convergence | published or proposed qualification as the target permits |
 | Hosted four-path qualification | activation | live evidence, from deployed authorities only |
@@ -606,7 +602,7 @@ Destinations are planned, not claims of implemented behaviour.
 
 | Accepted decision | Permanent location |
 |---|---|
-| D1–D2 rate derivation, gated setup activation and cancellation, presets and the exact check | `openspec/specs/settlement-servicing/spec.md`; `openspec/specs/storefront-publication/spec.md` and `architecture.md` |
+| D1–D2 rate derivation, the setup part, presets and the exact check | `openspec/specs/settlement-servicing/spec.md`; `openspec/specs/storefront-publication/spec.md` and `architecture.md` |
 | D3 external contract context | `openspec/specs/deal-lifecycle/architecture.md`, "External authorities" |
 | D4–D5 pure rate authorization, envelope consumption, operation identity, authority-priced `partialPeriod` and the journaled exceptional-end filing | `openspec/specs/settlement-servicing/spec.md` and `architecture.md` |
 | D6–D6a seller notice, the rate buyer end and the CLI | `deal-lifecycle` `spec.md` (foundation-created; [delta](specs/deal-lifecycle/spec.md)) and `architecture.md`; `docs/development/ARCHITECTURE.md`, "Release" |

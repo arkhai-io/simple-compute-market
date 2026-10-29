@@ -39,8 +39,8 @@ foundation; this design's D1–D7.
       vectors and partial-reversal-before/after-stop traces. Identify missing
       authority conformance evidence without replacing it with a double claim.
       Verify explicit partialPeriod on rate stop entries and rate ends on the
-      returned-capable revision, dispute chosen-entry payloads, and the qualified
-      setup activation trigger/full-return fallback. Once ends have no partialPeriod.
+      returned-capable revision and dispute chosen-entry payloads. Once ends have no
+      partialPeriod.
       Confirm exceptional_end remains a dispute intent/request and mediation's
       published standard self-penalty uses its own chosen stop entry with returned.
       Producer evidence gates that package; there is no seller restitution entry
@@ -107,13 +107,12 @@ publication configuration/builders and their focused publication suites.
       held money (bond reserved) are the remedy; the seller's own exit is the
       mechanically ruled self-penalty.
 - [ ] 2.4 Supply setup-bearing on-demand/spot presets with explicit setup pricing
-      and seller opt-out, gated on the qualified linked rate-start trigger and
-      bounded no-activation fallback. Until qualified, refuse setup presets;
-      explicit setup opt-out permits rate-only interim presets. Verify initial
-      reservation cannot pay out before activation and lawful cancellation before
-      activation returns setup in full with terminal authority provenance, not
-      seller-fault attribution. Bind all terms into option identity; invent no
-      amount or bare-metal minimum-spend gate.
+      and seller opt-out: the setup part is an ordinary once part ending at the
+      later of the Agreement start and approval, owed from approval; verify that a
+      buyer's stop before activation leaves it with the seller and that the
+      seller's self-penalty for non-delivery returns it. The bare-metal preset
+      ships no setup default; VM's may default to zero. Bind all terms into option
+      identity; invent no amount or bare-metal minimum-spend gate.
 - [ ] 2.5 Supply the preset helper to the terms-owned VM/bare-metal publication
       adapters through their injected preset-helper interface; helper availability
       gates rate emission, not the terms change's archive. Do not implement generic

@@ -238,18 +238,18 @@ The sole term-end carrier MUST be early_termination.settles_through, distinct fr
 
 ### Requirement: The dispute window sets the earliest payout
 
-Each payment adapter MUST derive holds under which each amount a part holds pays out no earlier than the part's end plus `adjudication.dispute_window_seconds`. A prepaid `once` part MUST end at the Agreement term end; a setup `once` part at activation; a rate part at its stop or term end. The window MUST NOT be shorter than the dispute authority's advertised minimum. SCM MUST NOT refuse a filing for being after the window; that is the dispute authority's policy.
+Each payment adapter MUST derive holds under which each amount a part holds pays out no earlier than the part's end plus `adjudication.dispute_window_seconds`. A prepaid `once` part MUST end at the Agreement term end; a setup `once` part at the later of the Agreement start and approval; a rate part at its stop or term end. The window MUST NOT be shorter than the dispute authority's advertised minimum. SCM MUST NOT refuse a filing for being after the window; that is the dispute authority's policy.
 
 #### Scenario: A once deal's hold is derived
 
 - **WHEN** a hosted mandate is derived for a deal whose term ends at 13:00 with a one-day window
 - **THEN** its `once` part has `end` 13:00 and hold `{afterStop: P1D}`, so it pays out no earlier than 13:00 the next day
 
-#### Scenario: A setup part ends at activation
+#### Scenario: A setup part ends at the term start
 
-- **WHEN** a deal activates with a setup `once` part and a one-day dispute window
-- **THEN** setup pays out no earlier than one day after activation, independently of the maximum running term
-- **AND** setup publication is refused until the vendored contracts express its activation-anchored end
+- **WHEN** a deal with a setup `once` part and a one-day dispute window is approved at or after its Agreement start
+- **THEN** setup pays out no earlier than one day after approval, independently of the maximum running term
+- **AND** a buyer's stop before activation does not return it, and the seller's self-penalty for non-delivery does
 
 #### Scenario: A buyer files after the window
 

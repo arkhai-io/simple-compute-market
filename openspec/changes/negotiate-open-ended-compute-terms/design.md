@@ -223,9 +223,9 @@ it has no at and the storefront records/signs its own receipt. The storefront ca
 billing for the buyer: the buyer half stops at the payment authority first and, if it is
 unreachable, journals the stop and retries under one key while billing runs. The buyer may
 also file buyer_end(at), human-triaged with kept evidence, preserving notice/treatment and
-netting recorded stops. Setup ends
-at activation, pays out one dispute window later and is fully returned for an
-undelivered deal but not after delivery.
+netting recorded stops. The setup charge is
+owed from approval and kept if the buyer stops; it returns only if the seller never
+delivers.
 
 ### D8. Churn is seller pricing/policy, not a protocol gate
 

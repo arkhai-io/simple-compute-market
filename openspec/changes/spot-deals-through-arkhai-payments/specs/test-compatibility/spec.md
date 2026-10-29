@@ -8,7 +8,7 @@ Rate mechanics qualification MUST follow "Lane qualification identifies readines
 - **THEN** evidence identifies the proposed revision and makes no hosted-readiness or live-authority claim
 
 #### Scenario: Required authority vectors are absent
-- **WHEN** producer-published signed pre-start/post-start snapshot, start, setup-trigger/fallback or partial reversal vectors are unavailable
+- **WHEN** producer-published signed pre-start/post-start snapshot, start or partial reversal vectors are unavailable
 - **THEN** the corresponding authority-conformance claim remains unproven
 - **AND** double-generated traces do not replace producer evidence
 

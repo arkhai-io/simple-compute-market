@@ -41,8 +41,8 @@ least as strong as standard. Through mediation's own
 rates now returned, reverses earnings since at, reverses once unserved shares by
 time, then reverses min(premature_stop_penalty, earned amounts still held) to the
 payer across parts in mandate order. Bond award stays reserved for hosted bonds. On-demand always returns the
-partial period: that is the on-demand contract. Setup's term ends at activation,
-so all returns if undelivered and none once delivered. Seller exit requires this
+partial period: that is the on-demand contract. Setup is owed from approval; it returns
+in full if the seller never delivers and not at all once it has. Seller exit requires this
 complete dispute-recorded package, not direct partial restitution. The authority
 also records disputes to act on bad sellers, including bans.
 
@@ -66,7 +66,7 @@ Qualification against the published contract if absent. Pinned candidate bytes
 permit only Qualification against a proposed contract; Live evidence additionally
 requires hosted observations. Lane-double D6 owns those definitions. Periods are
 earned at period end or part stop, not start; setup releases one dispute window
-after activation. No minimum-spend or backdated payee-stop gate is added.
+after the later of the Agreement start and approval. No minimum-spend or backdated payee-stop gate is added.
 
 ### D2. Verify double and consumer before the production declaration
 

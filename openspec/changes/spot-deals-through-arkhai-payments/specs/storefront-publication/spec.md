@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Compute rate preset helpers disclose setup pricing
-The hosted preset helper for both compute domains MUST construct presets from parts and lifecycle terms, not runtime classes. Setup MUST be explicitly priced with seller opt-out and no minimum-spend gate. Setup-bearing presets MUST refuse until the activation trigger and bounded no-activation full-return fallback are qualified. Rate-only interim presets MUST require explicit setup opt-out.
+The hosted preset helper for both compute domains MUST construct presets from parts and lifecycle terms, not runtime classes. Setup MUST be explicitly priced with seller opt-out and no minimum-spend gate; the bare-metal preset MUST ship no setup default, and the VM preset MAY default it to zero.
 
 #### Scenario: The compute publication adapter consumes presets
 - **WHEN** either compute publication adapter requests on-demand and spot preset parts
@@ -12,14 +12,9 @@ The hosted preset helper for both compute domains MUST construct presets from pa
 - **THEN** the builder refuses the incomplete preset rather than inventing a charge
 - **AND** explicit setup opt-out permits a valid rate-only option
 
-#### Scenario: Setup contract support is missing
-- **WHEN** the authority cannot express the linked activation trigger and bounded no-activation fallback
-- **THEN** publication and acceptance refuse setup-bearing presets
-- **AND** explicit seller setup opt-out permits the rate-only interim
-
 #### Scenario: Setup is disclosed
 - **WHEN** a qualified setup-bearing preset is built
-- **THEN** the helper discloses its activation end, no-payout reservation before activation and full return if lawfully cancelled first
+- **THEN** the helper discloses that the setup charge is owed from approval, kept if the buyer stops, and returned only if the seller never delivers
 - **AND** it does not spread setup over the maximum compute term
 
 #### Scenario: Accepted pricing survives publication changes

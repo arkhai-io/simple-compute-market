@@ -12,7 +12,7 @@ double.
 Sections follow the design's implementation cadence. Sections 1–7 are round 1 (foundation,
 wire and buyer side), except 7.5's explicitly round-2 end verification; section 8 joins round 1 once its schema and vectors are vendored
 into `kit/arkhai-payments/schema/`. The per-part lifecycle revision is published;
-including `partialPeriod`; activation-anchored setup still requires contract confirmation. The exact producer revision is recorded only in schema/SOURCE.md at 8.1.
+including `partialPeriod`; the setup part is an ordinary once part and needs no further contract confirmation. The exact producer revision is recorded only in schema/SOURCE.md at 8.1.
 Unsupported terms fail closed; once-only work does not wait for unsupported rate terms.
 Sections 9–15 are round 2 (seller servicing and domain wiring); section 16 is the closeout.
 

@@ -193,8 +193,8 @@ once part's unserved share by time, and then reverses
 mandate order. Bond award stays reserved for hosted bonds. An entitled notice pays no
 penalty; a spot emergency pays it. A person applies the same capped remedy to a buyer's
 case alleging an unentitled seller end. On-demand always returns the partial period —
-that is its contract. Setup's term ends at activation, so all of it is returned when
-undelivered and none once delivered. Every other request, `buyer_end` included, goes
+that is its contract. Setup is returned in full when the seller never delivers and
+not at all once it has; a buyer's stop before activation leaves it with the seller. Every other request, `buyer_end` included, goes
 to human triage. The authority never reconciles direct seller restitution, because
 there is none.
 
