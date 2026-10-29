@@ -7,7 +7,8 @@ real client prints when it refuses a changed host key. That the real client
 prints it is OpenSSH's behaviour, not something these tests can show. The
 e2e package has no integration tier, so the subprocess boundary is crossed here,
 to the fake, as the IaC suite's shell harness crosses it. Time is a fake clock
-the session's sleep advances, so no test waits on it.
+the session's sleep and the fake's planned attempt durations advance, so no
+test waits on it.
 """
 
 from __future__ import annotations
@@ -74,6 +75,10 @@ calls = json.loads((here / "calls.json").read_text())
 calls.append(sys.argv[1:])
 (here / "calls.json").write_text(json.dumps(calls))
 step = plan[min(len(calls), len(plan)) - 1]
+if step.get("elapse"):
+    elapsed = here / "elapsed"
+    spent = float(elapsed.read_text()) if elapsed.exists() else 0.0
+    elapsed.write_text(str(spent + step["elapse"]))
 if step.get("hang"):
     import time
     time.sleep(step["hang"])
@@ -107,16 +112,28 @@ sys.exit(step.get("rc", 0))
 
 
 class Clock:
-    def __init__(self) -> None:
-        self.now = 0.0
+    """Fake time: what the session slept, plus what the fake's attempts spent.
+
+    A plan step's `elapse` is how long that attempt takes in this time, so an
+    attempt can run past a deadline without the test waiting on it.
+    """
+
+    def __init__(self, elapsed: Path) -> None:
+        self.slept = 0.0
         self.sleeps: list[float] = []
+        self._elapsed = elapsed
+
+    @property
+    def now(self) -> float:
+        spent = float(self._elapsed.read_text()) if self._elapsed.exists() else 0.0
+        return self.slept + spent
 
     def __call__(self) -> float:
         return self.now
 
     def sleep(self, seconds: float) -> None:
         self.sleeps.append(seconds)
-        self.now += seconds
+        self.slept += seconds
 
 
 @pytest.fixture
@@ -131,6 +148,7 @@ def fake_ssh(tmp_path: Path):
 
     class Fake:
         path = str(executable)
+        elapsed = bin_dir / "elapsed"
 
         @staticmethod
         def plan(*steps: dict) -> None:
@@ -144,8 +162,8 @@ def fake_ssh(tmp_path: Path):
 
 
 @pytest.fixture
-def clock() -> Clock:
-    return Clock()
+def clock(fake_ssh) -> Clock:
+    return Clock(fake_ssh.elapsed)
 
 
 @pytest.fixture
@@ -304,6 +322,57 @@ def test_access_still_accepted_at_the_bound_fails(
 def test_access_ending_within_the_bound_is_refused(session: SshSession, fake_ssh):
     fake_ssh.plan({"host_key": HOST_KEY}, {"rc": 255, "stderr": "Connection refused"})
     assert session.assert_refused(ENDPOINT, session.new_key("buyer")) == "Connection refused"
+
+
+def test_no_refusal_attempt_starts_after_the_bound(
+    session: SshSession, fake_ssh, clock: Clock
+):
+    fake_ssh.plan(
+        {"host_key": HOST_KEY, "elapse": 27},
+        {"rc": 255, "stderr": "Connection refused"},
+    )
+    with pytest.raises(SshAccessError, match="still accepted buyer after 30s"):
+        session.assert_refused(ENDPOINT, session.new_key("buyer"), bound=30)
+    assert clock.sleeps == [3]
+    assert len(fake_ssh.calls()) == 1
+
+
+def test_a_refusal_returned_after_the_bound_fails(session: SshSession, fake_ssh):
+    fake_ssh.plan({"rc": 255, "stderr": "Connection refused", "elapse": 40})
+    with pytest.raises(SshAccessError, match="only after 30s: Connection refused"):
+        session.assert_refused(ENDPOINT, session.new_key("buyer"), bound=30)
+
+
+def test_an_attempt_cut_short_by_the_bound_is_not_a_refusal(
+    tmp_path: Path, fake_ssh, clock: Clock
+):
+    """Cut to the half second left, the attempt runs out of time while still
+    connected; a full attempt's timeout would count as refused."""
+    directory = tmp_path / "short"
+    directory.mkdir(mode=0o700)
+    session = SshSession(
+        directory, ssh=fake_ssh.path, clock=clock, sleep=clock.sleep, attempt_seconds=5,
+    )
+    fake_ssh.plan({"host_key": HOST_KEY, "elapse": 24.5}, {"hang": 10})
+    with pytest.raises(SshAccessError, match="not shown to refuse buyer within 30s"):
+        session.assert_refused(ENDPOINT, session.new_key("buyer"), bound=30)
+
+
+@pytest.mark.parametrize("call", ["run", "assert_key_refused"])
+def test_no_retry_sleeps_past_the_connect_window(
+    session: SshSession, fake_ssh, clock: Clock, call: str
+):
+    fake_ssh.plan({"rc": 255, "stderr": "Connection refused", "elapse": 57})
+    key = session.new_key("buyer")
+    attempt = (
+        (lambda: session.run(ENDPOINT, key, "true"))
+        if call == "run"
+        else (lambda: session.assert_key_refused(ENDPOINT, key))
+    )
+    with pytest.raises(SshAccessError, match="within 60s: Connection refused"):
+        attempt()
+    assert clock.sleeps == [3]
+    assert len(fake_ssh.calls()) == 2
 
 
 def test_a_key_refusal_needs_the_host_to_deny_the_key(
