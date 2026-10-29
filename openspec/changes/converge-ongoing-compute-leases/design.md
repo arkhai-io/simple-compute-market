@@ -184,19 +184,12 @@ sends no stop or reverse of its own for a self-penalty. The dispute adapter maps
 intent to its interface's request; the foundation supplies `exceptional_end` among its
 intents together with mediation's request vocabulary and published mapping.
 
-Arkhai mediation's only mechanical ruling is a payee-filed self-penalty request at
-least as strong as the standard request. Through its own stop entry,
-`{account, notice: PT0S, partialPeriod: "chosen"}`, the standard request stops rate
-parts now with returned treatment, reverses rate earnings since `at`, reverses each
-once part's unserved share by time, and then reverses
-`min(premature_stop_penalty, earned amounts still held)` to the payer across parts in
-mandate order. Bond award stays reserved for hosted bonds. An entitled notice pays no
-penalty; a spot emergency pays it. A person applies the same capped remedy to a buyer's
-case alleging an unentitled seller end. On-demand always returns the partial period —
-that is its contract. Setup is returned in full when the seller never delivers and
-not at all once it has; a buyer's stop before activation leaves it with the seller. Every other request, `buyer_end` included, goes
-to human triage. The authority never reconciles direct seller restitution, because
-there is none.
+Arkhai mediation's only mechanical ruling is the standard self-penalty
+(`openspec/changes/agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`); this change proves its financial consequences in both lanes (rows 5, 8 and
+10) and restates none of its steps. A person applies the same capped remedy to a
+buyer's case alleging an unentitled seller end; every other request, `buyer_end`
+included, goes to human triage. The authority never reconciles direct seller
+restitution, because there is none.
 
 A self-penalty is one package — stop, refunds and bond — and a partial direct path
 would still need a dispute. The authority records disputes so it can act on bad
@@ -234,11 +227,8 @@ and billing runs until the stop lands. `end_delivery` is the explicit end-now-re
 command: it carries no `at`, and the storefront signs its own receipt time as evidence.
 The storefront has no authority to stop billing for the buyer and journals no
 cooperative payment stop. The exact signed request, receipt and site reports are kept
-through the foundation's ingestion and read. The buyer may additionally file
-`buyer_end(at)` with that evidence; it is human-triaged and realized as the payer's own
-stop at `at` with the payer's notice and treatment, never ruled mechanically. The case
-carries the exact Agreement, verified against the mandate's deal hash, and needs no
-payment attachment. No payee notice waiver and no payer early release is assumed.
+through the foundation's ingestion and read. The buyer's `buyer_end(at)` case is the foundation's (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-buyers-end`); this change proves it
+in row 1 and assumes no payee notice waiver and no payer early release.
 
 Operator recovery is stateless and runs through the injected adapters from a
 caller-retained command file. A seller-authenticated, read-only export of the

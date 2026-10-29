@@ -241,18 +241,11 @@ authority identity. Knowing a transaction or case ref grants no permission.
   not a fabricated empty record. Sign with the Agreement's `record_key` through the
   shared kit fixture (02 F12).
 - The only mechanical ruling is a payee-filed exceptional_end(at) request at least
-  as strong as the standard self-penalty. Restore it in the dispute adapter's intents
-  and mediation's request vocabulary and published mapping. Through mediation's own
-  `{account, notice: PT0S, partialPeriod: chosen}` stop entry, the standard request
-  stops rate parts now with returned (always returned for on-demand), reverses their
-  earnings since at, and reverses the unserved share of once parts by time. Setup is
-  owed from approval: all of it is returned if the seller never delivered, none once
-  it has. Then
-  reverse min(premature_stop_penalty, earned amounts still held) to the payer across
-  parts in mandate order. This applies to spot emergency exits too, not entitled
-  notice stops. A person applies the same cap in a buyer's unentitled-seller-end case.
-  Bond award stays reserved for hosted bonds; do not invent support or report
-  unsupported effects complete. Non-payee or weaker requests do not receive this mechanical ruling.
+  as strong as the standard self-penalty, which the mediation double applies exactly as
+  `openspec/changes/agreed-evidence-and-early-termination/design.md#the-standard-self-penalty` states, step by step, from the kit's contract vectors; the double does not
+  restate or vary the rule, invents no bond support and reports no unsupported effect
+  complete. A person applies the same cap in a buyer's unentitled-seller-end case, and
+  non-payee or weaker requests do not receive the mechanical ruling.
 - Buyer_end(at) and every other nonqualifying claim enter visible triage. A signed
   storefront acknowledgement at filing or later append is evidence for a person,
   never an automatic buyer_end ruling input. **Recommendation:** use a local

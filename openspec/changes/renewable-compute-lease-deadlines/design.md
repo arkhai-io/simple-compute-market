@@ -239,11 +239,8 @@ delivery. Delivery admission must also honor an expiry claim that wins activatio
 - Site-event-triggered refund — the foundation classifies delivery failure and
   supplies a valid command instant, with the buyer's case as backstop; reports are evidence.
 - Seller-direct exceptional-end correction or backdated payee stop — the seller
-  files a dispute, not its own stop/reverse. Mediation alone uses its own stop entry
-  to stop rate parts now returned, reverse earnings since at, return unserved once
-  shares, then the premature-stop penalty capped by earned amounts still held across
-  parts in mandate order. Bond award stays reserved for hosted bonds. On-demand always uses returned; setup is
-  owed from approval (all returned if the seller never delivered, none once it has).
+  files a dispute, not its own stop/reverse, and mediation alone applies the standard
+  self-penalty (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`).
 - Compound payment termination authority — deferred until hosted bonds are designed;
   foundation records this alternative and its required dispute-authority recording,
   not a new site capability.

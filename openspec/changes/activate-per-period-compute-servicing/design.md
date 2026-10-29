@@ -37,27 +37,18 @@ Requalify foundation's exceptional_end dispute intent, mediation request vocabul
 and published mapping. The seller half files with the Agreement dispute authority,
 journaled with the end, never future-dated. Pre-start failure journals immediately
 and files at Agreement start. Seller sends no stop/reverse for this path.
-Arkhai mediation's only mechanical ruling is a payee-filed self-penalty request at
-least as strong as standard. Through mediation's own
-`{account, notice: PT0S, partialPeriod: "chosen"}` stop entry, standard ruling stops
-rates now returned, reverses earnings since at, reverses once unserved shares by
-time, then reverses min(premature_stop_penalty, earned amounts still held) to the
-payer across parts in mandate order. Bond award stays reserved for hosted bonds. On-demand always returns the
-partial period: that is the on-demand contract. Setup is owed from approval; it returns
-in full if the seller never delivers and not at all once it has. Seller exit requires this
-complete dispute-recorded package, not direct partial restitution. The authority
-also records disputes to act on bad sellers, including bans.
+Arkhai mediation's only mechanical ruling is the standard self-penalty
+(`openspec/changes/agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`), requalified here against the hosted authority step by step and never
+restated; seller exit requires that complete dispute-recorded package, not direct
+partial restitution, and the authority records disputes to act on bad sellers,
+including bans.
 
 Seller stop entries exist only for entitlements such as spot notice; spot emergency
 exit files exceptional_end. No seller PT0S/returned restitution entry, implicit
 favourable-stop permission, payee notice waiver, payer early release or several-
 stop-entries dependency remains. On-demand non-preemption is remedied by buyer case
-over held money plus the premature-stop penalty, not by mandate enforcement. buyer_end is buyer-filed
-and human-triaged, realized as payer stop at at with payer notice and partialPeriod;
-there is no mechanical buyer_end ruling. Cases carry exact Agreement verified
-against mandate deal hash, not a required payment attachment. The storefront signs
-end_delivery receipt evidence only; the buyer half alone stops payments and keeps
-same-key retry during outage, with billing until that stop lands.
+over held money plus the premature-stop penalty, not by mandate enforcement. The buyer's end and its
+`buyer_end` case are requalified exactly as the foundation states them (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-buyers-end`).
 
 A deployment must demonstrate semantics, not merely advertise a version. Check
 vendored schema/proof/vectors through the existing SOURCE record and reuse current
@@ -151,12 +142,8 @@ a case accepted over money already paid out, reported `not_held` per part and sh
 as such (row 13). An accepted case is not recoverable money; the authority's per-part
 answer is what the buyer sees.
 
-end_delivery carries no at; the storefront signs receipt time and retains exact
-signed request/receipt as evidence, with no authority to stop billing for the buyer.
-The buyer half stops at payments first. During outage it journals/retries that stop
-under the same key; billing runs until landing. An additional buyer_end case goes
-to human triage with exact Agreement and signed evidence; no mechanical buyer_end
-ruling or cooperative seller stop exists. At funding expiry verify payment read:
+The buyer's end runs live exactly as the foundation's "The buyer's end" states it,
+with the storefront's signed receipt kept as evidence. At funding expiry verify payment read:
 renewal replaces timer, verified exhaustion is an authority end, and only
 unreachable/unverifiable evidence permits bare-timer end and later self-penalty filing.
 

@@ -31,10 +31,8 @@ lane, not a cooperative storefront masquerading as an authority.
   per-agreement records. It verifies the case's exact Agreement against the mandate
   hash without requiring an attachment and extends holds. Exceptional_end(at) is a
   journaled seller-half dispute filing, never seller stop/reverse calls. Its sole
-  mechanical rule is a payee request at least as strong as standard self-penalty:
-  mediation's PT0S/chosen entry stops rates now returned, reverses earnings since at
-  and unserved once share by time (setup all before activation, none after), and
-  then reverses min(premature_stop_penalty, earned amounts still held) to payer across parts in mandate order; bond award stays reserved for hosted bonds. On-demand self-penalty is always returned.
+  mechanical rule is the foundation's standard self-penalty
+  (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`), applied as stated there.
   Buyer_end remains a person's triage case with payer notice/treatment; signed
   acknowledgements never trigger a mechanical buyer ruling. Only the authority
   applies dispute effects and nets agreement-wide prior remedies. Filings never

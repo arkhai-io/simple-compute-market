@@ -98,11 +98,11 @@ On-demand has no payee stop entry. The mandate therefore does not enforce that t
 won't preempt; that is enforced by the penalty and a buyer's case over held money, not by the mandate.
 The seller's own exit is `exceptional_end(at)`, a dispute filing the seller half journals with
 the end and files with the dispute authority; the seller sends no stop or reverse of its own.
-Arkhai mediation rules a payee-filed request at least as strong as the standard one
-mechanically: stop rate parts now returned (always returned on on-demand), reverse earnings
-since at and each once part's unserved time share, setup all if undelivered and none after
-activation, then reverse min(premature_stop_penalty, earned amounts still held) across parts in mandate order. Bond award stays reserved for hosted bonds. A buyer contesting the account files a case; mediation
-triages every other case, including buyer_end, for a person. There is no compensation enum.
+Arkhai mediation rules a payee-filed request at least as strong as the standard
+self-penalty mechanically (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`); the terms this change publishes are what that
+ruling reads — the penalty, the on-demand returned treatment, the setup charge — and
+the display explains them against it (D7). A buyer contesting the account files a case;
+mediation triages every other case, including buyer_end, for a person. There is no compensation enum.
 Entitled rate stops follow the committed per-stopper `settles_through`, computed by the
 payment authority, not a later storefront refund or promise to prorate every end.
 
@@ -261,13 +261,9 @@ remedy after that.
 Holds last through stop plus dispute window and accepted case extensions. Keep
 signed evidence through at least the window after the latest delivery end, last
 payout or case close. Sellers file exceptional_end for failed/non-started delivery;
-the buyer's stop/case is its backstop. Normal buyer end submits payment-authority stop then a hint: nonzero notice keeps
-service until the effective stop is watched. `end_delivery` means end now regardless;
-it has no at and the storefront records/signs its own receipt. The storefront cannot stop
-billing for the buyer: the buyer half stops at the payment authority first and, if it is
-unreachable, journals the stop and retries under one key while billing runs. The buyer may
-also file buyer_end(at), human-triaged with kept evidence, preserving notice/treatment and
-netting recorded stops. The setup charge is
+the buyer's stop/case is its backstop. The buyer's end — stop first, hint, `end_delivery` as end-now, the journaled retry while
+billing runs, the person-ruled `buyer_end(at)` — is the foundation's (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-buyers-end`); the display
+explains each step as that statement gives it. The setup charge is
 owed from approval and kept if the buyer stops; it returns only if the seller never
 delivers.
 

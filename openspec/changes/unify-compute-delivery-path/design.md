@@ -217,15 +217,9 @@ atomically. Delivery writes no second end log and computes no amounts or payment
 corrections.
 
 `end_delivery` carries no `at`; the storefront signs its receipt time as evidence.
-It grants the storefront no authority to stop billing for the buyer. The buyer half
-first stops at the payment authority under its own entitlement; if the authority is
-unreachable it journals that stop and retries under the same key, and billing
-continues until the stop lands. The buyer may additionally file `buyer_end` with
-the signed request and receipt; that case carries the exact Agreement verified
-against the mandate's deal hash, goes to a person in triage, and is realized as the
-payer's own stop at `at` with the payer's notice and `partialPeriod`. There is no
-mechanical `buyer_end` ruling. Delivery consumes the foundation's evidence and
-admission result, not a second policy.
+It grants the storefront no authority to stop billing for the buyer; the buyer's stop,
+retry and `buyer_end` case are the foundation's (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-buyers-end`). Delivery consumes the
+foundation's evidence and admission result, not a second policy.
 
 | Observed evidence before availability | Authority-backed cause input | Caller handoff |
 |---|---|---|
@@ -257,19 +251,11 @@ Physical recovery does not wait for authorities. The seller half files
 adapter, journaled with the end, and sends no stop or reverse of its own, so the
 authority never reconciles seller-side effects.
 
-Arkhai mediation's only mechanical ruling is a payee-filed self-penalty request at
-least as strong as the standard request. Through mediation's own stop entry
-`{account, notice: PT0S, partialPeriod: "chosen"}`, the standard request stops rate
-parts now with `returned`, reverses their earnings since `at`, returns the unserved
-share of once parts by time, then reverses `min(premature_stop_penalty, earned
-amounts still held)` to the payer across parts in mandate order; a bond award is
-reserved for hosted bonds. On-demand always uses `returned`: that is its contract.
-Setup is owed from approval, so it returns wholly if the seller never delivered and
-not at all once it has. These are dispute-authority rules the foundation and mediation own,
-never amounts or payment operations for delivery to implement. The package of stop,
-refunds and capped penalty needs one ruling; a partial seller-direct path would
-still need a dispute, and the authority records disputes so it can act on bad
-sellers. On-demand's "won't preempt" is enforced by remedy — the buyer's case over
+Arkhai mediation's only mechanical ruling is the standard self-penalty
+(`openspec/changes/agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`): dispute-authority rules the foundation and mediation own, never amounts or
+payment operations for delivery to implement. The package needs one ruling; a partial
+seller-direct path would still need a dispute, and the authority records disputes so
+it can act on bad sellers. On-demand's "won't preempt" is enforced by remedy — the buyer's case over
 held money and the premature-stop penalty — not by mandate restriction; the seller's
 own exit is this mechanically ruled self-penalty. Seller stop entries represent
 entitlements only, such as spot's notice entry; a spot seller's emergency exit is

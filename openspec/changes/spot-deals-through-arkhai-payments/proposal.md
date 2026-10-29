@@ -77,11 +77,8 @@ continuation is a separate, dependent change.
 - A seller's `exceptional_end(at)` is journaled and filed through the dispute
   adapter to the Agreement's dispute authority, never future-dated: a pre-start
   failure journals at once and files at the Agreement start, and the seller sends
-  no stop or reverse. Mediation's one mechanical ruling applies: an at-least-standard
-  payee self-penalty of `returned` rate stops now, reversal of earnings since `at`,
-  reversal of the time-unserved `once` shares (all of setup before delivery, none
-  after), then the premature-stop penalty capped by the earned amounts still held,
-  across parts in mandate order; bond award is reserved. The adapter consumes the
+  no stop or reverse. Mediation's one mechanical ruling, the standard self-penalty
+  (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`), applies. The adapter consumes the
   foundation's dispute intent, request vocabulary and published mapping, and
   neither calculates nor partially applies the package.
 - Service-identity overlap and re-anchoring run through the foundation's
