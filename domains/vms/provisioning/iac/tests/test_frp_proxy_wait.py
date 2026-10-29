@@ -11,9 +11,17 @@ is lowered and its delay removed, so a case that never becomes ready ends in
 seconds; nothing else in it is changed. Nothing runs on any host but this one,
 over a local connection.
 
-The image's Ansible is `ansible-core>=2.17,<2.20`; with none of those on
-`PATH`, the tests are skipped and say so. Whether a real client registers a
-real proxy is the live VM lane's evidence.
+They need an `ansible-playbook` of ansible-core 2.17 to 2.19, the image's
+`ansible-core>=2.17,<2.20`, and, installed for that same Ansible, the
+`ansible.posix` collection's `json` callback, which reports each task's result
+and is not part of ansible-core; the image installs the collection beside it.
+Without either, the tests are skipped, saying which is missing. Nothing is
+installed for them.
+
+They are integration tests in `docs/development/TESTING.md`'s sense: the real
+Ansible engine and `uri` module run the shipped task, with a controlled stand-in
+only at the HTTP boundary the task calls. Whether a real client registers a real
+proxy is the live VM lane's evidence.
 
 Every address and name here is a documentation or synthetic fixture value,
 never to be used on a public network.
@@ -49,17 +57,51 @@ READY = {"tcp": [{
 }]}
 
 
-def _supported_ansible_playbook() -> str | None:
-    path = shutil.which("ansible-playbook")
-    if path is None:
-        return None
+#: The stdout callback whose report the tests read. It is the ansible.posix
+#: collection's; ansible-core's own `ansible.builtin.json` name only redirects
+#: to it.
+CALLBACK = "ansible.posix.json"
+
+
+def _ansible_env() -> dict[str, str]:
+    """The caller's environment less every Ansible setting but where collections
+    are found, so no user configuration changes the task or its report."""
+    keep = {"ANSIBLE_COLLECTIONS_PATH", "ANSIBLE_COLLECTIONS_PATHS"}
+    return {k: v for k, v in os.environ.items() if not k.startswith("ANSIBLE_") or k in keep}
+
+
+def _ansible() -> tuple[str | None, str]:
+    """The ``ansible-playbook`` the tests run, or ``None`` and why they cannot."""
+    playbook = shutil.which("ansible-playbook")
+    if playbook is None:
+        return None, "no ansible-playbook on PATH; these tests need ansible-core 2.17 to 2.19"
     version = subprocess.run(
-        [path, "--version"], capture_output=True, text=True, check=False
+        [playbook, "--version"], capture_output=True, text=True, check=False
     ).stdout
-    return path if re.search(r"core 2\.(1[7-9])\.", version) else None
+    if not re.search(r"core 2\.(1[7-9])\.", version):
+        return None, f"{playbook} is not ansible-core 2.17 to 2.19, the image's Ansible"
+    # Asked of the same installation, in the environment the tests run in.
+    doc = Path(playbook).with_name("ansible-doc")
+    found = False
+    if doc.is_file():
+        with tempfile.TemporaryDirectory() as work:
+            probe = subprocess.run(
+                [str(doc), "-j", "-t", "callback", CALLBACK],
+                cwd=work, env=_ansible_env(), capture_output=True, text=True, check=False,
+            )
+        try:
+            found = CALLBACK in json.loads(probe.stdout or "{}")
+        except ValueError:
+            found = False
+    if not found:
+        return None, (
+            f"the {CALLBACK} callback, from the ansible.posix collection, is not "
+            f"installed for {playbook}"
+        )
+    return playbook, ""
 
 
-ANSIBLE_PLAYBOOK = _supported_ansible_playbook()
+ANSIBLE_PLAYBOOK, UNAVAILABLE = _ansible()
 
 
 class _Peer:
@@ -121,8 +163,8 @@ def _wait(port: int) -> dict:
         playbook = Path(work) / "wait.yml"
         playbook.write_text(yaml.safe_dump(play, sort_keys=False), encoding="utf-8")
         env = {
-            **{k: v for k, v in os.environ.items() if not k.startswith("ANSIBLE_")},
-            "ANSIBLE_STDOUT_CALLBACK": "ansible.builtin.json",
+            **_ansible_env(),
+            "ANSIBLE_STDOUT_CALLBACK": CALLBACK,
             "ANSIBLE_LOCALHOST_WARNING": "false",
             "ANSIBLE_NOCOLOR": "true",
         }
@@ -130,7 +172,10 @@ def _wait(port: int) -> dict:
             [ANSIBLE_PLAYBOOK, "-i", "localhost,", str(playbook)],
             cwd=work, env=env, capture_output=True, text=True, timeout=120, check=False,
         )
-    report = json.loads(run.stdout[run.stdout.index("{"):])
+    start = run.stdout.find("{")
+    if start < 0:
+        raise AssertionError(f"ansible-playbook printed no report:\n{run.stderr[-2000:]}")
+    report = json.loads(run.stdout[start:])
     (result,) = [
         task["hosts"]["localhost"]
         for play in report["plays"] for task in play["tasks"]
@@ -139,10 +184,7 @@ def _wait(port: int) -> dict:
     return result
 
 
-@unittest.skipIf(
-    ANSIBLE_PLAYBOOK is None,
-    "needs an ansible-playbook of ansible-core 2.17 to 2.19 on PATH, the image's Ansible",
-)
+@unittest.skipIf(ANSIBLE_PLAYBOOK is None, UNAVAILABLE)
 class TestTheProxyWait(unittest.TestCase):
     def assert_ready(self, result: dict) -> None:
         self.assertFalse(result.get("failed"), result.get("msg"))

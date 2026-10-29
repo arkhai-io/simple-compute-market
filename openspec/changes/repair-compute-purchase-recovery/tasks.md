@@ -3376,6 +3376,9 @@ pointer from each note they correct.
       It is skipped, saying why, unless an ansible-core 2.17 to 2.19
       `ansible-playbook` is on `PATH`; the workstation's is 2.10.8. Fixture
       addresses and names are documentation values.
+      Correction (14.16): the core range is not enough; the report it reads needs
+      the `ansible.posix` collection's `json` callback, which the test now
+      requires too. Its level is integration.
 
       Evidence, each with isolated ansible-core 2.17.14 and 2.19.14 outside the
       repository first on `PATH`:
@@ -3397,6 +3400,51 @@ pointer from each note they correct.
       Owed by validation: the IaC suite with a supported ansible-core on `PATH`,
       or these seven tests are skipped. A real client's proxy coming up, and
       buyer access through the relay, stay the live VM lane's evidence.
+- [x] 14.16 S4: `tests/test_frp_proxy_wait.py` names the callback it reads, and is
+      skipped, saying so, when the Ansible it would run cannot load it.
+
+      The supervising session accepted it under the owner's delegated judgement.
+      The test set `ANSIBLE_STDOUT_CALLBACK=ansible.builtin.json`, a name
+      ansible-core only redirects to `ansible.posix.json`, a callback of the
+      `ansible.posix` collection, which ansible-core does not ship. With ansible-core
+      2.17 or 2.19 and no collection installed, as under an empty home directory,
+      the test was not skipped: its plain-text ready case failed parsing the
+      report, a `ValueError`, instead of saying what the environment lacked. The
+      service image installs `ansible.posix` from the IaC's `requirements.yml`, so
+      no runtime or package changes.
+
+      Done, in the test alone:
+      - it sets `ANSIBLE_STDOUT_CALLBACK=ansible.posix.json`;
+      - before running anything it asks the same installation's `ansible-doc`
+        for that callback, in the environment the tests run in, and skips naming
+        the callback, its collection, and the `ansible-playbook` when it is not
+        found; a missing or unsupported `ansible-playbook` is skipped by name as
+        before. Nothing is installed or configured for it;
+      - every Ansible call runs with the caller's environment less its Ansible
+        settings, but for the collection paths, which decide where the callback
+        is found;
+      - a run that prints no report fails naming Ansible's error output;
+      - its docstring states both prerequisites and its level, integration in
+        `docs/development/TESTING.md`'s sense: the real Ansible engine and `uri`
+        module run the shipped task, with a controlled stand-in only at the HTTP
+        boundary. The cases and their assertions are unchanged.
+
+      Evidence:
+      - **Red**, `5a8711297`'s test under an empty home directory with
+        ansible-core 2.19.14: the plain-text ready case fails with `ValueError`.
+      - With the collection installed: 7 passed, 13 subtests, on 2.17.14 and on
+        2.19.14.
+      - Under an empty home directory, on each version: 7 skipped, naming
+        `ansible.posix.json` and the `ansible-playbook`. On the workstation's
+        `PATH`: 7 skipped, naming its ansible 2.10.8 as unsupported.
+      - The IaC suite: 134 passed and 15 subtests with either version on `PATH`;
+        under the default `make -C domains/vms/provisioning/iac test`, 127 passed
+        and 7 skipped.
+      - `make check-change` and `make check-comment-hygiene`: passed. No
+        production file, version, or lock changed.
+
+      Owed by validation: the IaC suite with a supported ansible-core and
+      `ansible.posix` installed for it, or these seven tests are skipped.
 
 ## 15. Closeout
 
@@ -3483,9 +3531,10 @@ change to implementation.
         role's task files, a capacity check's included, through the parse-only
         `vm-management-task-files.yaml`, since a syntax check does not follow
         `include_tasks`; it renders no Jinja and runs nothing (14.8, 14.14);
-        and `tests/test_frp_proxy_wait.py` runs the relay proxy wait through a
-        real `ansible-playbook` when ansible-core 2.17 to 2.19 is on `PATH`, and
-        is skipped otherwise (14.15).
+        and `tests/test_frp_proxy_wait.py`, an integration test, runs the relay
+        proxy wait through a real `ansible-playbook` when ansible-core 2.17 to
+        2.19 and the `ansible.posix` collection's `json` callback are installed,
+        and is skipped otherwise, saying which is missing (14.15, 14.16).
       - `docs/development/DEPLOYMENT_AND_CONFIG.md` "Definition documents", the
         host-inventory paragraph: `public_port=`; every `ssh` host connection,
         through the API or an inventory, at version 2; and a host stored at version
