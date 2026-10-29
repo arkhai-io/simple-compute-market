@@ -195,6 +195,15 @@ checks your understanding here before reading anything that rests on it. Then:
    a recorded reason to stay local
    (`openspec/README.md#plan-closeout-requirements`, parts 1 and 2).
 4. **`readiness`** — Is the change ready for promotion and closeout?
+5. **`consistency`**, after the merge before closeout — when the workflow log's last
+   run before this review is a `merge` run, the merge of the branch the change
+   lands on sent the change back to this review because it changed what the change
+   does. Read its report and its commits
+   since the previous pre-closeout review (`git log --first-parent`), and the merge
+   commit's own resolution (`git show --remerge-diff <merge>`): does each conflict's
+   resolution keep the change's behaviour as its sections built it and the merged
+   branch's as its commits made it, and does any code or end-to-end scenario the
+   change added still use what that branch renamed, removed, or changed in meaning?
 
 ### Closeout review
 

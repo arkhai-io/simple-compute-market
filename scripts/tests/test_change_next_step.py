@@ -777,10 +777,28 @@ def test_the_last_planned_round_advancing_goes_to_the_pre_closeout_review(
     assert (validated["step"], validated["kind"]) == ("review", "pre-closeout")
 
 
-def test_a_pre_closeout_triage_that_advances_goes_to_closeout_once_head_is_validated(
+def _merged(root: Path, *, to: dict | None = None, reviewed: str = HEAD,
+            validated: str = "e" * 40) -> dict:
+    """A pre-closeout triage that advanced to the merge, and the merge's run naming
+    `to`, closeout by default."""
+    _pre_closeout(root, to=_to("merge"), reviewed=reviewed, validated=validated)
+    return _log(root, "merge", _done(to or _to("closeout")))
+
+
+def test_a_pre_closeout_triage_that_advances_merges_dev_unvalidated(tmp_path: Path) -> None:
+    """The merge's own exits validate `HEAD`, which holds the triage's fixes."""
+    root = _repository(tmp_path, "in implementation")
+    _pre_closeout(root, to=_to("merge"), reviewed="e" * 40)
+
+    result = _next(root)
+
+    assert result["step"] == "merge" and "no run of it is logged" in result["reason"]
+
+
+def test_a_merge_that_advances_goes_to_closeout_once_the_merged_head_is_validated(
         tmp_path: Path) -> None:
     root = _repository(tmp_path, "in implementation")
-    _pre_closeout(root, to=_to("closeout"), reviewed=HEAD)
+    _merged(root)
 
     unvalidated = _next(root)
     _record(root, "04-validation.md", text=_validation(HEAD))
@@ -791,10 +809,89 @@ def test_a_pre_closeout_triage_that_advances_goes_to_closeout_once_head_is_valid
     assert validated["step"] == "closeout"
 
 
+def test_a_failed_validation_of_the_merged_head_returns_to_the_merge(tmp_path: Path) -> None:
+    """The merge holds what each side changed, so it repairs what the validation
+    found; an inconclusive validation is missing evidence, the owner's."""
+    root = _repository(tmp_path, "in implementation")
+    _merged(root)
+    _record(root, "04-validation.md", text=_validation(HEAD, "failed"))
+    _log(root, "validate", _done(_to("closeout")))
+
+    failed = _next(root)
+    _record(root, "05-validation.md", text=_validation(HEAD, "inconclusive"))
+    inconclusive = _next(root)
+
+    assert (failed["step"], failed["validation"]) == ("merge", "failed")
+    assert failed["target"] == {"step": "closeout"} and "04-validation.md" in failed["reason"]
+    assert (inconclusive["step"], inconclusive["validation"]) == ("owner", "inconclusive")
+
+
+def test_a_merge_meriting_review_is_validated_then_reviewed_again(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _merged(root, to=_to("review", "pre-closeout"))
+
+    unvalidated = _next(root)
+    _record(root, "04-validation.md", text=_validation(HEAD))
+    _log(root, "validate", _done(_to("review", "pre-closeout")))
+    validated = _next(root)
+    _record(root, "05-validation.md", text=_validation(HEAD, "failed"))
+    failed = _next(root)
+
+    assert (unvalidated["step"], unvalidated["target"]) == (
+        "validate", {"step": "review", "kind": "pre-closeout"})
+    assert (validated["step"], validated["kind"]) == ("review", "pre-closeout")
+    assert failed["step"] == "merge"
+
+
+def test_a_pre_closeout_review_of_the_merge_advances_to_the_merge_again(
+        tmp_path: Path) -> None:
+    """Its triage advances to the merge, which finds the branch the change lands on
+    merged, or merges what it gained since."""
+    root = _repository(tmp_path, "in implementation")
+    _merged(root, to=_to("review", "pre-closeout"))
+    _record(root, "04-validation.md", text=_validation(HEAD))
+    _log(root, "validate", _done(_to("review", "pre-closeout")))
+    _review(root, "05-pre-closeout.md", reviewed=HEAD)
+    _triage(root, "05-pre-closeout.md", to=_to("merge"))
+
+    assert _next(root)["step"] == "merge"
+
+
+def test_a_merge_takes_only_the_exits_its_node_declares(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _merged(root, to=_to("review", "implementation"))
+
+    result = _next(root)
+
+    assert result["step"] == "owner" and set(result["exits"]) == {
+        "closeout", "review:pre-closeout", "plan", "design"}
+
+
+def test_the_merge_proposing_a_return_waits_for_the_owner(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _pre_closeout(root, to=_to("merge"), reviewed=HEAD)
+    returned = _log(root, "merge", _returned(_to("plan")))
+
+    waiting = _next(root)
+    _direct(root, "plan", "return to planning confirmed", resolves=returned["seq"])
+
+    assert (waiting["step"], waiting["seq"]) == ("owner", returned["seq"])
+    assert _next(root)["step"] == "plan"
+
+
+def test_a_pre_closeout_triage_no_longer_goes_straight_to_closeout(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _pre_closeout(root, to=_to("closeout"), reviewed=HEAD, validated=HEAD)
+
+    result = _next(root)
+
+    assert result["step"] == "owner" and "merge" in result["exits"]
+
+
 def test_a_validation_naming_another_exit_than_its_target_goes_to_the_owner(
         tmp_path: Path) -> None:
     root = _repository(tmp_path, "in implementation")
-    _pre_closeout(root, to=_to("closeout"), reviewed=HEAD)
+    _merged(root)
     _record(root, "04-validation.md", text=_validation(HEAD))
     _log(root, "validate", _done(ROUND_TRIAGE))
 
@@ -810,10 +907,10 @@ DOCUMENTS = ["openspec/changes/README.md", f"openspec/changes/{CHANGE}/specs/x/s
              "docs/agents/change-workflow.md"]
 
 
-def test_a_pre_closeout_triages_document_commit_goes_to_closeout_unvalidated(
+def test_a_merge_bringing_only_documents_goes_to_closeout_unvalidated(
         tmp_path: Path) -> None:
     root = _repository(tmp_path, "in implementation")
-    _pre_closeout(root, to=_to("closeout"), reviewed="e" * 40)
+    _merged(root, reviewed="e" * 40)
 
     assert _next(root, changed=DOCUMENTS)["step"] == "closeout"
     assert _next(root, changed=DOCUMENTS + FIX)["step"] == "validate"
@@ -1113,8 +1210,8 @@ def test_the_owner_may_direct_a_repeat_review_with_no_fix(tmp_path: Path) -> Non
 # Closeout.
 
 def _to_closeout(root: Path) -> None:
-    """A pre-closeout triage that chose closeout, `HEAD` validated."""
-    _pre_closeout(root, to=_to("closeout"), reviewed=HEAD, validated=HEAD)
+    """A merge after the pre-closeout triage that chose closeout, `HEAD` validated."""
+    _merged(root, validated=HEAD)
 
 
 def test_closeout_not_yet_archived_continues(tmp_path: Path) -> None:
@@ -1165,14 +1262,14 @@ def test_an_archived_change_is_done(tmp_path: Path) -> None:
 
 def test_the_owner_directs_past_a_guard(tmp_path: Path) -> None:
     root = _repository(tmp_path, "in implementation")
-    _pre_closeout(root, to=_to("closeout"), reviewed=HEAD)
-    _record(root, "04-validation.md", text=_validation(HEAD, "failed"))
+    _merged(root)
+    _record(root, "04-validation.md", text=_validation(HEAD, "inconclusive"))
 
     failed = _next(root)
     _direct(root, "closeout", "closeout despite the validation")
     directed = _next(root)
 
-    assert (failed["step"], failed["validation"]) == ("owner", "failed")
+    assert (failed["step"], failed["validation"]) == ("owner", "inconclusive")
     assert directed["step"] == "closeout"
 
 
@@ -1673,6 +1770,24 @@ def test_a_merge_in_progress_comes_before_an_open_view_and_the_clone(tmp_path: P
     assert result["step"] == "owner" and result["merging"]
 
 
+def test_a_merge_step_asking_about_a_conflict_is_named_with_its_merge_in_progress(
+        tmp_path: Path) -> None:
+    """Its merge stays in progress for the answer, which resumes the run by its seq."""
+    root = _repository(tmp_path, "in implementation")
+    _pre_closeout(root, to=_to("merge"), reviewed=HEAD)
+    asked = _log(root, "merge", {"outcome": "question", "message": "Which side holds?",
+                                 "awaiting": "the owner's ruling on scripts/x.py"})
+
+    waiting = _next(root, merging=lambda _: True)
+    _decide(root, "the owner ruled on scripts/x.py", resolves=asked["seq"])
+    resolved = _next(root, merging=lambda _: True)
+
+    assert (waiting["step"], waiting["seq"], waiting["merging"]) == ("owner", asked["seq"], True)
+    assert waiting["resume"] == "merge" and "Which side holds?" in waiting["reason"]
+    assert (resolved["step"], resolved["merging"]) == ("owner", True)
+    assert "seq" not in resolved
+
+
 def _commit_all(repo: Path, message: str = "commit") -> str:
     _git(repo, "add", "--all")
     _git(repo, "commit", "-q", "-m", message)
@@ -1986,12 +2101,12 @@ def test_a_design_triages_denials_are_read_before_planning_starts(tmp_path: Path
     assert read["step"] == "plan"
 
 
-def test_a_pre_closeout_triages_denials_are_read_before_closeout_starts(
+def test_a_pre_closeout_triages_denials_are_read_before_the_merge_starts(
         tmp_path: Path) -> None:
-    root = _repository(tmp_path, "ready for closeout", tasks=ALL_WORK_DONE)
+    root = _repository(tmp_path, "in implementation", tasks=ALL_WORK_DONE)
     _triaged_round(root, to=_to("review", "pre-closeout"))
     _review(root, "03-pre-closeout.md", reviewed=HEAD)
-    run = _log(root, "triage", _done(_to("closeout"), triaged=["03-pre-closeout"],
+    run = _log(root, "triage", _done(_to("merge"), triaged=["03-pre-closeout"],
                                      denials=[{"tool_name": "Bash"}]))
     _record(root, "03-pre-closeout.md", triage="Closeout.", reviewed=HEAD)
 
@@ -2000,7 +2115,7 @@ def test_a_pre_closeout_triages_denials_are_read_before_closeout_starts(
     read = _next(root)
 
     assert (unread["step"], unread["seq"]) == ("owner", run["seq"])
-    assert read["step"] == "closeout"
+    assert read["step"] == "merge"
 
 
 def test_a_stopped_design_run_with_denials_holds_until_a_line_resolves_it(

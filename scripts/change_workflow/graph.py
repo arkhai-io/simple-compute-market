@@ -7,10 +7,11 @@ a design review has other exits than a closeout review, and so has the triage of
 each. An exit names the node it leads to, and is taken only once every guard on it
 holds; an unmet guard names its remedy — a node whose step satisfies it, or the
 owner where no step can — and some name the owner when their remedy has run and
-could not satisfy them, as a validation of `HEAD` that failed. A join is the set of
-records an exit waits for: the round's triage waits for its sections, the owner's
-reading, its validation, and its implementation review, each supplied by a step of
-its own.
+could not satisfy them, as a validation of `HEAD` that failed, or the step that
+repairs what it found, as the merge does a failed validation of the merged `HEAD`.
+A join is the set of records an exit waits for: the round's triage waits for its
+sections, the owner's reading, its validation, and its implementation review, each
+supplied by a step of its own.
 
 `scripts/change_next_step.py` interprets the table: it reads the exit the last
 step's outcome named, or the owner's direction, from the change's log, checks it
@@ -95,8 +96,8 @@ class Readings(Protocol):
     review is that computation's record of one, read for its file and its triage
     file's names; a run is a line of the workflow log."""
 
-    def validated(self, why: str,
-                  exempt: Callable[[str], bool] = is_record) -> Result | None: ...
+    def validated(self, why: str, exempt: Callable[[str], bool] = is_record,
+                  failed: Node | None = None) -> Result | None: ...
 
     def fixed_since(self, review: Any, exempt: Callable[[str], bool] = is_record) -> bool: ...
 
@@ -197,6 +198,10 @@ IMPLEMENTATION_REVIEW = Node("review", "implementation")
 IMPLEMENTATION_TRIAGE = Node("triage", "implementation")
 PRE_CLOSEOUT_REVIEW = Node("review", "pre-closeout")
 PRE_CLOSEOUT_TRIAGE = Node("triage", "pre-closeout")
+# Brings the branch the change lands on into its own once its implementation is
+# reviewed, so the validation before closeout tests the change with what it will
+# merge into.
+MERGE = Node("merge")
 CLOSEOUT = Node("closeout")
 CLOSEOUT_REVIEW = Node("review", "closeout")
 CLOSEOUT_TRIAGE = Node("triage", "closeout")
@@ -220,8 +225,11 @@ def _return_confirmed(readings: Readings, context: Context) -> Result | None:
                  "the run and directs the step returned to, or decides what follows")
 
 
-def _validated(why: str, exempt: Callable[[str], bool] = is_record) -> Check:
-    return lambda readings, _: readings.validated(why, exempt)
+def _validated(why: str, exempt: Callable[[str], bool] = is_record,
+               failed: Node | None = None) -> Check:
+    """`HEAD` validated; a validation of it that failed names `failed`, when given,
+    rather than the owner."""
+    return lambda readings, _: readings.validated(why, exempt, failed)
 
 
 def _fix_validated(exempt: Callable[[str], bool]) -> Check:
@@ -261,6 +269,7 @@ def _correction_validated(readings: Readings, context: Context) -> Result | None
 
 
 VALIDATION_FAILED = "failed or inconclusive: owner"
+MERGE_VALIDATION_FAILED = "failed: merge, inconclusive: owner"
 
 PLANNING_RELEASED = Guard("a dependency gating planning released", OWNER)
 IMPLEMENTATION_RELEASED = Guard("a dependency gating implementation released", OWNER)
@@ -275,10 +284,17 @@ ROUND_FIX_VALIDATED = Guard("the fix commit validated, records exempt", VALIDATE
 REPEAT_FIX_READ = Guard("a fix committed since the review read", ROUND_VIEW, check=_fix_read)
 REPEAT_FIX_VALIDATED = Guard("a fix committed since the review validated", VALIDATE,
                              VALIDATION_FAILED, _fix_validated(is_record))
-CLOSEOUT_VALIDATED = Guard("HEAD validated, openspec/ and docs/ exempt", VALIDATE,
-                           VALIDATION_FAILED,
-                           _validated("closeout needs a passing validation of HEAD",
-                                      is_documentation))
+# The merged `HEAD`: a validation of it that failed found what the merge broke,
+# which the merge step repairs, since it holds what each side changed; an
+# inconclusive one is missing evidence, the owner's to settle.
+MERGE_VALIDATED = Guard("the merged HEAD validated, openspec/ and docs/ exempt", VALIDATE,
+                        MERGE_VALIDATION_FAILED,
+                        _validated("closeout needs a passing validation of the merged HEAD",
+                                   is_documentation, failed=MERGE))
+MERGE_REVIEW_VALIDATED = Guard("the merged HEAD validated, records exempt", VALIDATE,
+                               MERGE_VALIDATION_FAILED,
+                               _validated("a pre-closeout review of the merge needs a passing "
+                                          "validation of HEAD", failed=MERGE))
 DOCUMENTED_FIX_VALIDATED = Guard("a fix outside openspec/ and docs/ validated", VALIDATE,
                                  VALIDATION_FAILED, _fix_validated(is_documentation))
 CORRECTION_VALIDATED = Guard("a path outside openspec/ and docs/ changed since the first "
@@ -366,11 +382,21 @@ _STEPS = (
              Exit(DESIGN, (RETURN_CONFIRMED,), RETURN), entry=(AWAITS_TRIAGE,)),
     _declare(PRE_CLOSEOUT_REVIEW, ("implementation",), Exit(PRE_CLOSEOUT_TRIAGE),
              entry=(REVIEW_VALIDATED,)),
+    # The triage's fixes need no validation of their own before the merge: each of
+    # the merge's exits validates `HEAD`, which holds them.
     _declare(PRE_CLOSEOUT_TRIAGE, ("implementation",),
-             Exit(CLOSEOUT, (CLOSEOUT_RELEASED, CLOSEOUT_VALIDATED), ADVANCE),
+             Exit(MERGE, when=ADVANCE),
              Exit(PRE_CLOSEOUT_REVIEW, (DOCUMENTED_FIX_VALIDATED,), ANOTHER_ROUND),
              Exit(PLAN, (RETURN_CONFIRMED,), RETURN),
              Exit(DESIGN, (RETURN_CONFIRMED,), RETURN), entry=(AWAITS_TRIAGE,)),
+    # The merge proposes whether its resolutions merit another pre-closeout review;
+    # a review round takes the owner's confirmation, given to the merge's question,
+    # and a waived validation the owner's direction past its guard.
+    _declare(MERGE, ("implementation",),
+             Exit(CLOSEOUT, (CLOSEOUT_RELEASED, MERGE_VALIDATED), ADVANCE),
+             Exit(PRE_CLOSEOUT_REVIEW, (MERGE_REVIEW_VALIDATED,), ANOTHER_ROUND),
+             Exit(PLAN, (RETURN_CONFIRMED,), RETURN),
+             Exit(DESIGN, (RETURN_CONFIRMED,), RETURN), entry=(NOT_ARCHIVED,)),
     # Closeout has no archive guard: it is the step that archives.
     _declare(CLOSEOUT, ("closeout",), Exit(CLOSEOUT_REVIEW)),
     _declare(CLOSEOUT_REVIEW, ("closeout",), Exit(CLOSEOUT_TRIAGE), entry=(ARCHIVED,)),

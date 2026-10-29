@@ -407,6 +407,15 @@ def test_a_step_target_is_interactive_unless_unattended(
         f"python3 scripts/run_change_step.py {unattended}"]
 
 
+@pytest.mark.parametrize("variables,branch", [((), "dev"), (("FROM=release/2.1",), "release/2.1")])
+def test_the_merge_target_names_the_branch_it_merges_dev_by_default(
+        variables: tuple[str, ...], branch: str) -> None:
+    assert _make_n("merge", "CHANGE=X", *variables) == [
+        f'claude "/change-merge X from {branch}"']
+    assert _make_n("merge", "CHANGE=X", *variables, "UNATTENDED=1") == [
+        f"python3 scripts/run_change_step.py run merge \"X\" --arguments 'from {branch}'"]
+
+
 @pytest.mark.parametrize("variable,interactive,unattended", [
     ("SECTION=2", "section 2", '--sections "2"'),
     ("SECTIONS=1-3", "sections 1-3", '--sections "1-3"'),

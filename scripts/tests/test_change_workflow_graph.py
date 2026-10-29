@@ -164,8 +164,27 @@ def test_a_return_and_another_round_are_chosen_among_a_triages_exits() -> None:
         graph.PRE_CLOSEOUT_REVIEW]
 
 
+def test_the_merge_follows_the_pre_closeout_triage_and_leads_to_closeout() -> None:
+    """Closeout is reached only through the merge, whose exits each validate the
+    merged `HEAD` and send a failed validation back to it."""
+    assert [e.target for e in graph.exits(graph.PRE_CLOSEOUT_TRIAGE,
+                                          when=graph.ADVANCE)] == [graph.MERGE]
+    into_closeout = [d.node for d in TABLE if d.node != graph.VALIDATE
+                     for e in d.exits if e.target == graph.CLOSEOUT]
+    assert into_closeout == [graph.MERGE]
+    merge = {e.target: e for e in graph.NODES[graph.MERGE].exits}
+    assert set(merge) == {graph.CLOSEOUT, graph.PRE_CLOSEOUT_REVIEW, graph.PLAN, DESIGN}
+    assert merge[graph.PRE_CLOSEOUT_REVIEW].when == graph.ANOTHER_ROUND
+    for target in (graph.CLOSEOUT, graph.PRE_CLOSEOUT_REVIEW):
+        validating = [g for g in merge[target].guards if g.remedy == graph.VALIDATE]
+        assert [g.otherwise for g in validating] == [graph.MERGE_VALIDATION_FAILED]
+    assert graph.CLOSEOUT_RELEASED in merge[graph.CLOSEOUT].guards
+    assert graph.NOT_ARCHIVED in graph.NODES[graph.MERGE].entry
+
+
 def test_the_phases_read_from_the_table() -> None:
     assert graph.phase_steps("planning") == ("plan",)
+    assert "merge" in graph.phase_steps("implementation")
     assert set(graph.phase_steps("closeout")) == {"closeout", "review", "triage", "validate",
                                                    "archive-cleanup"}
     assert graph.review_phase("pre-closeout") == "implementation"
