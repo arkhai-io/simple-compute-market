@@ -77,23 +77,17 @@ The target payment double MUST model per-part authorities, payee-only rate start
 - **THEN** the payment double retains the pending stop and applies it no earlier than the sender's notice allows without another storefront call
 - **AND** the earliest pending stop wins and cannot be withdrawn
 
-#### Scenario: Restitution requires an explicit stop entry
+#### Scenario: Seller entries express entitlements only
 
-- **WHEN** SCM derives a mandate for buyer checking under a contract expressing restitution
-- **THEN** every part carries `{account: seller, notice: PT0S, partialPeriod: returned}` and the double accepts ordinary `stop {part}` only under an authorizing entry
-- **AND** the double refuses a stop without an entry regardless of asserted favour or cause; it knows accounts and mandate authorizations, not SCM roles
+- **WHEN** a seller requests a payment stop
+- **THEN** the double requires an entitlement entry, such as spot's notice entry, and refuses a stop without authorization regardless of asserted favour
+- **AND** no seller restitution entry or several-stop-entries-per-account dependency is added; spot emergency exit is an exceptional_end dispute filing
 
-#### Scenario: Spot requires several entries for one account
+#### Scenario: On-demand non-preemption is remedy-enforced
 
-- **WHEN** spot needs both its seller notice entry and the immediate restitution entry on one part
-- **THEN** that composition is gated on the unscheduled payments capability for several stop entries per account per part and its selection semantics/vectors
-- **AND** until available, spot immediate stop is unavailable and emergency exit waits out its notice unless the owner decides otherwise
-
-#### Scenario: On-demand restitution authority does not enforce non-preemption
-
-- **WHEN** an on-demand seller holds only the explicit PT0S/returned entry
-- **THEN** payments authorizes its stop without interpreting the seller's reason
-- **AND** the buyer's remedy for preemption is a case over held money and the bond once supported, not a mandate prohibition
+- **WHEN** an on-demand seller preempts delivery
+- **THEN** the buyer's remedy is a case over held money and the bond once supported, not a mandate prohibition
+- **AND** the seller's own exit is exceptional_end, the qualifying mechanically ruled self-penalty, always returned on-demand
 
 #### Scenario: A stopped part still holds reversible earnings
 
@@ -129,11 +123,12 @@ The double MUST implement its selected contract's notice, partialPeriod, earning
 - **THEN** the double ends the setup once part at that anchor and releases only after its dispute window
 - **AND** a contract without that representation refuses unsupported setup inputs
 
-#### Scenario: A cooperative seller stops after end delivery
+#### Scenario: Buyer stops while payments is unavailable
 
-- **WHEN** the seller journals end_delivery at its own receipt time while payments is down and retries after recovery
-- **THEN** the double accepts the buyer's treatment at receipt plus buyer notice under the dispute-free path only where a mandate entry authorizes it; otherwise it is the buyer half's stop
-- **AND** end service never waives buyer notice, substitutes the seller's returned restitution treatment, backdates a stop or reports delayed replay as completed billing
+- **WHEN** the buyer half cannot reach payments before sending end_delivery without at
+- **THEN** it journals its payment stop and retries under the same key; billing runs until the stop lands under its notice and partialPeriod
+- **AND** the storefront signs its receipt time as evidence but has no authority to stop buyer billing
+- **AND** the buyer may additionally file buyer_end with signed request and receipt, remaining in triage
 
 #### Scenario: No implicit waiver or early release exists
 
@@ -167,9 +162,9 @@ The mediation double MUST authenticate file and append as agreement parties, and
 - **THEN** the double returns a signed empty record at cursor zero and watch can discover later entries
 - **AND** an unknown agreement or unauthorized party receives the selected contract's refusal, not a fabricated empty record
 
-### Requirement: Mediation double sends every claim to triage
+### Requirement: Mediation mechanically rules only qualifying seller self-penalties
 
-The mediation double MUST send every claim to visible controllable triage with an operator-notification outbox, with no mechanical rulings. It MUST NOT expose exceptional_end as a request or mapping. Operator stop rulings MUST state partialPeriod explicitly. The authority MUST derive effects from the exact case-carried Agreement verified against the mandate's deal hash, without requiring an attachment or trusting caller-computed remedies.
+The double MUST expose exceptional_end and its pinned mapping. Only payee requests at least as strong as standard self-penalty MAY be mechanically ruled. Other claims, including buyer_end, MUST enter visible triage with an operator outbox. Stop rulings MUST state partialPeriod. Effects MUST derive from the exact case Agreement verified against the mandate deal hash, not an attachment or trusted caller-computed remedies.
 
 #### Scenario: Buyer kept a signed end acknowledgement
 
@@ -184,12 +179,25 @@ The mediation double MUST send every claim to visible controllable triage with a
 - **AND** it uses a present stop plus the net held-money adjustment, never a backdated stop or a way to bypass priced notice
 - **AND** a stop ruling omitting partialPeriod refuses before applying effects
 
-#### Scenario: Seller corrects its own exceptional end
+#### Scenario: Seller files the standard exceptional end
 
-- **WHEN** a seller attempts to file exceptional_end as a mediation intent
-- **THEN** the double refuses the unsupported intent rather than mechanically ruling it
-- **AND** the SCM payment adapter instead sends only ordinary `stop {part}` under the seller's explicit PT0S/returned entry and `reverse {part, amount}` under existing reverse authority, with adapter-computed amounts and the spot multi-entry gate preserved
-- **AND** payments receives no exceptional-end kind, field or cause; cause stays in the end-service record and evidence store
+- **WHEN** the seller half journals exceptional_end(at) with the end and files through the Agreement's dispute adapter and authority
+- **THEN** the seller sends no stop or reverse of its own and the qualifying payee self-penalty is mechanically ruled through mediation's own `{account, notice: PT0S, partialPeriod: chosen}` stop entry
+- **AND** it stops rate parts now returned, always returned for on-demand, reverses earnings since at and reverses unserved once share by time
+- **AND** setup's term ends at activation so all is reversed if undelivered and none once delivered; any bond is awarded in full once supported, never fabricated
+- **AND** the authority records the dispute and owns the whole remedy, with no seller exceptional-end direct effects to reconcile
+
+#### Scenario: A request does not qualify for mechanical self-penalty
+
+- **WHEN** the filer is not the payee or its request is weaker than standard self-penalty
+- **THEN** the double does not mechanically grant the self-penalty and leaves nonqualifying claims in triage
+- **AND** no buyer_end request is mechanically ruled, with or without a signed acknowledgement
+
+#### Scenario: A seller fails before Agreement start
+
+- **WHEN** the seller's end precedes Agreement start
+- **THEN** it journals immediately and files exceptional_end at Agreement start
+- **AND** future-dated exceptional_end requests refuse
 
 #### Scenario: A case supplies its own Agreement
 
@@ -215,7 +223,7 @@ The mediation double MUST apply ruling effects through authenticated payment HTT
 
 ### Requirement: Mediation nets revised remedies across an agreement
 
-The double MUST use the pinned authority mapping to net prior confirmed remedies per part across cases, including seller self-corrections. It MUST serialize remedy application per agreement, resolve uncertain effects before computing the remainder, apply only additional amounts and preserve case/effect provenance. Missing mapping or vectors MUST leave revised remedies in explicit repair/triage, not report completion.
+The double MUST use the pinned mapping to net confirmed remedies per part across revised exceptional_end and operator cases. It MUST serialize application per agreement, resolve uncertain effects before computing the remainder, apply only additional amounts and preserve case/effect provenance. Missing mapping or vectors MUST leave revised remedies in explicit repair/triage, not report completion.
 
 #### Scenario: Earlier evidence follows a prior remedy
 

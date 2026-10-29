@@ -12,7 +12,8 @@ production adapters and their contract/fixture prerequisites remain in
   and the one clock-injected payments fixture engine; 9.1 supplies snapshot framing;
   12.1 supplies mediation contracts, installed resources, mapping/netting vectors,
   models and record-signing fixtures. Confirm each prerequisite before its surface.
-  No mediation acknowledgement-verifier gate remains: all cases go to triage.
+  No mediation acknowledgement-verifier gate remains: buyer_end goes to triage;
+  only qualifying payee exceptional_end self-penalties are mechanical.
   Foundation 2.4 supplies the buyer-usable acknowledgement model/verifier, 13.1 the
   storefront signer, and 7.5 consumes it. Bare-metal porting waits for 7.4, 13.x/15.x.
 - Foundation 7.4/11.1/12.2/14.2 and spot kit tests use in-process contract fakes
@@ -92,20 +93,15 @@ conformance evidence.
       follow the selected publication's actual semantics; refuse unsupported inputs,
       never guess charged behavior or implement consumer acceptance policy here.
       Setup maturity uses only the selected contract's immutable activation anchor.
-      Require an explicit authorizing stop entry; SCM derives and buyer-checks
-      `{account: seller, notice: PT0S, partialPeriod: returned}` on every part.
-      Self-correction emits only ordinary `stop {part}` under that entry and
-      `reverse {part, amount}` under existing reverse authority; adapter computes
-      amounts and retains causes outside payments. Add no exceptional-end field,
-      implicit favourable-stop rule, payee notice waiver or payer early release.
-      End_delivery preserves buyer treatment at receipt plus buyer notice only
-      under an authorizing dispute-free entry; otherwise use the buyer half's stop.
-      On-demand's restitution entry does not enforce non-preemption; remedy is a
-      buyer case over held money/bond. Gate spot immediate restitution on the
-      unscheduled payments capability for several stop entries per account per part,
-      including selection semantics/vectors. Until then immediate stop is unavailable
-      and spot emergency exit waits out its notice unless the owner decides otherwise.
-      Never conflate approval with rate start or observe compute activation inside the authority.
+      Require explicit authorizing stop entries: seller entries exist only for
+      entitlements, such as spot notice. Use mediation's PT0S/chosen entry for the
+      mechanical self-penalty, not seller payment-adapter operations. Add no seller
+      restitution entry, implicit favourable-stop rule, waiver, early release or
+      several-entries-per-account dependency. End_delivery grants the storefront no
+      buyer billing authority; buyer half journals/retries its own stop under the
+      same key during outage and billing runs until it lands. On-demand non-preemption
+      is enforced by buyer remedy over held money/bond, not the mandate. Never
+      conflate approval with rate start or observe compute activation inside the authority.
 - [ ] 2.3 Add held-money partial reverse before/after stop, afterStop payout timing,
       independent extend refs and lift, caps and contract refusal codes. Preserve
       idempotent results across lost responses. Share one state engine between HTTP
@@ -115,9 +111,8 @@ conformance evidence.
 Verification: keep existing kit `test_client.py`, `test_receipt_fixture.py` and
 `test_receipts.py` on kit-owned contract fakes/vectors. In the new tool's
 `tests/test_payments.py`, drive real clients through HTTP transports and prove
-entry-based start/stop authorization (including refusal without an entry), ordinary
-stop/reverse-only self-correction, unchanged buyer notice, explicit spot multi-entry
-gating, partialPeriod outcomes, notice firing without a storefront,
+entry-based start/stop authorization (including refusal without an entry), mediation
+self-penalty effects through its own entry, buyer-owned stop/retry and unchanged notice, partialPeriod outcomes, notice firing without a storefront,
 setup maturity, overlapping case holds, reversal before/after stop and response-loss
 replay. Required unit state-machine coverage uses an injected clock for timer/hold
 transitions and idempotent retries; required library integration covers signed HTTP
@@ -139,15 +134,20 @@ without sibling source trees and fake/HTTP engine parity (03 F2 / 04 F3). No hos
       production-party client. Take the exact Agreement from the case, verify its
       hash against the committed mandate, and derive dispute effects in the tool;
       do not require an attachment or trust marketplace-computed remedies (E-F).
-- [ ] 3.3 Queue every claim, including buyer_end with any acknowledgement, for
-      visible triage and a local operator-notification outbox (E-D). Remove
-      exceptional_end from mediation's vocabulary/mapping; it is seller payment-
-      adapter self-correction, not a case. Accept lane operator rulings through one
-      effect path; every stop ruling must state partialPeriod or refuse. Realize
-      buyer_end as the payer's stop at at, including payer notice and committed
-      partialPeriod; leave once parts untouched. A past remedy is present stop plus
-      net adjustment, never backdating or a way to skip priced notice.
-      Refuse unsupported bond effects until the contract has them.
+- [ ] 3.3 Restore exceptional_end to dispute adapter intents and mediation request
+      vocabulary/published mapping through the foundation producer gate. Accept a
+      journaled seller-half dispute filing only, never seller direct stop/reverse.
+      Never future-date; pre-start failures journal immediately and file at Agreement
+      start. Mechanically rule only a payee-filed request at least as strong as the
+      standard self-penalty: through mediation's PT0S/chosen entry stop rate parts now
+      returned (always returned on-demand), reverse earnings since at, reverse unserved
+      once share by time, setup all before activation and none after, full bond once
+      supported. Unsupported bond effects refuse, not fabricated completion. Queue
+      buyer_end and all other nonqualifying claims for visible triage/outbox regardless
+      of acknowledgements. Realize buyer_end as payer stop submitted at at with notice
+      and committed partialPeriod, leaving once parts untouched. Present stop plus
+      net held-money adjustment realizes a past remedy without backdating. All stop
+      rulings, mechanical or operator, state partialPeriod explicitly.
 - [ ] 3.4 Apply effects as the dispute authority with stable IDs/case refs, record
       applied state, resume partial outcomes and lift only this case's refs. Keep
       a delivery end distinct from a discount. Make case discovery/record watch work
@@ -155,16 +155,20 @@ without sibling source trees and fake/HTTP engine parity (03 F2 / 04 F3). No hos
 - [ ] 3.5 Implement revision-bound case references and agreement-wide remedy netting
       from the pinned foundation mapping/vectors (03 F1 / 04 F9). Serialize remedy
       application per agreement, resolve uncertain prior effects, net confirmed
-      reversals/self-corrections and awards, and apply only the additional remedy.
+      authority reversals and awards across revised exceptional_end and operator
+      cases, and apply only the additional remedy.
       Preserve prior provenance across open/closed cases, partial application and
       append/close races. Unsupported netting remains explicit repair/triage.
 
 Verification: foundation 12.2 uses its kit contract fake. The tool's required
 `tests/test_mediation.py` library integration drives real clients for two cases,
 mixed held/not-held, lost filing response, closed-before-append, empty record and
-repeated evidence. Required `tests/test_triage_rulings.py` coverage proves all claims
-stay triaged regardless of acknowledgement, exceptional_end is unsupported, and
-operator stops require explicit partialPeriod and preserve payer notice for buyer_end.
+repeated evidence. Required `tests/test_triage_rulings.py` coverage proves only
+qualifying payee exceptional_end is mechanical, weaker/non-payee requests do not get
+that rule, buyer_end remains triaged regardless of acknowledgement, and all stop
+rulings state partialPeriod. Cover on-demand returned, setup before/after activation,
+pre-start/future-time filing boundaries, no seller direct effects, preserved buyer
+notice and optional signed end_delivery evidence.
 HTTP integration files cases with the exact Agreement and no attachment, verifies
 hash mismatch refusal, and applies operator rulings through the authority path. Required `tests/test_effect_recovery.py` interrupts effect application
 and proves resume without duplicates or another case's lift (02 F10), plus a
