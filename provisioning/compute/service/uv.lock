@@ -330,7 +330,7 @@ requires-dist = [
     { name = "arkhai-kit-resource-pools", specifier = ">=0.8.0" },
     { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.2.0" },
     { name = "arkhai-kit-site", specifier = ">=0.11.0" },
-    { name = "arkhai-vms-provisioning-adapter", marker = "extra == 'adapters'", specifier = ">=0.14.0" },
+    { name = "arkhai-vms-provisioning-adapter", marker = "extra == 'adapters'", specifier = ">=0.16.0" },
     { name = "cachetools", specifier = ">=5.3" },
     { name = "cryptography", specifier = ">=42.0" },
     { name = "dependency-injector", specifier = ">=4.41.0" },
@@ -357,7 +357,7 @@ dev = [
     { name = "arkhai-kit-capacity-publication", specifier = "==0.11.0" },
     { name = "arkhai-kit-resource-pools-client", specifier = ">=0.1.0" },
     { name = "arkhai-kit-site-client", specifier = ">=0.12.0" },
-    { name = "arkhai-vms-provisioning-adapter", specifier = ">=0.14.0" },
+    { name = "arkhai-vms-provisioning-adapter", specifier = ">=0.16.0" },
     { name = "arkhai-vms-provisioning-operator-client", specifier = ">=0.9.0" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-asyncio", specifier = ">=0.23" },
@@ -608,7 +608,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-provisioning-adapter"
-version = "0.15.0"
+version = "0.16.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning" },
@@ -630,7 +630,7 @@ dependencies = [
     { name = "typing-inspect" },
 ]
 wheels = [
-    { path = "arkhai_vms_provisioning_adapter-0.15.0-py3-none-any.whl" },
+    { path = "arkhai_vms_provisioning_adapter-0.16.0-py3-none-any.whl" },
 ]
 
 [[package]]

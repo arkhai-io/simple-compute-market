@@ -416,44 +416,52 @@ def mount_unless_served(app: FastAPI, router: APIRouter) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Representative playbook stdout for a successful vm_create job.
-# Contains a vm_creation_data JSON block that the VM codec
+# Representative playbook stdout for a successful vm_create job, in the JSON
+# result format. Contains a vm_creation_data JSON block that the VM codec
 # will extract into the job result.  Credentials are embedded so the credential
-# storage path is exercised.
+# storage path is exercised. The codec takes evidence only from a fact naming
+# the job's own guest and reporting success, so a test whose job names another
+# guest renders the output for it.
 # ---------------------------------------------------------------------------
 
-FAKE_CREATE_STDOUT = """\
+
+def fake_create_stdout(vm_name: str) -> str:
+    """The stdout of a successful create of ``vm_name``."""
+    return """\
 PLAY [Provision VM] ***********************************************************
 
 TASK [debug] ******************************************************************
-ok: [kvm1] => {
-    "vm_creation_data": {
+ok: [kvm1] => {{
+    "vm_creation_data": {{
         "action": "create",
-        "vm_name": "agent-vm-01",
-        "status": "running",
+        "vm_name": "{vm_name}",
+        "status": "success",
         "host": "kvm1",
         "timestamp": "2025-01-01T00:00:00Z",
         "tenant_user": "agentvm01",
         "external_ssh_port": "54321",
         "vm_ip_internal": "192.168.122.50",
-        "authentication": {
-            "tenant": {
+        "authentication": {{
+            "tenant": {{
                 "password": "tenantpw",
                 "key_type": "generated",
-                "ssh_commands": {
+                "ssh_commands": {{
                     "internal": "ssh -i key agentvm01@192.168.122.50",
                     "external": "ssh -i key -p 54321 agentvm01@10.0.0.1"
-                }
-            },
-            "root": {
+                }}
+            }},
+            "root": {{
                 "password": "rootpw",
-                "ssh_commands": {"internal": "ssh root@192.168.122.50"},
+                "ssh_commands": {{"internal": "ssh root@192.168.122.50"}},
                 "ssh_key_path_host": "/root/.ssh/agent-vm-01_root_ed25519"
-            }
-        }
-    }
-}
-"""
+            }}
+        }}
+    }}
+}}
+""".format(vm_name=vm_name)
+
+
+FAKE_CREATE_STDOUT = fake_create_stdout("agent-vm-01")
 
 
 # ---------------------------------------------------------------------------

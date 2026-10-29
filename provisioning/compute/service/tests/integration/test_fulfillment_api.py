@@ -34,6 +34,7 @@ calls into.
 
 from __future__ import annotations
 from compute_provisioning_ansible import ssh_connection
+from compute_provisioning_ansible.runner import AnsibleResult
 
 import uuid
 from typing import Any
@@ -57,7 +58,7 @@ from compute_provisioning_contracts import (
 )
 from compute_provisioning_service.main import app
 from . import bare_metal_deal
-from .conftest import SERVICE_AUTHORITIES, STOREFRONT_SIGNER
+from .conftest import SERVICE_AUTHORITIES, STOREFRONT_SIGNER, fake_create_stdout
 from market_fulfillment import (
     FulfillmentOrchestrator,
     PhysicalSettlementRequest,
@@ -772,7 +773,7 @@ class TestStatusAndResultQueries:
         assert "fulfillment_not_found" in str(refused.value)
 
     async def test_result_on_an_active_fulfillment_includes_live_credentials(
-        self, fulfillment: FulfillmentApi, client_and_queue
+        self, fulfillment: FulfillmentApi, client_and_queue, fake_ansible
     ):
         # The create job runs to completion here, and it runs only against a
         # registered host record.
@@ -782,6 +783,13 @@ class TestStatusAndResultQueries:
         ))
         capacity_reservation_id = await _scheduled_reservation(
             pool_id="pool-fulfillment-result-active"
+        )
+        # The run reports the guest provisioning names for this reservation, as
+        # the role does, so its result carries delivery evidence.
+        fake_ansible.wait_for_playbook.return_value = AnsibleResult(
+            stdout=fake_create_stdout(fulfillment_guest_name(capacity_reservation_id)),
+            stderr="",
+            process_id=99999,
         )
         begun = await fulfillment.begin(
             capacity_reservation_id, "vms", _fulfillment_request()

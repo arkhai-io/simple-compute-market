@@ -921,12 +921,24 @@ merge:
   `tests/integration/test_test_router_mounting.py` holds that a second mount changes
   nothing.
 
-- [ ] 5.1 Replace `extract_vm_fact`'s private `msg:` fallback with Section 2's
+- [x] 5.1 Replace `extract_vm_fact`'s private `msg:` fallback with Section 2's
       reader. The codec supplies the expected action from its own mapping, beside
       `VM_RESULT_FACTS`: the job's `vm_action`, which is `create` for a create and
       `vm_remove` for a remove, as each VM role prints it. The shared reader holds no
       VM knowledge. Behaviour on JSON-form output is unchanged.
-- [ ] 5.2 A create's fact yields evidence only when:
+
+      Done, in `codec.py`:
+      - `extract_vm_fact` reads through `read_fact`, with the expected action from
+        `VM_FACT_ACTIONS`, beside `VM_RESULT_FACTS`: each VM action's fact names
+        the action as its role prints it, so `create` and `vm_remove` among them.
+      - The forward-scanning `msg:` fallback, and the regex reads of a port and an
+        account over the whole output (`extract_ssh_port`, `extract_tenant_user`),
+        are removed. No production code used them outside the codec.
+      - The monitor and check roles print no `action`, so only their JSON `var:`
+        form is read. The removed fallback could not read their `msg:` form
+        either, so nothing they report is lost; it is a limit of those roles,
+        left as it is.
+- [x] 5.2 A create's fact yields evidence only when:
       - its `action` is `create`;
       - its `vm_name` is the job's `vm_target`;
       - its `status` is `success`.
@@ -935,7 +947,26 @@ merge:
       (`tenant_user`, `external_ssh_port`) or its `frp` block, no longer by
       searching the whole output. The fact's `host` is not compared. Otherwise the
       result carries no evidence, and a detail naming the mismatch.
-- [ ] 5.3 `vm_mock_output` renders the shipped form for the job, from the job's
+
+      Done:
+      - **Linkage.** `create_fact_mismatch` compares the selected fact's `action`,
+        `vm_name` (against `vm_target`), and `status`. `create_evidence` yields
+        nothing on a mismatch, and `create_result` adds it to the detail as
+        `mismatch`. A result with no fact names that instead.
+      - **Fact-only fields.** The tenant account is the fact's `tenant_user`, and
+        the forwarded port its `external_ssh_port` when that is a port. A relayed
+        create prints a sentence there instead.
+      - **Address.** The buyer-facing address stays the registry's (`public_host`,
+        else `ssh_host`). The guest's port is the forwarded or relayed one, never
+        the host's `public_port`.
+      - **A defect found on the way.** `build_result_payload` replaced the
+        forwarded port with the `frp` block's `remote_port` whenever that block
+        was present. The buyer-key fact prints the block on the direct path too,
+        disabled and with `remote_port: 'N/A'`, so a real buyer-key create on the
+        direct path reported port `N/A` and yielded no evidence. Only an enabled
+        relay's port now replaces the forwarded one. The section's red (below)
+        shows it.
+- [x] 5.3 `vm_mock_output` renders the shipped form for the job, from the job's
       stored parameters, as bare metal's does:
       - **A create.** The provided-key create fact, with:
         - `vm_name` set to the job's `vm_target`;
@@ -946,7 +977,21 @@ merge:
       - **A remove.** `vm_remove_data` naming the job's guest.
 
       The fixed `mock-vm` create, whose status is `running`, is removed.
-- [ ] 5.4 Drop `result_stdout` from the create rule in each of the five scenario
+
+      Done, in `services/mock_output.py`:
+      - **A create.** The fact names the job's `vm_target` and its
+        `tenant_account`, reports `success`, a timestamp, the forwarded port
+        `2222`, and no relay.
+      - **The key variant.** A job naming the buyer's key prints the role's
+        provided-key fact, with its disabled `frp` block. A job naming none
+        prints the generated-key fact, with the role's `relay` block. The mock
+        credentials and their redaction are unchanged.
+      - **A remove.** It prints `vm_remove_data` naming the job's guest.
+      - **Other actions.** Each prints a minimal success fact under its own name,
+        rather than the create output every action used to receive.
+      - **The form.** `shipped_output` prints the YAML `var:` block, display only,
+        and the `msg: |-` JSON copy.
+- [x] 5.4 Drop `result_stdout` from the create rule in each of the five scenario
       modules. Each rule keeps its `rule_id`, `match`, and `pause_before_result`, so
       every create there gets the per-job default:
       - remove `compute_deal_driver.py`'s `_CREATE_RESULT_STDOUT`, and correct the
@@ -959,7 +1004,14 @@ merge:
       None of the five rules is a deliberate invalid-output case. A test that needs
       invalid create output stays at the codec's or the provider's level (5.5,
       Section 4.4).
-- [ ] 5.5 Unit tests:
+
+      Done. Each of the five rules is a typed `MockRuleCreate` and keeps its
+      `rule_id`, `match`, and `pause_before_result`. `_CREATE_RESULT_STDOUT` and
+      its comment are removed from `compute_deal_driver.py`, as are the four
+      inline outputs and their comments. The search at section start found
+      `vmuser` and the three fixed guest names only inside those outputs, and no
+      assertion on them; after the edit it finds nothing.
+- [x] 5.5 Unit tests:
       - each VM action from shipped-form output;
       - another action's `msg:` document no longer taken, including a `vm_remove`
         run whose output also carries a create document;
@@ -971,7 +1023,41 @@ merge:
         `tenant_user` derived from the job's `vm_target`, and its remove output
         names the job's guest;
       - existing cases kept.
-- [ ] 5.6 Verification:
+
+      Done (unit):
+      - **`tests/unit/test_vm_codec.py`**, now the VM adapter's:
+        - the shipped form read from its `msg:` block;
+        - the last document for the expected action taken;
+        - a remove run never adopting a create document;
+        - a summary block followed by a later document, adopting nothing;
+        - a port and account printed outside the fact, not read;
+        - a relayed create reporting no forwarded port;
+        - a fact naming another guest, status, or action, and a result with no
+          fact, each yielding no evidence with its `mismatch`;
+        - a fact `host` other than the registry's, still yielding evidence at the
+          registry's address;
+        - a disabled relay block keeping the forwarded port.
+      - **Fixtures.** Shipped-form fixtures come from a renderer kept in the test
+        module, apart from the adapter's own, so a mistake in that renderer
+        cannot hide one in the codec.
+      - **Removed.** The regex-reader tests and the forward-fallback case went
+        with the functions they tested.
+      - **`tests/unit/test_vm_mock_output.py`** (new): the tenant account's
+        derivation; the create in the shipped form, for the job's guest, in both
+        key variants; its evidence through the real codec, credentials split out
+        and absent from the result; the remove fact.
+
+      **Red.** A private script ran the same cases through the codec and mock on
+      `HEAD`, overlaid on the adapter's environment, and through the new ones:
+      - Every case went red on `HEAD`'s code, each failing on behaviour, not on an
+        import:
+        - a remove run adopting a create document;
+        - evidence from another guest's fact, and from a `running` one;
+        - a port read from outside the fact;
+        - the mock naming another guest;
+        - the disabled relay block's `N/A` port.
+      - All went green on the new code.
+- [x] 5.6 Verification:
       - `make -C domains/vms/provisioning/adapter test` (unit);
       - `make -C provisioning/compute/service test` (unit and application
         integration, including the VM codec tests and the service's mock-profile
@@ -995,6 +1081,57 @@ merge:
       stdout, which already reads the default and now prints `vm_remove_data`. No
       VM-lane scenario still supplies a rule's stdout. None is relay-backed. The
       live VM lane is the system evidence of a real guest.
+
+      Done, under the owner's focused cadence (the plan's header):
+      - **VM adapter:** `make -C domains/vms/provisioning/adapter test`, 262 passed
+        (unit, and library integration in its `tests/integration`).
+      - **Provisioning service, targeted.** One run of the integration modules that
+        run VM jobs or consume `vm_mock_output`, plus the service's VM operations
+        unit tests. 316 passed: application integration through the typed clients,
+        with some direct-storage cases. The modules:
+        - `test_bare_metal_mock_profile`, `test_capacity_api`,
+          `test_capacity_definitions_api`, `test_compute_contract_api`;
+        - `test_fulfillment_api`, `test_fulfillment_convergence*`;
+        - `test_host_pool_moves_api`, `test_host_requirement_api`,
+          `test_hosts_api`;
+        - `test_leases_api`, `test_lease_release_api`;
+        - `test_pool_seed_api`, `test_pools_api`;
+        - `test_provisioning_client_endpoint_coverage`, `test_system_api`,
+          `test_test_controller`, `test_test_router_mounting`, `test_vms_api`.
+
+        The service's whole suite, as its `make` target runs it, is not re-run
+        here: Round 1's root `make test`, after Section 6, covers it.
+      - **e2e:** `make -C e2e-tests test-unit`, 172 passed. The five scenario modules
+        import.
+      - **Packaging:** `make lock` changed only the adapter's version, its floor on
+        the Ansible kit, and the service's two floors on the adapter.
+        `make check-packaging` passed.
+
+      **Service fixtures.** The conftest's fixed `FAKE_CREATE_STDOUT` reported
+      status `running` and named one guest, `agent-vm-01`. Under the linkage, a
+      create naming another guest yields no evidence. Two tests failed on it, and
+      each failure is the linkage working:
+      - `test_vms_api.py`'s create result;
+      - `test_fulfillment_api.py`'s live credentials, whose fulfillment's guest
+        derives from its reservation.
+
+      The fixture is now `fake_create_stdout(vm_name)`, reporting `success` as the
+      role does. `FAKE_CREATE_STDOUT` keeps `agent-vm-01`, and the fulfillment
+      test renders the output for `fulfillment_guest_name(capacity_reservation_id)`.
+
+      **Packaging.**
+      - `arkhai-vms-provisioning-adapter` goes from 0.15.0, `dev`'s, to 0.16.0, and
+        its floor on the Ansible kit rises to `>=0.5.0`, for `read_fact`.
+      - The provisioning service composes the adapter's codec and mock, so its
+        `adapters` extra and dev group floors rise to `>=0.16.0`. The service is
+        not bumped again.
+
+      End-to-end:
+      - The five VM-lane scenarios named above, `e2e_deal`, `e2e_deal_buyer_cli`,
+        `e2e_listing_shapes`, `e2e_buy`, and `e2e_non_erc20_settlement`, now read
+        each create through the per-job default and the `msg:` path.
+      - Owed by validation: the pipeline's VM lane on this commit. No workflow
+        that only a push triggers is owed.
 
 ## 6. Recover what `buy` recorded, and qualify the payments upgrade
 

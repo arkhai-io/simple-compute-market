@@ -16,13 +16,18 @@ on the direct path is reached at its host's buyer-facing address and the
 external port the playbook forwarded. Its detail is VM's named operator facts,
 the guest's internal address among them; secrets are never among them, being
 reported as credentials.
+
+A result is read from the one fact its action's role printed, through the
+compute family's fact reader, never from a search of the whole output: the
+tenant account and the forwarded or relayed port are that fact's. A create
+yields evidence only from a fact that names the job's own guest and reports
+success; any other fact yields none, and the detail names what differed.
 """
 
 from __future__ import annotations
 
 import copy
 import logging
-import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -42,13 +47,9 @@ from compute_provisioning_ansible import (
     AnsibleJobInterpretation,
     AnsibleJobPlan,
     matches_any,
+    read_fact,
 )
-from compute_provisioning_ansible.runner import (
-    AnsibleResult,
-    InventoryTarget,
-    extract_fact,
-    extract_json_block,
-)
+from compute_provisioning_ansible.runner import AnsibleResult, InventoryTarget
 
 from vm_provisioning_adapter.models.jobs_model import VmJobParams
 
@@ -84,6 +85,25 @@ VM_RESULT_FACTS: Mapping[str, str] = {
     "reset_password": "vm_password_reset_data",
     "vm_remove": "vm_remove_data",
     "check": "check_data",
+}
+
+#: The ``action`` each VM action's fact names, as its role prints it. The shared
+#: fact reader takes a printed document as the job's fact only when it names
+#: this action, so one action's run never adopts another's document. The
+#: monitor and check roles print no ``action``, so only their fact's JSON
+#: ``var:`` form is read.
+VM_FACT_ACTIONS: Mapping[str, str] = {
+    "create": "create",
+    "list": "list",
+    "start": "start",
+    "shutdown": "shutdown",
+    "destroy": "destroy",
+    "reboot": "reboot",
+    "undefine": "undefine",
+    "monitor": "monitor",
+    "reset_password": "reset_password",
+    "vm_remove": "vm_remove",
+    "check": "check",
 }
 
 # The roles a playbook's ``authentication`` fact may carry, in the order their
@@ -339,10 +359,13 @@ def parse_vm_output(
 
     ``tenant_address`` is the address buyers use to reach the host, resolved
     from the registered host record. It becomes ``host_ip``; nothing here
-    reads an inventory file for it.
+    reads an inventory file for it. The tenant account and forwarded port are
+    the selected fact's own; a relayed port replaces the forwarded one when
+    the payload is built.
     """
-    ssh_port = extract_ssh_port(output.stdout, params.host_id)
-    tenant_user = extract_tenant_user(output.stdout, params.host_id)
+    fact = extract_vm_fact(output.stdout, params.vm_action)
+    ssh_port = _forwarded_port(fact)
+    tenant_user = _text(fact, "tenant_user")
     ssh_command = None
     if ssh_port and tenant_user and tenant_address:
         ssh_command = (
@@ -355,57 +378,30 @@ def parse_vm_output(
         tenant_user=tenant_user,
         host_ip=tenant_address,
         ssh_command=ssh_command,
-        ansible_result=extract_vm_fact(output.stdout, params.vm_action),
+        ansible_result=fact,
     )
 
 
-def extract_ssh_port(playbook_output: str, host_id: str | None = None) -> Optional[str]:
-    patterns = [r'"external_ssh_port":\s*"(?P<port>\d+)"']
-    if host_id:
-        patterns.extend([
-            rf"-p\s*(?P<port>\d{{2,5}})\s+root@{re.escape(host_id)}",
-            rf"-p\s*(?P<port>\d{{2,5}})\s+\S+@{re.escape(host_id)}",
-        ])
-    patterns.append(r"-p\s*(?P<port>\d{2,5})\s+\S+@[\w\.-]+")
-    for pattern in patterns:
-        match = re.search(pattern, playbook_output)
-        if match:
-            return match.group("port")
-    return None
-
-
-def extract_tenant_user(playbook_output: str, host_id: str | None = None) -> Optional[str]:
-    patterns = [r'"tenant_user":\s*"(?P<user>[^"]+)"']
-    if host_id:
-        patterns.append(
-            rf"-p\s*\d{{2,5}}\s+(?P<user>[A-Za-z0-9._-]+)@{re.escape(host_id)}"
-        )
-    patterns.append(r"-p\s*\d{2,5}\s+(?P<user>[A-Za-z0-9._-]+)@\S+")
-    for pattern in patterns:
-        match = re.search(pattern, playbook_output)
-        if match:
-            return match.group("user")
-    return None
-
-
 def extract_vm_fact(stdout: str, action: str) -> Optional[dict]:
-    """The result fact a VM action's playbook printed.
-
-    The fact is printed by name; failing that, the last ``msg: |`` block
-    carrying an ``action`` is the one ``json-output.yml`` printed.
-    """
+    """The result fact a VM action's playbook printed, read through the compute
+    family's fact reader for the ``action`` that action's role prints."""
     fact_name = VM_RESULT_FACTS.get(action)
     if not fact_name:
         return None
-    result = extract_fact(stdout, fact_name)
-    if result is not None:
-        return result
-    last_result = None
-    for match in re.finditer(r"msg:\s*\|[-]?\s*\n", stdout):
-        candidate = extract_json_block(stdout, match.end())
-        if candidate is not None and "action" in candidate:
-            last_result = candidate
-    return last_result
+    return read_fact(stdout, fact_name, action=VM_FACT_ACTIONS[action])
+
+
+def _text(fact: Mapping[str, Any] | None, name: str) -> Optional[str]:
+    value = (fact or {}).get(name)
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _forwarded_port(fact: Mapping[str, Any] | None) -> Optional[str]:
+    """The forwarded port a fact reports, or ``None``. A relayed create prints
+    a sentence there rather than a port."""
+    value = (fact or {}).get("external_ssh_port")
+    text = str(value).strip() if value is not None else ""
+    return text if text.isdigit() else None
 
 
 def split_credentials(
@@ -483,8 +479,12 @@ def build_result_payload(result: VmPlaybookOutput) -> dict:
     frp = ar.get("frp")
     if frp:
         payload["frp"] = frp
-        if frp.get("remote_port"):
-            payload["ssh_port"] = frp["remote_port"]
+        # The buyer-key fact prints its relay block on the direct path too,
+        # disabled and with no port; only an enabled relay's port replaces the
+        # forwarded one.
+        relay = _relay_reported(ar)
+        if relay is not None and relay.get("remote_port"):
+            payload["ssh_port"] = relay["remote_port"]
 
     for key in ("gpu", "network", "vm_ip_internal", "vm_state",
                 "result_message", "note", "operation_initiated"):
@@ -526,11 +526,35 @@ def build_result_payload(result: VmPlaybookOutput) -> dict:
 
 #: A create result's fields kept as its operator detail. None is secret: the
 #: playbook's credentials have already been split out as credentials.
+#: ``mismatch`` names how a fact differs from its job, when it does.
 VM_CREATE_DETAIL = (
     "action", "status", "vm_name", "vm_state", "host", "timestamp", "tenant_user",
     "host_ip", "ssh_port", "vm_ip_internal", "gpu", "network", "frp",
-    "result_message", "note", "operation_initiated",
+    "result_message", "note", "operation_initiated", "mismatch",
 )
+
+
+def create_fact_mismatch(payload: Mapping[str, Any], params: VmJobParams) -> str | None:
+    """How a create's selected fact differs from its job, or ``None``.
+
+    The role names the guest it created ``vm_name``, which the play sets from
+    the job's ``vm_target``, and reports ``success``. The fact's ``host`` is the
+    play's tenant address, not an identity, so it is not compared.
+    """
+    if payload.get("ansible_result") is None:
+        return "no create fact was printed"
+    found = []
+    if payload.get("action") != "create":
+        found.append(f"action: the fact names {payload.get('action')!r}, the job 'create'")
+    if not params.vm_target:
+        found.append("vm_name: the job names no guest")
+    elif payload.get("vm_name") != params.vm_target:
+        found.append(
+            f"vm_name: the fact names {payload.get('vm_name')!r}, the job {params.vm_target!r}"
+        )
+    if payload.get("status") != "success":
+        found.append(f"status: the fact reports {payload.get('status')!r}, not 'success'")
+    return "; ".join(found) or None
 
 
 def _relay_reported(payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
@@ -546,11 +570,15 @@ def _relay_reported(payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
 def create_evidence(payload: Mapping[str, Any], params: VmJobParams) -> DeliveryEvidence | None:
     """How a buyer reaches the guest a create reported, or ``None``.
 
-    A job that leased a relay port is reached through the relay, at exactly
-    that port; a run reporting none, or another, yields nothing. Otherwise the
-    guest is reached at its host's buyer-facing address and forwarded port.
-    Either way the endpoint names the tenant account, or there is no evidence.
+    A fact that does not name the job's guest and report success yields
+    nothing. A job that leased a relay port is reached through the relay, at
+    exactly that port; a run reporting none, or another, yields nothing.
+    Otherwise the guest is reached at its host's buyer-facing address and
+    forwarded port. Either way the endpoint names the tenant account, or there
+    is no evidence.
     """
+    if create_fact_mismatch(payload, params) is not None:
+        return None
     if params.relay_id or params.vm_remote_port is not None:
         relay = _relay_reported(payload)
         if relay is None or params.vm_remote_port is None:
@@ -585,14 +613,15 @@ def create_evidence(payload: Mapping[str, Any], params: VmJobParams) -> Delivery
 
 def create_result(payload: Mapping[str, Any], params: VmJobParams) -> CreateJobResult:
     """A create's result: its delivery evidence, and its named operator detail."""
-    return CreateJobResult(
-        evidence=create_evidence(payload, params),
-        detail={
-            name: payload[name]
-            for name in VM_CREATE_DETAIL
-            if payload.get(name) not in (None, "")
-        },
-    )
+    detail = {
+        name: payload[name]
+        for name in VM_CREATE_DETAIL
+        if payload.get(name) not in (None, "")
+    }
+    mismatch = create_fact_mismatch(payload, params)
+    if mismatch is not None:
+        detail["mismatch"] = mismatch
+    return CreateJobResult(evidence=create_evidence(payload, params), detail=detail)
 
 
 def _roles(auth: Mapping[str, Any]) -> Iterable[tuple[str, Mapping[str, Any]]]:
@@ -608,14 +637,14 @@ __all__ = [
     "VM_NON_RETRYABLE_FAILURES",
     "VM_RESULT_FACTS",
     "VM_CREATE_DETAIL",
+    "VM_FACT_ACTIONS",
     "VM_SECRET_FIELDS",
     "VmAnsibleCodec",
     "VmPlaybookOutput",
     "build_result_payload",
     "create_evidence",
+    "create_fact_mismatch",
     "create_result",
-    "extract_ssh_port",
-    "extract_tenant_user",
     "extract_vm_fact",
     "parse_vm_output",
     "split_credentials",
