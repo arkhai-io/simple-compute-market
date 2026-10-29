@@ -158,10 +158,12 @@ revisions before code starts; `unify-compute-delivery-path` lands before this ch
       term plus on-demand/spot emergency exceptional_end filings, sole mechanical
       payee self-penalty and on-demand returned treatment. Record buyer case/held
       money plus premature-stop-penalty remedy, not mandate-enforced non-preemption. Record
-      rows 12, 12a and 13: the seller that never files, remedied by the buyer's stop and case
+      rows 12, 12a, 12b and 13: the seller that never files, remedied by the buyer's stop and case
       from kept evidence alone with the storefront stopped, not flagged; the late anchor, where
       the site's longer physical deadline changes nothing about the ruling from the buyer's kept
-      approval record; and the case over paid-out money, accepted, `not_held` per part,
+      approval record; the asserted availability, the seller's timely `available` weighed
+      against the buyer's kept observation and conclusive on its own for neither; and the
+      case over paid-out money, accepted, `not_held` per part,
       displayed as such. Exercise buyer-half
       same-key payment-stop retry with billing until landing; end_delivery receipt
       grants no storefront payment authority. Rows 7/9 record interim non-default

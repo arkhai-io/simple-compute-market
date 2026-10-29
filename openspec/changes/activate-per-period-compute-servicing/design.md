@@ -142,7 +142,9 @@ a blocker if unrun: a payer stop with the storefront stopped, not flagged absent
 case filed from the exact accepted Agreement and the buyer's kept evidence with
 nothing retrieved from the seller; a restart after an unknown stop result that reuses
 the original operation key and opens no second stop; a seller that never files its
-exceptional end, remedied by the buyer's stop and case alone (convergence row 12); and
+exceptional end, remedied by the buyer's stop and case alone (convergence row 12); a
+seller's `available` recorded in time with nothing reachable, weighed as its assertion
+against the buyer's kept observation (row 12b); and
 a case accepted over money already paid out, reported `not_held` per part and shown
 as such (row 13). An accepted case is not recoverable money; the authority's per-part
 answer is what the buyer sees.

@@ -811,6 +811,11 @@ A party MUST keep evidence as exact bytes in a store separate from replay state,
 - **WHEN** authenticated replay state for an accepted negotiation is pruned
 - **THEN** the acceptance envelope remains in the evidence store with its exact bytes
 
+#### Scenario: The seller's availability record is weighed, not conclusive
+
+- **WHEN** a seller's storefront recorded `available` before the delivery deadline and the buyer's case carries its kept observation that nothing was reachable
+- **THEN** the buyer's display names the seller's record as the seller's assertion and the buyer's observation as its own, the case enters human triage with both, and neither alone decides it
+
 ### Requirement: Each party keeps its commitment envelopes and authority records
 
 The buyer MUST keep the seller's signed acceptance with its proof headers and exact body before committing. The seller MUST keep the buyer's signed message the agreement rests on: the buyer's opening or counteroffer the seller accepted, or the buyer's acceptance of a seller counter; an administrative acceptance MUST be kept with its administrator as author.

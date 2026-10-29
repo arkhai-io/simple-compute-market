@@ -313,6 +313,7 @@ under a rate hook, are this change's.
 | 11 | Identity rotation overlap | old receipt verified during overlap, current snapshot re-anchors the running rate deal before retirement, exact old bytes retained; once-only dependencies drain; revoked/stale anchors and livemode changes refused |
 | 12 | Seller never files | an unentitled end the storefront never reports and never files; the buyer's own stop and a case filed from the exact accepted Agreement and kept evidence alone, with the storefront absent throughout, are the whole remedy; the ruling rests on the buyer's record |
 | 12a | Late anchor | the storefront commits with a later, non-future anchor than the approval the payment authority recorded; the site enforces the longer physical deadline; the buyer's case from its kept approval record is ruled non-delivery at the accepted deadline regardless |
+| 12b | Asserted availability | the storefront records `available` before the deadline with nothing reachable behind it; the buyer's case carries its own kept observation of failure; the seller's record is weighed as its assertion, not conclusive, and the ruling rests on the classes together |
 | 13 | Case over paid-out money | a case filed after a part has paid out is accepted, reports `not_held` per part with the reason, may still end delivery, and moves no paid-out money; the buyer display shows per-part `held` / `not_held`, never a pending refund |
 
 The nine diagram pairs under `diagrams/` illustrate cases 0–8; cases 9–13 extend the
