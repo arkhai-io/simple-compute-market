@@ -23,6 +23,11 @@ SCM's rate-part qualification MUST use the lane-double-owned classes Qualificati
 - **WHEN** kit rate integration tests run
 - **THEN** they exercise the contract fake and verified vector fixtures without starting lane HTTP tooling
 
+#### Scenario: Interim spot uses a non-default buyer policy
+- **WHEN** a prepared interim spot scenario offers started_period on the payee entitlement or term end
+- **THEN** it explicitly configures and records buyer acceptance of started_period for every affected term
+- **AND** its result does not claim default-buyer acceptance; default policy refusal is a separate observation
+
 #### Scenario: Consumer behavior is not yet composed
 - **WHEN** adapter or notice first use succeeds before rate continuation is installed
 - **THEN** evidence claims only command/authority mechanics and delivery fails closed without the rate hook

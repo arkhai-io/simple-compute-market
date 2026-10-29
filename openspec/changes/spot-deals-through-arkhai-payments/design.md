@@ -214,15 +214,24 @@ The common codec's entitlement settles_through maps one-to-one to the stop entry
 | last_boundary | returned | Billing ends at the last boundary |
 | stop | prorated | Billed to effective stop time |
 
-The payments service computes this price, not SCM. Client preset recommendations
-are payer started_period and payee last_boundary. Mediation does not require
-returned on seller entries: this default belongs to SCM presets, and buyers may
-refuse offered terms. Mediation reads those terms instead of setting them. Until that contract
-revision is vendored, publication and acceptance refuse every unexpressible value.
-The interim spot preset explicitly commits started_period on both entitlements;
-it does not promise a seller-period return. D2's recommended interim rate presets
-also explicitly bind a charged end; the intended compute term-end treatment is
-returned once expressible. No storefront refund restores a missing payment term.
+The payments service computes this price, not SCM. Negotiation decides the
+accepted seller-stop and term-end treatment, not presets or mediation policy.
+Seller presets offer payer started_period and payee last_boundary, with a
+last_boundary term end. Mediation reads those terms instead of setting them.
+
+The terms-owned buyer acceptance policy defaults to refusing a payee entitlement
+or term end whose settles_through is not last_boundary, naming the offending term.
+A buyer may explicitly loosen that policy. Consume that policy here; do not
+implement another acceptance-policy owner in the rate adapter.
+
+Until the returned-capable contract revision is vendored, publication and acceptance
+refuse every unexpressible value. The interim spot offer explicitly commits
+started_period on both entitlements and, when only charged end is expressible,
+on the term end too. Default buyers refuse it: disclosure alone does not override
+their acceptance policy. Any interim scenario must configure its buyer to accept
+started_period for every affected term, including a charged term end. Spot reaches
+default buyers only once the vendored revision expresses returned on seller stops
+and term ends. No storefront refund restores a missing payment term.
 
 For authority start S and period P, periods are half-open [S+kP,S+(k+1)P).
 At E=S, nothing is earned. With S=0, P=60, A=100, E=60 charges 100 for all
@@ -369,7 +378,10 @@ Spot keeps its prepared entry points: the rate/setup preset and approval fixture
 the typed buyer-end and seller notice/preempt commands, and adapter start/read
 seams. Convergence executes those surfaces when its consumer is composed;
 activation owns hosted execution. Preparation and focused adapter/CLI evidence
-are not duplicate cross-service qualification.
+are not duplicate cross-service qualification. Prepared interim spot scenarios
+must name their buyer's explicit started_period acceptance configuration for the
+payee entitlement and any charged term end. Keep default-policy refusal and
+returned-capable acceptance observations distinct; convergence owns execution.
 
 Published vectors qualify derivation/contract use here; proposed lanes never prove
 hosted internals. Hosted prerequisites are reported before scenario execution.

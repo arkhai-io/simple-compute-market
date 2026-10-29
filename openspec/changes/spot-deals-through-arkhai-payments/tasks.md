@@ -75,6 +75,10 @@ publication configuration/builders and their focused publication suites.
       asset, hold, cap and stop authorities. Verify explicit zero payer notice is
       preserved exactly. Use the foundation's notice_seconds/settles_through
       authority mapping; reject retired exposure_seconds and stop+exposure.
+      Consume the terms-owned buyer acceptance policy: by default refuse payee
+      entitlement or term end unless settles_through is last_boundary, naming the
+      offending term. Verify explicit buyer opt-in can accept started_period;
+      do not mistake an exact mandate match for policy acceptance.
 - [ ] 2.4 Supply default setup-bearing on-demand/spot presets with explicit setup
       pricing and seller opt-out. Bind setup and rate terms into option identity.
       Do not invent a setup amount or impose a bare-metal minimum-spend gate.
@@ -126,7 +130,9 @@ Journal persistence itself belongs to convergence.
       superseded and equal-time requests from authority vectors; compute no
       local end-correction delta or clawback. Periods stay reserved until their
       end or part stop; afterStop payout is unchanged. Mediation requires no
-      particular seller rule: returned is the SCM preset default, not admission policy.
+      particular seller rule. Negotiation decides treatment; SCM seller presets
+      offer last_boundary, and the terms-owned buyer policy refuses other payee
+      or term-end treatments by default, with an explicit buyer override.
       Verify chosen-entry stop payloads follow payer/payee terms or the operator ruling.
 - [ ] 3.5 Keep exceptional_end filing with the dispute adapter for seller
       non-delivery or unentitled past physical failure, without computing ruling
@@ -174,6 +180,10 @@ second preemption endpoint or a local payment-stop scheduler.
       Before convergence, use lane-only approval/command fixtures and assert
       delivery refuses without the rate hook; do not commit/deliver an unserviced
       live rate option. This fixture is the explicit lane-only door exception.
+      Any interim spot fixture must explicitly configure its buyer to accept
+      started_period on the payee entitlement and any charged term end. Include
+      default-buyer refusal as a separate observation; returned-capable fixtures
+      may use default buyers only once the matching contract is vendored.
 - [ ] 4.5 Re-drive both domains' canonical rate buyer end: stop then hint, keep
       service during nonzero payer notice, and end through watch at effective
       stop. Keep explicit end-now-regardless and unreachable-authority
@@ -240,6 +250,8 @@ hosted-target evidence.
 - [ ] 6.2 Supply evidence metadata at the adapter/command first-use boundary:
       contract revision, target class/mode, hashes and control trace. Readiness
       gates scenario runs, not a claim that the target was prepared here.
+      Record the buyer acceptance-policy configuration for interim spot evidence;
+      an opted-in buyer is not evidence of acceptance by default buyers.
 - [ ] 6.3 Reference convergence's sole consolidated rate qualification matrix
       (its design's Scenarios and evidence); do not reproduce it here. Retain
       spot's prepared fixtures and typed entry points for its executor. Activation

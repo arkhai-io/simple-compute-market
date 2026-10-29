@@ -31,6 +31,11 @@ continuation is a separate dependent change.
   Term end also carries partialPeriod: compute presets use returned. Fail closed
   on unexpressible terms; interim spot commits charged on both sides. Recommend
   explicitly disclosed charged term ends for interim spot/on-demand rate options.
+  Negotiation decides accepted treatment. Seller presets offer last_boundary;
+  the terms-owned buyer policy by default refuses other payee or term-end
+  treatments. Interim spot therefore requires explicit buyer acceptance of
+  started_period for those terms and cannot reach default buyers until returned
+  is expressible in the vendored contract.
 - Add the seller half's notice command through the existing seller-authenticated,
   negotiation-keyed lifecycle submit; a typed client method and a deals preempt
   operator CLI verb in both domains. Submit stop immediately to the payment

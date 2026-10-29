@@ -47,7 +47,7 @@ SCM MUST derive time rate parts through the agreed-price accessor and lifecycle 
 - **WHEN** the shared codec derives rate/setup parts
 - **THEN** every stop-authority entry and each part end carries partialPeriod
 - **AND** the dispute authority's rate stop entry is {account, notice: PT0S, partialPeriod: chosen}, requiring its stop event to supply treatment
-- **AND** mediation does not require returned on seller entries; that is SCM's preset default
+- **AND** mediation does not require returned on seller entries; negotiation decides accepted treatment, seller presets offer last_boundary, and the terms-owned buyer policy defaults to refusing other payee or term-end treatments
 
 #### Scenario: Setup uses its own term
 - **WHEN** the setup once part ends at activation
@@ -91,6 +91,13 @@ SCM MUST derive rate stop treatment through the shared lifecycle codec's settles
 - **WHEN** an interim spot preset is offered against a contract supporting only charged behavior
 - **THEN** payer and payee entitlements both commit started_period
 - **AND** last_boundary or stop terms refuse before publication or acceptance
+- **AND** the terms-owned default buyer policy refuses the interim offer; proceeding requires explicit buyer acceptance of started_period on payee stops and any charged term end
+
+#### Scenario: Returned-capable spot reaches default buyers
+- **GIVEN** a vendored revision expressing returned and an offered spot option with payee and term-end settles_through last_boundary
+- **WHEN** the buyer's default acceptance policy and exact mandate check run
+- **THEN** those treatments pass policy without loosening it
+- **AND** an unexpressible returned treatment is never replaced with charged
 
 #### Scenario: Rate earning follows completed periods or stop
 - **WHEN** a rate period begins
