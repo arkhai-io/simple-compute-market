@@ -8,13 +8,15 @@ production adapters and their contract/fixture prerequisites remain in
 ## Dependency gates and first use
 
 - Foundation sections 1–2 supply lifecycle interfaces; 8.1 supplies payments
-  schemas/models/vectors; 9.1 supplies the shared snapshot fixture/frame seam;
-  12.1 supplies the published/draft mediation schema, models and
-  record-signing fixtures before construction. Gate buyer_end on the shared
-  acknowledgement signing/verification primitive owned by 13.1 and consumed by 7.5,
-  with the 2.4 response model. Confirm each prerequisite before its HTTP surface.
+  schemas/models/vectors, unpublished candidate, installed resource metadata/API
+  and the one clock-injected payments fixture engine; 9.1 supplies snapshot framing;
+  12.1 supplies mediation contracts, installed resources, mapping/netting vectors,
+  models and record-signing fixtures. Confirm each prerequisite before its surface.
+  No mediation acknowledgement-verifier gate remains: all cases go to triage.
+  Foundation 2.4 supplies the buyer-usable acknowledgement model/verifier, 13.1 the
+  storefront signer, and 7.5 consumes it. Bare-metal porting waits for 7.4, 13.x/15.x.
 - Foundation 7.4/11.1/12.2/14.2 and spot kit tests use in-process contract fakes
-  generated from the same kit vectors; they do not depend on this tool (D-H).
+  exercising the same kit vectors (payments uses the shared engine directly); they do not depend on this tool (D-H).
   The tool's tests and lane/system-integration runs consume its HTTP services.
   Land foundation prerequisites first, then this change, then lane consumers;
   foundation's remaining rounds can finish independently with contract fakes.
@@ -31,7 +33,7 @@ production adapters and their contract/fixture prerequisites remain in
 New paths below are planned deliverables, not citations to existing implementation.
 Within the new tooling root `tools/authority-lane-doubles`, filenames are relative to
 that root. Test work adapts existing kept suites first. The owner authorizes the
-new double's own timer/hold, mechanical-classifier, effect-resume and control-isolation
+new double's own timer/hold, triage/operator-ruling, effect-resume and control-isolation
 coverage below (02 F10); it is required for implementation, not a deferred approval.
 No unrelated consumer acceptance suite is authorized by this design triage.
 
@@ -45,7 +47,11 @@ No unrelated consumer acceptance suite is authorized by this design triage.
       primitives. Files: new tooling contract selectors/manifests under
       `src/authority_lane_doubles/contracts/` selectors and difference manifests;
       schemas/candidate bytes/vectors stay solely in the owning kit with publication
-      status and hashes in SOURCE. Consume those exact bytes (02 F5).
+      status and hashes in SOURCE. Consume the kit-installed resource/model API
+      from built wheels without sibling checkouts, not checkout-relative schema
+      paths (03 F2 / 04 F11). Keep one canonical resource source. Select the same
+      candidate as consumer publication/acceptance/derivation through the explicit
+      lane-only proposed declaration; refuse missing prerequisites by name.
 - [ ] 1.2 Add the tooling `pyproject.toml`, `uv.lock`, `Makefile`, `Dockerfile` and
       `src/authority_lane_doubles/` package with separate payments and mediation
       entry points. Declare every imported kit distribution. Reuse kit fixture APIs;
@@ -56,13 +62,14 @@ No unrelated consumer acceptance suite is authorized by this design triage.
       public development-only, never for a public network. Keep production defaults
       empty. Expose health/status with contract metadata outside signed wire frames;
       before explicit mode/seed selection report not-ready. Compare required consumer
-      SOURCE hashes in published readiness and fail setup by name on mismatch.
+      installed metadata hashes in both published and proposed readiness; fail
+      setup by name on mismatch. Report each authority's current wall-clock instant.
 
 Verification: static schema validation and existing kit vector targets
 `make -C kit/arkhai-payments check-vectors` and the foundation's mediation vector
 suite when available; shared receipt/snapshot signing reproduces the pinned vectors.
 The tool's library-integration suite uses real HTTP clients with injected transports
-to read both services' initial state; kit suites keep their vector-generated fakes.
+to read both services' initial state; kit suites keep their in-process fakes.
 Packaging: new tool build/reinit/typecheck targets, `make check-packaging`.
 Missing producer vectors are recorded as published-qualification gates, not passing
 conformance evidence.
@@ -72,25 +79,29 @@ conformance evidence.
 - [ ] 2.1 Implement approval, exact Agreement attachments, receipts, snapshots,
       event reads and per-account authorization/idempotency in new tooling
       `src/authority_lane_doubles/payments.py`, reusing kit models and signers.
-      Implement only the chosen contract in each mode, including explicit refusals
-      for unsupported operations. Never emit live-mode records.
+      Wrap the foundation 8.1 kit fixture engine, not another ledger. Implement only
+      the chosen contract, including explicit refusals for unsupported operations.
+      Normal responses never emit live-mode records; only the labelled 4.1
+      record-corruption fault may do so.
 - [ ] 2.2 Add the target revision's per-part start, stop with notice and pending-stop
       maturity, absolute end, funding exhaustion and funded-through observations.
-      Use the pinned rate-period arithmetic from start, including mixed once/rate
-      mandates where supported. Apply each stopper's partialPeriod in the authority,
-      one notice from notice_seconds, boundary-aligned exhaustion and absolute ends
-      carrying their own partialPeriod without term rounding. The dispute authority
-      entry uses chosen and its event supplies treatment. Earn periods at period end
-      or part stop; anchor {for} payouts to that earning instant, not period start. Until expressible, fail closed on unsupported values and use
-      charged for both spot parties. Setup ends at activation with its window,
-      returning all only when undelivered under self-penalty (D-A/D-B/D-D).
-      Do not conflate transaction approval with start.
-      Keep no payee stop on on-demand mandates.
+      Use pinned rate arithmetic from start, including mixed once/rate mandates
+      where supported. For contracts expressing them, implement stopper partialPeriod,
+      chosen dispute stops with explicit event treatment, end.partialPeriod without
+      rounding, period-end/stop earning and {for} holds from earning. Otherwise
+      follow the selected publication's actual semantics; refuse unsupported inputs,
+      never guess charged behavior or implement consumer acceptance policy here.
+      Setup maturity uses only the selected contract's immutable activation anchor.
+      Add the candidate's unconditional payee stop now with returned treatment
+      without an entitlement, payer early release, payee notice waiver and cooperative
+      stop at receipt plus payer notice with payer partialPeriod (E-A/E-C/E-E).
+      No self-interested payee stop exists without entitlement; never conflate
+      approval with rate start or observe compute activation inside the authority.
 - [ ] 2.3 Add held-money partial reverse before/after stop, afterStop payout timing,
       independent extend refs and lift, caps and contract refusal codes. Preserve
       idempotent results across lost responses. Share one state engine between HTTP
-      and controls; kit contract fakes follow shared vectors, not an independent
-      hand-maintained rate simulator.
+      and controls and the kit's in-process fake: import the shared kit engine,
+      exercise the same vectors and do not maintain another rate simulator.
 
 Verification: keep existing kit `test_client.py`, `test_receipt_fixture.py` and
 `test_receipts.py` on kit-owned contract fakes/vectors. In the new tool's
@@ -99,7 +110,8 @@ start/stop authorization, partialPeriod outcomes, notice firing without a storef
 setup maturity, overlapping case holds, reversal before/after stop and response-loss
 replay. Required unit state-machine coverage uses an injected clock for timer/hold
 transitions and idempotent retries; required library integration covers signed HTTP
-records from the same state engine (02 F10). No hosted ledger qualification is claimed.
+records from the same state engine (02 F10). Verify built-wheel resource access
+without sibling source trees and fake/HTTP engine parity (03 F2 / 04 F3). No hosted ledger qualification is claimed.
 
 ## 3. Mediation HTTP double
 
@@ -113,26 +125,40 @@ records from the same state engine (02 F10). No hosted ledger qualification is c
       held/not-held/pending/error results, stable case/part keys, and payout-race
       handling. Add `src/authority_lane_doubles/authority_payments_client.py` using
       kit-generated models for authority HTTP calls (02 F14), not an invented
-      production-party client. Read the committed Agreement and derive effects in
-      the authority tool, never in the marketplace dispute adapter.
-- [ ] 3.3 Implement the two mechanical classes only: sufficient seller self-penalty
-      and buyer_end with a verified, deal-bound storefront acknowledgement. Realize
-      past ends as stop-now plus reverse. Queue everything else for triage with a
-      local notification outbox; accept a lane operator ruling through the same
-      application path. Refuse unsupported bond effects until the contract has them.
+      production-party client. Take the exact Agreement from the case, verify its
+      hash against the committed mandate, and derive dispute effects in the tool;
+      do not require an attachment or trust marketplace-computed remedies (E-F).
+- [ ] 3.3 Queue every claim, including buyer_end with any acknowledgement, for
+      visible triage and a local operator-notification outbox (E-D). Remove
+      exceptional_end from mediation's vocabulary/mapping; it is seller payment-
+      adapter self-correction, not a case. Accept lane operator rulings through one
+      effect path; every stop ruling must state partialPeriod or refuse. Realize
+      buyer_end as the payer's stop at at, including payer notice and committed
+      partialPeriod; leave once parts untouched. A past remedy is present stop plus
+      net adjustment, never backdating or a way to skip priced notice.
+      Refuse unsupported bond effects until the contract has them.
 - [ ] 3.4 Apply effects as the dispute authority with stable IDs/case refs, record
       applied state, resume partial outcomes and lift only this case's refs. Keep
       a delivery end distinct from a discount. Make case discovery/record watch work
       after a party outage without imposing order across authority records.
+- [ ] 3.5 Implement revision-bound case references and agreement-wide remedy netting
+      from the pinned foundation mapping/vectors (03 F1 / 04 F9). Serialize remedy
+      application per agreement, resolve uncertain prior effects, net confirmed
+      reversals/self-corrections and awards, and apply only the additional remedy.
+      Preserve prior provenance across open/closed cases, partial application and
+      append/close races. Unsupported netting remains explicit repair/triage.
 
 Verification: foundation 12.2 uses its kit contract fake. The tool's required
 `tests/test_mediation.py` library integration drives real clients for two cases,
 mixed held/not-held, lost filing response, closed-before-append, empty record and
-repeated evidence. Required `tests/test_mechanical_rulings.py` unit coverage proves
-self-penalty sufficiency and acknowledgement signature/deal/time binding; HTTP
-integration files seller exceptional_end, acknowledged buyer_end and absent/invalid
-ack triage. Required `tests/test_effect_recovery.py` interrupts effect application
-and proves resume without duplicates or another case's lift (02 F10).
+repeated evidence. Required `tests/test_triage_rulings.py` coverage proves all claims
+stay triaged regardless of acknowledgement, exceptional_end is unsupported, and
+operator stops require explicit partialPeriod and preserve payer notice for buyer_end.
+HTTP integration files cases with the exact Agreement and no attachment, verifies
+hash mismatch refusal, and applies operator rulings through the authority path. Required `tests/test_effect_recovery.py` interrupts effect application
+and proves resume without duplicates or another case's lift (02 F10), plus a
+40-then-total-60 revised remedy applies only 20, including uncertain/partial prior
+effects, closed prior cases and races (03 F1 / 04 F9).
 These are interface simulation results, not live mediation acceptance.
 
 ## 4. Lane-only controls and deterministic time
@@ -141,7 +167,10 @@ These are interface simulation results, not live mediation acceptance.
       enablement, scoped run reset, wall-time due-work barriers, exhaustion, snapshot
       replay/sequence/provenance faults, per-operation refusals and delayed/dropped
       responses including after commit, independent authority outage, key overlap,
-      triage and effect pause/resume. Separate record corruption from normal valid
+      triage and effect pause/resume, payer funding/top-up and a labelled signed
+      livemode:true fault. Rotation retains old receipt bytes inside a current-key
+      signed snapshot with the selected contract's re-anchoring attestation; missing
+      vectors keep the scenario proposed-only (04 F9). Separate corruption from valid
       signing so scenarios can identify the injected fault.
 - [ ] 4.2 Keep controls on lane-private networks with no host port, unavailable
       outside the lane profile. Make faults run/transaction/case scoped. Rotation
@@ -154,6 +183,9 @@ These are interface simulation results, not live mediation acceptance.
       Barrier results expose per-authority watermarks, pending work and blocked
       dependencies, never claim completion while effects are blocked (01 F2/02 F12).
       Use wall time and short windows in lanes; injectable time is test-only (02 F4).
+      Process due work on reads/writes and an internal wall-time scheduler without
+      barriers; barriers only force/report progress. Expose each authority's current
+      instant in status and barriers for skew checks (04 F10).
 
 Verification: required `tests/test_controls.py` unit/library-integration coverage
 uses the typed client to prove scope/version refusals, deterministic initialization,
@@ -171,12 +203,16 @@ and isolated stores. A barrier must not mutate another run (02 F10).
       addressed services per lane and cleanup removes their state. Do not add these
       services to default or hosted stacks. Provide HTTPS origins/certificates with
       Compose-service SANs and a lane-only public development CA; explicitly mount
-      trust through SSL_CERT_FILE only in lane participants. No host control port.
+      trust through SSL_CERT_FILE only in lane participants, using a bundle of the
+      lane CA plus default public roots, not a replacement lane-CA-only trust store. No host control port.
 - [ ] 5.2 Add lane payment/dispute profiles under `e2e-tests/config` and role fixtures
       through existing configuration generation. Wire service identities, fixture
       credentials, seeded accounts and authority advertisements, including accepted
-      Dispute/DisputeCredential identity entries where lifecycle is composed. Preserve
-      API-credit compatibility without claiming it now services disputes. Use
+      Dispute entries in every hosted role, including API-credit publication and
+      selection, and DisputeCredential bindings where lifecycle filing is composed.
+      Admit draft mediation only under an explicit lane profile/proposed declaration;
+      an Agreement naming it makes the run proposed even without a case (04 F7).
+      Preserve API-credit compatibility without claiming it now services disputes. Use
       fixture bearer credentials through api_key_env, development_auth=false and
       livemode=false; preserve existing non-loopback HTTPS and auth checks. Add a
       composition guard in role config loaders, payments `settlement_config.py` and
@@ -190,7 +226,11 @@ and isolated stores. A barrier must not mutate another run (02 F10).
       Use a missing-setting failure for lane-owned credentials, not a blocked skip.
       Preserve explicit external-target selection without fallback to a double.
       Apply the foundation's target-naming/readiness rule and this change's single
-      evidence-class definition; reject published-mode consumer hash mismatch.
+      evidence-class definition; reject consumer hash mismatch in either mode.
+      Replace the helper's lane-double readiness skip with a named setup failure;
+      blocked/unrun is only for the explicitly selected external-target case (04 F1).
+      Declare the typed tooling-control-client distribution in e2e-tests/pyproject.toml
+      and refresh its lock so installed lane consumers can import it (04 F13).
       Pass explicit lane-CA SSL contexts to trust_env=false readiness probes, and
       supply service-name NO_PROXY for real clients that retain trust_env. Prove
       both readiness and signed requests succeed without disabling verification.
@@ -203,6 +243,14 @@ and isolated stores. A barrier must not mutate another run (02 F10).
       with fixture bearer auth; prove production rejects the lane tuple (02 F2).
       Capture reproducible commands and
       contract/evidence metadata; stop every owned service after trying it.
+- [ ] 5.5 Port the existing
+      `e2e-tests/tests/e2e/roles/scenarios/bare_metal/test_bare_metal_payment_deal.py`
+      and helper to foundation's post-approval commit, buyer-half re-drive, seller
+      reverse and end_delivery flow (04 F2). Retain original-run identity and all
+      bounded cleanup/race assertions. Remove retired payment-level dispute_authority
+      serialization in favor of role Dispute entries. Foundation 7.4, 13.x/15.x gate
+      this port; this change is its sole scenario owner. API credits keeps its
+      separately owned settle path.
 
 Verification levels/targets:
 - Unit: `e2e-tests/tests/unit/test_payments_helper.py` and
@@ -214,7 +262,7 @@ Verification levels/targets:
   internals or new API-credit dispute behavior.
 - Smoke: Compose health/readiness and a signed read at each required authority before
   mutating a scenario. A down target reports environment setup, not product evidence.
-- System integration: `make -C e2e-tests test-e2e-bare-metal` and
+- System integration (after 5.5's port): `make -C e2e-tests test-e2e-bare-metal` and
   `make -C e2e-tests test-e2e-apicredits`, preserving existing payment markers and
   mock provisioning. Run `test-e2e-vm` for its changed wiring. Capture consumer
   revision, contract hashes, initial seed/actors, result and cleanup. Later rate

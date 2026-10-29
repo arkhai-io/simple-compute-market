@@ -14,7 +14,9 @@ lane, not a cooperative storefront masquerading as an authority.
 
 - Own both runnable HTTP boundary doubles: `arkhai.payments.v1` and
   `arkhai.mediation.v1`, in one lane-only tooling image with separate services,
-  identities, records and availability controls. Production adapters, contract
+  identities, records and availability controls. The payment fake and HTTP wrapper
+  share one clock-injected payments fixture engine in the payments kit; no kit
+  depends on tooling. Production adapters, installed contract resources, contract
   vendoring and signing/verification primitives remain in their owning kits.
 - Preserve two explicit contract modes, `published` and `proposed`. Published mode
   implements the exact vendored publication; proposed mode implements a pinned,
@@ -23,25 +25,31 @@ lane, not a cooperative storefront masquerading as an authority.
   term/exhaustion stops, `{afterStop: dispute_window}` holds and `extend`/`lift`.
   There is no backdated stop or released-funds refund extension.
 - Add the dispute authority's file, append and read/watch boundary with signed
-  per-agreement records. It extends holds as the authority, mechanically rules a
-  sufficient seller self-penalty and an acknowledged `buyer_end(at)`, and sends
-  everything else to controllable triage. Only the authority double applies a
-  ruling's effects at the payment double.
+  per-agreement records. It verifies the case's exact Agreement against the mandate
+  hash without requiring an attachment, extends holds and sends all claims to
+  controllable triage. Operator stop rulings state partialPeriod; buyer_end preserves
+  payer notice and treatment. Only the authority double applies dispute effects,
+  netting prior agreement-wide remedies. Exceptional_end is seller payment-adapter
+  self-correction, not a mediation request or mechanical rule.
 - Keep mid-scenario control routes through a tooling-owned typed client: exhaustion,
   snapshot sequence/provenance faults, delay/drop/refusal, independent outages,
-  signing-identity rotation and triage/effect retry. Lane services use wall time
+  signing-identity rotation/re-anchoring, payer funding, labelled livemode-corruption
+  faults and triage/effect retry. Lane services use wall time
   and due-work barriers; isolated tooling tests use injectable deterministic time.
 - Use explicit lane-only HTTPS origins, a public development CA and fixture bearer
   auth; keep published clients' production transport/auth checks intact. Production
   composition refuses lane settings and identities. Add the double's own timer,
-  classifier, retry and isolation suites as required work, not deferred approval.
+  triage/operator-ruling, retry and isolation suites as required work, not deferred approval.
 - Wire lane-scoped targets, accounts, credentials and authority advertisements into
   the existing VM, bare-metal and API-credit lanes. Existing bare-metal and credits
   payment scenarios stop skipping; later compute lifecycle scenarios reuse the same
-  services. API-credit dispute servicing is not added here.
+  services. Port the existing bare-metal scenario to commit, buyer-half re-drive,
+  seller reverse and end_delivery with retained cleanup; required lane readiness
+  failures fail setup rather than skip. API-credit dispute servicing is not added.
 - Attribute each run as qualification against the published contract, qualification
   against a proposed contract, or live evidence. Neither double can produce live
-  evidence or `livemode: true`.
+  evidence. Normal payment records never use `livemode: true`; a labelled corruption
+  control may inject such a frame only to exercise client refusal.
 
 ## Capabilities
 
@@ -61,7 +69,8 @@ None. These are test collaborators, not new production authorities.
   primitives. Its schema/model work gates this change's corresponding published
   mode, not design. A pinned draft permits proposed-only qualification until then.
 - This change alone owns the executable payment and mediation doubles and their
-  controls. Kits keep vector-generated in-process contract fakes for unit and
+  controls. Foundation 8.1 supplies the shared payments fixture engine and both kits
+  supply installed provenance/resource seams. Kits keep in-process fakes for unit and
   library-integration tests; they never depend on the tool. Its own tests exercise
   real clients, while lanes consume the runnable services. Foundation section 12
   does not build another executable double. Design D7 gives the section-level gates.
@@ -77,8 +86,8 @@ None. These are test collaborators, not new production authorities.
 
 Production payment/dispute services, production derivation or cryptographic
 verification changes (the lane-only configuration refusal guard is in scope),
-new payment primitives, bonds before the contract supports them, automated decisions
-beyond the mediation contract's two mechanical classes, and live provider or ledger
+new production payment primitives, bonds before the contract supports them, any
+mechanical mediation rulings before the managed metering gateway, and live provider or ledger
 qualification. Seller site deadlines and churn/pricing policy are not protocol
 requirements and are not simulated as authority guarantees.
 

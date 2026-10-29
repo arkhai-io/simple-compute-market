@@ -18,12 +18,12 @@ Credential-free payment lanes MUST provide HTTP doubles of the payment and dispu
 
 ### Requirement: Kit contract fakes and runnable doubles have separate consumers
 
-Kits MUST use in-process contract fakes generated from their kit-owned vectors for unit and library-integration tests. A kit and its test environment MUST NOT depend on runnable tooling. HTTP doubles MUST serve lane and system-integration runs. The tooling's own suite MUST verify its timers, holds, mechanical classifier, effect recovery and control isolation against those same contracts.
+Kits MUST use in-process contract fakes and kit-owned vectors for unit and library-integration tests. The payment fake and HTTP double MUST share one clock-injected payments authority engine in payments-kit fixtures. Kits MUST NOT depend on tooling. HTTP doubles MUST serve lane/system-integration runs; their own suites MUST verify timers, holds, triage/operator rulings, effect recovery and controls.
 
 #### Scenario: A kit runs its ordinary tests
 
 - **WHEN** a kit exercises its lifecycle client without a lane
-- **THEN** its injected contract fake uses the same vectors as the runnable double
+- **THEN** its injected contract fake uses the same vectors as the runnable double, and the payments fake uses the shared kit engine directly
 - **AND** no Compose service or tooling distribution is required
 
 ### Requirement: Lane origins and authentication preserve production client checks
@@ -57,6 +57,16 @@ Each double MUST select `published` or `proposed` before scenario mutation. Publ
 - **THEN** its candidate frame is identified and its evidence is proposed qualification, never published conformance
 - **AND** a placeholder proof is not accepted as a verified snapshot
 
+### Requirement: Authority contract resources work from installed artifacts
+
+Doubles MUST consume the owning kits' installed resource/model API for the selected schema, vectors, publication status and hashes, without sibling checkouts. Packaged resources and generated metadata MUST derive from one canonical source. Readiness MUST compare the selected hashes with required consumers in both modes before mutation.
+
+#### Scenario: A source-free image selects a contract
+
+- **WHEN** the tool and consumer kits are installed from built wheels without source trees
+- **THEN** both select identical contract bytes/models and report identical publication/hash metadata
+- **AND** absent resources or mismatched hashes fail setup by name
+
 ### Requirement: Payment double models per-part lifecycle and held-money correction
 
 The target payment double MUST model per-part authorities, payee-only rate start, notice-bearing pending stops, term/exhaustion stops, afterStop holds, repeatable partial reversal of held money and independently referenced hold extensions. Its behavior MUST follow the selected contract. It MUST NOT invent backdated stops, minimum-spend primitives or released-funds refund routes.
@@ -69,9 +79,9 @@ The target payment double MUST model per-part authorities, payee-only rate start
 
 #### Scenario: A seller has no stop entitlement
 
-- **WHEN** the payee attempts to stop an on-demand rate part whose mandate grants it no stop authority
-- **THEN** the payment double refuses the command
-- **AND** a dispute authority may still apply an authorized ruling with its own account
+- **WHEN** the payee has no entitlement but requests an immediate stop in the payer's interest under the candidate contract
+- **THEN** the double accepts it without a stop entry, with partialPeriod returned
+- **AND** a self-interested stop without entitlement is still refused; published mode implements only its actual publication
 
 #### Scenario: A stopped part still holds reversible earnings
 
@@ -87,12 +97,13 @@ The target payment double MUST model per-part authorities, payee-only rate start
 
 ### Requirement: Payment double applies the selected stopper's partial-period terms
 
-The double MUST apply the foundation's notice/partialPeriod mapping at the authority, refusing unexpressible terms without storefront correction. Parties MUST have one notice from notice_seconds. Term ends MUST carry their own treatment without rounding; exhaustion MUST be boundary-aligned. The dispute stop entry MUST use chosen with event-supplied treatment. Rate earnings and {for} payout anchors MUST be period end or part stop, not period start.
+The double MUST implement its selected contract's notice, partialPeriod, earning and hold semantics, refusing unsupported terms without correction. When expressible, it MUST support end.partialPeriod without rounding, chosen dispute stops with explicit treatment, period-end/stop earning and {for} holds from earning. Setup ends MUST use the contract's immutable anchor, not compute observations.
 
 #### Scenario: A revision lacks partialPeriod
 
 - **WHEN** the selected contract cannot encode returned/prorated
-- **THEN** stops retain charged semantics, the offer discloses started_period, and default buyers refuse that payee or term-end treatment
+- **THEN** the double refuses those inputs and retains its publication's actual supported stop/earning semantics
+- **AND** it does not implement offer disclosure or buyer acceptance policy
 
 #### Scenario: Stopper terms differ
 
@@ -100,11 +111,23 @@ The double MUST apply the foundation's notice/partialPeriod mapping at the autho
 - **THEN** the double computes each stop's billing from that authority's terms
 - **AND** no caller sends a compensating started-period refund
 
-#### Scenario: Setup delivery activates
+#### Scenario: The contract represents setup maturity
 
-- **WHEN** a setup once part's delivery activates
-- **THEN** its end is activation and payout is one dispute window later
-- **AND** the standard self-penalty returns all setup payment for undelivered service and none after delivery
+- **WHEN** the selected contract defines an immutable activation anchor and receives its specified authority event
+- **THEN** the double ends the setup once part at that anchor and releases only after its dispute window
+- **AND** a contract without that representation refuses unsupported setup inputs
+
+#### Scenario: A cooperative seller stops after end delivery
+
+- **WHEN** the seller journals end_delivery at its own receipt time while payments is down and retries after recovery
+- **THEN** the candidate double accepts the contract-defined per-part events realizing billing through receipt plus payer notice with payer partialPeriod, never a backdated stop
+- **AND** payee policy may waive notice, independently of the unconditional immediate returned stop
+
+#### Scenario: A party waives its own protection
+
+- **WHEN** the selected candidate permits the payee to waive payer notice or the payer to release held funds early
+- **THEN** the double accepts that party's waiver without requiring a counterparty entitlement
+- **AND** unsupported published-mode waiver operations refuse explicitly
 
 ### Requirement: Mediation double records party cases and authority holds
 
@@ -133,27 +156,34 @@ The mediation double MUST authenticate file and append as agreement parties, and
 - **THEN** the double returns a signed empty record at cursor zero and watch can discover later entries
 - **AND** an unknown agreement or unauthorized party receives the selected contract's refusal, not a fabricated empty record
 
-### Requirement: Mediation double limits mechanical rulings to acknowledged classes
+### Requirement: Mediation double sends every claim to triage
 
-The mediation double MUST mechanically rule a payee request at least as strong on every part as the standard seller self-penalty, or a payer buyer_end with the storefront's verified acknowledgement bound to that deal and an end at or before the requested time. All other claims MUST enter visible controllable triage. Payment consequences MUST be derived by the authority from the committed form, not trusted from the marketplace caller.
-
-#### Scenario: Seller requests its own standard penalty
-
-- **WHEN** a payee files exceptional_end for failed or undelivered service with a sufficient self-penalty request
-- **THEN** the double rules mechanically to end delivery and apply the contract's held-money consequences
-- **AND** an insufficient request such as an unentitled bare stop goes to triage instead
+The mediation double MUST send every claim to visible controllable triage with an operator-notification outbox, with no mechanical rulings. It MUST NOT expose exceptional_end as a request or mapping. Operator stop rulings MUST state partialPeriod explicitly. The authority MUST derive effects from the exact case-carried Agreement verified against the mandate's deal hash, without requiring an attachment or trusting caller-computed remedies.
 
 #### Scenario: Buyer kept a signed end acknowledgement
 
-- **WHEN** buyer_end includes a valid storefront acknowledgement of the same deal's end at or before the requested time
-- **THEN** the double rules mechanically using that acknowledged end
-- **AND** a past end is realized as stop-now plus reversal since that end, not a backdated stop
+- **WHEN** buyer_end includes a storefront acknowledgement at filing or in a seller append
+- **THEN** the case remains in visible triage for a person to rule
+- **AND** the acknowledgement is evidence, not an automatic ruling input
 
-#### Scenario: Acknowledgement is absent or not evidence of this end
+#### Scenario: Operator realizes a buyer end
 
-- **WHEN** a buyer claim lacks an acknowledgement, has an invalid signature, or carries one for another deal or later end
-- **THEN** it goes to triage rather than a mechanical ruling
-- **AND** simulated operator notification is visible without sending real external email
+- **WHEN** an operator rules buyer_end for a past requested end
+- **THEN** the remedy realizes the payer's own stop at that instant, including payer notice and committed partialPeriod, leaving once parts untouched
+- **AND** it uses a present stop plus the net held-money adjustment, never a backdated stop or a way to bypass priced notice
+- **AND** a stop ruling omitting partialPeriod refuses before applying effects
+
+#### Scenario: Seller corrects its own exceptional end
+
+- **WHEN** a seller attempts to file exceptional_end as a mediation intent
+- **THEN** the double refuses the unsupported intent rather than mechanically ruling it
+- **AND** seller self-correction instead uses the payment adapter's per-part payee operations
+
+#### Scenario: A case supplies its own Agreement
+
+- **WHEN** a case carries the exact Agreement and no attachment is stored
+- **THEN** the authority verifies its hash against the committed mandate before deriving dispute effects
+- **AND** a mismatching Agreement is refused
 
 ### Requirement: Only the mediation authority double applies dispute effects
 
@@ -168,12 +198,22 @@ The mediation double MUST apply ruling effects through authenticated payment HTT
 #### Scenario: An operator rules a triaged discount
 
 - **WHEN** a lane operator control supplies a permissible discount ruling with no delivery end
-- **THEN** the authority applies it through the same effect path as a mechanical ruling
+- **THEN** the authority applies it through the single authenticated ruling-effect path
 - **AND** the running deal is not ended merely because money was partially reversed
+
+### Requirement: Mediation nets revised remedies across an agreement
+
+The double MUST use the pinned authority mapping to net prior confirmed remedies per part across cases, including seller self-corrections. It MUST serialize remedy application per agreement, resolve uncertain effects before computing the remainder, apply only additional amounts and preserve case/effect provenance. Missing mapping or vectors MUST leave revised remedies in explicit repair/triage, not report completion.
+
+#### Scenario: Earlier evidence follows a prior remedy
+
+- **WHEN** a prior remedy returned 40 and earlier evidence establishes a total remedy of 60
+- **THEN** the revised case applies only 20 more with references to the prior cases and effects
+- **AND** this holds during partial/uncertain application, after closure and across append/close races
 
 ### Requirement: Lane authority controls are deterministic and isolated
 
-Doubles MUST offer versioned typed lane controls for exhaustion, snapshot faults, delay/drop/refusal, independent outages, key rotation and triage/effect progress. Controls MUST require an owned run and explicit nonempty targets, refuse unknown scope or versions without mutation, stay off host ports and be unavailable outside lane profiles. Reset MUST name only its owned run. Lost responses MUST preserve idempotent results. Controls MUST NOT change client trust.
+Doubles MUST offer versioned typed lane controls for funding/exhaustion, snapshot faults (including labelled livemode corruption), delay/drop/refusal, outages, key rotation and triage/effect progress. Controls MUST require an owned run and explicit nonempty targets, refuse unknown scope/versions without mutation, stay off host ports and be unavailable outside lane profiles. Reset MUST name only its owned run. Lost responses MUST preserve idempotent results. Controls MUST NOT change client trust.
 
 #### Scenario: An authority response is lost after commit
 
@@ -183,7 +223,8 @@ Doubles MUST offer versioned typed lane controls for exhaustion, snapshot faults
 #### Scenario: Notice and hold work becomes due
 
 - **WHEN** a lane scenario reaches a pending stop or payout using short real-time terms
-- **THEN** a typed due-work barrier drains work due at its captured instant and reports per-authority watermarks, pending effects and blocked dependencies
+- **THEN** authorities process due work on reads/writes and an internal wall-time scheduler without needing a barrier
+- **AND** a typed barrier forces due work and reports current instants, per-authority watermarks, pending effects and blocked dependencies; status also reports each authority's current instant
 - **AND** a blocked effect is not complete and no global ordering of records is fabricated
 - **AND** deterministic clock advancement is confined to isolated tooling tests, not lane authorities ahead of their consumers
 
@@ -193,15 +234,28 @@ Doubles MUST offer versioned typed lane controls for exhaustion, snapshot faults
 - **THEN** it refuses without creating scope or mutating another run
 - **AND** status before mode selection reports not ready
 
+#### Scenario: Payer funding rescues a transaction
+
+- **WHEN** a scoped funding control tops up the payer before verified exhaustion
+- **THEN** the selected contract engine updates reservations and funded-through in signed observations
+- **AND** the control neither ends another transaction nor claims an unconfirmed exhaustion
+
+#### Scenario: A livemode fault is injected
+
+- **WHEN** a scoped record-corruption control emits a signed livemode:true frame
+- **THEN** the report identifies that injected fault and normal double records remain livemode:false
+- **AND** the fault cannot make readiness or qualification claim live evidence
+
 #### Scenario: A signing identity rotates
 
 - **WHEN** a control begins key overlap and later removes the old key
-- **THEN** the double exposes the selected contract's key material and signatures
+- **THEN** payments retains old receipt bytes inside current-key signed snapshots with the selected contract's re-anchoring attestation during overlap
+- **AND** missing attestation vectors keep that scenario proposed-only
 - **AND** the control does not rewrite a committed Agreement's record key or cause clients to trust an unpinned successor
 
 ### Requirement: Lane qualification identifies readiness and evidence class
 
-Lane runs MUST obey External payment qualification names its target and report authority kinds, modes and hashes. Their evidence MUST be published-contract qualification only if every exercised surface matches published bytes/vectors; any proposed surface MUST make the aggregate proposed-contract qualification. Live evidence MUST require an explicitly configured ready hosted target, never a double. Cleanup MUST remove only owned state; external targets MUST NOT be replaced.
+Lane runs MUST obey "External payment qualification names its target" and report authority kinds, modes and hashes. Published qualification MUST require all committed and exercised surfaces to match publications/vectors; any proposed surface, including a named draft dispute interface, MUST make the run proposed. Only an explicitly configured ready hosted target can yield live evidence. Cleanup MUST remove only owned state; external targets MUST NOT be replaced.
 
 #### Scenario: A mixed-contract run finishes
 
@@ -209,16 +263,16 @@ Lane runs MUST obey External payment qualification names its target and report a
 - **THEN** each boundary's contract is reported and the combined result is proposed-contract qualification
 - **AND** the result cannot enable live servicing
 
-#### Scenario: A cached double has a different published contract
+#### Scenario: A cached double has a different selected contract
 
-- **WHEN** published-mode readiness finds a schema or vector hash different from a required consumer's kit SOURCE hashes
+- **WHEN** published- or proposed-mode readiness finds a schema or vector hash different from a required consumer's installed kit metadata
 - **THEN** setup fails naming the mismatch before any scenario mutation
 - **AND** an unavailable producer vector precludes a published qualification claim
 
 #### Scenario: A required lane authority is not ready
 
-- **WHEN** the selected scenario's required authority fails readiness
-- **THEN** the run reports the exact environment prerequisite before approving a payment or filing a case
+- **WHEN** a required lane-owned authority is absent or fails readiness
+- **THEN** setup fails naming the exact prerequisite before approving a payment or filing a case; it does not skip or report a blocked prerequisite
 - **AND** it does not count the unexercised product assertions as passed
 
 #### Scenario: A lane tears down after failure
@@ -231,32 +285,32 @@ Lane runs MUST obey External payment qualification names its target and report a
 
 ### Requirement: A configured bare-metal payment purchase is qualified end to end
 
-With a ready payments target, the bare-metal lane MUST qualify a fixed-term whole-host arkhai.payments.v1 purchase: discovery, negotiation, approval, receipt-gated mock delivery, original-run re-drive, separate refund and teardown. It MUST apply Lane qualification identifies readiness and evidence class. Mock access MUST NOT claim real access or revocation. Cleanup MUST run on pass or failure. An absent or unready target MUST report a named prerequisite, never count as qualification or fall back.
+The bare-metal lane MUST qualify discovery, negotiation, approval, commit, receipt-gated mock delivery, original-run buyer-half re-drive, seller reverse and buyer end_delivery for a fixed-term whole-host arkhai.payments.v1 purchase. It MUST apply "Lane qualification identifies readiness and evidence class". Mock access MUST NOT claim real access/revocation. Cleanup MUST run on pass/failure. Missing/unready lane targets MUST fail setup; unavailable external targets MUST report blocked.
 
 #### Scenario: Bare-metal payment purchase is qualified
 
-- **WHEN** the bare-metal payment scenario runs with a ready configured payments target
+- **WHEN** the bare-metal payment scenario runs with ready configured required authorities
 - **THEN** three ordered calls discover a distinct backed whole-host listing, negotiate
   and approve one hourly payment option with a wallet-free profiled Ed25519 buyer,
-  and observe receipt-gated durable mock delivery
+  then commit and observe receipt-gated durable mock delivery
 - **AND** recovery reads the original run and resolves its retained signer, re-drives
-  the same negotiation through `SyncStorefrontClient.settle_agreement`, and requires
+  the same negotiation through the buyer half's commit path, and requires
   the original transaction, fulfillment identity, and durable result
-- **AND** the pinned seller refunds the held payment and the buyer separately
-  requests physical teardown, converging mock reclaim and selected-site capacity release
+- **AND** the pinned seller reverses the held payment and the buyer separately
+  sends end_delivery without a buyer-supplied time, converging mock reclaim and selected-site capacity release
 - **AND** a double target reports its published-contract or proposed-contract qualification class, never live evidence
 
 #### Scenario: A stage fails after the payment is approved
 
 - **WHEN** a stage of the bare-metal payment scenario fails after the buyer approved the payment
-- **THEN** the scenario's cleanup refunds the deal's payment if it is not already refunded,
-  then reads the deal's fulfillment and tears down a host it finds not yet torn down,
+- **THEN** the scenario's cleanup reverses the held payment if it is not already reversed,
+  then reads the deal's fulfillment and sends end_delivery for a host not yet torn down,
   reading the deal's identifiers from the original run when the purchase command failed
-- **AND** a host delivered while the refund was being requested is found and torn down,
+- **AND** a host delivered while the reversal was being requested is found and ended,
   and one whose fulfillment cannot be read or torn down is reported as a failed step
-- **AND** a refund the seller refuses because the payment is not yet verified, or the
+- **AND** a reversal the seller refuses because the payment is not yet verified, or the
   payments service or storefront is unavailable, is retried for a bounded time, and a
-  refund that still fails fails the scenario naming the negotiation and transaction
+  reversal that still fails fails the scenario naming the negotiation and transaction
   and any host its seller may still deliver for it
 - **AND** no allocated host, mock rule, payment hold or held loop is left except the
   explicitly reported unrecoverable payment or failed host cleanup
@@ -265,5 +319,10 @@ With a ready payments target, the bare-metal lane MUST qualify a fixed-term whol
 
 #### Scenario: No payments target is configured
 
-- **WHEN** the bare-metal payment scenario runs with no payments target configured, or an unready one
-- **THEN** it reports a named blocked prerequisite and makes no purchase
+- **WHEN** the bare-metal scenario explicitly selects an external target that is absent or unready
+- **THEN** it reports a named blocked prerequisite, makes no purchase and does not fall back to a double
+
+#### Scenario: The required lane target is unavailable
+
+- **WHEN** the default lane target is absent or unready
+- **THEN** setup fails naming the target before purchase mutation, rather than reporting blocked or skipped

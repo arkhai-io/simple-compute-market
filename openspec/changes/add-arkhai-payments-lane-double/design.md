@@ -20,10 +20,9 @@ Observed on the reconciliation base:
 - `e2e-tests/Makefile` owns three isolated Compose lanes and their cleanup targets;
   payment settings are blank by default. Bare-metal and credits payment scenarios
   already exist. There is no mediation kit on this base.
-- The foundation's task introduction, section 12 and package table already assign
-  executable ownership here. Its D6 adapter prose still assigns a test double to
-  the mediation kit. The remaining correction is in D7, together with the separation
-  of kit contract fakes from runnable lane doubles (owner decision D-H).
+- The foundation assigns runnable doubles here and keeps contract fakes in the
+  kits. The remaining prerequisite seams are installed contract resources and one
+  shared payments fixture engine (03 F2 / 04 F3/F11, owner E-H).
 
 ## Goals and acceptance boundary
 
@@ -54,10 +53,13 @@ mediation kit import a payment mechanism. No kit, including its test environment
 depends on this tool.
 
 Reuse the kits' public models, canonicalization and signed-frame fixture functions.
-Keep fixture primitives in their own kits; the HTTP state machines, authority-side
-payment composition and lane controls live only in the tool. Kits keep in-process
-contract fakes generated from the same kit-owned contract vectors for unit and
-library-integration tests (01 F2 / 02 F1, D-H). Application-integration tests use
+Keep fixture primitives in their own kits. One pure, clock-injected payments
+authority engine lives in `kit/arkhai-payments` fixtures (foundation 8.1 owns it).
+The kit's in-process fake uses that engine directly; this tool wraps the same engine
+with HTTP, controls and mediation composition (04 F3, E-H). Mediation's state
+machine and authority-side payment composition live only in tooling. Both consumers
+exercise the kit-owned vectors; there is no second hand-maintained payments ledger.
+Kits keep in-process contract fakes for unit and library-integration tests (D-H). Application-integration tests use
 those injected fakes too; only lane/system-integration tests require the runnable
 HTTP services. No Compose dependency is added to ordinary kit `make test`.
 
@@ -83,6 +85,17 @@ owning kit, explicitly marked unpublished with content hashes. Proposed mode sel
 those same bytes. The tool holds only a selector and difference manifest referencing
 them, not a second candidate contract (02 F5). A SOURCE identifying a draft cannot
 make published mode ready.
+
+**Recommendation (03 F2 / 04 F11):** foundation 8.1 and 12.1 own installed
+resource APIs for both kits: selected schema/vector bytes, generated models and
+publication/hash metadata readable from a built wheel without sibling checkouts.
+Keep one canonical source and generate packaged resources/metadata from it. Payments
+8.1 also pins the unpublished candidate, models and vectors when publication lacks
+the requested features. The lane-only proposed declaration selects the same candidate
+for publication, acceptance, mandate derivation and this tool; expressibility checks
+use that selection, never a union of models. Missing resources block the affected
+surface by name. Readiness compares consumer hashes in both modes.
+
 It is not a permissive union: unsupported commands fail, never silently succeed.
 When publication and vendoring catch up, matching features move to published mode;
 that does not establish that the hosted deployment has them.
@@ -90,8 +103,10 @@ that does not establish that the hosted deployment has them.
 The flag may be selected per service with the same vocabulary. A run records a
 contract/evidence class for each boundary it uses; if either needs a proposed
 contract, the combined result is proposed qualification. A service without a
-published contract cannot claim published readiness. Payment-only scenarios can
-still use published payments without requiring an unpublished mediation interface.
+published contract cannot claim published readiness. An Agreement naming an unpublished dispute interface also makes the run proposed,
+even if no case is filed: its committed hold/adjudication terms depend on that draft.
+Only scenarios whose commitments and exercised surfaces are all published may claim
+published qualification. Draft mediation admission is explicit and lane-only.
 
 **Recommendation:** expose contract identity, mode, readiness, content hashes and
 control state on a lane-only status route and in the run report, not as new fields
@@ -125,17 +140,20 @@ rate-part behavior owned by `spot-deals-through-arkhai-payments`:
   until vendored support exists, publication/acceptance refuse unexpressible terms
   and spot uses charged for both. There is one notice per party, from its
   entitlement's `notice_seconds`. The dispute authority's stop entry uses
-  `partialPeriod: chosen`; its stop supplies treatment from the ruling's purpose.
-  Seller treatment is negotiated, not mandated by mediation; default buyers refuse
-  payee or term-end treatment other than last_boundary until explicitly loosened.
-  An on-demand part has no payee stop entitlement. Unauthorized
-  events are refused, even when the caller is the seller.
-- `stop {part, at?}` is never backdated: effective time is the later of the requested
+  `partialPeriod: chosen`; every operator ruling states its treatment explicitly.
+  Seller entitlement treatment is negotiated, not mandated by mediation. An on-demand
+  part has no payee entitlement to stop in its own interest. Under the candidate
+  contract, however, the payee may always stop immediately in the payer's interest,
+  without a stop entry, with partialPeriod returned (E-A/E-C). The payee may waive
+  payer notice, and the payer may release held money early, waiving its dispute
+  window. Unsupported candidate operations in published mode refuse explicitly.
+- An entitled `stop {part, at?}` is never backdated: effective time is the later of the requested
   time (or now) and receipt time plus that sender's notice. The earliest pending
   stop wins, cannot be withdrawn, and fires at the authority without another
   storefront call. Buyer notice is priced in the accepted terms, including zero
   when offered; reserve-ahead is not a substitute for it.
-- Absolute per-part `end` carries its own `partialPeriod`, with no whole-period
+- Where the selected contract expresses these features, absolute per-part `end`
+  carries its own `partialPeriod`, with no whole-period
   rounding of accepted terms; compute presets use returned when expressible.
   Transaction funding exhaustion stops at its funded-through period boundary.
   Rate periods are earned at period end or the part's stop, remaining reserved
@@ -153,9 +171,12 @@ rate-part behavior owned by `spot-deals-through-arkhai-payments`:
   `hold_not_extendable`, `extension_not_found` and `extension_closed` refusals.
 - Mixed setup `once` plus `rate` mandates are supported when the selected contract
   supports them. Setup ends at activation/provisioning and pays out one dispute
-  window later. Its unserved-by-time self-penalty returns all for an undelivered
-  deal and none after delivery (D-D). Started-period arithmetic follows the contract;
-  authority-side reversal since an end uses the same pinned arithmetic, not storefront estimates.
+  window later, only through an immutable authority event/anchor defined by the
+  selected candidate; the authority does not observe compute activation itself.
+  Missing representability refuses setup support rather than inventing an end.
+  Published mode always follows its publication's actual earning/hold semantics.
+  Started-period arithmetic follows the selected contract; per-part reversal uses
+  the same pinned arithmetic, not storefront estimates.
   No minimum-spend primitive or bond capability is invented by this double.
 
 Consumers preserve the other settled delivery boundaries: rate `start` is issued
@@ -166,7 +187,23 @@ uses an entitled notice stop or otherwise exceptional_end (D-E). Physical comple
 requires proven release, never a `lease_ended` intent report (D-G). These behaviors
 are owned by their foundation/rate/servicing changes, not reimplemented in the double.
 
-This model must make both no-stop-on-demand and authority-hosted seller notice
+Exceptional_end is a seller payment-adapter command, not a mediation request (E-C).
+The adapter stops every rate part now with returned treatment, reverses rate earnings
+since the past end and the unserved once share by time, and awards a bond in full
+only once supported. Setup returns all before activation and none after. It journals
+immediately, never future-dates; a pre-start failure acts at the Agreement start.
+Revised self-corrections must account for prior reversals rather than duplicate them;
+SCM adapter/journal ownership remains with the foundation and spot.
+
+On end_delivery (no buyer-supplied at), the seller records its own receipt and ends
+service then. It journals a cooperative payee stop for receipt plus the payer's
+notice with the payer's partialPeriod, retrying when payments recovers; policy may
+waive notice (E-B/E-E). The double supports the candidate payment operations behind
+that path; delayed replay follows the foundation's pinned per-part mapping, never
+backdates a stop or fabricates billing completion. It does not implement end service. The buyer still stops at payments
+first when reachable. This is distinct from the payee's unconditional returned stop.
+
+This model must make both no-self-interested-stop-on-demand and authority-hosted seller notice
 observable while the storefront is down. It does not emulate storefront-local
 schedules or a seller-supplied claim that service continued.
 
@@ -181,7 +218,9 @@ authority identity. Knowing a transaction or case ref grants no permission.
 
 - Either party files an idempotent, self-contained case about the commitment, with
   the Agreement, claim, requested intent and ordered evidence. The authority reads
-  the attached committed form and determines per-part effects; neither SCM adapter
+  the exact Agreement carried in the case, verifies it against the committed
+  mandate's deal hash, and determines per-part effects without requiring an attachment
+  (E-F); neither SCM adapter
   nor control caller supplies a trusted computed refund.
 - Before reporting a part held, the authority sends `extend` to the payment double
   using its own account, keyed by case and part. File returns the case reference and
@@ -198,25 +237,35 @@ authority identity. Knowing a transaction or case ref grants no permission.
   unknown agreement or unauthorized reader receives the pinned contract's refusal,
   not a fabricated empty record. Sign with the Agreement's `record_key` through the
   shared kit fixture (02 F12).
-- Mechanically rule only payee requests at least as strong on every part as the
-  standard self-penalty, and payer `buyer_end(at)` carrying a verified storefront
-  acknowledgement of an end at or before `at`, bound to this deal and buyer request.
-  Requested end times are no later than now; a future delivery end is not a ruling.
-  The standard self-penalty ends delivery, reverses unserved once shares by time
-  (setup returns all before activation and none afterwards),
-  stops rate parts and reverses their earnings since a past end; award a bond only
-  if a later pinned contract actually supports one. A weaker seller request is not
-  an entitled exit. Missing, forged or mismatched acknowledgements go to triage.
-- Everything else, including unacknowledged buyer ends, goes to a visible triage
-  queue. **Recommendation:** represent operator notification by a local outbox
-  visible to controls; do not send real email. A lane-only operator ruling control
-  feeds the same effect application path, not a new mechanical rule.
-- Only the authority double applies effects over authenticated payment HTTP calls,
-  with the case reference and stable effect keys, then lifts that case's extensions.
-  A past end is stop-now plus reversal since `at`, never a backdated stop. Delivery
-  end is in the signed ruling for end service to observe. A discount need not end
-  delivery. Partial application resumes after outages without duplicate effects;
-  a case is not presented as fully applied while any effect remains pending.
+- Every claim, including buyer_end(at) with a signed storefront acknowledgement,
+  enters visible triage. There are no mechanical rulings before the managed metering
+  gateway (E-D). Exceptional_end is absent from mediation's request vocabulary,
+  mapping and classifier; seller self-correction goes through the payment adapter.
+  Acknowledgements are evidence for a person, not an automatic ruling input.
+  **Recommendation:** represent operator notification by a local outbox visible to
+  controls; do not send real email. A lane-only operator ruling control feeds the
+  single authority effect application path. Every ruling that stops a rate part
+  explicitly states partialPeriod; omission refuses without mutation.
+- A buyer_end ruling realizes the payer's own stop submitted at at: its effective
+  billing end includes the payer's priced notice and its committed partialPeriod.
+  It cannot skip notice via mediation. A past remedy uses a present stop and only
+  the held-money adjustment needed to realize that target, never a backdated stop.
+  Future requested end times refuse. Once parts remain untouched by buyer_end.
+- Only the authority double applies dispute effects over authenticated payment HTTP
+  calls with case refs and stable effect keys, then lifts that case's extensions.
+  Delivery end is in the signed ruling for end service to observe; a discount need
+  not end delivery. Partial application resumes without duplicate effects and is
+  not reported complete while effects remain pending.
+- **Recommendation (03 F1 / 04 F9):** revision-bound cases carry prior case/effect
+  references and earlier signed evidence. Compute the agreement-wide target remedy
+  using the foundation's pinned mapping, net prior confirmed remedies per part,
+  resolve uncertain effects before calculating the remainder, and apply only the
+  additional amount (40 returned toward a total remedy of 60 means 20 more, not 60).
+  Preserve provenance across open/closed cases, partial application and append/close
+  races. Serialize competing remedy application per agreement. Missing contract or
+  netting vectors leaves the revision in explicit repair/triage, never fabricated
+  completion. This remains necessary for operator cases after self-correction;
+  no automatic exceptional_end rule is restored.
 
 Pinned keys/origins keep the foundation's limitation: controls may simulate rotation,
 but do not teach clients to trust an unpinned successor or claim solved key migration.
@@ -226,7 +275,14 @@ but do not teach clients to trust an unpinned successor or claim solved key migr
 Retain mid-run controls for chosen-instant exhaustion, stale/equal/regressed sequence
 and wrong-transaction snapshots, delayed/dropped responses, chosen command/error
 refusals and signing-key rotation with overlap. Add independent authority outages,
-append/close races and pause/resume of ruling effects. Dropping a response after
+append/close races and pause/resume of ruling effects. Add payer funding/top-up
+controls that advance funded-through through the selected contract engine, and a
+labelled record-corruption control that signs a livemode:true fault frame. Normal
+records remain livemode:false; this fault is never a readiness or live-evidence mode.
+**Recommendation (04 F9):** payments rotation serves old receipts unchanged inside
+current-identity-signed snapshots during overlap, with the selected contract's
+attestation/re-anchoring proof; removing the old signer does not erase that proof.
+Missing vectors keep this scenario proposed-only. Dropping a response after
 commit must leave the original idempotent result readable. Faults are scoped by run,
 transaction/case and operation; they do not contaminate another lane or scenario.
 
@@ -236,7 +292,11 @@ due at its captured current instant and reports the processed watermark per
 authority, pending effects and blocked dependencies. Future work remains pending;
 a blocked effect is never a successful completion. Bounded waits observe progress,
 not arbitrary sleeps. No lane-wide time travel or cross-authority order is claimed.
-Only the tool's isolated state-machine tests inject and advance deterministic time.
+Each authority processes due work on reads and writes and with an internal
+wall-time scheduler, independent of barrier calls (04 F10). A barrier forces and
+reports progress; it is not the event that makes a stop or payout effective.
+Status and barriers expose each authority's current instant for consumer skew checks.
+Only isolated state-engine tests inject and advance deterministic time.
 This replaces D5's per-service clock advancement in live lane compositions, which
 would put authority records ahead of the storefront/site clocks.
 
@@ -269,8 +329,8 @@ reusing the retired payment-level dispute-authority setting. No live secrets or
 operator endpoint is needed by public CI.
 
 **Recommendation (01 F1 / 02 F2):** use HTTPS service origins with certificates
-whose SANs name the Compose services, a lane-only CA trusted explicitly through
-`SSL_CERT_FILE`, and fixture bearer credentials mapped by each double to its own
+whose SANs name the Compose services, a bundle of the lane-only CA plus default
+public roots trusted explicitly through `SSL_CERT_FILE`, and fixture bearer credentials mapped by each double to its own
 public development accounts. Keep `development_auth = false`; non-loopback
 `X-Account-ID` auth and plain HTTP remain refused by the published clients. The
 lane overlay mounts the CA only into participating containers and names credential
@@ -295,13 +355,16 @@ Existing `make -C e2e-tests test-e2e-bare-metal` and `test-e2e-apicredits` are t
 first-use surfaces: build, seed, health-check, then run the existing payment deals
 through the configured HTTP service. VM wiring prepares the same boundary for its
 later rate scenarios; VM evidence here is only health/readiness, not payment
-scenario qualification (02 F15). Missing lane-owned settings fail by name; an unready required
-authority stops scenario mutation and reports environment setup, not product failure.
+scenario qualification (02 F15). This change also ports the existing bare-metal
+payment scenario to foundation's commit/buyer-half re-drive, seller reverse and
+buyer end_delivery flow; API credits retains its separately owned settle binding.
+Missing or unready lane-owned targets fail setup by name before scenario mutation,
+never skip or report a blocked prerequisite (03 F3 / 04 F1/F2).
 Cleanup uses the existing lane down/log targets and also removes double state.
 A separately configured external target retains readiness gating; it is never
 silently replaced by the double.
 
-Published-mode readiness compares selected schema/vector hashes with each required
+Both published- and proposed-mode readiness compare selected schema/vector hashes with each required
 consumer's kit SOURCE hashes, refusing mismatch by name before mutation (02 F13).
 The fixture payments identity is also the proposed-servicing declaration's binding:
 it must equal configured `SERVICE_IDENTITY` in test mode; production refuses it.
@@ -313,9 +376,9 @@ activation reference these classes instead of redefining them (02 F6 / F9).
 Each scenario/report identifies consumer revision, target kind, selected contracts
 and hashes, and exactly one aggregate evidence class:
 
-1. *Qualification against the published contract*: all exercised authority surfaces
+1. *Qualification against the published contract*: all committed and exercised authority surfaces
    match their pinned publications/vectors, using test doubles.
-2. *Qualification against a proposed contract*: at least one exercised authority
+2. *Qualification against a proposed contract*: at least one committed or exercised authority
    surface uses an explicitly pinned candidate. This cannot enable live servicing.
 3. *Live evidence*: only an explicitly configured, ready hosted deployment, after
    the activation follow-on checks its capabilities and the double's conformance.
@@ -326,30 +389,37 @@ that boundary, not the real authorities' accounting, adjudication or availabilit
 
 ### D7. One owner and non-cyclic dependency gates
 
-This change owns both runnable doubles, including their state machines and controls.
+This change owns both runnable HTTP doubles, mediation's state machine and controls;
+foundation 8.1 owns the shared kit payments engine consumed here.
 The foundation owns vendoring, generated models, fixture signing/verification seams
 and the production adapters. Work can proceed in this order:
 
-1. Foundation sections 1–2 supply interfaces; 8.1 supplies payment schemas/models;
-   9.1 supplies snapshot framing; 12.1 supplies the published/draft mediation
-   schema, models and record-signing fixtures before building mediation. Its adapter verification uses kit contract fakes, not
-   this tool. There is therefore no library-test dependency back onto this change.
-2. Foundation 13.1 owns the shared storefront acknowledgement signing/verification
-   primitive; 7.5 consumes it. Gate the mechanical buyer_end implementation on that
-   primitive and the 2.4 response model. Never duplicate its verifier in tooling.
+1. Foundation sections 1–2 supply interfaces; 8.1 supplies payment schemas/models,
+   the unpublished candidate, installed resources and shared payments fixture engine;
+   9.1 supplies snapshot framing; 12.1 supplies mediation contracts, installed
+   resources, models, netting mapping/vectors and record-signing fixtures. Its
+   adapter verification uses kit fakes, with no library-test dependency back here.
+2. Foundation 2.4 supplies the buyer-usable acknowledgement model/verifier in a
+   permitted shared library; 13.1 supplies storefront signing and 7.5 consumes it.
+   Mediation takes no acknowledgement-verifier dependency because all cases are
+   triaged. Bare-metal scenario porting waits for foundation 7.4, 13.x and 15.x.
 3. Build the corresponding HTTP surfaces and lane wiring here. Missing publication
    or producer vectors permits pinned proposed-only work, not published claims.
 4. Later rate and compute lane scenarios consume the services. Kit unit/library
-   and storefront application-integration tests keep vector-generated contract
-   fakes, including foundation 7.4, 11.1, 12.2 and 14.2 and spot's kit suite (D-H).
+   and storefront application-integration tests keep kit-owned contract
+   fakes (payments directly uses the shared engine), including foundation 7.4, 11.1, 12.2 and 14.2 and spot's kit suite (D-H).
 
 Recommended landing sequence (02 F3): foundation prerequisites land first, then
 this change, then lane consumers; no whole-change cycle or mutually importing
 branches. The remaining foundation rounds can proceed using their own fakes.
 
-The foundation owns those prerequisite contracts and kit fakes. Its 7.4/11.1/12.2/14.2
-use vector-derived in-process fakes; 13.1 supplies the shared acknowledgement
-primitive. Tool construction has no reverse dependency from kit integration.
+The foundation owns those prerequisite contracts and kit fakes. Its
+7.4/11.1/12.2/14.2 use in-process fakes. Tool construction has no reverse dependency
+from kit integration. Archive foundation's target-naming requirement before this
+change: the MODIFIED bare-metal requirement preserves all retained purchase,
+recovery and cleanup clauses, but ports them to the post-foundation lifecycle flow.
+This change alone defines evidence classes; siblings reference the permanent
+requirement name, not an active change ID, and do not duplicate its scenarios.
 
 ## Rejected alternatives
 
@@ -364,7 +434,10 @@ primitive. Tool construction has no reverse dependency from kit integration.
 - Separate images for each contract mode: one pinned mode selector per service keeps packaging and controls shared.
 - In-process fake as lane authority: it cannot exercise HTTP authentication, retries and signed records through real clients.
 - Cross-mechanism payment imports in the dispute kit: authority-side composition belongs in tooling, not a single-interface kit.
-- Automatically ruling all buyer claims: the initial mediation policy sends unsupported evidence to triage.
+- Mechanical buyer_end or seller self-penalty rulings: all mediation cases go to
+  triage; exceptional_end is seller payment-adapter self-correction (E-C/E-D).
+- A second payments simulator in tooling: shared vectors alone cannot keep two
+  time-dependent ledgers aligned; one kit fixture engine serves both (E-H).
 - A fixture key trusted by default production configuration: a public test identity is never a production authority.
 
 ## Open questions
@@ -396,10 +469,58 @@ contract and isolated tooling harness are retained. TLS plus explicit lane CA an
 bearer fixtures is the recommended 02 F2 transport, not a production relaxation.
 The double's own suites are required by the owner's 02 F10 disposition.
 
-Recommend keeping the index **in design** for a focused second design review of
-D1/D2/D5/D6/D7 after the parent integrates the coordination edits. The clock boundary,
-kit consumers and reusable controls changed materially. The parent owns the workflow
-exit and index/roadmap edits; this worker does not advance them implicitly.
+That first-round recommendation was to keep the index in design for the second
+review. Reviews 03/04 are now triaged below; the parent owns the workflow exit and
+index/roadmap edits.
+
+## Second-review disposition and coordination
+
+Reviews 03 F1–F3 and 04 F1–F13 have dispositions in their triage records. Owner
+E-H replaces the dual-engine design with a shared payments-kit fixture engine;
+E-C/E-D remove both mechanical ruling classes and mediation exceptional_end.
+E-A/E-E add the cooperative seller payment operations; E-F makes the case-carried
+Agreement sufficient, verified against the mandate hash. E-B's receipt time is used
+by the cooperative stop. E-G remains servicing's authority-read rule, supported by
+the double's funding/read controls; E-I retains the single term-end settles_through.
+
+Applied: 03 F1/F2/F3; 04 F1/F2/F3/F5/F6/F7/F9/F10/F11/F12/F13, with coordination
+outside this directory listed below. Rejected: 04 F4's automatic reclassification
+(the case stays in triage under E-D), and 04 F8's proposed term-end fallback (the
+seller corrects directly with returned treatment under E-C, without a mediation
+exceptional_end intent). 04 F9's exceptional_end case examples are superseded;
+netting remains for operator cases and prior seller corrections.
+
+**Recommendations supplied:** foundation 8.1 owns the shared payments fixture
+engine and payments candidate/resource seam; 12.1 owns mediation resources/netting
+mapping and vectors. Generate installed resources from one canonical source and
+check built-wheel use. This change owns the bare-metal scenario port (5.5). Classify
+an Agreement naming draft mediation as proposed even without a filing. Serialize
+remedy application per agreement and resolve uncertain effects before netting. Add
+funding, labelled livemode fault and current-key/old-receipt re-anchoring controls.
+Run due work on reads/writes plus an internal wall-time scheduler; barriers only
+force/report progress and expose each authority's current instant. Use a lane CA
+plus default-root bundle. These recommendations satisfy the settled owner decisions;
+they do not reopen them.
+
+Edits required outside this owned directory (parent coordination, not performed here):
+
+| Owner | Required coordination |
+|---|---|
+| Foundation 8.1 / 9.1 | Supply the shared payments fixture engine/fake, installed resource/model metadata API, unpublished payments candidate and coherent snapshot/start/reversal vectors, including partial reversal before/after stop. The candidate and consumer selector must express the E-A/E-C/E-E operations. |
+| Foundation 12.1 | Supply installed mediation resources and Agreement-in-case hash verification; triage only, no exceptional_end or acknowledgement-based mechanical rules; explicit ruling partialPeriod, payer-notice buyer_end mapping and agreement-wide netting vectors. |
+| Foundation 2.4 / 7.5 / 13.1 | Put acknowledgement model/verification in a buyer-permitted shared library in round 1 (2.4); leave signing at 13.1. Mediation no longer depends on this verifier. |
+| Foundation test-compatibility delta | Reference the permanent requirement name "Lane qualification identifies readiness and evidence class", remove duplicate mixed-contract scenario and stale change-ID citation; archive that target-naming modification before this change. |
+| Spot and convergence | Consume the shared engine/typed controls; classify by the single lane requirement. Seller exceptional_end is payment self-correction; revised authority remedies net prior effects. Convergence reads authority at funding-timer expiry (E-G), compares exposed current instants and removes lane clock-jump wording. |
+| Terms | Lane-only proposed declarations select installed candidate expressibility for publication, acceptance and mandate derivation; draft identities/contracts remain refused outside lanes. |
+| Activation | Reference the class rule conditionally, include mediation publication when Agreement terms name it, and identify exactly which consumer declaration/artifact is retired, never the tool's proposed selector. |
+| Campaign index / roadmap | Parent updates status/dependencies and removes obsolete mechanical/self-filing descriptions; these files remain outside this worker's authority. |
+
+**Recommended status:** ready for planning once the parent integrates these
+coordination edits. No further full design round is recommended: the central
+changes are settled owner decisions and the remaining choices above are explicit.
+Implementation remains section-gated on the named contract/fixture seams, and
+missing publications/vectors still prohibit published or live qualification claims.
+This is a recommendation to the parent, not an implicit index edit.
 
 ## Reconciliation validation
 
@@ -407,5 +528,14 @@ First-review triage validation: pinned
 `bunx @fission-ai/openspec@1.14.0 validate add-arkhai-payments-lane-double --strict`,
 installed `openspec validate add-arkhai-payments-lane-double --strict` (without
 long-requirement warnings), `make check-change CHANGE=add-arkhai-payments-lane-double`
-and `git diff --check` pass. No runtime, packaging or end-to-end execution is claimed; those remain the
-implementation plan's gates.
+and `git diff --check` pass. No runtime, packaging or end-to-end execution is claimed;
+those remain the implementation plan's gates.
+
+Second-review triage: the same pinned and installed strict validators (no warnings),
+`make check-change CHANGE=add-arkhai-payments-lane-double` and `git diff --check`
+pass. The first validation caught the renamed retained bare-metal scenario; keeping
+its original name with the narrowed external-target condition preserves the
+MODIFIED superset. Reviews 03/04 and their triage records remain in the ignored
+reviews directory for owner collection. Five course-correction ledger entries
+record E-H, E-D, E-C, E-E and E-F. This remains plan-only validation, not runtime,
+packaging or live qualification.
