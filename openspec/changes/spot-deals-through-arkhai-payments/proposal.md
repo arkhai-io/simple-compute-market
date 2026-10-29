@@ -78,7 +78,8 @@ Implementation gates on:
    publication/acceptance gates. Only those sections gate mechanics; the terms
    change must not wait for this change's door-3 evidence to archive.
 3. The foundation's in-process contract fakes gate kit library integration.
-   add-arkhai-payments-lane-double supplies HTTP doubles and deterministic controls
+   add-arkhai-payments-lane-double supplies HTTP doubles, wall-time typed due-work
+   barriers and the three named aggregate evidence classes
    only for lane/e2e evidence, not as a whole-change implementation prerequisite.
 
 converge-ongoing-compute-leases depends on this change: it owns rate servicing

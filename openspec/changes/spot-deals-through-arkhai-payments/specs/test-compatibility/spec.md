@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Rate-part qualification names contract and authority evidence
-SCM's rate-part qualification MUST distinguish published-vector conformance, proposed-contract lane-double qualification, and hosted-target qualification. It MUST record revision/content hashes, mode and target class, and MUST NOT present double-backed scenarios as proof of the external authority's ledger, payouts or mechanical rulings.
+SCM's rate-part qualification MUST use the lane-double-owned classes Qualification against the published contract, Qualification against a proposed contract, and Live evidence. It MUST record revision/content hashes, mode and target class, and MUST NOT present double-backed scenarios as proof of the external authority's ledger, payouts or mechanical rulings.
 
 #### Scenario: The lane runs against a proposed contract
 - **WHEN** rate mechanics pass against the in-lane payment and mediation doubles
@@ -9,9 +9,15 @@ SCM's rate-part qualification MUST distinguish published-vector conformance, pro
 - **AND** it makes no hosted readiness or live authority claim
 
 #### Scenario: Required authority vectors are absent
-- **WHEN** signed pre-start/post-start snapshot or partial reversal traces are unavailable
+- **WHEN** producer-published signed pre-start/post-start snapshot, start or partial reversal vectors are unavailable
 - **THEN** the corresponding authority-conformance claim is recorded as unproven
-- **AND** double-generated traces are not relabelled published vectors
+- **AND** activation lists these as blockers to published qualification rather than relabelling double-generated traces as published vectors
+
+#### Scenario: Notice or term work becomes due in a lane
+- **WHEN** a rate scenario waits for notice or maximum-term effects
+- **THEN** it uses wall time and tooling-owned typed due-work barriers with per-authority progress, pending effects and blocked dependencies
+- **AND** future work remains pending and blocked effects do not count as completion
+- **AND** injected or advanced clocks are limited to isolated tooling state-machine tests
 
 #### Scenario: The adapter is tested without lane services
 - **WHEN** kit rate integration tests run

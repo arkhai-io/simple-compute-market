@@ -294,6 +294,11 @@ work. Convergence owns rate startup/recovery and continuation registration;
 activation owns published production switch-on after hosted deployment. Disabling
 new publication must not abandon already materialized deals. No horizon gate.
 
+The lane-only proposed declaration binds the fixture payments identity to the
+configured `SERVICE_IDENTITY` in test mode (`livemode = false`). Materialization
+consumes the terms-owned validation and refuses mismatched identities, live mode
+or production use; it never queries private control/status routes to establish trust.
+
 Configuration may list current and retiring service identities with retirement
 dates. During overlap an old receipt remains verifiable and a fresh snapshot under
 the current identity can re-anchor a running deal. Through the foundation verifier,
@@ -313,8 +318,12 @@ seam, not cryptographic proof implementation.
 
 ### D8. Vectors, qualification and consumer scenarios
 
-Separate published-contract conformance, proposed-contract qualification against
-lane doubles, and hosted qualification naming target, revision and readiness.
+Use the lane-double change's three evidence classes by name:
+*Qualification against the published contract*, *Qualification against a proposed
+contract*, and *Live evidence* (see
+[its D6](../add-arkhai-payments-lane-double/design.md#d6-lane-first-use-and-evidence-classes)).
+That change owns their definitions; pinned-vector conformance remains focused
+supporting evidence rather than a new aggregate class.
 Keep target identity/mode, hashes and control trace with results. Only the external
 service's suite qualifies its ledger and payouts. Examples/fixtures use USD/6;
 production reads the Agreement asset.
@@ -326,6 +335,13 @@ HTTP doubles serve lane/e2e qualification. Application integration proves seller
 auth, Agreement binding, CLI delegation and both-domain preset integration. Smoke is readiness/auth only. E2e proves
 cross-service effects, not arithmetic permutations.
 
+Lanes use wall time and short advertised notice/dispute windows, not lane-clock
+advancement. Consume the tooling-owned typed control client and due-work barriers:
+each captures its current instant and reports per-authority watermarks, pending
+effects and blocked dependencies. Future work remains pending; blocked effects
+never count as successful completion. Use bounded progress waits, not arbitrary
+sleeps. Injected/advanced clocks belong only in isolated tooling state-machine tests.
+
 Convergence owns the cross-service requirements, runnable scenarios and execution
 matrix; none is promoted here while unrun. Physical completion evidence must prove
 release and access closure, not merely the site's lease_ended intent report. This change supplies adapter/CLI seams
@@ -334,17 +350,20 @@ are to be delivered in the existing compute-lane scenario harness by the executo
 
 | Scenario / planned selector | Entry surface | Executor | Evidence class |
 |---|---|---|---|
-| buyer_notice | canonical buyer end | convergence, both lanes | proposed lane |
-| notice_outage | deals preempt + outage control | convergence, both lanes | proposed lane |
-| earlier_buyer_stop | preempt then buyer end | convergence, both lanes | proposed lane |
-| exhaustion / maximum_term | clock/funding controls | convergence, both lanes | proposed lane |
-| on_demand_exceptional_end | refused notice then self-filing | convergence, both lanes | proposed lane |
-| stop_start_race | activation/start controls | convergence, both lanes | proposed lane |
-| rotation_overlap | identity control + restart | convergence, both lanes | proposed lane |
-| hosted_four_path | buyer stop, seller notice, exhaustion, self-filing | activation, both lanes | hosted, readiness-gated |
+| buyer_notice | canonical buyer end | convergence, both lanes | Qualification against a proposed contract |
+| notice_outage | deals preempt + outage control | convergence, both lanes | Qualification against a proposed contract |
+| earlier_buyer_stop | preempt then buyer end | convergence, both lanes | Qualification against a proposed contract |
+| exhaustion / maximum_term | funding controls + wall-time due-work barriers | convergence, both lanes | Qualification against a proposed contract |
+| on_demand_exceptional_end | refused notice then self-filing | convergence, both lanes | Qualification against a proposed contract |
+| stop_start_race | activation/start controls | convergence, both lanes | Qualification against a proposed contract |
+| rotation_overlap | identity control + restart | convergence, both lanes | Qualification against a proposed contract |
+| hosted_four_path | buyer stop, seller notice, exhaustion, self-filing | activation, both lanes | Live evidence, readiness-gated |
 
 Published vectors qualify derivation/contract use here; proposed lanes never prove
 hosted internals. Hosted prerequisites are reported before scenario execution.
+Activation must list producer-published signed snapshot, start and reversal vectors
+among blockers to published qualification; double-generated traces cannot satisfy
+those blockers or enable published production servicing.
 
 ## Rejected alternatives
 

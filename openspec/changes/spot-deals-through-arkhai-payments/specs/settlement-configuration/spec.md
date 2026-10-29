@@ -39,6 +39,12 @@ SCM MUST refuse rate mandate materialization without a composition's rate-servic
 - **WHEN** the materialization door is called
 - **THEN** it refuses before deriving or approving a rate mandate
 
+#### Scenario: A lane-only proposed declaration names the wrong identity
+- **GIVEN** a proposed declaration whose fixture payments identity differs from configured SERVICE_IDENTITY or whose mode is not test mode
+- **WHEN** the materialization door consumes the terms-owned validator result
+- **THEN** it refuses before mandate derivation or approval
+- **AND** production cannot admit the lane-only proposed declaration
+
 #### Scenario: Publication is disabled after materialization
 - **WHEN** a previously materialized rate deal is recovered with new publication disabled
 - **THEN** its existing servicing continues under accepted terms

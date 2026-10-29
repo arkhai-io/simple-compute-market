@@ -189,6 +189,8 @@ convergence persist outputs through their existing ports.
 
 - [ ] 5.1 Consume the terms-owned proposed-declaration validator at materialization,
       including its lane target and test-mode binding; do not duplicate it.
+      Bind the lane-only proposed declaration's fixture payments identity to configured
+      SERVICE_IDENTITY with livemode=false; refuse mismatch or production/live use.
       Keep published production enablement with activate-per-period-compute-servicing,
       gated only on deployment of the contract revision, never a horizon.
 - [ ] 5.2 Add configured retiring identities with retirement dates alongside the
@@ -217,13 +219,22 @@ hosted-target evidence.
 
 - [ ] 6.1 Update examples/fixtures to USD/6 without hardcoding a production asset.
       Keep published vectors content-identified and separate from proposed
-      qualification traces. Run make -C kit/arkhai-payments check-vectors,
+      qualification traces. Name the lane-double-owned aggregate evidence classes
+      exactly: Qualification against the published contract, Qualification against
+      a proposed contract, and Live evidence. Do not redefine them here.
+      Run make -C kit/arkhai-payments check-vectors,
       check-generated, test-unit and typecheck as appropriate to changed seams.
 - [ ] 6.2 Supply evidence metadata at the adapter/command first-use boundary:
       contract revision, target class/mode, hashes and control trace. Readiness
       gates scenario runs, not a claim that the target was prepared here.
 - [ ] 6.3 Confirm convergence owns the full D8 scenario table, its lane entry
       points and execution; activation owns hosted four-path qualification.
+      Use wall-time lanes, short advertised windows and the tooling-owned typed
+      due-work barriers/client; report per-authority progress, pending effects and
+      blocked dependencies. No lane-wide clock advancement or fabricated completion;
+      injected clocks are confined to isolated tooling state-machine tests.
+      Activation must list producer snapshot, start and reversal vectors among
+      blockers to published qualification; double traces do not satisfy them.
       Transfer maximum-term, on-demand refusal/self-filing and rotation-overlap
       rows explicitly, requiring proven physical release/access closure rather
       than a lease_ended intent report. Promote no unrun consumer requirement here.
