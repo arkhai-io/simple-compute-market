@@ -1077,6 +1077,15 @@ says so beside the prerequisites.
 The guest is reached through the recipe's existing access paths, a relay or a forwarded
 port. This change adds no networking, and which path a lane uses is operational.
 
+On the relay path, a create waits until the host's tunnel client reports the guest's
+proxy `running`. The client's status API answers a JSON body labelled `text/plain`,
+and Ansible's `uri` decodes only a body labelled JSON, so the wait as first written
+never saw a ready proxy (S3, found by an unpaid create on the VM lane's host, after
+Section 14). The wait parses the body itself, whatever its label, and still requires
+the exact proxy `vm-<guest>` reported `running`. A failed request, another status, or
+an empty body is retried within its bound; a body that is not the client's status
+document ends the create as an error; nothing else is ready. No networking changes.
+
 ## Live qualification
 
 The two live lanes are outside this change's sections and gated separately. Each is a
@@ -1276,6 +1285,7 @@ closeout, under the heading named.
 | D10 lanes on separate machines in parallel; on a shared machine, sequential lanes, pause, drain conditions, and the pause's precondition | `docs/development/VALIDATION_RUNBOOK.md`, a new generic section on running live lanes: lanes on separate machines run in parallel while source, build, and environment changes stay serialized; lanes sharing a machine run in sequence under the freeze, the pause, read-backs in the site's own states, full projection availability, and the precondition that a refresh or reopen under the same identity keeps the pause; `docs/development/ROADMAP.md` "Payment qualification boundaries", for the pause's limits and coverage gaps |
 | D11 a pinned, verified x86-64 guest image | `openspec/specs/physical-provisioning/spec.md` ("A VM guest is created from a pinned, verified image", by the archive); `domains/vms/provisioning/iac/README.md` under "Prerequisites", for the x86-64 host prerequisites, the `vm-setup.yaml` warning, and how an operator moves the pin; `docs/seller-quickstart.md` under "4. Prepare your KVM hosts", step 3, for the host prerequisites |
 | D12 boot-GPU detection, the opt-in, and the live passthrough-binding check | `openspec/specs/physical-provisioning/spec.md` ("A host's boot GPU is passed through only by an operator's opt-in", by the archive); `domains/vms/provisioning/iac/README.md` under "VM Management Operations (vm-management role)", beside the passthrough variables, including that the inventory alone never makes a GPU eligible |
+| S3 the relay proxy wait reads the client's status body whatever its label | `domains/vms/provisioning/iac/README.md` under "VM Management Operations (vm-management role)": the wait's readiness rule and what it retries or refuses |
 | D13 the readiness wait and autostart | `openspec/specs/physical-provisioning/spec.md` ("A GPU guest's readiness wait and autostart are set by its pool's operator", by the archive); `domains/vms/provisioning/iac/README.md` under "VM Management Operations (vm-management role)", beside the passthrough variables: the three `extra_vars`, their defaults, and why a host passing through its only GPU sets `vm_autostart` false |
 | D14 the real-host bare-metal scenario | `docs/bare-metal-seller-quickstart.md` under "Release-qualified deal evidence": the role inputs, the pinned known-hosts file among them, `--run-id`, teardown to `released`, and revocation proven only by an authentication refusal. `docs/development/TESTING.md` is unchanged: its sentence on `e2e_bare_metal_deal` stays true |
 | The role's task files parsed by the repository's syntax check (Round 2 review F1, `tasks.md` 14.8 and 14.14) | `docs/development/TESTING.md`, beside "Chart Render Tests", and `domains/vms/provisioning/iac/README.md` under "Validation": `validate-playbooks` parses the `vm-management` task files, a capacity check's included, through a parse-only playbook importing them in the role's context, what a syntax check does not show, and that a free-form `shell` string's unbalanced quote fails its task file as it loads |

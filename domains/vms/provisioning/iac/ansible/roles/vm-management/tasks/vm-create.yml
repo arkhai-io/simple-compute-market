@@ -1794,6 +1794,15 @@
   # whether registration succeeded; polling the relay was a round trip to ask a
   # third party about our own state, and it required a dashboard, a DNS name, a
   # certificate, and a second credential to do it.
+  #
+  # The client answers with a JSON body labelled text/plain, and uri decodes
+  # only a body labelled JSON, so the body is parsed from `content` whatever
+  # its label. A failed request, another status, or an empty body is retried
+  # within the bound; it reaches no parse, since from_json raising inside
+  # `until` ends the task at once. A non-empty body that is not the client's
+  # status document, not JSON or listing a proxy that is not an object, does
+  # end it, as an error, since waiting cannot make it one. Only the exact
+  # proxy reported `running` is ready.
   uri:
     url: "http://127.0.0.1:{{ frp_admin_port | default(7400) }}/api/status"
     method: GET
@@ -1803,9 +1812,10 @@
   retries: 12
   delay: 5
   until: >-
-    frp_client_status.json is defined
+    frp_client_status.status | default(-1) == 200
+    and (frp_client_status.content | default('') | trim) != ''
     and (
-      frp_client_status.json.tcp | default([])
+      (frp_client_status.content | from_json).tcp | default([], true)
       | selectattr('name', 'equalto', 'vm-' ~ vm_name)
       | selectattr('status', 'equalto', 'running')
       | list | length

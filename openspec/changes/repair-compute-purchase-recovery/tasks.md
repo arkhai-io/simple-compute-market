@@ -3337,6 +3337,66 @@ pointer from each note they correct.
 
       Owed by validation: as 14.13, on the candidate this commit makes. Whether
       the count is right on a host stays the live VM lane's evidence.
+- [x] 14.15 S3: `vm-create.yml`'s "Wait for this VM's proxy to come up" accepts
+      the tunnel client's status as the client sends it.
+
+      The supervising session accepted it as required, under the owner's
+      delegated judgement. An unpaid create on the VM lane's host stopped at this
+      wait, before guest setup and before its cleanup script was written, while
+      the client reported the guest's proxy `running`. The client's `GET
+      /api/status` answers valid JSON labelled `text/plain`; `uri` decodes only a
+      body labelled JSON, so the task's `frp_client_status.json` was never defined
+      and every attempt failed. The partial create's effects are the supervisor's
+      to remove through `vm_remove`.
+
+      Done, in the VM IaC alone; no other task reads a `uri` result's `json`, and
+      the two `/api/reload` calls read only the status:
+      - the `until` parses `content` with `from_json`, whatever the label, and
+        still requires a `tcp` proxy named exactly `vm-<guest>` with status
+        exactly `running`;
+      - it parses only a 200 answer with a non-empty body, so a failed request,
+        another status, or an empty body is retried within the 12 attempts: a
+        parse error inside `until` ends the task at once, which ansible-core 2.17
+        and 2.19 both do;
+      - a non-empty body that is not the status document, not JSON or naming a
+        proxy that is not an object, ends the task as an error, and nothing but
+        the exact running proxy is ready. The task's comment says why.
+
+      Tests: `tests/test_frp_proxy_wait.py` (new), seven tests and 13 subtests. It
+      runs the task as shipped, retries lowered to two and its delay removed,
+      through a real `ansible-playbook` over a local connection, against an
+      in-process HTTP peer standing in for the client's admin API. Its cases are:
+      - the ready body as `text/plain`, and as `application/json`;
+      - the proxy among others;
+      - not ready and retried: another guest, a name it prefixes, a start error,
+        `Running`, an `http` proxy, `tcp: null`, `null`, and `[]`;
+      - retried: an empty body, a 500, and a client that does not answer;
+      - refused at once: truncated JSON, non-JSON, and a non-object proxy.
+
+      It is skipped, saying why, unless an ansible-core 2.17 to 2.19
+      `ansible-playbook` is on `PATH`; the workstation's is 2.10.8. Fixture
+      addresses and names are documentation values.
+
+      Evidence, each with isolated ansible-core 2.17.14 and 2.19.14 outside the
+      repository first on `PATH`:
+      - **Red**, on `1fb4adedc`'s task from a scratch copy: 5 failed, 5 passed,
+        10 subtests passed on each version. The two plain-text ready cases fail,
+        which is the defect, and the three non-document cases fail because the
+        old task retried them to its bound rather than stopping; it never
+        reported them ready either.
+      - **Green**: 7 passed, 13 subtests passed on each version.
+      - The whole IaC suite: 134 passed and 15 subtests on each version. Under
+        the default `make -C domains/vms/provisioning/iac test`: 127 passed,
+        7 skipped.
+      - `make -C domains/vms/provisioning/iac validate-playbooks`: exit 0 on
+        each, six playbooks parsed.
+      - `make check-packaging`, `make check-change`, and
+        `make check-comment-hygiene`: passed. The role ships in no wheel, so no
+        version, floor, or lock moved.
+
+      Owed by validation: the IaC suite with a supported ansible-core on `PATH`,
+      or these seven tests are skipped. A real client's proxy coming up, and
+      buyer access through the relay, stay the live VM lane's evidence.
 
 ## 15. Closeout
 
@@ -3422,7 +3482,10 @@ change to implementation.
         checks it extends: `make validate-playbooks` parses the `vm-management`
         role's task files, a capacity check's included, through the parse-only
         `vm-management-task-files.yaml`, since a syntax check does not follow
-        `include_tasks`; it renders no Jinja and runs nothing (14.8, 14.14).
+        `include_tasks`; it renders no Jinja and runs nothing (14.8, 14.14);
+        and `tests/test_frp_proxy_wait.py` runs the relay proxy wait through a
+        real `ansible-playbook` when ansible-core 2.17 to 2.19 is on `PATH`, and
+        is skipped otherwise (14.15).
       - `docs/development/DEPLOYMENT_AND_CONFIG.md` "Definition documents", the
         host-inventory paragraph: `public_port=`; every `ssh` host connection,
         through the API or an inventory, at version 2; and a host stored at version
@@ -3440,6 +3503,9 @@ change to implementation.
       - `domains/vms/provisioning/iac/README.md`:
         - "Prerequisites": the x86-64 host prerequisites, how an operator moves the
           image pin, and the `vm-setup.yaml` warning;
+        - "VM Management Operations (vm-management role)": the relay proxy wait,
+          ready only for the exact proxy reported `running`, reading the client's
+          status body whatever its label (14.15);
         - "VM Management Operations (vm-management role)": `vm_passthrough_boot_gpu`,
           `vm_setup_wait_attempts`, `vm_setup_wait_interval_seconds`, and
           `vm_autostart`, beside the passthrough variables.
