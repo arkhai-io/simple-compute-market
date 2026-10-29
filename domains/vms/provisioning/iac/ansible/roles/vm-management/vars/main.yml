@@ -1,0 +1,21 @@
+---
+# The image a VM create from scratch boots: one dated release of Ubuntu Noble's
+# x86-64 (amd64) cloud image, never the moving `current` path, so every create
+# on every host boots the same verified bytes.
+#
+# The digest is the one the release's SHA256SUMS gives for the image. The role
+# carries the digest alone and checks it before the image backs any disk; it
+# never fetches the checksum list or its signature. So an operator moving the
+# pin verifies the new release's signed SHA256SUMS first (its SHA256SUMS.gpg,
+# against Ubuntu's cloud image signing key) and only then records the release
+# and its digest here, together.
+#
+# The stored name carries the release, so an image left on a host under another
+# name, an unversioned `noble-server-cloudimg-amd64.img` included, is never
+# taken for this one.
+vm_scratch_image_release: "20261017"
+vm_scratch_image_url: "https://cloud-images.ubuntu.com/noble/{{ vm_scratch_image_release }}/noble-server-cloudimg-amd64.img"
+vm_scratch_image_sha256: "04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94"
+vm_scratch_image_path: "/var/lib/libvirt/images/noble-server-cloudimg-amd64-{{ vm_scratch_image_release }}.img"
+# Only an x86-64 image is pinned, so a scratch create refuses any other host.
+vm_scratch_image_architecture: "x86_64"

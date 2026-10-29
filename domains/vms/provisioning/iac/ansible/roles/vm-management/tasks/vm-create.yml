@@ -74,37 +74,31 @@
     vm_root_ssh_filename: "{{ vm_name + '_root_ed25519' }}"
   when: vm_action == "create"
 
-# Define as VM creation from scratch
-- name: Check if Ubuntu Noble cloud image already exists
+# Define as VM creation from scratch. The image is the role's pinned release
+# (vars/main.yml).
+- name: Check whether the pinned scratch image is already on the host
   stat:
-    path: /var/lib/libvirt/images/noble-server-cloudimg-amd64.img
+    path: "{{ vm_scratch_image_path }}"
+    get_checksum: false
   register: ubuntu_image_exists
-  when: 
+  when:
     - vm_action == "create" and vm_image_type == "scratch"
   delegate_to: "{{ target_host }}"
 
-- name: Download Ubuntu Noble Server cloud image
+# Only when the file is absent: get_url replaces an existing file whose digest
+# differs, and a file already on the host that does not match the pin must fail
+# the create rather than be replaced. get_url checks the download against the
+# digest before it moves it into place, so a bad download never reaches the
+# pinned path.
+- name: Download the pinned scratch image
   get_url:
-    url: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
-    dest: /tmp/noble-server-cloudimg-amd64.img
-    mode: '0644'
-  when:
-    - vm_action == "create" and vm_image_type == "scratch" and not ubuntu_image_exists.stat.exists
-  delegate_to: "{{ target_host }}"
-
-- name: Move Ubuntu cloud image to libvirt directory
-  command: mv /tmp/noble-server-cloudimg-amd64.img /var/lib/libvirt/images/
-  when:
-    - vm_action == "create" and vm_image_type == "scratch" and not ubuntu_image_exists.stat.exists
-  delegate_to: "{{ target_host }}"
-
-- name: Set ownership and permissions for Ubuntu cloud image
-  file:
-    path: /var/lib/libvirt/images/noble-server-cloudimg-amd64.img
+    url: "{{ vm_scratch_image_url }}"
+    dest: "{{ vm_scratch_image_path }}"
+    checksum: "sha256:{{ vm_scratch_image_sha256 }}"
     owner: libvirt-qemu
     group: kvm
     mode: '0644'
-  when: 
+  when:
     - vm_action == "create" and vm_image_type == "scratch" and not ubuntu_image_exists.stat.exists
   delegate_to: "{{ target_host }}"
 
@@ -136,8 +130,32 @@
     - vm_action == "create" and vm_image_type == "scratch"
   delegate_to: "{{ target_host }}"
 
+# On both paths, a file found on the host and a fresh download alike, and
+# immediately before the image backs a disk: a mismatch fails the create here,
+# before any disk or domain is defined, and leaves the file unused.
+- name: Verify the pinned scratch image before it backs any disk
+  shell: |
+    IMAGE="{{ vm_scratch_image_path }}"
+    EXPECTED="{{ vm_scratch_image_sha256 }}"
+    if [ ! -f "$IMAGE" ]; then
+      echo "Pinned scratch image $IMAGE is not on the host" >&2
+      exit 1
+    fi
+    ACTUAL="$(sha256sum "$IMAGE" | awk '{print $1}')"
+    if [ "$ACTUAL" != "$EXPECTED" ]; then
+      echo "Scratch image $IMAGE has SHA-256 ${ACTUAL:-unreadable}, not the pinned $EXPECTED; it is not used" >&2
+      exit 1
+    fi
+    echo "Verified $IMAGE: SHA-256 $ACTUAL"
+  args:
+    executable: /bin/bash
+  changed_when: false
+  when:
+    - vm_action == "create" and vm_image_type == "scratch"
+  delegate_to: "{{ target_host }}"
+
 - name: Create VM disk image from cloud image
-  shell: qemu-img create -f qcow2 -F qcow2 -b /var/lib/libvirt/images/noble-server-cloudimg-amd64.img /var/lib/libvirt/images/{{ vm_name }}.qcow2 {{ vm_disk_size }}
+  shell: qemu-img create -f qcow2 -F qcow2 -b {{ vm_scratch_image_path }} /var/lib/libvirt/images/{{ vm_name }}.qcow2 {{ vm_disk_size }}
   when:
     - vm_action == "create" and vm_image_type == "scratch"
   delegate_to: "{{ target_host }}"

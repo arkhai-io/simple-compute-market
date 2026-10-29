@@ -9,6 +9,26 @@
     ansible_become: yes
   tags: always
 
+# First of the create's checks that read the host: it precedes every task that
+# changes the host, starting libvirtd included, so a host the pinned image
+# cannot boot on is refused before anything is done to it.
+- name: Refuse a scratch create on a host whose architecture has no pinned image
+  shell: |
+    ARCH="$(uname -m)"
+    if [ "$ARCH" != "{{ vm_scratch_image_architecture }}" ]; then
+      echo "No pinned scratch image for machine architecture '${ARCH:-unknown}': only {{ vm_scratch_image_architecture }} is pinned" >&2
+      exit 1
+    fi
+    echo "$ARCH"
+  args:
+    executable: /bin/bash
+  changed_when: false
+  delegate_to: "{{ target_host }}"
+  when:
+    - vm_action == "create"
+    - vm_image_type == "scratch"
+  tags: always
+
 - name: Ensure libvirtd is running
   service:
     name: libvirtd

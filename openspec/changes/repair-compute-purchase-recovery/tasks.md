@@ -2303,7 +2303,7 @@ image". Files:
 - the role's `vars/main.yml`, new, for the pin
 - a new role test module in `domains/vms/provisioning/iac/tests/`
 
-- [ ] 12.1 The scratch image is one dated release of the Ubuntu Noble x86-64 cloud
+- [x] 12.1 The scratch image is one dated release of the Ubuntu Noble x86-64 cloud
       image:
       - the pin, the release's dated URL and the SHA-256 its published checksum list
         gives for the image, is in the role's `vars/main.yml`. Record in this
@@ -2317,7 +2317,49 @@ image". Files:
         and fails, naming it, on any other than `x86_64`.
 
       Golden images are unchanged.
-- [ ] 12.2 Tests:
+
+      Done:
+      - **The pin.** Release `20261017`:
+        `https://cloud-images.ubuntu.com/noble/20261017/noble-server-cloudimg-amd64.img`,
+        SHA-256 `04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94`,
+        621284352 bytes. When the digest was taken, that release's `SHA256SUMS`
+        was checked against its `SHA256SUMS.gpg` with `gpgv` and the Ubuntu cloud
+        image keyring (`ubuntu-cloudimage-keyring.gpg`). The result was a good
+        signature from the UEC Image Automatic Signing Key, and the list gives
+        that digest for the image.
+      - **`vars/main.yml`** (new) states the release once. The URL and the stored
+        path, `/var/lib/libvirt/images/noble-server-cloudimg-amd64-20261017.img`,
+        are templated from it, beside the digest and the one pinned architecture,
+        `x86_64`. Its comment says how an operator moves the pin. Role variables
+        outrank inventory and play variables; only extra variables, which a pool's
+        operator-owned `extra_vars` are, override them.
+      - **The image tasks** in `vm-create.yml`:
+        - `stat` the pinned path, without a checksum;
+        - only when the path is absent, `get_url` the pinned URL to it, with
+          `checksum: sha256:<pin>` and `libvirt-qemu:kvm` `0644`. Two facts were
+          read in ansible-core 2.19.14's `get_url`: it checks a download's
+          digest before moving it into place, so a bad download never reaches
+          the path, and it re-downloads over an existing file whose digest
+          differs, which is why it runs only on absence;
+        - a shell step, "Verify the pinned scratch image before it backs any
+          disk", directly before `qemu-img create`, on both paths. It runs
+          `sha256sum` on the path and fails, naming both digests, on a mismatch
+          or a missing file. It leaves the file as it is;
+        - `qemu-img create -b` names the pinned path.
+
+        The `/tmp` download, the `mv`, and the separate ownership task are gone.
+        No task names the unversioned `noble-server-cloudimg-amd64.img` or a
+        `current` URL. A file under the old name is therefore never used, and is
+        not removed either.
+      - **The architecture check is in `prerequisites.yml`**, outside the plan's
+        file list. The prerequisites run before the create's own tasks, and their
+        "Ensure libvirtd is running" starts and enables a service. Only there can
+        the check precede every host effect. The check is a shell step with
+        `changed_when: false`, for a scratch create alone. It reads `uname -m`
+        and fails, naming the architecture (`unknown` when unreadable), on any
+        other than the pinned one.
+      - Golden creates are unchanged. Nothing else about the guest changed.
+- [x] 12.2 Tests:
       - **Role structure (unit):** the URL is dated and never `current`; the
         checksum is stated; verification precedes the `qemu-img create` that uses
         the image as a backing file, on both the download and the existing-file
@@ -2331,7 +2373,59 @@ image". Files:
 
       Owed outside this section: a real download and a real guest boot are the live
       VM lane's evidence.
-- [ ] 12.3 Verification:
+
+      Done, in a new `domains/vms/provisioning/iac/tests/test_scratch_image_pin.py`,
+      17 cases (unit):
+      - **Role structure, read as YAML.**
+        - The pin is an eight-digit release, its URL dated and never `current`,
+          its digest 64 hex characters, and its stored name carries the release.
+        - `vm-create.yml`'s directives name neither `current` nor the
+          unversioned file.
+        - The download goes to the pinned path with the pinned checksum, never
+          `force`, and only when the `stat` found nothing.
+        - The verification has the disk's own condition, does not depend on the
+          file's presence, and is the task immediately before `qemu-img create`.
+          That task's `-b` is the pinned path.
+        - No `qemu-img`, `virt-install`, or `virsh define` precedes the
+          verification.
+        - In `prerequisites.yml`, every task before the architecture check is a
+          local, read-only one. The check precedes the first task that changes
+          the host, and it is conditioned on a scratch create.
+      - **Behaviour, through `shell_harness`.**
+        - The architecture check's real shell, with `uname` faked: `x86_64`
+          passes; `aarch64` fails naming it; an empty answer fails naming
+          `unknown`.
+        - The verification's real shell, with the real `sha256sum` on a
+          temporary file of synthetic bytes: a matching digest passes; a
+          mismatch fails naming both digests and leaves the file byte for byte;
+          a missing file fails.
+      - **Red.** Against `HEAD`'s role, all 17 failed. The red is weak for most
+        of them, since they had nothing to read. These are the meaningful ones:
+        - a `current` URL and the unversioned name were found;
+        - no verification preceded the disk.
+      - **Mutations, each on a temporary copy, each caught by exactly one case:**
+        - conditioning the verification on a fresh download alone fails the
+          both-paths ordering case;
+        - removing the digest comparison fails the mismatch case.
+      - **Real Ansible.**
+        - `make -C domains/vms/provisioning/iac validate-playbooks` passed on
+          the system's ansible 2.10.8, and on ansible-core 2.19.14 from an
+          isolated environment outside the repository. That is the version the
+          service image's `ansible-core>=2.17,<2.20` resolves. The playbook
+          reaches the role's task files only through `include_tasks`, which a
+          syntax check does not parse.
+        - So a throwaway playbook outside the repository `import_tasks`
+          `prerequisites.yml`, `vm-create.yml`, `vm-remove.yml`,
+          `vm-undefine.yml`, and both retry files, with the role's
+          `vars/main.yml`. Its `--syntax-check` passed on both versions.
+        - Corroboration, not a repository suite: the architecture check and the
+          verification ran as tasks under ansible-core 2.19.14 against
+          `localhost`, with the role's variables and a synthetic file, the
+          overrides given as extra variables:
+          - a matching digest: `ok=2`;
+          - a mismatch: failed, naming the file's digest;
+          - a faked `aarch64`: failed, naming it.
+- [x] 12.3 Verification:
       - `make -C domains/vms/provisioning/iac test` (unit);
       - `make -C domains/vms/provisioning/adapter test` (unit and library
         integration; its tests read `vm-create.yml`);
@@ -2340,6 +2434,27 @@ image". Files:
       End-to-end: the VM mock lanes run no playbook, so the recipe does not reach
       them. The live VM lane is the system evidence. The role ships in no Python
       package, so no version changes. Owed by validation: none.
+
+      Done:
+      - `make -C domains/vms/provisioning/iac test`: exit 0, 82 passed (unit): the
+        65 before this section and 17 new.
+      - `make -C domains/vms/provisioning/adapter test`: exit 0, 262 passed (unit,
+        and library integration in its `tests/integration`), after its `reinit`.
+      - `make check-packaging`: exit 0, the architecture rules included.
+      - **Delivery.** The role ships through the provisioning service image's
+        `COPY` of `domains/vms/provisioning/iac`, whose `.dockerignore` admits
+        the whole tree, `vars/` included. It is not in any wheel, so no version,
+        floor, or lock moved. A wheel's contents say nothing about the role an
+        image carries. Validation of a built image reads the role there.
+      - **End-to-end, confirmed.** No mock lane runs a playbook. Owed by
+        validation: none.
+
+      **Handoff.**
+      - A host already holding the release at the pinned path is verified and
+        not downloaded again. A file there with another digest fails every
+        scratch create until an operator removes it.
+      - The live VM lane still owes a real download, or a staged copy's
+        verification, and a guest booted from the pinned image.
 
 ## 13. A VM teardown removes only its own guest
 
