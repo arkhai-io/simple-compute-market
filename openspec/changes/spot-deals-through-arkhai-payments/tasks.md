@@ -176,8 +176,8 @@ Journal persistence itself belongs to convergence.
       without a seller-fault filing merely for non-availability. Consume, do not
       reimplement, the foundation's published mediation self-penalty mapping:
       rate stop-now returned, rate earnings since at reversed, time-unserved once
-      shares (setup all before delivery, none after), and full bond award once
-      supported. Verify filing response-loss/read/retry, spot emergency filing,
+      shares (setup all before delivery, none after), then min(premature_stop_penalty,
+      earned amounts still held) across parts in mandate order. Bond award stays reserved. Verify filing response-loss/read/retry, spot emergency filing,
       on-demand returned treatment and absence of seller payment calls. Report
       missing dispute intent/request/mapping or producer qualification to foundation;
       there is no direct-payment fallback or second correction journal.

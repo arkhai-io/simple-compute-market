@@ -540,6 +540,28 @@ Applied 17 F1–F5 and 18 F1–F14/F16–F17. 18 F15 recommendation: retain mini
 
 Rejected suggested alternatives: buyer-supplied past times; mechanical acknowledgement rulings; a missing-payee fallback treatment; seller restitution entry and payment-adapter self-correction (withdrawn by the final decision); undefined authority treatment-policy checks; duplicate mechanism term-end fields. Recommended (not additional owner decisions): stable-ID equal-time attribution, minimal discovery projections, and splitting round-1 fake-adapter buyer dispatch from round-2 end verification. External contract publication/vectors still gate implementation and live claims, not design triage.
 
-Promotion remains planned to lifecycle spec/architecture (including External authorities), settlement-servicing and buyer orchestration, plus deployment/site/report companions named in proposal/tasks; no unimplemented permanent behavior is promoted now. Shared index/roadmap updates are handed to the integrating owner: reflect the one mechanical ruling (the seller self-penalty), outstanding payments contract asks, archive order and section-level terms dependencies.
+Promotion remains planned to lifecycle spec/architecture (including External authorities), settlement-servicing and buyer orchestration, plus deployment/site/report companions named in proposal/tasks; no unimplemented permanent behavior is promoted now. The coordinated index/roadmap reflect the one mechanical seller self-penalty including the premature-stop penalty, published payments partialPeriod revision, pending mediation contract, archive order and section-level dependencies.
 
 Status after coordination: ready for implementation with section-level contract gates. The partialPeriod revision is published and ready for 8.1 vendoring; mediation publication remains pending. Sibling changes other than the lane double remain in design for a short focused re-check. Validation on 2026-10-29: pinned 1.14.0 and installed strict OpenSpec checks passed without warnings for both owned changes. Foundation check-change passes five checks and reports only the accepted future deal-lifecycle/architecture.md citation; terms check-change passes all six. No runtime code, deployment or new tests changed; packaging/runtime suites are not claimed.
+
+## Coordinated second-review validation
+
+On 2026-10-29, all nine Goal 8 changes pass both
+`bunx @fission-ai/openspec@1.14.0 validate <change> --strict` and
+`openspec validate <change> --strict`, without warnings. MODIFIED-target informational
+notices for unify/convergence are covered by foundation-first and renewable-before-
+unify archive order. `make check-change CHANGE=<change>` passes all checks except
+the expressly accepted future `openspec/specs/deal-lifecycle/architecture.md`
+citation in foundation, spot and convergence. The same strict/check-change runs
+pass for the narrow hardening and kit-owned sibling edits. `make check-change-index`,
+`make check-comment-hygiene` and `git diff --check` pass. This is design validation,
+not runtime evidence. The ten second-review triage records retain historical
+findings under a final coordination supersession; no finding is missing triage.
+
+Supplied representation/interface recommendations: canonical installed resource APIs
+from one source; immutable shared filing/revision identities; injected preset
+helpers; canonical decimal-string penalty encoding and asset-correlated zero-when-
+absent projection. They follow existing amount/identity conventions rather than add
+payment-service capabilities. Owner-recommended defaults remain on-demand 24 periods' price
+and buyer refusal without a positive penalty. Exact producer revision is not
+recorded by this design pass; task 8.1 alone records it in payments schema/SOURCE.md.

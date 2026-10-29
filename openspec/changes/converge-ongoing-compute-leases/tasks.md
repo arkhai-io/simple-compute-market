@@ -23,7 +23,8 @@ before code starts; no superseded Goal 8 change is an implementation gate.
       and source-classified self-penalty filing. Confirm seller stop entries exist
       only for entitlements such as spot notice; emergencies file exceptional_end.
       Verify mediation's PT0S/chosen stop entry, standard returned rate stops, rate
-      reversals since at, once unserved shares and full bond award once supported.
+      reversals since at, once unserved shares, then the premature-stop penalty capped by
+      earned amounts still held across parts in mandate order; bond award stays reserved.
       Seller sends no stop/reverse for self-penalty. No seller restitution entry,
       implicit favourable permission, notice waiver, payer early release or
       multi-stop-entry payments dependency remains. Verify shared original filing
@@ -147,7 +148,7 @@ before code starts; no superseded Goal 8 change is an implementation gate.
       rate matrix (0–11), executing spot's prepared entry points and recording maximum
       term plus on-demand/spot emergency exceptional_end filings, sole mechanical
       payee self-penalty and on-demand returned treatment. Record buyer case/held
-      money/bond remedy, not mandate-enforced non-preemption. Exercise buyer-half
+      money plus premature-stop-penalty remedy, not mandate-enforced non-preemption. Exercise buyer-half
       same-key payment-stop retry with billing until landing; end_delivery receipt
       grants no storefront payment authority. Rows 7/9 record interim non-default
       buyer acceptance, separate default-policy refusal and returned-capable acceptance once vendored. Drop once-only

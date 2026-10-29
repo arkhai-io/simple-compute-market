@@ -70,7 +70,8 @@ continuation is a separate dependent change.
   immediately and file at Agreement start. The seller sends no stop or reverse.
   Consume mediation's only mechanical ruling: an at-least-standard payee self-penalty
   package of returned rate stops now, earned-since-at reversal, time-unserved once
-  reversal (setup all before delivery, none after) and full bond award once supported.
+  reversal (setup all before delivery, none after), then the premature-stop penalty
+  capped by earned amounts still held across parts in mandate order; bond award is reserved.
   Restore the dispute intent/request vocabulary and published mapping in foundation,
   rather than calculate or partially apply the package in the payment adapter.
 - Support service-identity overlap and re-anchoring through the foundation's

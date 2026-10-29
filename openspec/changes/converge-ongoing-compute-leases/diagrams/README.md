@@ -9,8 +9,9 @@ Buyer client, end service (physical P / authority-work F), site, payment authori
 and dispute authority are separate lifelines. Numbered arrows give scenario order;
 self-arrows are local transitions. A diagram is design, not evidence of a run.
 `exceptional_end` is a seller dispute filing. Only a qualifying payee self-penalty
-is mechanically ruled by mediation; it applies returned rate stops, refunds and
-any full bond through its own authority entries. Seller sends no stop/reverse for
+is mechanically ruled by mediation; through its own entries it applies returned
+rate stops and unearned-money refunds, then min(premature_stop_penalty, earned amounts
+still held) across parts in mandate order. Bond award stays reserved for hosted bonds. Seller sends no stop/reverse for
 that path, and spot emergency uses the same filing. end_delivery carries no at;
 storefront receipt is evidence only, not payment authority. Buyer half alone
 journals/retries payment stop under the same key during outage, with billing until
