@@ -101,9 +101,16 @@ REAL_VM_TARGET:
       ssh_user: provisioner
       ssh_port: 22
       public_host: 192.0.2.10
-      capacity: {cpu_count: 8, memory_gib: 32, disk_gib: 200}
+      capacity: {cpu_count: 7, memory_gib: 28, disk_gib: 160}
   access: {mode: direct}
 ```
+
+`capacity` is what the host **sells** — its hardware less whatever the environment
+owner reserves for the host itself — not the hardware. It is the capacity declaration
+the scenario registers, and the listing shape the scenario states equals it, so the
+one deal takes everything the host sells and the shape checks (D7) compare the guest
+against it. Rendering hardware totals would ask for a guest holding all of the host's
+memory and disk.
 
 The scenario validates the section with a typed model before any stage runs: a
 missing or misspelled field fails with a message naming it rather than falling back

@@ -112,7 +112,9 @@ values are visibly fictitious. The section MUST be validated before any stage ru
 missing or misspelled field MUST fail naming the field, an unknown version MUST be
 refused, and an access mode the version does not admit MUST be refused. Version 1
 describes each host's identity, connection address, connection user and port, tenant
-address, and capacity, and admits only direct access. The section MUST NOT carry the
+address, and the capacity it sells, and admits only direct access. The capacity is what
+the host offers for sale, not its hardware; the scenario declares it and deals on a
+shape equal to it. The section MUST NOT carry the
 private key the provisioning service reaches hosts with.
 
 #### Scenario: A field is misspelled
