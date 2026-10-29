@@ -163,6 +163,13 @@ class ProviderNotFoundError(FulfillmentError): pass
 class ProviderUnavailableError(FulfillmentError): pass
 class ProviderConfigInvalidError(FulfillmentError): pass
 class FulfillmentConflictError(FulfillmentError): pass
+class CompensationRefusedError(FulfillmentConflictError):
+    """A failed fulfillment's compensating teardown cannot begin.
+
+    Its caller did not authorize it, or its provider cannot prepare a
+    teardown from what the create recorded. Permanent for the record as it
+    stands, unlike a transient preparation error, and nothing was written.
+    """
 class FulfillmentCreateFailedError(FulfillmentError): pass
 class FulfillmentStatusFailedError(FulfillmentError): pass
 class FulfillmentTeardownFailedError(FulfillmentError): pass

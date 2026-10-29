@@ -16,6 +16,14 @@ class InvalidSettlementTransitionError(Exception):
     """Raised when a requested state change is not a legal edge in the table."""
 
 
+#: The failure reason a compensating teardown records when it moves a
+#: ``failed`` aggregate into teardown. Only that operation writes it, so a
+#: ``torn_down`` aggregate carrying it ended compensated, while one carrying
+#: any other reason was delivered: a delivered fulfillment whose teardown
+#: failed once keeps that failure's reason after a later success.
+CREATE_COMPENSATION = "create_compensation"
+
+
 _ALLOWED_TRANSITIONS: dict[SettlementRecordState, frozenset[SettlementRecordState]] = {
     SettlementRecordState.assigned: frozenset(
         {SettlementRecordState.dispatch_pending, SettlementRecordState.abandoned}
@@ -37,7 +45,11 @@ _ALLOWED_TRANSITIONS: dict[SettlementRecordState, frozenset[SettlementRecordStat
     SettlementRecordState.teardown_failed: frozenset(
         {SettlementRecordState.teardown_dispatch_pending}
     ),
-    SettlementRecordState.failed: frozenset(),
+    # Taken only by a compensating teardown, which undoes what a failed create
+    # may have left behind; ordinary teardown still begins only from active.
+    SettlementRecordState.failed: frozenset(
+        {SettlementRecordState.teardown_dispatch_pending}
+    ),
     SettlementRecordState.torn_down: frozenset(),
     SettlementRecordState.abandoned: frozenset(),
 }

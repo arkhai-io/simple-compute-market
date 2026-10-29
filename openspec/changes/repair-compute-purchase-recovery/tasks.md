@@ -1448,9 +1448,15 @@ Delivers D4's kit half ("The kit operation", "The compensation marker"), for the
   `test_settlement_repository.py`
 - a library integration case under `kit/fulfillment/tests/integration/`
 
-- [ ] 7.1 Add the transition `failed` → `teardown_dispatch_pending`, and the constant
+- [x] 7.1 Add the transition `failed` → `teardown_dispatch_pending`, and the constant
       `CREATE_COMPENSATION = "create_compensation"`.
-- [ ] 7.2 Add `FulfillmentOrchestrator.begin_compensating_teardown(fulfillment_id,
+
+      Done (unit), in `transitions.py`, with the constant beside the edge it
+      accompanies and exported from the package. `db.py`'s state docstring now
+      says `failed` is terminal but for that edge. `test_transitions.py` checks
+      that `failed` reaches only `teardown_dispatch_pending`, and that `torn_down`
+      and `abandoned` reach no state.
+- [x] 7.2 Add `FulfillmentOrchestrator.begin_compensating_teardown(fulfillment_id,
       *, authorize)`, with two new types:
       - `CompensationCandidate`: the state, the failure reason, and the provider
         metadata, which stays opaque;
@@ -1470,7 +1476,28 @@ Delivers D4's kit half ("The kit operation", "The compensation marker"), for the
       - any other state: `FulfillmentConflictError`, writing nothing.
 
       `begin_fulfillment_teardown` still refuses `failed`.
-- [ ] 7.3 Tests:
+
+      Done (unit and library integration), as the table states:
+      - **Types.** `CompensationCandidate` is in `fulfillment.py`. It hands
+        `authorize` a deep copy of the provider metadata, read-only at its top
+        level, so nothing the callback does reaches the record.
+        `CompensationRefusedError` is in `provider.py`. Both are exported from the
+        package.
+      - **One transaction.** The operation's first statement is a new
+        transaction method, `get_by_fulfillment_id_for_write`. It reserves
+        SQLite's writer slot and then reads the row, so `authorize`, preparation,
+        and the write all judge one state.
+      - **The write.** A new transaction method, `begin_compensating_teardown`,
+        shares the ordinary teardown's write. It refuses a row that is not
+        `failed`, and writes the prepared operation and `failure_reason` only, so
+        `failure_message` is kept.
+      - **Preparation is shared.** Both teardown entrypoints use one helper. It
+        reuses a teardown operation already on the row, and otherwise asks the
+        provider. A native `failed` row carries no prepared teardown, so for
+        compensation the provider is asked.
+      - **Unchanged.** `begin_fulfillment_teardown` takes no writer slot and still
+        refuses `failed`.
+- [x] 7.3 Tests:
       - **Unit:**
         - the transition table;
         - each row of the state table;
@@ -1484,11 +1511,98 @@ Delivers D4's kit half ("The kit operation", "The compensation marker"), for the
           row as `failed`, then in its teardown state, then under `teardown_failed`
           after a failure, and finally under `torn_down`. It never counts a
           compensated `torn_down` as failed.
-- [ ] 7.4 Verification:
+
+      Done:
+      - **Unit, `test_fulfillment.py`.** The orchestrator runs over the module's
+        fake unit of work and a mocked provider. Each row of the table is covered:
+        - not found;
+        - the four begun-teardown states, adopted with nothing written;
+        - `authorize` refusing;
+        - `ProviderConfigInvalidError`, refused;
+        - another preparation error, propagated;
+        - the authorized write, which keeps the message;
+        - the five other states, each a plain conflict, never a refusal.
+
+        `authorize` receives one candidate with the record's fields, and the
+        candidate's top level cannot be written. A callback that changes nested
+        metadata leaves the record's metadata unchanged, whether it then refuses
+        (nothing written) or authorizes (the provider prepares from the record's
+        own metadata). Both cases fail against a shallow copy.
+      - **Unit, `test_fulfillment_persistence.py`.** Over a mocked repository, the
+        transaction's compensating write passes `failure_reason` and the prepared
+        operation and no message. It refuses a row that is not `failed`.
+      - **Library integration, new `tests/integration/test_compensating_teardown.py`.**
+        Real file-backed SQLite, with independent sessions:
+        - **Nothing written.** A refusal by `authorize`, a refusal by
+          `ProviderConfigInvalidError`, and a propagated error each leave the row
+          as convergence left it. A later compensation can still begin.
+        - **A concurrent ordinary teardown.** The compensation is held after its
+          write and before its commit. The ordinary request reads the committed
+          `failed` row and refuses, writing nothing. After the commit, the same
+          request adopts the compensation's view. One teardown was prepared, and
+          the marker and message are kept.
+        - **Two compensations.** The second runs on a connection that does not
+          wait for the writer slot. It fails at the slot, before `authorize` or
+          preparation runs. Once the first commits, a repeat adopts it.
+          Removing the writer reservation fails this case.
+        - **Diagnostics.** The teardown's progress is written through the
+          repository's transitions, as convergence writes them. The counts move:
+          - `failed` 1;
+          - `teardown_dispatch_pending` 1;
+          - `tearing_down` 1;
+          - `teardown_failed` 1;
+          - `tearing_down` 1;
+          - nothing, at `torn_down`.
+
+          The row ends `torn_down` carrying `create_compensation`. A repeated
+          compensation adopts it.
+
+      **Differences from the plan.**
+      - **`torn_down` has no count.** `recovery_diagnostics` reports only the four
+        recovery states and the two failure counts. A `torn_down` row is not
+        counted anywhere, so "finally under `torn_down`" is asserted as the row
+        leaving every count, with its state read from the record. No count was
+        added. The delta's "ends counted as `torn_down`" says more than the
+        diagnostics report.
+      - **Correction: the design and the delta now say what the diagnostics
+        report.** D4's "Readers" and the delta's convergence-worker paragraph said
+        the row ends "under" or "counted as" `torn_down`. The existing projection
+        has no `torn_down` entry, so both now say the row reaches a durable
+        `torn_down` and leaves every recovery-state and failure count, never
+        counted as failed. That is the contract tested above. No diagnostics field
+        was added.
+      - **`test_settlement_repository.py` is unchanged.** It sits in `unit/` and
+        uses a real database. `TESTING.md` moves such a file to `integration/`
+        when it is next touched, and this section needed no repository change.
+        The real-database cases are in the new integration module instead.
+      - **`test_import_boundaries.py`'s standard-library list gains `copy` and
+        `types`.** `fulfillment.py` uses `copy.deepcopy` and `MappingProxyType`.
+- [x] 7.4 Verification:
       - `make -C kit/fulfillment test` (unit and library integration);
       - `make check-packaging`.
 
       End-to-end: none. No pipeline scenario fails a create deliberately.
+
+      Done:
+      - `make -C kit/fulfillment test`: 200 passed (unit and library
+        integration).
+      - **Packaging.** `arkhai-kit-fulfillment` is 0.6.0. No dependant imports the
+        new operation yet, so their `>=0.5.0` floors stay. `make lock` changed
+        eight locks, each only in that version. `make check-packaging` passed,
+        including `make check-architecture`.
+      - **End-to-end.** None, as planned. Owed by validation: none.
+
+      **Handoff.**
+      - **Floors.** Section 8 is the first caller. It raises
+        `compute_provisioning`'s floor on the kit to 0.6.0.
+      - **The ordinary teardown takes no writer slot.** A concurrent ordinary
+        request therefore judges the last committed state: it refuses `failed`
+        while a compensation is uncommitted, and adopts it afterwards. Two
+        ordinary requests on one `active` row are not serialized the same way.
+        That is unchanged here.
+      - **Reasons are compared exactly.** The kit writes `create_compensation`
+        and never reads it. Convergence's teardown-failure write that keeps it is
+        Section 8's (8.6).
 
 ## 8. Release compensates eligible failed creates
 

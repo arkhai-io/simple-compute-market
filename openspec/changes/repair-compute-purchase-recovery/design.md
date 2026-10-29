@@ -500,9 +500,10 @@ keep it.
   (below), never from a storefront failure action.
 - *Recovery diagnostics* (`SettlementRepository.recovery_diagnostics`) count rows by
   state. A row leaves `failed_count` when compensation begins, appears under the
-  teardown states while it runs, counts in `teardown_failed_count` if its teardown
-  fails, and ends under `torn_down`. Nothing relabels a compensated `torn_down` as
-  failed. This is tested.
+  teardown states while it runs, and counts in `teardown_failed_count` if its
+  teardown fails. Its durable state ends `torn_down`, which the diagnostics do not
+  count: it leaves every recovery-state and failure count, and no field is added
+  for it. Nothing counts a compensated `torn_down` as failed. This is tested.
 
 #### The compute-owned seam
 

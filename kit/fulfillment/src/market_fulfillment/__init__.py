@@ -36,6 +36,7 @@ from .results import (
     build_fulfillment_result_envelope,
 )
 from .provider import (
+    CompensationRefusedError,
     CredentialFetchFailedError,
     FulfillmentConflictError,
     FulfillmentCreateFailedError,
@@ -58,7 +59,12 @@ from .provider import (
     ProviderUnavailableError,
 )
 from .settlement_repository import SettlementRepository, begin_sqlite_write_transaction
-from .fulfillment import FulfillmentAcceptance, FulfillmentOrchestrator, FulfillmentStatus
+from .fulfillment import (
+    CompensationCandidate,
+    FulfillmentAcceptance,
+    FulfillmentOrchestrator,
+    FulfillmentStatus,
+)
 from .fulfillment_persistence import (
     FulfillmentAcceptanceDecision, FulfillmentTransaction, FulfillmentUnitOfWork,
     SqlAlchemyFulfillmentTransaction, SqlAlchemyFulfillmentUnitOfWork,
@@ -83,11 +89,18 @@ from .settlement_types import (
     SettlementRequirement,
     SettlementResource,
 )
-from .transitions import InvalidSettlementTransitionError, validate_transition
+from .transitions import (
+    CREATE_COMPENSATION,
+    InvalidSettlementTransitionError,
+    validate_transition,
+)
 
 __all__ = [
     "Backoff",
     "CapacityReservationExpiredError",
+    "CompensationCandidate",
+    "CompensationRefusedError",
+    "CREATE_COMPENSATION",
     "begin_sqlite_write_transaction",
     "FulfillmentBase",
     "SqlAlchemyFulfillmentUnitOfWork",
