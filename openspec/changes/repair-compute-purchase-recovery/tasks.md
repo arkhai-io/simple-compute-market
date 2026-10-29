@@ -1638,14 +1638,21 @@ and this branch merged it before Section 5. In the files this section edits it c
 `_begin_recorded_teardown`, `_mark_release_failed`, the releasing pass, and
 convergence's teardown-failure write are as this section's tasks describe them.
 
-- [ ] 8.1 Add `compensable(state, failure_reason, provider_metadata)` to
+- [x] 8.1 Add `compensable(state, failure_reason, provider_metadata)` to
       `compute_provisioning.release`. It is true when the state is `failed`, the
       reason is `provider_reported_failure`, and the metadata parses as
       `JobFulfillmentMetadata` with `operation` `create`.
-- [ ] 8.2 `submit_release` calls `compensable` with the record's fields. It answers
+
+      Done (unit), as stated. A value that is not a mapping is not compensable.
+      `PROVIDER_REPORTED_FAILURE` now lives beside the predicate, and
+      convergence writes it from there, so the reason the predicate reads is
+      the one convergence writes.
+- [x] 8.2 `submit_release` calls `compensable` with the record's fields. It answers
       `TEARDOWN` for a compensable `failed` aggregate, and `UNRELEASABLE`
       (`fulfillment_failed`) for any other `failed` one.
-- [ ] 8.3 `FulfillmentServiceTeardownPort.begin_teardown` reads the current state:
+
+      Done (library integration, `test_release.py`'s decision table).
+- [x] 8.3 `FulfillmentServiceTeardownPort.begin_teardown` reads the current state:
       - for `failed`, it calls `begin_compensating_teardown` with
         `authorize=lambda candidate: compensable(candidate.state,
         candidate.failure_reason, candidate.provider_metadata)`;
@@ -1653,11 +1660,23 @@ convergence's teardown-failure write are as this section's tasks describe them.
 
       It translates `CompensationRefusedError` into `TeardownRefused`
       (`compensation_refused`), and passes every other error through.
-- [ ] 8.4 `FulfillmentReleaseStatusPort` reads the record through the repository and
+
+      Done (library integration). `TeardownRefused` carries `reason` and
+      `message`, and lives in `compute_provisioning.release`. The service's
+      `DeferredFulfillmentTeardownPort` is what the composition wires, not
+      `FulfillmentServiceTeardownPort`. It now delegates both of its calls to a
+      `FulfillmentServiceTeardownPort` over its bound service, so the rule has
+      one implementation.
+- [x] 8.4 `FulfillmentReleaseStatusPort` reads the record through the repository and
       calls `compensable` with its fields. It answers by D4's state table, with
       `READY_FOR_TEARDOWN` for a compensable `failed` aggregate. The composition
       gives it the repository and the session factory the executor holds.
-- [ ] 8.5 When `begin_teardown` raises `TeardownRefused`, the lease lifecycle records
+
+      Done (library integration). Its constructor now takes
+      `settlement_repository` and `session_factory` as keywords, in place of the
+      teardown port, which it no longer uses. Every test composition that built
+      it was updated (8.7).
+- [x] 8.5 When `begin_teardown` raises `TeardownRefused`, the lease lifecycle records
       `release_failed` with the refusal's reason and message, under the release
       handle, through the site's conditional write. `_mark_release_failed` gains an
       explicit expected-handle argument:
@@ -1668,16 +1687,42 @@ convergence's teardown-failure write are as this section's tasks describe them.
         recorded `release_job_id`, as today.
 
       Every other error stays transient, as today.
-- [ ] 8.6 Convergence's teardown-failure write keeps a `create_compensation` reason
+
+      Done (unit). `_mark_release_failed` takes `expected_handle` as a required
+      keyword. The callers that act on a reservation as they read it pass
+      `_handle_read(reservation)`, which is the old derivation; the release
+      path's refusal passes the decision's `fulfillment_id`.
+      `_begin_recorded_teardown` now returns the lease's resulting state, so a
+      termination refused this way answers `release_failed`. In the releasing
+      pass, an error other than a refusal still propagates to the cycle's
+      handler, which logs it and counts the lease as skipped.
+- [x] 8.6 Convergence's teardown-failure write keeps a `create_compensation` reason
       and replaces only `failure_message`. For every other aggregate it writes
       `provider_reported_failure`, as today.
-- [ ] 8.7 Update the tests that pin the old behaviour. The design found the set
+
+      Done (library integration), in `_apply_teardown_failure`. The reason is
+      read inside the owned write transaction, not from the claimed row.
+- [x] 8.7 Update the tests that pin the old behaviour. The design found the set
       below; re-list it at section start:
       - `provisioning/compute/tests/integration/test_release.py`
       - `provisioning/compute/service/tests/unit/services/test_ledger_lease_lifecycle.py`
       - `provisioning/compute/service/tests/integration/test_lease_release_api.py`
       - `provisioning/compute/service/tests/integration/test_compute_contract_api.py`
-- [ ] 8.8 Unit and library integration tests:
+
+      Re-listed at section start:
+      - **`test_release.py`.** The status port's constructor changed. The
+        decision table gains a compensable `failed` row, which answers
+        `TEARDOWN`.
+      - **`test_lease_release_api.py`.** Its failed-grant case set `failed` with
+        no reason, a row convergence never writes. It is replaced by the
+        ineligible cases in 8.9. The status port's constructor changed.
+      - **`test_ledger_lease_lifecycle.py`, the service's integration
+        `conftest.py`, and `test_legacy_backfill_teardown.py`.** Only the status
+        port's constructor changed. The first's `failed` row has no reason, so
+        it still pins the ineligible path.
+      - **`test_compute_contract_api.py` is unchanged.** Its ordinary teardown of
+        a `failed` aggregate still answers 409, as the design keeps it.
+- [x] 8.8 Unit and library integration tests:
       - `compensable` for each eligible and ineligible row: quarantined,
         `invalid_provisioned_resource_metadata`, no metadata, unreadable metadata,
         and another provider's metadata;
@@ -1692,7 +1737,50 @@ convergence's teardown-failure write are as this section's tasks describe them.
           message becomes the teardown's detail;
         - an `active` fulfillment's teardown that fails and later succeeds never
           carries `create_compensation`.
-- [ ] 8.9 Application integration, through the typed clients under the mock profile:
+
+      Done:
+      - **Unit, new `provisioning/compute/tests/unit/test_compensable.py`.**
+        `compensable` over:
+        - the eligible row;
+        - the states other than `failed`;
+        - quarantined, `invalid_provisioned_resource_metadata`,
+          `create_compensation`, and no reason;
+        - metadata that is none, empty, not a mapping, missing its host, create
+          job, or target, a teardown's, another provider's, or carrying an
+          unknown field.
+      - **Library integration, `test_release.py`.**
+        - The status port answers every state in D4's table, and a handle that
+          names no fulfillment.
+        - The teardown port is driven against the real orchestrator and a real
+          SQLite database, with only the provider faked:
+          - `active` begins the ordinary teardown;
+          - a begun teardown is adopted;
+          - a compensable `failed` row is compensated once over two calls;
+          - quarantined, no metadata, and `ProviderConfigInvalidError` are
+            refused, writing nothing;
+          - a connection error propagates and is not a refusal.
+        - The state changes between the port's read and the kit's transaction:
+          - another release compensates first, and the port adopts it;
+          - the create fails after the port read `dispatching`. The ordinary
+            teardown refuses with a conflict, not a refusal, and the status then
+            reads ready.
+      - **Unit, `provisioning/compute/tests/unit/test_lease_lifecycle.py`.**
+        - A refusal on the release path is recorded under the decision's
+          handle. The reservation was read `leased`, so it had none.
+        - A refusal under a handle another release has since replaced is
+          refused by the site, and that release is left as it is. Passing the
+          read reservation's handle instead fails this case.
+        - The releasing pass records a refusal.
+        - A transient failure there leaves the lease `releasing`.
+      - **Library integration, `test_fulfillment_convergence.py`.**
+        - A compensating teardown that fails keeps `create_compensation`, and its
+          message becomes the teardown's detail. After the requeue and a later
+          success, it is still marked.
+        - An `active` teardown that fails and then succeeds never carries the
+          marker.
+        - Writing `provider_reported_failure` unconditionally fails the first
+          case.
+- [x] 8.9 Application integration, through the typed clients under the mock profile:
       - **Bare metal.** A grant runs but yields no evidence, and the lease is
         terminated:
         - the lease becomes `releasing`;
@@ -1718,7 +1806,47 @@ convergence's teardown-failure write are as this section's tasks describe them.
         down, and its relay port returns with the capacity, not before. Its create
         output comes from a rule armed in the test, since the default mock reports
         no relay.
-- [ ] 8.10 Verification:
+
+      Done, through the typed clients. Convergence is stepped with its pause and
+      advance controls, and the lease watchdog with `check_leases`.
+      - **Bare metal** (`test_lease_release_api.py`):
+        - **No evidence.** A mock rule prints a grant naming another tenant, so
+          the grant carries no delivery evidence, and convergence fails it as
+          `provider_reported_failure`. Terminating the lease then:
+          - makes the lease `releasing`, under the fulfillment;
+          - begins the compensation, which keeps the create's message;
+          - dispatches one reclaim job, and a repeated termination adds none;
+          - holds capacity after the reclaim succeeds and before convergence
+            records `torn_down`;
+          - releases the lease once, and a later cycle releases nothing.
+        - **Create in flight.** A grant held at a gate, then failed, is
+          compensated by the releasing pass.
+        - **Ineligible rows.** Four of them: quarantined,
+          `invalid_provisioned_resource_metadata`, no metadata, and another
+          provider's metadata. Each leaves the lease `release_failed`
+          (`fulfillment_failed`), runs no teardown job, and holds capacity.
+        - **Refused compensation.** With the create job's row deleted, the lease
+          is `release_failed` (`compensation_refused`) under the fulfillment it
+          entered `releasing` with. The aggregate stays `failed`, nothing is
+          prepared, and capacity is held.
+        - **A failing compensation.** A reclaim rule's failure leaves the
+          aggregate `teardown_failed` with `create_compensation`, and the lease
+          `release_failed` with capacity held.
+        - **Delivered teardown.** A delivered grant's reclaim fails, and
+          convergence records `provider_reported_failure`. A failed teardown job
+          is not re-run (D6), so its later success is set as convergence would
+          leave it. The operator's retry-release then releases the lease, and
+          the aggregate never carries the marker.
+      - **VM** (`test_fulfillment_api.py`, the relay-backed class):
+        - The module runs VM jobs through its `fake_ansible` runner, not the
+          mock rule set, so the test states the create and removal outputs on
+          that runner.
+        - The create prints another guest, so it carries no evidence.
+          Convergence fails it, and the termination compensates it.
+        - The removal runs, and the aggregate reaches `torn_down` with the
+          marker. The relay port stays leased until the lease's release returns
+          it with the capacity.
+- [x] 8.10 Verification:
       - `make -C provisioning/compute test` (unit and library integration);
       - `make -C provisioning/compute/service test` (application integration);
       - `make check-packaging`.
@@ -1727,6 +1855,41 @@ convergence's teardown-failure write are as this section's tasks describe them.
       added. The application integration cases are the lowest level that proves the
       lifecycle. The live bare-metal lane's supported teardown is the system
       evidence.
+
+      Done:
+      - `make -C provisioning/compute test`: 280 passed (unit and library
+        integration).
+      - `make -C provisioning/compute/service test`: 607 unit and 476
+        application integration passed.
+      - **Packaging.**
+        - `arkhai-compute-provisioning` is 0.22.0, with its floor on
+          `arkhai-kit-fulfillment` raised to 0.6.0.
+        - The service is already 0.20.0 in this change, so it is not bumped
+          again. Its floors rise to `arkhai-kit-fulfillment>=0.6.0` and
+          `arkhai-compute-provisioning>=0.22.0`.
+        - The Ansible kit and the two adapters keep their floors, since none
+          uses the new API.
+        - `make dist` and `make lock` changed five locks: compute, Ansible, the
+          service, and both adapters. Each changed only in that version and those
+          floors.
+        - `make check-packaging` passed, including `make check-architecture`.
+      - **End-to-end.** None. Owed by validation: none.
+      - **Coordination.** `resolve-compute-family-findings` landed first, as the
+        correction above records. This section changes neither
+        `TERMINAL_FAILURE_STATES` nor `_TERMINAL_RESERVATION_STATES`.
+
+      **Handoff.**
+      - **Retry-release reuses the release path's handling.** An operator's
+        retry-release of a `release_failed` lease runs `_request_release`. A
+        compensable aggregate begins its compensation there, and a refusal
+        returns the lease to `release_failed` under the new handle.
+      - **A failed create is no longer reported `fulfillment_failed`.** The
+        bare-metal mock profile's failed grants are compensable now. A test
+        that terminates such a lease and expects `fulfillment_failed` must make
+        the row ineligible.
+      - **Section 10 is next on this path.** Bare metal's reclaim of an account
+        its grant never created is what makes the compensation safe on a real
+        host. Here, the mock's reclaim succeeds.
 
 ## 9. A VM storefront reads a compensating fulfillment as a failed delivery
 

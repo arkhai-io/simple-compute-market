@@ -14,6 +14,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from market_fulfillment import (
+    CREATE_COMPENSATION,
     Backoff,
     FulfillmentProvider,
     FulfillmentResult,
@@ -426,6 +427,126 @@ def _active_row_ready_for_teardown(repo, session_factory, cr_id="cr-1"):
             ).model_dump(mode="json"),
         )
         db.commit()
+
+
+def _watchdog_reporting(session_factory, repo, state, detail=None, **provider):
+    return FulfillmentConvergenceWatchdog(
+        session_factory=session_factory,
+        repository=repo,
+        provider_registry=ProviderRegistry(
+            {"vm.ansible": _StubProvider(status=ProviderStatus(state=state, detail=detail), **provider)}
+        ),
+        settings=_settings(),
+    )
+
+
+def _tearing_down_after_failed_create(repo, session_factory):
+    """A create convergence failed, compensated: the row's teardown has been
+    dispatched, carrying ``create_compensation`` and the create's message."""
+    _accepted_row(repo, session_factory)
+    with session_factory() as db:
+        repo.transition(
+            db, "cr-1", SettlementRecordState.dispatching.value, provider_metadata={"job": "1"}
+        )
+        repo.transition(
+            db,
+            "cr-1",
+            SettlementRecordState.failed.value,
+            failure_reason="provider_reported_failure",
+            failure_message="create reported no delivery evidence",
+        )
+        repo.transition(
+            db,
+            "cr-1",
+            SettlementRecordState.teardown_dispatch_pending.value,
+            prepared_teardown_operation=VersionedEnvelope(
+                kind="ansible.teardown", schema_version=1, payload={}
+            ).model_dump(mode="json"),
+            failure_reason=CREATE_COMPENSATION,
+        )
+        repo.transition(
+            db,
+            "cr-1",
+            SettlementRecordState.tearing_down.value,
+            teardown_provider_metadata={"teardown_job": "1"},
+        )
+        db.commit()
+
+
+def _reason_and_message(repo, session_factory):
+    with session_factory() as db:
+        record = repo.get(db, "cr-1")
+        return record.state, record.failure_reason, record.failure_message
+
+
+async def _requeue_and_redispatch(session_factory, repo):
+    """Convergence's requeue of ``teardown_failed``, then its redispatch."""
+    await _watchdog_reporting(
+        session_factory, repo, ProviderOperationState.pending
+    ).requeue_teardown_failures()
+    await _watchdog_reporting(
+        session_factory,
+        repo,
+        ProviderOperationState.pending,
+        dispatch_teardown_result=FulfillmentResult(provider_metadata={"teardown_job": "1"}),
+    ).dispatch_pending_teardowns()
+
+
+async def test_a_compensating_teardown_that_fails_keeps_its_marker(session_factory, repo):
+    _tearing_down_after_failed_create(repo, session_factory)
+
+    await _watchdog_reporting(
+        session_factory, repo, ProviderOperationState.failed, "reclaim job failed"
+    ).converge_teardowns()
+
+    assert _reason_and_message(repo, session_factory) == (
+        SettlementRecordState.teardown_failed.value,
+        CREATE_COMPENSATION,
+        "reclaim job failed",
+    )
+
+    await _requeue_and_redispatch(session_factory, repo)
+    await _watchdog_reporting(
+        session_factory, repo, ProviderOperationState.succeeded
+    ).converge_teardowns()
+
+    assert _reason_and_message(repo, session_factory) == (
+        SettlementRecordState.torn_down.value,
+        CREATE_COMPENSATION,
+        "reclaim job failed",
+    )
+
+
+async def test_a_delivered_teardown_that_fails_then_succeeds_never_carries_the_marker(
+    session_factory, repo
+):
+    _active_row_ready_for_teardown(repo, session_factory)
+    with session_factory() as db:
+        repo.transition(
+            db,
+            "cr-1",
+            SettlementRecordState.tearing_down.value,
+            teardown_provider_metadata={"teardown_job": "1"},
+        )
+        db.commit()
+
+    await _watchdog_reporting(
+        session_factory, repo, ProviderOperationState.failed, "teardown job failed"
+    ).converge_teardowns()
+    assert _reason_and_message(repo, session_factory) == (
+        SettlementRecordState.teardown_failed.value,
+        "provider_reported_failure",
+        "teardown job failed",
+    )
+
+    await _requeue_and_redispatch(session_factory, repo)
+    await _watchdog_reporting(
+        session_factory, repo, ProviderOperationState.succeeded
+    ).converge_teardowns()
+
+    state, reason, _ = _reason_and_message(repo, session_factory)
+    assert state == SettlementRecordState.torn_down.value
+    assert reason != CREATE_COMPENSATION
 
 
 async def test_dispatch_pending_teardowns_success_transitions_to_tearing_down(

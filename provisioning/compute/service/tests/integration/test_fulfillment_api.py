@@ -55,11 +55,14 @@ from compute_provisioning_contracts import (
     FulfillmentScheduleRequest,
     FulfillmentScheduleResponse,
     FulfillmentStatusResponse,
+    LeaseState,
+    LeaseTermination,
 )
 from compute_provisioning_service.main import app
 from . import bare_metal_deal
 from .conftest import SERVICE_AUTHORITIES, STOREFRONT_SIGNER, fake_create_stdout
 from market_fulfillment import (
+    CREATE_COMPENSATION,
     FulfillmentOrchestrator,
     PhysicalSettlementRequest,
     ProviderRegistry,
@@ -78,6 +81,8 @@ from vm_provisioning_adapter.db import RelayPortLease
 from vm_provisioning_adapter.guest_names import fulfillment_guest_name
 from vm_provisioning_adapter.services.relay_service import RelayService
 from vm_provisioning_adapter.services.relay_port_allocator import RelayPortAllocator
+from vm_provisioning_adapter.codec import VM_RESULT_FACTS
+from vm_provisioning_adapter.services.mock_output import shipped_output
 from market_resource_pools_contracts import PoolCreate, PoolUpdate
 from market_site.router import make_capacity_router
 from compute_provisioning_contracts import HostCreate
@@ -1077,6 +1082,88 @@ class TestRelayPortLifecycleOverTheApi:
         )
         await fulfillment.begin(capacity_reservation_id, "vms", _fulfillment_request())
         assert len(self._held_ports()) == 1
+
+    async def test_a_failed_create_is_compensated_and_its_port_returns_with_the_capacity(
+        self, fulfillment: FulfillmentApi, client_and_queue, fake_ansible
+    ):
+        """A create on a relay-backed pool fails after dispatch: its run, stated
+        here, prints a guest other than this reservation's, so it carries no
+        delivery evidence. Terminating the lease begins the VM's removal as a
+        compensating teardown; the relay port stays leased through it and
+        returns with the capacity, once the aggregate is ``torn_down``."""
+        clients, job_queue = client_and_queue
+        capacity_reservation_id = await self._relay_backed_reservation(
+            f"relay-pool-{uuid.uuid4().hex[:8]}"
+        )
+        guest = fulfillment_guest_name(capacity_reservation_id)
+        removed_stdout = shipped_output(
+            "kvm-fulfillment-1",
+            VM_RESULT_FACTS["vm_remove"],
+            {
+                "action": "vm_remove",
+                "vm_name": guest,
+                "timestamp": "2030-01-01T00:00:00Z",
+                "host": "kvm-fulfillment-1",
+                "status": "success",
+                "destroy_output": "",
+                "cleanup_output": [],
+                "error": "",
+            },
+        )
+        fake_ansible.wait_for_playbook.side_effect = [
+            AnsibleResult(stdout=fake_create_stdout("another-guest"), stderr="", process_id=1),
+            AnsibleResult(stdout=removed_stdout, stderr="", process_id=2),
+        ]
+        ledger = _container_module.resolved_capacity_ledger_service
+        ledger.commit(
+            capacity_reservation_id=capacity_reservation_id,
+            lease_end_utc="2099-01-01T00:00:00Z",
+        )
+
+        async def converge() -> None:
+            await clients.family.pause_fulfillment_convergence()
+            try:
+                await clients.family.advance_fulfillment_convergence_cycle()
+            finally:
+                await clients.family.resume_fulfillment_convergence()
+
+        def aggregate() -> SettlementRecord:
+            with _container_module.resolved_session_factory() as db:
+                record = db.get(SettlementRecord, capacity_reservation_id)
+                db.expunge(record)
+                return record
+
+        await fulfillment.begin(capacity_reservation_id, "vms", _fulfillment_request())
+        await job_queue.wait_until_idle()
+        await converge()
+        record = aggregate()
+        assert (record.state, record.failure_reason) == (
+            SettlementRecordState.failed.value,
+            "provider_reported_failure",
+        )
+        assert len(self._held_ports()) == 1
+
+        lease = await clients.family.terminate_lease(capacity_reservation_id, LeaseTermination())
+        assert lease.status == LeaseState.RELEASING
+        assert aggregate().failure_reason == CREATE_COMPENSATION
+
+        await converge()
+        await job_queue.wait_until_idle()
+        await converge()
+        record = aggregate()
+        assert (record.state, record.failure_reason) == (
+            SettlementRecordState.torn_down.value,
+            CREATE_COMPENSATION,
+        )
+        # Torn down, but the lease has not yet returned its capacity.
+        assert len(self._held_ports()) == 1
+
+        await clients.family.check_leases()
+
+        assert (await clients.family.get_lease(capacity_reservation_id)).status == (
+            LeaseState.RELEASED
+        )
+        assert self._held_ports() == []
 
     async def test_a_direct_nat_pool_takes_no_port(self, fulfillment: FulfillmentApi):
         """A deployment with no relay is a supported state, not a degraded one."""

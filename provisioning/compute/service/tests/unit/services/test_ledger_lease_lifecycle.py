@@ -224,7 +224,10 @@ def _lifecycle(session_factory, ledger, *, fulfillment_service=None, **settings_
             session_factory=session_factory,
             teardown_port=teardown_port,
         ),
-        release_status=FulfillmentReleaseStatusPort(teardown_port),
+        release_status=FulfillmentReleaseStatusPort(
+            settlement_repository=SettlementRepository(),
+            session_factory=session_factory,
+        ),
         capacity_released_notifier=(
             lambda reservation: notify_storefront_capacity_released(
                 settings, reservation, sink=event_sink

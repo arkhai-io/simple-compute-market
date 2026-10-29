@@ -13,6 +13,7 @@ from sqlalchemy.exc import OperationalError
 
 from market_fulfillment.ids import derive_provisioned_resource_id
 from market_fulfillment import (
+    CREATE_COMPENSATION,
     Backoff,
     ProviderOperationState,
     SettlementRecordState,
@@ -26,6 +27,7 @@ from market_site.db import CapacityReservation, ReservationState
 from market_site.ledger import CapacityConflictError
 
 from compute_provisioning.job_fulfillment import fulfillment_executor_target
+from compute_provisioning.release import PROVIDER_REPORTED_FAILURE
 
 # Reservations a lease target is never recorded on: their lease is over.
 _TERMINAL_RESERVATION_STATES = (
@@ -485,12 +487,7 @@ class FulfillmentConvergenceWatchdog:
                 self._apply_teardown_success(record.capacity_reservation_id)
                 return
             if status.state is ProviderOperationState.failed:
-                self._apply_provider_failure(
-                    record.capacity_reservation_id,
-                    SettlementRecordState.tearing_down,
-                    SettlementRecordState.teardown_failed,
-                    status.detail,
-                )
+                self._apply_teardown_failure(record.capacity_reservation_id, status.detail)
         except Exception as exc:
             self._log_retry("teardown status", record.capacity_reservation_id, exc)
 
@@ -541,8 +538,37 @@ class FulfillmentConvergenceWatchdog:
             reservation_id,
             source_state.value,
             target_state.value,
-            failure_reason="provider_reported_failure",
+            failure_reason=PROVIDER_REPORTED_FAILURE,
             failure_message=detail,
+        )
+
+    def _apply_teardown_failure(self, reservation_id: str, detail: str | None) -> None:
+        """Record a failed teardown, keeping a compensating teardown's marker.
+
+        A compensated aggregate is told apart from a delivered one only by its
+        ``create_compensation`` reason, so a compensating teardown's failure
+        replaces only the message, which then holds the teardown's detail. The
+        reason is read in the transaction that writes it, not from the claimed
+        row. Any other aggregate records ``provider_reported_failure``.
+        """
+
+        def apply(db) -> None:
+            record = self._repository.get(db, reservation_id)
+            reason = (
+                CREATE_COMPENSATION
+                if record.failure_reason == CREATE_COMPENSATION
+                else PROVIDER_REPORTED_FAILURE
+            )
+            self._repository.transition(
+                db,
+                reservation_id,
+                SettlementRecordState.teardown_failed.value,
+                failure_reason=reason,
+                failure_message=detail,
+            )
+
+        self._with_owned_record(
+            reservation_id, SettlementRecordState.tearing_down.value, apply
         )
 
     def _apply_transition(
