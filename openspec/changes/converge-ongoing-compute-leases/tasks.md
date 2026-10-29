@@ -11,7 +11,7 @@ before code starts; no superseded Goal 8 change is an implementation gate.
       buyer stop/end_delivery/buyer_end and mediation request mapping. Record exact
       contract bindings; stop on a missing interface rather than duplicating it.
 - [ ] 1.2 Confirm spot supplies verified rate authorize/start_billing adapter operations,
-      per-stopper partialPeriod mapping, whole-period maximum terms, afterStop holds
+      per-stopper and term-end partialPeriod mapping without term rounding, afterStop holds
       and rotation re-anchoring. Foundation supplies the neutral adapter protocol
       and source-classified seller self-filing. Unify tasks 1–3 supply the path,
       protocol consumption, activation/undelivered ports and start-journal reference.
@@ -47,7 +47,7 @@ before code starts; no superseded Goal 8 change is an implementation gate.
       policy using deployment retry/watchdog budgets; leave loops running on warning.
       Bind diagnostics/state mapping to the deal-lifecycle read/list contract, with
       manual principal/reason and revision identity. Measure cadence/teardown budgets
-      as seller risk recommendations, never exposure_seconds codec/config gates.
+      as seller risk recommendations, never another notice or codec/config gate.
 - [ ] 2.5 Validate at the lowest meaningful level: pure timer/fact/revision selection
       in unit coverage; database journal/cursor/restart and queue independence in
       `kit/deal-servicing/tests` library-integration coverage. Exercise no dispatch,
@@ -95,10 +95,12 @@ before code starts; no superseded Goal 8 change is an implementation gate.
 ## 4. Lane qualification and pre-closeout review
 
 - [ ] 4.1 Extend e2e-tests/tests/e2e/roles/scenarios and shared stages with D's full
-      rate matrix (0–10), executing spot's prepared entry points and recording maximum
+      rate matrix (0–11), executing spot's prepared entry points and recording maximum
       term plus on-demand refused stop/exceptional_end explicitly. Drop once-only
       activation duplication (unify owns it). Gate on readiness and coherent UTC/skew
-      checks; doubles use wall-clock mode, short fixture deadlines and event-bounded
+      checks; consume typed due-work barriers with per-authority watermarks, pending
+      effects and blocked dependencies (never completed while blocked). Doubles use
+      wall-clock mode, short fixture deadlines and event-bounded
       waits, never isolated clock jumps. Pause/step the one three-pass loop; assert
       authority effects, evidence and both facts. Lane pause is not restart proof.
 - [ ] 4.2 Exercise additional remote-stop windows, both-authority outage replay,

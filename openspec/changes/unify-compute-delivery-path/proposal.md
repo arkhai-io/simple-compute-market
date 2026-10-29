@@ -28,7 +28,7 @@ fails to deliver. This is the delivery portion of Goal 8 in
   and access until the accepted start. The site deadline is anchored at the later
   of commit and lease start plus its allowance.
 - Every compute lease, whatever its payment structure or mechanism, activates by
-  reservation identity, adopting the current end (including verified earlier truncation). There is no billing horizon and no periodic lease renewal here.
+  reservation identity, adopting the current end (including verified earlier truncation). There is no periodic lease renewal here.
   The site owns the awaiting-activation deadline under
   `renewable-compute-lease-deadlines`; it is seller-side risk management, not a buyer
   guarantee.
@@ -37,16 +37,18 @@ fails to deliver. This is the delivery portion of Goal 8 in
   additional financial action; all deals still pass end service's admission check.
   Rate servicing supplies the hook's payment-authority checks through its injected
   payment adapter, with a separate keyed `start_billing` effect after provisioning and activation.
-  Neutral protocol/evidence types belong to the foundation lifecycle kit.
+  The foundation owns neutral payment-adapter/evidence types and the servicing
+  authorization port; end service alone journals billing-start intent/key under
+  delivery's stable key, with delivery keeping only its reference.
 - The durable delivery checkpoints are `authorized`, `dispatched`, `activated`,
   `started`, `available` and `converged`, with stable effect identities and recovery
   at each acknowledgement gap. Availability does not depend on a buyer reading it.
 - Delivery supplies classified actor/cause/source, accepted start and fixed failure
   time to the foundation's single end-plus-optional-self-filing operation. Lawful
   buyer/terms/ruling ends do not automatically incur a seller penalty. A genuine
-  never-delivered failure before a future start needs a valid immediate filing;
-  the recommended lifecycle mapping is the earlier of accepted start and failure.
-  End service journals the filing; the dispute authority applies any correction. The path does not implement its own refund,
+  never-delivered failure uses the foundation's fixed min(start, failure-observation)
+  basis after start; before a future start it journals now and files at Agreement
+  start, never future-dating a filing. End service journals the filing; the dispute authority applies any correction. The path does not implement its own refund,
   stop, correction journal or end-deal route.
 - Credential reads enforce the delivery checkpoint and end service's recorded end,
   ordered with local end admission. They fetch access material live and recheck
@@ -79,7 +81,7 @@ requirements belong to `agreed-evidence-and-early-termination`, not a second del
 
 ## Non-Goals
 
-- A billing horizon, vouch, minimum spend, backdated stop or local notice scheduler.
+- Minimum spend, backdated stop or local notice scheduler; see design's rejected alternatives.
 - The site's deadline schema, lapse policy or active-lease renewal.
 - The rate hook implementation and continuing rate servicing
   (`converge-ongoing-compute-leases`), or payment event translation and rate arithmetic

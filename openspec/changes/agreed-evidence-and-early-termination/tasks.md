@@ -26,8 +26,8 @@ generated from the same contract vectors for unit and library-integration tests;
 library tests depends on runnable-double tooling. `add-arkhai-payments-lane-double` owns the
 runnable HTTP payments/mediation doubles for lanes and end-to-end runs. This change supplies
 contracts, clients, adapters and signing fixtures: sections 1–2 (including 2.4's acknowledgement
-signing/verifier), 8.1, 9.1 and 12.1 (including models/signing fixtures) precede the corresponding
-HTTP double, but sections 11 and 12's kit tests do not wait for it. Convergence owns funding
+model), 8.1, 9.1 and 12.1 (including models/signing fixtures) precede the corresponding
+HTTP double; 13.1's shared acknowledgement signing/verifier gates mechanical buyer_end, but sections 11 and 12's kit tests do not wait for it. Convergence owns funding
 timers and consuming servicing scenarios; `activate-per-period-compute-servicing` owns hosted
 four-path e2e against the public test deployment (design.md, D15). Sections that change existing deal paths
 name the existing scenarios that must keep passing. The buyer-termination fold additionally
@@ -105,15 +105,18 @@ by dispute interface", "Evidence is keyed by negotiation" and "A dispute is one 
       `exceptional_end(at)`; derivation of each part's stop authorities from entitlements plus
       the agreement's dispute authority; operation-key handling (derived idempotency keys for
       part events, filings and appends; local refusal of a retry with changed content); and the
-      evidence-store interface keyed by negotiation ID. Verify: unit tests for "A mechanism has
+      evidence-store interface keyed by negotiation ID. Include neutral payment-adapter
+      authorize(phase, evidence) and start_billing(operation_key, activated_delivery_evidence)
+      with versioned secret-free identity/digest envelopes; once-only returns allow/no-op
+      after commitment validation. Verify: unit tests for "A mechanism has
       no adapter for a command", "A deal names an interface with no adapter", "An interface has
       no exceptional end", "A retry changes content" and the on-demand stop-authority scenario,
       using fake adapters.
 
 - [ ] 2.4 Extend the peer/route/read contracts with `end_delivery {at}`, a signed end
       acknowledgement with durable physical progress and attribution, and verbatim signed site
-      reports, plus shared end-acknowledgement signing/verification primitives bound to deal, buyer,
-      instant and exact bytes for both clients and mediation evidence verification; include a delivery
+      reports, plus the shared end-acknowledgement verification contract bound to deal, buyer,
+      instant and exact bytes; 13.1 supplies the v2 primitive for clients and mediation; include a delivery
       view alongside an explicit rejected authority view when no
       payment adapter exists; define `buyer_end(at)` beside `exceptional_end(at)`. Files:
       `kit/deal-lifecycle-contracts` and `kit/deal-lifecycle`. Verify: unit model/codec targets
@@ -292,7 +295,7 @@ and the bare-metal buyer's counterparts.
       bare-metal buyer stages; compute deals send `commit` after settlement instead of the seller
       settlement handoff where the mechanism has a lifecycle adapter, and Alkahest and API-credit
       paths are unchanged. Verify: application-integration tests through the typed client per
-      domain that a hosted-mechanism deal stage reaches `commit` (with the kit-owned in-process payments contract fake)
+      domain that a hosted-mechanism deal stage reaches `commit` (with kit-owned vector-derived in-process payments and mediation contract fakes; no runnable tooling dependency)
       and an Alkahest deal stage is unchanged.
 
 - [ ] 7.5 Add the canonical client's `end_delivery(negotiation_id, at)` and buyer-half end
@@ -405,7 +408,11 @@ market-composition's "Marketplace roles hold no payment ledger". Files: new `kit
       ended(T), revision` over the caller's storefront database session, with durable revision/CAS
       ordering reservation, dispatch, activation and credential authorization against end recording.
       Own `record_end(final_request, self_filing_intent?)`, journaling both atomically in that session;
-      stale revisions retry admission and cannot authorize work. These are section-level prerequisites
+      stale revisions retry admission and cannot authorize work. Supply the neutral delivery
+      authorization protocol and versioned secret-free evidence envelope from D6. End service
+      alone journals billing-start key/evidence before I/O; accept delivery's stable operation key
+      and return an intent reference, never let the delivery record own a competing key.
+      These are section-level prerequisites
       for unify's delivery consumer, not a whole-change cycle.
       Verify: unit tests with a fake domain port for "A ruling ends delivery before the lease
       exists", "The end overlaps delivery start" and "The storefront restarts between the end
@@ -431,8 +438,13 @@ market-composition's "Marketplace roles hold no payment ledger". Files: new `kit
       and expose earliest-end attribution and current physical
       progress through `read`. Accept verified site reports as final requests; journal required
       `exceptional_end(at)` filings atomically with unentitled ends, including never-started
-      delivery. For future-start undelivered deals, persist the intent now but defer submission until
-      Agreement start so `at <= now`; replay preserves the original key and never resumes delivery.
+      delivery. Apply D8's fixed min(accepted start, failure observation) basis, with its
+      future-start exception: journal now, submit at Agreement start with that start as at,
+      never future-date a filing. Replay preserves the original key and never resumes delivery.
+      Consume D8's cause classification, including unresolved funding-timer classification
+      and correlated lawful ends; do not exempt late settlement without buyer evidence.
+      Reverify revised-case netting vectors with prior effects and bond awards; missing
+      evidence stays repair-required. Convergence executes the consolidated cases.
       Retain sources and effects under D9 rather than a core fixed floor. Files:
       `kit/deal-servicing`; gate: section 2.4. Verify: kit library-integration targets against
       real persistence for equal-time replay, a late earlier site report after teardown began,
@@ -470,7 +482,7 @@ names its target" (hold extensions are the payments service's evidence, cases th
 authority's; this change's suites claim neither). Files: `kit/arkhai-payments/src/market_arkhai_payments/`
 (new adapter module, `seller.py`, `reconciliation.py`).
 
-- [ ] 11.1 Implement the payment adapter against the kit-owned in-process payments contract fake: per-part event
+- [ ] 11.1 Implement the payment adapter against the kit-owned vector-derived in-process payments contract fake (no runnable tooling dependency): per-part event
       translation, derived idempotency keys, `unknown` resolved by `read`, verified snapshots
       (section 9), open extensions per ref. Verify: library-integration tests for "A reverse's
       response is lost", "A ruling discounts a deal" (observation side), "Two outcomes reverse
@@ -502,7 +514,7 @@ paid-out money" (client side) and "Dispute writes are idempotent". Files: new
       credentials bound by identity; map `exceptional_end(at)` to the standard self-penalty
       request; build and validate free-form requests; return the authority's answers, per-part
       `held` / `not_held`, errors and `pending` as lifecycle outcomes; verify record entries.
-      Verify: library-integration tests against the kit-owned in-process mediation contract fake for "Two cases on one
+      Verify: library-integration tests against the kit-owned vector-derived in-process mediation contract fake (no runnable tooling dependency) for "Two cases on one
       deal", "Parts differ", "A part was wholly reversed", "Payout wins against the extension",
       "A late case ends delivery" (filing half), "A filing's response is lost", "The case closes
       during the append" and "The claimant adds evidence".
@@ -528,7 +540,11 @@ seller's budget". Files: `kit/deal-servicing` (router factory),
 `kit/deal-lifecycle-contracts` (route contracts), `kit/storefront` composition.
 
 - [ ] 13.1 Implement the routes as a router factory the storefronts mount, never relaying a
-      buyer's authority command. Verify: application-integration tests through the typed client
+      buyer's authority command. Supply the shared acknowledgement signing/verification
+      primitive using kit/identity's arkhai.market-response-signature.v2 under the Agreement's
+      seller principal over the exact response to end_delivery; clients and mediation reuse
+      it, and tooling never duplicates its verifier. Section 2.4 supplies its model; the
+      mechanical buyer_end double and section 7.5 verification depend on this primitive. Verify: application-integration tests through the typed client
       for authentication per role, signed responses and refusal of a relayed authority command.
 - [ ] 13.2 Emit seller diagnostics when reserve-ahead or payer notice does not cover the configured
       polling/watchdog/teardown budget; these are recommendations, not codec/publication refusals.
@@ -565,8 +581,8 @@ provision stages". Files: `domains/vms/storefront/src/market_storefront/`
       envelope is stored.
 - [ ] 14.2 Route terminal settlement and refund-driven ends through end service, and order
       delivery start and reconciliation against the earliest final request. Verify:
-      application-integration tests through the typed client with kit-owned in-process payments and mediation
-      contract fakes for "A seller's hardware fails", "A buyer tears down" scenarios in the VM
+      application-integration tests through the typed client with kit-owned vector-derived in-process payments and mediation
+      contract fakes (no runnable tooling dependency) for "A seller's hardware fails", "A buyer tears down" scenarios in the VM
       delta, and the admission scenarios on the VM path.
 - [ ] 14.3 Keep the requested instant in VM lease ends (second precision). Verify: unit and
       integration tests in the VM fulfillment suites for the delta's scenarios.
@@ -689,6 +705,7 @@ The remaining D1–D15 destinations are listed in proposal.md and task 16.9.
 
 | Accepted decision | Permanent location |
 |---|---|
+| D6 neutral authorization/evidence envelope, sole end-service billing-start intent; D8 cause classification, pre-start timing exception and revised-remedy netting | New `deal-lifecycle` spec/architecture and settlement-servicing spec/architecture at closeout |
 | D8 canonical buyer end, stop-or-case and both CLI paths | `openspec/specs/buyer-orchestration/spec.md` and `architecture.md` |
 | D8 earliest final request with actor, cause, source and stable effects; D9 retained signed end evidence | New `deal-lifecycle` capability's spec and architecture companion (created at archive/closeout) |
 | D8 site-signed intended-end report, transactional event/outbox and recovery | `openspec/specs/site-capacity/spec.md`, `openspec/specs/physical-provisioning/spec.md` and their architecture companions |

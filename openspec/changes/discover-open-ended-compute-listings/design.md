@@ -106,7 +106,7 @@ Consume the foundation's common query implementation before adding class sugar.
 Reverify term placement without tying projections to that placement. Registry
 implementation waits for the carrier/migration dependency; local option clauses do
 not wait for server pushdown. Activation waits for discovery plus servicing and the
-hosted revision, never for a billing horizon or minimum-spend primitive.
+hosted revision; no extra minimum-spend primitive is awaited.
 
 First-use fixtures have one mixed listing per domain with differently priced
 reserved, on-demand and spot options, differing notices, two bound values and an

@@ -37,16 +37,22 @@ SCM started_period/last_boundary/stop map to charged/returned/prorated respectiv
 Unsupported offered terms fail closed. Until the partialPeriod revision is
 vendored, spot offers only charged on both sides, never a corrective storefront
 refund. That supported charged/charged subset may activate if all other gates pass
-and the selected dispute authority's published policy accepts it. Client presets prefer payer charged/payee returned once expressible;
-dispute-authority published policy may further constrain offers. Exhaustion/part
-end are charged and maximum terms round down to whole periods. Verify setup once
+and the buyer explicitly accepts started_period for payee and charged term ends.
+Seller-stop treatment is negotiated; mediation does not mandate returned. Client
+presets prefer payer charged/payee returned, and default buyers refuse payee or
+term-end treatment other than last_boundary. Each absolute term end has its own
+partialPeriod, without term rounding; exhaustion is period-boundary aligned.
+The dispute authority's stop entry uses chosen and its event supplies treatment.
+Periods are earned at period end or part stop, not period start. Verify setup once
 ends at activation, releases one dispute window later, and self-penalty returns
 all before delivery and none after delivery.
 
-There is no horizon/vouch gate, true-minimum-spend gate or backdated/effective-time
-payee-stop gate. Signed snapshot vectors and before/after-start vectors are
-conformance evidence requested by the foundation/spot owners, not an unrelated
-new product primitive introduced here.
+There is no true-minimum-spend gate or backdated/effective-time payee-stop gate. Producer-published signed snapshot, before/after-start and partial-reversal vectors
+before/after stop are blockers to *Qualification against the published contract*.
+Absent any, pinned kit-owned candidate bytes support only *Qualification against a
+proposed contract*, never a relabelled double trace. *Live evidence* additionally
+requires the hosted checks. These three classes are defined only by the lane-double
+change's D6; snapshot proof or vector gaps cannot be waived by activation.
 
 ### D2. Verify double and consumer before the production declaration
 

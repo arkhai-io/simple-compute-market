@@ -19,8 +19,7 @@ held money and kept signed bytes, not on a deadline inside the seller's site.
   deadline max(commit time, lease start) plus the pool's provisioning allowance.
   Existing leases retain null fields and their current behavior.
 - Add an idempotent activation transition. Every compute deal activates to its
-  current agreed end, regardless of payment mechanism or billing shape. There is no
-  funded-horizon activation and no renewal operation in this change.
+  current agreed end, regardless of payment mechanism or billing shape. There is no renewal operation in this change.
 - Make expiry claim the state, deadline, phase and agreed end it read, before any
   teardown effect. Activation that wins the race invalidates a stale expiry claim;
   an elapsed deadline may still be activated until expiry claims it.
@@ -39,8 +38,7 @@ held money and kept signed bytes, not on a deadline inside the seller's site.
   backfills legacy leases. Unify owns deployed enablement after compatible callers.
 
 Renewal and the site's `reclaim` / bounded `grace` / `continue` lapse policy are
-**deferred**, with their design and revisit condition retained in D4. Without a
-payment horizon, reclaiming an active lease costs the buyer a working VM and the
+**deferred**, with their design and revisit condition retained in D4. Reclaiming an active lease costs the buyer a working VM and the
 honest storefront a self-penalty awarding any bond in full.
 
 ## Capabilities
@@ -59,7 +57,7 @@ None.
 ## Non-Goals
 
 - Renewable active leases, renewal-lapse policy, lease extension or pooled deadlines.
-- Billing horizons, payee-advanced vouches, or any funded-through fact at the site.
+- Any funded-through fact at the site; design records rejected billing alternatives.
 - A buyer-facing provisioning SLA or a minimum-spend rule.
 - A site-event-triggered refund. Under end service, a delivery that fails or never
   starts is classified by the foundation's single end-plus-optional-filing operation,
@@ -88,7 +86,7 @@ None.
   table. Coordinate migration order; use a separate lease-deadline due query/index.
   This is not a behavior dependency.
 - `converge-ongoing-compute-leases` uses end service to end an active lease earlier;
-  it neither renews this site's deadline nor advances a billing horizon.
+  it does not renew this site's deadline.
 
 ## Impact and acceptance boundary
 

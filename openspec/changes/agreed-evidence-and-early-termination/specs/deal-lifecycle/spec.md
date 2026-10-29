@@ -4,6 +4,11 @@
 
 A payment event MUST be read from the payment authority the committed agreement names, and MUST record what happened to one part of the deal. It MUST carry `negotiation_id`, `commitment_ref`, `part`, `kind`, `actor`, `at`, `amount` where it moves money, `cause`, the `case_ref` of the case that caused it if any, the `extension_ref` an `extend` opened or a `lift` ended, `sequence`, and the authority's record reference. The lifecycle layer MUST treat the commitment reference as opaque.
 
+#### Scenario: Rate earnings become held
+
+- **WHEN** a rate period ends or its part stops during that period
+- **THEN** the payment authority earns that amount at that instant, reserved until then, and a {for} hold anchors payout there rather than at period start
+
 #### Scenario: A reverse is recorded
 
 - **WHEN** the payments service records a partial `reverse` of a hosted deal's `once` part
@@ -195,7 +200,7 @@ An adapter MUST make each initiator with an entitlement a `stop` authority of th
 
 ### Requirement: Each party has one priced stop notice
 
-The adapter MUST carry each party's entitlement `notice_seconds` unchanged into its stop-authority entry beside `partialPeriod`. It MUST NOT add another tail. The dispute authority's notice MUST be zero; its treatment MUST follow the accepted authority policy.
+The adapter MUST carry each party's entitlement `notice_seconds` unchanged into its stop-authority entry beside `partialPeriod`. It MUST NOT add another tail. The dispute authority's notice MUST be zero and its stop entry MUST use partialPeriod chosen, requiring event-supplied treatment.
 
 #### Scenario: A payer's notice is zero
 
@@ -378,7 +383,7 @@ The seller half's exceptional-end command MUST file `exceptional_end(at)` with t
 
 ### Requirement: The seller files ends its terms do not entitle
 
-When end service learns of a delivery end that no final request it issued and no entitlement covers, such as a site withdrawing a resource or a delivery that fails or never starts, the seller half MUST file `exceptional_end(at)` on a deal whose Agreement names a dispute authority, with `at` the instant service ended, or the deal's start when it never began.
+When end service learns of a delivery end that no final request it issued and no entitlement covers, such as a site withdrawing a resource or a delivery that fails or never starts, the seller half MUST file `exceptional_end(at)` on a deal whose Agreement names a dispute authority, with `at` the instant service ended. Never-delivered timing MUST follow the foundation's fixed failure-basis rule below.
 
 #### Scenario: A withdrawal is reported late
 
@@ -405,6 +410,33 @@ When end service learns of a delivery end that no final request it issued and no
 - **WHEN** the storefront records a late-discovered end and crashes before filing
 - **THEN** on restart the journal replays the filing under its original idempotency key
 
+
+### Requirement: Never-delivered filing has a fixed non-future basis
+
+End service MUST fix min(accepted start, failure-observation time) with never-delivered evidence. If accepted start is still ahead, it MUST journal now but submit at that start with at equal to start. Otherwise it MUST file at the fixed minimum basis. It MUST NOT send a future-dated filing or recompute on retry.
+
+#### Scenario: Failure precedes accepted start
+
+- **WHEN** a seller failure is observed at 09:00 for an accepted 10:00 start
+- **THEN** end and intent are recorded at 09:00, submission waits until 10:00 with at 10:00, and restart preserves the same key without delivery
+
+### Requirement: Cause classification is owned by end service
+
+End service MUST distinguish lawful buyer/authority/terms/ruling ends from unentitled seller failures and correlate site reports to controlling requests. Admission refusal alone MUST NOT create a seller penalty or erase an established earlier seller failure. A funding-timer expiry without authority proof MUST remain pending classification until verified evidence establishes exhaustion or continued billing.
+
+#### Scenario: A hidden top-up outlives the local funding timer
+
+- **WHEN** a timer ends delivery at T but the recovered authority record proves billing continued past T
+- **THEN** end service journals exceptional_end(T) under a stable key; an inconclusive read instead leaves classification unresolved without blocking physical recovery
+
+### Requirement: Revised remedies require authority netting evidence
+
+A revised end MUST NOT be discharged by an evidence append alone. Unless verified authority amendment covers it, end service MUST file a revision-bound intent with prior case/effect records after resolving unknown effects. Qualification MUST establish authority netting of prior returns and bond awards across cases; missing contract/vector evidence MUST remain repair-required rather than authorize local financial arithmetic.
+
+#### Scenario: Earlier evidence arrives during partial application
+
+- **WHEN** a prior case is open or closing with partial effects and earlier signed end evidence arrives
+- **THEN** both case revisions remain tracked, the authority nets prior applied effects, and no append acknowledgement or close race fabricates financial completion
 
 ### Requirement: Self-filed ends survive a crash
 
@@ -672,6 +704,24 @@ End service MUST record a deal's earliest final request whether or not a lease e
 
 - **WHEN** the storefront restarts after recording a final request for an unprovisioned deal
 - **THEN** after restart the deal still does not start delivery
+
+### Requirement: Neutral delivery decisions delegate payment interpretation
+
+kit/deal-servicing MUST own authorize_delivery for commit, dispatch, start and disclose with durable allow/refuse/pending, reason, operation ID and evidence references. The foundation payment-adapter protocol MUST expose authorize(phase, evidence) and start_billing(operation_key, activated_delivery_evidence). Generic servicing MUST NOT interpret hosted part fields; once-only adapters MUST validate commitment evidence and use no-op billing start.
+
+#### Scenario: A financial decision is pending
+
+- **WHEN** the injected adapter cannot resolve authority evidence for dispatch
+- **THEN** delivery stays pending and a later allow still cannot override end-service admission
+
+### Requirement: Billing-start intent and evidence have one owner
+
+End service MUST journal billing-start key and activated-delivery evidence before I/O, using delivery's stable operation key. Delivery MUST retain only an intent reference. The versioned secret-free envelope MUST bind negotiation, commitment, resource identities and validated ready-evidence digest/projection. Activation MUST precede rate start; unknown effects MUST resolve by read/same-key retry before disclosure.
+
+#### Scenario: Start acknowledgement is lost
+
+- **WHEN** rate start succeeds but delivery cannot observe its acknowledgement
+- **THEN** end service resolves the same key through the adapter and delivery resumes from the intent reference without creating another start identity
 
 ### Requirement: Admission shares the end-service transaction and revision
 

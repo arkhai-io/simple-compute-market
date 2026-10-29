@@ -25,7 +25,7 @@ activation-only scope are settled.
 and expiry race safely; keep payment classifications out of the site; leave old
 leases and API-credit quota holds unchanged.
 
-**Non-goals:** renewal of active leases, billing horizons, lease extension, payment
+**Non-goals:** renewal of active leases, lease extension, payment
 or refund operations, buyer-facing provisioning promises, and delivery caller wiring.
 This is a recommended cooperative seller implementation, not a protocol requirement
 that a buyer may assume an arbitrary seller obeys.
@@ -45,8 +45,7 @@ The names do not imply an active renewal operation: only activation ships here.
 - Activation is one conditional transition from `leased` and
   `awaiting_activation` to `active`. It replaces the deadline, earlier or later,
   with the reservation's current `lease_end_utc`. **Every deal activates to that
-  end**, including reserved, on-demand, spot and Alkahest; there is no funded
-  horizon. The request names the reservation, not a payment fact or target time.
+  end**, including reserved, on-demand, spot and Alkahest. The request names the reservation, not a payment fact or target time.
 - Activation retried in `leased` / `active` returns the current lease unchanged.
   Commit retried in either phase likewise leaves the original deadline and phase
   unchanged. Activation from `releasing`, terminal, failed-release or operator-owned
@@ -130,8 +129,8 @@ storefront-selected allowance is not an authorized fallback.
 An allowance overrun enters ordinary guarded release. The storefront supplies
 classified failure evidence to the foundation's single end-plus-optional-filing
 operation. The foundation owns lawful-end versus seller-failure classification and
-the financial intent, including a valid immediate pre-start case (recommended
-at = min(accepted start, fixed failure-observation time)). The site never computes
+the financial intent and its fixed timing basis. Consume foundation D8's pre-start
+exception (journal now, file at accepted start), never a future-dated case. The site never computes
 that instant, corrections or amounts and its report is not a refund prerequisite.
 A controlling buyer/terms/ruling end is not automatically seller failure. Rate billing
 starts after ready evidence and activation in unify; allowance authorizes no billing.
@@ -151,8 +150,8 @@ Retained option for that future design:
   or resurrect a lease. Admission still uses the full agreed window.
 - Expiry compares the observed deadline and phase as in D2. An elapsed but unclaimed
   deadline may be renewed. Activation and renewal remain distinct transitions;
-  a future activation target would need its own explicit design, not a funded
-  horizon inferred from this option.
+  a future activation target would need its own explicit design, never a payment
+  fact inferred from this option.
 - A site-selected pool policy could be `reclaim` (release on lapse), bounded
   `grace` (release later, with the duration and effective deadline visible), or
   `continue` (serve to the agreed end). A site-wide default and any maximum grace
@@ -160,7 +159,7 @@ Retained option for that future design:
 - The view and physical-end record would expose the deadline, phase, policy and
   cause `renewal_lapsed`. They would remain evidence, never a billing stop.
 
-**Cost without a horizon:** `reclaim` can destroy a working VM merely because the
+**Cost of active reclaim:** `reclaim` can destroy a working VM merely because the
 storefront crashed. Billing does not stop on site silence or on that reclaim.
 Honest recovery is `exceptional_end(at)` at the physical end: a self-penalty, including
 awarding any bond in full, even though the original failure was only bookkeeping.
@@ -224,8 +223,7 @@ One site-focused implementation round after `inject-site-pool-authority`: schema
 allowance validation/provider declarations, activation, conditional expiry and typed
 views. Event integration waits for `agreed-evidence-and-early-termination`'s signed
 record/outbox. `unify-compute-delivery-path` then wires activation and supplies the
-cross-service delivery evidence. No dependency on a payments horizon or rate-part
-contract revision is introduced. Renewable ships `activation_deadlines_enabled`
+cross-service delivery evidence. No dependency on a rate-part contract revision is introduced. Renewable ships `activation_deadlines_enabled`
 false. Unify owns enablement after compatible storefronts deploy first, the updated
 site deploys with protection off, and every commit/recovery caller is qualified.
 New storefronts treat verified null-phase legacy leases as already active/no-op;

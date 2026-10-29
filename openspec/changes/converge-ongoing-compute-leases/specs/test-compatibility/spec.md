@@ -2,12 +2,12 @@
 
 ### Requirement: One rate-servicing matrix qualifies both compute lanes
 
-VM and bare-metal lanes MUST execute the rate-servicing matrix against the runnable payment and mediation doubles, including spot's prepared entry points. Each row MUST record physical progress, financial work and kept evidence separately. Reports MUST distinguish proposed-contract, published-contract and live provenance; no double run MUST be labelled live.
+VM and bare-metal lanes MUST execute the rate-servicing matrix against the runnable payment and mediation doubles, including spot's prepared entry points. Each row MUST record physical progress, financial work and kept evidence separately. Reports MUST use the lane-double-owned classes Qualification against the published contract, Qualification against a proposed contract, and Live evidence; no double run MUST be labelled live.
 
 #### Scenario: The full matrix runs
 
 - **WHEN** either compute lane qualifies rate servicing
-- **THEN** it covers baseline, payment-outage buyer end, absent-storefront withdrawal, interrupted effects, stop/disclosure races, rate activation expiry, exhaustion/hidden top-up, notice/earlier payer stop, start without disclosure, maximum term and on-demand refused payee stop followed by exceptional_end
+- **THEN** it covers baseline, payment-outage buyer end, absent-storefront withdrawal, interrupted effects, stop/disclosure races, rate activation expiry, exhaustion/hidden top-up, notice/earlier payer stop, start without disclosure, absolute maximum term with its own treatment, on-demand refused payee stop followed by exceptional_end, and identity-rotation overlap/re-anchoring
 - **AND** it records both completion facts and authority/evidence references for every row
 
 #### Scenario: A notice outlives servicing
@@ -36,4 +36,4 @@ Cross-service rate scenarios MUST run the doubles in wall-clock mode with short 
 #### Scenario: Funding and site deadlines are observed
 
 - **WHEN** the lane waits for authority funding expiry or a site activation deadline
-- **THEN** all peers use real UTC instants and event-bounded waits, without a future-dated filing caused by an isolated double clock jump
+- **THEN** all peers use real UTC instants and typed due-work barriers reporting per-authority watermarks, pending effects and blocked dependencies; future work stays pending and blocked effects never count as completion

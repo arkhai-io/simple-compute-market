@@ -111,7 +111,7 @@ Rate servicing MUST keep verified funded-through as a replaceable local timer, n
 
 ### Requirement: Rate admission uses a neutral adapter decision
 
-The authorization protocol, phases and allow/refuse/pending decision MUST live in kit/deal-servicing. Its implementation MUST delegate financial admission to the injected payment adapter's deal-level authorize operation rather than interpret hosted part fields. Refusal MUST use unified delivery's undelivered handoff; local admission and credential revocation MUST use the foundation/unified path.
+Rate servicing MUST implement the foundation-owned delivery authorization protocol via the injected payment adapter's authorize operation, not hosted part-field interpretation. Refusal MUST supply classified evidence through unified delivery to the foundation end/filing policy. Local admission and credential revocation MUST use that shared path.
 
 #### Scenario: Adapter evidence is unavailable
 
@@ -120,12 +120,12 @@ The authorization protocol, phases and allow/refuse/pending decision MUST live i
 
 ### Requirement: Billing start is one activation-following effect
 
-End service MUST journal the billing-start identity and activated-delivery evidence before I/O. Lease activation MUST precede rate start; start MUST NOT be an authorization step. Unified delivery MUST retain only a reference to that intent. Unknown start MUST be resolved by authority read/same-key retry before disclosure; refusal MUST enter the undelivered handoff.
+Rate servicing MUST implement start_billing under the foundation's sole end-service intent/key and activated-delivery envelope. It MUST translate through the injected payment adapter, preserve delivery's intent reference, and resolve unknown rate start through authority read/same-key retry before disclosure. Refusal MUST enter the foundation's classified undelivered handoff.
 
 #### Scenario: Activation fails
 
 - **WHEN** the lease cannot activate to the agreed end
-- **THEN** rate start is not issued and unified delivery hands off failed delivery at deal start
+- **THEN** rate start is not issued and unified delivery supplies start/failure evidence to the foundation's filing-timing policy
 
 #### Scenario: Start acknowledgement is lost
 
@@ -134,7 +134,7 @@ End service MUST journal the billing-start identity and activated-delivery evide
 
 ### Requirement: Revised end remedies are not discharged by append
 
-Earlier evidence MUST remain unresolved financial work until an authority remedy covers its revision. Evidence append acknowledgement or skipped-closed append MUST NOT prove amendment or re-ruling. Without a verified amendment contract, the seller MUST submit a new revision-bound exceptional_end with prior case/effect records, after resolving unknown original effects. Only the authority MUST determine further remedy.
+Rate servicing MUST consume the foundation's revised-remedy filing/netting contract. Earlier evidence MUST remain unresolved financial work until a verified authority remedy covers its revision; neither an append nor skipped-closed append MUST count as completion. Qualification MUST exercise prior partial effects and append/close races without local remedy arithmetic.
 
 #### Scenario: Earlier evidence arrives during partial ruling application
 

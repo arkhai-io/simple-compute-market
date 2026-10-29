@@ -26,11 +26,10 @@ Design phase; not planned.
 - **Where the divergences are.** API credits' fulfillment is issuance, not
   provisioning; the convergence mechanism must fit it without a provisioning-shaped
   no-op.
-- **Whether settlement-started delivery, evidence publication, verification, and access
-  belong in this change or in one of their own.** "Input from
+- **How evidence publication and verification consume the unified delivery path.** "Input from
   `bare-metal-mock-provisioned-deal` (2026-10-07)" below proposes them here, as the step
-  this change's convergence starts from; a split would put them in a sibling change this
-  one depends on.
+  this change's convergence starts from. Consume unify's decided protected delivery
+  and credential-retirement path; only publication/verification integration is open.
 - **The listing-lifecycle module's position among the kit areas.** It will depend
   on `kit/capacity-publication`'s binding and `kit/settlement-runtime`. Whether it
   is a module of `kit/capacity-publication` or of `kit/storefront` should be
@@ -93,7 +92,8 @@ recorded below as input to this design; none of it is decided here yet.
    obligation once; every retry is the worker's. Retired: `SettlementJobCoordinator`, VM's
    resume pass, every domain's `ensure_hosted_fulfillment` and hosted `fulfill` body, and
    bare metal's interim Alkahest step. VM's physical-resumption rules ("Physical
-   fulfillment resumption") stay, as properties of VM's `deliver`.
+   fulfillment resumption") stay, consumed through unify's shared compute delivery
+   checkpoint recovery, not another VM-owned `deliver` state machine.
 2. **Mechanism-owned publishers behind one port**, in `kit/settlement-runtime`;
    `kit/alkahest`'s publisher (with its four outcomes: published, not submitted, outcome
    unknown, rejected) and the hosted adapter implement it; the domain declarations go.
@@ -112,10 +112,11 @@ recorded below as input to this design; none of it is decided here yet.
    with none.
 5. **One access rule.** Buyer access material reaches only the authenticated buyer: live
    where an authority can serve it again (VM, bare metal), persisted privately where none
-   can (API credits). The kit owns access orchestration; each domain owns its typed access
-   result and its route models, under the five-piece route pattern. VM stops storing and
-   returning `connection_details` and `tenant_credentials`; VM's buyer reads them from
-   the access route. What VM already published on chain stays public.
+   can (API credits). Consume unify's compute access guard and credential-retirement
+   migration, preserving VM settle/status as the live access surface rather than
+   creating another access route. Each domain retains its typed result/route models;
+   API credits retains its private issuance-result ownership. No protected-effect
+   recovery or credential-clearing implementation is duplicated here. What VM already published on chain stays public.
 6. **Recovery resources are required while configured, and startup refuses abandonment.**
    VM and API credits require a configured mechanism's recovery resources, as bare metal
    does; all three refuse to start while unfinished obligations exist under a mechanism
@@ -127,8 +128,9 @@ recorded below as input to this design; none of it is decided here yet.
 
 - VM's cutover needs scenarios for deals in flight: physical delivery done with no
   fulfillment bound; stored access material; a checkpoint the old resume pass wrote. The
-  worker must be proven to discover and continue them, and stored credentials may be
-  cleared only once every active row can fetch them live.
+  worker must be proven to discover and delegate continuation to unify's checkpoint
+  recovery; consume unify's credential-retirement proof, never clear copies through
+  a competing migration.
 - Validation: settlement-runtime integration tests against its real repository for
   durable ready, terminal, and retry behaviour; VM and bare-metal application integration
   through their canonical clients for settlement, delivery, evidence, and access; API
@@ -146,6 +148,14 @@ fulfillment path this change proposes: one compute-family delivery path for the
 protected transitions — commit, dispatch, disclosure — plus activation and the
 undelivered path, and the access rule, calling a kit-owned delivery authorization
 hook before each transition, which the per-period billing gate needs and which
-removes a divergence between VM and bare metal. The rest of the unification — one
-start path, the layered evidence envelope, the verification contract — stays here;
-design this change against the path that one leaves.
+removes a divergence between VM and bare metal. This is a design-level dependency on `unify-compute-delivery-path`, not a second
+implementation of its checkpoints. That change owns protected checkpoint-effect
+recovery (including reserve/commit/dispatch/activation and the reference to end
+service's billing-start intent), the live credential guard, response-cache retirement
+and clearing legacy credential copies only after live retrieval is proved for every
+active row. This change owns obligation discovery/resumption and cross-mechanism
+terminal driving, including discovering old in-flight checkpoints and delegating
+them to that path. It also owns one worker start path, evidence-publication envelope
+and verification contributions; the foundation's neutral authorization evidence
+envelope is consumed, not redefined. Its terminal effects use end service. Plan the
+cutover against unify's deployed path and credential-retirement evidence.

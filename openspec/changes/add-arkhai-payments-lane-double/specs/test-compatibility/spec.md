@@ -59,7 +59,7 @@ Each double MUST select `published` or `proposed` before scenario mutation. Publ
 
 ### Requirement: Payment double models per-part lifecycle and held-money correction
 
-The target payment double MUST model per-part authorities, payee-only rate start, notice-bearing pending stops, term/exhaustion stops, afterStop holds, repeatable partial reversal of held money and independently referenced hold extensions. Its behavior MUST follow the selected contract. It MUST NOT invent a billing horizon, backdated stop, minimum-spend primitive or released-funds refund route.
+The target payment double MUST model per-part authorities, payee-only rate start, notice-bearing pending stops, term/exhaustion stops, afterStop holds, repeatable partial reversal of held money and independently referenced hold extensions. Its behavior MUST follow the selected contract. It MUST NOT invent backdated stops, minimum-spend primitives or released-funds refund routes.
 
 #### Scenario: Seller notice survives a storefront outage
 
@@ -87,7 +87,12 @@ The target payment double MUST model per-part authorities, payee-only rate start
 
 ### Requirement: Payment double applies the selected stopper's partial-period terms
 
-For a supporting revision, stop entries MUST carry partialPeriod charged, returned or prorated, corresponding to SCM started_period, last_boundary or stop. The double MUST compute billing without a storefront correction and refuse unexpressible terms. A revision lacking partialPeriod MUST retain its charged stop semantics. Exhaustion and part end MUST use charged, and maximum terms MUST round down to whole periods. Each party MUST have one notice, from notice_seconds.
+The double MUST apply the foundation's notice/partialPeriod mapping at the authority, refusing unexpressible terms without storefront correction. Parties MUST have one notice from notice_seconds. Term ends MUST carry their own treatment without rounding; exhaustion MUST be boundary-aligned. The dispute stop entry MUST use chosen with event-supplied treatment. Rate earnings and {for} payout anchors MUST be period end or part stop, not period start.
+
+#### Scenario: A revision lacks partialPeriod
+
+- **WHEN** the selected contract cannot encode returned/prorated
+- **THEN** stops retain charged semantics, the offer discloses started_period, and default buyers refuse that payee or term-end treatment
 
 #### Scenario: Stopper terms differ
 

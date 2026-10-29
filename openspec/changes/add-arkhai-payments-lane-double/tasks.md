@@ -9,8 +9,8 @@ production adapters and their contract/fixture prerequisites remain in
 
 - Foundation sections 1–2 supply lifecycle interfaces; 8.1 supplies payments
   schemas/models/vectors; 9.1 supplies the shared snapshot fixture/frame seam;
-  12.1 supplies the published/draft mediation schema. Extract 12.2's models and
-  record-signing fixtures into a prerequisite subtask. Gate buyer_end on the shared
+  12.1 supplies the published/draft mediation schema, models and
+  record-signing fixtures before construction. Gate buyer_end on the shared
   acknowledgement signing/verification primitive owned by 13.1 and consumed by 7.5,
   with the 2.4 response model. Confirm each prerequisite before its HTTP surface.
 - Foundation 7.4/11.1/12.2/14.2 and spot kit tests use in-process contract fakes
@@ -22,7 +22,7 @@ production adapters and their contract/fixture prerequisites remain in
 - `spot-deals-through-arkhai-payments` owns production rate arithmetic/adapters and
   compute scenarios. `converge-ongoing-compute-leases` consumes the controls for end
   service/rate servicing. `activate-per-period-compute-servicing` owns later hosted
-  capability readiness and live qualification. No horizon feature gates any of them.
+  capability readiness and live qualification. Only their stated contract/deployment gates apply.
 - First use is the existing bare-metal and credits payment deals, through their lane
   targets, mock provisioning, seeded development payer and seller accounts and pinned
   fixture authority identities. No live credential or physical hardware is required.
@@ -78,12 +78,14 @@ conformance evidence.
       maturity, absolute end, funding exhaustion and funded-through observations.
       Use the pinned rate-period arithmetic from start, including mixed once/rate
       mandates where supported. Apply each stopper's partialPeriod in the authority,
-      one notice from notice_seconds, charged exhaustion/part ends and whole-period
-      maximum terms. Until expressible, fail closed on unsupported values and use
+      one notice from notice_seconds, boundary-aligned exhaustion and absolute ends
+      carrying their own partialPeriod without term rounding. The dispute authority
+      entry uses chosen and its event supplies treatment. Earn periods at period end
+      or part stop; anchor {for} payouts to that earning instant, not period start. Until expressible, fail closed on unsupported values and use
       charged for both spot parties. Setup ends at activation with its window,
       returning all only when undelivered under self-penalty (D-A/D-B/D-D).
       Do not conflate transaction approval with start.
-      Keep no payee stop on on-demand mandates and no horizon/vouch route.
+      Keep no payee stop on on-demand mandates.
 - [ ] 2.3 Add held-money partial reverse before/after stop, afterStop payout timing,
       independent extend refs and lift, caps and contract refusal codes. Preserve
       idempotent results across lost responses. Share one state engine between HTTP

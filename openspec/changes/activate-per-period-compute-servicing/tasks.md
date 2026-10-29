@@ -4,7 +4,7 @@ Pending implementation plan. The sole external contract capability gate is the
 hosted deployment of the payments revision adding per-part authorities and hold
 extensions, with support for every offered stop term. Non-charged partialPeriod
 terms wait for their revision; a supported charged/charged subset need not. No
-horizon capability is requested. Product implementation remains in its owning changes.
+additional payment capability is requested. Product implementation remains in its owning changes.
 
 ## 1. Internal readiness and hosted revision gate
 
@@ -17,7 +17,11 @@ horizon capability is requested. Product implementation remains in its owning ch
       `kit/arkhai-payments/test-vectors/payments.json` and
       `kit/arkhai-payments/schema/SOURCE.md` through existing vendoring tooling.
       Verify provenance with public-safe identifiers only. A published schema with
-      an older deployed target leaves this gate blocked.
+      an older deployed target leaves this gate blocked. Require producer-published
+      signed snapshot, before/after-start, and partial-reversal before/after-stop
+      vectors. Any absence blocks Qualification against the published contract;
+      pinned kit-owned candidates permit only Qualification against a proposed contract,
+      not Live evidence or production enablement. Use lane-double D6's definitions.
 - [ ] 1.3 Re-run the vendored vectors against the double and
       `kit/arkhai-payments/tests`; verify per-part start/stop/reverse authorities,
       notice scheduling and charged/returned/prorated mapping (SCM started_period/
@@ -25,8 +29,9 @@ horizon capability is requested. Product implementation remains in its owning ch
       extend/lift. Requalify mediation adapter compatibility with the same revision.
       Classify divergences by owner; repair compatibility without weakening product
       guarantees. Verify fail-closed unsupported partialPeriod terms (charged/charged
-      only until vendored, and only if dispute policy permits), whole-period maximum
-      terms, activation-before-start,
+      only until vendored and only with explicit buyer policy opt-in), absolute maximum
+      terms with their own partialPeriod and no rounding, chosen dispute-stop entry,
+      period-end/part-stop earning and {for} payout anchoring, activation-before-start,
       setup once end at activation and full-undelivered/zero-delivered self-penalty.
       Never add a storefront end-refund correction. A required product decision
       returns to its owning change. Kit tests use vector-derived in-process fakes.
@@ -128,7 +133,7 @@ All destinations are planned until implementation closeout.
 
 | Accepted decision | Permanent location |
 |---|---|
-| D1 hosted per-part/hold gate and offered partialPeriod support, no horizon | settlement-configuration spec/architecture; ARCHITECTURE settlement servicing |
+| D1 hosted per-part/hold gate and offered partialPeriod/end support | settlement-configuration spec/architecture; ARCHITECTURE settlement servicing |
 | D2 vector conformance and honest evidence provenance | test-compatibility spec/architecture |
 | D3 owned-target preparation, production declaration and rollback | settlement-configuration spec/architecture; docs/development/DEPLOYMENT_AND_CONFIG.md |
 | D4 live versus qualification matrix and completion | test-compatibility spec/architecture; docs/development/ROADMAP.md Goal 8 |

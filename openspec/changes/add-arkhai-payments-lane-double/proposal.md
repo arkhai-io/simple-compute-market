@@ -21,7 +21,7 @@ lane, not a cooperative storefront masquerading as an authority.
   labelled candidate where that publication lacks the target revision. The payments
   target is per-part authorities, payee-only rate start, pending stops with notice,
   term/exhaustion stops, `{afterStop: dispute_window}` holds and `extend`/`lift`.
-  There is no horizon, `vouch`, backdated stop or released-funds refund extension.
+  There is no backdated stop or released-funds refund extension.
 - Add the dispute authority's file, append and read/watch boundary with signed
   per-agreement records. It extends holds as the authority, mechanically rules a
   sufficient seller self-penalty and an acknowledged `buyer_end(at)`, and sends

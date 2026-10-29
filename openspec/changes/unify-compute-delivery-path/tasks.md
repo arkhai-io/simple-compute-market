@@ -51,8 +51,8 @@ confirm downward scope/kind edges without moving protocols into the family packa
 Do not change provisioning's physical aggregate schema to hold commercial state.
 
 - [ ] 1.1 Define the shared record keyed by negotiation, exact accepted window/site,
-      reservation/fulfillment IDs, phase decisions, stable effect intents/acks and
-      delivery checkpoints authorized/dispatched/activated/started/available/converged.
+      reservation/fulfillment IDs, phase decisions, delivery-owned effect intents/acks,
+      end-service billing-start intent reference, and delivery checkpoints authorized/dispatched/activated/started/available/converged.
       Keep credentials and balances out. Apply D1's additive migration: preserve exact
       evidence/requests, reconcile recorded resources, turn domain progress rows into
       read-only projections and enforce minimum writer version. Ambiguous rows remain
@@ -70,8 +70,8 @@ Do not change provisioning's physical aggregate schema to hold commercial state.
 - [ ] 1.3 Consume neutral `authorize_delivery(deal, phase)` with durable pure
       allow/refuse/pending records and the prepaid no-financial-action implementation.
       Separately invoke `start_billing(effect_id, evidence)` after activation under
-      the path's one durable intent/key; servicing replays this supplied key, not a
-      second independently keyed start. Supply identity/digest/versioned opaque
+      a stable delivery-supplied operation key. End service owns the sole durable
+      billing-start intent/key; store only its reference and acknowledged checkpoint. Supply identity/digest/versioned opaque
       evidence through the injected compute adapter; never credentials.
       Inject foundation-owned admission and single end-plus-filing ports.
       Verify: family-library integration that an end admitted
@@ -117,7 +117,7 @@ its access/result adapters. Reverify actual filenames against the dependency tre
       Alkahest, to reservation-only activation after readiness and before billing
       start/availability, no earlier than the accepted start. Validate the returned
       end as commit end or a verified end-service truncation; adopt it and the site's
-      active instant, never extend it or submit a funded horizon. Persist/retry calls. Verify: application integration/drive with the
+      active instant, never extend it or supply a target deadline. Persist/retry calls. Verify: application integration/drive with the
       provisioning client, including truncation before activation, truncation after
       lost activation acknowledgement and expiry winning before any billing start.
       Implement verified null-phase legacy compatibility; missing route for a
@@ -161,7 +161,8 @@ implement its internals in this change. No edits to the payment authority contra
       observation time, resource identities and evidence; retain signed site bytes.
       Preserve controlling buyer/terms/ruling requests without automatic seller
       penalty. For genuine never-delivered pre-start failure consume foundation's
-      valid immediate policy (recommended min(start,failure)); do not clamp commands
+      timing policy: journal now, defer filing at Agreement start when still ahead;
+      otherwise use its fixed min(start,failure) basis. Do not clamp commands
       locally or recompute the instant on retry. Late settlement alone is not proof
       of buyer fault. No billing start may occur before activation.
       Verify: family-library integration with the real lifecycle journal and injected

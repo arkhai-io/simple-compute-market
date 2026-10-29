@@ -318,7 +318,7 @@ proposed-profile validation. This change consumes that validated contract at
 materialization and refuses absent declarations even for accepted-but-unmaterialized
 work. Convergence owns rate startup/recovery and continuation registration;
 activation owns published production switch-on after hosted deployment. Disabling
-new publication must not abandon already materialized deals. No horizon gate.
+new publication must not abandon already materialized deals. Hosted enablement is a separate deployment gate.
 
 The lane-only proposed declaration binds the fixture payments identity to the
 configured `SERVICE_IDENTITY` in test mode (`livemode = false`). Materialization

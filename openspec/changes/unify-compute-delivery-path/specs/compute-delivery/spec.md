@@ -67,7 +67,7 @@ Each protected transition, activation, recovery and credential-response authoriz
 
 ### Requirement: Billing start follows activation under one effect identity
 
-After acknowledged activation and start authorization, delivery MUST persist one billing-start intent and invoke the injected start effect under its stable identity. It MUST supply commitment/fulfillment identities and validated ready-evidence envelope/digest without credentials. Unknown results MUST resolve under that identity. Rate servicing owns payment interpretation; prepaid start MUST be a no-op.
+After activation and start authorization, delivery MUST supply a stable key to end service, the sole billing-start intent/key owner before I/O, and retain only its reference. It MUST supply commitment/fulfillment IDs and validated ready-evidence envelope/digest without credentials. Unknown results MUST resolve under the same key. Rate servicing MUST own payment interpretation; prepaid start MUST be a no-op.
 
 #### Scenario: Rate start acknowledgement is lost
 
@@ -83,7 +83,7 @@ After acknowledged activation and start authorization, delivery MUST persist one
 
 ### Requirement: Delivery checkpoints recover stable effects
 
-Each negotiation MUST have one durable delivery record with ordered checkpoints authorized, dispatched, activated, started, available and converged. Intents and stable identities MUST precede remote reserve, commit, dispatch, activation and billing effects; acknowledgements advance checkpoints. Recovery MUST reconcile the same effect and resource, including reservation creation, and recheck admission.
+Each negotiation MUST keep ordered checkpoints authorized, dispatched, activated, started, available and converged. Delivery intents MUST precede reserve, commit, dispatch and activation I/O; billing MUST reference end service's sole intent/key under delivery's stable key. Checkpoints MUST advance only on acknowledgement. Recovery MUST reconcile the same effect/resource, including reservation creation, and recheck admission.
 
 #### Scenario: Reserve acknowledgement is lost
 
@@ -134,7 +134,7 @@ Before billing start and availability, every compute delivery MUST invoke reserv
 #### Scenario: A reserved lease survives allowance
 
 - **WHEN** a reserved lease activates and its former provisional deadline passes before its current end
-- **THEN** it remains active without renewal or a funded horizon
+- **THEN** it remains active to its recorded end without renewal
 
 ### Requirement: Safeguard enablement follows compatible callers
 
@@ -164,7 +164,7 @@ Before availability, terminal refusal, provisioning failure, elapsed window and 
 
 - **WHEN** a never-delivered deal fails before its accepted start
 - **THEN** delivery supplies both accepted start and the fixed failure-observation time
-- **AND** the lifecycle owner journals a valid immediate intent under its pre-start policy, not a future-dated command or a retry-time recomputation
+- **AND** the lifecycle owner journals the end and filing intent now, then files at Agreement start under its timing policy, never a future-dated command or a retry-time recomputation
 
 #### Scenario: Settlement arrives after the window without established buyer fault
 

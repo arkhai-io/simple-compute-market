@@ -60,7 +60,7 @@ None. The lifecycle codec and its common semantics belong to the foundation chan
 - Delivery admission/window derivation: `unify-compute-delivery-path`; activation
   deadlines: `renewable-compute-lease-deadlines`.
 - Discovery and `--class`: `discover-open-ended-compute-listings`.
-- Minimum-spend primitives, billing horizons, storefront-local stop scheduling,
+- Minimum-spend primitives, storefront-local stop scheduling (see design's rejected alternatives),
   backdated payment stops, or extending accepted leases after listing edits.
 
 ## Dependencies and gates

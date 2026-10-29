@@ -11,7 +11,7 @@ self-arrows are local transitions. A diagram is design, not evidence of a run.
 |---|---|---|
 | 0 | [On-demand baseline](00-on-demand-baseline.svg) | authority stop and physical recovery earn separate facts |
 | 1 | [Payments-down buyer end](01-buyer-cancel-payments-down.svg) | signed end_delivery acknowledgement supports buyer_end; physical work is independent |
-| 2 | [Site withdrawal, storefront absent](02-site-withdraws-storefront-dead.svg) | buyer stop/case and held money, then seller self-filing on recovery; no horizon cap |
+| 2 | [Site withdrawal, storefront absent](02-site-withdraws-storefront-dead.svg) | buyer stop/case and held money, then seller self-filing on recovery |
 | 3 | [Crash during case effects](03-crash-during-case-effects.svg) | stable case/effect keys, partial reverse after stop, revised filing with prior effects |
 | 4 | [Stop before disclosure](04-payer-stop-before-disclosure.svg) | local end blocks disclosure; remote observation has a measured window |
 | 5 | [Activation expiry](05-prepaid-activation-deadline-expires.svg) | failed delivery files exceptional_end at start, including once-part consequences |

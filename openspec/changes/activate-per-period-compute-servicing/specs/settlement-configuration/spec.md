@@ -2,7 +2,7 @@
 
 ### Requirement: Production rate servicing requires a qualified hosted revision
 
-Production compositions MUST NOT declare rate servicing until the hosted deployment supports the vendored per-part authority/hold revision and every offered stop term. Qualification MUST verify pending notices, offered partial-period billing, afterStop holds, post-stop partial reverse and extend/lift through real responses. A supported charged/charged subset MAY activate before partialPeriod is vendored if dispute policy permits; other terms MUST fail closed.
+Production compositions MUST NOT declare rate servicing until the hosted deployment supports the vendored per-part authority/hold revision and every offered stop term. Qualification MUST verify pending notices, offered partial-period billing, afterStop holds, post-stop partial reverse and extend/lift through real responses. A charged interim subset MAY activate only with explicit buyer-policy opt-in; other terms MUST fail closed.
 
 #### Scenario: Schema is published but target is older
 
@@ -22,6 +22,12 @@ Activation MUST verify SCM started_period, last_boundary and stop map to authori
 
 - **WHEN** a preset asks for payee last_boundary but the vendored contract cannot encode it
 - **THEN** publication and acceptance refuse the term rather than rely on a later storefront reversal
+
+#### Scenario: A maximum term cuts a billing period
+
+- **WHEN** late activation leaves an incomplete period at the absolute term end
+- **THEN** the end's own partialPeriod determines billing without rounding duration, and default buyers refuse any treatment except last_boundary
+- **AND** dispute stops use chosen with event-supplied treatment; rate earning and {for} payouts anchor at period end or part stop
 
 #### Scenario: Delivery activates successfully
 

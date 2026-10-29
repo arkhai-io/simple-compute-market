@@ -215,7 +215,7 @@ convergence persist outputs through their existing ports.
       Bind the lane-only proposed declaration's fixture payments identity to configured
       SERVICE_IDENTITY with livemode=false; refuse mismatch or production/live use.
       Keep published production enablement with activate-per-period-compute-servicing,
-      gated only on deployment of the contract revision, never a horizon.
+      gated on deployment qualification of the offered contract revision.
 - [ ] 5.2 Add configured retiring identities with retirement dates alongside the
       current identity. Return a fresh current-key snapshot as re-anchoring
       evidence only after foundation verification of mandate, parties, mode and

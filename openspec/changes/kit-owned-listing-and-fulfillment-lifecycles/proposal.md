@@ -71,8 +71,8 @@ than register payments on the obligation worker.
 - Proposed (see `design.md`): make the servicing worker's ready step the one way every
   domain starts fulfillment, composed from mechanism and domain contributions; one
   publisher port; a layered evidence envelope; a mechanism-neutral verification contract
-  registering the committed plan; one access rule, with VM's stored access material
-  retired; recovery resources required while a mechanism is configured, and startup
+  registering the committed plan; consume unify-compute-delivery-path's checkpoint
+  recovery and live-access/credential-retirement rule rather than reimplement them; recovery resources required while a mechanism is configured, and startup
   refused while a mechanism with no configured section has unfinished obligations.
 - Compose all three domains and remove every domain-local copy in this change.
 - Keep, in the unified delivery surface, the rule `unbacked-bare-metal-listings` gives both
@@ -101,9 +101,9 @@ None.
 
 - Do not extract the shell, authentication, or persistence residue — sibling changes.
 - Do not change fulfillment semantics for any domain; a divergence between copies is
-  recorded and one behavior chosen, not silently adopted. The proposed access rule is
-  such a choice: VM's buyers would read access material from an access route rather
-  than from settle status.
+  recorded and one behavior chosen, not silently adopted. Compute access consumes
+  unify's live guard and credential retirement; VM settle/status remains the access
+  surface. This change does not invent a second access route or clearing migration.
 
 ## Impact
 
@@ -131,7 +131,10 @@ None.
 ## Dependencies and Related Changes
 
 - Depends on `kit-owned-storefront-shell`, whose shared routes dispatch to these
-  lifecycles.
+  lifecycles, and has a design-level dependency on `unify-compute-delivery-path` for
+  protected checkpoint-effect recovery and credential retirement. Obligation discovery
+  and cross-mechanism terminal driving remain here; the broader worker delegates
+  protected effects to that path.
 - Builds on `kit-owned-capacity-and-publication` (the common binding) and
   `kit-owned-settlement-runtime` (archived; the obligation journal fulfillment
   convergence reads).

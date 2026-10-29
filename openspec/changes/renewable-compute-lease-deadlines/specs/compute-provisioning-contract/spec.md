@@ -2,7 +2,7 @@
 
 ### Requirement: Typed compute lease activation and deadline inspection
 
-The shared compute client and contract MUST expose offering-mode-neutral activation by reservation identity and lease inspection carrying nullable `renew_by_utc`, nullable `renewal_phase`, and the existing active instant. Activation MUST accept no funded horizon or target deadline and MUST return the site's recorded lease through every client layer. It MUST use the existing authenticated service boundary and exact response verification.
+The shared compute client and contract MUST expose offering-mode-neutral activation by reservation identity and lease inspection carrying nullable `renew_by_utc`, nullable `renewal_phase`, and the existing active instant. Activation MUST accept no payment fact or target deadline and MUST return the site's recorded lease through every client layer. It MUST use the existing authenticated service boundary and exact response verification.
 
 #### Scenario: A caller activates through the shared client
 

@@ -5,7 +5,7 @@
 The foundation is `agreed-evidence-and-early-termination`: commitment ends the
 protocol; lifecycle commands go through payment and dispute adapters; end service
 realizes the earliest final request; money moves only at the named authorities.
-The owner-approved reconciliation removes the payee-advanced billing horizon. The
+The reconciled plan uses authority records and held-money remedies. The
 buyer's guarantee is its own authority stop and a case over held money, backed by
 kept signed bytes. Seller cooperation is useful but not assumed.
 
@@ -76,7 +76,7 @@ public network. The payment authority always signs `livemode: false`.
 
 ### D2. Two contracts, pinned independently from deployment
 
-Keep the `published` / `proposed` flag, not the former horizon extension. For each
+Keep the `published` / `proposed` contract selector. For each
 service, published mode is exactly the schema and vectors marked published by its
 kit's `schema/SOURCE.md`. Candidate schemas, models and vectors also live in the
 owning kit, explicitly marked unpublished with content hashes. Proposed mode selects
@@ -116,7 +116,7 @@ rate-part behavior owned by `spot-deals-through-arkhai-payments`:
   the payee's per-part `start`; the period clock begins there, not at approval.
 - Parts carry their own authorities. Start is payee-only; stop entries carry
   `{account, notice, partialPeriod}` when the selected revision supports it.
-  `partialPeriod` is `charged`, `returned` or `prorated`, mapping respectively to
+  Parties' `partialPeriod` is `charged`, `returned` or `prorated`, mapping respectively to
   SCM `settles_through` values `started_period` (bill the started period),
   `last_boundary` (bill only to the last boundary) and `stop` (prorate to the
   effective stop time).
@@ -124,7 +124,10 @@ rate-part behavior owned by `spot-deals-through-arkhai-payments`:
   corrects it afterwards. Client defaults are payer charged and payee returned;
   until vendored support exists, publication/acceptance refuse unexpressible terms
   and spot uses charged for both. There is one notice per party, from its
-  entitlement's `notice_seconds`; there is no `exposure_seconds` or stop+exposure.
+  entitlement's `notice_seconds`. The dispute authority's stop entry uses
+  `partialPeriod: chosen`; its stop supplies treatment from the ruling's purpose.
+  Seller treatment is negotiated, not mandated by mediation; default buyers refuse
+  payee or term-end treatment other than last_boundary until explicitly loosened.
   An on-demand part has no payee stop entitlement. Unauthorized
   events are refused, even when the caller is the seller.
 - `stop {part, at?}` is never backdated: effective time is the later of the requested
@@ -132,9 +135,11 @@ rate-part behavior owned by `spot-deals-through-arkhai-payments`:
   stop wins, cannot be withdrawn, and fires at the authority without another
   storefront call. Buyer notice is priced in the accepted terms, including zero
   when offered; reserve-ahead is not a substitute for it.
-- Absolute per-part `end` and transaction funding exhaustion stop with cause terms
-  and charged started-period treatment. Maximum terms round down to whole periods,
-  so their ends never fall mid-period.
+- Absolute per-part `end` carries its own `partialPeriod`, with no whole-period
+  rounding of accepted terms; compute presets use returned when expressible.
+  Transaction funding exhaustion stops at its funded-through period boundary.
+  Rate periods are earned at period end or the part's stop, remaining reserved
+  until then. A `{for}` hold pays relative to that earning instant, not period start.
   Snapshots expose `fundedThrough`, per-part `started`, `stop`, `pendingStop`, event
   sequence and `latestEventSequence`, according to the selected contract.
 - Held rate earnings release no earlier than stop plus the dispute window
@@ -163,7 +168,7 @@ are owned by their foundation/rate/servicing changes, not reimplemented in the d
 
 This model must make both no-stop-on-demand and authority-hosted seller notice
 observable while the storefront is down. It does not emulate storefront-local
-schedules, vouching or a seller-supplied claim that service continued.
+schedules or a seller-supplied claim that service continued.
 
 ### D4. Mediation target: a separate dispute authority
 
@@ -327,8 +332,7 @@ and the production adapters. Work can proceed in this order:
 
 1. Foundation sections 1–2 supply interfaces; 8.1 supplies payment schemas/models;
    9.1 supplies snapshot framing; 12.1 supplies the published/draft mediation
-   schema. Extract 12.2's models/record-signing fixtures into a prerequisite subtask
-   before building mediation. Its adapter verification uses kit contract fakes, not
+   schema, models and record-signing fixtures before building mediation. Its adapter verification uses kit contract fakes, not
    this tool. There is therefore no library-test dependency back onto this change.
 2. Foundation 13.1 owns the shared storefront acknowledgement signing/verification
    primitive; 7.5 consumes it. Gate the mechanical buyer_end implementation on that
@@ -343,11 +347,9 @@ Recommended landing sequence (02 F3): foundation prerequisites land first, then
 this change, then lane consumers; no whole-change cycle or mutually importing
 branches. The remaining foundation rounds can proceed using their own fakes.
 
-Outstanding coordination edits, not applied outside this change: remove foundation
-D6's obsolete kit test-double ownership; restate 7.4/11.1/12.2/14.2 per D-H; identify
-12.2's model/fixture prerequisite and 13.1's shared acknowledgement primitive.
-The foundation task introduction and section-12 executable ownership are already
-correct; do not request those edits again (02 F11).
+The foundation owns those prerequisite contracts and kit fakes. Its 7.4/11.1/12.2/14.2
+use vector-derived in-process fakes; 13.1 supplies the shared acknowledgement
+primitive. Tool construction has no reverse dependency from kit integration.
 
 ## Rejected alternatives
 

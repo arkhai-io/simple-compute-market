@@ -37,7 +37,7 @@ Activation MUST move a leased awaiting_activation reservation conditionally to a
 #### Scenario: Each compute billing shape activates
 
 - **WHEN** a reserved, on-demand, spot or Alkahest delivery activates its awaiting-activation lease
-- **THEN** the site sets the deadline to that lease's current agreed end, never to a funded-through horizon
+- **THEN** the site sets the deadline to that lease's current agreed end, never to a payment-derived deadline
 
 #### Scenario: Activation is retried after truncation
 

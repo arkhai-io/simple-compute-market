@@ -109,8 +109,8 @@ a double-backed scenario never qualifies the external payment or dispute authori
 
 ## Non-Goals
 
-- A billing horizon, vouch, minimum-spend primitive, payee backdating, or local
-  payment-stop scheduler.
+- A minimum-spend primitive, payee backdating, or local payment-stop scheduler;
+  design records rejected payment primitives.
 - Storefront continuation loops, queues, funding timers, site deadline/renewal
   policy, provisioning or teardown implementation.
 - Snapshot-proof implementation, immediate end_delivery transport/evidence capture

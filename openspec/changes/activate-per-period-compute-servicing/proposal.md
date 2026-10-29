@@ -6,9 +6,9 @@ production can use its required payment semantics. Its external gate is the
 and hold extensions**, including afterStop holds and partial reversals after stop,
 and support for the stop terms actually offered. Unsupported started-period terms fail closed; the
 payment authority computes them, never a storefront corrective refund. A supported
-charged/charged subset may ship before partialPeriod is vendored if the selected
-dispute authority permits it; returned/prorated offers await their contract support.
-A published schema alone is not deployment evidence. No billing horizon, vouch,
+charged/charged subset may ship before partialPeriod is vendored only with explicit
+buyer-policy opt-in for payee and charged term ends; returned/prorated offers await their contract support.
+A published schema alone is not deployment evidence. No
 minimum spend or backdated payee stop is requested or awaited.
 
 ## What Changes
@@ -75,6 +75,6 @@ The hosted-revision gate and coordinated declaration/rollback go to
 settlement-configuration's spec and architecture companion and
 `docs/development/DEPLOYMENT_AND_CONFIG.md`. Evidence provenance goes to
 test-compatibility's spec/architecture companion. Goal 8 describes held-money
-recovery and buyer stops, not a horizon; its completion record cites actual
+recovery and buyer stops; its completion record cites actual
 hosted-deployment evidence. Reconciled servicing diagrams are promoted by the
 servicing change, not copied a second time here.

@@ -25,7 +25,7 @@ One compute-family delivery implementation, immutable Agreement windows, activat
 before billing and availability, stable effect recovery, classified end handoff,
 and no credential replay after a locally admitted end.
 
-No second end service, payment journal, dispute policy, billing horizon, renewal,
+No second end service, payment journal, dispute policy, renewal,
 Alkahest dispute adapter, or broader obligation-discovery/evidence extraction.
 
 ## Decisions
@@ -42,8 +42,9 @@ do not add an override that closeout cannot discharge.
 This avoids adding servicing/persistence dependencies to the site service's install.
 The vocabulary-only domains/compute and neutral kit/fulfillment remain unsuitable.
 
-The neutral authorization/effect protocols, phase vocabulary and opaque evidence
-envelope belong in kit/deal-lifecycle; the foundation owns that shared port slice.
+The foundation owns the shared port slice: kit/deal-lifecycle supplies payment
+adapter authorization/effect protocols and evidence envelopes, and kit/deal-servicing
+supplies the neutral delivery authorization phases/decisions.
 An envelope carries identity, digest, kind/version and a domain payload. Generic
 servicing does not interpret compute payloads; a compute-scoped adapter validates
 ready evidence and is injected by composition. No upward family import is required.
@@ -85,7 +86,7 @@ blanket reset-only delivery-schema rule, not its fail-closed evidence validation
 
 Commit lease_start_utc = Agreement.start_utc and lease_end_utc = start + duration,
 at settlement, under the same reservation identity on every attempt. Terms owns
-max_term_seconds == duration_seconds and whole-period maximums, not delivery.
+max_term_seconds == duration_seconds and the term end's own treatment without rounding, not delivery.
 No now/missing-duration fallback and no replacement resource on ambiguous old timing.
 Late settlement shortens service, never shifts the absolute end.
 
@@ -117,18 +118,18 @@ and its revision; a financial allow never overrides a local due end.
 D7 reuses that port for subsequent credential reads.
 
 After ready evidence and activation, invoke start_billing(effect_id, evidence)
-separately. The path persists one stable effect intent/key before calling.
-Rate servicing implements it through the seller half/payment adapter under the
-supplied key, derives per-part keys deterministically, and resolves unknown outcomes
-without allocating another start identity. Its existing effect journal is a replay
-implementation of this intent, not an independently keyed delivery decision.
+separately. Delivery supplies a stable operation key; end service alone persists the
+immutable billing-start intent/key and evidence before calling the payment adapter,
+derives per-part keys deterministically, and resolves unknown outcomes without
+allocating another start identity. Delivery stores only the end-service intent
+reference and acknowledged checkpoint, never a second start intent/key.
 Prepaid start_billing is a no-op and creates no artificial once-part start.
 
 The family supplies commitment and fulfillment identities plus validated ready-
 evidence digest/envelope, never access secrets. Converge owns rate authorization,
 authority start/stop/pending-stop interpretation and the start-port implementation;
 spot-deals owns adapter/part translation. Their requirements are referenced, not
-copied here. Neither a funded horizon nor a payee vouch is required.
+copied here.
 A remote authority read and local admission are not globally atomic.
 
 ### D4. Acknowledged checkpoints and recoverable effect intents
@@ -149,8 +150,8 @@ renewal_phase active remain their owners' distinct facts. Converged does not wai
 for unrelated collection/payout or move claims-engine submission into delivery.
 Access uses available/converged and D7, not convergence alone.
 
-Persist intents before remote reserve, commit, dispatch, activation and billing
-calls. Acknowledgements advance checkpoints. Recovery checks authority state under
+Persist delivery-owned intents before remote reserve, commit, dispatch and activation
+calls; for billing, retain the reference to end service's journaled intent. Acknowledgements advance checkpoints. Recovery checks authority state under
 the same keys and repeats admission at every gap. Required writes defer effects;
 bookkeeping alone never abandons a running resource. Local claim expiry permits
 recovery, not duplication. This change recovers each checkpoint effect.
@@ -171,12 +172,11 @@ Delivery neither writes a second end log nor computes amounts or payment correct
 | Seller failure discovered after an already controlling lawful end | Earlier buyer/terms/ruling request | Preserve attribution; do not manufacture a second undelivered penalty |
 | Settlement observed after the window with no prior end/failure record | No independently established prior cause | Request end at term; supply never-delivered evidence for cooperative self-filing, not a guessed buyer-fault exemption |
 
-**Recommendation (01 F4 / 02 F2/F8):** for genuinely never-delivered failure the
-foundation uses at = min(Agreement.start_utc, failure_observed_at). Persist that
-instant with the failure; retry does not recompute now. Before a future start this
-is a valid immediate intent and returns the entire unserved term/setup share; after
-start it preserves the original start basis. Delivery supplies both instants rather
-than silently clamping authority commands. Foundation/dispute policy owns that mapping.
+The foundation's D8 owns the never-delivered timing policy. Delivery supplies the
+accepted start and fixed failure-observation time; it does not choose `at`. That
+owner uses min(start, failure observation) after start, with the pre-start exception
+of journaling now and filing at the Agreement start, never future-dating a filing.
+Retries preserve the original evidence and key.
 A prior term end does not erase an already established seller non-delivery obligation.
 Reject an unsupported assertion of buyer-caused lateness as a reason to keep payment:
 only authority records and kept signed bytes establish buyer actions.
@@ -203,7 +203,7 @@ a valid earlier truncation is adopted, never extended to the original Agreement 
 The active instant is the site's fact. Journal/retry unknown acknowledgements under
 the same identity; expiry claimed first refuses activation and enters D5.
 A truncation before activation or between a lost acknowledgement and retry must
-survive unchanged. Never activate to a funded horizon.
+survive unchanged. Activation never changes the reservation's end.
 
 **Recommendation (02 F4): staged enablement.** Renewable ships the explicit compute
 composition safeguard switch off, while provider support/default validation remains.

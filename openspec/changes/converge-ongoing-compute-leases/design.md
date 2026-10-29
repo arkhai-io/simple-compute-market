@@ -17,7 +17,7 @@ that integration; it makes no current-runtime or hosted-readiness claim.
 
 Both compute compositions converge after commitment, report physical and financial
 work separately, and recover durable effects across restart and authority outages.
-No payment ledger, horizon/vouch, site renewal protocol, local payment-stop
+No payment ledger, site renewal protocol, local payment-stop
 scheduler or minimum spend is introduced. Spot owns rate mechanics, mandates,
 period arithmetic, partial-period terms, publication and online notice commands.
 Unify owns the one delivery state machine. Activation owns hosted enablement.
@@ -27,8 +27,8 @@ Unify owns the one delivery state machine. Activation owns hosted enablement.
 ### D1. Ownership and section-level gates
 
 **Recommendation supplied here (external F4):** `kit/deal-servicing` owns the storefront end-service loop, observation state,
-evidence/journal, domain-neutral physical ports, and delivery authorization
-protocol (phase and allow/refuse/pending decision with reason/evidence references).
+evidence/journal, domain-neutral physical ports, and consumption of the
+foundation-owned delivery authorization protocol (phases and decisions).
 It imports no mechanism kit, dispute kit or compute specialization. The compute
 specialization imports this protocol; compositions inject concrete adapters and
 domain lease/admission/activation/release ports.
@@ -118,12 +118,13 @@ the lease to the Agreement's end **before** issuing rate start as an effect, not
 authorization step. End service alone journals the immutable billing-start key and
 activated-delivery evidence before I/O; unify's delivery checkpoint stores a
 reference, not a second start intent. Resolve unknown start by read/same-key retry
-before disclosure. Start refusal uses unify's undelivered handoff at deal start.
+before disclosure. Start refusal supplies classified undelivered evidence through unify to the
+foundation's timing policy, not a rate-owned choice of filing instant.
 
 Unify/foundation own local dispatch/disclosure serialization and physical revocation.
 This hook consumes those guarantees rather than repeating them. A healthy remote
 stop still has a polling/watchdog/teardown observation window, not instantaneous
-revocation. `exposure_seconds` and `stop+exposure` are retired: each party has one
+revocation. Each party has one
 `notice_seconds` on its stop entitlement. Measured servicing latency and
 reserve-ahead sizing are seller capacity-risk recommendations, not codec gates or
 extra buyer charges. With storefront absent, service may run to the maximum lease
@@ -134,12 +135,12 @@ end; an optional activation deadline protects seller capacity, not buyer money.
 Keep earnings under the agreed afterStop hold and accepted case extensions. Only
 verified payment records establish protection, not filing acceptance. Stops are
 never backdated. **Recommendation supplied here (external F2):** consume a closed source-classified
-self-filing contract, to be reconciled in the foundation owner requirement:
+self-filing contract owned by foundation D8; the table below is its rate-consumer mapping:
 
 | Final-request cause | Seller action |
 |---|---|
 | Verified authority stop (including exhaustion, maximum term, entitled notice), ruling, or buyer end_delivery | No exceptional_end for that request |
-| Unentitled site withdrawal, failed/never-started delivery, operator emergency without entitlement | Journal exceptional_end with final request; undelivered uses deal start |
+| Unentitled site withdrawal, failed/never-started delivery, operator emergency without entitlement | Journal through foundation's end/filing operation; supply undelivered start/failure evidence |
 | Funding-timer expiry without current authority evidence | Journal pending classification with the end; read before deciding |
 
 A site report caused by an already requested entitled/buyer end is correlated to
@@ -169,7 +170,12 @@ term per stopper: SCM started_period ↔ charged, last_boundary ↔ returned, st
 prorated. The payments service computes it, with no storefront corrective reverse.
 SCM presets prefer payer charged/payee returned; until expressible by the vendored
 contract only charged/charged spot terms ship, and unsupported terms fail closed.
-Exhaustion and part end are charged; spot owns whole-period maximum-term rounding.
+Exhaustion is period-boundary aligned. Each absolute term end carries its own
+partialPeriod, with no maximum-term rounding; the default buyer refuses payee or
+term-end treatment other than last_boundary until explicitly configured otherwise.
+The dispute authority uses a chosen stop entry and selects treatment per ruling,
+not a policy that mandates returned seller terms. Rate periods are earned at
+period end or the part's stop, not at period start.
 Setup once ends at activation, pays one dispute window later, and self-penalty
 returns all when undelivered and none once delivered. These are adapter/authority
 contracts consumed here, not local financial arithmetic.
@@ -231,19 +237,27 @@ rate qualification uses this matrix after the section handoff in D1.
 | 6 | Funds exhausted / timer expiry during outage | renewable timer; exhaustion no filing; hidden top-up leads to self-filing after verified read |
 | 7 | Spot notice then earlier payer stop | authority hosts pending stop during absence; earliest wins, authority partial-period terms |
 | 8 | Activated and started but never disclosed | disclosure fails, self-filing at deal start, buyer-case backstop |
-| 9 | Maximum term | authority end at whole-period bound; physical recovery, no exceptional_end |
+| 9 | Maximum term | absolute authority end with its own partialPeriod, including late start and a mid-period end; physical recovery, no exceptional_end |
 | 10 | On-demand seller emergency | payee stop refused, exceptional_end accepted; no invented entitlement |
+| 11 | Identity rotation overlap | old receipt verified during overlap, current snapshot re-anchors the running rate deal before retirement, exact old bytes retained; once-only dependencies drain; revoked/stale anchors and livemode changes refused |
 
-The nine diagram pairs illustrate cases 0–8; cases 9–10 extend the qualification
+The nine diagram pairs illustrate cases 0–8; cases 9–11 extend the qualification
 matrix without duplicating diagrams. **Recommendation supplied here (Sol F3):**
 lane interruptions are loop pause/resume, not process restart evidence. Durable restart proof belongs to production-application
 integration tests rebuilding against the same database in both domains; retain the
 permanent bare-metal lane no-restart contract. Lost-response replay in lanes proves
 cross-service effect convergence only.
 
+Use the lane-double-owned evidence classes *Qualification against the published
+contract*, *Qualification against a proposed contract*, and *Live evidence* by name;
+their definitions remain in that change's D6. Spot owns identity re-anchoring;
+scenario 11 here qualifies its overlap/recovery behavior in both lanes.
+
 **Recommendation supplied here:** cross-service lane scenarios use real UTC time,
 short fixture periods/deadlines and bounded readiness/event waits through existing
-controls. Doubles run wall-clock mode here; do not jump their injected clocks ahead
+controls. Use tooling's typed due-work barriers with per-authority watermarks,
+pending effects and blocked dependencies; future work stays pending and blocked
+effects never count as completion. Doubles run wall-clock mode here; do not jump their injected clocks ahead
 of storefront/site time. Fixture validation bounds clock skew and wait budgets and
 fails setup if clocks disagree. No site clock-injection surface is added. Library
 integration keeps deterministic injected clocks for expiry/race permutations; lanes

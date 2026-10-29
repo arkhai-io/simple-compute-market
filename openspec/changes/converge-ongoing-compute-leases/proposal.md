@@ -55,8 +55,7 @@ handoff. Hosted enablement belongs to activate-per-period-compute-servicing.
 
 This change owns no payment arithmetic, mandate codec, authority policy, buyer-half
 implementation, site renewal or hosted deployment. Started-period settlement is
-expressed by payment terms, not corrected locally. Each party has one notice;
-exposure_seconds is retired. Servicing latency and reserve-ahead sizing are seller
+expressed by payment terms, not corrected locally. Each party has one priced notice. Servicing latency and reserve-ahead sizing are seller
 risk recommendations, not buyer billing promises or codec gates.
 
 ## Impact

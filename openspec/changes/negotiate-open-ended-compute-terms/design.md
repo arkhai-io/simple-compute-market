@@ -156,7 +156,7 @@ round-zero missing-reserved-duration fallback; delivery owns its resume fallback
 
 Composition, not a listing or buyer, declares rate servicing and its contract:
 deployed published revision, or `proposed` only in an explicitly opted-in test
-lane. Neither a horizon nor a minimum-spend primitive gates it.
+lane. No additional minimum-spend primitive gates it.
 
 1. Publication omits recurring candidates if servicing is undeclared, using existing
    no-settlement-option diagnostics if none remain.

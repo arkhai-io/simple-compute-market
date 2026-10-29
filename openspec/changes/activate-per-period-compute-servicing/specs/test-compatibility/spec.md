@@ -2,7 +2,12 @@
 
 ### Requirement: Rate activation evidence identifies the real authority boundary
 
-Activation evidence MUST distinguish proposed-contract qualification, published-contract qualification and live hosted evidence per scenario. Both compute lanes MUST pass published-contract qualification against the payment and mediation doubles. Activation MUST additionally record both-domain live complete deals and hosted rate/stop/hold/case acceptance effects against the intended deployment; missing required live evidence MUST block completion, not be counted as a passing double run.
+Reports MUST use lane-double D6's Qualification against the published contract, Qualification against a proposed contract, and Live evidence per scenario. Both compute lanes MUST pass published qualification against both doubles. Activation MUST also record both-domain live complete deals and required hosted rate/stop/hold/case effects; missing live evidence MUST block completion, never count as a passing double run.
+
+#### Scenario: Producer vectors are missing
+
+- **WHEN** a producer-published signed snapshot, before/after-start, or partial-reversal before/after-stop vector is absent
+- **THEN** Qualification against the published contract is blocked; pinned kit-owned candidates permit only Qualification against a proposed contract, never production enablement
 
 #### Scenario: Double passes all scenarios
 
