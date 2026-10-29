@@ -28,6 +28,20 @@ The VM storefront MUST own capacity reservation, physical fulfillment, credentia
 
 ## ADDED Requirements
 
+### Requirement: VM buyers can end delivery through end service
+
+The VM storefront MUST accept the accepted buyer's `end_delivery` peer message through the shared lifecycle route and realize it through end service, including before fulfillment begins. When the end is due it MUST invoke the site's termination or undelivered-hold release path immediately, not truncate to now and wait for a watchdog. Its signed response MUST distinguish a recorded end from proven capacity release.
+
+#### Scenario: A buyer ends before provisioning
+
+- **WHEN** a committed VM deal's buyer sends `end_delivery` while no resource has been dispatched
+- **THEN** the storefront records the end, releases any undelivered hold and prevents later reconciliation from starting delivery
+
+#### Scenario: A buyer ends a running VM
+
+- **WHEN** the accepted buyer sends `end_delivery` for a running VM
+- **THEN** end service requests termination at its recorded site and reports teardown progress until the site's capacity-released callback proves capacity return
+
 ### Requirement: VM lease ends keep the requested instant
 
 The VM storefront MUST send and record lease ends to at least one-second precision, and MUST still read lease ends already recorded to the minute.

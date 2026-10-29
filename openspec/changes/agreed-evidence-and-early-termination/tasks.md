@@ -22,10 +22,23 @@ is rejected from section 3; `[Settlement.alkahest]`'s two release flags are migr
 Paths: `src/` abbreviates each package's source root. "Payments test double" is the double at
 the `kit/arkhai-payments` client boundary, and "mediation test double" the one section 12 adds
 at the `kit/arkhai-mediation` boundary (`docs/development/TESTING.md`, "Private Service
-Dependencies"). No end-to-end scenario exercises lifecycle behaviour in this change: the hosted
+Dependencies"). The hosted rate-part
 four-path e2e against the payments service's public test deployment is owned by
 `spot-deals-through-arkhai-payments` (design.md, D15). Sections that change existing deal paths
-name the existing scenarios that must keep passing.
+name the existing scenarios that must keep passing. The buyer-termination fold additionally
+extends those existing compute scenarios with delivery-only end and signed-report retrieval
+stages; hosted rate stop/outage cases remain owned by `spot-deals-through-arkhai-payments`.
+
+Dependency gates for the folded end work: sections 2 and 10's final-request and site-report
+contracts precede section 13's peer/read routes; sections 7 and 13 precede both domain CLI
+paths. `unify-compute-delivery-path` consumes section 10's admission interface and must preserve
+these early-end scenarios whichever change lands second. `renewable-compute-lease-deadlines`
+adds deadline-specific causes/phases later, not a gate on this report. Reuse
+`replace-polling-with-authenticated-push`'s transport if it lands first; otherwise section 10
+supplies the single-event outbox it later adopts. `buyers-use-the-storefront-client` does not
+gate this end method. Rate end validation waits for `spot-deals-through-arkhai-payments`;
+in-lane payments/mediation evidence additionally waits for `add-arkhai-payments-lane-double`,
+with live hosted evidence gated on the deployed contract revision.
 
 ## 1. Kit areas and the dispute-interface architecture check
 
@@ -89,6 +102,14 @@ by dispute interface", "Evidence is keyed by negotiation" and "A dispute is one 
       no adapter for a command", "A deal names an interface with no adapter", "An interface has
       no exceptional end", "A retry changes content" and the on-demand stop-authority scenario,
       using fake adapters.
+
+- [ ] 2.4 Extend the peer/route/read contracts with `end_delivery {at}`, a signed end
+      acknowledgement with durable physical progress and attribution, and verbatim signed site
+      reports, including a delivery view alongside an explicit rejected authority view when no
+      payment adapter exists; define `buyer_end(at)` beside `exceptional_end(at)`. Files:
+      `kit/deal-lifecycle-contracts` and `kit/deal-lifecycle`. Verify: unit model/codec targets
+      in those kits refuse future peer ends and preserve report bytes and proof. These models
+      gate sections 7, 10 and 13; no core-owned two-instant end decision is introduced.
 
 Verification point: unit tests in both kits; `make check-packaging`; `make check-architecture`;
 `make test`. End-to-end: none; nothing composes the kits yet.
@@ -248,7 +269,8 @@ and the bare-metal buyer's counterparts.
 - [ ] 7.2 Implement the buyer half in `kit/deal-lifecycle-buyer`: payment commands to the payment
       adapter, `dispute` and `append` to the dispute adapter, outcomes reported as the
       counterpart's own, `read` merging payment events, open extensions and cases, `rejected`
-      for a mechanism with no adapter, `hint` after a filing. Verify: library-integration tests
+      authority view for a mechanism with no adapter (delivery view remains readable), `hint`
+      after a filing. Verify: library-integration tests
       with fake adapters for "A filed case requests a reverse", "The authority cannot complete an
       extension", "Parts differ", "A buyer reads a deal with no lifecycle adapter", "A buyer
       files after the window" and "A filing's response is lost".
@@ -263,6 +285,19 @@ and the bare-metal buyer's counterparts.
       paths are unchanged. Verify: application-integration tests through the typed client per
       domain that a hosted-mechanism deal stage reaches `commit` (with the payments test double)
       and an Alkahest deal stage is unchanged.
+
+- [ ] 7.5 Add the canonical client's `end_delivery(negotiation_id, at)` and buyer-half end
+      command, verifying/capturing signed acknowledgements and site reports. On rate deals,
+      stop at the payment authority first, then request delivery end; on `unknown`/unreachable
+      payment authority send the peer request anyway and journal `buyer_end(at)` with both
+      signed messages, retrying unavailable dispute filings. On `once`-only/no-adapter deals
+      request delivery end without an unsupported stop or invented refund. Files:
+      `kit/deal-lifecycle-client`, `kit/deal-lifecycle-buyer`; gate: section 2.4, and section 12's
+      intent mapping for cases. Verify: library-integration targets in both kits with injected
+      adapters for accepted stop, payment outage, both authorities down, missing storefront
+      acknowledgement, and delivery-only ends; assert stable operation keys and separate
+      payment/delivery/case progress. Rate semantics are re-driven with the rate adapter in
+      `spot-deals-through-arkhai-payments` before that change enables them.
 
 Verification point: unit and library-integration suites of the client and buyer kits; the VM and
 bare-metal buyer application-integration suites; `make test`. End-to-end: `e2e_deal`,
@@ -371,6 +406,32 @@ market-composition's "Marketplace roles hold no payment ledger". Files: new `kit
       credential is missing", "A seller stops offering an authority", "An administrator files an
       exceptional end" and "A filing is not ruled".
 
+- [ ] 10.5 Persist final-request identities, actors, causes, instants and evidence references,
+      including superseded requests and administrator identity/reason for operator ends,
+      and expose earliest-end attribution and current physical
+      progress through `read`. Accept verified site reports as final requests; journal required
+      `exceptional_end(at)` filings atomically with unentitled ends, including never-started
+      delivery. Retain sources and effects under D9 rather than a core fixed floor. Files:
+      `kit/deal-servicing`; gate: section 2.4. Verify: kit library-integration targets against
+      real persistence for equal-time replay, a late earlier site report after teardown began,
+      duplicate report delivery, and crash between end recording and self-filing; assert no
+      repeated physical work and no storefront-owned financial end.
+- [ ] 10.6 Implement the site report's independent acceptance boundary first: immutable event
+      recording in the lease-ending transaction and a separate event-keyed outbox; signing,
+      retry and authenticated lease-read recovery of the stored report. Cover expiry,
+      termination, direct release, failure and force-release, preserving release guards and the
+      existing capacity-released callback. Files: `kit/site/src/market_site/ledger.py` and its
+      persistence/authority ports, `provisioning/compute/src/compute_provisioning/lease_lifecycle.py`,
+      `provisioning/compute/contracts` (event and lease models), `provisioning/compute/service`
+      (`db/models.py`, migrations, `services/deal_event_sink.py`, lease read composition) and
+      `provisioning/compute/client`. Gate: contract model before sender/receiver; no payment
+      or dispute service required. Verify: site library-integration targets in
+      `kit/site/tests/integration/test_ledger.py` for atomic transitions and deduplication;
+      compute service application-integration targets for crash/restart, lost acknowledgement,
+      signed push/pull byte preservation, direct release, failure and force-release. Exercise
+      the existing lease lifecycle, lease API and capacity-release outbox suites; no sleeps or
+      teardown-complete claim from an intent report.
+
 Verification point: unit and library-integration suites of `kit/deal-servicing`; `make
 check-architecture`; `make test`. End-to-end: none; no storefront composes the kit yet.
 
@@ -422,6 +483,13 @@ paid-out money" (client side) and "Dispute writes are idempotent". Files: new
       "A late case ends delivery" (filing half), "A filing's response is lost", "The case closes
       during the append" and "The claimant adds evidence".
 
+- [ ] 12.3 Map `buyer_end(at)` through the mediation adapter's published request vocabulary,
+      preserving the signed buyer request and seller acknowledgement as evidence. Files:
+      `kit/arkhai-mediation` adapter, contract and double. Gate: section 2.4 and the confirmed
+      mediation contract for live use. Verify: library-integration targets for unavailable
+      authority/retry, mechanically accepted acknowledgement evidence and non-acknowledged
+      cases remaining the authority's policy, never SCM applying money effects.
+
 Verification point: `kit/arkhai-mediation` unit and library-integration suites; `make
 check-architecture`; `make check-packaging`; `make test`. End-to-end: none; live mediation is not
 reachable from public CI.
@@ -442,6 +510,15 @@ seller's budget". Files: `kit/deal-servicing` (router factory),
       interval plus watchdog and teardown budget, and a configuration change that would put an
       active deal over its exposure. Verify: application-integration test for the 290-second
       scenario.
+
+- [ ] 13.3 Serve `end_delivery` directly as the accepted buyer's peer message, keyed by
+      negotiation ID, without an authority read; refuse future instants and outside-settlement
+      stages. Return signed acknowledgement with recorded cause/source and current progress;
+      expose stored site-signed reports verbatim on the buyer-authenticated lifecycle read.
+      Files: `kit/deal-servicing` router and `kit/deal-lifecycle-contracts`; gate: sections 2.4
+      and 10.5. Verify: application-integration targets through the canonical typed client for
+      wrong buyer, future instant, introduction refusal, before-fulfillment end, retry during
+      teardown and access control on exact report bytes. No buyer authority-command relay.
 
 Verification point: application-integration suites; `make test`. End-to-end: none.
 
@@ -470,12 +547,24 @@ provision stages". Files: `domains/vms/storefront/src/market_storefront/`
 - [ ] 14.3 Keep the requested instant in VM lease ends (second precision). Verify: unit and
       integration tests in the VM fulfillment suites for the delta's scenarios.
 - [ ] 14.4 Add the admin exceptional-end route through the seller half. Verify:
-      application-integration test that the route files `exceptional_end(now)` and the lease
+      application-integration test that the route files `exceptional_end(now)` with the
+      administrator identity and reason kept, and the lease
       changes only once the ruling is read.
 
+- [ ] 14.5 Mount the peer end/read route and authenticated site-report receiver in the VM
+      storefront; terminate now through `terminate_vm_lease`/hold release, not a watchdog kick.
+      Add the VM buyer end verb through the buyer half and canonical client. Files:
+      `domains/vms/storefront` fulfillment services, callback/router composition and startup;
+      `domains/vms/buyer` command and stage composition. Gates: sections 7.5, 10.6 and 13.3.
+      Verify: VM application-integration targets with real persistence for accepted-site
+      signature checks, duplicate callback, end before provisioning and teardown progress;
+      buyer application-integration targets for canonical client dispatch and evidence capture.
+      Extend `e2e_deal`/`e2e_deal_buyer_cli` buyer-end stages to read signed site bytes and await
+      proven capacity release, readiness-gated through the existing lane tooling.
+
 Verification point: the VM storefront's unit and application-integration suites; `make test`.
-End-to-end: `e2e_deal`, `e2e_deal_buyer_cli` and `e2e_vm_introduction` must keep passing; none
-exercises a hosted lifecycle end.
+End-to-end: `e2e_deal`, `e2e_deal_buyer_cli` and `e2e_vm_introduction` must keep passing;
+the first two gain delivery-only end/report stages, not hosted rate-part stop qualification.
 
 ## 15. Bare-metal wiring
 
@@ -489,6 +578,18 @@ Files: `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/` (`api.p
 - [ ] 15.1 Compose the servicing kit and adapters, route teardown and terminal settlement through
       end service, and order admission against the end. Verify: application-integration tests
       for "A buyer tears down bare metal" and the admission scenarios on the bare-metal path.
+
+- [ ] 15.2 Fold the buyer teardown route into `end_delivery` and move `market bare-metal
+      teardown` from its domain-only transport to the canonical lifecycle client through the
+      buyer half. Retire the unbegun-fulfillment refusal: release undelivered holds, or adopt
+      dispatched fulfillment and terminate. Mount accepted-site report receipt and lifecycle
+      read exactly as for VM. Files: `domains/bare_metal/storefront` API, fulfillment service
+      and composition; `domains/bare_metal/buyer` teardown command and transport; gates:
+      sections 7.5, 10.6 and 13.3. Verify: bare-metal application-integration targets for wrong
+      buyer/site, before-dispatch and create-in-flight ends, repeated teardown and exact report
+      reads. Extend existing `e2e_bare_metal_mock_deal`/`e2e_bare_metal_deal` teardown stages to
+      use the shared client, retrieve the signed end report and distinguish it from proven
+      access revocation/capacity return. Rate stop/case scenarios wait for the rate adapter.
 
 Verification point: the bare-metal storefront's unit and application-integration suites;
 `make test`. End-to-end: `e2e_bare_metal_deal` and `e2e_bare_metal_mock_deal` (teardown path)
@@ -510,19 +611,23 @@ documentation only; a part needing code returns the change to implementation.
       requirements.
 - [ ] 16.4 **Narrative compression.** Compress completed-task notes to final behaviour, evidence,
       deferred work and destinations.
-- [ ] 16.5 **Roadmap currency.** Update Goal 6's current state and remove or mark landed the gap
-      row "Post-commitment lifecycle…" in `docs/development/ROADMAP.md`; name it in the
-      promotion record.
+- [ ] 16.5 **Roadmap currency.** Update Goals 6 and 8's current state and remove or mark landed
+      this change's post-commitment lifecycle and buyer-end/report gaps in
+      `docs/development/ROADMAP.md`; name both updates in the promotion record.
 - [ ] 16.6 **Campaign index currency.** Update this change's row in `openspec/changes/README.md`
       and the campaign graph (`spot-deals-through-arkhai-payments`, `move-settle-out-of-core`,
-      `automate-seller-spot` build on it); run `make check-change-index`.
+      `automate-seller-spot` build on it), including the folded buyer-end/report boundary and
+      its delivery/deadline dependents; run `make check-change-index`.
 - [ ] 16.7 **Packaging.** Run `make check-packaging` and `make
       check-architecture-change CHANGE=agreed-evidence-and-early-termination` and resolve every
       failure; no architecture exception row may remain owned by this change.
 - [ ] 16.8 **End-to-end pipeline.** Record the pipeline run, its result, and that `e2e_deal`,
       `e2e_deal_buyer_cli`, `e2e_bare_metal_deal`, `e2e_bare_metal_mock_deal`,
       `e2e_non_erc20_settlement` and `e2e_credits_payment_deal` passed or were readiness-gated;
-      the hosted lifecycle e2e is owned by `spot-deals-through-arkhai-payments`.
+      record buyer delivery-only ends, site-report retrieval and subsequent proven capacity return
+      in the existing compute scenarios. The hosted rate lifecycle e2e is owned by
+      `spot-deals-through-arkhai-payments`, with in-lane double evidence labelled separately
+      from hosted qualification.
 - [ ] 16.9 **Promotion.** Write the permanent documents and the design-promotion record:
       `docs/development/ARCHITECTURE.md` ("Composition from above and below", "Authority
       boundaries" with D4's independent per-deal authority and D6's counterpart table, "Kit
@@ -532,13 +637,20 @@ documentation only; a part needing code returns the change to implementation.
       `settlement-servicing/architecture.md` ("Capacity coupling", "Current limits",
       "Charge-first payment settlement"), `storefront-publication/architecture.md` ("Arkhai
       payment options"), `deployment-state/architecture.md`, `test-compatibility/architecture.md`,
-      `buyer-orchestration/architecture.md` and `api-credits/architecture.md` ("Payment
+      `buyer-orchestration/architecture.md` (canonical end verbs and stop-or-case evidence),
+      `physical-provisioning/architecture.md` and `site-capacity/architecture.md` (intended end,
+      outbox, pull recovery, immediate termination versus future truncation and separate
+      capacity release), and `api-credits/architecture.md` ("Payment
       composition and recovery"); `docs/development/DEPLOYMENT_AND_CONFIG.md` (exposure budget
       settings, beside sections 3 and 4's entries). The archive writes the delta-covered
       `spec.md` files: `deal-lifecycle` (new), `buyer-orchestration`, `cli-query-language`,
       `deployment-state`, `market-composition`, `negotiation-protocol`, `registry-discovery`,
       `settlement-configuration`, `settlement-servicing`, `storefront-publication`,
-      `test-compatibility`, `vm-storefront-fulfillment`.
+      `test-compatibility`, `vm-storefront-fulfillment`, `physical-provisioning`, `site-capacity`.
+      Update `ARCHITECTURE.md`'s "Site authority", "Fulfillment status and results" and "Release"
+      to distinguish intended-end reports from the capacity-released callback. Promote D8's
+      retained attribution and one delivery instant, and D9's site-report retention, into
+      `deal-lifecycle/spec.md` and its architecture companion; no core financial-end record.
 - [ ] 16.10 **Documentation citations.** Run `make check-doc-citations
       CHANGE=agreed-evidence-and-early-termination` and resolve every match; then
       `openspec validate agreed-evidence-and-early-termination --strict`.
@@ -547,5 +659,13 @@ documentation only; a part needing code returns the change to implementation.
 
 ## Design promotion record
 
+Planned destinations below; promotion is not performed during this design reconciliation.
+The remaining D1–D15 destinations are listed in proposal.md and task 16.9.
+
 | Accepted decision | Permanent location |
 |---|---|
+| D8 canonical buyer end, stop-or-case and both CLI paths | `openspec/specs/buyer-orchestration/spec.md` and `architecture.md` |
+| D8 earliest final request with actor, cause, source and stable effects; D9 retained signed end evidence | New `deal-lifecycle` capability's spec and architecture companion (created at archive/closeout) |
+| D8 site-signed intended-end report, transactional event/outbox and recovery | `openspec/specs/site-capacity/spec.md`, `openspec/specs/physical-provisioning/spec.md` and their architecture companions |
+| D8 intended end versus proven release; terminate versus future truncate | `docs/development/ARCHITECTURE.md`, "Site authority", "Fulfillment status and results", "Release"; `openspec/specs/site-capacity/architecture.md` |
+| D8 VM buyer end and second-precision lease effects | `openspec/specs/vm-storefront-fulfillment/spec.md` |

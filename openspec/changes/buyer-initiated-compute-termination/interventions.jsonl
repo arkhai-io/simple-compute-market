@@ -1,1 +1,0 @@
-{"review": "design", "finding": "D4", "section": null, "lens": "direction", "basis": "judgement", "severity": null, "agent_position": "one mutable intent per deal", "owner_disposition": "an append-only log of requests with deterministic processing and a retention policy", "summary": "append-only request log (round 1)"}

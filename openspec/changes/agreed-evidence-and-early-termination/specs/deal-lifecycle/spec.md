@@ -75,12 +75,22 @@ A peer message (`commit`, `hint`, `end_delivery`) MUST be buyer-to-seller and MU
 
 ### Requirement: A buyer's end-delivery request is acted on directly
 
-The storefront MUST act on a buyer-authenticated `end_delivery {at}` without a read of the authority, by a final request at *at*, and MUST refuse an *at* later than its receipt. Its signed response MUST state the end it recorded.
+The storefront MUST act on a buyer-authenticated `end_delivery {at}` without a read of the authority, by a final request at *at*, and MUST refuse an *at* later than its receipt. Its signed response MUST state the end it recorded and durable physical progress, never claiming capacity released while teardown is queued. This delivery-only request MUST remain available on compute deals with no payment lifecycle adapter; a stage that declares `completes_outside_settlement` MUST be refused.
 
 #### Scenario: A future end is requested
 
 - **WHEN** a buyer sends `end_delivery` with *at* an hour ahead
 - **THEN** the storefront refuses it, since a future end is a stop with notice at the payment authority
+
+#### Scenario: A once-only buyer ends delivery
+
+- **WHEN** the accepted buyer sends `end_delivery` for a committed `once`-only deal
+- **THEN** delivery ends without a payment stop or automatic cancellation refund
+
+#### Scenario: A retry finds teardown in progress
+
+- **WHEN** the buyer repeats an acknowledged `end_delivery` while the site is tearing down
+- **THEN** the response finds the same recorded end and reports current progress rather than released capacity
 
 ### Requirement: Adapters translate deal commands into per-part events
 
@@ -376,12 +386,12 @@ A `dispute` and an `append` MUST carry an idempotency key derived from the comma
 
 ### Requirement: The buyer half hides the mechanism
 
-On VM and bare-metal deals the buyer half MUST offer `submit` and `read(negotiation_id)` without the caller branching on mechanism. `read` MUST return the deal's lifecycle state, each part's open extensions, its authority events and its cases, or `rejected` when the deal's mechanism has no adapter.
+On VM and bare-metal deals the buyer half MUST offer `submit` and `read(negotiation_id)` without the caller branching on mechanism. `read` MUST return the deal's lifecycle state, each part's open extensions, its authority events and its cases where an adapter exists, and MUST return the storefront's delivery progress and obtained signed site reports independently. When the mechanism has no adapter the authority view MUST be explicitly `rejected`, naming the mechanism, without suppressing the delivery view or inventing authority state.
 
 #### Scenario: A buyer reads a deal with no lifecycle adapter
 
 - **WHEN** a buyer reads an Alkahest deal through the buyer half
-- **THEN** the result is `rejected`, naming the mechanism
+- **THEN** the authority view is `rejected`, naming the mechanism, and the storefront delivery view still returns recorded end progress and any obtained site-signed reports
 
 ### Requirement: The seller half lists deals
 
@@ -495,7 +505,7 @@ A `watch` cursor MUST advance only after the event's effect is journaled: by end
 
 ### Requirement: Lifecycle routes are authenticated per role
 
-The VM and bare-metal storefronts MUST expose the seller half's `submit`, `read`, and `list` through the administrator-principal contract. The VM and bare-metal storefronts MUST expose a buyer route for `commit` and `hint`, authenticated as the negotiation's buyer principal, with signed responses. The storefront MUST NOT relay a buyer's authority command.
+The VM and bare-metal storefronts MUST expose the seller half's `submit`, `read`, and `list` through the administrator-principal contract. The VM and bare-metal storefronts MUST expose a buyer route for `commit`, `hint`, and `end_delivery`, keyed by negotiation ID and authenticated as the negotiation's buyer principal, with signed responses. The storefront MUST NOT relay a buyer's authority command.
 
 #### Scenario: Another principal sends commit
 
@@ -507,9 +517,14 @@ The VM and bare-metal storefronts MUST expose the seller half's `submit`, `read`
 - **WHEN** an administrator interrupts a hosted deal with only `once` parts through the VM admin route
 - **THEN** the route files `exceptional_end(now)` with the agreement's dispute authority through the seller half, and the lease changes only through end service, once the ruling is read
 
+#### Scenario: Another principal ends delivery
+
+- **WHEN** a principal other than the accepted negotiation's buyer sends `end_delivery`
+- **THEN** the storefront rejects it without making a final request or contacting the site
+
 ### Requirement: End service keeps the earliest final request
 
-End service MUST take final requests, "end delivery at *T*" with actor, cause, and source, from authority stops through `watch`, from dispute outcomes with a delivery end, and from local delivery decisions: a buyer's `end_delivery`, terminal settlement, and the further local sources of mechanisms built on this interface. Repeated final requests for one deal MUST keep the earliest *T*. A local decision MUST NOT move money.
+End service MUST take final requests, "end delivery at *T*" with actor, cause, and source, from authority stops through `watch`, from dispute outcomes with a delivery end, from verified site-signed `lease_ended` reports, and from local delivery decisions: a buyer's `end_delivery`, terminal settlement, and the further local sources of mechanisms built on this interface. Repeated final requests for one deal MUST keep the earliest *T*. A local decision MUST NOT move money.
 
 #### Scenario: A buyer tears down bare metal
 
@@ -521,9 +536,42 @@ End service MUST take final requests, "end delivery at *T*" with actor, cause, a
 - **WHEN** a VM buyer sends `end_delivery {at: now}`
 - **THEN** end service terminates the lease with the buyer as actor and the storefront's signed response acknowledges the end at that time
 
+### Requirement: The recorded end retains cause and source
+
+End service MUST durably keep final requests with stable source identities, actors, causes, instants and evidence references, including superseded requests, and MUST expose the earliest request's attribution and physical progress through lifecycle reads. Earlier evidence received after teardown begins MUST NOT resurrect delivery or duplicate physical effects; financial correction MUST use the dispute authority, not a storefront financial-end record.
+
+#### Scenario: A site reports an earlier end late
+
+- **WHEN** a site report for 12:00 arrives after a 12:10 local end has already begun teardown
+- **THEN** the recorded earliest end becomes 12:00 with the site's cause, both source records remain, teardown is not restarted, and any required `exceptional_end(12:00)` is journaled
+
+#### Scenario: Two causes have the same instant
+
+- **WHEN** two final requests name the same earliest instant
+- **THEN** both source records remain and replay selects the same attribution without changing the end instant
+
+### Requirement: Site end reports are kept and returned to the buyer
+
+The storefront MUST authenticate a `lease_ended` report against the reservation's configured site peer, deduplicate by event identity, retain the exact signed bytes, and submit a final request with its instant and cause. The buyer-authenticated lifecycle read MUST return those bytes and proof verbatim beside end-service attribution and physical progress. A missing push MUST be recoverable from the authenticated lease read. Site reports MUST NOT be treated as payment authority records or proof of capacity return.
+
+#### Scenario: A report is pushed twice and then read
+
+- **WHEN** the site retries a signed report after losing its acknowledgement
+- **THEN** the storefront records one source request and the buyer reads the site's original signed bytes, not a storefront reconstruction
+
+#### Scenario: A push is lost
+
+- **WHEN** the storefront's next lease read recovers a signed `lease_ended` report it has not received
+- **THEN** it keeps and acts on that report as it would the authenticated push
+
+#### Scenario: The site reports release failure
+
+- **WHEN** a valid report records an intended end and `release_failed`
+- **THEN** the end is recorded with that cause, but status still reports incomplete physical recovery and listings do not reopen
+
 ### Requirement: End service terminates or truncates, and journals each effect
 
-When *T* is now or past, end service MUST terminate the lease; otherwise it MUST truncate it to *T* at one-second precision or finer. Each effect MUST be journaled and retried until done. A shortfall in the exposure budget at runtime MUST only warn and MUST NOT stop the lifecycle loops.
+When *T* is now or past, end service MUST terminate the lease; otherwise it MUST truncate it to *T* at one-second precision or finer. Each effect MUST be journaled with a stable operation identity and retried under that identity until done. A shortfall in the exposure budget at runtime MUST only warn and MUST NOT stop the lifecycle loops.
 
 #### Scenario: A stop arrives after its effective time
 
@@ -560,7 +608,7 @@ A party MUST keep evidence as exact bytes in a store separate from replay state,
 
 ### Requirement: Each party keeps its commitment envelopes and authority records
 
-The buyer MUST keep the seller's signed acceptance with its proof headers and exact body before committing. The seller MUST keep the buyer's signed message the agreement rests on: the buyer's opening or counteroffer the seller accepted, or the buyer's acceptance of a seller counter; an administrative acceptance MUST be kept with its administrator as author. Both MUST keep the peer messages they sent or received and the authority records they receive.
+The buyer MUST keep the seller's signed acceptance with its proof headers and exact body before committing. The seller MUST keep the buyer's signed message the agreement rests on: the buyer's opening or counteroffer the seller accepted, or the buyer's acceptance of a seller counter; an administrative acceptance MUST be kept with its administrator as author. Both MUST keep the peer messages they sent or received, including the signed end-delivery acknowledgement, the authority records they receive and site-signed end reports they obtain. Site reports MUST remain evidence rather than authority records. End service's requests and effect journal MUST follow the same retention rule.
 
 #### Scenario: A buyer accepts
 

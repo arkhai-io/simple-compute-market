@@ -32,7 +32,7 @@ The typed storefront client MUST settle an Agreement-settled deal with `settle_a
 
 ### Requirement: The buyer's end is backed by its own stop or a case
 
-The buyer half's end command MUST issue the buyer's `stop` at the payment authority before it sends `end_delivery`. When the payment authority's answer is `unknown` or the authority is unreachable, it MUST still send `end_delivery` and MUST file `buyer_end(at)` with the agreement's dispute authority, carrying the signed request and the storefront's signed response as evidence; a filing the dispute authority cannot receive MUST be journaled and retried under its idempotency key.
+On a deal with buyer-stoppable rate parts, the buyer half's end command MUST issue the buyer's `stop` at the payment authority before it sends `end_delivery`. When the payment authority's answer is `unknown` or the authority is unreachable, it MUST still send `end_delivery` and MUST file `buyer_end(at)` with the agreement's dispute authority, carrying the signed request and the storefront's signed response as evidence; a filing the dispute authority cannot receive MUST be journaled and retried under its idempotency key.
 
 #### Scenario: The payment authority is down
 
@@ -48,6 +48,30 @@ The buyer half's end command MUST issue the buyer's `stop` at the payment author
 
 - **WHEN** the payment authority accepts the buyer's stop
 - **THEN** the buyer half sends `end_delivery` and files nothing
+
+### Requirement: Compute buyers end delivery through the canonical lifecycle client
+
+The VM and bare-metal buyer end commands MUST use the lifecycle client's `end_delivery(negotiation_id, at)` through the buyer half, with the accepted buyer's profile signer and storefront trust. `market bare-metal teardown` MUST remain the bare-metal verb over this shared client, not a domain-only transport. The client MUST verify signed responses and keep exact request and acknowledgement envelopes and any site-signed reports returned by lifecycle reads. Progress MUST distinguish delivery acknowledgement, payment-stop outcome and any case.
+
+#### Scenario: A bare-metal buyer tears down
+
+- **WHEN** the buyer runs `market bare-metal teardown` for its committed deal
+- **THEN** it uses the same authenticated lifecycle client method as the VM end verb and keeps the signed response
+
+#### Scenario: A buyer leaves a reserved deal
+
+- **WHEN** a buyer ends delivery on a `once`-only hosted deal or a current Alkahest deal without a lifecycle payment adapter
+- **THEN** it sends `end_delivery` without trying an unsupported payment stop or claiming a refund
+
+#### Scenario: The storefront is down
+
+- **WHEN** a buyer's rate-part stop is accepted but the storefront cannot receive `end_delivery`
+- **THEN** the command reports the accepted stop and unacknowledged delivery request separately and does not claim the resource was torn down
+
+#### Scenario: The buyer obtains a site report
+
+- **WHEN** the buyer's lifecycle read returns a site-signed `lease_ended` report
+- **THEN** the buyer stores its exact bytes and proof even if it has no independently trusted site identity to verify it, without treating it as a payment authority record
 
 ### Requirement: Buyer lifecycle actions go through the buyer half
 
