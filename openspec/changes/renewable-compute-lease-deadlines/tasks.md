@@ -24,7 +24,9 @@ dependency lands rather than preserving a forbidden import to fit this plan.
   `unify-compute-delivery-path` consumes the activation call without a target time
   and wires every commit caller before deployed enablement. Renewable ships the
   explicit compute composition setting `activation_deadlines_enabled` false; unify
-  owns final enablement after storefront-first/site-off deployment and qualification.
+  owns the post-qualification repository composition-default edit after storefront-
+  first/site-off rollout and explicitly enabled owned-lane drives. Hosted operators
+  independently confirm readiness; public records never include hosted identifiers.
 
 ## 2. Allowance declaration and validation
 

@@ -32,23 +32,29 @@ Delivery MUST commit and recover the accepted Agreement's exact start and durati
 
 ### Requirement: Future-start delivery waits inside its admitted window
 
-Capacity MAY be committed at settlement before the Agreement start. Dispatch, activation, billing start and availability MUST NOT precede that start. The path MUST retain a durable wake time and recheck admission on wake. Credential reads MUST NOT disclose before the start.
+Capacity MAY be committed at settlement before the Agreement start. Dispatch, activation, billing start and availability MUST NOT precede that start. The path MUST retain a durable wake time and an identified retry owner, and recheck admission on wake. Credential reads MUST NOT disclose before the start.
 
 #### Scenario: A forward reservation waits
 
 - **WHEN** a 12:00 Agreement commits at 10:00
-- **THEN** it remains deferred until 12:00 without dispatch or early access
+- **THEN** it remains waiting-for-delivery until 12:00 without dispatch or early access
 - **AND** recovery repeats the same commit and wake time
 - **AND** the site's provisional deadline is anchored by the activation-deadline contract
 
 ### Requirement: Delivery authorization is a decision separate from billing effects
 
-The path MUST call the injected neutral authorization protocol before commit, dispatch, billing start and initial disclose. It MUST record outcome, reason, operation identity and evidence references before use. Pending and unknown outcomes MUST remain pending. The prepaid decision MUST issue no financial mutation.
+The path MUST call the injected neutral authorization protocol before commit, dispatch, billing start and initial disclose. It MUST retain the servicing owner's durable decision reference before use, not duplicate its journal. Pending and unknown outcomes MUST remain pending. An explicitly composed no-financial-action decision for prepaid/current Alkahest MUST require selected-stage evidence and issue no financial mutation; a missing required adapter MUST NOT imply allow.
 
 #### Scenario: A prepaid deal passes authorization
 
 - **WHEN** selected-stage evidence and local admission permit delivery
 - **THEN** the prepaid financial decision allows without a payment start
+
+#### Scenario: Alkahest has no lifecycle payment adapter
+
+- **WHEN** the selected Alkahest stage validates its typed commitment evidence and composition explicitly provides no-financial-action
+- **THEN** delivery can pass local admission and reach activation without a hosted payment start
+- **AND** a missing required adapter registration still blocks composition rather than implicitly allowing
 
 #### Scenario: An outcome is unknown
 
@@ -67,13 +73,13 @@ Each protected transition, activation, recovery and credential-response authoriz
 
 ### Requirement: Billing start follows activation under one effect identity
 
-After activation and start authorization, delivery MUST supply a stable key to end service, the sole billing-start intent/key owner before I/O, and retain only its reference. It MUST supply commitment/fulfillment IDs and validated ready-evidence envelope/digest without credentials. Unknown results MUST resolve under the same key. Rate servicing MUST own payment interpretation; prepaid start MUST be a no-op.
+After activation and start authorization, delivery MUST call end service's begin_billing with a stable key and retain only its intent reference. ActivatedDeliveryRef MUST supply negotiation/commitment/reservation/fulfillment IDs, verified site activation reference/instant and ready envelope/digest, without credentials. Recovery MUST reuse that key. Delivery MUST NOT implement the adapter's start_billing or a second intent journal.
 
 #### Scenario: Rate start acknowledgement is lost
 
 - **WHEN** the authority accepted start but its acknowledgement was not persisted
-- **THEN** recovery resolves the same start key and adopts its verified record
-- **AND** does not start billing again or allocate a second resource
+- **THEN** delivery resolves through the same begin_billing operation and retains only its intent reference
+- **AND** adopts its acknowledged outcome without another key or resource
 
 #### Scenario: Activation fails
 
@@ -91,6 +97,11 @@ Each negotiation MUST keep ordered checkpoints authorized, dispatched, activated
 - **THEN** negotiation-keyed exact-request replay recovers the same reservation
 - **AND** a conflicting request is refused rather than creating a second hold
 
+#### Scenario: An unresolved reserve intent outlives its hold
+
+- **WHEN** exact-request reconciliation returns the original expired or released reservation
+- **THEN** delivery preserves that identity and enters repair-required or classified end handoff, never silently reserves fresh
+
 #### Scenario: A protected write fails
 
 - **WHEN** an admission or intent write cannot be persisted
@@ -105,7 +116,7 @@ Each negotiation MUST keep ordered checkpoints authorized, dispatched, activated
 
 ### Requirement: Availability and convergence have explicit meanings
 
-Available MUST mean that readiness and disclose authorization are durable without waiting for a buyer read. Converged MUST additionally mean the selected stage's required evidence, readiness and claim-binding continuation is acknowledged or explicitly absent. Pending, persistence retry and repair-required MUST map to deferred hook outcomes; terminal failure MUST map to failed only after the end handoff is durable.
+Available MUST mean readiness and disclose authorization are durable without a buyer read. Converged MUST additionally mean the selected stage's required evidence, readiness and claim-binding continuation is acknowledged or explicitly absent. Terminal failure MUST map to failed only after the end handoff is durable.
 
 #### Scenario: A buyer never reads
 
@@ -116,6 +127,16 @@ Available MUST mean that readiness and disclose authorization are durable withou
 
 - **WHEN** availability is durable but the selected continuation is unfinished
 - **THEN** delivery is not converged and retries that continuation without another physical delivery
+
+### Requirement: Pending delivery preserves its retry owner
+
+Before dispatch, pending/persistence/repair outcomes MUST preserve the mechanism's journaled awaiting-delivery operation and retry owner, not deferred fulfillment. After workload creation, deferred MUST identify the deployed domain convergence owner. Repair-required MUST remain visible without guessing terms.
+
+#### Scenario: Future-start Alkahest resumes without buyer polling
+
+- **WHEN** a committed forward deal restarts before dispatch with no buyer polls
+- **THEN** its selected continuation leaves the operation journaled awaiting delivery and the servicing worker rechecks each cycle without error backoff
+- **AND** delivery resumes at the accepted start under the same reservation and reaches availability
 
 ### Requirement: Activation consumes the reservation's current end
 
@@ -152,19 +173,20 @@ This change MUST enable the compute composition's activation safeguard only afte
 
 ### Requirement: Delivery supplies classified evidence to the single end operation
 
-Before availability, terminal refusal, provisioning failure, elapsed window and activation lapse MUST enter the lifecycle owner's single end-plus-optional-filing operation. Delivery MUST supply actor, cause, source, accepted start, fixed observed failure time, resource identities and evidence. It MUST NOT compute corrections or duplicate that owner's cause/timing policy. Unsupported adapters MUST be reported honestly.
+Before availability, refusal, provisioning failure, elapsed window or activation lapse MUST enter record_end. Delivery MUST supply actor/cause/source, accepted start, fixed observation, resource IDs and evidence, including verified refusal reasons, payer/mandate state and unserved setup. It MUST NOT classify by event name, compute corrections or duplicate lifecycle cause/timing policy. Unsupported exceptional-end adapters MUST be reported honestly.
 
 #### Scenario: A lawful end wins before availability
 
-- **WHEN** a buyer request, entitled stop, terms end or ruling already controls the end
-- **THEN** delivery preserves that cause and supplies the existing final request
-- **AND** does not request a seller self-penalty solely because availability was not reached
+- **WHEN** a buyer request, verified payer stop or ruling is observed before availability
+- **THEN** delivery supplies its exact evidence/instant alongside the non-delivery basis to record_end
+- **AND** uses the returned classification rather than treating every start refusal as seller failure
 
 #### Scenario: Seller failure occurs before a future start
 
 - **WHEN** a never-delivered deal fails before its accepted start
 - **THEN** delivery supplies both accepted start and the fixed failure-observation time
-- **AND** the lifecycle owner journals the end and filing intent now, then files at Agreement start under its timing policy, never a future-dated command or a retry-time recomputation
+- **AND** delivery retains the returned operation reference and supplies those fixed inputs once, without locally choosing a future at or recomputing on retry
+- **AND** consumes deal-lifecycle's exceptional-end timing policy
 
 #### Scenario: Settlement arrives after the window without established buyer fault
 

@@ -61,6 +61,22 @@ Recoverable bookkeeping or evidence-publication failures after provisioning MUST
 - **WHEN** a physically ready VM cannot activate because expiry claimed it
 - **THEN** delivery enters the classified lifecycle handoff rather than deferring forever as bookkeeping failure
 
+### Requirement: Physical fulfillment resumption
+
+When fulfillment identity exists, recovery MUST query it directly, never schedule or begin a replacement. Nonterminal state MUST remain pending with an identified retry owner; active results MUST yield readiness/resource identities, not persisted credentials. Provider failures MUST use the classified lifecycle handoff. Without identity, recovery MUST reuse the exact request and idempotent reserve/schedule/begin contracts. Selected-stage evidence MUST be revalidated before protected effects.
+
+#### Scenario: Recovery before fulfillment acceptance
+
+- **WHEN** unfinished delivery has persisted context but no fulfillment ID
+- **THEN** recovery reuses the exact stored request and target
+- **AND** reconciles reservation, scheduling and begin through their idempotent contracts
+
+#### Scenario: Recovery after fulfillment acceptance
+
+- **WHEN** unfinished delivery has a durable fulfillment ID
+- **THEN** recovery polls that fulfillment directly
+- **AND** does not schedule a replacement or begin another fulfillment
+
 ### Requirement: A VM deal records only how to reach its VM
 
 The VM storefront MUST persist readiness and resource identities, not access material. Settle and settle-status MUST obtain buyer-facing connection details live through compute delivery's admission guard. Missing buyer-facing host MUST remain omitted. Authenticated replay storage MUST retain no credential-capable response bodies; exact retries MUST recheck eligibility without weakening signing or changed-request rejection.
@@ -78,7 +94,7 @@ The VM storefront MUST persist readiness and resource identities, not access mat
 
 ### Requirement: VM evidence and delivery progress are not payment escrows
 
-Evidence MUST remain negotiation-scoped, not a sentinel escrow. Shared delivery MUST own protected progress; legacy domain rows MAY be read-only projections. Additive cutover MUST adopt verified exact requests/identities, defer ambiguous rows for repair, purge access material and reject old writers. Unknown or conflicting evidence MUST fail closed; real Alkahest state MAY stay with its owner.
+Evidence MUST remain negotiation-scoped, not a sentinel escrow. Shared delivery MUST own protected progress; legacy domain rows MAY be read-only projections. Additive cutover MUST adopt verified exact requests/identities, defer ambiguous rows for repair, purge access material and enforce the mandatory bridge writer-floor gate. Unknown or conflicting evidence MUST fail closed; real Alkahest state MAY stay with its owner.
 
 #### Scenario: Payment delivery is pending
 
@@ -98,8 +114,8 @@ Evidence MUST remain negotiation-scoped, not a sentinel escrow. Shared delivery 
 
 #### Scenario: An old binary attempts downgrade
 
-- **WHEN** an old writer starts after cutover's minimum schema/writer version
-- **THEN** startup refuses rather than resuming competing delivery writes
+- **WHEN** the actual supported pre-cutover bridge binary opens the migrated database
+- **THEN** its writer-floor check refuses before any recovery or foreground writer starts
 
 #### Scenario: A fresh VM schema boots
 

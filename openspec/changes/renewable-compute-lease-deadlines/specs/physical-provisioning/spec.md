@@ -37,4 +37,4 @@ The signed lease_ended record MUST carry activation_deadline_lapsed, claimed dea
 #### Scenario: Delivery fails without a site event
 
 - **WHEN** no signed lease-ended record has arrived at the storefront
-- **THEN** the site contract supplies no payment operation and imposes no event prerequisite on the seller's exceptional-end filing
+- **THEN** the site contract supplies no payment operation and imposes no event prerequisite on the seller's exceptional-end self-correction

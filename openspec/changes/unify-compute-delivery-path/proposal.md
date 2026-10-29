@@ -7,13 +7,14 @@ separate implementations. VM derives its lease end from the Agreement but substi
 an hour for a missing duration during recovery; bare metal commits from `now` and
 can move an absolute seller bound. Neither path activates the site's lease after
 provisioning. A per-period payment adapter also needs an explicit seam before each
-protected transition, rather than discovering after delivery that a start was refused.
+protected transition, with billing start a separately journaled effect after activation. A refusal there
+ends the resource through lifecycle before any credential disclosure.
 
 One compute-family path removes those divergences without making the market-neutral
 fulfillment kit own commercial deal state. It builds on the lifecycle and end-service
 boundary of `agreed-evidence-and-early-termination`: money moves at authorities,
-end service orders delivery admission, and the cooperative seller self-files when it
-fails to deliver. This is the delivery portion of Goal 8 in
+end service orders delivery admission, and the cooperative seller self-corrects through its payment adapter when it fails to
+deliver, not through a dispute filing. This is the delivery portion of Goal 8 in
 [`docs/development/ROADMAP.md`](../../../docs/development/ROADMAP.md#goal-8--sell-compute-by-the-period-until-either-party-stops).
 
 ## What Changes
@@ -33,7 +34,7 @@ fails to deliver. This is the delivery portion of Goal 8 in
   `renewable-compute-lease-deadlines`; it is seller-side risk management, not a buyer
   guarantee.
 - The shared path calls `authorize_delivery(deal, phase)` before `commit`,
-  `dispatch`, `start` and `disclose`, with durable decisions. The prepaid hook has no
+  `dispatch`, `start` and `disclose`, with servicing-owned decisions and delivery-held references. The prepaid hook has no
   additional financial action; all deals still pass end service's admission check.
   Rate servicing supplies the hook's payment-authority checks through its injected
   payment adapter, with a separate keyed `start_billing` effect after provisioning and activation.
@@ -44,11 +45,13 @@ fails to deliver. This is the delivery portion of Goal 8 in
   `started`, `available` and `converged`, with stable effect identities and recovery
   at each acknowledgement gap. Availability does not depend on a buyer reading it.
 - Delivery supplies classified actor/cause/source, accepted start and fixed failure
-  time to the foundation's single end-plus-optional-self-filing operation. Lawful
-  buyer/terms/ruling ends do not automatically incur a seller penalty. A genuine
+  time to the foundation's single end-plus-optional-self-correction operation. Lawful
+  buyer/payer-stop/ruling evidence is classified by foundation against the non-delivery
+  basis; a clock or payee stop alone cannot erase non-delivery. A genuine
   never-delivered failure uses the foundation's fixed min(start, failure-observation)
-  basis after start; before a future start it journals now and files at Agreement
-  start, never future-dating a filing. End service journals the filing; the dispute authority applies any correction. The path does not implement its own refund,
+  basis after start; before a future start it journals now and acts at Agreement
+  start, never future-dating a command. End service journals the self-correction; the seller's payment adapter applies
+  its per-part payee effects, not mediation. The path does not implement its own refund,
   stop, correction journal or end-deal route.
 - Credential reads enforce the delivery checkpoint and end service's recorded end,
   ordered with local end admission. They fetch access material live and recheck
@@ -70,13 +73,21 @@ fails to deliver. This is the delivery portion of Goal 8 in
 
 ### Modified Capabilities
 
+- `marketplace-identity`: narrow per-route exact-retry declaration with unchanged
+  proof/reservation/skew/refusal contract; credential-capable routes re-run without
+  retained bodies. Archive unify before `redesign-authenticated-requests`, which
+  generalizes the same declaration and must preserve it in a superset delta.
+- `resource-pool-management`: post-qualification compute composition default;
+  supersets renewable's off-by-default introduction, archiving renewable first.
+- `physical-provisioning`: verified bare-metal lifecycle adoption and read-only
+  legacy progress, retaining malformed-evidence and source-revalidation refusal.
 - `vm-storefront-fulfillment`: compose the family path; preserve delivery priority
   without executing unjournaled protected effects; allow the activation call after
   commit while keeping lease ends with end service.
 
 `fulfillment` continues to own provider-neutral execution, not commercial delivery
 state. `physical-provisioning`'s activation primitive is specified by
-`renewable-compute-lease-deadlines`. The lifecycle final-request and self-filing
+`renewable-compute-lease-deadlines`. The lifecycle final-request and self-correction
 requirements belong to `agreed-evidence-and-early-termination`, not a second delta here.
 
 ## Non-Goals
@@ -96,15 +107,16 @@ requirements belong to `agreed-evidence-and-early-termination`, not a second del
 ## Dependencies and Acceptance Boundary
 
 - Implementation requires `agreed-evidence-and-early-termination`'s seller half,
-  end-service admission and journaled self-filing interface, and
+  end-service admission and journaled self-correction interface, and
   `renewable-compute-lease-deadlines`' activation half, including its signed site-end
   report. Buyer termination is folded into the former, not a separate dependency.
-  The foundation also owns neutral delivery protocols and pre-start filing policy;
+  The foundation also owns neutral delivery protocols and pre-start command policy;
   renewable transitively waits on `inject-site-pool-authority`.
 - Sections 1–2 require only the negotiation-keyed reservation-idempotency slice of
   `capacity-reservation-lifecycle-hardening`. Sections 3.3/4.3/4.4 require
   `add-arkhai-payments-lane-double` for HTTP qualification; library integration uses
-  in-process contract-vector fakes with no dependency on runnable tooling.
+  the shared clock-injected payments engine in kit-owned fixtures (HTTP wraps it),
+  with no dependency on runnable tooling.
 - Renewable ships its compute composition safeguard off. This change owns final
   enablement: deploy compatible storefronts first, then the site off, qualify every
   caller, then enable for new commits. Verified legacy null-phase views remain
@@ -122,18 +134,18 @@ requirements belong to `agreed-evidence-and-early-termination`, not a second del
 Acceptance: both domains and every compute mechanism use the shared protected
 transitions; the Agreement window survives retries; every delivered lease activates
 to its current site end before billing; genuine seller non-delivery durably reaches
-the classified end/filing operation, while lawful ends retain their attribution;
+the classified end/correction operation, while lawful ends retain their attribution;
 no locally ended deal discloses access, including exact authenticated retries;
 restart recovers each effect without
 replacement resources. Reserved VM and bare-metal deals prove activation beyond the
-pool allowance, expiry before activation proves recovery plus the journaled filing,
+pool allowance, expiry before activation proves recovery plus the journaled self-correction,
 and API-credit delivery remains unchanged. Rate-path qualification is explicitly
 blocked until its implementation dependencies are ready; no prepaid result proves it.
 
 ## Impact
 
 Recommended home: a separate compute-family library distribution at
-`provisioning/compute/delivery`, with its repository in the storefront database.
+`domains/compute/delivery`, with its repository in the storefront database.
 It depends downward on neutral lifecycle protocols and compute contracts, without
 adding commercial orchestration to the physical provisioning base distribution.
 Both storefront composition roots inject
@@ -145,7 +157,8 @@ lane deal stages change. API credits is a regression consumer, not a caller.
 
 - [x] `docs/development/ARCHITECTURE.md` — family-kit ownership, fulfillment flow,
   authority boundary and release.
-- [x] Existing subsystem specification — `vm-storefront-fulfillment`.
+- [x] Existing subsystem specifications — `vm-storefront-fulfillment`,
+  `physical-provisioning`, `marketplace-identity`.
 - [x] New subsystem specification — `compute-delivery` and its architecture companion.
 - [ ] No permanent documentation change.
 
@@ -154,6 +167,9 @@ lane deal stages change. API credits is a regression consumer, not a caller.
 - Family delivery ownership, windows, phases, checkpoints, activation caller and
   access rule: `compute-delivery` spec and architecture companion; capability index
   in `openspec/specs/README.md`.
+- Bare-metal verified lifecycle adoption and retained evidence refusal:
+  `physical-provisioning` spec/architecture. Credential retry declaration:
+  `marketplace-identity` spec and repository authentication architecture.
 - VM convergence/activation obligations: `vm-storefront-fulfillment` spec and
   architecture companion.
 - Cross-system flow and one end-service owner: `docs/development/ARCHITECTURE.md`,

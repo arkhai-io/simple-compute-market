@@ -7,7 +7,7 @@ are later amended.
 ## Dependency gates and validation scope
 
 - Before sections 1–3 execute: land `agreed-evidence-and-early-termination`'s seller
-  half, final-request admission, joint end/self-filing journal and end-domain port;
+  half, final-request admission, joint end/self-correction journal and end-domain port;
   neutral delivery authorization/effect protocols and opaque evidence envelope;
   land `renewable-compute-lease-deadlines`' activation half with its composition
   safeguard off (transitively gated by `inject-site-pool-authority`).
@@ -16,8 +16,10 @@ are later amended.
   Do not recreate missing dependency interfaces locally. Preserve the VM recovery/admission baseline from
   the archived `resolve-compute-family-findings` while rebinding its seams.
 - Tasks 3.3/4.3/4.4's HTTP lane drives wait for
-  `add-arkhai-payments-lane-double`. Library integration uses in-process fakes built
-  from the same contract vectors; kits never import runnable tooling.
+  `add-arkhai-payments-lane-double`. Library integration uses the shared clock-injected
+  payments authority engine in kit/arkhai-payments fixtures directly; HTTP wraps
+  that engine. Mediation's in-process fake keeps triage without mechanical rulings;
+  kits never import runnable tooling.
 - Section 4's rate qualification additionally waits for
   `spot-deals-through-arkhai-payments`' rate adapter and
   `converge-ongoing-compute-leases`' rate hook. The prepaid path can land independently;
@@ -41,21 +43,24 @@ ordering contract.
 
 ## 1. Shared delivery record, phases and admission ports
 
-Files: new `provisioning/compute/delivery/` distribution (source `compute_delivery`:
+Files: new `domains/compute/delivery/` distribution (source `compute_delivery`:
 repository, window derivation, orchestration and compute evidence adapter), its
-`pyproject.toml`; normal compute-family subtree classification in
-`scripts/architecture.py` and `docs/development/ARCHITECTURE.toml` (no new enduring
-override/exception); both storefronts' persistence bindings
-and migrations. Import neutral protocol types supplied by `kit/deal-lifecycle`;
+`pyproject.toml` (existing path classification, no checker edit/override);
+both storefronts' persistence bindings
+and migrations. Import neutral protocol types from `kit/deal-lifecycle` and `kit/deal-servicing`;
 confirm downward scope/kind edges without moving protocols into the family package.
 Do not change provisioning's physical aggregate schema to hold commercial state.
 
 - [ ] 1.1 Define the shared record keyed by negotiation, exact accepted window/site,
-      reservation/fulfillment IDs, phase decisions, delivery-owned effect intents/acks,
+      reservation/fulfillment IDs, servicing-decision references, delivery-owned effect intents/acks,
       end-service billing-start intent reference, and delivery checkpoints authorized/dispatched/activated/started/available/converged.
       Keep credentials and balances out. Apply D1's additive migration: preserve exact
       evidence/requests, reconcile recorded resources, turn domain progress rows into
-      read-only projections and enforce minimum writer version. Ambiguous rows remain
+      read-only projections. First deploy D1's bridge release enforcing the writer floor,
+      record actual bridge artifacts as the oldest supported rollback binaries, stop
+      unbridged writers and obtain the operator acknowledgement before migration.
+      Raise the floor at cutover; qualify refusal with both domains' actual pre-cutover
+      bridge binaries against migrated copies. Never claim unbridged code reads it. Ambiguous rows remain
       repair-required. Never infer availability or activation from stored credentials.
       Verify: family-library
       integration against a real storefront-style database for idempotent record
@@ -66,14 +71,21 @@ Do not change provisioning's physical aggregate schema to hold commercial state.
       bare-metal materialization tests, covering late settlement and missing duration.
       Commit forward reservations at settlement, persist wake at accepted start, and
       defer dispatch/activation/billing/disclosure until then. Verify restart before
-      wake and the max(commit,start)+allowance deadline with renewable.
-- [ ] 1.3 Consume neutral `authorize_delivery(deal, phase)` with durable pure
-      allow/refuse/pending records and the prepaid no-financial-action implementation.
-      Separately invoke `start_billing(effect_id, evidence)` after activation under
-      a stable delivery-supplied operation key. End service owns the sole durable
-      billing-start intent/key; store only its reference and acknowledged checkpoint. Supply identity/digest/versioned opaque
-      evidence through the injected compute adapter; never credentials.
-      Inject foundation-owned admission and single end-plus-filing ports.
+      wake and the max(commit,start)+allowance deadline with renewable. Keep pre-dispatch
+      work awaiting-delivery in the existing mechanism runtime journal (Alkahest
+      each cycle; hosted payment reconciliation), not deferred. Drive a future-start
+      Alkahest deal through restart to availability without buyer polling.
+- [ ] 1.3 Consume neutral `authorize_delivery(deal, phase)` with servicing-owned durable pure
+      decisions; retain only their references. Explicitly compose no-financial-action
+      for prepaid/current Alkahest after selected-stage evidence validation; a missing
+      required adapter blocks. Consume foundation's shared phase enum (unknown refuses).
+      Separately call end service's
+      `begin_billing(operation_key, activated_delivery_ref)` after activation. End service owns the sole durable
+      billing-start intent/key; store only its reference and acknowledged checkpoint. Supply foundation's ActivatedDeliveryRef: negotiation/commitment/reservation/
+      fulfillment IDs, verified activation reference/active instant and ready digest/
+      versioned envelope, never credentials. Spot implements payment authorize/
+      start_billing; converge composes/drives the neutral journals.
+      Inject foundation-owned admission and single end-plus-correction ports.
       Verify: family-library integration that an end admitted
       before dispatch defeats financial allow and unknown hook results stay pending.
 - [ ] 1.4 Coordinate local end admission and checkpoint/disclosure CAS through the
@@ -103,16 +115,21 @@ its access/result adapters. Reverify actual filenames against the dependency tre
       remove `_parse_start_utc`'s missing-start-to-now fallback while retaining
       minute-format reads for persisted legacy timestamps. Preserve accepted
       selected-site routing and exact-request adoption. Delegate inside the domain
-      fulfillment hook via StorefrontFulfillmentPorts, retaining core identity checks;
-      map pending/persistence/repair to deferred, available to fulfilled, and terminal
-      failure to failed only after the lifecycle handoff is durable. Verify:
+      fulfillment hook via composition closure, leaving StorefrontFulfillmentPorts
+      unchanged and retaining core identity checks. Preserve D1's awaiting-delivery
+      versus deferred-completion distinction and deployed retry owners; available
+      maps to fulfilled, failure to failed only after durable lifecycle handoff. Verify:
       existing `test_fulfillment_resume_runtime.py`, `test_fulfillment_service.py`,
       `test_fulfillment_provisioning.py` and integration `test_payment_settlement.py`.
+      Preserve foundation scenarios 'A buyer ends before provisioning', 'The end
+      overlaps delivery start' and 'The storefront restarts between the end and
+      provisioning' through the rebound admission seam.
 - [ ] 2.2 Replace bare metal's commit-from-now and protected transitions with the
       same path, retaining domain preparation and public access models. Verify:
       existing `test_fulfillment_service.py` and integration
       `test_payment_settlement_client.py` with canonical clients; delayed settlement
-      must preserve the original end in both domains.
+      must preserve the original end in both domains. Preserve foundation's 'A buyer
+      tears down bare metal' and the same early-end/admission restart scenarios.
 - [ ] 2.3 Wire every capacity commit caller, including fresh/recovered holds and
       Alkahest, to reservation-only activation after readiness and before billing
       start/availability, no earlier than the accepted start. Validate the returned
@@ -121,9 +138,9 @@ its access/result adapters. Reverify actual filenames against the dependency tre
       provisioning client, including truncation before activation, truncation after
       lost activation acknowledgement and expiry winning before any billing start.
       Implement verified null-phase legacy compatibility; missing route for a
-      protected/unknown lease remains repair-required. This change owns deployed
-      safeguard enablement: storefronts first, site off next, qualify every caller,
-      then enable new commits. Record target/version evidence and rollback refusal.
+      protected/unknown lease remains repair-required. Leave repository defaults off
+      here. Section 4 qualifies callers before the default change; record public
+      version/readiness evidence and rollback refusal, never hosted target identifiers.
 - [ ] 2.4 Route buyer credential/result reads through the shared local admission
       check, live fetch and final revision/time check before response authorization.
       Do not alter provisioning's read-only result contract or fetch payment
@@ -157,11 +174,14 @@ Files: family delivery orchestration and the same domain composition/recovery ad
 implement its internals in this change. No edits to the payment authority contract.
 
 - [ ] 3.1 Wire D5's cause table into the foundation-owned single end-plus-optional-
-      self-filing operation. Supply actor/cause/source, accepted start, fixed failure
+      self-correction operation. Supply actor/cause/source, accepted start, fixed failure
       observation time, resource identities and evidence; retain signed site bytes.
-      Preserve controlling buyer/terms/ruling requests without automatic seller
-      penalty. For genuine never-delivered pre-start failure consume foundation's
-      timing policy: journal now, defer filing at Agreement start when still ahead;
+      Supply verified refusal reasons/payment records, not event-kind classification:
+      payer stop or mandate state is not automatically seller failure; missing
+      pre-start funding is not exhaustion. Supply elapsed-window/payee-stop
+      non-delivery and unserved setup evidence; the clock or seller stop cannot erase
+      it. Consume foundation classification against the never-delivered start basis. For genuine never-delivered pre-start failure consume foundation's
+      timing policy: journal now, defer the command to Agreement start when still ahead;
       otherwise use its fixed min(start,failure) basis. Do not clamp commands
       locally or recompute the instant on retry. Late settlement alone is not proof
       of buyer fault. No billing start may occur before activation.
@@ -173,15 +193,16 @@ implement its internals in this change. No edits to the payment authority contra
       Verify: existing release/admission integration at
       `provisioning/compute/tests/integration/test_release.py`, plus application
       drive after the storefront restarts with a due site-end report.
-- [ ] 3.3 Reuse the joint end/filing journal across a crash, retaining the same filing
+- [ ] 3.3 Reuse the joint end/correction journal across a crash, retaining the same command
       key. Display pending/unsupported/repair-required outcomes honestly; an Alkahest
-      deal with no dispute adapter retains its accepted failure/reclaim behavior.
-      Verify: library integration uses vector-derived in-process fakes; HTTP
+      deal with no exceptional-end payment adapter retains its accepted failure/reclaim behavior.
+      Verify: library integration uses the shared kit-owned clock-injected engine; HTTP
       application/lane qualification waits for the runnable payments/mediation doubles
       that the path supplies an intent and no correction amounts, direct stop or
-      alternate refund log; filing retries are the lifecycle owner's operation.
+      alternate refund log; self-correction retries are the lifecycle owner's operation. E-C uses the seller's
+      payment adapter, not mediation filing; buyer cases still go to mediation triage.
 
-Acceptance property: recovery cannot lose an owed self-filing after recording the
+Acceptance property: recovery cannot lose an owed self-correction after recording the
 local end; the lifecycle owner selects its fixed valid instant from cause/start/failure
 evidence, never payment start or retry time. Lawful ends do not create seller penalties. Financial amounts and authority ruling policy
 are qualified by the lifecycle/rate changes, not duplicated here.
@@ -200,22 +221,31 @@ pass. New persisted scenarios remain subject to the explicit approval gate above
       inspect selectors before seeding or teardown. Use the existing lane readiness
       check and stop on not-ready. No private service credentials or raw private logs
       enter the repository.
-- [ ] 4.2 Drive a reserved deal in each domain through activation, then beyond the
+- [ ] 4.2 Explicitly enable activation_deadlines_enabled in owned lane setup only,
+      leaving repository/operator defaults off. Drive a reserved deal in each domain through activation, then beyond the
       provisioning allowance but before Agreement end, observing the site's active
       instant and unchanged end. Drive settlement delayed within and beyond the
       absolute window. Record exact deal/lease evidence and outcomes, not just health.
 - [ ] 4.3 Drive crash/restart at every adjacent delivery checkpoint and every
       external intent/acknowledgement gap with deterministic controls. Drive a crash
       before activation until the site's awaiting-activation expiry, recover and
-      observe physical release plus the journaled exceptional-end filing. Keep
-      authority-application results distinct from local filing evidence.
+      observe physical release plus the journaled exceptional-end self-correction. Keep
+      authority-application results distinct from local command evidence.
 - [ ] 4.4 After the rate dependencies are ready, compose their hook and drive
       activate/start/disclose races and a post-activation start refusal in both
       domains against the in-lane payments and mediation doubles. Prove no start
       before activation and no duplicated start key across crashes.
       Name this client qualification against the double, not proof of live authority
       behavior. Keep live contract qualification with the activation campaign gate.
-- [ ] 4.5 Run the relevant complete-deal markers in the ready lanes:
+- [ ] 4.5 After 4.2/4.3 qualify every commit/recovery caller, change the repository's
+      compute-composition activation_deadlines_enabled default introduced by renewable
+      in `provisioning/compute/service/src/compute_provisioning_service/container.py`
+      and its configuration owner (reverify relocated paths). Document storefront-first,
+      site-off rollout and hosted operators' independent caller-readiness gate in
+      `docs/development/DEPLOYMENT_AND_CONFIG.md`. Record public artifact versions/
+      readiness only, no hosted target identifiers. Off remains an explicit override
+      for new commits and never clears existing deadlines.
+- [ ] 4.6 Run the relevant complete-deal markers in the ready lanes:
       `e2e_deal`, `e2e_deal_buyer_cli`, `e2e_bare_metal_mock_deal`,
       `e2e_bare_metal_payment_deal` and `e2e_credits_payment_deal` as configured;
       readiness-gate unavailable public payment targets explicitly. Stop the owned
@@ -242,9 +272,9 @@ implementation, including a comment/import repair. Follow
 - [ ] 5.4 **Narrative compression:** retain final behavior, material evidence,
       deferred rate/renewal work and destinations; move reasoning to the design.
 - [ ] 5.5 **Roadmap currency:** update Goal 8's shared-delivery gap/current state in
-      `docs/development/ROADMAP.md`; also replace the capacity row saying a missing
-      negotiated start begins at commit: compute missing timing now requires repair.
-      Name both updates in the promotion record.
+      `docs/development/ROADMAP.md`; also amend only the capacity row's missing-start-at-commit clause:
+      compute missing timing requires repair. Keep its separate start-on-activation
+      gap open; this change does not implement it. Name both edits in promotion.
 - [ ] 5.6 **Campaign index currency:** update this row and dependencies in
       `openspec/changes/README.md` without prematurely removing dependencies from
       other rows; run `make check-change-index` and record the disposition.
@@ -257,21 +287,26 @@ implementation, including a comment/import repair. Follow
 - [ ] 5.9 **Promotion:** create `compute-delivery`'s permanent spec (by archive) and
       architecture companion under `openspec/specs/`; amend
       `openspec/specs/README.md`, `openspec/specs/vm-storefront-fulfillment/architecture.md`,
-      `openspec/specs/fulfillment/architecture.md` (physical/delivery boundary), and
+      `openspec/specs/fulfillment/architecture.md` (physical/delivery boundary),
+      `openspec/specs/physical-provisioning/architecture.md` (verified bare-metal
+      adoption, read-only legacy progress and retained evidence refusal), and
       `docs/development/ARCHITECTURE.md` (Family kits, authority boundaries,
       Fulfillment, Fulfillment status and results, Release), plus
       `docs/development/DEPLOYMENT_AND_CONFIG.md` for staged safeguard enablement,
       verified legacy compatibility and downgrade refusal. Archive promotes the
-      VM spec delta. Complete each row of the design-promotion record with its exact
+      VM, physical-provisioning, resource-pool-management and marketplace-identity deltas. Complete each row of the design-promotion record with its exact
       destination/heading; reference the owning lifecycle/site contracts without
       reintroducing their requirements.
 - [ ] 5.10 **Documentation citations:** run
       `make check-doc-citations CHANGE=unify-compute-delivery-path`, then the pinned
       `bunx @fission-ai/openspec@1.14.0 validate unify-compute-delivery-path --strict`
       and `make check-change CHANGE=unify-compute-delivery-path`; resolve all failures.
-- [ ] 5.11 **Archival:** archive after the foundation. Re-diff every MODIFIED VM
-      requirement against the then-current permanent spec, preserving accepted
-      foundation semantics and reconciling overlapping blocks before merging. Run
+- [ ] 5.11 **Archival:** archive after foundation and renewable, preserving their
+      physical-provisioning event/watchdog clauses. Archive unify before
+      redesign-authenticated-requests; its later identity MODIFIED block must retain
+      this declaration. If order reverses, re-diff unify as a superset first. Re-diff
+      every MODIFIED block against then-current permanent specs, retaining all clauses
+      and scenarios that the other changes keep. Run
       `bunx @fission-ai/openspec@1.14.0 archive unify-compute-delivery-path -y`, merging
       deltas; point the index row at the archive. Closeout review reads the archived
       change and promoted current-state documentation.

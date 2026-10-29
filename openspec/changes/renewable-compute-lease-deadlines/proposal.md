@@ -60,8 +60,8 @@ None.
 - Any funded-through fact at the site; design records rejected billing alternatives.
 - A buyer-facing provisioning SLA or a minimum-spend rule.
 - A site-event-triggered refund. Under end service, a delivery that fails or never
-  starts is classified by the foundation's single end-plus-optional-filing operation,
-  including a valid immediate pre-start failure intent;
+  starts is classified by the foundation's single end-plus-optional-self-correction operation,
+  including a pre-start command journaled now and executed at the accepted start;
   the buyer's own case is the backstop. The site event may supply evidence, but is
   neither the refund trigger contract nor a payment operation.
 - Wiring every compute delivery caller: `unify-compute-delivery-path` owns that work.
@@ -74,7 +74,7 @@ None.
 - **Event integration gate:** `agreed-evidence-and-early-termination` supplies end
   service, the signed `lease_ended` record and evidence retention. This change owns
   the activation-lapse cause, not the base event or the seller's exceptional-end
-  filing. Ledger work may proceed independently; event integration and closeout
+  self-correction. Ledger work may proceed independently; event integration and closeout
   wait for the foundation.
 - `unify-compute-delivery-path` depends on this change and activates every compute
   commit caller once, including recovery and Alkahest. Campaign enablement waits

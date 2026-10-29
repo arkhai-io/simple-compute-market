@@ -127,12 +127,14 @@ If the dependency stalls, reconsider the port contract with its owner; passing a
 storefront-selected allowance is not an authorized fallback.
 
 An allowance overrun enters ordinary guarded release. The storefront supplies
-classified failure evidence to the foundation's single end-plus-optional-filing
-operation. The foundation owns lawful-end versus seller-failure classification and
-the financial intent and its fixed timing basis. Consume foundation D8's pre-start
-exception (journal now, file at accepted start), never a future-dated case. The site never computes
-that instant, corrections or amounts and its report is not a refund prerequisite.
-A controlling buyer/terms/ruling end is not automatically seller failure. Rate billing
+classified failure evidence to the foundation's single end-plus-optional-self-correction
+operation. The foundation owns cause classification and the financial intent's
+fixed timing basis. Consume D8's pre-start exception (journal now, act at accepted
+start), never a future-dated command. E-C makes exceptional_end a seller payment-
+adapter self-correction, not a dispute or mechanical mediation ruling. The site
+computes no financial instant/amount and its report is not a refund prerequisite.
+The caller supplies verified buyer/ruling/payment evidence for classification;
+term clock or payee stop alone does not erase established non-delivery. Rate billing
 starts after ready evidence and activation in unify; allowance authorizes no billing.
 
 ### D4. Renewal and renewal-lapse policy are deferred seller options
@@ -193,9 +195,10 @@ delivery. Delivery admission must also honor an expiry claim that wins activatio
 - Funded-horizon activation or active renewal now — conflates the seller's internal
   lease policy with payment; activate every deal to its agreed end and defer renewal.
 - Site-event-triggered refund — the foundation classifies delivery failure and
-  supplies a valid filing instant, with the buyer's case as backstop; reports are evidence.
-- Backdated/effective-time payee stop — stops are never backdated; the dispute
-  authority stops now and reverses held earnings since the ruled instant.
+  supplies a valid command instant, with the buyer's case as backstop; reports are evidence.
+- Backdated/effective-time payee stop — stops are never backdated; the seller's
+  payment adapter stops now with partialPeriod returned and reverses held earnings
+  since at as self-correction, separate from a buyer's dispute.
 - Minimum-spend requirement — churn is the seller's pricing/acceptance choice;
   a setup `once` part is the recommended default, not a site allowance rule.
 - Storefront-local scheduled stop — authority-hosted pending stops survive a dead
@@ -228,7 +231,10 @@ activation work can proceed before that integration gate. Event integration wait
 record/outbox. `unify-compute-delivery-path` then wires activation and supplies the
 cross-service delivery evidence. No dependency on a rate-part contract revision is introduced. Renewable ships `activation_deadlines_enabled`
 false. Unify owns enablement after compatible storefronts deploy first, the updated
-site deploys with protection off, and every commit/recovery caller is qualified.
+site deploys with protection off, and every commit/recovery caller is qualified
+in explicitly enabled owned lanes. Unify then changes the repository composition
+default; hosted operators independently confirm readiness. Public evidence records
+readiness and public release versions, not hosted target identifiers.
 New storefronts treat verified null-phase legacy leases as already active/no-op;
 absence of an activation route is tolerated only with a verified legacy view.
 A protected/unknown phase without activation support is repair-required. Existing
@@ -240,7 +246,7 @@ protection or proves campaign readiness. This avoids a whole-change dependency c
 The unify review's 01 F3 / 02 F1 are resolved by reservation-only activation and
 explicit truncation/lost-acknowledgement scenarios. Its 01 F4 / 02 F2 are resolved
 by the max(commit,start) deadline anchor, zero early-dispatch lead time at the
-caller, and foundation-owned valid immediate pre-start filing. Its 02 F4 is
+caller, and foundation-owned valid pre-start command journaling (act at accepted start). Its 02 F4 is
 resolved by the off-by-default composition switch and unify-owned final enablement.
 The owner additionally fixes the distinction between site end intent and proven
 physical completion (D-G), and activation-before-billing order (D-F). These are
@@ -248,6 +254,17 @@ coordinated design edits, not evidence that caller or site code is implemented.
 Recommend another design review of the coordinated contracts before planning;
 keep this change in design. The review/triage records live with unify, which owns
 those findings.
+
+## Coordinated second-review triage
+
+Unify 04 F9 splits enablement into owned-lane qualification with the switch on and
+only then unify's repository composition-default edit. Renewable's introduced default
+remains false; its resource-pool requirement is amended by unify after qualification.
+Unify 03 F2 / 04 F8 strengthens the hardening slice to normalized exact-request/state
+reconciliation; expired unresolved reserve effects cannot silently create a hold.
+E-C removes any seller dispute/mechanical-ruling dependency: activation lapse remains
+site evidence passed to the seller payment-adapter self-correction. No site payment
+logic or new buyer guarantee is introduced. Keep in design for the coordinated review.
 
 ## Open questions
 
