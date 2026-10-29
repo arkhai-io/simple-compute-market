@@ -8,8 +8,8 @@ and support for the stop terms actually offered. Unsupported started-period term
 payment authority computes them, never a storefront corrective refund. A supported
 charged/charged subset may ship before partialPeriod is vendored only with explicit
 buyer-policy opt-in for payee and charged term ends, and only if every required
-entry is supported. On-demand's explicit seller PT0S/returned restitution entry
-still requires returned support; spot immediate restitution stays gated separately.
+term is supported. On-demand always returns the partial period through the dispute
+authority's qualifying mechanical self-penalty ruling.
 A published schema alone is not deployment evidence. No
 minimum spend or backdated payee stop is requested or awaited.
 
@@ -50,12 +50,15 @@ is supplied by `add-arkhai-payments-lane-double`; unified delivery is a transiti
 servicing dependency. No dependency remains on the superseded settle or publish/
 preempt changes.
 
-The external capability gates include hosted deployment of that payments revision
-and, for spot immediate seller restitution, support for several stop entries per
-account per part. The latter is an unscheduled gated payments dependency; until it
-lands spot emergency exit waits out seller notice and immediate stop is unavailable. Schema/vector verification, credentials, target readiness and
-live execution verify/use those gates; this change does not schedule the missing
-multi-entry payments work.
+The external payments capability gate is hosted deployment of that revision.
+Internal dispute-adapter/mediation readiness includes exceptional_end filings and
+the sole qualifying mechanical payee self-penalty, not seller-direct correction.
+Seller stop entries are only entitlements such as spot notice; spot emergency
+files exceptional_end. No seller restitution entry or several-stop-entries gate
+remains. end_delivery supplies receipt evidence only; buyer half owns payment stop,
+same-key outage retry and optional human-triaged buyer_end. Schema/vector checks,
+credentials, target readiness and live execution verify/use the gate; they do not
+introduce extra payment primitives.
 This change does not redesign product terms, servicing, adjudication or site policy.
 Any contract divergence requiring a product decision blocks activation and returns
 to the owning change rather than weakening the declared guarantees.

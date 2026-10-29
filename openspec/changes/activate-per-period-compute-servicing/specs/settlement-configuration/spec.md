@@ -16,34 +16,30 @@ Production compositions MUST NOT declare rate servicing until the hosted deploym
 
 ### Requirement: Activation requalifies the owned payment and lifecycle contracts
 
-Activation MUST requalify foundation/spot's terms and payment-adapter contracts, not supply another pricing implementation. Observations MUST cover per-stopper and term-end treatment, fail-closed unsupported terms, activation-before-start, setup once end and exceptional-end self-correction. No storefront end-pricing correction MAY substitute for an unsupported term.
+Activation MUST requalify foundation/spot's payment and dispute contracts, not implement pricing. Observations MUST cover per-stopper/term-end treatment, fail-closed terms, activation-before-start, setup once end, exceptional_end filing and sole mechanical payee self-penalty. Buyer_end MUST remain human-triaged; buyer half MUST own payment stops and outage retry. No storefront end-pricing correction MAY replace an unsupported term.
 
 #### Scenario: Published schema cannot express returned
 
 - **WHEN** a preset asks for payee last_boundary but the vendored contract cannot encode it
 - **THEN** publication and acceptance refuse rather than rely on later correction; interim charged acceptance records explicit buyer-policy opt-in
 
-#### Scenario: A seller corrects an exceptional end
+#### Scenario: A seller files an exceptional end
 
-- **WHEN** an unentitled end is corrected through the payment adapter
-- **THEN** hosted records show stop per part under buyer-checked seller PT0S/returned entries and reverse per part/amount under existing authority for rate earnings since at, once unserved shares and any full bond award, with no exceptional-end payments kind/field or dispute case
+- **WHEN** an unentitled seller end is handled through the dispute adapter
+- **THEN** the seller files exceptional_end with the Agreement authority, journaled with the end, never future-dated; pre-start failures journal immediately and file at Agreement start, without seller stop/reverse
+- **AND** a payee request at least as strong as standard receives mediation's only mechanical ruling: returned rate stops now through mediation's PT0S/chosen entry, rate reversals since at, once unserved-share refunds by time and full bond award once bonds exist
 
-#### Scenario: Restitution requires mandate authorization
+#### Scenario: On-demand non-preemption is remedied
 
-- **WHEN** hosted qualification exercises on-demand seller restitution
-- **THEN** every part has the explicit seller PT0S/returned stop entry visible to buyer checking, with no implicit role-based permission, payee waiver of payer notice or payer early release
-- **AND** the seller holds only that stop entry; non-preemption is remedied by buyer case over held money and the bond, not enforced by the mandate
+- **WHEN** qualification exercises seller emergency exit in on-demand or spot
+- **THEN** seller entries exist only for entitlements such as spot notice; emergency uses exceptional_end filing, with no seller restitution entry or several-stop-entries dependency
+- **AND** on-demand always returns the partial period under its self-penalty contract; non-preemption is remedied by buyer case over held money and the bond, not enforced by the mandate
 
-#### Scenario: Spot multi-entry support is unavailable
+#### Scenario: Buyer stop is journaled while payments is down
 
-- **WHEN** payments cannot represent several stop entries per account per part
-- **THEN** spot's immediate seller stop remains an unscheduled gated dependency and emergency exit waits out seller notice; activation must not claim immediate restitution
-
-#### Scenario: Cooperative stop is journaled while payments is down
-
-- **WHEN** end_delivery reaches the storefront during payment outage
-- **THEN** signed receipt time governs delivery end and, only where an entry authorizes the storefront's dispute-free action, it journals a cooperative stop with buyer receipt-plus-notice treatment and payer partialPeriod, without notice waiver
-- **AND** absent that authorization, stopping payments remains the buyer half's job
+- **WHEN** the buyer cannot reach payments and end_delivery reaches the storefront
+- **THEN** the storefront signs its receipt time as evidence for the request with no at, never stops buyer billing, and the buyer half journals/retries its stop under the same key with billing until landing
+- **AND** an additional buyer_end carries exact Agreement verified against mandate deal hash and signed request/receipt for human triage, realized as payer stop at at with payer notice/partialPeriod, never a mechanical ruling
 
 ### Requirement: Rate activation preserves existing commitment servicing
 

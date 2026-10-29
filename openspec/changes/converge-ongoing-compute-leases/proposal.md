@@ -17,10 +17,10 @@ bytes even when the seller is dishonest or absent.
   before billing start, with one end-service-owned operation key and a delivery
   checkpoint reference. Consume the unified path's admission/disclosure guarantees.
 - Keep funding renewable until expiry, read payments at expiry, and end on the bare timer only when
-  unreachable/unverifiable. Consume foundation payment self-correction for unentitled ends;
+  unreachable/unverifiable. Consume foundation self-penalty dispute filings for unentitled ends;
   buyer end_delivery and authority stops do not become seller self-penalties.
-- Reconcile earlier evidence through payment-adapter revision corrections with
-  verified prior effects, not dispute self-filing or storefront end-pricing arithmetic. Payments compute each
+- Reconcile earlier evidence through dispute-adapter revised requests and verified
+  prior ruling effects, never seller-direct stop/reverse or local end-pricing arithmetic. Payments compute each
   stopper's partial-period term; setup once ends at activation.
 - Supply retained seller evidence export and immutable command envelopes for
   stateless operator authority recovery through injected adapters, never an
@@ -53,10 +53,12 @@ and converge 4. Neither implementation waits for the other's archive. The campai
 index must record this in Notes, not retain a whole-change archive cycle. Double
 runnable sections gate scenario execution only. Reverify contracts at each section
 handoff. Hosted enablement belongs to activate-per-period-compute-servicing.
-SCM corrections require explicit buyer-checked seller PT0S/returned stop entries
-and existing reverse authority, not role-beneficial payments permissions. Spot's
-several stop entries per account/part remain an unscheduled gated payments
-dependency: until supported its emergency exit waits out seller notice.
+Seller exceptional_end is a journaled dispute filing, not direct payment effects.
+Mediation alone mechanically rules qualifying payee self-penalty; seller entries
+exist only for entitlements such as spot notice, and spot emergency files that case.
+No seller restitution entry or several-stop-entries payments dependency is needed.
+end_delivery supplies signed receipt evidence only; buyer half owns payment stop
+and same-key outage retry, and billing continues until that stop lands.
 
 This change owns no payment arithmetic, mandate codec, authority policy, buyer-half
 implementation, site renewal or hosted deployment. Started-period settlement is

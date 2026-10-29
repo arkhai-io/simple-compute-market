@@ -59,11 +59,11 @@ Financial completion MUST require terminal required parts, resolved end work and
 
 ### Requirement: Lifecycle completion diagnostics are explicit
 
-Seller read/list MUST expose both facts and evidence references, end revision, gap ages, pending operations/cases, repair reason and manual provenance. A due end with either fact false MUST be ending; both true MUST be ended. Permanent refusal or missing required evidence/credentials MUST show repair required without erasing facts. Pending cooperative stops and billing after delivery end MUST be named. Warning thresholds MUST NOT disable servicing.
+Seller read/list MUST expose both facts and evidence references, end revision, gap ages, pending operations/cases, repair reason and manual provenance. A due end with either fact false MUST be ending; both true MUST be ended. Permanent refusal or missing required evidence/credentials MUST show repair required without erasing facts. Pending self-penalty cases and billing after delivery end MUST be named. Warning thresholds MUST NOT disable servicing.
 
 #### Scenario: Priced notice leaves a financial gap
 
-- **WHEN** physical recovery is proven while a cooperative billing stop with priced payer notice or a case remains outstanding
+- **WHEN** physical recovery is proven while the buyer's payment stop with priced notice or a case remains outstanding
 - **THEN** diagnostics identify that work without labelling the entire gap overcharge or claiming a reserve-ahead billing cap
 
 #### Scenario: Delivery is still running
@@ -92,7 +92,7 @@ Rate servicing MUST keep verified funded-through as a replaceable timer, never s
 #### Scenario: A last-poll top-up is reachable
 
 - **WHEN** funding advances within one polling interval before expiry and the expiry read verifies it
-- **THEN** the timer is replaced without ending delivery or creating seller self-correction
+- **THEN** the timer is replaced without ending delivery or creating a self-penalty filing
 
 #### Scenario: Exhaustion is verified at expiry
 
@@ -102,7 +102,7 @@ Rate servicing MUST keep verified funded-through as a replaceable timer, never s
 #### Scenario: An outage concealed a top-up
 
 - **WHEN** a bare timer ended service at T during an outage and verified recovery shows billing continued past T
-- **THEN** foundation resolve_correction atomically journals SCM exceptional_end(T); the adapter maps it to authorized stop/reverse messages only, and financial work stays unresolved until verified effects complete
+- **THEN** foundation's atomic pending-filing resolution journals exceptional_end(T) through the dispute adapter to the Agreement authority; seller sends no stop/reverse and financial work stays unresolved until verified ruling effects complete
 
 #### Scenario: Classification cannot be verified
 
@@ -125,39 +125,35 @@ Both compositions MUST bind foundation's neutral authorization and billing-start
 
 ### Requirement: Offline authority recovery has no storefront writer
 
-Recovery MUST use a seller export, original authority-bound credentials and a durable immutable command envelope written before I/O. It MUST fix key, kind/time/payload, authority, evidence references, principal/reason and per-part descriptors. Replay MUST read first and reuse identical descriptors without opening storefront persistence. Results MUST be retained separately. Foundation/spot's correction contract MUST govern adoption, semantic effect identities and overlapping revisions.
+Recovery MUST use a seller export, original authority-bound credentials and an immutable command envelope saved before I/O. It MUST fix original key, kind/time/payload, authority, evidence, principal/reason and adapter descriptors. Replay MUST read first and reuse exact descriptors without opening storefront persistence. Results MUST be kept separately. Self-penalty MUST file through the dispute adapter, using foundation's case adoption/revision contract, never seller payment correction.
 
 #### Scenario: A seller prepares recovery evidence
 
 - **WHEN** an authenticated seller exports a committed deal through lifecycle read-only export and its typed client/CLI
-- **THEN** the bundle contains exact Agreement, mandate/commitment, authority bindings and kept signed evidence/effect references, without credentials; missing required bytes refuses recovery
+- **THEN** the bundle contains exact Agreement, mandate/commitment, authority bindings, original filing identities and kept evidence/case references, without credentials; missing required bytes refuses recovery
 
 #### Scenario: Recovery is interrupted before result export
 
-- **WHEN** an entitled notice or exceptional_end may have succeeded but no result was saved
-- **THEN** the runner consumes the retained envelope and resolves its original effects by read/same-key retry without reconstructing time or payload
+- **WHEN** an entitled notice or exceptional_end filing may have succeeded but no result was saved
+- **THEN** the runner consumes the retained envelope and resolves its original operation by read/same-key retry without reconstructing time or payload
 
 #### Scenario: Recovery overlaps online replay
 
-- **WHEN** the runner corrected an end whose journaled intent is replayed after storefront restart
-- **THEN** watch discovers the payment effects, matching semantic identities are adopted and no effect is duplicated under a different caller key
-- **AND** different correction bases use qualified overlapping/revision reconciliation or remain repair required, never a speculative extra reversal or duplicate exceptional-end case
+- **WHEN** a runner's self-penalty filing overlaps journal replay after storefront restart
+- **THEN** both use the original semantic filing identity, discover/adopt an equivalent existing seller case and never create a duplicate case under a different caller key
+- **AND** changed end bases use qualified dispute-adapter revision mapping and prior-ruling netting or remain repair required, not speculative append-as-amendment
 
-#### Scenario: On-demand restitution uses explicit authority
+#### Scenario: Seller emergency uses the dispute authority
 
-- **WHEN** an operator requests emergency recovery for an on-demand deal
-- **THEN** the adapter sends stop per part under the buyer-checked seller PT0S/returned entry and reverse per part/amount under existing reverse authority, with no exceptional-end payments field or implicit role-based permission
-- **AND** the mandate does not enforce non-preemption; a buyer case over held money and the bond supplies the remedy
+- **WHEN** an operator requests emergency recovery for an on-demand or spot deal
+- **THEN** the seller files exceptional_end with the Agreement dispute authority and sends no stop or reverse of its own; mediation's sole mechanical ruling is a qualifying payee self-penalty
+- **AND** on-demand non-preemption is remedied by buyer case over held money and the bond, not enforced by the mandate
 
-#### Scenario: Spot immediate stop support is gated
+#### Scenario: Buyer ends delivery during payment outage
 
-- **WHEN** payments cannot represent several stop entries per account per part
-- **THEN** spot's seller immediate-stop dependency stays gated and emergency exit waits out seller notice, rather than inventing an immediate entitlement
-
-#### Scenario: Cooperative stop lacks authorization
-
-- **WHEN** end_delivery reaches the storefront but no entry authorizes its dispute-free stop using the buyer's treatment
-- **THEN** delivery ends at signed receipt time but the buyer half must stop payments; the storefront neither waives payer notice nor substitutes the seller restitution entry
+- **WHEN** end_delivery reaches the storefront after the buyer's payment stop could not reach the authority
+- **THEN** the storefront signs receipt time as evidence, never stops billing for the buyer, and the buyer half journals/retries the same stop key with billing until it lands
+- **AND** an additional buyer_end case carries exact Agreement and signed request/receipt for human triage, not a mechanical ruling
 
 ### Requirement: Rotation evidence has a durable servicing consumer
 

@@ -8,24 +8,25 @@ Lane absence/crash arrows mean pause/resume; durable restart is integration evid
 Buyer client, end service (physical P / authority-work F), site, payment authority
 and dispute authority are separate lifelines. Numbered arrows give scenario order;
 self-arrows are local transitions. A diagram is design, not evidence of a run.
-`exceptional_end` labels persisted SCM intent only; payments receives authorized
-per-part stop/reverse, never an exceptional-end field. Restitution examples require
-explicit buyer-checked seller PT0S/returned entries. Spot's immediate entry remains
-gated on unscheduled multi-entry payments support; until then emergency waits out
-seller notice. Cooperative end_delivery uses buyer treatment only where authorized;
-otherwise the buyer half must stop payments, with no seller notice waiver.
+`exceptional_end` is a seller dispute filing. Only a qualifying payee self-penalty
+is mechanically ruled by mediation; it applies returned rate stops, refunds and
+any full bond through its own authority entries. Seller sends no stop/reverse for
+that path, and spot emergency uses the same filing. end_delivery carries no at;
+storefront receipt is evidence only, not payment authority. Buyer half alone
+journals/retries payment stop under the same key during outage, with billing until
+it lands. buyer_end is human-triaged with exact Agreement and signed evidence.
 
 | # | Diagram | Guarantee |
 |---|---|---|
 | 0 | [On-demand baseline](00-on-demand-baseline.svg) | authority stop and physical recovery earn separate facts |
 | 1 | [Payments-down buyer end](01-buyer-cancel-payments-down.svg) | signed end_delivery acknowledgement supports buyer_end; physical work is independent |
-| 2 | [Site withdrawal, storefront absent](02-site-withdraws-storefront-dead.svg) | buyer stop/case and held money, then seller payment self-correction on recovery |
-| 3 | [Crash during case effects](03-crash-during-case-effects.svg) | stable correction/effect keys, partial reverse after stop, revised correction with prior effects |
+| 2 | [Site withdrawal, storefront absent](02-site-withdraws-storefront-dead.svg) | buyer stop/case and held money, then seller self-penalty filing on recovery |
+| 3 | [Crash during case effects](03-crash-during-case-effects.svg) | original filing identity, partial ruling effects after stop, revised request with prior-ruling netting |
 | 4 | [Stop before disclosure](04-payer-stop-before-disclosure.svg) | local end blocks disclosure; remote observation has a measured window |
 | 5 | [Activation expiry](05-prepaid-activation-deadline-expires.svg) | failed rate delivery corrects exceptional_end at start, including setup once |
 | 6 | [Funding/exhaustion](06-funds-exhausted.svg) | read before end; renewal replaces timer, exhaustion supplies authority end |
 | 7 | [Spot notice](07-spot-preemption-with-notice.svg) | authority-hosted pending stop survives absent storefront; earliest stop wins |
-| 8 | [Started but undelivered](08-start-before-delivery.svg) | cooperative payment self-correction plus buyer-case backstop |
+| 8 | [Started but undelivered](08-start-before-delivery.svg) | mechanically ruled payee self-penalty plus human buyer-case backstop |
 
 Each SVG is rendered from its adjacent `.drawio` XML and embeds that exact editable
 source in its content attribute. Update source and regenerate the rendering

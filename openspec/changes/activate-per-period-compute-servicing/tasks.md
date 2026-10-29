@@ -1,11 +1,11 @@
 # Tasks — activate deployment-qualified per-period servicing
 
 Pending implementation plan. Hosted deployment must support per-part authorities,
-hold extensions and every required stop entry/term. Negotiated charged/charged
-terms do not waive on-demand's required seller PT0S/returned entry. Spot immediate
-restitution also waits on unscheduled several-stop-entries-per-account/part support;
-until then its emergency exit uses seller notice. This change gates, but does not
-schedule, that payments dependency. Product implementation stays with its owners.
+hold extensions and every required stop term. Seller exceptional_end is a journaled
+dispute filing with a qualifying mechanical payee self-penalty, never seller payment
+correction. On-demand always returns its partial period. No seller restitution
+entry or several-stop-entries payments dependency remains. Product implementation
+stays with its owners.
 
 ## 1. Internal readiness and hosted revision gate
 
@@ -33,23 +33,25 @@ schedule, that payments dependency. Product implementation stays with its owners
       only until vendored and only with explicit buyer policy opt-in), absolute maximum
       terms with their own partialPeriod and no rounding, chosen dispute-stop entry,
       period-end/part-stop earning and {for} payout anchoring, activation-before-start,
-      setup once end at activation and full-undelivered/zero-delivered self-correction.
-      SCM exceptional_end maps to stop {part} under explicit buyer-checked seller
-      PT0S/returned entries and reverse {part, amount} under existing authority,
-      without any payments exceptional-end kind/field or implicit role permission,
-      never a dispute filing; no mechanical mediation rulings remain. buyer_end
-      is human triage with payer notice/treatment; the exact Agreement is carried
-      in the case and verified against the mandate deal hash.
-      Never add a storefront end-refund correction. A required product decision
-      returns to its owning change. Kit tests use the kit-owned clock-injected authority engine directly, while HTTP
-      doubles wrap it with controls and mediation; no kit depends on tooling.
-      Verify on-demand seller has only the immediate entry and non-preemption is
-      remedied by buyer case/held money/bond, not enforced by the mandate. Gate spot's
-      several stop entries per account/part on the unscheduled payments dependency:
-      before support immediate stop is unavailable and emergency waits out notice.
-      No payee waiver of payer notice or payer early release. Cooperative end_delivery
-      uses buyer receipt-plus-notice treatment only where a mandate entry authorizes
-      the storefront's dispute-free action; otherwise the buyer half must stop.
+      setup once end at activation and full-undelivered/zero-delivered self-penalty.
+      Restore exceptional_end to dispute-adapter intents and mediation vocabulary/
+      published mapping; journal with end, never future-date and file pre-start
+      failure at Agreement start. Seller sends no stop/reverse. Verify mediation's
+      only mechanical ruling: payee request at least as strong as standard, through
+      its PT0S/chosen entry for returned rates, rate earnings since at, once unserved
+      shares by time and full bond once supported. On-demand always returns partial
+      period. buyer_end is human triage using payer stop at at with payer notice and
+      partialPeriod; cases carry exact Agreement verified against mandate deal hash.
+      Verify seller stop entries only for entitlements such as spot notice; spot
+      emergency files exceptional_end. On-demand non-preemption remedy is buyer case/
+      held money/bond, not mandate prevention. Remove seller restitution entry,
+      implicit favourable stop, notice waiver, early release and multi-entry gate.
+      Verify storefront signs end_delivery receipt (request has no at), never stops
+      buyer billing; buyer half stops first, journals/retries same key through
+      outage with billing until landing, and may additionally file buyer_end.
+      Never add storefront monetary corrections. Return product decisions to owners.
+      Kit tests use the kit-owned clock-injected authority engine directly; HTTP
+      doubles wrap it with controls and mediation, with no kit-to-tooling dependency.
 
 ## 2. Reproducible qualification and target preparation
 
@@ -78,8 +80,9 @@ schedule, that payments dependency. Product implementation stays with its owners
 - [ ] 3.1 Run both-domain live complete deals and the hosted payment/dispute matrix
       in design D4: activation then start, priced payer stop plus hint, authority
       partialPeriod billing, setup once, seller notice surviving storefront
-      absence, exhaustion/read-before-timer-end, explicit-entry seller stop/reverse,
-      receipt-timed cooperative stop during outage, human-triaged buyer_end, case extend/lift
+      absence, exhaustion/read-before-timer-end, exceptional_end dispute filing and
+      sole qualifying mechanical payee ruling, buyer-half same-key outage stop retry
+      with billing until landing, receipt evidence and human buyer_end, case extend/lift
       and partial reverse after stop. Use supported test controls for uncertainty/
       restart; annotate races/outages qualified only in the double. Every required
       live scenario must pass or remain explicitly blocking activation.
