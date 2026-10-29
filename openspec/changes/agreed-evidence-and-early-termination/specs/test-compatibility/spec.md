@@ -8,3 +8,8 @@ External qualification MUST identify the actual payments target and consumer rev
 
 - **WHEN** a disposable selected-site host is unavailable
 - **THEN** local deterministic tests do not claim authenticated access, revocation, or physical teardown
+
+#### Scenario: A configured payments run lacks a buyer credential
+
+- **WHEN** a payments target is configured but the buyer's marketplace credential is not
+- **THEN** the payment scenario fails naming the missing setting, rather than reporting itself blocked

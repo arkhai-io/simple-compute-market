@@ -205,6 +205,5 @@ deadline equal to the commit plus a per-pool provisioning allowance the site rea
 provisioning time is bounded and accounted apart from billable time but is not priced.
 Once held time is priced here, the provisioning window is a candidate for the same
 machinery — an allowance that costs the buyer, rather than one that only
-expires — and the minimum charge a per-period option may state
-(`settle-ongoing-compute-through-arkhai-payments`) is the goal's interim answer to
-repeated provisioning. Revisit both when this change is designed.
+expires — and repeated provisioning is priced by the seller, with a setup `once` part by default
+(`spot-deals-through-arkhai-payments`) and refusal in negotiation policy as its alternative. Revisit both when this change is designed.

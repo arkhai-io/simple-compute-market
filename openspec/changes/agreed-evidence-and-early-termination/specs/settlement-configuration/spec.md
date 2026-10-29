@@ -14,6 +14,11 @@ Shared Arkhai payments registration, typed configuration, and owner-scoped clien
 - **WHEN** a storefront or buyer is configured for Arkhai payments
 - **THEN** its configuration names the API key's environment variable only, and the credential appears in no public option, Agreement, run log, or status
 
+#### Scenario: An undeclared mode accepts no live receipt
+
+- **WHEN** a storefront or buyer configured for Arkhai payments does not set `livemode`
+- **THEN** it expects test-mode receipts, and a receipt signed with `livemode` true does not verify
+
 ### Requirement: Mechanism clause fields stay in their namespace
 
 Mechanism-contributed clause fields MUST live under the mechanism's configuration-key namespace and declare their applicable roles, operators, and value types. The lifecycle term codec's common fields (`adjudication.*`, `early_termination.*`) are the one exception: the codec owns them for every mechanism. The shared foundation MUST own registration, grammar integration, ordering, common status, exact option correlation, and composition, and MUST NOT interpret chain-, arbiter-, condition-, or financial-authority fields.
