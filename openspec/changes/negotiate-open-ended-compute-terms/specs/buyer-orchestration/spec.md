@@ -4,7 +4,7 @@
 
 Both compute buyers MUST display the derived product class, quote with unit,
 separate setup once charge, initial reserve, maximum term/end, selected horizon,
-payer/payee entitlements, notices, `settles_through` and adjudication/retention terms
+payer/payee entitlements, notices, per-stopper and term-end `settles_through`, and adjudication/retention terms
 before approval. They MUST distinguish reserve from spend, start from observed
 delivery, and authority guarantees from cooperative seller behavior. They MUST NOT
 present reserve-ahead as a dishonest-seller billing cap.

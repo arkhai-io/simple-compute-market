@@ -93,8 +93,8 @@ by dispute interface", "Evidence is keyed by negotiation" and "A dispute is one 
       unknown kinds; `make check-packaging`.
 - [ ] 2.2 Create `kit/deal-lifecycle` (foundation library, on the contracts) with the term codec
       for `adjudication` (`dispute` as `{interface, origin, account, record_key, params}`),
-      `early_termination` (no `exposure_seconds`; entitlements' `settles_through` values and
-      `partialPeriod` mapping per D5) and reserved `bond`; malformed and bounded-term refusal
+      `early_termination` (no `exposure_seconds`; entitlements' and term end's `settles_through`
+      values and `partialPeriod` mapping per D5) and reserved `bond`; malformed and bounded-term refusal
       (`case_hold_max_seconds` a nonnegative integer or `null`, minimums from an authority's
       advertisement copy); and the semantics table. Verify: unit tests for each refusal in the
       "Malformed terms are refused" and "Dispute timing terms are bounded" scenarios, and that
@@ -332,15 +332,18 @@ settle by negotiation". Files: `kit/arkhai-payments/schema/`, `src/market_arkhai
 `settlement_composition.py`, and the API-credit buyer.
 
 - [ ] 8.1 Vendor the contract revision (`extend` authorities key, `maxHoldExtension`,
-      per-extension refs, per-part authorities with stop notice durations and `partialPeriod`, `end`, `afterStop`
+      per-extension refs, per-part authorities with stop notice durations and `partialPeriod`,
+      `end` with its own `partialPeriod`, `afterStop`
       holds; producer signed-snapshot and before/after-start vectors) and refresh vectors. Build the
       kit-owned in-process contract fake from the same vectors used by the HTTP double. Verify: `test_receipt_fixture.py` and the
       vector conformance tests pass against the new content hash.
 - [ ] 8.2 Derive each part's authorities and holds from the terms: prepaid `once` end at term end,
       setup `once` end at activation (gated on contract expressibility), hold `{afterStop: dispute_window}`;
       each party's stop notice exactly its entitlement's `notice_seconds`, dispute authority notice 0;
-      `settles_through` mapping to `partialPeriod` per D5, fail closed when the vendored contract or
-      authority policy cannot express/accept it (interim spot charged on both sides). `extend` authorities and `reverse` for the
+      entitlements' and term end's `settles_through` mapping to stop-authority and `end.partialPeriod`
+      respectively per D5; compute term ends use returned. Fail closed when the vendored contract or
+      authority policy cannot express/accept it (interim spot stops charged on both sides;
+      recommendation: absolute end with a charged final partial period disclosed in the option). `extend` authorities and `reverse` for the
       agreement's dispute authority taken from the option; `maxHoldExtension` from
       `case_hold_max_seconds`. Verify: `test_mandates.py` cases for "A once deal's hold is
       derived", "A bounded case hold is derived", "An unbounded case hold is derived" and "A

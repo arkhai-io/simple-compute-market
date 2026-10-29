@@ -53,9 +53,12 @@ added by this reconciliation.
   uses each storefront's typed client and real persistence to prove the cached-option
   refusal has no acceptance side effect.
 - [ ] 3.2 In both negotiation runtimes/policies, resolve start/bounds before final
-  signature according to section 1's identity decision, round the effective horizon down to whole periods,
-  bind equal duration/max term,
-  refuse expired/excessive horizons and missing reserved duration. Remove only VM's
+  signature according to section 1's identity decision, bind equal duration/max term
+  without rounding, require at least one whole period for recurring horizons, and
+  refuse expired/excessive horizons and missing reserved duration. Carry term-end
+  `settles_through` into payments `end.partialPeriod` through the foundation codec;
+  compute presets use returned and fail closed until vendored. Interim recommendation:
+  absolute end with a charged final partial period disclosed in the option. Remove only VM's
   round-zero fallback here. Unit targets: domain terms/policy suites;
   app integration: `domains/vms/storefront/tests/integration/test_buyer_selection_negotiation.py`
   and bare-metal negotiation tests. `unify-compute-delivery-path` gates using the same
@@ -71,7 +74,8 @@ added by this reconciliation.
 
 - [ ] 4.1 Update both buyer CLIs and policies: optional recurring horizon, required
   reserved duration and D7's display of class/price unit/setup/reserve/terms, including
-  per-stopper `settles_through`, effective whole-period horizon and stop-then-hint semantics. Use
+  per-stopper and term-end `settles_through`, unrounded effective horizon and
+  stop-then-hint semantics. Use
   accepted codec values; never promise a reserve-ahead loss cap. Unit targets:
   `domains/vms/buyer/tests/test_buy_resume_cli.py`, `test_explain_cli.py` and
   `domains/bare_metal/buyer/tests`. Integration verifies displayed/approved values

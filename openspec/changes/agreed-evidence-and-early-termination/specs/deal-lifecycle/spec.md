@@ -108,7 +108,7 @@ A mechanism adapter MUST translate each deal-level command into the events of th
 
 ### Requirement: Lifecycle terms are part of the selected option
 
-A settlement option MAY carry `adjudication` (`version`, `dispute`, `dispute_window_seconds`, `case_hold_max_seconds`), `early_termination` (`version`, `entitlements` keyed by `payer` or `payee` with `notice_seconds` and `settles_through`, `max_term_seconds`), and `bond` (`version`, `amount`, reserved until a mechanism can hold a seller-funded stake) in its `params`. The shared codec MUST decode them, so they are part of the Agreement bytes and the option ID.
+A settlement option MAY carry `adjudication` (`version`, `dispute`, `dispute_window_seconds`, `case_hold_max_seconds`), `early_termination` (`version`, `entitlements` keyed by `payer` or `payee` with `notice_seconds` and `settles_through`, `max_term_seconds`, term-end `settles_through`), and `bond` (`version`, `amount`, reserved until a mechanism can hold a seller-funded stake) in its `params`. The shared codec MUST decode them, so they are part of the Agreement bytes and the option ID.
 
 #### Scenario: A term changes the option ID
 
@@ -206,6 +206,16 @@ The codec MUST map `settles_through` values `started_period`, `last_boundary`, `
 
 - **WHEN** an entitlement has `notice_seconds: 0` and `settles_through: started_period`
 - **THEN** its stop entry has zero notice and charged treatment, with no exposure tail
+
+### Requirement: Term ends carry their own partial-period treatment
+
+The codec MUST carry the term end's `early_termination.settles_through` separately from entitlements. The adapter MUST map it to each rate part's `end.partialPeriod` using the stop-authority mapping. Compute presets MUST use `last_boundary` (returned). Publication and acceptance MUST fail closed when the vendored contract cannot express it. Any interim charged final partial period MUST be disclosed as term-end `started_period` in the option.
+
+#### Scenario: A rate end is not a billing boundary
+
+- **WHEN** activation starts rate billing after the Agreement start and the absolute term end falls within a billing period
+- **THEN** the compute preset's `end.partialPeriod` is returned, so billing ends at the last boundary without running past the agreed maximum
+- **AND** publication and acceptance refuse that preset until the vendored contract expresses it
 
 ### Requirement: The dispute window sets the earliest payout
 

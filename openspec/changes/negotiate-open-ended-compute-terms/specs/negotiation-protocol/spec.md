@@ -31,7 +31,7 @@ explicit raw negotiation hooks MUST fail the repository check.
 
 ### Requirement: Compute horizons bind both seller bounds
 
-Reserved duration MUST be positive and fit both bounds. Recurring horizons MAY be omitted; default is the least stated relative bound or absolute availability minus resolved start. Accepted duration/max term MUST equal that default or a shorter selection, rounded down to positive whole periods. Acceptance MUST refuse expired, excessive or sub-period selections.
+Reserved duration MUST be positive and fit both bounds. Recurring horizons MAY be omitted; default is the least stated relative bound or absolute availability minus resolved start. Accepted duration/max term MUST equal that default or a shorter selection without rounding, and MUST include at least one whole period. Acceptance MUST refuse expired, excessive or sub-period selections.
 
 #### Scenario: Absolute bound is earlier
 
@@ -41,7 +41,8 @@ Reserved duration MUST be positive and fit both bounds. Recurring horizons MAY b
 #### Scenario: Maximum term is not a whole period
 
 - **WHEN** the effective seller bound or shorter buyer horizon is 125 seconds for a 60-second period
-- **THEN** duration and max term bind 120 seconds before signature, never 125 or 180
+- **THEN** duration and max term bind 125 seconds before signature, without rounding
+- **AND** the term end carries its own `settles_through` under the foundation codec: compute presets use `last_boundary` mapped to `end.partialPeriod: returned`, and fail closed until vendored
 
 #### Scenario: Reserved term exceeds availability
 

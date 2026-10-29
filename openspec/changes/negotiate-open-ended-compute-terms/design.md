@@ -64,7 +64,8 @@ implementation that rejects every repository reader found during migration.
 
 Keep the foundation's exact shapes and names:
 
-- `early_termination = {version, entitlements, max_term_seconds}`;
+- `early_termination = {version, entitlements, max_term_seconds, settles_through}`;
+  its top-level `settles_through` is the term end's treatment, separate from
   entitlements keyed by `payer`/`payee`, each `{notice_seconds, settles_through}`.
   Foundation D5 owns the `settles_through` mapping: `started_period` ↔ charged,
   `last_boundary` ↔ returned, `stop` ↔ prorated. Presets choose payer charged and
@@ -116,12 +117,22 @@ derivation with a diagnostic, not a guessed default.
 
 At resolved `start_utc`, let `B = min(positive max_duration_seconds,
 available_until_utc - start_utc)` over stated bounds. Default recurring selection
-binds `duration_seconds = max_term_seconds = floor(B / period_seconds) * period_seconds`.
-If one bound is absent use the other. Require at least one whole period and never
-round up past an absolute bound. Round an explicit shorter buyer horizon down by
-the same rule, show the effective horizon before signature, and refuse a longer,
-expired or sub-period selection. Exhaustion and part end use charged treatment;
-a maximum term must therefore never end mid-period. Every reserved duration must fit both bounds.
+binds `duration_seconds = max_term_seconds = B`.
+If one bound is absent use the other. Require at least one whole period, but do not
+round the horizon. Bind an explicit shorter buyer horizon unchanged, show the
+effective horizon before signature, and refuse a longer, expired or sub-period
+selection. Every reserved duration must fit both bounds.
+
+Rate billing starts at activation, potentially later than the Agreement start,
+while the payments end is absolute: horizon rounding cannot align that end to a
+billing boundary. Foundation D5 therefore gives the term end its own
+`settles_through`, mapped to the rate part's `end.partialPeriod` with the same
+values as stop authorities. Compute presets use `last_boundary` (returned), so
+billing never runs past the agreed maximum. Publication and acceptance fail
+closed until that treatment is vendored. Interim recommendation: publish rate
+options with an absolute end and a charged final partial period, disclosed in
+the option as term-end `started_period`, not as the returned preset. Exhaustion
+needs no separate rule: reserve-ahead places it on a period boundary.
 
 The selected option's max term and Agreement duration must agree before signature
 and commitment. A decision gate with the foundation/rate builder resolves how an
@@ -161,9 +172,9 @@ publication/acceptance gates. Exercise all three doors independently.
 ### D7. Display what the authority can enforce
 
 Both CLIs show class, recurring charge/period or total, separate setup once charge,
-initial reserve (not spend), maximum end/horizon, payer/payee entitlements, notice
-and `settles_through` treatment, dispute authority/window/case-hold cap and evidence retention. Values come
-from the selected option, not a stored class. Asking rate keeps its stated unit.
+initial reserve (not spend), maximum end/horizon, payer/payee entitlements, notice,
+per-stopper and term-end `settles_through` treatment, dispute authority/window/
+case-hold cap and evidence retention. Values come from the selected option, not a stored class. Asking rate keeps its stated unit.
 
 Explain rate start as a journaled effect after lease activation, distinct from buyer
 credential disclosure; explain each stopper's started-period charge/return/proration,
@@ -220,7 +231,7 @@ not buyer protocol guarantees.
 
 ## Goal 8 review triage
 
-No standalone review of this terms change was supplied this round. Applied the terms-facing findings from spot external F1/F9/F10/F12 and convergence external F6: foundation-owned `settles_through` values and fail-closed expressibility, one notice without exposure, whole-period horizon rounding, accepted pricing evidence, truthful stop-and-hint and setup display. Rejected: a seller-only started-period refund, because only a committed payment term survives an adversarial seller and independent dispute execution. No new product choice is supplied here; final start/bound/option-identity resolution remains the explicit pre-acceptance gate in D5, rather than a silently chosen protocol amendment.
+No standalone review of this terms change was supplied this round. Applied the terms-facing findings from spot external F1/F9/F10/F12 and convergence external F6: foundation-owned `settles_through` values and fail-closed expressibility, one notice without exposure, unrounded horizons with explicit term-end billing treatment, accepted pricing evidence, truthful stop-and-hint and setup display. Rejected: a seller-only started-period refund, because only a committed payment term survives an adversarial seller and independent dispute execution. No new product choice is supplied here; final start/bound/option-identity resolution remains the explicit pre-acceptance gate in D5, rather than a silently chosen protocol amendment.
 
 ## Design validation
 
