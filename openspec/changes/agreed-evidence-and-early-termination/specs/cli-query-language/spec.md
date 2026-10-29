@@ -14,6 +14,11 @@ The settlement DSL MUST reserve common fields for immutable option identity and 
 - **WHEN** a clause names a payment provider ID, credential, webhook value, or authority-administrator field
 - **THEN** validation rejects the field without contacting the payment service or exposing any provider data
 
+#### Scenario: An option omits the premature-stop penalty
+
+- **WHEN** a valid option has no premature_stop_penalty or explicitly sets zero
+- **THEN** the codec projects zero in that option asset's minor units, with comparisons correlated to that same asset and option
+
 #### Scenario: A buyer asks for buyer-stoppable options
 
 - **WHEN** a clause contains `early_termination.payer=true` and a listing has one option with a payer entitlement and one without

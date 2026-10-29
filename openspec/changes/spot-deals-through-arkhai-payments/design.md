@@ -75,8 +75,8 @@ The buyer may dispute an untrue payee assertion of activation through a case.
 | Reserved | once for committed term | existing once semantics |
 
 Carry foundation early_termination.premature_stop_penalty through both recurring
-presets. Recommendation: on-demand defaults to 24 periods' price, seller-overridable;
-spot carries the configured amount (absent/zero means none). Entitled notice stops
+presets. The injected helper encodes only the penalty supplied by terms; terms
+alone resolves the preset default and seller override. Entitled notice stops
 pay none; an emergency without notice files exceptional_end and pays the capped
 penalty after refunds. Buyer acceptance/display belongs to terms.
 
@@ -224,8 +224,9 @@ version, bindings and activation evidence against the accepted mandate. Missing,
 malformed or mismatched evidence refuses start before an authority call.
 The end service's start journal replays its sole durable intent/key, adopts unknown
 start from authority records on recovery, and ends the resource if start fails.
-If a lawful end already controls, retain its attribution without a seller-fault filing;
-only seller non-delivery follows the classified exceptional_end handoff. Admission/disclosure
+For a verified buyer end, payer stop or ruling before disclosure, defer to
+foundation's “Cause classification is owned by end service”; only classified
+seller non-delivery follows the exceptional_end handoff. Admission/disclosure
 races and durable journals belong to convergence, not the adapter.
 
 Export immutable operation descriptors (part, event kind, amount or at,
@@ -341,12 +342,12 @@ delivered because its term ends at activation), then reverses min(premature_stop
 earned amounts still held) to the payer across parts in mandate order. Bond award
 stays reserved for hosted bonds. Unsupported hosted bonds remain a publication refusal. These amounts
 and payment effects belong to mediation's published mapping, not to this payment
-adapter. A self-penalty is a package of stop, refunds and bond; a partial seller
-path would still need a dispute. Arkhai mediation records disputes so it can act on
+adapter. A self-penalty is a package of stop, refunds and capped penalty (bond
+reserved); a partial seller path would still need a dispute. Arkhai mediation records disputes so it can act on
 bad sellers, including banning them. The buyer may still bring its own case.
 
-Restore exceptional_end to the dispute adapter's intents and mediation's request
-vocabulary and published mapping in the foundation. No exceptional-end event kind
+This adapter consumes foundation 12.3's exceptional_end dispute intent and
+mediation request vocabulary/published mapping. No exceptional-end event kind
 or field enters payments vocabulary: the authority applies ordinary stop/reverse
 ruling effects. Missing returned/chosen-entry producer evidence blocks qualification
 of the standard package, not grounds for a seller-side substitute.
@@ -540,13 +541,14 @@ Archive order for the shared “The payments mandate is derived exactly from the
 Agreement” requirement is foundation, then spot. Spot's MODIFIED text is a superset
 of the foundation's once clauses plus its rate/setup branch; once-only options
 without early-termination entitlements authorize no start or stop. Later codec
-changes must be carried into both before archive. Rate buyer-end behavior has one owner:
-the deal-lifecycle requirement here; buyer-orchestration references that requirement.
+changes must be carried into both before archive. Foundation's buyer-orchestration
+requirement owns buyer end and outage behavior; this change adds only the rate
+stop-then-hint sequence with service through priced notice.
 The foundation owns codec mapping and the neutral activated-evidence envelope;
 this change owns hosted rate authorize and consumption of the journaled
 exceptional-end dispute-filing path; mediation alone owns its ruling computation.
 
-## Second-review recommendations and integration requests
+## Applied second-review coordination
 
 03 F3 / 04 F5's conditional setup trigger and no-activation full return are
 recommendations supplied here, gated on producer contract/vectors; rate-only opt-out
@@ -554,22 +556,15 @@ is the interim, not a silent downgrade. 04 F15 uses caller-owned journal compari
 with a supplied descriptor/digest, not hidden adapter storage. Both choices minimize
 new state and preserve adversarial payment-authority guarantees.
 
-Before advancement the integrator must reconcile the terms tasks/delta and index
-Notes with the section gates above; add activation reference/instant and the
-rotation verifier inputs to the foundation interfaces; fix its rate example with
-paired period/reserve_ahead_seconds and a supported unit; make buyer-orchestration
-reference the rate buyer-end owner; point lane-double rate execution to convergence.
-The final owner decision supersedes E-A/E-C/E-E as amended, the explicit-entry
-correction and the favourable-stop note: restore exceptional_end to the dispute
-adapter's intents and mediation request vocabulary/published mapping. Only the
-seller's at-least-standard self-penalty is mechanically ruled; buyer_end remains
-human triage with the exact Agreement. End_delivery has no at; its signed receipt
-is evidence only. The buyer half owns stop journaling and same-key outage retries,
-and billing runs until stop lands. Remove seller restitution entries, multiple-entry
-gates and cooperative storefront payment stops. The foundation must also record the
-compound-payment-termination alternative as deferred until hosted bonds and dispute
-recording are designed. These are parent-only sibling edits, not claimed here.
-No new implementation or live qualification is claimed by these design edits.
+The coordinated plan reconciled the terms tasks/delta and index Notes with these
+section gates. Foundation supplies activation reference/instant, rotation-verifier
+inputs, paired period/reserve_ahead_seconds, exceptional_end dispute intents and
+mediation's published self-penalty mapping (12.3). Its buyer half owns stop
+journaling and same-key outage retries; buyer_end remains human triage and
+end_delivery is receipt-only evidence. Seller restitution entries, multiple-entry
+gates and cooperative storefront payment stops were removed. Compound payment
+termination is deferred pending hosted bonds and dispute recording. Convergence
+owns rate-lane execution. No new implementation or live qualification is claimed.
 
 First use before convergence uses lane-only approval/command fixtures: delivery
 must fail closed without the rate hook. It proves pending authority stop, not a

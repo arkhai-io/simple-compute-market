@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Hosted rate parameters are explicit and unit-safe
-SCM MUST admit period and reserve_ahead_seconds together or neither and require positive fixed-unit values. Rate options MUST have a finite maximum term. Materialization MUST reject fractional Agreement starts; negotiation MUST resolve whole-second starts before signature. Optional setup_amount MUST be a disclosed positive minor-unit amount in the selected asset; omission MUST mean no setup part. Approval expiry and dispute holds MUST remain separate.
+SCM MUST admit period and reserve_ahead_seconds together or neither and require positive fixed-unit values. Rate options MUST have a finite maximum term. Materialization MUST reject fractional Agreement starts. Optional setup_amount MUST be a disclosed positive minor-unit amount in the selected asset; omission MUST mean no setup part. Approval expiry and dispute holds MUST remain separate.
 
 #### Scenario: Only one rate parameter is set
 - **WHEN** an option supplies period without reserve_ahead_seconds or the converse

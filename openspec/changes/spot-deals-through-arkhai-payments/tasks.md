@@ -20,12 +20,14 @@ foundation; this design's D1–D7.
 - [ ] 1.1 Confirm agreed-evidence-and-early-termination supplies the codec, command
       contracts, hosted once adapter, evidence-store/journal seam, per-part contract
       vendoring and round-2 verified-snapshot interface. Record the actual schema
-      and vector hashes. Do not edit generated models to mimic an unvendored contract.
+      and vector hashes. Gate task 3.5 on foundation 10.4, 10.5 and 12.3;
+      gate task 4.5 on foundation 7.5 round 2, after 12.3 and 13.3.
+      Do not edit generated models to mimic an unvendored contract.
 - [ ] 1.2 Confirm negotiate-open-ended-compute-terms supplies the price accessor
       with its period unit, common term shape, listing bounds and two front-door
-      servicing gates. Gate on terms 1.3/2.1/2.2/3.1/3.2 and D5's start/identity
-      resolution before signature, including whole-second rate starts. Freeze period plus reserve_ahead_seconds and the recommended
-      setup_amount shape with that consumer. Require the accepted rate-structure
+      servicing gates. Gate on terms 1.3/2.1/2.2/3.1/3.2 implementing D5's settled
+      bounded final-option refinement before signature, including whole-second rate
+      starts. Freeze period plus reserve_ahead_seconds and the recommended setup_amount shape with that consumer. Require the accepted rate-structure
       carrier/digest from negotiation-driven-capacity-resize gate 2.1a; refuse an
       unresolved pricing reference rather than read the current listing.
 - [ ] 1.3 Freeze operation descriptors, consume the foundation-owned versioned
@@ -70,9 +72,13 @@ publication configuration/builders and their focused publication suites.
       partialPeriod capability check. Reject fractional rate starts rather than
       rewriting signed Agreement bytes; once-only rounding stays unchanged.
       Keep approval_window distinct from adjudication. Carry foundation's premature_stop_penalty
-      through the injected preset helper: recommended on-demand default 24 periods' price,
-      seller override and spot configured value. Entitled notice pays none; emergency without
-      notice pays the capped mediation penalty, never a seller payment-adapter correction.
+      through the injected preset helper, encoding only the value supplied by terms;
+      terms alone resolves preset defaults and seller overrides. In
+      kit/arkhai-payments/src/market_arkhai_payments/settlement_config.py add public
+      arkhai_payments.period and billing-kind projections, with the typed missing-period
+      representation agreed with discovery task 1.2. Verify once-only, rate and mixed
+      setup/rate projection in test_settlement_config.py. Entitled notice pays none;
+      emergency without notice pays the capped mediation penalty, never a seller payment-adapter correction.
       Verify malformed pairs, calendar periods, setup opt-out and insufficient lead.
 - [ ] 2.2 Derive setup-once then rate deterministically through the accessor and
       codec. Include rate end, afterStop hold, maxHoldExtension and exact per-part
@@ -97,8 +103,9 @@ publication configuration/builders and their focused publication suites.
       offending term. Verify explicit buyer opt-in can accept started_period;
       do not mistake an exact mandate match for policy acceptance. Refuse extra
       seller stop entries not derived from entitlements. Do not claim on-demand
-      prevents physical preemption: the buyer case over held money and any supported
-      bond is the remedy; the seller's own exit is the mechanically ruled self-penalty.
+      prevents physical preemption: the premature-stop penalty and a buyer case over
+      held money (bond reserved) are the remedy; the seller's own exit is the
+      mechanically ruled self-penalty.
 - [ ] 2.4 Supply setup-bearing on-demand/spot presets with explicit setup pricing
       and seller opt-out, gated on the qualified linked rate-start trigger and
       bounded no-activation fallback. Until qualified, refuse setup presets;
@@ -167,20 +174,14 @@ Journal persistence itself belongs to convergence.
       Verify human rulings state treatment; buyer_end preserves payer notice and
       treatment. Exceptional_end is the dispute intent for mediation's only
       mechanical ruling: a payee request at least as strong as the published standard.
-- [ ] 3.5 Integrate the seller half's journaled exceptional_end(at) filing through
-      the dispute adapter to the Agreement's dispute authority, using the existing
-      end-service journal and stable filing identity. Never future-date at;
-      pre-start failures journal immediately and file at Agreement start. The seller
-      sends no stop or reverse of its own, so mediation never reconciles partial
-      seller-applied effects. A lawful pre-disclosure end retains attribution
-      without a seller-fault filing merely for non-availability. Consume, do not
-      reimplement, the foundation's published mediation self-penalty mapping:
-      rate stop-now returned, rate earnings since at reversed, time-unserved once
-      shares (setup all before delivery, none after), then min(premature_stop_penalty,
-      earned amounts still held) across parts in mandate order. Bond award stays reserved. Verify filing response-loss/read/retry, spot emergency filing,
-      on-demand returned treatment and absence of seller payment calls. Report
-      missing dispute intent/request/mapping or producer qualification to foundation;
-      there is no direct-payment fallback or second correction journal.
+- [ ] 3.5 Verify the hosted adapter against foundation 10.4, 10.5 and 12.3's
+      journaled exceptional_end filing path and qualified mediation mapping. Consume
+      deal-lifecycle's “A seller's exceptional end is a dispute filing”; do not
+      reimplement seller filing or journal ownership. Observe filing response-loss/
+      read/retry, spot emergency filing, on-demand returned treatment and capped
+      penalty after refunds. Verify no seller payment calls, exceptional-end payment
+      operation, direct-payment fallback or second correction journal. Report missing
+      dispute intent/request/mapping or producer qualification to foundation.
 - [ ] 3.6 Implement the pure rate authorize hook for commit/dispatch/start/disclose
       under D4's phase table and settlement-servicing delta. Return reason,
       operation identity and verified provenance with allow/refuse/pending. Verify
@@ -236,15 +237,10 @@ second preemption endpoint or a local payment-stop scheduler.
       may use default buyers only once the matching contract is vendored.
 - [ ] 4.5 Re-drive both domains' canonical rate buyer end: stop then hint, keep
       service during nonzero payer notice, and end through watch at effective
-      stop. Keep explicit end-now-regardless and unreachable-authority
-      end_delivery/buyer_end(at) paths distinct. Preserve signed evidence and
-      report stop, delivery and case progress separately. End_delivery has no at;
-      storefront signs receipt time only as evidence and has no authority to stop
-      billing for the buyer. On outage the buyer half journals its stop and retries
-      under the same key; billing runs until it lands. Optional buyer_end carries
-      the signed request, receipt and exact Agreement verified against mandate deal
-      hash to human triage; its ruling realizes the payer's stop at at with payer
-      notice/partialPeriod, never an automatic acknowledgement ruling. Coordinate display.
+      stop. Consume foundation 7.5 round 2 (after 12.3 and 13.3) and
+      buyer-orchestration's “The buyer's end is backed by its own stop or a case”
+      for immediate surrender and outage handling; do not implement those paths here.
+      Coordinate rate notice display.
 - [ ] 4.6 Verify the foundation-owned VM admin route delegates notice for a lawful
       entitled stop and files exceptional_end for seller-caused emergency failure,
       including spot hardware failure; request a foundation fix rather than add a

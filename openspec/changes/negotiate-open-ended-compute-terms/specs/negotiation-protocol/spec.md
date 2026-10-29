@@ -55,6 +55,26 @@ Reserved duration MUST be positive and fit both bounds. Recurring horizons MAY b
 - **THEN** the final identity-bound option and Agreement both bind 10 hours before acceptance
 - **AND** no cached or accepted option is silently mutated
 
+### Requirement: Final recurring options only narrow advertised horizons
+
+The seller's signed acceptance MUST carry the final recurring option and its canonical ID. The buyer MUST verify the ID and equality to an advertised option except for max_term_seconds and the resulting ID; Agreement duration_seconds MUST equal that max term, which MUST NOT exceed the advertised bound. Every other option field MUST remain equal. Cached options and accepted bytes MUST NOT be mutated.
+
+#### Scenario: Final horizon is within the advertised bound
+
+- **WHEN** signed acceptance carries a canonical final option with a 10-hour max term under an advertised 20-hour bound and no other option field changed
+- **THEN** the buyer accepts the refinement if Agreement duration is also 10 hours and both listing bounds hold
+- **AND** selection retains the advertised-to-final option correlation
+
+#### Scenario: Final horizon exceeds the advertised bound
+
+- **WHEN** signed acceptance carries a 21-hour max term under an advertised 20-hour bound
+- **THEN** the buyer refuses even if the final option has a valid canonical ID
+
+#### Scenario: Another option field changes
+
+- **WHEN** signed acceptance narrows the max term but changes any other option field, such as price, asset, notice or adjudication
+- **THEN** the buyer refuses even if duration equals max term and the canonical ID is valid
+
 ### Requirement: Recurring starts resolve before signature
 
 The terms runtime MUST resolve recurring start_utc to whole-second precision before the final signature, with bound/horizon and canonical option identity fixed. It MUST reject a fractional rate start rather than round accepted bytes. Once-only timestamp handling MUST remain unchanged.

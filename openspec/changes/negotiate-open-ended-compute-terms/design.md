@@ -18,12 +18,12 @@ params, not option params. Recheck these seams after dependencies land.
 
 ### D1. Classes are derived presets, never stored
 
-| Selected option billing | Payee entitlement | Display |
-|---|---|---|
-| prepaid once | absent | reserved |
-| per period (`period` present) | absent | on-demand |
-| per period | present | spot |
-| prepaid existing Alkahest splitter | release condition permits interruption | prepaid interruptible |
+| Selected option billing | Payer entitlement | Payee entitlement | Display |
+|---|---|---|---|
+| prepaid once | — | absent | reserved |
+| per period (`period` present) | present | absent | on-demand |
+| per period | present | present | spot |
+| prepaid existing Alkahest splitter | — | release condition permits interruption | prepaid interruptible |
 
 A setup once charge beside a rate does not make it prepaid. One listing can offer
 several combinations at different rates over its existing pool/shape identity;
@@ -150,13 +150,15 @@ needs no separate rule: reserve-ahead places it on a period boundary.
 Recurring start_utc must resolve to whole-second precision before the final signature;
 refuse a fractional rate start rather than round signed bytes. Preserve once-only
 fractional handling. The selected option's max term and Agreement duration must agree before signature
-and commitment. A decision gate with the foundation/rate builder resolves how an
-absolute bound and a relative start produce the final identity-bound option.
-Recommendation: resolve start and effective horizon before the final seller offer;
-a changed horizon requires a canonical option ID and buyer validation. Never mutate
-a cached option or rewrite identity after acceptance. Preserve selection's rule
-that it only narrows advertised offers; if binding this refinement needs a protocol
-amendment, document it explicitly before implementing acceptance.
+and commitment. Adopted recommendation, which the owner may revise: resolve start
+and effective horizon before the seller's signed acceptance, which carries the final
+option and its canonical ID. The buyer verifies that ID and accepts only if the
+option equals an advertised option except for max_term_seconds (and the equal
+Agreement duration_seconds), which must not exceed the advertised bound. Only the
+canonical ID changes as a consequence of that refinement; every other option field
+stays equal. Preserve the advertised-to-final option correlation, never mutate a
+cached option or rewrite identity after acceptance. The negotiation-protocol delta
+specifies this bounded refinement.
 
 An unbounded recurring candidate yields no option and a derivation close reason,
 not a hold merely for being unbounded; valid reserved candidates remain. Bare
@@ -244,7 +246,7 @@ the rate change derives it.
 
 Foundation codec, authority validation and release-model migration precede wire edits. Reverify resize before accessor migration. Freeze recurring
 `period`, `reserve_ahead_seconds`, setup pricing and servicing declaration with the
-rate change. Resolve final-offer start/bound identity before acceptance work.
+rate change. Implement D5's adopted bounded final-option refinement in acceptance.
 Sections 1–2's accessor/codec and 3.1's declaration are section-level handoffs to spot.
 This change can archive with its own declaration/publication/acceptance/display evidence;
 spot's materialization and convergence's continuation evidence are not prerequisites.
@@ -256,15 +258,15 @@ not buyer protocol guarantees.
 
 ## Goal 8 review triage
 
-No standalone review of this terms change was supplied this round. Applied the terms-facing findings from spot external F1/F9/F10/F12 and convergence external F6: foundation-owned `settles_through` values and fail-closed expressibility, one notice without exposure, unrounded horizons with explicit term-end billing treatment, accepted pricing evidence, truthful stop-and-hint and setup display. Rejected: a seller-only started-period refund, because only a committed payment term survives an adversarial seller and independent dispute execution. No new product choice is supplied here; final start/bound/option-identity resolution remains the explicit pre-acceptance gate in D5, rather than a silently chosen protocol amendment.
+No standalone review of this terms change was supplied this round. Applied the terms-facing findings from spot external F1/F9/F10/F12 and convergence external F6: foundation-owned `settles_through` values and fail-closed expressibility, one notice without exposure, unrounded horizons with explicit term-end billing treatment, accepted pricing evidence, truthful stop-and-hint and setup display. Rejected: a seller-only started-period refund, because only a committed payment term survives an adversarial seller and independent dispute execution. The focused cross-change re-check adopts D5's owner-revisable recommendation as the bounded final-option refinement, with an explicit negotiation-protocol delta rather than an unresolved identity gate.
 
 Second-review triage applies foundation 18 F4/F13/F14 and spot 03 F2: one term-end carrier,
 terms-owned default buyer policy, all interim charged term ends refused by default, and no
 terms-to-materialization/startup closeout cycle. The final owner decision makes the seller's
 exceptional_end a dispute filing, mechanically ruled only when at least the standard
 self-penalty, and keeps buyer_end a buyer-filed case ruled by a person.
-Recommendation: retain the design-stage status and re-review changed contracts with the
-foundation; the pre-acceptance final start/bound/identity gate remains explicit, not settled here.
+The focused cross-change re-check leaves this change ready for implementation,
+subject to the recorded dependency and section-level gates.
 
 ## Design validation
 
@@ -284,8 +286,8 @@ Destinations are planned, not claims of implemented behavior.
 | Accepted decision | Permanent location |
 |---|---|
 | D1, D2 classes and quote unit | `docs/development/ARCHITECTURE.md`; `openspec/specs/negotiation-protocol/spec.md` |
-| D3 penalty codec, 24-period on-demand preset and buyer acceptance recommendations; D4 placement result | `openspec/specs/settlement-configuration/spec.md`; foundation-owned lifecycle contract |
-| D5 listing bounds and omission | `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md`; `openspec/specs/resource-pool-management/spec.md` |
+| D3 penalty preset default (24 periods) and buyer acceptance recommendations; D4 placement result | `openspec/specs/settlement-configuration/spec.md`; foundation-owned lifecycle contract |
+| D5 bounded final-option refinement, listing bounds and omission | `openspec/specs/negotiation-protocol/spec.md`; `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md`; `openspec/specs/resource-pool-management/spec.md` |
 | D6 servicing doors | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/storefront-publication/architecture.md` |
 | D7, D8 display and seller-policy distinction | `openspec/specs/buyer-orchestration/spec.md`; `openspec/specs/buyer-orchestration/architecture.md` |
 | Goal/dependency currency | `docs/development/ROADMAP.md`; `openspec/changes/README.md` at integration/closeout |

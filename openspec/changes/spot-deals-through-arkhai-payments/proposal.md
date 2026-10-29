@@ -22,9 +22,9 @@ continuation is a separate dependent change.
   payee-only rate start, entitled stop accounts with their priced notice, and the
   dispute authority's stop/reverse/extend permissions. Seller stop entries exist
   only for entitlements, such as spot notice; on-demand has none. Its no-preemption
-  promise is enforced by remedy, not the mandate: a buyer case over held money and
-  any supported bond. The seller's emergency exit is an exceptional_end dispute
-  filing, including on spot. There is no restitution entry, implicit favourable
+  promise is enforced by remedy, not the mandate: the premature-stop penalty and
+  a buyer case over held money (bond reserved). The seller's emergency exit is an
+  exceptional_end dispute filing, including on spot. There is no restitution entry, implicit favourable
   stop privilege, multiple-entry gate, notice waiver or payer early release.
   Use part end, {afterStop: dispute_window} and maxHoldExtension.
 - Extend the hosted adapter's command translation, reads and watch source with
@@ -72,7 +72,7 @@ continuation is a separate dependent change.
   package of returned rate stops now, earned-since-at reversal, time-unserved once
   reversal (setup all before delivery, none after), then the premature-stop penalty
   capped by earned amounts still held across parts in mandate order; bond award is reserved.
-  Restore the dispute intent/request vocabulary and published mapping in foundation,
+  Consume foundation 12.3's dispute intent/request vocabulary and published mapping,
   rather than calculate or partially apply the package in the payment adapter.
 - Support service-identity overlap and re-anchoring through the foundation's
   verified-snapshot interface. Snapshot-proof verification itself remains owned

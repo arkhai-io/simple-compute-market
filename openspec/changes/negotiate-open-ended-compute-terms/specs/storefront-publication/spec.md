@@ -35,7 +35,7 @@ Unsupported lifecycle promises MUST NOT be synthesized for the Alkahest splitter
 
 ### Requirement: Recurring presets expose the premature-stop penalty
 
-The injected preset helper MUST carry early_termination.premature_stop_penalty through the foundation codec into candidate identity. On-demand SHOULD default to 24 periods' price with a seller override. A missing helper MUST omit recurring candidates with a named refusal rather than reconstruct mechanism params; reserved candidates MUST remain independent.
+Terms publication MUST resolve the penalty preset default and seller override before invoking the helper. On-demand SHOULD default to 24 periods' price. The injected helper MUST encode only the supplied early_termination.premature_stop_penalty through the foundation codec into candidate identity. A missing helper MUST omit recurring candidates with a named refusal rather than reconstruct mechanism params; reserved candidates MUST remain independent.
 
 #### Scenario: A default on-demand preset is emitted
 

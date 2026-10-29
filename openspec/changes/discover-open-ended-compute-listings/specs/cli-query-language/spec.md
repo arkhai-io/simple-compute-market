@@ -22,7 +22,7 @@ mechanism params or depend on the final placement of common terms.
 
 ### Requirement: Penalty projection is asset-correlated
 
-Discovery MUST project premature_stop_penalty through the common codec in the option asset's minor units, with absent/zero meaning none. Penalty predicates MUST correlate with asset and every other predicate on that same option. A positive match MUST NOT replace buyer acceptance policy or claim money remains held.
+Compute discovery MUST consume the foundation-owned premature_stop_penalty projection under cli-query-language's “Settlement fields have common and mechanism-owned namespaces”. Penalty predicates MUST correlate with asset and every other predicate on that same option. A positive match MUST NOT replace buyer acceptance policy or claim money remains held.
 
 #### Scenario: Penalty and asset belong to different options
 

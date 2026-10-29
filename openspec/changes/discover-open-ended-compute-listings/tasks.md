@@ -14,11 +14,17 @@ approval. No tests are added by this reconciliation.
   rate registration's `period` projection. Decide and record D3's typed billing-kind/
   missing-period representation with the registration and DSL before class work;
   any needed public grammar change is explicit and validated first. Preserve the
-  existing Alkahest splitter exclusion without inventing stop entitlements.
+  existing Alkahest splitter exclusion without inventing stop entitlements. Spot
+  task 2.1 owns the payments period/billing-kind projections consumed here.
 - [ ] 1.3 Reverify the landed carrier from `store-registry-listings-as-published`
   (after `add-database-migration-commands`), the filter-spec edits of
   `publish-shape-bounds`, and `drop-escrow-from-shared-wire`'s pushdown state. Record
   local versus server predicate ownership before registry implementation.
+- [ ] 1.4 In `kit/alkahest/src/market_alkahest/settlement_config.py`, expose public
+  billing-kind and release-condition eligibility projections using the representation
+  agreed in 1.2. Verify recipient eligibility and splitter exclusion in
+  `kit/alkahest/tests/unit/test_settlement_config.py`; shared discovery must not
+  inspect arbiter trees or invent lifecycle entitlements.
 
 ## 2. Bound filters and correlated option discovery
 
@@ -31,10 +37,11 @@ approval. No tests are added by this reconciliation.
   and round-trip publication using the canonical typed registry client.
 - [ ] 2.2 In buyer query/selection and registry pushdown where supported, consume
   common `early_termination.*`/`adjudication.*` fields and registered
-  `arkhai_payments.period`, retaining eligible option IDs. Include premature_stop_penalty
-  in option-asset minor units (absent zero), with asset-correlated comparisons; a positive
-  discovery match is not acceptance or a held-money guarantee. Do not create a second
-  evaluator or `interruption.*` alias. Unit targets:
+  `arkhai_payments.period`, retaining eligible advertised option IDs and their
+  correlation to the final ID under terms D5's bounded refinement. Consume the
+  foundation's premature_stop_penalty projection with same-option, asset-correlated
+  comparisons; a positive discovery match is not acceptance or a held-money guarantee.
+  Do not create a second evaluator or `interruption.*` alias. Unit targets:
   `core/tests/unit/test_query_dsl.py`,
   `core/registry/tests/unit/test_option_aware_filters.py` and
   `kit/settlement-runtime` clause tests. App integration verifies same-option

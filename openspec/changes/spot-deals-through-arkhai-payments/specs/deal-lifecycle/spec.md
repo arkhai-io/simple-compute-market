@@ -50,7 +50,4 @@ The buyer half MUST normally submit rate stop at the payment authority and send 
 
 #### Scenario: The payment authority cannot be reached
 - **WHEN** the buyer invokes end but payment stop is unknown or unavailable
-- **THEN** the buyer half journals its stop and retries under the same key; billing runs until the stop lands
-- **AND** end_delivery has no at field; the storefront signs receipt time as evidence and has no authority to stop billing for the buyer
-- **AND** the buyer may additionally file buyer_end(at) with the signed request, receipt and exact Agreement verified against the mandate deal hash
-- **AND** a person in triage realizes any buyer_end ruling as the payer's own stop at at with payer notice and partialPeriod; no signed acknowledgement triggers a mechanical ruling
+- **THEN** the buyer follows buyer-orchestration's “The buyer's end is backed by its own stop or a case”, including its foundation-owned outage recovery rather than a rate-specific duplicate

@@ -19,7 +19,7 @@ Rate authorities and term ends MUST use the deal-lifecycle codec. Optional setup
 
 #### Scenario: A hosted option names a bond
 - **WHEN** a hosted option includes bond
-- **THEN** publication refuses the unsupported term
+- **THEN** publication refuses, naming the unsupported term
 
 #### Scenario: A mixed mandate is derived
 - **WHEN** a rate option includes setup_amount
@@ -151,15 +151,15 @@ The hosted rate adapter MUST consume the deal-lifecycle stop-authority mapping a
 - **THEN** SCM neither absorbs that effect into a cumulative end target nor submits an overlapping correction
 
 #### Scenario: A lawful end precedes disclosure
-- **GIVEN** a controlling buyer end, entitled authority stop, terms end or ruling before disclosure
+- **GIVEN** a verified buyer end, payer stop or ruling before disclosure
 - **WHEN** delivery reports that availability was not reached
-- **THEN** its lawful end attribution is preserved without exceptional_end filing merely for non-availability
-- **AND** only seller non-delivery follows the classified dispute-filing handoff
+- **THEN** attribution follows deal-lifecycle's “Cause classification is owned by end service”, without a seller-fault filing merely for non-availability
+- **AND** only classified seller non-delivery follows the dispute-filing handoff
 
 #### Scenario: A site reports an earlier exceptional end
 - **WHEN** the seller learns service ended without an entitlement covering that end
-- **THEN** it journals exceptional_end at the reported instant and files through the dispute adapter to the Agreement's dispute authority
-- **AND** the seller sends no stop or reverse for that filing
+- **THEN** handling follows deal-lifecycle's “A seller's exceptional end is a dispute filing”
+- **AND** the hosted payment adapter exposes no exceptional-end operation or direct-payment fallback
 
 #### Scenario: Start evidence is absent or mismatched
 - **WHEN** rate start has no valid deal-lifecycle activation envelope matching the deal, commitment and activated lease
@@ -207,26 +207,23 @@ The hosted rate adapter MUST implement authorize(phase, evidence) for commit, di
 - **AND** an unknown phase or malformed/cross-deal envelope refuses
 - **AND** a known pending stop bound cannot be crossed using stale evidence
 
-### Requirement: Seller exceptional ends are filed through the dispute adapter
-The seller half MUST file journaled exceptional_end(at) through the dispute adapter to the Agreement's dispute authority, preserving the end-service journal's identity and evidence. It MUST NOT send its own stop or reverse for that filing. Future-dated at MUST refuse; pre-start failures MUST journal immediately and file at Agreement start.
+### Requirement: Hosted payments expose no exceptional-end operation
+The hosted payment adapter MUST expose no exceptional-end operation and MUST NOT provide a direct-payment fallback for seller exceptional ends. It MUST consume verified authority effects from the foundation-owned filing path under deal-lifecycle's “A seller's exceptional end is a dispute filing”, without duplicating its journal or mediation's computation.
 
 #### Scenario: A seller files its emergency exit
 - **GIVEN** seller-caused failure on an on-demand or spot deal
-- **WHEN** the end service records exceptional_end(at)
-- **THEN** the seller files the self-penalty through the dispute adapter, with no seller payment effects or extra restitution stop entry
-- **AND** the cause and kept evidence remain in the end-service record and evidence store
-- **AND** payments receives no exceptional-end event kind or field
+- **WHEN** the foundation-owned exceptional-end filing path runs
+- **THEN** the hosted adapter receives only ordinary authority records, with no exceptional-end payment event kind or field and no seller stop/reverse fallback
 
 #### Scenario: Filing outcome is uncertain
 - **WHEN** the dispute filing response is lost
-- **THEN** the existing journal and identical-key read/retry resolve the outcome
-- **AND** the seller does not fall back to direct payment calls
+- **THEN** recovery remains with the foundation-owned journal and identical-key read/retry, never a direct hosted-payment fallback
 
 #### Scenario: The mediation self-penalty result is observed
 - **GIVEN** Arkhai mediation's published standard mapping for a payee request at least as strong as the standard
 - **WHEN** the adapter observes the resulting verified authority records
 - **THEN** it reports rate stops now with returned and rate earnings since at reversed, including always-returned on-demand treatment
-- **AND** once parts reflect their time-unserved reversal, with setup all if undelivered and none once delivered, plus any full supported-bond award
+- **AND** once parts reflect their time-unserved reversal, with setup all if undelivered and none once delivered, then min(premature_stop_penalty, earned amounts still held) reversed to the payer across parts in mandate order; no bond award
 - **AND** SCM does not duplicate mediation's computation or apply a second correction
 
 #### Scenario: The standard package cannot be qualified
