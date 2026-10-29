@@ -72,7 +72,10 @@ None. The lifecycle codec and its common semantics belong to the foundation chan
 - Rate-servicing change: freeze `period`, `reserve_ahead_seconds`, setup pricing and
   the servicing declaration with the accessor's unit contract. Rate materialization
   depends on its adapter, not merely the presence of these terms.
-- `converge-ongoing-compute-leases`: startup and retained-deal servicing wiring.
+- `converge-ongoing-compute-leases` owns startup/retained-deal execution and evidence;
+  spot owns materialization execution/evidence. Neither is a prerequisite to this change's
+  archive: sections 1–2 and 3.1 hand off accessor/codec/declaration contracts, and this plan
+  qualifies declaration/publication/acceptance only. Consumer gates still precede live offers.
 - Registry carrier/filter dependencies gate discovery/activation, not dark terms.
 
 ## Impact

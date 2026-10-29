@@ -32,22 +32,17 @@ The typed storefront client MUST settle an Agreement-settled deal with `settle_a
 
 ### Requirement: The buyer's end is backed by its own stop or a case
 
-For buyer-stoppable rate parts, normal end MUST submit `stop` then a `hint`; delivery continues until the effective stop is watched. `end_delivery` MUST remain available for explicit end-now-regardless. An unknown or unreachable payment authority MUST cause `end_delivery` plus a `buyer_end(at)` filing with the signed request and seller acknowledgement.
+The buyer half MUST dispatch payment stops through the payment adapter. If payments is unknown/unreachable, it MUST send receipt-only end_delivery and file buyer_end(at) with its kept request and any seller acknowledgement. It MUST use acknowledged receipt when available, otherwise retain its observed time as a contested claim, and MUST NOT claim automatic adjudication. Rate stop sequencing and notice behavior belong to rate servicing.
 
 #### Scenario: The payment authority is down
 
-- **WHEN** a buyer ends a hosted VM deal while the payment authority is unreachable
-- **THEN** delivery ends, and a `buyer_end` case at the request's time is filed with the dispute authority with both signed messages
+- **WHEN** a buyer requests an end while payments is unreachable
+- **THEN** the buyer sends end_delivery without at, retains the signed receipt if obtained, and files a buyer_end case for human triage without claiming the seller's billing action or case has completed
 
 #### Scenario: Both authorities are down
 
-- **WHEN** a buyer ends a deal while neither authority is reachable
-- **THEN** delivery ends, the filing is journaled, and it is filed once the dispute authority answers
-
-#### Scenario: The stop is accepted
-
-- **WHEN** the payment authority accepts the buyer's stop
-- **THEN** the buyer half sends a hint and files nothing; delivery continues through any priced payer notice until the effective stop is watched
+- **WHEN** the storefront acknowledges surrender while both authorities are unreachable
+- **THEN** the buyer retains receipt evidence and journals its case for retry; seller cooperative payment progress remains distinct
 
 ### Requirement: A buyer end filing survives an absent dispute authority
 
@@ -60,7 +55,7 @@ A `buyer_end` filing the dispute authority cannot receive MUST be journaled and 
 
 ### Requirement: Compute buyers end delivery through the canonical lifecycle client
 
-The VM and bare-metal buyer end commands MUST use the lifecycle client's `end_delivery(negotiation_id, at)` through the buyer half, with the accepted buyer's profile signer and storefront trust. `market bare-metal teardown` MUST remain the bare-metal verb over this shared client, not a domain-only transport.
+The VM and bare-metal buyer end commands MUST use the lifecycle client's `end_delivery(negotiation_id)` through the buyer half, with the accepted buyer's profile signer and storefront trust. `market bare-metal teardown` MUST remain the bare-metal verb over this shared client, not a domain-only transport.
 
 #### Scenario: A bare-metal buyer tears down
 

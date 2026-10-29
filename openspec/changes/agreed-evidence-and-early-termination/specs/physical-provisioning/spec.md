@@ -14,6 +14,11 @@ Compute provisioning MUST deliver each stored `lease_ended` report to the owning
 - **WHEN** the storefront receives a report but its acknowledgement is lost
 - **THEN** the outbox retries the same event identity and payload until acknowledged
 
+#### Scenario: An older receiver is unsupported
+
+- **WHEN** the owning storefront responds 404 or explicitly unsupported to a report push
+- **THEN** the outbox parks push for that peer and retains the signed event for authenticated pull recovery; transient failures instead retry
+
 #### Scenario: Teardown completes after the report
 
 - **WHEN** the site reports an intended end and physical teardown completes later

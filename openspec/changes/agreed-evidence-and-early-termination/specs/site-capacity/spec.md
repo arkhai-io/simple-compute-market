@@ -31,4 +31,4 @@ Expiry, termination, direct release, release failure and force-release MUST each
 #### Scenario: Force-release is repeated
 
 - **WHEN** an operator force-releases the same lease twice
-- **THEN** one `lease_ended` event exists, and the second call returns it
+- **THEN** the second call returns the force-release event and creates no other event; earlier intended-end events remain unchanged

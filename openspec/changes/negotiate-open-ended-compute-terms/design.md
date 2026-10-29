@@ -65,14 +65,14 @@ implementation that rejects every repository reader found during migration.
 Keep the foundation's exact shapes and names:
 
 - `early_termination = {version, entitlements, max_term_seconds, settles_through}`;
-  its top-level `settles_through` is the term end's treatment, separate from
+  its top-level `settles_through` is the sole term-end treatment carrier (no mechanism-specific duplicate), separate from
   entitlements keyed by `payer`/`payee`, each `{notice_seconds, settles_through}`.
   Foundation D5 owns the `settles_through` mapping: `started_period` ↔ charged,
   `last_boundary` ↔ returned, `stop` ↔ prorated. Seller presets offer payer charged and
   payee returned; the buyer's default acceptance policy refuses a payee entitlement
   or term end that is not returned (the buyer benefits, so the buyer enforces it in
   negotiation), and a buyer may loosen it. Until the vendored contract expresses
-  returned, spot explicitly offers charged on both sides, which default buyers refuse. Publication and acceptance fail closed on any
+  returned, interim rate options explicitly offer charged treatment, which default buyers refuse. Publication and acceptance fail closed on any
   unsupported treatment. `exposure_seconds` and `stop+exposure` are retired.
 - `adjudication = {version, dispute, dispute_window_seconds, case_hold_max_seconds}`;
   `dispute = {interface, origin, account, record_key, params}`.
@@ -80,11 +80,13 @@ Keep the foundation's exact shapes and names:
 
 A payee entitlement means the seller may interrupt; the payment authority enforces
 its notice as a pending stop on that stop authority, not a local schedule.
-On-demand has no payee stop authority. Hardware withdrawal without entitlement is
-`exceptional_end(at)`, a dispute requesting the standard self-penalty: stop now and
-reverse the unserved share since `at`, awarding any bond in full. That reversal
-also replaces prepaid `refund_unused`; there is no compensation enum. Permitted
-rate stops follow the committed per-stopper `settles_through`, computed by the
+On-demand has no payee entitled reclaim entry. The seller can still act in the buyer's
+interest without such an entry: exceptional_end(at) is the seller's payment-adapter
+self-correction, not a dispute. It stops rates now with returned treatment, reverses earnings
+since at and each once part's unserved time share, and awards bonds once supported.
+Setup returns all if undelivered and none after activation. A buyer contesting the account
+files a case; mediation triages all cases for a person. There is no compensation enum.
+Entitled rate stops follow the committed per-stopper `settles_through`, computed by the
 payment authority, not a later storefront refund or promise to prorate every end.
 
 Hosted once options carry adjudication but no early_termination: no part is
@@ -169,7 +171,10 @@ Startup additionally refuses to strand accepted rate deals without their
 continuation. Disabling offers never disables accepted-deal servicing.
 `converge-ongoing-compute-leases` owns startup/continuation wiring; the rate adapter
 owns materialization. This change supplies the common declaration contract and
-publication/acceptance gates. Exercise all three doors independently.
+publication/acceptance gates. This plan qualifies those two gates using injected declarations;
+spot owns materialization execution/evidence and convergence owns startup/continuation
+execution/evidence. Neither consumer's completion gates this change's archive. Rate offers
+remain disabled in deployed compositions until their consumer gates pass.
 
 ### D7. Display what the authority can enforce
 
@@ -184,10 +189,13 @@ the one priced notice, authority-hosted pending stops and adjudication for
 unentitled loss of service. Reserve-ahead is not a dishonest-seller billing cap.
 Holds last through stop plus dispute window and accepted case extensions. Keep
 signed evidence through at least the window after the latest delivery end, last
-payout or case close. Cooperative sellers self-file for failed/non-started delivery;
+payout or case close. Cooperative sellers self-correct through their payment adapter for failed/non-started delivery;
 the buyer's stop/case is its backstop. Normal buyer end submits payment-authority stop then a hint: nonzero notice keeps
 service until the effective stop is watched. `end_delivery` means end now regardless;
-payment outage uses it plus `buyer_end(at)` and kept request/ack evidence. Setup ends
+it has no at and the storefront records/signs its own receipt. Our seller journals a billing
+stop for receipt plus payer notice with payer treatment even during payment outages,
+optionally waiving notice; the buyer's outage case buyer_end(at) is human-triaged with kept
+evidence, preserving notice/treatment and netting recorded stops, not ruled mechanically. Setup ends
 at activation, pays out one dispute window later and is fully returned for an
 undelivered deal but not after delivery.
 
@@ -204,7 +212,7 @@ the rate change derives it.
 - Stored class: it can disagree with selected terms.
 - `interruption {seller_may_interrupt, notice_seconds, compensation}`: duplicates the shared codec.
 - Terms as typed fields beside `params`: widens the shared option wire for terms only some mechanisms enforce, against the payment-mechanism-primary rule (D4).
-- Payee stop authority on on-demand: makes won't-preempt unenforceable.
+- Payee entitled reclaim entry on on-demand: makes won't-preempt unenforceable; a returned voluntary self-correction in the buyer's interest is not that right.
 - Bare-metal minimum spend/new payments primitive: churn is seller pricing/refusal policy.
 - Rejecting setup once because it is not minimum spend: name the additive fee honestly.
 - Banning principal-blacklist policy: goodwill is not a decentralized protocol guarantee.
@@ -225,6 +233,9 @@ the rate change derives it.
 Foundation codec, authority validation and release-model migration precede wire edits. Reverify resize before accessor migration. Freeze recurring
 `period`, `reserve_ahead_seconds`, setup pricing and servicing declaration with the
 rate change. Resolve final-offer start/bound identity before acceptance work.
+Sections 1–2's accessor/codec and 3.1's declaration are section-level handoffs to spot.
+This change can archive with its own declaration/publication/acceptance/display evidence;
+spot's materialization and convergence's continuation evidence are not prerequisites.
 Publication and buyers can then proceed while adapter/continuation are prepared;
 rate offers remain dark until all three doors can succeed. Discovery and activation
 also require the registry carrier chain; hosted deployment gates activation, not
@@ -234,6 +245,13 @@ not buyer protocol guarantees.
 ## Goal 8 review triage
 
 No standalone review of this terms change was supplied this round. Applied the terms-facing findings from spot external F1/F9/F10/F12 and convergence external F6: foundation-owned `settles_through` values and fail-closed expressibility, one notice without exposure, unrounded horizons with explicit term-end billing treatment, accepted pricing evidence, truthful stop-and-hint and setup display. Rejected: a seller-only started-period refund, because only a committed payment term survives an adversarial seller and independent dispute execution. No new product choice is supplied here; final start/bound/option-identity resolution remains the explicit pre-acceptance gate in D5, rather than a silently chosen protocol amendment.
+
+Second-review triage applies foundation 18 F4/F13/F14 and spot 03 F2: one term-end carrier,
+terms-owned default buyer policy, all interim charged term ends refused by default, and no
+terms-to-materialization/startup closeout cycle. Owner decisions also replace seller self-filing
+with payment self-correction and mechanical buyer-end adjudication with human triage.
+Recommendation: retain the design-stage status and re-review changed contracts with the
+foundation; the pre-acceptance final start/bound/identity gate remains explicit, not settled here.
 
 ## Design validation
 

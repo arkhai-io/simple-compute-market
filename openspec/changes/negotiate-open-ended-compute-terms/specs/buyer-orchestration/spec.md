@@ -12,8 +12,8 @@ present reserve-ahead as a dishonest-seller billing cap.
 #### Scenario: On-demand approval
 
 - **WHEN** a buyer approves a payer-only recurring option with a setup once part
-- **THEN** the display says on-demand, separately shows setup and recurring charge, and states payer notice and started-period treatment without granting the payee a stop right
-- **AND** it explains stop-then-hint with service through the effective stop, explicit end-now-regardless, the authority stop/case and kept-evidence backstop
+- **THEN** the display says on-demand, separately shows setup and recurring charge, and states payer notice and started-period treatment without granting the payee an entitled reclaim right; voluntary returned-stop self-correction remains separate
+- **AND** it explains stop-then-hint with service through the effective stop, receipt-only immediate surrender and the seller's cooperative receipt-plus-payer-notice billing action, separate from the buyer's authority stop/case backstop and human triage
 
 #### Scenario: Payee treatment is displayed faithfully
 

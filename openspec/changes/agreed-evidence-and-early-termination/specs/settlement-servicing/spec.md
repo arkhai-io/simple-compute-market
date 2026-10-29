@@ -12,7 +12,8 @@ The mandate's `deal` MUST be `sha256(JCS(agreement))` and its transaction ID `sh
 #### Scenario: Hold and approval expiry follow the accepted timing
 
 - **WHEN** a seller derives a mandate from an Agreement accepted at `accepted_at`
-- **THEN** the hold is `ceil(start_utc - accepted_at) + duration_seconds + dispute_window_seconds` whole seconds, approval expires at `floor(accepted_at) + approval_window`, and fractional timestamps stay unchanged in the Agreement and its deal hash
+- **THEN** each prepaid once part has absolute end start_utc + duration_seconds and hold {afterStop: dispute_window}; approval expires at floor(accepted_at) + approval_window, and fractional Agreement timestamps stay unchanged in its deal hash
+- **AND** delayed approval does not shift the part end or replace the stop-relative hold with a duration from acceptance
 
 #### Scenario: A once mandate is derived
 
@@ -50,8 +51,5 @@ A refund MUST be seller-initiated through `reverse`. `reverse` is authorized for
 
 #### Scenario: Only the seller initiates a refund
 
-- **WHEN** delivery fails or a buyer requests settlement after any outcome
-- **THEN** no storefront issues `reverse` unless a seller-authenticated refund
-  request names the deal, or the seller has enabled the `refund` failure action
-  and the deal failed before any delivery; the buyer's recourse is a case with the
-  agreement's dispute authority
+- **WHEN** delivery fails or the seller voluntarily corrects an unentitled end
+- **THEN** seller-authenticated exceptional_end through the payment adapter may reverse unserved held money under its journaled self-correction policy without a buyer filing; a buyer disputing that account files a case with the agreement's dispute authority

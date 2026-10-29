@@ -63,12 +63,13 @@ added by this reconciliation.
   app integration: `domains/vms/storefront/tests/integration/test_buyer_selection_negotiation.py`
   and bare-metal negotiation tests. `unify-compute-delivery-path` gates using the same
   accepted start/end on resume and provisioning; do not duplicate its window logic.
-- [ ] 3.3 With the rate change, exercise materialization's undeclared-servicing refusal
-  after acceptance/restart; with `converge-ongoing-compute-leases`, exercise startup
-  refusal without accepted-deal continuation and continued servicing when offers are
-  disabled. Do not turn on recurring publication until these gates pass. Library
-  integration owns durable adapter behavior; app integration owns composition and
-  fail-before-effect behavior. Exercise one readiness-gated lane scenario per door.
+- [ ] 3.3 Verify this change's declaration seam using injected published/proposed/absent
+  declarations and stable lane identity: publication omits and cached acceptance refuses
+  undeclared servicing before persistence. Commit reproducible fixtures for those two gates.
+  Handoff declaration/accessor contracts after 1.3, 2.1 and 3.1 to spot materialization;
+  spot owns its restart/refusal tests and evidence, convergence owns startup/continuation
+  tests and evidence. Do not wait for either consumer to close this task or archive this change.
+  Deployed recurring offers remain disabled until the consuming gates pass.
 
 ## 4. Buyer first use and focused validation
 
@@ -79,16 +80,19 @@ added by this reconciliation.
   accepted codec values; never promise a reserve-ahead loss cap. Unit targets:
   `domains/vms/buyer/tests/test_buy_resume_cli.py`, `test_explain_cli.py` and
   `domains/bare_metal/buyer/tests`. Integration verifies displayed/approved values
-  agree with the selected option and materialized mandate.
-- [ ] 4.2 Prepare committed first-use fixtures and commands using existing e2e lane
-  tooling: one pool with reserved/on-demand/spot options and two finite bounds in
-  each domain, with the payments/mediation doubles from
-  `add-arkhai-payments-lane-double`. Readiness-check before scenarios; record double
-  evidence distinctly from live hosted activation. Start at each buyer's buy surface
-  and observe unnamed horizon, a shorter named horizon and a cached-option refusal.
+  agree with selected terms and the fixture-derived expected mandate; live rate
+  materialization evidence belongs to spot and does not gate this task.
+- [ ] 4.2 Prepare committed publication/selection fixtures with reserved/on-demand/spot
+  candidate options and both bounds in each domain, using injected proposed declarations
+  rather than requiring runnable rate or mediation services. Start at each buyer's selection
+  surface and observe omitted/shorter horizon, displayed treatments and cached-option refusal.
+  Consumer lane qualification of all three doors belongs to spot/convergence/activation,
+  not a prerequisite to this terms archive. Keep proposed fixture evidence distinct from
+  runtime rate/live-hosted evidence; readiness-check any actual lane before driving it.
 - [ ] 4.3 Run affected package unit/app-integration suites, existing VM listing-shape
   scenarios in `e2e-tests/tests/e2e/roles/scenarios/vms/test_listing_shapes.py` and
-  compute deal scenarios in both domains. Record exact targets/results and disclose
+  existing reserved compute deal scenarios in both domains (rate consumer scenarios are not
+  this archive's gate). Record exact targets/results and disclose
   dependency-gated runs. Run `make check-change CHANGE=negotiate-open-ended-compute-terms`
   and pinned strict OpenSpec validation before pre-closeout review.
 
@@ -115,7 +119,9 @@ closeout tasks, not authorization to promote unimplemented behavior now.
   `make check-architecture-change CHANGE=negotiate-open-ended-compute-terms`; resolve
   all failures/owned exceptions. Run agent-skill checks if instructions were touched.
 - [ ] 5.8 **End-to-end pipeline:** record the pipeline run/result and scenarios proving
-  both domains' classes, bounds, display and all three doors. Readiness/dependency
+  both domains' classes, bounds, display and the declaration/publication/acceptance gates.
+  Materialization and startup/continuation pipeline evidence belongs to spot and convergence,
+  respectively, not this change's closeout. Readiness/dependency
   failures are explicit blockers, never passing evidence or live-deployment claims.
 - [ ] 5.9 **Promotion:** after code review, promote D1–D8 to the destinations in the
   design-promotion table, including publication/buyer architecture companions and
