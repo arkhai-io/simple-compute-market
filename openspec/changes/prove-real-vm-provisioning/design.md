@@ -95,22 +95,35 @@ and ignores `config-real-vm-target.yml`.
 # owner renders the real file; never commit it.
 REAL_VM_TARGET:
   version: 1
-  hosts:
-    - host_id: example-kvm-1
-      ssh_host: 192.0.2.10        # RFC 5737 documentation address
-      ssh_user: provisioner
-      ssh_port: 22
-      public_host: 192.0.2.10
-      capacity: {cpu_count: 7, memory_gib: 28, disk_gib: 160}
+  host:
+    host_id: example-kvm-1
+    ssh_host: 192.0.2.10        # RFC 5737 documentation address
+    ssh_user: provisioner
+    ssh_port: 22
+    ssh_key_path: /run/secrets/example-host-key   # where the service reads its key; never the key
+    public_host: 192.0.2.10
+    capacity: {vcpu_count: 7, ram_gb: 28, disk_gb: 160}
   access: {mode: direct}
 ```
 
+Version 1 describes exactly one host, as a mapping rather than a list: the scenario
+deals once on one shape, and a list would document a selection the format does not
+have. Serving several hosts is a later version's, with its own selection rule.
+
+`ssh_key_path` is where the provisioning service reads the key it reaches this host
+with — a path in the service's filesystem, which whoever deploys the stack arranges
+together with the key (D3). It is not key material, and the SSH connection the host
+is registered with names its key by it.
+
 `capacity` is what the host **sells** — its hardware less whatever the environment
-owner reserves for the host itself — not the hardware. It is the capacity declaration
-the scenario registers, and the listing shape the scenario states equals it, so the
-one deal takes everything the host sells and the shape checks (D7) compare the guest
-against it. Rendering hardware totals would ask for a guest holding all of the host's
-memory and disk.
+owner reserves for the host itself — not the hardware. Its keys are the VM capacity
+dimensions every VM lane declares, `vcpu_count`, `ram_gb` (GiB), and `disk_gb`, each
+a positive integer and all three required. It is registered as the declaration's
+`capacity` unchanged, and the listing shape is derived from it by
+`capacity_source_for` (`cpu.count`, `memory.gib`, `storage.gib`, with no GPU family;
+D6), so the one deal takes everything the host sells and the shape checks (D7)
+compare the guest against it. Rendering hardware totals would ask for a guest holding
+all of the host's memory and disk.
 
 The scenario validates the section with a typed model before any stage runs: a
 missing or misspelled field fails with a message naming it rather than falling back
@@ -131,9 +144,17 @@ the directory).
 ### D2. The scenario registers its own supply
 
 From the target, the scenario registers a pool stating a GPU-less listing shape, the
-executor host, and one capacity declaration per host, through the existing
-`host_registry.py` helpers. The deployment seeds no host inventory. Convention: the
-VM lane already registers everything it reads.
+executor host, and its one capacity declaration, through the `host_registry.py`
+helpers. The deployment seeds no host inventory. Convention: the VM lane already
+registers everything it reads.
+
+`register_e2e_host` takes an optional SSH connection. The mock lanes omit it and keep
+today's placeholder, which nothing connects to. The real lane passes the connection
+built from the target (`ssh_host`, `ssh_user`, `ssh_port`, `public_host`,
+`ssh_key_path`). A host that already exists has its connection replaced when it
+differs (`HostUpdate.connection`), not only its pool reconciled, so a stack surviving
+an earlier run never sends the create to a stale address; and the registered host's
+public connection is checked against the target before any deal stage runs.
 
 ### D3. The scenario's credentials are the local profile's
 
@@ -154,6 +175,25 @@ works, the VM no longer exists on the host once its capacity is released, and ac
 has ended. Intermediate states the mock lanes prove under their gates are left to
 them.
 
+**Finding the jobs.** The fulfillment path surfaces no executor job id, so the real
+lane correlates through the fulfillment's `capacity_reservation_id`, which the status
+08b reads carries, and the operator job list filtered by it
+(`list_jobs(capacity_reservation_id=…)`):
+
+- The create-job poll lists the reservation's jobs and requires exactly one, on the
+  target host; it polls that job to terminal, requires `succeeded`, and records its
+  id, which 09c then also checks the lease's `create_job_id` equals.
+- The teardown-job poll, once teardown is dispatched, lists the reservation's jobs
+  and requires exactly one besides the create job, on the target host, and polls it
+  the same way.
+- No match fails naming the reservation and the fulfillment's state; several
+  matches fail listing them; a failed job fails with its error and its
+  `get_job_logs` output; a timeout fails with the job's last status and its logs.
+
+Where the existing operator interface proves insufficient for a check the lane
+needs, the provisioning service may gain an operation for it; the job list is the
+starting mechanism, not a limit.
+
 Rejected: job gates in real mode under a dedicated profile (a test hook in the real
 executor's path, a new authority surface to keep impossible under production
 configuration, and the gated job still runs for minutes); asserting the gated
@@ -162,14 +202,34 @@ coverage).
 
 ### D4a. Shared stages split at their mock gates
 
-Each shared stage that calls a mock gate is split at the gate. Its gate-free part
-stays shared; its gate part becomes a mock-only stage named for what it does (for
-example, 07 becomes the on-chain escrow stage plus a create-gate stage; 09a becomes
-a release-and-drain stage plus the shared advance to `active`). 08c and 11a, whose
-assertions exist only under a gate, become mock-only. The real lane inserts its own
-"poll the create job to terminal" and "poll the teardown job to terminal" stages
-where the mock lanes release. `Stage00e_ProvisioningMockMode` stays mock-only and the
-real lane adds its own not-mocked check.
+Each shared stage that calls a mock gate — 07, 09a, 10a, 11b — is split at the gate.
+Its gate-free part stays shared; its gate part becomes a mock-only stage named for
+what it does: 07 becomes the on-chain escrow stage plus a create-gate arm; 09a a
+create release-and-drain plus the shared advance to `active`; 10a a teardown-gate
+arm plus the shared expiry; 11b a teardown release-and-drain plus the shared
+completion and release. 08c, whose assertions are about the mock rule, becomes
+mock-only. The real lane inserts its own create-job and teardown-job polls (D4) where
+the mock lanes release. `Stage00e_ProvisioningMockMode` stays mock-only and the real
+lane adds its own not-mocked check.
+
+08b and 11a stay shared. Neither calls a gate, and the states they assert —
+`dispatching` after settlement, `tearing_down` after the dispatching cycle — hold
+because convergence is held for the module and only a stage's explicit advance
+observes a provider's outcome; a real job finishing moves neither. 08b's prerequisite
+becomes `_evaluate_settle_passed` instead of the mock-only `_provision_job_evaluated`,
+and its message says the fulfillment is dispatched and not yet converged. In the
+mock lanes a failure at 08c then no longer skips 08b; the gate stays asserted by the
+mock-only stages around it.
+
+The resulting orders:
+
+- **Mock lanes:** 07 escrow → create-gate arm → 07b → 08a → 08c → 08b → create
+  release-and-drain → 09a advance to `active` → 09b → 09c → teardown-gate arm → 10a
+  expiry → 10b → 11a → teardown release-and-drain → 11b completion and release.
+- **Real lane:** the same shared stages, with its not-mocked check in place of 00e, a
+  create-job poll between 08b and 09a, the SSH access stages (D7) after 09c, a
+  teardown-job poll between 11a and 11b, and the VM-gone and access-ended checks
+  after 11b.
 
 The gate methods (`create_rule_id`, `teardown_rule_id`, `arm_*`, `release_*`,
 `evaluate_create_job`) move from `ComputeDealDriver` to a `MockGates` part that only
@@ -201,9 +261,9 @@ mock lanes keep their GPU shapes. Convention: `test_listing_shapes.py`
 ### D7. What the scenario proves over SSH
 
 - **What a connection proves.** With the delivered command, `ssh … true` succeeds;
-  `id -un` is the delivered user; `nproc` equals the negotiated vCPU count;
-  `MemTotal` is within a named tolerance of the negotiated memory; the root disk is
-  at least the negotiated size; and a second, unrelated key is refused. The tolerance
+  `id -un` is the delivered user; `nproc` equals the negotiated `vcpu_count`;
+  `MemTotal` is within a named tolerance of the negotiated `ram_gb` in GiB; the root
+  disk is at least the negotiated `disk_gb`; and a second, unrelated key is refused. The tolerance
   starts strict and is loosened only on evidence.
 - **Keys.** The scenario generates an ed25519 key pair per run, owner-only, with the
   `cryptography` package, and negotiates its public half.
@@ -239,14 +299,33 @@ evidence `relay-vm-access-without-a-dashboard` needs to close.
   software emulation. Rejected: asserting in preparation only (misses a host that
   loses KVM later); leaving it (an operator without nested virtualization gets a late,
   unrelated failure).
-- **9b. Passthrough boot configuration follows the audit.** GPU passthrough
-  configuration, the rescue boot entry, and the GPU-detection service run when the
-  passthrough audit finds at least one candidate. An operator variable,
-  `gpu_passthrough: auto | enabled | disabled` (default `auto`), forces either way. A
-  host that gains GPUs later re-runs preparation, as binding them requires anyway. The
-  GPU path is unchanged. Rejected: an explicit variable defaulting to enabled (a
-  GPU-less host gets boot changes unless someone remembers); leaving it (boot changes
-  on every GPU-less host the market can now sell).
+- **9b. Passthrough boot configuration follows GPU presence; binding follows the
+  audit.** An operator variable, `gpu_passthrough: auto | enabled | disabled`
+  (default `auto`), forces either way; any other value fails preparation, naming the
+  value. Under `auto` the rule has two phases (01 F5):
+  - *Presence decides the boot configuration.* Preparation reads PCI class and
+    vendor from sysfs, which needs no IOMMU, and a display or 3D controller (`0300`,
+    `0302`) from a vendor whose GPUs the market passes through — NVIDIA (`10de`) or
+    AMD (`1002`) — is GPU presence. Presence runs the GPU passthrough configuration
+    (the IOMMU kernel arguments among it), the rescue boot entry, and the
+    GPU-detection service.
+  - *The audit decides binding.* Binding still happens only after the reboot, from
+    an assessable audit's bindable addresses, exactly as before.
+
+  The audit cannot be the boot gate: with the IOMMU disabled it reports nothing
+  assessable and no GPUs, and enabling the IOMMU is one of the gated steps, so a GPU
+  host whose IOMMU starts disabled would never be prepared. Presence cannot be class
+  alone: a server's BMC display controller and the emulated VGA of most KVM cloud
+  instances are class `0300`, so a class test would change the boot of exactly the
+  GPU-less hosts this rule spares. A listed-vendor card the operator did not mean to
+  pass through gets the IOMMU arguments, as every host does today; an unlisted
+  vendor is treated as GPU-less until the operator sets `enabled`. A host that gains
+  GPUs later re-runs preparation, as binding them requires anyway. Rejected: an
+  explicit variable defaulting to enabled (a GPU-less host gets boot changes unless
+  someone remembers); leaving it (boot changes on every GPU-less host the market can
+  now sell); `auto` keyed to the audit with `enabled` required for a GPU host whose
+  IOMMU starts disabled (moves a step onto the operators of exactly the hosts the
+  market sells).
 - **9c. Host preparation defaults to the scratch image**, the image market
   fulfillment creates from. The golden image becomes an explicit choice, and the
   documentation that states the default is updated with it.
@@ -295,8 +374,12 @@ Two rounds, one session each.
   their coverage must not; round 1 is validated by both lanes passing unchanged in
   outcome.
 - **Interaction with `never-strand-the-host-on-passthrough`.** Its tasks now run only
-  when the audit finds a candidate. On a GPU host the audit does, so its live
-  verification is unaffected.
+  on a host with an NVIDIA or AMD GPU present, whether or not its IOMMU is enabled
+  yet, and binding still follows its audit, so its live verification on such a host
+  is unaffected.
+- **The vendor allow-list.** Presence names the vendors whose GPUs the market passes
+  through. A new vendor's cards are treated as GPU-less until the list gains it or
+  the operator sets `enabled`.
 
 ## Open Questions
 

@@ -36,7 +36,7 @@ under `e2e-tests/.github/workflows/` that GitHub never runs.
 ## What Changes
 
 - A real-provisioning VM scenario, `e2e_vm_real_provisioning`, in no default lane. It
-  reads a target description — the host to provision on, its capacity, and the
+  reads a target description — the one host to provision on, its capacity, and the
   access mode to expect — from a typed settings section an environment owner renders
   into an ignored profile file, registers the pool, host, and GPU-less capacity
   declaration itself, runs the canonical compute deal through to an active lease,
@@ -49,9 +49,10 @@ under `e2e-tests/.github/workflows/` that GitHub never runs.
 - A domain-neutral SSH access helper for scenarios, and GPU-less shape support in
   the VM e2e helpers.
 - Host preparation refuses a host without hardware virtualization, and VM creation
-  pins KVM. GPU-passthrough boot configuration is applied only when the passthrough
-  audit finds a candidate, with an explicit operator override. Host preparation
-  defaults to the scratch image.
+  pins KVM. GPU-passthrough boot configuration is applied only to a host with a GPU
+  from a vendor whose GPUs are passed through, whether or not its IOMMU is enabled
+  yet, with an explicit operator override; binding still follows the passthrough
+  audit. Host preparation defaults to the scratch image.
 - The dead nested workflow and the README's nonexistent targets are removed; the
   manual live-validation runbook is rewritten as the scenario's manual counterpart.
 
@@ -103,8 +104,8 @@ None.
 
 - `never-strand-the-host-on-passthrough` (blocked in closeout) wrote the audit and
   the passthrough tasks this change gates. Its GPU path is unchanged, so its live
-  verification remains valid; its gated tasks now run only when the audit finds a
-  candidate.
+  verification remains valid; its gated tasks now run only on a host with an NVIDIA
+  or AMD GPU present, and binding still follows its audit.
 - `relay-vm-access-without-a-dashboard` (blocked in closeout) needs a prepared host
   and a deployed relay for its live verification. The relay-backed follow-up to this
   change is how that evidence is produced.

@@ -68,8 +68,10 @@ exists on the host and the delivered access no longer connects.
 The scenario MUST register the pool, executor host, and capacity declaration it deals
 on from its target description, and MUST be able to deal on a shape that declares no
 GPUs. It MUST keep every worker hold and explicit advance that exists outside the mock
-profile, and MUST wait for a real job by reading its state, within a stated bound, where
-a mock lane would release a gate. It MUST generate the buyer's key for the run and
+profile, and MUST wait for a real job, found through its fulfillment's capacity
+reservation, by reading its state, within a stated bound, where a mock lane would
+release a gate. It MUST register the host with the connection its target describes,
+replacing the connection of a host an earlier run left behind. It MUST generate the buyer's key for the run and
 MUST trust the guest's host key on first use for the run only, failing if a later
 connection in the run presents another. It belongs to no default lane and MUST skip,
 naming the profile it needs, when no target description is present.
@@ -111,11 +113,13 @@ loaded from a profile file the repository ignores, beside a committed example wh
 values are visibly fictitious. The section MUST be validated before any stage runs: a
 missing or misspelled field MUST fail naming the field, an unknown version MUST be
 refused, and an access mode the version does not admit MUST be refused. Version 1
-describes each host's identity, connection address, connection user and port, tenant
-address, and the capacity it sells, and admits only direct access. The capacity is what
-the host offers for sale, not its hardware; the scenario declares it and deals on a
-shape equal to it. The section MUST NOT carry the
-private key the provisioning service reaches hosts with.
+describes exactly one host — its identity, connection address, connection user and
+port, the path at which the provisioning service reads the key it reaches the host
+with, its tenant address, and the capacity it sells — and admits only direct access.
+The capacity is what the host offers for sale, not its hardware, stated in the VM
+capacity dimensions `vcpu_count`, `ram_gb`, and `disk_gb`; the scenario declares it
+unchanged and deals on a shape equal to it. The section MUST NOT carry the private key
+the provisioning service reaches hosts with.
 
 #### Scenario: A field is misspelled
 
