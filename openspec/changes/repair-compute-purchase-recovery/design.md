@@ -70,7 +70,9 @@ Two design reviews on 2026-10-28 shaped the decisions below:
   - D10 names the site's own states, compares the projection's full availability,
     and states the pause's precondition and coverage gaps.
 
-The decisions below are written as settled by those triages.
+The decisions below are written as settled by those triages. The Round 1
+implementation review's F1 (`reviews/03-implementation-external.md`) reopened D3's
+compatibility: the owner settled that `ssh` is served at version 2 only.
 
 ## Goals and non-goals
 
@@ -294,54 +296,75 @@ The VM codec takes its host from `public_host` or `ssh_host`, as today. Its tena
 port stays what its role reports for the guest (the forwarded or relay port), not the
 host's `public_port`.
 
-**Compatibility.**
-- `public_port` is additive to version 1 of the `ssh` connection envelope.
-- A connection that states no `public_port` is read exactly as before.
-- An older service reading a connection that states one refuses it (`extra="forbid"`).
-  Rolling back therefore means removing `public_port` from host records first. That
-  is recorded as the rollback step, as sites and storefronts are upgraded together
-  (`ARCHITECTURE.md`, "Operators").
-
-No networking is widened. An operator records the route that already exists.
-
-**Compatibility, as settled after merging `dev`.** This supersedes the bullets
-above. `RELEASING.md`'s versioning policy says a contract that carries its own
-version is never changed in place, and that incompatibility is signalled by the
-version numbers. A version-1 `ssh` reader refuses a record stating `public_port`, so
-adding the field to version 1 broke that rule. The field therefore belongs to a new
-version:
-- **Version 1 is unchanged.** It never carries `public_port`, not even as null. A
-  version-1 submission or stored record is read and stored exactly as before.
-- **Version 2 is version 1 with the optional `public_port`.** An explicit version-2
-  connection that states no port stays version 2, stored without the key.
-- **What writes which.** `ssh_connection()`, and the INI import through it, submit
-  version 2 when a port is stated and version 1 otherwise. A caller that states no
-  version keeps submitting version 1, which the contracts default to.
-- **Dispatch.** The host authority's codec registry is keyed by kind and version, and
-  the provisioning service registers the `ssh` codec once per supported version. A
-  submission at a version no codec serves is refused, naming the versions served, and
-  so is a duplicate kind-and-version registration. The `ConnectionCodec` protocol is
-  unchanged: each instance serves one version.
+**Compatibility: `ssh` is served at version 2 only.** `RELEASING.md`'s versioning
+policy says a contract that carries its own version is never changed in place, so
+`public_port`, which a version-1 reader refuses, belongs to a new version. Before 1.0.0
+the release that introduces a version may stop accepting the one before, and this
+change does so. The repository has no production deployment, and every host record it
+has written is a development or test record, so no reader or writer of version 1 needs
+to be kept:
+- **Version 2 is the only version served.** It is version 1 with the optional
+  `public_port`. A connection is submitted and stored at version 2 whether it states
+  a port, states none, or states it as null; an absent or null port is stored with no
+  key, and the address and port fall back as above.
+- **What writes it.** `ssh_connection()`, and the INI import through it, always submit
+  version 2. The generic `ConnectionSubmission` keeps its default of version 1, which
+  is not `ssh`'s to change: a caller that states no version is refused, naming version
+  2, rather than read as version 2. Every typed caller in the repository states it.
+- **Dispatch.** The host authority's codec registry is keyed by kind, as on `dev`, and
+  `build` refuses a submission at another version than its kind's codec serves, naming
+  it. The service registers one `ssh` codec. No caller needs more than one version of a
+  kind, so the registry keyed by kind and version that served both is removed, and the
+  family kit is unchanged from `dev`.
 - **Reading.** `SshConnectionCodec.parse`, the strict read that execution and probes
-  use, checks the envelope's kind and version before its fields, and refuses a
-  version it does not serve.
-- **Credentials.** A protected key is carried forward across an update whatever the
-  previous record's version.
-- **Rollback.** Before an older provisioning service runs, rewrite every version-2
-  host to version 1 without `public_port`, through `PUT /api/v1/hosts/{host_id}` or an
-  INI re-import without `public_port=`. An older service is not relied on to read a
-  version-2 record: it would ignore the version rather than support it. Nothing
-  rewrites stored hosts automatically.
+  use, checks kind and version before any field, and refuses a host stored at version 1,
+  telling the operator to re-register it. Host reads (`GET /api/v1/hosts`) do not pass
+  through a codec and still list such a host, at version 1.
+- **Moving a stored host forward.** A host stored at version 1 runs nothing until it is
+  submitted again at version 2, and nothing rewrites it on its own:
+  - `PUT /api/v1/hosts/{host_id}` with a version-2 connection. An update replaces the
+    connection's whole public mapping, so it restates every stored public field,
+    `key_path` included where the host has one, and the tenant route, at version 2,
+    and submits no `private_key` secret. A host whose key is a file keeps it through
+    the restated `key_path`; omitting it would leave the connection naming no key,
+    which is refused. A host with a protected key and no `key_path` keeps that key: a
+    protected key the submission neither resubmits nor replaces with a file is
+    carried forward from the stored row as opaque ciphertext, never read or
+    decrypted. Pool, enabled state, and GPU description are untouched unless the
+    update states them.
+  - An inventory import (`POST /api/v1/hosts/import`), which upserts each entry it
+    names at version 2 with the key the entry names; for a host whose key is a file,
+    an entry naming the same file is the alternative to the update. An entry stating
+    no `pool_id` leaves the host's pool as it is.
+  - Startup seeding from an inventory file applies the same upsert, but only on a
+    service whose registry is empty, so it upgrades nothing that is already stored.
+- **When.** A retained development or test host is moved forward in the same rollout
+  that deploys the service serving version 2, after that service is running and before
+  any work is dispatched to the host. The service serving version 2 refuses a
+  version-1 record at execution, and the service before it was never written or
+  qualified to read a version-2 record: its strict read does not check the version,
+  and refuses only a record stating `public_port`, so nothing relies on how it treats
+  one. The update keeps the host's
+  identity, pool, enabled state, route, and key, whether a file reference or a
+  protected key, and changes no host-side state; a listing that
+  must not trade during the rollout stays paused through it. No database row is
+  rewritten by hand.
+- **No downgrade.** This change provides and qualifies no downgrade to version 1. Its
+  rollout installs the service serving version 2 together with the components that
+  call it, and moves retained test data forward explicitly, as above.
 
 Alternatives rejected:
-- *Additive to version 1.* This was the earlier choice, and it is the change in place
-  the policy forbids.
-- *Write version 2 only.* This refuses every existing version-1 registration,
-  including callers that state no version. That is a larger incompatible boundary than
-  the field needs.
-- *One codec declaring a set of versions.* The codec's `build` would need the version,
-  which changes the protocol for every codec. Two instances of one implementation
-  need no protocol change.
+- *Additive to version 1.* This is the change in place the policy forbids.
+- *Serve versions 1 and 2 side by side, with a documented downgrade.* This was the
+  choice after merging `dev`. It lets existing records keep running without an
+  explicit upgrade, at the cost of keeping a second contract, a registry keyed by
+  version, and a downgrade path to test. No production deployment exists, so no
+  compatibility obligation requires that cost, and the owner chose coordinated
+  upgrades instead (`reviews/03-implementation-external.md`, F1).
+- *Read version 1 as version 2.* A stored version-1 row would then be reinterpreted
+  silently; refusing it until it is submitted again keeps every upgrade explicit.
+- *Change `ConnectionSubmission`'s default to version 2.* The default is the generic
+  contract's, shared by every connection kind.
 
 **Completed results are not rewritten.** A grant's endpoint is computed when its job
 completes and stored in the job's result. The delivery is read back from that
@@ -953,18 +976,16 @@ those (Section 14.9).
 
 - **No schema migration.** `public_port` lives in the connection envelope's public
   fields, and the compensation marker is a value of the existing `failure_reason`
-  column. Each host row already records its connection's version.
+  column. Each host row already records its connection's version, and no automatic
+  migration rewrites it. A host stored at `ssh` version 1 is moved to version 2 by an
+  explicit data update, a host update or an inventory import, as D3 says.
 - **Wire.**
   - The fulfillment status and result reads are unchanged in shape. A compensated
     aggregate reads `torn_down` with `failure_reason` `create_compensation`.
   - The VM administrator reservation response's `gpu_count` becomes optional, in the
     server model and the storefront client's.
 - **Rollback.**
-  - Remove `public_port` from host records before running an older provisioning
-    service.
-
-    Correction after merging `dev`: `public_port` is now `ssh` version 2's. Rewrite
-    every version-2 host to version 1 without the port, as D3 says.
+  - No downgrade of `ssh` connections to version 1 is provided or qualified (D3).
   - An older service treats a compensating teardown already recorded as an ordinary
     teardown. Its teardown-failure write replaces the marker with
     `provider_reported_failure`, so an in-flight compensation completes and is still
@@ -1025,7 +1046,7 @@ closeout, under the heading named.
 |---|---|
 | D1 fact reading, block boundaries, and linkage | `openspec/specs/physical-provisioning/spec.md` ("A create succeeds only with readable delivery evidence", and "A bare-metal reclaim's printed fact is a diagnostic" for the reclaim's result and the job status's authority over teardown, by the archive); rationale in `openspec/specs/physical-provisioning/architecture.md` under "Durable jobs, transient workers" |
 | D2 mocks print the shipped form, rendered for the job, and pipeline scenarios use it | `docs/development/TESTING.md` under "4. System Integration Tests (End-to-End)", beside its paragraph on the compute lanes' mock profile |
-| D3 tenant-facing port | `openspec/specs/physical-provisioning/spec.md` ("The tenant-facing host address falls back to the connection address", for the fallback and the delivery endpoint, and "Host registry records the connection port", for the INI `public_port=` rule, rendering, and the record stored without the field; both by the archive); `openspec/specs/physical-provisioning/architecture.md` under "The host registry owns the connection"; `docs/development/DEPLOYMENT_AND_CONFIG.md` under "Definition documents", in its host-inventory paragraph (`public_port=`, and a host API connection stating `public_port` at `ssh` version 2); the versioned `ssh` connection and the codec registry keyed by kind and version: `openspec/specs/physical-provisioning/spec.md` ("Host connections are typed by their implementation's codec", by the archive) and `openspec/specs/physical-provisioning/architecture.md` under "The host registry owns the connection". `docs/development/RELEASING.md` is unchanged |
+| D3 tenant-facing port | `openspec/specs/physical-provisioning/spec.md` ("The tenant-facing host address falls back to the connection address", for the fallback and the delivery endpoint, and "Host registry records the connection port", for the INI `public_port=` rule, rendering, and the record stored without the field; both by the archive); `openspec/specs/physical-provisioning/architecture.md` under "The host registry owns the connection"; `docs/development/DEPLOYMENT_AND_CONFIG.md` under "Definition documents", in its host-inventory paragraph (`public_port=`; every `ssh` host connection, through the API or an inventory, at version 2; and a host stored at version 1 moved forward by an update or an import, never on its own); `ssh` served at version 2 alone, other versions refused, and a re-registration keeping a protected key: `openspec/specs/physical-provisioning/spec.md` ("Host connections are typed by their implementation's codec", by the archive) and `openspec/specs/physical-provisioning/architecture.md` under "The host registry owns the connection". `docs/development/VALIDATION_RUNBOOK.md`'s host requests state version 2 already (task 3.11). `docs/development/RELEASING.md` is unchanged |
 | D4 compensating teardown, its marker, and the compute seam | `openspec/specs/fulfillment/spec.md` and `openspec/specs/physical-provisioning/spec.md` (by the archive); `openspec/specs/fulfillment/architecture.md` under "Durable persistence and recovery"; `openspec/specs/physical-provisioning/architecture.md` under "Proof-driven release"; `docs/development/ARCHITECTURE.md` under "Release", whose table's `failed` row splits into compensable and not |
 | D5 run-log round trip | None: a test that qualifies the producer's existing form. No behaviour changes |
 | D6 an exhausted teardown job is not re-run | `openspec/specs/physical-provisioning/architecture.md` under "Proof-driven release", whose `teardown_failed` requeue sentence is corrected |

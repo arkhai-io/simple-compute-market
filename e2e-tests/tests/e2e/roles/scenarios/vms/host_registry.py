@@ -213,6 +213,7 @@ def register_e2e_host(
             host_id=name,
             connection=ConnectionSubmission(
                 kind="ssh",
+                version=2,
                 public={"ssh_host": "127.0.0.1", "ssh_user": "e2e", "key_path": "/dev/null"},
             ),
             gpu_count=gpu_count,

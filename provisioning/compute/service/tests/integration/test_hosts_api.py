@@ -25,12 +25,13 @@ from __future__ import annotations
 import shlex
 from types import SimpleNamespace
 
+from compute_provisioning.hosts import ConnectionEnvelope, ProtectedValue
 from compute_provisioning.hosts.db import Host
-from compute_provisioning_ansible import ssh_connection
+from compute_provisioning_ansible import SshConnectionCodec, ssh_connection
 from compute_provisioning_ansible.runner import AnsibleRunner
 from vm_provisioning_operator.models import CreateVmRequest
 
-from compute_provisioning_client import ComputeProvisioningError
+from compute_provisioning_client import ComputeProvisioningError, ComputeProvisioningJobError
 import pytest
 
 from .conftest import ProvisioningClients, TEST_CONNECTION_KEY
@@ -41,7 +42,7 @@ from compute_provisioning_contracts import (
     HostResponse,
     HostUpdate,
 )
-from market_config import decrypt_secret
+from market_config import decrypt_secret, encrypt_secret
 
 
 def _connection(**changes):
@@ -469,6 +470,7 @@ class TestSshPortRejection:
                 "host_id": "kvm1",
                 "connection": {
                     "kind": "ssh",
+                    "version": 2,
                     "public": {
                         "ssh_host": "10.0.0.1", "ssh_user": "ubuntu",
                         "key_path": "/keys/id", "ssh_port": port,
@@ -503,6 +505,25 @@ class TestEmbeddedKey:
         assert stored["scheme"] == "fernet-v1"
         assert "fixture" not in stored["ciphertext"]
         assert decrypt_secret(stored["ciphertext"], TEST_CONNECTION_KEY) == self._PEM
+
+    async def test_an_update_naming_no_key_keeps_the_protected_key(
+        self, client_and_queue, session_factory,
+    ):
+        client, _ = client_and_queue
+        await client.family.register_host(HostCreate(
+            host_id="bm1",
+            connection=ssh_connection(ssh_host="10.0.1.1", private_key=self._PEM),
+        ))
+        with session_factory() as db:
+            before = dict(db.get(Host, "bm1").connection_protected)
+
+        updated = await client.family.update_host("bm1", HostUpdate(
+            connection=ssh_connection(ssh_host="10.0.1.2", public_port=2222),
+        ))
+
+        assert (updated.connection.version, updated.connection.public["public_port"]) == (2, 2222)
+        with session_factory() as db:
+            assert dict(db.get(Host, "bm1").connection_protected) == before
 
 
 class TestTenantFacingRoute:
@@ -578,11 +599,11 @@ class TestTenantFacingRoute:
             "public_port": "22",
         }
 
-    async def test_a_host_stating_no_route_is_stored_and_rendered_as_before(
+    async def test_a_host_stating_no_route_is_stored_at_version_2_and_rendered_with_the_fallback(
         self, client_and_queue, fake_ansible, session_factory,
     ):
-        """No ``public_port`` key is stored, not even a null, so a reader that
-        does not know the field still reads the record."""
+        """No ``public_port`` key is stored, not even a null, and the job's
+        inventory carries the connection's own address and port."""
         client, _ = client_and_queue
         rendered = self._render_for_real(fake_ansible)
         await _register(client)
@@ -590,9 +611,9 @@ class TestTenantFacingRoute:
         connection = (await client.family.get_host("kvm1")).connection
         public = connection.public
         assert public["public_host"] is None and "public_port" not in public
-        assert connection.version == 1
+        assert connection.version == 2
         with session_factory() as db:
-            assert db.get(Host, "kvm1").connection_version == 1
+            assert db.get(Host, "kvm1").connection_version == 2
             assert db.get(Host, "kvm1").connection_public == {
                 "ssh_host": "10.0.0.1",
                 "public_host": None,
@@ -609,62 +630,164 @@ class TestTenantFacingRoute:
             "10.0.0.1", "22", "ubuntu",
         )
 
+    async def test_an_imported_host_is_stored_at_version_2_and_rendered_with_the_fallback(
+        self, client_and_queue, fake_ansible, session_factory,
+    ):
+        client, _ = client_and_queue
+        rendered = self._render_for_real(fake_ansible)
+        await client.host_import.import_hosts_from_text(_SAMPLE_INI, ssh_key_type="path")
+
+        with session_factory() as db:
+            stored = db.get(Host, "kvm1")
+            assert stored.connection_version == 2
+            assert "public_port" not in stored.connection_public
+
+        await self._run_a_job(client, "kvm1")
+
+        host_vars = self._host_vars(rendered[-1], "kvm1")
+        assert "public_host" not in host_vars and "public_port" not in host_vars
+        assert (host_vars["ansible_host"], host_vars["ansible_port"]) == ("10.0.0.1", "22")
+
 
 class TestConnectionVersions:
-    """The ``ssh`` connection is served at versions 1 and 2, and only version 2
-    carries ``public_port``. Addresses are RFC 5737 documentation values, fixture
-    values that must never be used on a public network."""
+    """The ``ssh`` connection is served at version 2 alone. Addresses are RFC 5737
+    documentation values, fixture values that must never be used on a public
+    network."""
 
     _PUBLIC = {"ssh_host": "198.51.100.1", "ssh_user": "ubuntu", "key_path": "/home/appuser/.ssh/id_ed25519"}
 
-    async def test_a_registration_stating_no_version_is_stored_at_version_1(
-        self, client_and_queue, session_factory,
+    async def test_a_registration_stating_no_version_is_refused(self, client_and_queue):
+        """A submission that states no version is read as version 1, which is
+        not served: it is refused rather than read as version 2."""
+        client, _ = client_and_queue
+        with pytest.raises(ComputeProvisioningError) as refused:
+            await client.family.register_host(HostCreate(
+                host_id="unversioned",
+                connection=ConnectionSubmission(kind="ssh", public=self._PUBLIC),
+            ))
+        assert refused.value.status_code == 400
+        assert "is at version 2, not 1" in str(refused.value)
+        with pytest.raises(ComputeProvisioningError) as missing:
+            await client.family.get_host("unversioned")
+        assert missing.value.status_code == 404
+
+    @pytest.mark.parametrize("version", [1, 3], ids=["the retired version 1", "a later version"])
+    async def test_another_version_is_refused_and_nothing_is_stored(
+        self, client_and_queue, version,
     ):
         client, _ = client_and_queue
-        await client.family.register_host(HostCreate(
-            host_id="unversioned",
-            connection=ConnectionSubmission(kind="ssh", public=self._PUBLIC),
-        ))
+        with pytest.raises(ComputeProvisioningError) as refused:
+            await client.family.register_host(HostCreate(
+                host_id="other-version",
+                connection=ConnectionSubmission(kind="ssh", version=version, public=self._PUBLIC),
+            ))
+        assert refused.value.status_code == 400
+        assert f"is at version 2, not {version}" in str(refused.value)
+        with pytest.raises(ComputeProvisioningError) as missing:
+            await client.family.get_host("other-version")
+        assert missing.value.status_code == 404
 
-        assert (await client.family.get_host("unversioned")).connection.version == 1
+
+class TestHostsStoredAtVersion1:
+    """A host the service stored at ``ssh`` version 1, before it served version 2.
+
+    Each case seeds that row directly, as setup, because nothing registers
+    version 1 any more. The key is a development placeholder protected with the
+    suite's development connection key; neither is ever used on a network.
+    """
+
+    _PEM = "-----BEGIN OPENSSH PRIVATE KEY-----\nlegacy-fixture\n-----END OPENSSH PRIVATE KEY-----\n"
+    _PUBLIC = {
+        "ssh_host": "198.51.100.9",
+        "public_host": "192.0.2.9",
+        "ssh_port": 6000,
+        "ssh_user": "ops",
+        "key_path": None,
+    }
+
+    def _seed(self, session_factory, *, embedded: bool = True) -> dict:
+        public = dict(self._PUBLIC)
+        protected = {}
+        if embedded:
+            protected = {"private_key": ProtectedValue(
+                scheme="fernet-v1", ciphertext=encrypt_secret(self._PEM, TEST_CONNECTION_KEY)
+            )}
+        else:
+            public["key_path"] = "/home/appuser/.ssh/id_ed25519"
+        host = Host(host_id="legacy", enabled=True)
+        host.set_connection(
+            ConnectionEnvelope(kind="ssh", version=1, public=public, protected=protected)
+        )
         with session_factory() as db:
-            stored = db.get(Host, "unversioned")
-            assert stored.connection_version == 1
-            assert stored.connection_public == {
-                "ssh_host": "198.51.100.1",
-                "public_host": None,
-                "ssh_port": 22,
-                "ssh_user": "ubuntu",
-                "key_path": "/home/appuser/.ssh/id_ed25519",
-            }
+            db.add(host)
+            db.commit()
+            return dict(db.get(Host, "legacy").connection_protected)
 
-    @pytest.mark.parametrize("port", [22, None], ids=["a port", "a null"])
-    async def test_a_version_1_connection_stating_a_public_port_is_refused(
-        self, client_and_queue, port,
+    async def test_a_job_against_it_fails_before_any_playbook(
+        self, client_and_queue, fake_ansible, session_factory,
     ):
         client, _ = client_and_queue
-        with pytest.raises(ComputeProvisioningError) as refused:
-            await client.family.register_host(HostCreate(
-                host_id="v1-port",
-                connection=ConnectionSubmission(
-                    kind="ssh", version=1, public={**self._PUBLIC, "public_port": port}
-                ),
-            ))
-        assert refused.value.status_code == 400
-        assert "public_port" in str(refused.value)
-        with pytest.raises(ComputeProvisioningError) as missing:
-            await client.family.get_host("v1-port")
-        assert missing.value.status_code == 404
+        self._seed(session_factory)
+        written = fake_ansible.write_inventory.call_count
+        started = fake_ansible.start_playbook.call_count
 
-    async def test_an_unsupported_version_is_refused(self, client_and_queue):
+        submit = await client.vm.create_vm("legacy", CreateVmRequest(vm_target="legacy-vm"))
+        with pytest.raises(ComputeProvisioningJobError, match="re-register the host at version 2"):
+            await client.family.poll_until_complete(
+                submit.job_id, timeout=5.0, poll_interval=0.05
+            )
+
+        assert fake_ansible.write_inventory.call_count == written
+        assert fake_ansible.start_playbook.call_count == started
+
+    async def test_an_update_at_version_2_upgrades_it_keeping_its_protected_key(
+        self, client_and_queue, fake_ansible, session_factory,
+    ):
         client, _ = client_and_queue
-        with pytest.raises(ComputeProvisioningError) as refused:
-            await client.family.register_host(HostCreate(
-                host_id="v3",
-                connection=ConnectionSubmission(kind="ssh", version=3, public=self._PUBLIC),
-            ))
-        assert refused.value.status_code == 400
-        assert "supported versions: [1, 2]" in str(refused.value)
-        with pytest.raises(ComputeProvisioningError) as missing:
-            await client.family.get_host("v3")
-        assert missing.value.status_code == 404
+        seeded = self._seed(session_factory)
+        renderer = AnsibleRunner(SimpleNamespace(), ssh_codec=SshConnectionCodec(TEST_CONNECTION_KEY))
+        keys: list[str] = []
+
+        def write_inventory(hosts, *, group):
+            inventory = renderer.write_inventory(hosts, group=group)
+            keys.extend(path.read_text() for path in inventory.key_paths)
+            return inventory
+
+        fake_ansible.write_inventory.side_effect = write_inventory
+
+        updated = await client.family.update_host("legacy", HostUpdate(connection=ssh_connection(
+            ssh_host="198.51.100.9", public_host="192.0.2.9", ssh_port=6000, ssh_user="ops",
+        )))
+
+        assert updated.connection.version == 2
+        assert updated.connection.protected == {"private_key": "fernet-v1"}
+        assert "legacy-fixture" not in updated.model_dump_json()
+        with session_factory() as db:
+            stored = db.get(Host, "legacy")
+            assert stored.connection_version == 2
+            assert stored.connection_public == self._PUBLIC
+            assert dict(stored.connection_protected) == seeded
+
+        submit = await client.vm.create_vm("legacy", CreateVmRequest(vm_target="legacy-vm"))
+        final = await client.family.poll_until_complete(
+            submit.job_id, timeout=5.0, poll_interval=0.05
+        )
+        assert final.status == "succeeded"
+        assert keys == [self._PEM]
+
+    async def test_an_inventory_re_import_upgrades_it(self, client_and_queue, session_factory):
+        client, _ = client_and_queue
+        self._seed(session_factory, embedded=False)
+
+        await client.host_import.import_hosts_from_text(
+            "[nodes]\nlegacy  ansible_host=198.51.100.9  ansible_user=ops  ansible_port=6000  "
+            "public_host=192.0.2.9  ansible_ssh_private_key_file=/home/appuser/.ssh/id_ed25519\n",
+            ssh_key_type="path",
+        )
+
+        with session_factory() as db:
+            stored = db.get(Host, "legacy")
+            assert stored.connection_version == 2
+            assert stored.connection_public == {
+                **self._PUBLIC, "key_path": "/home/appuser/.ssh/id_ed25519",
+            }

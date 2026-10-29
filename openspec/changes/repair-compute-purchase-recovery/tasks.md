@@ -603,6 +603,168 @@ merging `dev`"). These tasks correct it, after 3.1–3.4 and before Section 5. F
         corrections. No path that service composition takes changed: the service
         registers both versions explicitly, and `build` states the version.
 
+**Correction after the Round 1 implementation review: `ssh` is served at version 2
+only.** The review's F1 (`reviews/03-implementation-external.md`) found the version-2
+to version-1 rollback untested. The owner noted that the repository has no production
+deployment and chose to retire version 1 rather than test a downgrade, before Sections
+7 onward (`design.md`, D3, "Compatibility: `ssh` is served at version 2 only";
+`interventions.jsonl`). Tasks 3.5–3.8 above stand as the record of what was built and
+verified then. These tasks supersede what they established about version 1 and the
+registry keyed by kind and version. The review's other findings are not dispositioned
+here. Files:
+- `provisioning/compute/ansible/src/compute_provisioning_ansible/connection.py` and
+  `__init__.py`: one model and one codec, at version 2;
+- `provisioning/compute/src/compute_provisioning/hosts/connection.py`, restored to
+  `dev`'s registry keyed by kind, and the removal of
+  `provisioning/compute/tests/unit/test_connection_codecs.py`;
+- the service's `container.py`, `pyproject.toml`, and lock, and its test fixtures;
+- the tests and fixtures that build `ssh` envelopes or submissions: the Ansible kit's,
+  both adapters', the service's, and three `e2e-tests` helpers;
+- the host requests in `docs/development/VALIDATION_RUNBOOK.md` and
+  `tools/issue-discovery/config/phases/local.yaml`.
+
+- [x] 3.9 Amend the design, proposal, delta, and plan: D3's compatibility, the
+      `physical-provisioning` delta's "Host registry records the connection port" and
+      "Host connections are typed by their implementation's codec", the proposal's
+      D3 bullet and Impact, the D3 promotion row, and the ledger entry for F1.
+
+      Done. D3's two earlier compatibility passages are replaced by one: version 2
+      only, the generic submission default left at 1 so an unversioned `ssh` request
+      is refused, a stored version-1 host refused at execution until it is updated
+      or imported again, how each seam moves it forward and when in a rollout, and
+      no rollback to version 1. The delta drops version 1's acceptance and gains
+      scenarios for an unversioned or version-1 submission, a stored version-1 host
+      refused before any playbook, and a stored host moved forward by an update,
+      keeping its key, or by an import. "Compatibility, migration, and rollback" and
+      the context note follow. The ledger records F1's redirection.
+- [x] 3.10 One `ssh` model and codec at version 2:
+      - `SshConnection` carries `public_port`; `SshConnectionCodec.version` is 2, with
+        no version argument;
+      - `ssh_connection()` and the INI import submit version 2 always, an absent or
+        null port stored with no key;
+      - `parse` refuses any other kind or version before any field, telling the
+        operator to re-register the host;
+      - a protected key a submission does not resubmit is carried from the previous
+        row whatever its version, as opaque ciphertext;
+      - `SshConnectionV1`, `SSH_CONNECTION_VERSIONS`, `SSH_PUBLIC_PORT_VERSION`, and
+        `ssh_connection_codecs` are removed, and `SSH_CONNECTION_VERSION` is 2;
+      - the family registry returns to `dev`'s, keyed by kind, whose `build` refuses
+        another version naming the one served; the service registers one codec.
+
+      Done. Before deleting an export every caller was searched: only tests, the
+      service's composition, and the bare-metal adapter's test fixture used the
+      removed names. `ConnectionSubmission` (`compute_provisioning_contracts`)
+      still defaults to version 1, so the three `e2e-tests` helpers that registered a
+      host without a version now state version 2. The VM helper in
+      `vms/conftest.py` skips its scenario when registration fails, so without
+      this it would have skipped rather than failed. The validation runbook's
+      registration and update requests, and the issue-discovery tool's local phase,
+      state `"version":2`. The runbook's update request is also the re-registration
+      step for a host stored at version 1.
+
+      The service's migration that first wrote connection envelopes from older host
+      columns wrote them at version 1, and it is not edited: a host it migrated is
+      refused at execution until it is submitted again, like any stored version-1
+      host.
+- [x] 3.11 Tests:
+      - **Unit (Ansible kit):**
+        - the codec at version 2;
+        - a connection with no port, a null port, a port beside or without
+          `public_host`, and malformed ports;
+        - every operator submission at version 2;
+        - stored connections at version 1, version 3, and another kind refused by
+          `parse` and `validate`;
+        - a version-1 row with a protected key built forward through the registry,
+          keeping the key;
+        - a version-1 submission refused naming version 2;
+        - a host stored at version 1 never reaching an inventory;
+        - the INI round trip, every entry at version 2.
+      - **Application integration (service, typed clients, mock profile):**
+        - an unversioned registration, and explicit versions 1 and 3, refused with
+          400 naming version 2 and nothing stored;
+        - a registration and an INI import without a port, stored at version 2 with
+          no `public_port` key, and a job's inventory carrying the connection's own
+          address and port;
+        - a routed registration rendering the buyer route, as before;
+        - an embedded-key host updated at version 2 naming no key, keeping its
+          ciphertext;
+        - a seeded version-1 row: a job against it fails before any inventory is
+          written or playbook started, with the re-register message; an update at
+          version 2 naming no key stores version 2, keeps the seeded ciphertext byte
+          for byte and its public mapping, and then a job succeeds with the embedded
+          key materialized; an INI re-import stores it at version 2 with the key path
+          its entry names.
+
+      The version-1 rows are written directly as setup, since nothing registers
+      version 1 any more; every assertion goes through the typed clients or reads the
+      stored row. Keys are development placeholders. No downgrade test is added.
+
+      Done. No red was manufactured. The behaviour under test is new, and the
+      first targeted run failed in one case, which was the test's fault, not the
+      service's: it awaited a failed job's result, and the typed client raises
+      `ComputeProvisioningJobError` on a failed job. The test now expects that
+      error and its message.
+- [x] 3.12 Verification, after `make dist-clean` and `make dist`, so that no stale
+      0.22.0 family wheel stays in the wheelhouse to be locked:
+      - `make lock` for the five projects that lock the family kit: every lock now
+        records it at 0.21.0, as on `dev`, and the service's floor on it is back to
+        `dev`'s `>=0.20.0`;
+      - `make -C provisioning/compute test`: 243 passed (unit and library
+        integration); the family kit's source, tests, and version equal `dev`'s;
+      - `make -C provisioning/compute/ansible test`: 133 passed (unit);
+      - `make -C domains/bare_metal/provisioning/adapter test`: 77 passed (unit);
+      - `make -C domains/vms/provisioning/adapter test`: 262 passed (unit and library
+        integration);
+      - the service's `test-unit`: 607 passed (unit);
+      - twenty service integration modules: those that register, update, or import
+        hosts or run jobs on them, the capacity modules, and the router mounting
+        module, with the mock profile. 319 passed and 1 failed, the case 3.11
+        describes; after the fix, `test_hosts_api.py` passed 52. These are mixed
+        levels: application integration through the typed clients, with
+        direct-storage setup and reads;
+      - `make -C e2e-tests test-unit`: 172 passed (unit);
+      - `make check-packaging` (architecture included), `make check-comment-hygiene`,
+        `make check-change` (strict OpenSpec validation and citations included), and
+        `make check-tasks`: passed;
+      - the family kit's 0.21.0, the Ansible kit's 0.5.0, the service's 0.20.0, and
+        both adapters' wheels equal their source; the locks changed only the family
+        kit's version and the service's floor on it.
+
+      **Packaging.**
+      - `arkhai-compute-provisioning` returns to 0.21.0: its source equals `dev`'s,
+        so it changes nothing to bump.
+      - `arkhai-compute-provisioning-ansible` stays at 0.5.0, bumped once for this
+        change; retiring version 1 is the incompatible change that minor bump
+        allows before 1.0.0.
+      - The service stays at 0.20.0, its Ansible floor at `>=0.5.0`.
+      - The adapters' versions are unchanged: only their tests changed here.
+
+      **End-to-end.** Every pipeline host is registered by the three helpers, now at
+      version 2, or imported from an inventory, which submits version 2. The VM and
+      bare-metal lanes therefore exercise version-2 registration and execution. No
+      scenario seeds a version-1 row. The earlier pipeline and Helm passes ran
+      against the candidate that served both versions, so they are not evidence for
+      this correction. Owed by validation: the pipeline and Helm on the corrected
+      candidate.
+
+      **Retained development and test hosts.** A host stored before this change is
+      at version 1 and runs nothing until it is moved forward. In the rollout that
+      deploys this service, once it is running and before any work is dispatched to
+      the host, submit the host's connection again at version 2.
+      - **Update.** `PUT /api/v1/hosts/{host_id}` replaces the whole public mapping,
+        so it restates every stored public field, `key_path` included where the host
+        has one, and the tenant route, at version 2, with no `private_key` secret.
+        Omitting an existing `key_path` would leave the connection naming no key,
+        and the update is refused. A host with a protected key and no `key_path`
+        keeps that key as stored ciphertext.
+      - **Import.** For a host whose key is a file, an inventory import naming the
+        same file is the alternative.
+
+      Then read it back at version 2, with its key reference or protected scheme,
+      pool, enabled state, and route unchanged; any listing that must not trade stays
+      paused throughout. Nothing rewrites a row on its own, and no database row is
+      edited by hand. This is done in the reviewed rollout, not by this section.
+
 ## 4. Bare-metal grants yield evidence linked to their job, on the buyer's route
 
 Delivers D1's bare-metal linkage, D2's shipped-form mock, and D3's endpoint, for the
@@ -1726,7 +1888,9 @@ change to implementation.
         - "Durable jobs, transient workers": fact reading and linkage, and a
           bare-metal reclaim's diagnostic result, whose teardown the reclaim
           job's status decides;
-        - "The host registry owns the connection": the tenant-facing port;
+        - "The host registry owns the connection": the tenant-facing port, and
+          `ssh` served at version 2 alone, a stored version-1 host refused until it
+          is submitted again;
         - "Proof-driven release": compensation, and the corrected `teardown_failed`
           requeue sentence, which says the requeue re-observes the same failed job
           and does not re-run it (D6).
@@ -1740,6 +1904,8 @@ change to implementation.
         the default.
       - `docs/development/DEPLOYMENT_AND_CONFIG.md`:
         - "Definition documents", the host-inventory paragraph: `public_port=`;
+          every `ssh` host connection, through the API or an inventory, at version
+          2; and a host stored at version 1 moved forward by an update or an import;
         - "Storefront listing shapes and pool overrides": the shape-constraints
           bullet, corrected for VM shapes stated without the `gpu` family.
       - `domains/vms/provisioning/iac/README.md` "Prerequisites": the aarch64 host

@@ -9,7 +9,7 @@ from pathlib import Path
 from arkhai_bare_metal import BARE_METAL_OFFERING_MODE
 from compute_provisioning.hosts import ConnectionEnvelope, ExecutionHost
 from compute_provisioning.jobs import JobRun
-from compute_provisioning_ansible import SSH_PUBLIC_PORT_VERSION, AnsibleJobExecutor
+from compute_provisioning_ansible import AnsibleJobExecutor
 
 from bare_metal_provisioning_adapter.codec import BareMetalAnsibleCodec, BareMetalJobParams
 
@@ -19,7 +19,7 @@ HOST = ExecutionHost(
     pool_id="default",
     connection=ConnectionEnvelope(
         kind="ssh",
-        version=1,
+        version=2,
         public={
             "ssh_host": "10.0.0.5",
             "public_host": "203.0.113.5",
@@ -32,13 +32,11 @@ HOST = ExecutionHost(
 
 
 def host_with(**public) -> ExecutionHost:
-    """``HOST`` with its connection's public fields changed, at ``ssh`` version 2
-    when they state ``public_port``, the version that carries it."""
-    version = SSH_PUBLIC_PORT_VERSION if "public_port" in public else HOST.connection.version
+    """``HOST`` with its connection's public fields changed."""
     return dataclasses.replace(
         HOST,
         connection=dataclasses.replace(
-            HOST.connection, version=version, public={**HOST.connection.public, **public}
+            HOST.connection, public={**HOST.connection.public, **public}
         ),
     )
 

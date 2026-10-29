@@ -54,7 +54,7 @@ from vm_provisioning_adapter.codec import VmAnsibleCodec
 from compute_provisioning.jobs.queue import AsyncJobQueue
 from compute_provisioning.hosts import ConnectionCodecs
 from compute_provisioning.hosts.service import HostAuthority
-from compute_provisioning_ansible import ssh_connection_codecs
+from compute_provisioning_ansible import SshConnectionCodec
 from compute_provisioning.jobs.engine import JobEngine
 from compute_provisioning_service.services.job_retry import retry_policy_from
 from compute_provisioning.jobs.submission import JobSubmissionService
@@ -151,7 +151,7 @@ async def client_and_queue(
 
     host_authority = HostAuthority(
         session_factory,
-        codecs=ConnectionCodecs(ssh_connection_codecs()),
+        codecs=ConnectionCodecs([SshConnectionCodec()]),
     )
     host_authority.register_host(HostCreate(
         host_id=HOST,

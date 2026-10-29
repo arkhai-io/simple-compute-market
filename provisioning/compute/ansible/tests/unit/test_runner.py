@@ -39,7 +39,7 @@ def _host(**protected) -> ExecutionHost:
     public = {"ssh_host": "10.0.0.1", "ssh_port": 2201, "ssh_user": "ops", "public_host": None}
     public["key_path"] = None if protected else "/keys/id"
     return ExecutionHost(
-        "kvm1", "default", ConnectionEnvelope(kind="ssh", version=1, public=public, protected=protected)
+        "kvm1", "default", ConnectionEnvelope(kind="ssh", version=2, public=public, protected=protected)
     )
 
 
@@ -125,6 +125,15 @@ def test_only_ssh_connections_reach_an_inventory() -> None:
     host = ExecutionHost("h", None, ConnectionEnvelope(kind="cloud_api", version=1))
     with pytest.raises(ValueError, match="over ssh"):
         inventory_target(host)
+
+
+def test_a_host_stored_at_version_1_never_reaches_an_inventory() -> None:
+    stored = _host().connection
+    legacy = ExecutionHost(
+        "kvm1", "default", ConnectionEnvelope(kind="ssh", version=1, public=stored.public)
+    )
+    with pytest.raises(ValueError, match="re-register the host at version 2"):
+        inventory_target(legacy)
 
 
 def test_a_tenant_facing_route_is_carried_into_the_rendered_inventory() -> None:

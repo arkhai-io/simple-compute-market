@@ -42,8 +42,11 @@ unsafe after a partial create.
 - **Tenant endpoint (D3).** An `ssh` connection may state a tenant-facing
   `public_port`, falling back to its `ssh_port`, as `public_host` falls back to
   `ssh_host`. A bare-metal grant's delivery endpoint is built from the host record's
-  tenant-facing address and port. The port belongs to a new version, `ssh` version 2;
-  version 1 is unchanged and still accepted.
+  tenant-facing address and port. The port belongs to a new version, `ssh` version 2,
+  which becomes the only version served. A host stored at version 1 runs nothing until
+  it is updated or imported again at version 2. An update restates the stored public
+  fields, `key_path` included where present, and keeps a protected key it does not
+  replace.
 - **Compensating teardown (D4).** A failed create that was dispatched is torn down
   through its domain's ordinary teardown when its provider can prepare that teardown
   from durable state:
@@ -134,9 +137,8 @@ None.
   - `domains/vms/provisioning/adapter` (codec, mock output) and its IaC (guest recipe,
     teardown);
   - `kit/fulfillment` (transition and compensating operation);
-  - `provisioning/compute` (the host authority's codec registry keyed by kind and
-    version; eligibility, release decision and status, teardown port, and the lease
-    lifecycle's refusal handling);
+  - `provisioning/compute` (eligibility, release decision and status, teardown port,
+    and the lease lifecycle's refusal handling);
   - `provisioning/compute/service` (convergence's teardown-failure write,
     composition, and integration tests);
   - `domains/compute`, `domains/vms/domain`, `domains/vms/listings`,
@@ -144,23 +146,27 @@ None.
     administrator reservation response, and the fulfillment resume reader);
   - `core/storefront-client` (the optional `gpu_count` of the reservation response);
   - `domains/bare_metal/buyer` (test only);
-  - `e2e-tests` (five VM scenario modules drop their fixed create output; test
-    only).
+  - `e2e-tests` (five VM scenario modules drop their fixed create output, and three
+    scenario helpers register their hosts at `ssh` version 2; test only);
+  - the host registration requests in `docs/development/VALIDATION_RUNBOOK.md` and
+    `tools/issue-discovery`'s local phase configuration, which state `ssh` version 2.
   - Each changed package bumps its minor version. Dependants' pins and locks are
     refreshed.
 - **Wire and persistence:**
-  - The `ssh` connection envelope gains version 2, which adds the optional
-    `public_port`. Version 1 is unchanged and still accepted, and the host
-    registry dispatches a connection by its kind and version.
+  - The `ssh` connection envelope moves to version 2, which adds the optional
+    `public_port`, and version 2 is the only version served. A submission at version
+    1, or stating no version, is refused, and a host stored at version 1 is refused at
+    execution until it is updated or imported again at version 2.
   - A compensated fulfillment ends `torn_down` with the failure reason
     `create_compensation`, a value of an existing field.
   - The VM administrator reservation response's `gpu_count` becomes optional.
   - VM listings may omit GPU fields.
-  - No schema migration.
-  - Rollback first rewrites version-2 host records to version 1, without
-    `public_port` (`design.md`, D3).
+  - No automatic schema migration.
+  - No downgrade to `ssh` version 1 is provided or qualified; retained test hosts
+    are moved forward explicitly in the coordinated rollout (`design.md`, D3).
 - **Deployment:** none required by the code. Qualifying the lanes needs rebuilt
-  buyer environments and images, and records the buyer route in host records.
+  buyer environments and images, re-registers each retained host at `ssh` version 2,
+  and records the buyer route in host records.
 
 ## Dependencies and Related Changes
 
