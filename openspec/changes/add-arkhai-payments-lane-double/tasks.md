@@ -92,11 +92,20 @@ conformance evidence.
       follow the selected publication's actual semantics; refuse unsupported inputs,
       never guess charged behavior or implement consumer acceptance policy here.
       Setup maturity uses only the selected contract's immutable activation anchor.
-      Add the candidate's unconditional payee stop now with returned treatment
-      without an entitlement, payer early release, payee notice waiver and cooperative
-      stop at receipt plus payer notice with payer partialPeriod (E-A/E-C/E-E).
-      No self-interested payee stop exists without entitlement; never conflate
-      approval with rate start or observe compute activation inside the authority.
+      Require an explicit authorizing stop entry; SCM derives and buyer-checks
+      `{account: seller, notice: PT0S, partialPeriod: returned}` on every part.
+      Self-correction emits only ordinary `stop {part}` under that entry and
+      `reverse {part, amount}` under existing reverse authority; adapter computes
+      amounts and retains causes outside payments. Add no exceptional-end field,
+      implicit favourable-stop rule, payee notice waiver or payer early release.
+      End_delivery preserves buyer treatment at receipt plus buyer notice only
+      under an authorizing dispute-free entry; otherwise use the buyer half's stop.
+      On-demand's restitution entry does not enforce non-preemption; remedy is a
+      buyer case over held money/bond. Gate spot immediate restitution on the
+      unscheduled payments capability for several stop entries per account per part,
+      including selection semantics/vectors. Until then immediate stop is unavailable
+      and spot emergency exit waits out its notice unless the owner decides otherwise.
+      Never conflate approval with rate start or observe compute activation inside the authority.
 - [ ] 2.3 Add held-money partial reverse before/after stop, afterStop payout timing,
       independent extend refs and lift, caps and contract refusal codes. Preserve
       idempotent results across lost responses. Share one state engine between HTTP
@@ -106,7 +115,9 @@ conformance evidence.
 Verification: keep existing kit `test_client.py`, `test_receipt_fixture.py` and
 `test_receipts.py` on kit-owned contract fakes/vectors. In the new tool's
 `tests/test_payments.py`, drive real clients through HTTP transports and prove
-start/stop authorization, partialPeriod outcomes, notice firing without a storefront,
+entry-based start/stop authorization (including refusal without an entry), ordinary
+stop/reverse-only self-correction, unchanged buyer notice, explicit spot multi-entry
+gating, partialPeriod outcomes, notice firing without a storefront,
 setup maturity, overlapping case holds, reversal before/after stop and response-loss
 replay. Required unit state-machine coverage uses an injected clock for timer/hold
 transitions and idempotent retries; required library integration covers signed HTTP

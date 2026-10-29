@@ -23,14 +23,25 @@ lane, not a cooperative storefront masquerading as an authority.
   labelled candidate where that publication lacks the target revision. The payments
   target is per-part authorities, payee-only rate start, pending stops with notice,
   term/exhaustion stops, `{afterStop: dispute_window}` holds and `extend`/`lift`.
-  There is no backdated stop or released-funds refund extension.
+  SCM derives a buyer-checked seller PT0S/returned restitution stop entry on every
+  part; payments authorizes entries without interpreting roles, causes or favour.
+  Spot's combined ordinary-notice/immediate entries require an unscheduled payments
+  capability for several entries per account per part. Until available, spot immediate
+  stop is unavailable and its emergency exit waits out notice unless the owner decides
+  otherwise. On-demand restitution authority does not enforce non-preemption; the
+  remedy is a buyer case over held money/bond. There is no backdated stop, notice
+  waiver, payer early release or released-funds refund extension.
 - Add the dispute authority's file, append and read/watch boundary with signed
   per-agreement records. It verifies the case's exact Agreement against the mandate
   hash without requiring an attachment, extends holds and sends all claims to
   controllable triage. Operator stop rulings state partialPeriod; buyer_end preserves
   payer notice and treatment. Only the authority double applies dispute effects,
   netting prior agreement-wide remedies. Exceptional_end is seller payment-adapter
-  self-correction, not a mediation request or mechanical rule.
+  self-correction, not a mediation request or mechanical rule. It sends only ordinary
+  `stop {part}` under the explicit entry and `reverse {part, amount}` under existing
+  reverse authority; the adapter computes amounts. No exceptional-end kind or field
+  reaches payments; cause stays in end service/evidence. End_delivery preserves buyer
+  notice/treatment through an authorizing dispute-free entry, otherwise buyer-half stop.
 - Keep mid-scenario control routes through a tooling-owned typed client: exhaustion,
   snapshot sequence/provenance faults, delay/drop/refusal, independent outages,
   signing-identity rotation/re-anchoring, payer funding, labelled livemode-corruption

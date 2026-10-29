@@ -77,11 +77,23 @@ The target payment double MUST model per-part authorities, payee-only rate start
 - **THEN** the payment double retains the pending stop and applies it no earlier than the sender's notice allows without another storefront call
 - **AND** the earliest pending stop wins and cannot be withdrawn
 
-#### Scenario: A seller has no stop entitlement
+#### Scenario: Restitution requires an explicit stop entry
 
-- **WHEN** the payee has no entitlement but requests an immediate stop in the payer's interest under the candidate contract
-- **THEN** the double accepts it without a stop entry, with partialPeriod returned
-- **AND** a self-interested stop without entitlement is still refused; published mode implements only its actual publication
+- **WHEN** SCM derives a mandate for buyer checking under a contract expressing restitution
+- **THEN** every part carries `{account: seller, notice: PT0S, partialPeriod: returned}` and the double accepts ordinary `stop {part}` only under an authorizing entry
+- **AND** the double refuses a stop without an entry regardless of asserted favour or cause; it knows accounts and mandate authorizations, not SCM roles
+
+#### Scenario: Spot requires several entries for one account
+
+- **WHEN** spot needs both its seller notice entry and the immediate restitution entry on one part
+- **THEN** that composition is gated on the unscheduled payments capability for several stop entries per account per part and its selection semantics/vectors
+- **AND** until available, spot immediate stop is unavailable and emergency exit waits out its notice unless the owner decides otherwise
+
+#### Scenario: On-demand restitution authority does not enforce non-preemption
+
+- **WHEN** an on-demand seller holds only the explicit PT0S/returned entry
+- **THEN** payments authorizes its stop without interpreting the seller's reason
+- **AND** the buyer's remedy for preemption is a case over held money and the bond once supported, not a mandate prohibition
 
 #### Scenario: A stopped part still holds reversible earnings
 
@@ -120,14 +132,13 @@ The double MUST implement its selected contract's notice, partialPeriod, earning
 #### Scenario: A cooperative seller stops after end delivery
 
 - **WHEN** the seller journals end_delivery at its own receipt time while payments is down and retries after recovery
-- **THEN** the candidate double accepts the contract-defined per-part events realizing billing through receipt plus payer notice with payer partialPeriod, never a backdated stop
-- **AND** payee policy may waive notice, independently of the unconditional immediate returned stop
+- **THEN** the double accepts the buyer's treatment at receipt plus buyer notice under the dispute-free path only where a mandate entry authorizes it; otherwise it is the buyer half's stop
+- **AND** end service never waives buyer notice, substitutes the seller's returned restitution treatment, backdates a stop or reports delayed replay as completed billing
 
-#### Scenario: A party waives its own protection
+#### Scenario: No implicit waiver or early release exists
 
-- **WHEN** the selected candidate permits the payee to waive payer notice or the payer to release held funds early
-- **THEN** the double accepts that party's waiver without requiring a counterparty entitlement
-- **AND** unsupported published-mode waiver operations refuse explicitly
+- **WHEN** a caller requests a payee notice waiver or payer early release outside the selected contract's authorizations
+- **THEN** the double refuses it rather than adding such an operation or inferring permission from whose interest it serves
 
 ### Requirement: Mediation double records party cases and authority holds
 
@@ -177,7 +188,8 @@ The mediation double MUST send every claim to visible controllable triage with a
 
 - **WHEN** a seller attempts to file exceptional_end as a mediation intent
 - **THEN** the double refuses the unsupported intent rather than mechanically ruling it
-- **AND** seller self-correction instead uses the payment adapter's per-part payee operations
+- **AND** the SCM payment adapter instead sends only ordinary `stop {part}` under the seller's explicit PT0S/returned entry and `reverse {part, amount}` under existing reverse authority, with adapter-computed amounts and the spot multi-entry gate preserved
+- **AND** payments receives no exceptional-end kind, field or cause; cause stays in the end-service record and evidence store
 
 #### Scenario: A case supplies its own Agreement
 

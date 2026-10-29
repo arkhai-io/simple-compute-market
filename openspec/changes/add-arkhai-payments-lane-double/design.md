@@ -138,15 +138,25 @@ rate-part behavior owned by `spot-deals-through-arkhai-payments`:
   The payment authority computes the result; no storefront started-period refund
   corrects it afterwards. Client defaults are payer charged and payee returned;
   until vendored support exists, publication/acceptance refuse unexpressible terms
-  and spot uses charged for both. There is one notice per party, from its
-  entitlement's `notice_seconds`. The dispute authority's stop entry uses
+  and spot's ordinary notice entry uses charged for both. Each ordinary entry's
+  notice comes from its entitlement's `notice_seconds`. The dispute authority's stop entry uses
   `partialPeriod: chosen`; every operator ruling states its treatment explicitly.
-  Seller entitlement treatment is negotiated, not mandated by mediation. An on-demand
-  part has no payee entitlement to stop in its own interest. Under the candidate
-  contract, however, the payee may always stop immediately in the payer's interest,
-  without a stop entry, with partialPeriod returned (E-A/E-C). The payee may waive
-  payer notice, and the payer may release held money early, waiving its dispute
-  window. Unsupported candidate operations in published mode refuse explicitly.
+  Seller ordinary entitlement treatment is negotiated, not mandated by mediation.
+  SCM mandate derivation adds an explicit restitution stop entry on every part:
+  `{account: seller, notice: PT0S, partialPeriod: returned}`, visible to the buyer's
+  mandate check (corrected E-A/E-C). Payments knows accounts, money movement and
+  mandate lifecycle authorizations, not SCM roles, causes or whose interest a stop
+  serves. Every stop requires an authorizing entry; no implicit favourable-stop
+  permission, payee notice waiver or payer early-release operation is added.
+  An on-demand seller holds only the restitution entry: the mandate does not enforce
+  "won't preempt". The buyer's remedy is a case over held money and the bond, once
+  supported. Unsupported operations in published mode refuse explicitly.
+  **Gated payments dependency:** spot needs both its ordinary notice entry and the
+  immediate restitution entry for the same account on each part. Several stop entries
+  per account per part require an unscheduled payments capability and its selection
+  semantics/vectors; this change must not invent them. Until that lands, a spot
+  seller's immediate stop is unavailable and its emergency exit waits out its notice,
+  unless the owner decides otherwise. Foundation/spot gate that composition.
 - An entitled `stop {part, at?}` is never backdated: effective time is the later of the requested
   time (or now) and receipt time plus that sender's notice. The earliest pending
   stop wins, cannot be withdrawn, and fires at the authority without another
@@ -187,8 +197,13 @@ uses an entitled notice stop or otherwise exceptional_end (D-E). Physical comple
 requires proven release, never a `lease_ended` intent report (D-G). These behaviors
 are owned by their foundation/rate/servicing changes, not reimplemented in the double.
 
-Exceptional_end is a seller payment-adapter command, not a mediation request (E-C).
-The adapter stops every rate part now with returned treatment, reverses rate earnings
+Exceptional_end is an SCM seller payment-adapter command, not a payments event or
+mediation request (E-C). It emits ordinary `stop {part}` under the seller's explicit
+PT0S/returned entry and `reverse {part, amount}` under the existing reverse authority;
+amounts are computed by the adapter. Payments receives no exceptional-end kind,
+field or cause; the cause stays in the end-service record and evidence store.
+The adapter stops each rate part immediately only where that entry is expressible
+and authorized (spot remains gated above), and reverses rate earnings
 since the past end and the unserved once share by time, and awards a bond in full
 only once supported. Setup returns all before activation and none after. It journals
 immediately, never future-dates; a pre-start failure acts at the Agreement start.
@@ -196,14 +211,15 @@ Revised self-corrections must account for prior reversals rather than duplicate 
 SCM adapter/journal ownership remains with the foundation and spot.
 
 On end_delivery (no buyer-supplied at), the seller records its own receipt and ends
-service then. It journals a cooperative payee stop for receipt plus the payer's
-notice with the payer's partialPeriod, retrying when payments recovers; policy may
-waive notice (E-B/E-E). The double supports the candidate payment operations behind
-that path; delayed replay follows the foundation's pinned per-part mapping, never
-backdates a stop or fabricates billing completion. It does not implement end service. The buyer still stops at payments
-first when reachable. This is distinct from the payee's unconditional returned stop.
+service then. The storefront journals the buyer's own treatment at receipt plus buyer
+notice under the dispute-free path only where an entry authorizes it; otherwise it
+is the buyer half's stop (corrected E-E). End service never waives the buyer's notice
+or borrows the seller's restitution entry to substitute returned treatment. Retry
+follows the foundation's pinned authorized per-part mapping, never backdates a stop
+or fabricates billing completion. The double does not implement end service. The
+buyer still stops at payments first when reachable.
 
-This model must make both no-self-interested-stop-on-demand and authority-hosted seller notice
+This model must make explicit mandate authorization and authority-hosted seller notice
 observable while the storefront is down. It does not emulate storefront-local
 schedules or a seller-supplied claim that service continued.
 
@@ -478,7 +494,8 @@ index/roadmap edits.
 Reviews 03 F1–F3 and 04 F1–F13 have dispositions in their triage records. Owner
 E-H replaces the dual-engine design with a shared payments-kit fixture engine;
 E-C/E-D remove both mechanical ruling classes and mediation exceptional_end.
-E-A/E-E add the cooperative seller payment operations; E-F makes the case-carried
+Corrected E-A requires an explicit restitution entry; corrected E-E preserves buyer
+notice/treatment only through an authorized path; E-F makes the case-carried
 Agreement sufficient, verified against the mandate hash. E-B's receipt time is used
 by the cooperative stop. E-G remains servicing's authority-read rule, supported by
 the double's funding/read controls; E-I retains the single term-end settles_through.
@@ -506,11 +523,12 @@ Edits required outside this owned directory (parent coordination, not performed 
 
 | Owner | Required coordination |
 |---|---|
-| Foundation 8.1 / 9.1 | Supply the shared payments fixture engine/fake, installed resource/model metadata API, unpublished payments candidate and coherent snapshot/start/reversal vectors, including partial reversal before/after stop. The candidate and consumer selector must express the E-A/E-C/E-E operations. |
+| Foundation 8.1 / 9.1 and mandate derivation/check | Supply the shared payments fixture engine/fake, installed resource/model metadata API, unpublished payments candidate and coherent snapshot/start/reversal vectors. Derive and buyer-check the explicit seller PT0S/returned entry; self-correction uses only ordinary authorized stop/reverse events. Preserve buyer notice/treatment for end_delivery only through an authorized path, otherwise buyer-half stop. No waiver or early release. |
+| Payments capability / spot gate | Several stop entries for one account on one part, including selection semantics/vectors, are an unscheduled payments dependency, not supplied by this double. Until available, spot immediate stop is unavailable and emergency exit waits out its notice unless the owner decides otherwise. |
 | Foundation 12.1 | Supply installed mediation resources and Agreement-in-case hash verification; triage only, no exceptional_end or acknowledgement-based mechanical rules; explicit ruling partialPeriod, payer-notice buyer_end mapping and agreement-wide netting vectors. |
 | Foundation 2.4 / 7.5 / 13.1 | Put acknowledgement model/verification in a buyer-permitted shared library in round 1 (2.4); leave signing at 13.1. Mediation no longer depends on this verifier. |
 | Foundation test-compatibility delta | Reference the permanent requirement name "Lane qualification identifies readiness and evidence class", remove duplicate mixed-contract scenario and stale change-ID citation; archive that target-naming modification before this change. |
-| Spot and convergence | Consume the shared engine/typed controls; classify by the single lane requirement. Seller exceptional_end is payment self-correction; revised authority remedies net prior effects. Convergence reads authority at funding-timer expiry (E-G), compares exposed current instants and removes lane clock-jump wording. |
+| Spot and convergence | Consume the shared engine/typed controls; classify by the single lane requirement. Seller exceptional_end is adapter self-correction emitting ordinary authorized stop/reverse events; cause remains outside payments. On-demand restitution authority does not enforce non-preemption; buyer remedy uses held money/bond. Spot immediate restitution is gated on several stop entries per account per part; revised authority remedies net prior effects. Convergence reads authority at funding-timer expiry (E-G), compares exposed current instants and removes lane clock-jump wording. |
 | Terms | Lane-only proposed declarations select installed candidate expressibility for publication, acceptance and mandate derivation; draft identities/contracts remain refused outside lanes. |
 | Activation | Reference the class rule conditionally, include mediation publication when Agreement terms name it, and identify exactly which consumer declaration/artifact is retired, never the tool's proposed selector. |
 | Campaign index / roadmap | Parent updates status/dependencies and removes obsolete mechanical/self-filing descriptions; these files remain outside this worker's authority. |
