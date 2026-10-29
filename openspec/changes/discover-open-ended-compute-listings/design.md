@@ -39,7 +39,7 @@ listing date does not extend accepted deals.
 
 ### D2. Common terms come from the shared codec, per option
 
-Use these exact common fields, independent of final inside/beside-params placement:
+Use these exact common fields, read through the shared codec rather than raw params paths:
 
 - `early_termination.payer` and `early_termination.payee`: presence of that entitlement;
 - `early_termination.payee.notice_seconds`: its integer notice, missing if absent;
@@ -121,7 +121,7 @@ separately from live deployment. This design reconciliation deploys nothing.
 - Satisfying predicates across options: selects a promise no option actually makes.
 - Treating missing payee notice as zero: invents a notice promise.
 - Treating a matching authority account as buyer approval: exact authority identity is required.
-- Hard-coding params placement in discovery: placement is still owner-open.
+- Hard-coding params paths in discovery: projections read through the codec, so the registry does not depend on how params are laid out.
 - Waiting for server-only clauses: shared local evaluation can already narrow options.
 - Owning carrier migration here: the storage dependency decides that policy.
 - Mapping prepaid splitter to spot or reserved: its billing and release terms differ.

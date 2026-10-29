@@ -95,25 +95,11 @@ never grants the payee an implicit entitlement. The foundation owns validation a
 identity inclusion; do not create a second hash rule or require early_termination
 on every compute option.
 
-### D4. Placement remains a decision gate
+### D4. The terms are option params
 
-The merged frame provisionally places the objects in `params`; keep that notation
-until the owner settles placement. Before wire implementation, exercise the same
-objects through hosted and Alkahest option params, shared codec, ID/Agreement
-serialization, splitter `vms.interruptible.v1` service terms and buyer mandate/
-commitment checks. The codec must not branch on mechanism ID or decode Alkahest
-arbiter demand trees to read these keys. A mechanism adapter separately refuses
-terms it cannot enforce; structural carriage is not permission to advertise an
-unsupported Alkahest lifecycle promise.
+`early_termination` and `adjudication` are objects in the selected option's `params`, and so in the Agreement bytes and the option ID. This follows the foundation's rule that terms take the form `mechanism { fields }` with the payment mechanism primary: what a deal may end by and who adjudicates it are terms of the payment the option offers, not fields beside it. Beside `params` would add typed fields to the shared `SettlementOption` wire that every mechanism and registry must carry, for terms only some mechanisms can enforce.
 
-If both paths retain/read the keys without a mechanism-specific codec, that supports
-inside params. Otherwise record the precise refusal/loss and evaluate beside params
-with identical names/shapes. Bring evidence to the owner before freezing placement.
-Tasks/deltas here describe logical terms, not authority to choose a carrier.
-
-`placement-probe.md` records a current-tree diagnostic. It is a partial carriage
-check, not the complete decision test: the shared codec and revised buyer mandate
-check do not yet exist.
+The codec reads both keys by the same names and shapes whatever the mechanism, and must not branch on the mechanism ID or decode Alkahest arbiter demand trees to read them. A mechanism adapter separately refuses terms it cannot enforce: carrying the keys is not permission to advertise an unsupported Alkahest lifecycle promise. `placement-probe.md` records that the current shared carrier and Alkahest's option builders already keep both objects and that changing them changes the option ID; task 1.2 runs the full check once the foundation's codec exists, as a regression test rather than a decision gate.
 
 ### D5. Two listing bounds compose at the agreed start
 
@@ -194,7 +180,7 @@ the rate change derives it.
 
 - Stored class: it can disagree with selected terms.
 - `interruption {seller_may_interrupt, notice_seconds, compensation}`: duplicates the shared codec.
-- Deciding placement without the Alkahest test: placement remains owner-open.
+- Terms as typed fields beside `params`: widens the shared option wire for terms only some mechanisms enforce, against the payment-mechanism-primary rule (D4).
 - Payee stop authority on on-demand: makes won't-preempt unenforceable.
 - Bare-metal minimum spend/new payments primitive: churn is seller pricing/refusal policy.
 - Rejecting setup once because it is not minimum spend: name the additive fee honestly.
@@ -213,8 +199,7 @@ the rate change derives it.
 
 ## Dependency gates and sequence
 
-Foundation codec, authority validation, release-model migration and placement decision
-precede wire edits. Reverify resize before accessor migration. Freeze recurring
+Foundation codec, authority validation and release-model migration precede wire edits. Reverify resize before accessor migration. Freeze recurring
 `period`, `reserve_ahead_seconds`, setup pricing and servicing declaration with the
 rate change. Resolve final-offer start/bound identity before acceptance work.
 Publication and buyers can then proceed while adapter/continuation are prepared;
@@ -228,8 +213,8 @@ not buyer protocol guarantees.
 On 2026-10-29, pinned OpenSpec 1.14.0 strict validation and
 `make check-change CHANGE=negotiate-open-ended-compute-terms` passed, including
 comment hygiene, agent skills, citations, task structure and the current change
-index. `placement-probe.md` records the successful partial carriage experiment and
-unrun full codec experiment. No runtime implementation, new tests, deployment or
+index. `placement-probe.md` records the partial carriage experiment; the full codec check
+is task 1.2. No runtime implementation, new tests, deployment or
 permanent-document promotion was performed; packaging and runtime suites are future
 implementation gates, not claimed evidence here.
 

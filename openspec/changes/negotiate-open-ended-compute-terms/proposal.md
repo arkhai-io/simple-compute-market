@@ -10,7 +10,7 @@ do not express these products across mechanisms or bound them by an absolute dat
 - Derive reserved, on-demand and spot from billing kind and the selected option's
   payee entitlement. Use `agreed-evidence-and-early-termination`'s shared
   `early_termination` and `adjudication` codec, not an `interruption` object.
-  Placement inside `params` versus beside it remains an explicit decision gate.
+  Both are objects in the selected option's `params` (D4).
 - One `agreed_price(agreement, listing)` accessor returns a quote with unit `total`
   or `per_period`, following `negotiation-driven-capacity-resize`'s multiplier
   contract. A fail-closed repository check refuses direct `Agreement.amount` reads
@@ -62,8 +62,7 @@ None. The lifecycle codec and its common semantics belong to the foundation chan
 ## Dependencies and gates
 
 - `agreed-evidence-and-early-termination`: codec, authority checks, option identity,
-  Alkahest release-model migration and common projections; settle placement before
-  wire edits.
+  Alkahest release-model migration and common projections, before wire edits.
 - `negotiation-driven-capacity-resize`: reverify its landed multiplier contract
   before implementing the accessor.
 - Rate-servicing change: freeze `period`, `reserve_ahead_seconds`, setup pricing and

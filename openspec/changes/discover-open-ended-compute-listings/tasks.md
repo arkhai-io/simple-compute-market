@@ -9,7 +9,7 @@ approval. No tests are added by this reconciliation.
 - [ ] 1.1 Consume `agreed-evidence-and-early-termination`'s common projections and
   exact-option correlation in `core/src/market_core/query_dsl.py` and
   `kit/settlement-runtime`. Reverify false/missing/malformed behavior without forking
-  the codec or settling inside/beside-params placement here.
+  the codec.
 - [ ] 1.2 Consume `negotiate-open-ended-compute-terms`'s bound/class semantics and the
   rate registration's `period` projection. Decide and record D3's typed billing-kind/
   missing-period representation with the registration and DSL before class work;

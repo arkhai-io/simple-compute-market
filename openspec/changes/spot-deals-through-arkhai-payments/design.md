@@ -5,7 +5,7 @@
 The merged lifecycle design is the frame: commitment ends protocol; later
 authority records and kept signed bytes are evidence. Terms retain
 early_termination {entitlements, notice_seconds, exposure_seconds, max_term_seconds}
-and adjudication. Their physical placement is the foundation's decision; payment
+and adjudication. Both are option params (foundation D4 and the terms change's D4); payment
 derivation consumes the common codec, not another mechanism-specific copy.
 
 The current kit/arkhai-payments derives a single once part. Its vendored schema

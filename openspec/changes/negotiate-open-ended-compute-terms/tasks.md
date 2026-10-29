@@ -10,11 +10,10 @@ added by this reconciliation.
 - [ ] 1.1 Reverify `negotiation-driven-capacity-resize`'s landed multiplier contract
   against `core/src/market_core/schemas.py` and `core/tests/unit/test_rate_helpers.py`.
   Record scalar, rounding and amount-range behavior before migrating readers.
-- [ ] 1.2 With `agreed-evidence-and-early-termination`, run D4's complete placement
-  experiment after `kit/deal-lifecycle` exists, using `kit/alkahest` option params,
-  splitter service terms and both buyer commitment checks. Present evidence and
-  record the owner's placement decision before wire edits. Preserve common shapes;
-  do not implement a mechanism-specific term codec. Start from `placement-probe.md`.
+- [ ] 1.2 With `agreed-evidence-and-early-termination`, once `kit/deal-lifecycle` exists,
+  add a regression test that both objects round-trip through hosted and `kit/alkahest`
+  option params, splitter service terms and both buyer commitment checks by the same
+  codec (D4). Do not implement a mechanism-specific term codec. Start from `placement-probe.md`.
 - [ ] 1.3 With the reconciled rate change (`spot-deals-through-arkhai-payments`),
   freeze `period`, `reserve_ahead_seconds`, separate setup pricing, accessor unit and
   servicing-declaration contracts. With the foundation, decide and record the
@@ -95,7 +94,7 @@ closeout tasks, not authorization to promote unimplemented behavior now.
   comments describe current invariants, not change provenance.
 - [ ] 5.2 **Import placement:** confirm touched imports are module-level unless an
   experimentally verified circularity or deliberate lazy-load reason is recorded.
-- [ ] 5.3 **Documentation compliance:** classify D1–D8 and placement/identity gate
+- [ ] 5.3 **Documentation compliance:** classify D1–D8 and identity gate
   outcomes; verify each permanent home and no duplicated codec/authority ownership.
 - [ ] 5.4 **Narrative compression:** reduce completed-task notes to behavior, material
   evidence, residual work and permanent destinations; retain reasoning in design.
@@ -114,7 +113,7 @@ closeout tasks, not authorization to promote unimplemented behavior now.
   design-promotion table, including publication/buyer architecture companions and
   architecture vocabulary. Archive merges deltas into negotiation, publication,
   resource-pool, settlement-configuration and buyer specs; record destinations and
-  placement/identity decision outcomes. No new capability-index entry is needed.
+  identity decision outcomes. No new capability-index entry is needed.
 - [ ] 5.10 **Documentation citations:** run
   `make check-doc-citations CHANGE=negotiate-open-ended-compute-terms`, resolve all
   matches, then `bunx @fission-ai/openspec@1.14.0 validate negotiate-open-ended-compute-terms --strict`.
