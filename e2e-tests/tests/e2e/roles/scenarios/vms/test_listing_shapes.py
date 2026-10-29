@@ -669,24 +669,26 @@ class TestStage09_ShapeWithoutGpus:
 
     def test_09d_arm_a_create_rule_for_the_machine(self, provisioning_test_client, shape_state):
         require_state(shape_state, "cpu_listing_id")
-        delete_mock_rules_if_present(provisioning_test_client, CPU_CREATE_RULE_ID)
-        provisioning_test_client.add_mock_rule(
-            rule_id=CPU_CREATE_RULE_ID,
-            match={"vm_action": "create", "host_id": E2E_LISTING_SHAPES_CPU_HOST},
-            pause_before_result=False,
-            # The create fact the VM playbook prints, as stage 03's. Its user,
-            # addresses, port, and key path are development fixture values that
-            # name no real host.
-            result_stdout=(
-                'ok: [kvm1] => {\n    "vm_creation_data": '
-                '{"action": "create", "vm_name": "e2e-shapes-cpu-vm", "tenant_user": "vmuser", '
-                '"external_ssh_port": "2223", "timestamp": "2030-01-01T00:00:01Z", '
-                '"tenant_ssh_key_path": "/tmp/e2e.key", "frp": {"enabled": false}, '
-                '"authentication": {"tenant": {"ssh_commands": '
-                '{"external": "ssh vmuser@localhost", '
-                '"internal": "ssh vmuser@10.0.0.1"}}}}\n}\n'
-            ),
-            fail_with=None,
+        rules = provisioning_test_client.vm_rules
+        delete_mock_rules_if_present(rules, CPU_CREATE_RULE_ID)
+        rules.add_rule(
+            MockRuleCreate(
+                rule_id=CPU_CREATE_RULE_ID,
+                match={"vm_action": "create", "host_id": E2E_LISTING_SHAPES_CPU_HOST},
+                pause_before_result=False,
+                # The create fact the VM playbook prints, as stage 03's. Its user,
+                # addresses, port, and key path are development fixture values that
+                # name no real host.
+                result_stdout=(
+                    'ok: [kvm1] => {\n    "vm_creation_data": '
+                    '{"action": "create", "vm_name": "e2e-shapes-cpu-vm", "tenant_user": "vmuser", '
+                    '"external_ssh_port": "2223", "timestamp": "2030-01-01T00:00:01Z", '
+                    '"tenant_ssh_key_path": "/tmp/e2e.key", "frp": {"enabled": false}, '
+                    '"authentication": {"tenant": {"ssh_commands": '
+                    '{"external": "ssh vmuser@localhost", '
+                    '"internal": "ssh vmuser@10.0.0.1"}}}}\n}\n'
+                ),
+            )
         )
         shape_state.cpu_provisioning_armed = True
 
