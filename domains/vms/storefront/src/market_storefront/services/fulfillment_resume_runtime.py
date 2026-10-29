@@ -25,6 +25,7 @@ from compute_provisioning_contracts import (
 from market_capacity_publication import CapacityEffects, PublicationBinding
 from market_core import SettlementEvidence, VersionedEnvelope
 from market_fulfillment import (
+    CREATE_COMPENSATION,
     FULFILLMENT_RESULT_KIND,
     FULFILLMENT_RESULT_SCHEMA_VERSION,
     FulfillmentResultPayload,
@@ -358,7 +359,12 @@ async def _load_active_physical_result(
         capacity_reservation_id=reservation_id,
         site_id=site_id,
     )
-    if status.state == "failed":
+    # A failed create that provisioning compensates leaves ``failed`` for its
+    # teardown states and keeps ``CREATE_COMPENSATION`` through all of them, to
+    # ``torn_down``. A delivery first read after compensation began has failed
+    # as surely as one read ``failed``; waiting for ``active`` would never end.
+    # Its capacity still returns only through the site's guarded release.
+    if status.state == "failed" or status.failure_reason == CREATE_COMPENSATION:
         await persist_delivery_fields_with_retry(
             lambda: sqlite_client,
             negotiation_id=negotiation_id,

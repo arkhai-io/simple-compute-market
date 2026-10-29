@@ -1900,20 +1900,91 @@ requirement "An undelivered lease is released by what its fulfillment proves". F
 - `domains/vms/storefront/tests/unit/test_failure_policy.py`, for the failure actions
   in `domains/vms/storefront/src/market_storefront/failure_actions.py`
 
-- [ ] 9.1 The fulfillment resume treats a `create_compensation` reason, in any state,
+- [x] 9.1 The fulfillment resume treats a `create_compensation` reason, in any state,
       as a failed delivery, as it treats `failed`.
-- [ ] 9.2 Unit tests:
+
+      Done (unit), in `_load_active_physical_result`. A status whose state is
+      `failed`, or whose `failure_reason` is the kit's `CREATE_COMPENSATION`, is a
+      failed delivery: the delivery is recorded `failed` in phase `physical_failed`
+      with the status's message, and the pass runs the accepted entry's failure
+      policy with the reason `provisioning_failed`, exactly as for `failed`. The
+      constant is imported from `market_fulfillment`, which the module already
+      imports. The unit fakes of the status gained `failure_reason=None`, since
+      the real `FulfillmentStatusResponse` always carries the field.
+
+      **Left as it is: the foreground poll.** `fulfillment_service.py`'s
+      `_poll_fulfillment_until_terminal` stops only at `active` or `failed`, and its
+      docstring says the teardown states cannot appear there. D4 names only the
+      resume reader. A compensation begins only on a lease's release, so the poll
+      meets a teardown state only if a release lands between two of its polls after
+      the create failed. It then times out after `provisioning.timeout`, a bounded
+      wait, and the resume loop reads the delivery as failed. This is recorded for
+      review, not changed here.
+- [x] 9.2 Unit tests:
       - an aggregate in `teardown_dispatch_pending`, `tearing_down`,
         `teardown_failed`, or `torn_down` carrying `create_compensation` is a failed
         delivery;
       - a delivered aggregate's `torn_down`, carrying another reason, is not;
       - the failure actions' capacity release is still refused by the guarded site
         release until the aggregate is `torn_down`.
-- [ ] 9.3 Verification:
+
+      Done (unit):
+      - **`test_fulfillment_resume_runtime.py`.** One resume pass over a delivery
+        whose fulfillment is known, reading a real `FulfillmentStatusResponse`:
+        - in each of the four teardown states with `create_compensation`, the
+          delivery is recorded `failed` and the failure policy runs once with the
+          reservation and the status's message; no result is read and nothing is
+          begun;
+        - `torn_down` with no reason or `provider_reported_failure`,
+          `teardown_failed` with `provider_reported_failure`, and `tearing_down`
+          with none are not failed deliveries: the pass waits, and no policy runs.
+      - **Red.** Against `HEAD`'s reader the four compensating cases failed and the
+        other sixteen in the two modules passed. Treating any non-null reason as a
+        failure fails the two `provider_reported_failure` cases, so the marker, not
+        a reason, decides.
+      - **`test_failure_policy.py`.** The failure actions' release over the fake
+        site's transport. While the site's guard refuses, as provisioning's does
+        for a compensating aggregate until `torn_down` (the fake models it as a
+        release answering no reservation), the action reports nothing released,
+        the reservation stays `reserved`, its capacity stays held, and no listing
+        reopens. Once the guard permits, the same action releases it. This passed
+        before and after the change: D4 says the failure actions need no change,
+        and this pins it. Provisioning's own guard is Section 8's evidence.
+      - **Seams.** The new case replaces the module's
+        `capacity_binding_for_listing` and its configured-actions source, as the
+        module's existing release case does. That patches module names, which
+        `TESTING.md` discourages; it was kept to match the module's seam rather
+        than restructure the policy. The `SQLiteClient` it constructs is not read
+        on this path.
+- [x] 9.3 Verification:
       - `make -C domains/vms/storefront test` (unit and application integration);
       - `make check-packaging`.
 
       End-to-end: none. No pipeline scenario fails a create deliberately.
+
+      Done:
+      - `make -C domains/vms/storefront test`: exit 0, after `reinit`. Unit 1158
+        passed and 1 skipped; integration 476 passed. Both folders mix levels:
+        `tests/unit` holds cases over real SQLite, and `tests/integration` holds
+        application cases through the typed client beside direct-storage ones.
+      - **Packaging.** `arkhai-vms-storefront` goes from 0.23.1, `dev`'s, to
+        0.24.0, its one bump in this change, under this plan's minor-bump rule.
+        Its floor on `arkhai-kit-fulfillment` rises to `>=0.6.0`, for
+        `CREATE_COMPENSATION`. `make dist` and `make lock` changed two locks, the
+        storefront's and `e2e-tests`', each only in that version and floor. No
+        exact pin of the storefront exists.
+      - `make check-packaging`: passed, the architecture rules included.
+        `make check-change`, `make check-tasks`, and `make check-comment-hygiene`:
+        passed.
+      - **The wheel.** The 0.24.0 wheel's 85 package files equal their source.
+      - **End-to-end, confirmed.** No VM-lane scenario fails a create, so none
+        reaches this reader's new branch. Owed by validation: none.
+
+      **Handoff.**
+      - The section's fresh-context compliance check was not run: the owner's
+        cadence for this phase runs no subagent or reviewer, and the round's one
+        independent review covers it.
+      - Section 10 is next: the bare-metal reclaim of an account never created.
 
 ## 10. A bare-metal reclaim of an account that was never created succeeds
 
