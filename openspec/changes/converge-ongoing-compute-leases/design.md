@@ -1,365 +1,273 @@
 # Design
 
-The decisions below were settled at goal level with the owner on 2026-10-28 for
-[`ROADMAP.md`, Goal 8](../../../docs/development/ROADMAP.md#goal-8--sell-compute-by-the-period-until-either-party-stops),
-and revised the same day against four rounds of independent design review of the
-goal. This change's own design review may reopen any of them with a finding; its
-design session verifies them against the code as its dependencies left it and adds
-the spec deltas.
+## Context and authority
 
-## Context
+This is rate-part servicing inside end service, not a second deal lifecycle. The
+frame is `agreed-evidence-and-early-termination`: commitment, lifecycle, final
+request, `early_termination {entitlements, notice_seconds, exposure_seconds,
+max_term_seconds}`, adjudication, payment/dispute adapters and evidence stores.
+The protocol ends at commitment; post-commitment records are lifecycle and evidence.
+The storefront and site are one seller from the buyer's perspective.
 
-Verified against the tree on 2026-10-28; re-verify before planning, since every
-dependency changes it.
+The current storefronts verify approval before delivery but do not keep rate-part
+funding, authority stops and lease effects converged after delivery. The new kit is
+planned, not current architecture. This change extends the foundation rather than
+claiming to supply its routes or the hosted adapter's mechanics.
 
-- No storefront watches a transaction after approval: VM's `VmPaymentsCoordinator`
-  verifies the approval receipt, spawns provisioning, and does nothing after; bare
-  metal's and credits' reconciliation passes skip delivered deals. Refund is
-  seller-initiated `reverse`; nothing issues `start` or `stop`.
-- The buyer's settle paths approve, poll, then call the storefront; the run log
-  records `payment_approved` with the transaction ID. No buyer-side stop exists.
-- The storefront operator CLIs read the storefront's configuration and database
-  directly; no command issues a payment event.
-- The payments contract: a rate part's hold is `{until: stop}`; `PartState` runs
-  `held → released`; the payee has `PayoutBalance.withdrawable` and
-  `WithdrawalRequest`, reached through the service's own surface and not through the
-  storefront; `reverse` reaches held funds only; `PartSnapshot.refunded` exists with
-  no command behind it; `EventCommand` carries no effective time. So a stop releases
-  a rate part's earned periods toward the payee's balance, where nothing in the
-  published contract returns them to the payer, and nothing the storefront does can
-  hold the payee's withdrawals.
-- The delivery path, its hook, its state machine, and the undelivered path are
-  [`unify-compute-delivery-path`](../unify-compute-delivery-path/)'s; the horizon,
-  the operations, the refusal table, rotation, and the servicing declaration are
-  [`settle-ongoing-compute-through-arkhai-payments`](../settle-ongoing-compute-through-arkhai-payments/)';
-  the request log, its retention rule, and the `lease_ended` event are
-  [`buyer-initiated-compute-termination`](../buyer-initiated-compute-termination/)'s.
+## Goals and non-goals
 
-## Goals / Non-Goals
+Both VM and bare-metal compositions service committed rate-part deals across
+restarts and authority outages, revoke access after ends, and report unfinished
+physical and financial work separately. Buyer safety rests on authority records
+and exact kept signed bytes even if the storefront does not cooperate.
 
-**Goals:** a per-period deal is served exactly while it is funded and wanted, with a
-fail-safe on each side that needs no cooperation from the other; physical
-convergence never waits on payments; billing is corrected to the earliest
-authenticated end, and money is conserved under lost acknowledgements; a deal leaves
-the continuation only when it has converged both ways, and every gap is measured.
-
-**Non-Goals:** the site's renewal primitive; the delivery path; seller preemption;
-pooled funding; the liability ledger; push delivery; periodic collection of a running
-deal's earnings by the seller.
+No vouch, billing horizon, site renewal protocol, local stop scheduler, independent
+financial-effective-end register, payment ledger or minimum spend is introduced.
+Rate-part mechanics, presets, option publication and seller notice commands belong
+to `spot-deals-through-arkhai-payments`. The buyer half and `end_delivery` route
+belong to `agreed-evidence-and-early-termination`; the one delivery state machine
+belongs to `unify-compute-delivery-path`.
 
 ## Decisions
 
-### D1. The billing guarantee, the horizon, and what ships before the service has it
+### D1. Ownership and dependency gates
 
-The goal's guarantee is stated once, in one form: *charges after a deal's effective
-end are reversed before they are collected*, with one bounded residual stated beside
-it on every buyer-facing surface: a buyer may be charged for at most the option's
-`reserve_ahead` past an end the storefront did not observe. What keeps it is the
-billing horizon (`settle-ongoing-compute-through-arkhai-payments` D5): the storefront
-vouches for billing only as far ahead as it has verified the lease is alive and
-wanted, and renews the site's lease to the same instant in the same cycle, so a dead
-storefront's billing and lease lapse together and nothing accrues that it did not
-vouch for while alive. The published contract lacks the horizon. Until the service
-vendors it, this change is built and closed out in full against the double's
-proposed contract, under a servicing declaration the lane profile alone may make
-(`settle-ongoing-compute-through-arkhai-payments` D10); no production composition
-declares servicing, so no per-period option is published, accepted, or materialized
-anywhere; and the closeout records every per-period scenario as *qualification
-against a proposed contract*. The follow-on
-[`activate-per-period-compute-servicing`](../activate-per-period-compute-servicing/)
-vendors the revision, re-verifies the double against it, declares servicing, and
-turns the same scenarios into live evidence.
+`kit/deal-servicing` owns the storefront's loop, lifecycle observation state,
+evidence store, end-service journal and domain-neutral physical ports. It receives
+payment and dispute adapters through the lifecycle tables; it imports neither
+mechanism kit, dispute kit nor domain implementation. Both storefront compositions
+supply lease lookup, delivery/admission state, terminate/truncate and evidence
+ports. No second state machine is created in a domain payment coordinator.
 
-*Rejected:* shipping an interim per-period product under a narrowed guarantee — an
-exposure bounded only by the buyer's vigilance. *Rejected:* blocking the whole
-change on the service. *Rejected:* leaving the scenarios unrun until the service
-lands — every integration defect would then be found by the one change that is also
-absorbing a new schema. *Rejected:* the earlier two required capabilities, an
-effective-time payee stop and a post-stop refund entitlement — the refund cannot
-reach funds the payee has withdrawn, so the guarantee still needed a hold or a
-narrowed scope; the horizon makes the storefront's silence end billing instead of
-prolonging it.
+Implementation starts only after the foundation's final-request/admission,
+watch/cursor, evidence and command contracts, the spot change's rate mechanics,
+and the unified delivery path's authorization/activation ports are available.
+Scenario execution additionally gates on the in-lane payment and mediation doubles.
 
-### D2. Per-deal continuation state, two completion facts, two queues, one continuation
+### D2. Durable state and two completion facts
 
-Every per-period deal has a **continuation state record** from approval, keyed by
-negotiation ID: the transaction ID; the stored evidence of approval (the receipt,
-replaced by a verified snapshot on re-anchor); the delivery state
-(`unify-compute-delivery-path` D4); the last verified event sequence and
-`observedAt`; the trusted `fundedThrough`; the instant last vouched and the instant
-last renewed to, each written before its call; the financial operation journal (D5);
-and two **completion facts**, written by the transitions that earn them, idempotent,
-never recomputed from lease state:
+From a verified commitment, persist negotiation/commitment references, accepted
+Agreement binding, domain delivery/lease handle, verified payment and dispute
+cursors, latest verified funding observation, local funding timer, earliest final
+request with actor/cause/source, immutable effect identities and completion facts.
+Evidence bytes live in the evidence store, not solely in mutable replay state.
 
-- *physical completion* — written by the physical queue when the site's
-  `lease_ended` for the lease is recorded, which the site's deadline guarantees
-  eventually, by `renewal_lapsed` at the latest, since the storefront stops renewing
-  a deal whose billing has ended; or when the operator closes it by hand through the
-  stop command (D7) with a reason;
-- *financial completion* — written by the financial queue when the stop is
-  acknowledged, the amount returned equals the target, and no journal operation is
-  pending.
+- Physical completion: the site's signed `lease_ended` is recorded, or the delivery
+  state proves no resource was dispatched. A dispatched operation with an unknown
+  result is adopted and terminated before this fact is earned. A reasoned,
+  seller-authenticated manual recovery acknowledgement may record physical
+  completion when site evidence is unavailable; it is labelled manual and is not
+  represented as site evidence.
+- Financial completion: for the current end revision, authority records confirm
+  all required parts stopped (or never earning and terminal), every end-related
+  filing/ruling effect and adapter correction is resolved, and no operation has a
+  pending or unknown outcome. Acceptance of a case alone is not completion.
 
-The continuation selects `approved AND NOT (physical AND financial)`; each queue
-skips once its own fact is set. The gap between the two is the diagnostic: *financial
-without physical* past a threshold is the teardown-failure exposure, the seller's
-cost, bounded by the lease deadline and reported; *physical without financial* is a
-correction still owed, the buyer's, bounded by `reserve_ahead` and reported.
-Retention for the record starts when both are set
-(`buyer-initiated-compute-termination` D4).
+A running deal has neither end completion merely because an observation succeeded.
+End processing selects committed deals not complete on both sides. Watching and
+evidence retention continue under the foundation's rules even after end work
+completes: a newly observed earlier end or relevant ruling reopens financial work
+for a new end revision, preserving prior completion history. **Recommendation
+supplied here:** scope the financial fact to an end revision rather than deleting
+its history when late evidence reopens work. Physical completion never resurrects
+a resource. Thus late evidence is not dropped by a terminal filter.
 
-The continuation lives in `kit/arkhai-payments`' seller stage, runs as a storefront
-lifecycle loop on the kit loop controller, and depends on nothing of the compute
-domains or the provisioning service; the delivery path supplies the lease handle,
-the delivery predicate, and the teardown hook as injected, mechanism-neutral
-operations. Each cycle, per deal, it runs **two queues in order**, so physical work
-never waits on payments:
+Expose the time between the facts, pending case/operation references and repair
+reasons in lifecycle read/list diagnostics. Physical completion before financial
+completion can be normal during priced notice or a case; do not label that entire
+gap an overcharge. Financial completion before physical completion is the seller's
+unpaid-service exposure. An operator cannot declare money corrected by hand.
 
-1. **Physical.** Every due decision in the request log — a recorded cancel, a
-   preemption whose instant has passed, a site event — is terminated at the site if
-   not already, and the lease is read for evidence. No payments call is in this
-   path, and a failure in it does not skip the other queue.
-2. **Financial.** Verify the current snapshot (`settle-ongoing-compute-through-arkhai-payments`
-   D4) against the record's transaction, evidence, sequence, and `observedAt`. A
-   snapshot that cannot be fetched or verified skips this queue for the deal — it
-   vouches nothing, renews nothing, starts nothing, and derives no new financial
-   fact; the site's lapse policy decides what an unrenewed lease does. A verified
-   snapshot showing a stop, or in the active state a `fundedThrough` not ahead of
-   now, is a verified end: append the request and run the physical queue for it
-   now. Otherwise, in the active state, vouch and renew to the earliest of now plus
-   `reserve_ahead`, `fundedThrough`, and the agreed end, in that order with each
-   instant recorded first; then run every pending journal operation (D5).
+**Recommendation supplied here:** warn when a physical gap exceeds the configured
+watchdog-plus-teardown budget; warn for authority work after one configured retry
+budget and immediately surface permanent refusals as repair required. Numerical
+budgets are deployment settings validated from real latency, not double timings.
+The loops continue after a warning.
 
-On restart the loop recomputes every deal from its record, its decision log, and its
-verified snapshot, issuing nothing already in the events. The polling cadence plus the
-domain's teardown time must fit inside the option's `reserve_ahead`; the storefront
-refuses to publish a per-period option whose `reserve_ahead` is shorter than that
-floor, derived from real provisioning and teardown latency plus polling, transport,
-and clock tolerance, never from the mock profile.
+### D3. Two independent queues inside end service
 
-*Rejected:* one pass with the lease read moved first — a throw mid-pass skips the
-rest, and independence should be structural. *Rejected:* reading "terminal" from
-lease or deal state — a deal whose lease has ended but whose journal still holds a
-`refund` marked `unsupported` would leave the selection and never drain. *Rejected:*
-one completion fact — the teardown-failure exposure would be neither bounded nor
-visible. *Rejected:* recomputing convergence each cycle with no stored fact — a
-change to how lease state is read would silently change which deals are served.
+Each cycle services physical work first, then authority work, with independent
+error handling and bounded I/O so an unavailable authority cannot stall later
+physical cycles. The physical queue executes due final requests and reads the
+site for recovery evidence. No payment/dispute call is required to admit that work.
+A failed physical effect does not suppress authority work either.
 
-### D3. The hook's per-period implementation
+The authority-work queue consumes verified payment and dispute observations,
+updates renewable funding timers, journals final requests and drives pending
+lifecycle commands. A newly observed due end schedules physical work immediately,
+without waiting another normal polling interval. Each record's cursor advances
+only after its effect is journaled; there is no ordering invented across records.
+Unknown outcomes are resolved by read and retry with the same operation key.
+Invalid/unavailable snapshots produce no new funding or financial fact and do not
+block physical work or erase previously journaled requests.
 
-`unify-compute-delivery-path` D3's `authorize_delivery(deal, phase)` is implemented
-here for per-period deals. Before `start` (`commit`, `dispatch`): the verified
-snapshot shows no `stop` and its embedded receipt shows the rate part's first batch
-reserved to cover `reserve_ahead` — `fundedThrough` is not consulted. At `start`: the
-same, then the mechanism's `start` is journaled with the delivery evidence the path
-hands it and issued; `start` is the payee's alone, so the state machine has one
-issuer and `started` is reached only from `dispatched`. At `disclose`: the same
-checks, and the recorded delivery state. A refusal at any phase takes the path's
-undelivered route, which for a per-period deal is this hook's stop and the return of
-the reserved batch, the minimum spend following its committed refund rule; the
-started-but-undelivered case — the site answering at activation that the lease
-expired — is stopped and corrected from the `start` instant, since the buyer was
-billed for nothing.
+An entitled stop's notice lives at the payment authority. A pending stop is not a
+stop now: its effective time supplies the future final request, and the earliest
+pending stop wins. The storefront can truncate physical service to that final
+instant, but its survival is not what makes the payment stop fire. Funding is
+separate: a verified funded-through deadline is a replaceable local timer; funding
+can advance it. It becomes a final request only on expiry without a verified
+renewal, never by truncating the lease speculatively. An expiry during an outage
+may cost the seller a working lease; if no entitlement covers that local end, D5
+requires self-filing. No site deadline is required to follow that timer.
 
-*Rejected:* a payer-issued `start` accepted as the deal's
-(`settle-ongoing-compute-through-arkhai-payments` D2).
+### D4. Delivery authorization and access
 
-### D4. What the access guarantee says
+Implement `authorize_delivery(deal, phase)` through the injected rate-part adapter.
+Before dispatch/start, validate current authority evidence, first-batch reservation
+and absence of an effective stop under the spot change's rules. Provision before
+payee-only `start`; journal its stable identity with delivery evidence, and resolve
+an unknown start before retrying or disclosing. Recheck admission and authority
+evidence at disclosure. A pending stop in the future permits only the remaining
+service window. Refusal enters the unified path's undelivered route and D5.
 
-Four guarantees, each enforceable by the party that holds it:
+A local due final request is serialized with dispatch and disclosure. Nothing is
+disclosed after it. In-flight fulfillment is adopted and ended; a started lease
+that expired before activation is treated as undelivered from the deal's start.
+Credential reads enforce local delivery state rather than requiring an authority
+network request each time. Revocation of already disclosed credentials means
+physical teardown, not just refusing future reads.
 
-1. **No disclosure after a locally committed end.** The credential read route
-   enforces the recorded delivery state and decision on every read — never a live
-   snapshot — serialized with local termination by the decision row's
-   compare-and-set. Absolute, and local; the delivery path's
-   (`unify-compute-delivery-path` D6).
-2. **A remote stop is incorporated within one continuation interval while the
-   storefront is healthy.** The window between a payer's stop at the service and
-   the storefront's observation of it is bounded by the polling cadence, which
-   `reserve_ahead` bounds; a disclosure inside it is served on funds the service had
-   reserved, and the stop ends it at the next cycle.
-3. **When the storefront is not healthy, the site's deadline bounds physical
-   service** under `reclaim`, and the operator's chosen exposure under `grace` or
-   `continue`; and the horizon bounds billing to the same instant.
-4. **After any end, physical termination is the revocation.** A credential already
-   disclosed is made useless by tearing the resource down, never by refusing reads;
-   the end-deal path terminates whether or not credentials were ever read.
+A remote effective stop is incorporated within one polling interval while healthy,
+then the configured watchdog/teardown budget applies. `exposure_seconds` must cover
+that entire window at publication and acceptance, as the foundation specifies.
+A proposed configuration that breaks an active deal's exposure budget is refused;
+runtime shortfalls warn but never stop servicing. There is no absolute no-access
+claim between remote stop and observation. With the storefront absent, service can
+continue to the maximum lease term; that is the seller's liveness risk. An optional
+site activation deadline protects seller capacity before delivery, not buyer money.
 
-The tests inject a remote stop between `start` and disclosure and between disclosure
-and the next cycle, and assert the bound. *Rejected:* an absolute "no access after an
-authoritative stop" — no pair of authorities can provide it. *Rejected:* a snapshot
-fetch on every read — a smaller number, not a different guarantee, and a payments
-dependency on the physical path.
+### D5. Holds, self-filing and bounded residual
 
-### D5. Corrections: a financial operation journal with a cumulative target
+Every rate part holds earnings under `{afterStop: dispute_window}`. A timely case
+accepted as held at the payment authority extends protection; a filing response
+alone does not prove that extension. Stops are never backdated. A site withdrawal,
+failed or never-started delivery, or any other local end not covered by entitlement
+journals `exceptional_end(at)` atomically with the final request. For failed or
+never-started delivery, `at` is the deal's start. The dispute adapter builds the
+request; Arkhai mediation's mechanical self-penalty stops now and reverses earnings
+since `at` (and applies the applicable once-part/bond consequences). End service
+never turns that filing into a bare payee stop on an on-demand mandate.
 
-The financial convergence of a decision is a **target** — a pure function of the
-stopped snapshot's `settled` and the decision's financial effective end — and a
-**journal** of operations, each immutable once written: kind (`start`, `stop`,
-`reverse`, `refund`), part, amount, its own request identity, and outcome `pending |
-confirmed | unsupported | refused`. A new operation is issued only when every earlier
-one is resolved, for the delta between the target and the amount returned, which is
-the snapshot's `reversed + refunded` — `reverse` lands in `reversed` while the part is
-held, `refund` in `refunded` after release, and that is how the two fields reconcile.
-Each operation is written before the external call so a retry resends the same amount
-under the same identity; an unresolved operation is resolved first from the snapshot
-and the events. Whole refunds and dispute reversals the storefront did not issue count
-toward the target, never beyond it. When the financial effective end moves earlier on
-authenticated evidence (`buyer-initiated-compute-termination` D4), the target rises
-and the next delta is issued the same way; it never moves later.
+Financial work uses the spot change's cumulative correction target, immutable
+operation keys, half-open arithmetic and started-period rule through its adapter.
+It does not introduce a `refund` journal kind, require reverse-before-stop, or own
+a financial-effective-end register. The dispute authority applies case outcomes;
+the seller neither applies them nor computes replacement rulings. If earlier site
+evidence arrives after a filing, journal an append to an open case with the kept
+evidence and observe the resulting ruling/correction. A confirmed closed case is
+not appended to: while protection permits, file a new exceptional_end for the new
+end revision with prior effects as evidence. Use a stable revision-bound filing
+key, not a fresh arbitrary payout key. The authority determines any further remedy.
 
-**Order.** Reverse before stop, always (`settle-ongoing-compute-through-arkhai-payments`
-D5); the horizon is what makes a crash between the two bounded. A correction that
-becomes due after the stop is a `refund`, `unsupported` until the service provides
-the command, retried every cycle and never terminal. Refusals are classified by the
-kit's table; `unsupported` and the retry class are never surfaced as failures,
-`refused` is surfaced to the operator.
+The residual is **not** at most reserve-ahead after an unnoticed end. A silent or
+malicious seller can continue billing until the buyer's authority stop becomes
+effective, exhaustion, or the maximum term. The buyer's priced stop notice bounds
+its authorized stop tail; reserve-ahead bounds seller exposure on exhaustion.
+Held earnings and a timely case make the unserved interval reversible, including
+after stop; recovery depends on the agreed dispute authority and timely action,
+not on seller liveness. No automatic crash-to-stop guarantee is claimed. If both
+authorities are unavailable, unresolved filings remain durable and financial
+completion stays false; no finite authority-recovery time is promised.
 
-**The arithmetic.** The service interval is half-open, `[start, end)`; period *k*
-spans `[start + k·period, start + (k+1)·period)` and is charged iff its start is
-before `end`; the excess is every charged period whose start is at or after `end`.
-**The started period** — the one in which `end` falls — is charged in full for a
-buyer-caused end, disclosed as such, and reversed for a seller-caused one: a
-preemption, a site withdrawal, or a storefront termination for the seller's reasons,
-read from the decision's cause, so a seller cannot time an end to the first second of
-a period and collect it whole. With no `start` ever issued the target is the whole
-reserved batch; the minimum spend, once it exists, follows its refund rule outside
-the target.
+### D6. Buyer and seller commands compose the same lifecycle
 
-*Rejected:* one correction under a fresh key each time evidence moves — a lost
-acknowledgement plus earlier evidence pays the buyer twice. *Rejected:* the first
-correction final and later evidence to dispute. *Rejected:* charging the started
-period for seller-caused ends and disclosing it — disclosure does not remove the
-incentive. *Recommendation left to `negotiate-open-ended-compute-terms`' session:*
-prorating every end locally by reverse, buyer-caused included, which the service's
-prorated final period would do without local arithmetic.
+The buyer half tries its payer stop first and sends `end_delivery {at}` regardless
+of payment reachability. The storefront acts on this authenticated peer message
+without an authority read, persists the final request and returns a signed
+acknowledgement. It moves no money. If the payment authority is unavailable the
+buyer files `buyer_end(at)` with that acknowledgement; if both authorities are
+unavailable it journals and retries the filing. Without an acknowledgement, the
+buyer still has its own kept evidence and a case, but no mechanical-ruling claim.
+This change exercises that foundation-owned flow rather than duplicating it.
 
-### D6. Stopping payment first is safe for the buyer; reclaiming first for the seller; neither is required
+The site-signed `lease_ended` is ingested idempotently, kept as exact signed bytes,
+and returned on the buyer's lifecycle read; it is seller evidence, not a payment
+or dispute authority record. Late evidence can cause D5 work without reviving a
+lease. Seller notice/preemption uses the spot change's seller-half command. An
+operator can run the seller half against the owned persisted state with the
+storefront stopped; entitled stops retain authority-hosted notice, while an
+unentitled emergency files `exceptional_end`. Never run a competing database
+writer beside the storefront. Manual physical recovery is an explicitly audited
+operation, distinct from these authority actions.
 
-Each party holds one lever it can pull without anyone's cooperation, and the
-storefront reconciles whichever came first:
+### D7. Restart, rotation and activation
 
-- The **buyer's** cancel attempts the payer stop at the payments service first — the
-  mandate names the payer as a stop authority, and that stop is authoritative the
-  moment the service records it — and then calls the end-deal route *whether or not
-  the first step succeeded*. The route records the request and terminates the lease
-  while the payments service is unreachable; the decision's financial convergence
-  reverses and stops when the service returns, as the payee if the payer's never
-  appears. A buyer who never calls the storefront is still not paying, and the
-  continuation terminates within a polling interval.
-- The **site** reports its intent to reclaim the moment it forms it, to the
-  storefront only, durably. The storefront runs D5 at the reported instant.
-- The **seller** ends billing through the storefront, which also terminates the
-  lease; if the storefront is unreachable, through the operator stop command (D7).
+Restart recovers journaled effects and both record cursors; it does not infer
+convergence from a lease status or historical approval receipt. Compose the spot
+change's verified-snapshot identity re-anchoring and report unreanchored deals.
+The servicing declaration is required at publish, accept and materialize. With
+accepted rate-part deals persisted, startup without the servicing loop is an
+incoherent local configuration and is refused. Withdrawing new publication never
+removes servicing of existing commitments. A dependency outage alone does not
+refuse startup.
 
-A storefront that keeps billing after the site reclaimed, or never corrects, is
-answered by the buyer's own stop and a dispute against the payments service's event
-record, the signed site event the buyer's status read returns, and the delivery
-instants the buyer's client recorded
-(`settle-ongoing-compute-through-arkhai-payments` D11). A site that is a separate
-business from the storefront is the seller's responsibility to the buyer.
+The lane alone may declare proposed-contract servicing. Production waits for
+`activate-per-period-compute-servicing` to verify the hosted deployment of the
+payments revision with per-part authorities and hold extensions. There is no
+horizon capability gate and no request for one.
 
-### D7. The seller's stop lever works with the storefront process down
+## Scenarios and evidence
 
-An operator command (`market-storefront settlement stop <negotiation>`, name to be
-settled) reads the mandate and transaction ID from the storefront's stored
-`settlement_data` and issues the payee stop with the operator's credential, without
-the running process, journaled by the identity it records if it can and reconciled by
-the continuation on return if it cannot. The same command, with a reason, records
-physical completion by hand for a deal whose site event will never come (D2).
+The diagrams in [diagrams/](diagrams/) illustrate these nine cases. Run in VM and
+bare-metal lanes against the in-lane payment and mediation doubles, pausing loops
+and advancing explicit side effects, with exact signed records and both facts:
 
-### D8. Rotation is composed, not designed here
-
-Identity rotation is `settle-ongoing-compute-through-arkhai-payments` D7's; the
-continuation re-anchors a running deal on the first snapshot it verifies under the
-new key and reports deals not yet re-anchored in system status. The acceptance
-scenario — one deal running across a rotation window in the double — is this
-change's to run.
-
-### D9. Declaring servicing, and the startup rule
-
-A production composition declares per-period servicing against the `published`
-contract only once the horizon is vendored, which is the follow-on's act; the lane
-profile declares it against the `proposed` contract, refused by startup in any other
-configuration (`settle-ongoing-compute-through-arkhai-payments` D10). Disabling new
-publication is withdrawing the declaration; it is not removing the continuation. A
-storefront that holds accepted per-period deals and starts without the continuation
-composed refuses to start, under the existing rule that a service refuses its own
-incoherent state and never a dependency. A tree with the continuation composed and
-servicing undeclared starts, services nothing new, and publishes, accepts, and
-materializes nothing per-period — D1's dark posture, enforced at three doors
-(`negotiate-open-ended-compute-terms` D9).
-
-## Scenarios
-
-Nine sequence diagrams, draw.io sources with SVG exports under
-[`diagrams/`](diagrams/), one guarantee each; the decisions above cite them, and
-`activate-per-period-compute-servicing`'s closeout promotes them to
-`docs/development/diagrams/` beside the `settlement-servicing` architecture
-companion. Lifelines: the buyer's client, the storefront (its physical and financial
-queues as two activation bars), the site, the payments service.
-
-| # | Scenario | Demonstrates |
+| # | Scenario | Required observation |
 |---|---|---|
-| 0 | On-demand baseline: approve, commit, `start`, activate, disclose, vouch-and-renew cycles, buyer stop, reverse, stop, `lease_ended`, both completion facts | the normal path and where each fact is written |
-| 1 | Buyer cancels with the payments service down | the end-deal route works alone; the payer stop lands later; no charge past the decision's physical end |
-| 2 | Site withdraws while the storefront is dead | horizon lapse stops billing at *V*; late `lease_ended` at *E* on resume; `refund` journaled `unsupported`; excess ≤ `reserve_ahead` |
-| 3 | Crash between `reverse` and `stop` | the horizon bounds the tail; resume finds the service's lapse-stop and the reverse acknowledged |
-| 4 | Payer stop between `start` and disclosure | no disclosure after a committed end; teardown; charge from `start` to the stop only |
-| 5 | Prepaid deal, activation deadline expires | site's `renewal_lapsed` in the awaiting-activation phase; full refund through the delivery path |
-| 6 | Funds exhausted mid-lease | `fundedThrough` not advancing; vouch and renewal held; site lapse policy; stop at the funded horizon |
-| 7 | Spot preemption with notice | scheduled stop at now + notice; started period reversed before the stop; a buyer cancel earlier supersedes |
-| 8 | A `start` issued before delivery | the buyer's recorded delivery instants against the signed `start` event; the dispute path |
+| 0 | On-demand baseline | setup once + rate, provision/start/activate/disclose, payer stop with priced notice, end service, both facts |
+| 1 | Buyer ends with payments down | before provisioning, during dispatch and after delivery: physical work and signed acknowledgement; buyer_end, stop-now/reverse on recovery; both-down replay |
+| 2 | Site withdraws with storefront dead | buyer can stop/file independently; on recovery late lease_ended triggers exceptional_end/append; no reserve-ahead residual claim |
+| 3 | Crash after filing, before ruling effects finish | same case/key on replay, stop and partial reverse after stop observed once, no double correction |
+| 4 | Payer stop between start and disclosure | no disclosure after local due end; remote-stop windows measured before/after disclosure |
+| 5 | Activation deadline expires, once or rate deal | undispatched completes empty; dispatched is adopted/ended; exceptional_end at start, once reversal and rate correction through ruling |
+| 6 | Funds exhausted | verified funding timer advances without truncation, expires if not renewed, authority exhaustion stop and physical recovery |
+| 7 | Spot notice, then earlier payer stop | authority-hosted pending stop survives dead storefront, earliest effective stop wins; cause-specific period treatment, including seller-only notice variant |
+| 8 | Seller starts but never delivers | kept start/delivery evidence, seller self-filing and buyer-case backstop against a noncooperative seller |
 
-## Accepted limitations and gaps (recorded in the goal)
+Focused integration additionally exercises payment outage during teardown, failure
+of physical work with successful authority work, invalid/stale/wrong-transaction/
+regressed snapshots, lost acknowledgements then earlier site evidence, restart
+between final-request and filing, manual physical recovery, startup declaration
+checks, short-deal setup pricing, and rotation re-anchoring. Contract qualification
+is labelled proposed or published; double evidence is never live evidence.
 
-- **Provisioning churn on VM.** Until the minimum spend exists, a buyer who
-  provisions and cancels before `start` pays nothing for the seller's provisioning.
-  An explicit product decision; a scenario provisions, cancels before `start`, and
-  asserts the buyer was charged nothing, labelled as the accepted risk, so it is never
-  reported as mitigated. Bare metal publishes no per-period option without a minimum
-  (`negotiate-open-ended-compute-terms` D13).
-- **The bounded residual.** A buyer may be charged for at most `reserve_ahead` past
-  an end the storefront did not observe (D1); the `refund` kind returns it once the
-  service provides the command.
-- **Teardown after billing stops.** Between a stop and the site's reclaim the seller
-  serves unpaid; bounded by the lease deadline, measured as the gap between the two
-  completion facts (D2), the seller's cost.
-- **Seller cash.** Under `{until: stop}` the payee collects nothing until the deal
-  stops; a months-long lease pays the seller at its end. Accepted for this goal;
-  periodic collection of earned periods is a welcome request to the service.
-- **Pooled funding**, the **storefront–site liability ledger**, and **push delivery**.
+## Rejected alternatives
 
-## Open questions
+- Payee-advanced billing horizon/vouch: a dishonest seller can advance it; buyer protection must use its own stop and held-money case.
+- Coupled site renewal and billing horizon: seller hardware policy cannot guarantee buyer billing; keep activation protection, defer renewal until separately operated sites need it.
+- Storefront-local stop scheduling: it dies with the process; payment authority hosts pending notice stops.
+- Backdated/effective-time payee stops: stop now plus reversal under held money covers correction without backdating authority records.
+- Required minimum spend or a bare-metal gate on it: sellers price setup once parts and may refuse churners in negotiation policy.
+- Refund-after-release journal and mandatory reverse-before-stop: afterStop holds and case extensions keep corrections reversible after stop.
+- Separate physical/financial effective-end log: end service owns earliest delivery T; financial corrections are authority records and rulings.
+- Bare payee stop for unentitled on-demand exit: mandate enforces no payee entitlement; self-filed exceptional_end supplies the honest exit.
+- One queue or one completion fact: authority outages must not stall hardware recovery or hide unresolved corrections.
+- Automatic physical completion on lease status alone: an unknown dispatched operation may still own a resource.
+- Automatic financial completion on accepted filing: ruling and payment effects can remain pending.
 
-- The continuation's default cadence and the `reserve_ahead` floor each domain passes
-  the kit; settled in design from measured real latencies with a stated margin.
-- Whether the operator stop command and the buyer's cancel share one kit operation
-  for their financial convergence; settled in design.
-- The thresholds at which each completion gap is reported (D2); settled in design.
+## Recommendations and accepted limitations
 
-## Implementation cadence (recommended)
+Recommendations supplied here are the financial-fact end-revision implementation
+and completion-gap warning policy in D2, and using the existing seller-half
+offline composition for operator recovery in D6,
+not a separate payment command implementation. Numeric cadence/retry budgets are
+chosen during implementation from real domain measurements; they must pass the
+foundation's exposure gate. Site renewal/lapse remains seller policy, not required.
 
-Two rounds. Round 1: the kit continuation with its state record and completion
-facts, the two queues, vouch-and-renew, the hook's per-period implementation, the
-journal with its order and arithmetic, the restart recomputation, the operator stop
-command, and the startup rule. Round 2: the buyer's cancel with its fallback, the
-buyer's evidence record, and the end-to-end scenarios in both lanes under the lane
-profile's `proposed` declaration — the nine diagrams' scenarios, the remote-stop
-windows, lost acknowledgements followed by earlier evidence, payment outage during
-physical recovery, the churn scenario, and the rotation window — each recorded as
-qualification against a proposed contract. One session per round.
+Seller cash remains held until stop plus dispute window, and longer for held cases;
+periodic collection, pooled funding, a storefront/site liability ledger, push
+observation and lease top-up are outside this change. The buyer must retain bytes
+and act within its dispute protection; there is no guarantee of a cooperative
+seller or instantaneous adjudication. Setup once parts mitigate but need not fully
+cover provisioning churn. These limitations are disclosed, not protocol additions.
 
 ## Permanent documentation destinations
 
-| Decision | Destination |
-|---|---|
-| D1 | `openspec/specs/settlement-servicing/spec.md` and architecture companion; `ROADMAP.md` Goal 8 (the dependency and what turns the product on) |
-| D2 | `settlement-servicing` spec and architecture companion; `market-composition` spec (the loop) |
-| D3 | `settlement-servicing` spec; `fulfillment` spec (the hook's per-period implementation) |
-| D4 | `settlement-servicing` spec; `ARCHITECTURE.md`, "Deciding which party is authoritative" |
-| D5 | `settlement-servicing` spec and architecture companion |
-| D6 | `ARCHITECTURE.md`, "Deciding which party is authoritative"; `settlement-servicing` architecture companion; `buyer-orchestration` spec |
-| D7 | `settlement-servicing` spec; the storefront operator CLI reference |
-| D9 | `settlement-configuration` spec; `deployment-state` spec (the startup rule) |
-| Scenarios | `docs/development/diagrams/`, cited from the `settlement-servicing` architecture companion |
+Promote D1/D3/D7 composition ownership to market-composition and ARCHITECTURE's kit
+areas/settlement servicing. Promote D2–D6 behavior to settlement-servicing spec and
+its architecture companion, with lifecycle links for foundation-owned behavior.
+Promote scenario requirements to test-compatibility and the diagrams to
+`docs/development/diagrams/`. Record the Goal 8/index update at closeout. See tasks
+for the decision-by-decision promotion record; no permanent document is changed
+while this remains a proposed design.
