@@ -222,7 +222,7 @@ design.
   job, and what the job must show:
 
   ```
-  Owed by validation: `tests.yml`, job `release · deployment contracts` —
+  Owed by validation: `tests.yml`, job `test · test-deployment-packaging` —
   `azure/setup-helm` installs v4.3.0, and `make -C helm test-render` prints
   `helm v4.3.0` before the first render and passes.
   ```
