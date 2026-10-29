@@ -62,7 +62,8 @@ than register payments on the obligation worker.
 - Move the seller listing lifecycle into `kit/capacity-publication`, over the common
   binding it already owns: close, pause, reopen, and successor carry-over, with the
   domain supplying its payload codec and its successor-identity rule.
-- Move restart-safe fulfillment convergence into the compute family kit: obligation
+- Move restart-safe calling fulfillment convergence into `domains/compute/delivery`
+  or a higher compute-family composition, not the `compute_provisioning` base kit: obligation
   resumption after restart, terminal-state driving, executor-result reconciliation,
   and teardown independence, with the domain supplying the executor payload, result
   decoding, and effects. It is compute-family code — only the VM and bare-metal
@@ -111,7 +112,8 @@ None.
   `fulfillment_service.py`, `fulfillment_resume_runtime.py`;
   API-credit `listing_service.py`, `fulfillment_service.py`; bare-metal
   `fulfillment_service.py`, `hosted_lifecycle.py`, and the listing handlers in `api.py`.
-  `kit/capacity-publication` and a fulfillment convergence kit gain the mechanisms.
+  `kit/capacity-publication` gains listing lifecycle; `domains/compute/delivery` or a
+  higher family composition gains calling convergence above protected checkpoint recovery.
 - Tests: three domains' listing and fulfillment suites collapse into kit suites plus
   per-domain hook conformance.
 

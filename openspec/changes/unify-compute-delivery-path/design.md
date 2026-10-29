@@ -246,7 +246,9 @@ mechanical ruling is a payee-filed self-penalty request at least as strong as th
 standard request. Through mediation's own stop entry
 `{account, notice: PT0S, partialPeriod: "chosen"}`, the standard request stops rate
 parts now with returned, reverses their earnings since at, returns the unserved
-share of once parts by time, and awards any bond in full once bonds exist.
+share of once parts by time, then reverses min(premature_stop_penalty, earned
+amounts still held) to the payer across parts in mandate order. Bond award stays
+reserved for hosted bonds.
 On-demand always uses returned: that is the on-demand contract. Setup's term ends
 at activation, so its return is all if undelivered and none once delivered.
 These are dispute-authority rules to reference from foundation/mediation, never
@@ -256,7 +258,7 @@ Restore exceptional_end to dispute-adapter intents and mediation's request vocab
 and published mapping. The package of stop, refunds and bond needs one ruling;
 a partial seller-direct path would still need a dispute. Arkhai also records disputes
 to act on bad sellers. On-demand's "won't preempt" is enforced by remedy—a buyer's
-case over held money and bond—not by mandate restrictions. The seller's own exit
+case over held money and the premature-stop penalty—not by mandate restrictions. The seller's own exit
 is this mechanically ruled self-penalty.
 
 Remove the explicit seller restitution entry, payee-stop-without-entry/favourable
@@ -349,7 +351,7 @@ authority stops into local ends. Foundation supplies ordering, not another cache
 - Add-arkhai-payments-lane-double: HTTP lane qualification in tasks 3.3/4.3/4.4.
   Library integration uses the clock-injected payments engine in kit/arkhai-payments
   fixtures directly; the lane HTTP double wraps that same engine. Mediation fakes
-  retain triage, not mechanical rulings. No kit depends on runnable tooling.
+  retain triage plus the sole qualifying seller self-penalty mechanical ruling. No kit depends on runnable tooling.
 - Kit-owned listing/fulfillment: broader convergence discovery/terminal driving,
   dependent on this path for protected-effect recovery and access retirement;
   place its calling convergence here or above, never in the base kit.
@@ -374,7 +376,8 @@ authority stops into local ends. Foundation supplies ordering, not another cache
 
 ## Second-review coordination
 
-These are required sibling edits, reported rather than made outside this change:
+The coordinated plan supplies these sibling edits; the table retains ownership and
+re-check obligations, not authority to duplicate a sibling implementation:
 
 | Finding | Owner and edit needed |
 |---|---|
@@ -396,11 +399,13 @@ No whole-change dependency cycle is introduced by this ordering.
 ## Open questions
 
 No unowned design choice here. Recommendations above are defaults supplied under
-owner delegation. Foundation, spot and converge must share these named contracts
-before implementation; missing ports remain gates, not license to duplicate them.
-Recommend one coordinated design review before planning: placement, compatibility
-and cause evidence changed materially. Cross-owner edits are reported to the parent;
-this does not claim their files already agree.
+owner delegation. Foundation defines the shared protocol/evidence/journal, spot interprets rate
+financial evidence, and convergence composes rate execution. These named contracts
+are coordinated before implementation; missing implementations remain gates, not
+license to duplicate them.
+A short focused re-check is due before advancement: placement, compatibility and
+cause evidence changed materially. The sibling seams and archive-order commitments
+are now coordinated; no runtime implementation or qualification is claimed.
 
 ## Design promotion record
 

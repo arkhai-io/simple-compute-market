@@ -47,10 +47,12 @@ exists in the VM and bare-metal storefronts and nowhere else: the API-credits
 storefront has no convergence code and imports neither
 `compute_provisioning_client` nor `compute_provisioning_contracts`. A
 repository-wide kit may know no family, and convergence cannot be written
-without the compute provisioning client, so the extraction target is a module of
-the compute family kit (beside `job_fulfillment.py`, `hosts/`, and `jobs/`),
-depending on `arkhai-compute-provisioning-client` and never on the family kit's
-persistence. The alternative — a family-neutral convergence mechanism over
+without the compute provisioning client, so the calling convergence belongs in
+`domains/compute/delivery` or a higher family composition, on top of the protected
+path there, never in the `compute_provisioning` base kit. It depends on the compute
+provisioning client and consumes the protected checkpoints and access retirement;
+obligation discovery/resumption and cross-mechanism terminal driving remain this
+change's responsibility, not another protected-effect state machine. The alternative — a family-neutral convergence mechanism over
 injected ports — was considered and set aside: there is no third consumer to
 make the ports' shape honest, and the first draft of this note assumed the reuse
 boundary it should have proved. The *listing* lifecycle half of this change is

@@ -18,7 +18,7 @@ are later amended.
 - Tasks 3.3/4.3/4.4's HTTP lane drives wait for
   `add-arkhai-payments-lane-double`. Library integration uses the shared clock-injected
   payments authority engine in kit/arkhai-payments fixtures directly; HTTP wraps
-  that engine. Mediation's in-process fake keeps triage without mechanical rulings;
+  that engine. Mediation's in-process fake keeps triage plus the sole qualifying seller self-penalty ruling;
   kits never import runnable tooling.
 - Section 4's rate qualification additionally waits for
   `spot-deals-through-arkhai-payments`' rate adapter and
