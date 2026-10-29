@@ -66,12 +66,21 @@ The storefront MUST read a ruling's effects from the dispute authority's record 
 
 ### Requirement: Peer messages are hints until the authority confirms them
 
-A peer message (`commit`, `hint`) MUST be buyer-to-seller and MUST be kept as evidence. It MUST NOT change lifecycle state until a read of the authority confirms what it reports.
+A peer message (`commit`, `hint`, `end_delivery`) MUST be buyer-to-seller and MUST be kept as evidence. `commit` and `hint` MUST NOT change lifecycle state until a read of the authority confirms what they report.
 
 #### Scenario: A forged hint arrives
 
 - **WHEN** a seller receives a `hint` that the buyer acted, and the authority's record shows no such event
 - **THEN** the seller keeps the hint as evidence and continues service unchanged
+
+### Requirement: A buyer's end-delivery request is acted on directly
+
+The storefront MUST act on a buyer-authenticated `end_delivery {at}` without a read of the authority, by a final request at *at*, and MUST refuse an *at* later than its receipt. Its signed response MUST state the end it recorded.
+
+#### Scenario: A future end is requested
+
+- **WHEN** a buyer sends `end_delivery` with *at* an hour ahead
+- **THEN** the storefront refuses it, since a future end is a stop with notice at the payment authority
 
 ### Requirement: Adapters translate deal commands into per-part events
 
@@ -500,12 +509,17 @@ The VM and bare-metal storefronts MUST expose the seller half's `submit`, `read`
 
 ### Requirement: End service keeps the earliest final request
 
-End service MUST take final requests, "end delivery at *T*" with actor, cause, and source, from authority stops through `watch`, from dispute outcomes with a delivery end, and from local delivery decisions: bare-metal buyer teardown, terminal settlement, and the further local sources of mechanisms built on this interface. Repeated final requests for one deal MUST keep the earliest *T*. A local decision MUST NOT move money.
+End service MUST take final requests, "end delivery at *T*" with actor, cause, and source, from authority stops through `watch`, from dispute outcomes with a delivery end, and from local delivery decisions: a buyer's `end_delivery`, terminal settlement, and the further local sources of mechanisms built on this interface. Repeated final requests for one deal MUST keep the earliest *T*. A local decision MUST NOT move money.
 
 #### Scenario: A buyer tears down bare metal
 
-- **WHEN** a bare-metal buyer requests teardown through the storefront
+- **WHEN** a bare-metal buyer sends `end_delivery` through the storefront
 - **THEN** end service terminates the lease with the buyer as actor, the request is kept as evidence, and no payment command is sent
+
+#### Scenario: A VM buyer ends delivery
+
+- **WHEN** a VM buyer sends `end_delivery {at: now}`
+- **THEN** end service terminates the lease with the buyer as actor and the storefront's signed response acknowledges the end at that time
 
 ### Requirement: End service terminates or truncates, and journals each effect
 

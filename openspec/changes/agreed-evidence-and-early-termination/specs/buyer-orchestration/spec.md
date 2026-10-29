@@ -30,6 +30,25 @@ The typed storefront client MUST settle an Agreement-settled deal with `settle_a
 
 ## ADDED Requirements
 
+### Requirement: The buyer's end is backed by its own stop or a case
+
+The buyer half's end command MUST issue the buyer's `stop` at the payment authority before it sends `end_delivery`. When the payment authority's answer is `unknown` or the authority is unreachable, it MUST still send `end_delivery` and MUST file `buyer_end(at)` with the agreement's dispute authority, carrying the signed request and the storefront's signed response as evidence; a filing the dispute authority cannot receive MUST be journaled and retried under its idempotency key.
+
+#### Scenario: The payment authority is down
+
+- **WHEN** a buyer ends a hosted VM deal while the payment authority is unreachable
+- **THEN** delivery ends, and a `buyer_end` case at the request's time is filed with the dispute authority with both signed messages
+
+#### Scenario: Both authorities are down
+
+- **WHEN** a buyer ends a deal while neither authority is reachable
+- **THEN** delivery ends, the filing is journaled, and it is filed once the dispute authority answers
+
+#### Scenario: The stop is accepted
+
+- **WHEN** the payment authority accepts the buyer's stop
+- **THEN** the buyer half sends `end_delivery` and files nothing
+
 ### Requirement: Buyer lifecycle actions go through the buyer half
 
 On VM and bare-metal deals, dispute filing, appending to a case, read, and any payment command the deal's parts offer the buyer MUST go through the buyer half of the lifecycle interface, dispatched by the domain's buyer stage table, without core buyer code binding the lifecycle kits. After a filed dispute the buyer client MUST send a `hint` to the seller.
