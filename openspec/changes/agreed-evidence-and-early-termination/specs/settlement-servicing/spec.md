@@ -52,4 +52,4 @@ A refund MUST be seller-initiated through `reverse`. `reverse` is authorized for
 #### Scenario: Only the seller initiates a refund
 
 - **WHEN** delivery fails or the seller voluntarily corrects an unentitled end
-- **THEN** the seller's exceptional_end command to its payment adapter may reverse unserved held money, as ordinary `reverse` events the adapter computes under its journaled self-correction policy, without a buyer filing; a buyer disputing that account files a case with the agreement's dispute authority
+- **THEN** the seller files exceptional_end with the agreement's dispute authority, whose standard ruling reverses unserved held money; the seller itself sends only a voluntary `reverse` of its own choosing, and a buyer disputing that account files a case

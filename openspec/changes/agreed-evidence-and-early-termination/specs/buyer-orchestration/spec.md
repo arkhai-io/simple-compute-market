@@ -32,17 +32,17 @@ The typed storefront client MUST settle an Agreement-settled deal with `settle_a
 
 ### Requirement: The buyer's end is backed by its own stop or a case
 
-The buyer half MUST dispatch payment stops through the payment adapter. If payments is unknown/unreachable, it MUST send receipt-only end_delivery and file buyer_end(at) with its kept request and any seller acknowledgement. It MUST use acknowledged receipt when available, otherwise retain its observed time as a contested claim, and MUST NOT claim automatic adjudication. Rate stop sequencing and notice behavior belong to rate servicing.
+The buyer half MUST stop at the payment authority first through the payment adapter. If payments is unknown/unreachable, it MUST journal its stop and retry under the same key, and billing runs until the stop lands. The storefront MUST NOT be relied on to stop billing. It MAY additionally file buyer_end(at) with the signed request, receipt and any seller acknowledgement. It MUST use acknowledged receipt when available, otherwise retain its observed time as a contested claim, and MUST NOT claim automatic adjudication. Rate stop sequencing and notice behavior belong to rate servicing.
 
 #### Scenario: The payment authority is down
 
 - **WHEN** a buyer requests an end while payments is unreachable
-- **THEN** the buyer sends end_delivery without at, retains the signed receipt if obtained, and files a buyer_end case for human triage without claiming the seller's billing action or case has completed
+- **THEN** the buyer journals its stop and retries it under the same key, sends end_delivery without at, retains the signed receipt if obtained, and may file a buyer_end case for human triage without claiming billing has stopped
 
 #### Scenario: Both authorities are down
 
 - **WHEN** the storefront acknowledges surrender while both authorities are unreachable
-- **THEN** the buyer retains receipt evidence and journals its case for retry; seller cooperative payment progress remains distinct
+- **THEN** the buyer retains receipt evidence and journals its case for retry; delivery, stop and case progress remain distinct
 
 ### Requirement: A buyer end filing survives an absent dispute authority
 

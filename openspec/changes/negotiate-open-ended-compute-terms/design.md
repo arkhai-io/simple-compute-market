@@ -80,16 +80,15 @@ Keep the foundation's exact shapes and names:
 
 A payee entitlement means the seller may interrupt; the payment authority enforces
 its notice as a pending stop on that stop authority, not a local schedule.
-On-demand has no payee notice entry; its seller holds only the restitution entry
-`{account: seller, notice: PT0S, partialPeriod: returned}` that SCM derives on every part, visible
-to the buyer's mandate check. The mandate therefore does not enforce that the seller won't preempt;
-the buyer's remedy is a case over held money and the bond. exceptional_end(at) is the seller's
-payment-adapter self-correction, not a dispute, and the payments service never sees it as one. The
-adapter sends only ordinary payee events: `stop {part}` under that entry per rate part and
-`reverse {part, amount}`
-for earnings since at and each once part's unserved time share, with amounts it computes.
-Setup reverses all if undelivered and none after activation; the cause stays in end service's record. A buyer contesting the account
-files a case; mediation triages all cases for a person. There is no compensation enum.
+On-demand has no payee stop entry. The mandate therefore does not enforce that the seller
+won't preempt; that is enforced by remedy, the buyer's case over held money and the bond.
+The seller's own exit is `exceptional_end(at)`, a dispute filing the seller half journals with
+the end and files with the dispute authority; the seller sends no stop or reverse of its own.
+Arkhai mediation rules a payee-filed request at least as strong as the standard one
+mechanically: stop rate parts now returned (always returned on on-demand), reverse earnings
+since at and each once part's unserved time share, setup all if undelivered and none after
+activation, and award any bond. A buyer contesting the account files a case; mediation
+triages every other case, including buyer_end, for a person. There is no compensation enum.
 Entitled rate stops follow the committed per-stopper `settles_through`, computed by the
 payment authority, not a later storefront refund or promise to prorate every end.
 
@@ -193,13 +192,14 @@ the one priced notice, authority-hosted pending stops and adjudication for
 unentitled loss of service. Reserve-ahead is not a dishonest-seller billing cap.
 Holds last through stop plus dispute window and accepted case extensions. Keep
 signed evidence through at least the window after the latest delivery end, last
-payout or case close. Cooperative sellers self-correct through their payment adapter for failed/non-started delivery;
+payout or case close. Sellers file exceptional_end for failed/non-started delivery;
 the buyer's stop/case is its backstop. Normal buyer end submits payment-authority stop then a hint: nonzero notice keeps
 service until the effective stop is watched. `end_delivery` means end now regardless;
-it has no at and the storefront records/signs its own receipt. Our seller journals a billing
-stop for receipt plus payer notice with payer treatment even during payment outages,
-never waiving the payer's notice; the buyer's outage case buyer_end(at) is human-triaged with kept
-evidence, preserving notice/treatment and netting recorded stops, not ruled mechanically. Setup ends
+it has no at and the storefront records/signs its own receipt. The storefront cannot stop
+billing for the buyer: the buyer half stops at the payment authority first and, if it is
+unreachable, journals the stop and retries under one key while billing runs. The buyer may
+also file buyer_end(at), human-triaged with kept evidence, preserving notice/treatment and
+netting recorded stops. Setup ends
 at activation, pays out one dispute window later and is fully returned for an
 undelivered deal but not after delivery.
 
@@ -216,7 +216,7 @@ the rate change derives it.
 - Stored class: it can disagree with selected terms.
 - `interruption {seller_may_interrupt, notice_seconds, compensation}`: duplicates the shared codec.
 - Terms as typed fields beside `params`: widens the shared option wire for terms only some mechanisms enforce, against the payment-mechanism-primary rule (D4).
-- Payee notice entry on on-demand: grants the seller a priced reclaim. On-demand carries only the seller's restitution entry, so won't-preempt is not mandate-enforced; the remedy is a buyer case and the bond. A spot seller holding both its notice and restitution entries needs several stop entries per account per part, a gated payments dependency.
+- Payee notice entry on on-demand: grants the seller a priced reclaim. On-demand carries no seller stop entry, so won't-preempt is enforced by remedy, a buyer case and the bond, and the seller's exit is the mechanically ruled exceptional_end filing.
 - Bare-metal minimum spend/new payments primitive: churn is seller pricing/refusal policy.
 - Rejecting setup once because it is not minimum spend: name the additive fee honestly.
 - Banning principal-blacklist policy: goodwill is not a decentralized protocol guarantee.
@@ -252,8 +252,9 @@ No standalone review of this terms change was supplied this round. Applied the t
 
 Second-review triage applies foundation 18 F4/F13/F14 and spot 03 F2: one term-end carrier,
 terms-owned default buyer policy, all interim charged term ends refused by default, and no
-terms-to-materialization/startup closeout cycle. Owner decisions also replace seller self-filing
-with payment self-correction and mechanical buyer-end adjudication with human triage.
+terms-to-materialization/startup closeout cycle. The final owner decision makes the seller's
+exceptional_end a dispute filing, mechanically ruled only when at least the standard
+self-penalty, and keeps buyer_end a buyer-filed case ruled by a person.
 Recommendation: retain the design-stage status and re-review changed contracts with the
 foundation; the pre-acceptance final start/bound/identity gate remains explicit, not settled here.
 

@@ -55,8 +55,8 @@ None. The lifecycle codec and its common semantics belong to the foundation chan
 - Rate settlement, payment/dispute adapters and notice-stop commands: the reconciled
   rate-servicing change, named `spot-deals-through-arkhai-payments` at integration.
 - End service, `end_delivery`, buyer end commands and signed end evidence: the
-  lifecycle foundation. Unentitled seller withdrawal uses `exceptional_end(at)`;
-  unused prepaid service is reversed by the self-penalty, not a compensation enum.
+  lifecycle foundation. Unentitled seller withdrawal uses the `exceptional_end(at)`
+  dispute filing; unused prepaid service is reversed by its standard ruling, not a compensation enum.
 - Delivery admission/window derivation: `unify-compute-delivery-path`; activation
   deadlines: `renewable-compute-lease-deadlines`.
 - Discovery and `--class`: `discover-open-ended-compute-listings`.
