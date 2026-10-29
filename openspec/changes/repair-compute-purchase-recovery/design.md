@@ -937,7 +937,9 @@ operator can lift it.
 - **Detection.** Whether a candidate is the boot GPU is read from that candidate's own
   sysfs `boot_vga` flag, the kernel's authoritative answer, rather than from a parse
   across `lspci` fields. Every task of the create that excludes or refuses the boot GPU
-  uses that one test.
+  uses that one test. That is every task that chooses a GPU, not only the single-GPU
+  selector: the alternatives a create retries with after a failed attempt, and the
+  multi-GPU selection, could otherwise fall back to the boot GPU.
 - **The default.** Without the opt-in, the boot GPU is never selected, whatever the
   capability inventory lists.
 - **The opt-in.** A pool's provider configuration may set `vm_passthrough_boot_gpu:

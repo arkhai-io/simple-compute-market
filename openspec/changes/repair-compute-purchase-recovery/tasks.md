@@ -2757,23 +2757,108 @@ by its pool's operator". Files:
   `test_gpu_attachment_discovery.py`
 - `domains/vms/provisioning/adapter/tests/unit/`, for where the settings come from
 
-- [ ] 14.1 Boot-GPU detection reads each candidate's own sysfs `boot_vga` flag, in place
+- [x] 14.1 Boot-GPU detection reads each candidate's own sysfs `boot_vga` flag, in place
       of the `lspci -D -vmm` parse that expects a device's `Slot:` after its `Class:`
       and so finds none on a real host. Every task that excludes or refuses the boot
       GPU uses that one test. List those tasks in this section's notes.
-- [ ] 14.2 The opt-in, `vm_passthrough_boot_gpu`, false when absent. Without it the boot
+
+      Done:
+      - **One test**, `roles/vm-management/files/gpu_eligibility.sh` (new),
+        included with `lookup('file', ...)`:
+        - `gpu_is_boot_gpu` reads `/sys/bus/pci/devices/<address>/boot_vga`;
+        - `gpu_driver` reads the device's `driver` link;
+        - `gpus_attached_to_guests` reads every defined guest's hostdev
+          *source* addresses;
+        - `gpu_ineligibility` and `eligible_gpus` combine them.
+
+        No `lspci -D -vmm` parse, `HOST_GPU`, or `boot_vga` read remains in
+        `vm-create.yml` or `gpu-virt-install-retry.yml`.
+      - **The tasks that use it**, each with the opt-in:
+        - "Get all GPUs currently attached to VMs", the listing that names each
+          inventory GPU and why it is not eligible;
+        - "Find least-used available GPU", the single-GPU selector;
+        - "Get total available GPUs for retry calculation", which now counts
+          eligible GPUs;
+        - "Get alternative GPU (excluding attempted ones)", twice, in the scratch
+          and golden retry rescues;
+        - "Get next alternative GPU (excluding attempted ones)" in
+          `gpu-virt-install-retry.yml`;
+        - "Auto-select available GPUs by count", the multi-GPU selection.
+      - **Wider than the plan's single selector, deliberately.** Before this
+        section, the three retry alternatives and the multi-GPU selection
+        excluded no boot GPU at all. So a first attempt failing on another GPU
+        could fall back to the host's console GPU. They now draw only eligible
+        GPUs. That also stops a retry taking a GPU another defined guest holds,
+        which the first choice already refused. The delta's D12 requirement now
+        names all three ways a create chooses, with a retry scenario, and D12 in
+        `design.md` says why.
+      - **Not changed:**
+        - `gpu-virt-install-multi-retry.yml`, which nothing includes but itself;
+        - a storefront-supplied `vm_gpu_devices` list. `gpu-virt-install-multi.yml`
+          reads each entry's `.pci`, and the requirements model types the list as
+          strings, so such a list fails at templating before any `virt-install`;
+          it selects no device.
+      - **Found on the way.** Every attachment scan read the five lines after a
+        hostdev, so a device's address *inside* its guest also counted as a
+        host device. The library reads only `<source>` addresses, normalized
+        from libvirt's `0x` hex.
+- [x] 14.2 The opt-in, `vm_passthrough_boot_gpu`, false when absent. Without it the boot
       GPU is never selected, whatever the inventory lists. With it, the boot GPU is
       eligible only when, at selection, the capability inventory lists it available,
       the device's sysfs driver link names `vfio-pci`, and no defined guest has it
       attached. Another driver, or none, makes it ineligible, and a create left with
       no eligible GPU fails before defining a domain. Nothing in the role binds or
       unbinds a device. The selection among eligible GPUs is unchanged.
-- [ ] 14.3 The readiness wait reads `vm_setup_wait_attempts` and
+
+      Done:
+      - **The opt-in.** `defaults/main.yml` (new) defaults it to false. A pool's
+        `extra_vars` reach the playbook as extra variables and override that.
+        Every selector renders it as `true` or `false` for the library.
+      - **Eligibility.** A candidate is a GPU the inventory lists. It is
+        ineligible when a defined guest has it attached. When it is the boot
+        GPU, it is also ineligible without the opt-in, or when its driver link
+        is anything but `vfio-pci`, absent included. Each exclusion is named on
+        stderr.
+      - **Failure.** An empty eligible set prints `NO_AVAILABLE_GPU`, and the
+        existing "Fail if no available GPU found" stops the create before any
+        domain is defined. Its message shows the listing's reasons.
+      - **Fail closed.** Defined guests that cannot be read fail the selection.
+        The first choice and the alternatives exit non-zero; the retry count
+        reads zero.
+      - **Unchanged.** The least-used choice among eligible GPUs, the
+        multi-GPU selection's holding back of its first eligible GPU, and a
+        supplied `vm_gpu_device`'s replacement by the selector's choice.
+      - **No binding.** No file of the role binds or unbinds a device: no
+        `/bind`, `/unbind`, `driver_override`, `new_id`, `nodedev-detach`,
+        `nodedev-reattach`, or `modprobe`.
+- [x] 14.3 The readiness wait reads `vm_setup_wait_attempts` and
       `vm_setup_wait_interval_seconds`, defaulting to 10 and 30. A value that is not
       a positive integer fails the create, naming it, before any host effect, and a
       wait that runs out fails the create naming the bound, as today.
-- [ ] 14.4 The autostart task runs only when `vm_autostart`, true when absent, is true.
-- [ ] 14.5 Tests:
+
+      Done:
+      - **Defaults.** 10 and 30, in `defaults/main.yml`.
+      - **The type check.** It is in `prerequisites.yml`, before the
+        architecture check and every task that touches the host. Two `assert`
+        tasks run on the controller for every create:
+        - `vm_setup_wait_attempts` and `vm_setup_wait_interval_seconds` must
+          each be `is integer` and `> 0`;
+        - `vm_passthrough_boot_gpu` and `vm_autostart` must each be
+          `is boolean`.
+
+        Each failure names its setting. The checks are strict: a quoted `"40"`
+        is text, and `true` is not a count. A pool's `extra_vars` reach the
+        playbook as JSON, so their types survive.
+      - **The wait** loops at most the pool's number of attempts, sleeping the
+        pool's interval between them. On running out it fails, printing "VM
+        setup was not confirmed within <n> attempts, <s> seconds apart
+        (vm_setup_wait_attempts, vm_setup_wait_interval_seconds)" to stderr.
+- [x] 14.4 The autostart task runs only when `vm_autostart`, true when absent, is true.
+
+      Done: the task's condition gains `vm_autostart | bool`. The type check in
+      14.3 has already refused a value that is not a boolean. Teardown is
+      unchanged.
+- [x] 14.5 Tests:
       - **Detection and selection (unit, through `shell_harness`):** the selector run
         with `lspci`, `virsh`, and the device's sysfs files faked. The fake `lspci -D
         -vmm` prints each record in that format's real field order, `Slot:` before
@@ -2805,7 +2890,99 @@ by its pool's operator". Files:
       Owed outside this section: a real passthrough of a boot GPU, its readiness on
       the lane's host, and the GPU's return to the host's driver baseline are the
       live VM lane's evidence, after the operator's host procedure is reviewed.
-- [ ] 14.6 Verification:
+
+      Done (unit), in a new `domains/vms/provisioning/iac/tests/test_gpu_eligibility.py`
+      (22 cases, 2 of them with subtests) and a new
+      `domains/vms/provisioning/adapter/tests/unit/test_gpu_guest_settings.py`
+      (7 cases):
+      - **The fake.** `host_fakes.FakeGpuHost` builds a sysfs PCI tree under a
+        temporary directory, with each device's `boot_vga` and `driver` link.
+        Its `lspci -D -vmm` prints `Slot:` before `Class:`. Its `virsh`
+        reports defined guests, each hostdev with a source address and a
+        separate guest-side address.
+      - **Faking sysfs.** The library names `/sys/bus/pci/devices` once, as
+        `PCI_DEVICES`, and the test rewrites that literal to the temporary
+        tree. This is the same path rewriting the teardown tests do, so no
+        production variable exists for testing. The GPUs are synthetic devices
+        at arbitrary addresses.
+      - **Behaviour, the real shell through `shell_harness`:**
+        - **The single selector:**
+          - the boot GPU alone, no opt-in: `NO_AVAILABLE_GPU`, named as the
+            boot GPU without an opt-in;
+          - opt-in and `vfio-pci`: selected;
+          - opt-in with `nvidia`, or no driver: `NO_AVAILABLE_GPU`, naming the
+            driver;
+          - opt-in but attached to a defined guest: excluded;
+          - with a second GPU and no opt-in: the second is selected;
+          - a guest-side address equal to a candidate's: the candidate is not
+            taken as attached;
+          - defined guests that cannot be read: the task fails.
+        - **The three alternatives:** each refuses to fall back to the boot GPU
+          without the opt-in, and takes the bound boot GPU with it.
+        - **The retry count:** 1 without the opt-in and 2 with it, over a boot
+          GPU, a free GPU, and an attached GPU.
+        - **Multi-GPU:** three asked of four listed, the boot GPU listed
+          second: exactly the two eligible GPUs not held back are selected.
+        - **The readiness wait,** with `ssh` and `sleep` faked:
+          - the defaults: 10 attempts, 9 sleeps of 30, then a failure naming
+            the bound;
+          - 40/15: 40 attempts, 39 sleeps of 15, then a failure naming both
+            settings;
+          - a guest ready on the third attempt: two sleeps of 15, success.
+      - **Role structure:**
+        - the defaults are exactly false/10/30/true;
+        - both type checks loop their settings with these exact conditions,
+          run on the controller for a create, and precede the first task
+          delegated to the host;
+        - the wait reads its two settings and no fixed `sleep 30`;
+        - the autostart condition reads `vm_autostart | bool`;
+        - every task choosing a GPU includes the library and reads the opt-in;
+        - the boot GPU is read only from its flag;
+        - no role file binds or unbinds a device;
+        - the library carries no Jinja delimiter.
+      - **The settings' source (unit, VM adapter):**
+        - no `VmFulfillmentRequirements` field names any of the four settings,
+          and a request naming one is refused, naming it, for each;
+        - no `VmJobParams` field and no job variable names one;
+        - a pool's `extra_vars` holding all four reach the prepared job's
+          `provider_extra_vars`, and the rendered extra-vars document, with
+          their types: `true`, `40`, `15`, `false`.
+      - **`test_gpu_attachment_discovery.py`'s** full-task syntax case now
+        renders the include and the opt-in before `bash -n`.
+      - **Red.** Against `HEAD`'s task files, with only the new `files/` and
+        `defaults/` added, 13 of the selection and wait cases failed. The
+        decisive ones:
+        - `HEAD`'s selector chose the boot GPU `0000:0a:00.0` without any
+          opt-in, since its parse found no boot GPU in real field order;
+        - it preferred the boot GPU over a second GPU;
+        - all three of its alternatives fell back to the boot GPU;
+        - its attachment scan took a guest-side address for a host device;
+        - its wait ignored the pool's bound.
+
+        The multi-GPU case passed on `HEAD` only by its hold-back's luck, so it
+        was rearranged to list the boot GPU second.
+      - **Mutations, each on a temporary copy:**
+        - removing the opt-in check fails 5 cases;
+        - removing the driver check fails both stale-inventory subtests;
+        - removing the attachment check fails 2 cases.
+      - **Real Ansible, corroboration outside the repository**, on ansible-core
+        2.17.14 and 2.19.14:
+        - The two type checks ran with the role's defaults and pool-style extra
+          variables:
+          - the defaults and a 40/15/false/true pool passed;
+          - `0`, `-1`, `"abc"`, `"40"`, and `true` as a count each failed,
+            naming the setting;
+          - `"no"` and `1` as a switch each failed, naming it;
+          - the opt-in rendered `false` and `true`;
+          - the autostart condition held only for the default.
+        - The real selector task ran through `include_role` from a temporary
+          copy of the role, whose library pointed at a fixture tree.
+          `lookup('file')`, the `{% if %}` block, and the default against the
+          extra variable gave `NO_AVAILABLE_GPU` without the opt-in and the
+          boot GPU with it.
+        - `validate-playbooks` and the `import_tasks` syntax check passed on
+          2.10.8, 2.17.14, and 2.19.14.
+- [x] 14.6 Verification:
       - `make -C domains/vms/provisioning/iac test` (unit);
       - `make -C domains/vms/provisioning/adapter test` (unit and library
         integration);
@@ -2819,6 +2996,41 @@ by its pool's operator". Files:
       This section freezes Round 2's candidate: the round's one full `make test`,
       one independent implementation review, and one validation follow it, before
       any live purchase.
+
+      Done:
+      - `make -C domains/vms/provisioning/iac test`: exit 0, 126 passed and 2
+        subtests passed (unit): 104 before this section and 22 new.
+      - `make -C domains/vms/provisioning/adapter test`: exit 0, 270 passed (unit,
+        and library integration in its `tests/integration`): 263 before, 7 new.
+      - `make check-packaging`: exit 0, the architecture rules included.
+      - **Versions.** None moved. The adapter changed only in tests. The role,
+        its new `defaults/` and `files/` included, ships in the provisioning
+        service image's `COPY` of the IaC tree, not in a wheel. A wheel's
+        contents say nothing about the role an image carries.
+      - **End-to-end, confirmed.** No mock lane runs a playbook. Owed by
+        validation: none.
+
+      **Handoff.** Round 2's sections are complete; its candidate is frozen at
+      this section's commit.
+      - **Owed on the frozen candidate:** one root `make test`, one independent
+        implementation review covering Sections 7 to 14, and local, Helm, and
+        pipeline validation. Then the round's triage.
+      - **Owed by the live VM lane:**
+        - the pinned image's download, or a staged copy's verification;
+        - a guest booted from it;
+        - with `vm_passthrough_boot_gpu`, a boot GPU the operator bound to
+          `vfio-pci` passed through;
+        - its readiness within the pool's bound;
+        - `vm_autostart` false honoured;
+        - a teardown removing only the guest's artifacts;
+        - the GPU back on its host driver.
+
+        A lane whose only GPU is its boot GPU sets the opt-in and
+        `vm_autostart: false` in the pool's `extra_vars`, and a readiness wait
+        measured on its host.
+      - **The fresh-context compliance checks of Sections 12 to 14 were not
+        run.** This phase runs no subagent or reviewer, and the round's one
+        independent review covers them.
 
 ## 15. Closeout
 

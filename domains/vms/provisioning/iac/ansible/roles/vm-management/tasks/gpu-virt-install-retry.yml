@@ -71,6 +71,19 @@
           echo "NO_AVAILABLE_GPU"
           exit 0
         fi
+
+        {{ lookup('file', 'gpu_eligibility.sh') }}
+
+        # An alternative is a GPU this create may pass through, by the same
+        # test as the first choice.
+        if ! AVAILABLE_GPUS="$(eligible_gpus "$AVAILABLE_GPUS" "{{ vm_passthrough_boot_gpu | bool | lower }}")"; then
+          echo "Cannot tell which GPUs a defined guest has attached" >&2
+          exit 1
+        fi
+        if [ -z "$AVAILABLE_GPUS" ]; then
+          echo "NO_AVAILABLE_GPU"
+          exit 0
+        fi
         
         # Build array of attempted GPUs
         declare -a ATTEMPTED_GPUS_ARRAY

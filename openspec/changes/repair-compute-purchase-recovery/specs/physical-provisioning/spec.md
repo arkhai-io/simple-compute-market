@@ -118,9 +118,10 @@ machine architecture MUST fail, naming it, before any host effect.
 
 ### Requirement: A host's boot GPU is passed through only by an operator's opt-in
 
-A VM create selecting one GPU for passthrough MUST decide whether a candidate is the
-host's boot GPU, the device the host's console runs on, from that candidate's own
-kernel boot flag, and MUST NOT select the boot GPU unless the pool's operator-owned
+A VM create selecting a GPU for passthrough, whether as its first choice, as an
+alternative after a failed attempt, or among several for a multi-GPU guest, MUST decide
+whether a candidate is the host's boot GPU, the device the host's console runs on, from
+that candidate's own kernel boot flag, and MUST NOT select the boot GPU unless the pool's operator-owned
 provider configuration sets `vm_passthrough_boot_gpu` true. No job parameter, buyer
 term, or storefront request MUST be able to set it. With it set, the boot GPU MUST be
 eligible only when, at the moment of selection, the host's GPU capability inventory
@@ -154,6 +155,11 @@ create left with no eligible GPU MUST fail before defining a domain.
 
 - **WHEN** the pool sets `vm_passthrough_boot_gpu` true, but a defined guest has the boot GPU attached
 - **THEN** the boot GPU is not selected
+
+#### Scenario: A create retries after its first GPU fails
+
+- **WHEN** a GPU VM create's first GPU fails to attach, the only other GPU the inventory lists is the boot GPU, and the pool does not opt in
+- **THEN** the boot GPU is not tried, and the create fails having no other eligible GPU
 
 ### Requirement: A GPU guest's readiness wait and autostart are set by its pool's operator
 

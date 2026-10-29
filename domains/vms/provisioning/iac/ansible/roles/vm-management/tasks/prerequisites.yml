@@ -9,6 +9,35 @@
     ansible_become: yes
   tags: always
 
+# A pool's GPU guest settings (defaults/main.yml) are checked on this
+# controller before anything touches the host, so a misconfigured pool fails
+# the create by naming the setting, not part-way through it. Each must be
+# exactly its type: a quoted "40" is text, not a count.
+- name: Refuse a pool's readiness wait that is not a positive integer
+  assert:
+    that:
+      - lookup('vars', item) is integer
+      - lookup('vars', item) > 0
+    fail_msg: "{{ item }} must be a positive integer, not {{ lookup('vars', item) | string }}"
+    quiet: true
+  loop:
+    - vm_setup_wait_attempts
+    - vm_setup_wait_interval_seconds
+  when: vm_action == "create"
+  tags: always
+
+- name: Refuse a pool's GPU guest switch that is not a boolean
+  assert:
+    that:
+      - lookup('vars', item) is boolean
+    fail_msg: "{{ item }} must be true or false, not {{ lookup('vars', item) | string }}"
+    quiet: true
+  loop:
+    - vm_passthrough_boot_gpu
+    - vm_autostart
+  when: vm_action == "create"
+  tags: always
+
 # First of the create's checks that read the host: it precedes every task that
 # changes the host, starting libvirtd included, so a host the pinned image
 # cannot boot on is refused before anything is done to it.

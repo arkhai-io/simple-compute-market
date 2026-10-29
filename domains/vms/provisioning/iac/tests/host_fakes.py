@@ -15,6 +15,12 @@ as the real commands answer:
 
 Every call is appended to `calls`, so a test can assert what was never run.
 Addresses are RFC 5737 documentation addresses and names are synthetic.
+
+`FakeGpuHost` fakes what a create reads to choose a GPU: a sysfs PCI tree whose
+devices carry their own `boot_vga` flag and `driver` link, `lspci` printing
+`-vmm` records in a real host's field order, and the host devices each defined
+guest has attached. Its GPUs are synthetic devices at arbitrary addresses,
+not any real machine's.
 """
 
 from __future__ import annotations
@@ -234,3 +240,96 @@ def quoted(rule: str) -> str:
         if token == "--comment":
             tokens[index + 1] = f'"{tokens[index + 1]}"'
     return " ".join(tokens)
+
+
+_GPU_VIRSH = _PREAMBLE + r'''
+state = json.loads((STATE / "gpu-virsh.json").read_text(encoding="utf-8"))
+args = sys.argv[1:]
+if args[:1] == ["list"]:
+    if state.get("list_fails"):
+        print("error: failed to connect to the hypervisor", file=sys.stderr)
+        sys.exit(1)
+    for name in state["guests"]:
+        print(name)
+elif args[:1] == ["dumpxml"]:
+    print("<domain type='kvm'>\n  <devices>")
+    for device in state["guests"][args[1]]:
+        source = device["source"]
+        domain, bus, rest = source.split(":")
+        slot, function = rest.split(".")
+        guest_bus = device.get("guest_bus", "0x05")
+        print("    <hostdev mode='subsystem' type='pci' managed='yes'>")
+        print("      <source>")
+        print(f"        <address domain='0x{domain}' bus='0x{bus}' slot='0x{slot}' function='0x{function}'/>")
+        print("      </source>")
+        print(f"      <address type='pci' domain='0x0000' bus='{guest_bus}' slot='0x00' function='0x0'/>")
+        print("    </hostdev>")
+    print("  </devices>\n</domain>")
+else:
+    print(f"fake virsh: unsupported {args}", file=sys.stderr)
+    sys.exit(2)
+'''
+
+# `lspci -D -vmm` prints each record's Slot: before its Class:, the order a
+# real host's lspci prints them in.
+_GPU_LSPCI = _PREAMBLE + r'''
+devices = json.loads((STATE / "lspci.json").read_text(encoding="utf-8"))
+args = sys.argv[1:]
+if "-vmm" in args:
+    for device in devices:
+        print(f"Slot:\t{device['address']}")
+        print(f"Class:\t{device['class']}")
+        print("Vendor:\tSynthetic Vendor")
+        print(f"Device:\t{device['name']}")
+        print()
+elif "-s" in args:
+    wanted = args[args.index("-s") + 1]
+    for device in devices:
+        if device["address"].endswith(wanted):
+            print(f"{device['address'][5:]} {device['class']}: {device['name']}")
+            if "-nnk" in args and device.get("driver"):
+                print(f"\tKernel driver in use: {device['driver']}")
+else:
+    for device in devices:
+        print(f"{device['address']} {device['class']}: {device['name']}")
+'''
+
+
+class FakeGpuHost:
+    """A host's GPUs: its sysfs PCI tree under ``root``, `lspci`, and the
+    defined guests `virsh` reports with the host devices each has attached."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.state = root / "state"
+        self.state.mkdir(parents=True)
+        (self.state / "calls").write_text("", encoding="utf-8")
+        self.devices = root / "sys/bus/pci/devices"
+        self.devices.mkdir(parents=True)
+        self.drivers = root / "sys/bus/pci/drivers"
+        self.drivers.mkdir(parents=True)
+        self._lspci: list[dict] = []
+        (self.state / "lspci.json").write_text("[]", encoding="utf-8")
+        self.set_guests({})
+
+    def add_gpu(self, address: str, *, boot: bool, driver: str | None) -> None:
+        device = self.devices / address
+        device.mkdir()
+        (device / "boot_vga").write_text("1\n" if boot else "0\n", encoding="utf-8")
+        if driver is not None:
+            (self.drivers / driver).mkdir(exist_ok=True)
+            (device / "driver").symlink_to(self.drivers / driver)
+        self._lspci.append({"address": address, "class": "VGA compatible controller",
+                            "name": "Synthetic GPU", "driver": driver})
+        (self.state / "lspci.json").write_text(json.dumps(self._lspci), encoding="utf-8")
+
+    def set_guests(self, guests: dict[str, list[dict]], *, list_fails: bool = False) -> None:
+        (self.state / "gpu-virsh.json").write_text(
+            json.dumps({"guests": guests, "list_fails": list_fails}), encoding="utf-8"
+        )
+
+    def binaries(self) -> dict[str, str]:
+        return {"virsh": _GPU_VIRSH, "lspci": _GPU_LSPCI}
+
+    def environment(self, base: dict[str, str]) -> dict[str, str]:
+        return {**base, "FAKE_HOST_STATE": str(self.state)}

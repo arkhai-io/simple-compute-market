@@ -396,24 +396,9 @@
 - name: Get all GPUs currently attached to VMs
   shell:
     cmd: |
+      {{ lookup('file', 'gpu_eligibility.sh') }}
+
       echo "=== GPU Attachments Across All VMs ==="
-      HOST_GPU=$(lspci -D -vmm | awk '/^Class:.*VGA|^Class:.*3D|^Class:.*Display/ {getline; if ($0 ~ /^Slot:/) print $2}' | while read pci; do
-        if [ -f "/sys/bus/pci/devices/${pci}/boot_vga" ] && [ "$(cat /sys/bus/pci/devices/${pci}/boot_vga 2>/dev/null)" = "1" ]; then
-          echo "$pci"
-          break
-        fi
-      done)
-      
-      if [ ! -z "$HOST_GPU" ]; then
-        echo "Host is using GPU: $HOST_GPU"
-        HOST_GPU_MODEL=$(lspci -s ${HOST_GPU#0000:} | grep -i "vga\|3d\|display" | cut -d: -f3-)
-        HOST_GPU_DRIVER=$(lspci -nnk -s ${HOST_GPU#0000:} | grep "Kernel driver in use:" | awk '{print $5}' || echo "none")
-        echo "Model: $HOST_GPU_MODEL"
-        echo "Driver: $HOST_GPU_DRIVER"
-      else
-        echo "No host GPU detected (headless or no boot_vga)"
-        HOST_GPU="NONE"
-      fi
       echo ""
       
       # 1. List all VMs with attached GPU PCI IDs (single clean output)
@@ -448,23 +433,24 @@
       LOCKFILE_AVAILABLE=""
       {% endif %}
 
-      # 3. List all GPUs not attached to any VM (and not host GPU)
-      echo "=== Available GPUs (Not Attached and Not Host GPU) ==="
+      # 3. Each GPU the inventory lists, and whether this create may pass it
+      # through (files/gpu_eligibility.sh).
+      echo "=== Available GPUs (eligible for passthrough) ==="
       if [ -z "$LOCKFILE_AVAILABLE" ]; then
         echo "  No available devices in lockfile"
       else
+        ATTACHED=" $(gpus_attached_to_guests | tr '\n' ' ') "
         for gpu_pci in $LOCKFILE_AVAILABLE; do
           [ -z "$gpu_pci" ] && continue
-          if [ "$HOST_GPU" != "NONE" ] && [ "$gpu_pci" == "$HOST_GPU" ]; then
-            continue
-          fi
-          if echo " $ATTACHED_GPUS_LIST " | grep -q " $gpu_pci "; then
-            continue
-          fi
+          REASON="$(gpu_ineligibility "$gpu_pci" "{{ vm_passthrough_boot_gpu | bool | lower }}" "$ATTACHED")"
           GPU_MODEL=$(lspci -s ${gpu_pci#0000:} 2>/dev/null | grep -i "vga\|3d\|display" | cut -d: -f3- || echo "Unknown GPU")
           GPU_DRIVER=$(lspci -nnk -s ${gpu_pci#0000:} 2>/dev/null | grep "Kernel driver in use:" | awk '{print $5}' || echo "none")
           echo "  PCI: $gpu_pci - $GPU_MODEL"
-          echo "      Driver: $GPU_DRIVER ✓ Ready for passthrough"
+          if [ -n "$REASON" ]; then
+            echo "      Driver: $GPU_DRIVER - not eligible: $REASON"
+          else
+            echo "      Driver: $GPU_DRIVER ✓ Ready for passthrough"
+          fi
         done
       fi
     executable: /bin/bash
@@ -498,75 +484,19 @@
       exit 0
       {% endif %}
       
-      HOST_GPU=$(lspci -D -vmm | awk '/^Class:.*VGA|^Class:.*3D|^Class:.*Display/ {getline; if ($0 ~ /^Slot:/) print $2}' | while read pci; do
-        if [ -f "/sys/bus/pci/devices/${pci}/boot_vga" ] && [ "$(cat /sys/bus/pci/devices/${pci}/boot_vga 2>/dev/null)" = "1" ]; then
-          echo "$pci"
-          break
-        fi
-      done)
-      
-      if [ -z "$HOST_GPU" ]; then
-        HOST_GPU="NONE"
-      fi
-      
-      # Use available devices from parsed lockfile
+      {{ lookup('file', 'gpu_eligibility.sh') }}
+
+      # The inventory's GPUs this create may pass through: none a defined guest
+      # has attached, and the boot GPU only by the pool's opt-in while the
+      # kernel reports it bound to vfio-pci. Each one left out is named on
+      # stderr. Attachment that cannot be read fails the selection.
       LOCKFILE_AVAILABLE='{{ gpu_lockfile.gpu_modes.passthrough.available_devices | join(" ") }}'
-      
-      # Declare array to collect attached PCI devices
-      declare -a ATTACHED_GPUS_ARRAY=()
-      
-      # Collect attached PCI devices from VMs
-      for vm in $(virsh list --all --name); do
-        if [ ! -z "$vm" ]; then
-          GPU_DEVICES=$(virsh dumpxml "$vm" 2>/dev/null | grep -A 5 "hostdev.*pci" | grep "address.*domain" | sed "s/.*domain='\([^']*\)'.*bus='\([^']*\)'.*slot='\([^']*\)'.*function='\([^']*\)'.*/\1:\2:\3:\4/" || echo "")
-          if [ ! -z "$GPU_DEVICES" ]; then
-            while read -r pci_addr; do
-              if [ ! -z "$pci_addr" ]; then
-                # Normalize PCI address (remove 0x prefixes and ensure proper format)
-                normalized_pci=$(echo "$pci_addr" | sed 's/0x//g' | awk -F: '{printf "%04s:%02s:%02s.%s", $1, $2, $3, $4}' | sed 's/ /0/g')
-                ATTACHED_GPUS_ARRAY+=("$normalized_pci")
-              fi
-            done < <(echo "$GPU_DEVICES")
-          fi
-        fi
-      done
-      
-      # Create sorted unique list of attached GPUs
-      ATTACHED_GPUS=$(printf '%s\n' "${ATTACHED_GPUS_ARRAY[@]}" | sort -u)
-      
-      # Filter out attached GPUs from lockfile available devices
-      AVAILABLE_UNATTACHED=""
-      for gpu_pci in $LOCKFILE_AVAILABLE; do
-        if [ -z "$gpu_pci" ]; then
-          continue
-        fi
-        
-        # Check if this GPU is attached to any VM
-        IS_ATTACHED=0
-        for attached in $ATTACHED_GPUS; do
-          if [ "$gpu_pci" == "$attached" ]; then
-            IS_ATTACHED=1
-            break
-          fi
-        done
-        
-        if [ $IS_ATTACHED -eq 0 ]; then
-          AVAILABLE_UNATTACHED="$AVAILABLE_UNATTACHED $gpu_pci"
-        fi
-      done
-      
-      # Use all available unattached GPUs
-      FILTERED_GPUS="$AVAILABLE_UNATTACHED"
+      FILTERED_GPUS="$(eligible_gpus "$LOCKFILE_AVAILABLE" "{{ vm_passthrough_boot_gpu | bool | lower }}")"
       
       # Get all GPU attachments with VM counts (using filtered list)
       declare -A GPU_VM_COUNT
       for gpu_pci in $FILTERED_GPUS; do
         if [ -z "$gpu_pci" ]; then
-          continue
-        fi
-        
-        if [ "$HOST_GPU" != "NONE" ] && [ "$gpu_pci" == "$HOST_GPU" ]; then
-          echo "Skipping host GPU: $gpu_pci" >&2
           continue
         fi
         
@@ -687,36 +617,11 @@
       exit 0
     fi
     
-    # Collect all GPUs currently attached to VMs
-    declare -a ATTACHED_GPUS_ARRAY=()
-    for vm in $(virsh list --all --name); do
-      if [ ! -z "$vm" ]; then
-        GPU_DEVICES=$(virsh dumpxml "$vm" 2>/dev/null | grep -A 5 "hostdev.*pci" | grep "address.*domain" | sed "s/.*domain='\([^']*\)'.*bus='\([^']*\)'.*slot='\([^']*\)'.*function='\([^']*\)'.*/\1:\2:\3:\4/" || echo "")
-        if [ ! -z "$GPU_DEVICES" ]; then
-          while read -r pci_addr; do
-            if [ ! -z "$pci_addr" ]; then
-              normalized_pci=$(echo "$pci_addr" | sed 's/0x//g' | awk -F: '{printf "%04s:%02s:%02s.%s", $1, $2, $3, $4}' | sed 's/ /0/g')
-              ATTACHED_GPUS_ARRAY+=("$normalized_pci")
-            fi
-          done < <(echo "$GPU_DEVICES")
-        fi
-      fi
-    done
-    
-    # Count GPUs that are in lockfile but NOT attached to any VM
-    UNATTACHED_COUNT=0
-    for gpu_pci in $AVAILABLE_GPUS; do
-      IS_ATTACHED=0
-      for attached in "${ATTACHED_GPUS_ARRAY[@]}"; do
-        if [ "$gpu_pci" = "$attached" ]; then
-          IS_ATTACHED=1
-          break
-        fi
-      done
-      if [ $IS_ATTACHED -eq 0 ]; then
-        UNATTACHED_COUNT=$((UNATTACHED_COUNT + 1))
-      fi
-    done
+    {{ lookup('file', 'gpu_eligibility.sh') }}
+
+    # Only GPUs this create may pass through count as further attempts.
+    ELIGIBLE="$(eligible_gpus "$AVAILABLE_GPUS" "{{ vm_passthrough_boot_gpu | bool | lower }}")" || ELIGIBLE=""
+    UNATTACHED_COUNT=$(printf '%s\n' "$ELIGIBLE" | grep -c . || true)
     
     echo "$UNATTACHED_COUNT"
   args:
@@ -974,45 +879,15 @@
       exit 0
     fi
     
-    # Collect all GPUs currently attached to VMs
-    declare -a ATTACHED_GPUS_ARRAY=()
-    for vm in $(virsh list --all --name); do
-      if [ ! -z "$vm" ]; then
-        GPU_DEVICES=$(virsh dumpxml "$vm" 2>/dev/null | grep -A 5 "hostdev.*pci" | grep "address.*domain" | sed "s/.*domain='\([^']*\)'.*bus='\([^']*\)'.*slot='\([^']*\)'.*function='\([^']*\)'.*/\1:\2:\3:\4/" || echo "")
-        if [ ! -z "$GPU_DEVICES" ]; then
-          while read -r pci_addr; do
-            if [ ! -z "$pci_addr" ]; then
-              normalized_pci=$(echo "$pci_addr" | sed 's/0x//g' | awk -F: '{printf "%04s:%02s:%02s.%s\n", $1, $2, $3, $4}' | sed 's/ /0/g')
-              ATTACHED_GPUS_ARRAY+=("$normalized_pci")
-            fi
-          done < <(echo "$GPU_DEVICES")
-        fi
-      fi
-    done
-    
-    # Create sorted unique list of attached GPUs
-    ATTACHED_GPUS=$(printf '%s\n' "${ATTACHED_GPUS_ARRAY[@]}" | sort -u)
-    
-    # Filter out attached GPUs from lockfile available devices
-    AVAILABLE_UNATTACHED=""
-    for gpu_pci in $AVAILABLE_GPUS; do
-      if [ -z "$gpu_pci" ]; then
-        continue
-      fi
-      
-      # Check if this GPU is attached to any VM
-      IS_ATTACHED=0
-      for attached in $ATTACHED_GPUS; do
-        if [ "$gpu_pci" == "$attached" ]; then
-          IS_ATTACHED=1
-          break
-        fi
-      done
-      
-      if [ $IS_ATTACHED -eq 0 ]; then
-        AVAILABLE_UNATTACHED="$AVAILABLE_UNATTACHED $gpu_pci"
-      fi
-    done
+    {{ lookup('file', 'gpu_eligibility.sh') }}
+
+    # Only GPUs this create may pass through: none a defined guest has
+    # attached, and the boot GPU only by the pool's opt-in while bound to
+    # vfio-pci.
+    if ! AVAILABLE_UNATTACHED="$(eligible_gpus "$AVAILABLE_GPUS" "{{ vm_passthrough_boot_gpu | bool | lower }}")"; then
+      echo "Cannot tell which GPUs a defined guest has attached" >&2
+      exit 1
+    fi
     
     # Remove first available GPU from filtered list (reserve it)
     RESERVED_GPU=""
@@ -1214,6 +1089,19 @@
         # Get list of available GPUs from lockfile
         AVAILABLE_GPUS=$(jq -r '.gpu_modes.passthrough.available_devices[]' /etc/libvirt/gpu-capabilities/gpu-lockfile.json 2>/dev/null)
         
+        if [ -z "$AVAILABLE_GPUS" ]; then
+          echo "NO_AVAILABLE_GPU"
+          exit 0
+        fi
+
+        {{ lookup('file', 'gpu_eligibility.sh') }}
+
+        # An alternative is a GPU this create may pass through, by the same
+        # test as the first choice.
+        if ! AVAILABLE_GPUS="$(eligible_gpus "$AVAILABLE_GPUS" "{{ vm_passthrough_boot_gpu | bool | lower }}")"; then
+          echo "Cannot tell which GPUs a defined guest has attached" >&2
+          exit 1
+        fi
         if [ -z "$AVAILABLE_GPUS" ]; then
           echo "NO_AVAILABLE_GPU"
           exit 0
@@ -1546,6 +1434,19 @@
         # Get list of available GPUs from lockfile
         AVAILABLE_GPUS=$(jq -r '.gpu_modes.passthrough.available_devices[]' /etc/libvirt/gpu-capabilities/gpu-lockfile.json 2>/dev/null)
         
+        if [ -z "$AVAILABLE_GPUS" ]; then
+          echo "NO_AVAILABLE_GPU"
+          exit 0
+        fi
+
+        {{ lookup('file', 'gpu_eligibility.sh') }}
+
+        # An alternative is a GPU this create may pass through, by the same
+        # test as the first choice.
+        if ! AVAILABLE_GPUS="$(eligible_gpus "$AVAILABLE_GPUS" "{{ vm_passthrough_boot_gpu | bool | lower }}")"; then
+          echo "Cannot tell which GPUs a defined guest has attached" >&2
+          exit 1
+        fi
         if [ -z "$AVAILABLE_GPUS" ]; then
           echo "NO_AVAILABLE_GPU"
           exit 0
@@ -2010,10 +1911,16 @@
   when: vm_action == "create" and vm_image_type == "golden" and vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
   delegate_to: "{{ target_host }}"
 
+# A GPU guest installs its driver and reboots before it confirms setup. The
+# pool's operator bounds the wait (vm_setup_wait_attempts,
+# vm_setup_wait_interval_seconds; defaults/main.yml), and a wait that runs out
+# fails the create naming that bound: no setting reports a guest ready that has
+# not confirmed its setup.
 - name: Wait for VM setup completion by checking for setup log
   shell: |
     echo "Waiting for VM {{ vm_name }} setup to complete (checking for /var/log/vm-setup.log)..."
-    MAX_RETRIES=10
+    MAX_RETRIES={{ vm_setup_wait_attempts }}
+    INTERVAL={{ vm_setup_wait_interval_seconds }}
     RETRY_COUNT=0
     
     while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
@@ -2023,10 +1930,10 @@
       else
         RETRY_COUNT=$((RETRY_COUNT + 1))
         if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-          echo "Setup not complete yet or connection issue (attempt $RETRY_COUNT/$MAX_RETRIES), retrying in 30 seconds..."
-          sleep 30
+          echo "Setup not complete yet or connection issue (attempt $RETRY_COUNT/$MAX_RETRIES), retrying in $INTERVAL seconds..."
+          sleep "$INTERVAL"
         else
-          echo "⚠ WARNING: Failed to confirm VM setup completion after $MAX_RETRIES attempts"
+          echo "VM setup was not confirmed within $MAX_RETRIES attempts, $INTERVAL seconds apart (vm_setup_wait_attempts, vm_setup_wait_interval_seconds)" >&2
           exit 1
         fi
       fi
@@ -2065,11 +1972,16 @@
     - vm_mac_address.stdout != ""
   delegate_to: "{{ target_host }}"
 
+# Off when the pool's operator sets vm_autostart false (defaults/main.yml): a
+# guest a teardown has not yet removed then cannot take a passed-through GPU
+# back from the host when the host reboots. Teardown removes the same
+# artifacts either way.
 - name: Set VM to autostart on host boot
   shell: virsh autostart {{ vm_name }}
   when:
     - vm_action == "create"
     - vm_ip is defined
+    - vm_autostart | bool
   delegate_to: "{{ target_host }}"
 
 - name: Set up iptables port forwarding for SSH
