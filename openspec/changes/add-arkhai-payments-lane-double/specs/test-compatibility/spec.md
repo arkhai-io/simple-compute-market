@@ -86,7 +86,7 @@ The target payment double MUST model per-part authorities, payee-only rate start
 #### Scenario: On-demand non-preemption is remedy-enforced
 
 - **WHEN** an on-demand seller preempts delivery
-- **THEN** the buyer's remedy is a case over held money and the bond once supported, not a mandate prohibition
+- **THEN** the buyer's remedy is the premature-stop penalty and a case over held money, not a mandate prohibition
 - **AND** the seller's own exit is exceptional_end, the qualifying mechanically ruled self-penalty, always returned on-demand
 
 #### Scenario: A stopped part still holds reversible earnings
@@ -184,8 +184,15 @@ The double MUST expose exceptional_end and its pinned mapping. Only payee reques
 - **WHEN** the seller half journals exceptional_end(at) with the end and files through the Agreement's dispute adapter and authority
 - **THEN** the seller sends no stop or reverse of its own and the qualifying payee self-penalty is mechanically ruled through mediation's own `{account, notice: PT0S, partialPeriod: chosen}` stop entry
 - **AND** it stops rate parts now returned, always returned for on-demand, reverses earnings since at and reverses unserved once share by time
-- **AND** setup's term ends at activation so all is reversed if undelivered and none once delivered; any bond is awarded in full once supported, never fabricated
+- **AND** setup's term ends at activation so all is reversed if undelivered and none once delivered
+- **AND** then min(premature_stop_penalty, earned amounts still held) is reversed to payer across parts in mandate order; bond award stays reserved for hosted bonds
 - **AND** the authority records the dispute and owns the whole remedy, with no seller exceptional-end direct effects to reconcile
+
+#### Scenario: Seller penalties distinguish entitled notice from emergency
+
+- **WHEN** a spot seller uses its entitled notice and a separate seller ends without that notice
+- **THEN** the entitled stop pays no penalty and the emergency self-penalty pays the configured amount capped by earned amounts still held after refunds
+- **AND** a buyer case alleging an unentitled seller end goes to a person applying that same cap
 
 #### Scenario: A request does not qualify for mechanical self-penalty
 

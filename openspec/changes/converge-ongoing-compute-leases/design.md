@@ -177,7 +177,10 @@ Arkhai mediation's only mechanical ruling is a payee-filed self-penalty request 
 least as strong as the standard request. Through mediation's own stop entry
 `{account, notice: PT0S, partialPeriod: "chosen"}`, that standard request stops rate
 parts now with returned treatment, reverses rate earnings since at, reverses each
-once part's unserved share by time, and awards any bond in full once bonds exist.
+once part's unserved share by time, then reverses min(premature_stop_penalty,
+earned amounts still held) to the payer across parts in mandate order. Bond award
+stays reserved for hosted bonds; entitled notice pays none, spot emergency pays it.
+A person applies the same capped remedy in a buyer case alleging an unentitled seller end.
 On-demand always returns the partial period: that is its contract. Setup's term
 ends at activation, so all is returned if undelivered and none once delivered.
 Other requests, including buyer_end, go to human triage. The authority does not
@@ -188,7 +191,7 @@ still need a dispute. The authority also records disputes to act on bad sellers,
 including banning them. Seller stop entries therefore exist only for entitlements,
 such as spot's notice entry. Spot emergency exit files exceptional_end, not a
 notice-only fallback or an immediate seller stop. On-demand non-preemption is
-remedied by a buyer case over held money and the bond, not enforced by the mandate;
+remedied by the premature-stop penalty and a buyer case over held money, not enforced by the mandate;
 the seller's own exit is the mechanically ruled self-penalty.
 
 Earlier evidence creates revision-bound dispute work, not append-as-amendment.
@@ -290,7 +293,7 @@ rate qualification uses this matrix after the section handoff in D1.
 | 7 | Spot notice then earlier payer stop | authority hosts pending stop during absence; earliest wins, authority partial-period terms |
 | 8 | Activated and started but never disclosed | disclosure fails, exceptional_end filing at deal start, buyer-case backstop |
 | 9 | Maximum term | absolute authority end with its own partialPeriod, including late start and a mid-period end; physical recovery, no exceptional_end |
-| 10 | Seller emergency | on-demand and spot file exceptional_end; mediation mechanically rules only qualifying payee self-penalty through its chosen entry; seller sends no stop/reverse; buyer case/bond remedies on-demand preemption |
+| 10 | Seller emergency | on-demand and spot file exceptional_end; mediation mechanically rules only qualifying payee self-penalty through its chosen entry; seller sends no stop/reverse; on-demand emergency pays premature_stop_penalty capped by earned amounts still held after refunds in mandate order; entitled spot notice pays none |
 | 11 | Identity rotation overlap | old receipt verified during overlap, current snapshot re-anchors the running rate deal before retirement, exact old bytes retained; once-only dependencies drain; revoked/stale anchors and livemode changes refused |
 
 The nine diagram pairs illustrate cases 0–8; cases 9–11 extend the qualification

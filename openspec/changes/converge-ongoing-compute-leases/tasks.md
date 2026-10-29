@@ -99,8 +99,10 @@ before code starts; no superseded Goal 8 change is an implementation gate.
       through the dispute adapter to the Agreement authority; seller sends no stop
       or reverse. Qualify mediation's sole mechanical ruling for a payee request at
       least as strong as standard, using its own PT0S/chosen entry for returned rate
-      stops, rate reversals since at, time-based once refunds and full bond once
-      supported. Add timer classification via foundation's atomic filing resolution.
+      stops, rate reversals since at, time-based once refunds, then the premature-stop
+      penalty capped by earned amounts still held, across parts in mandate order; bond award
+      stays reserved for hosted bonds. Matrix row 10 must prove an on-demand emergency
+      pays it and entitled spot notice pays none. Add timer classification via foundation's atomic filing resolution.
       Resolve unknown original filings before revised requests; consume the dispute
       adapter's qualified revision mapping and prior-ruling netting, not local
       monetary deltas or append-as-amendment. Adopt equivalent runner cases under

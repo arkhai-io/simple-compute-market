@@ -64,7 +64,7 @@ implementation that rejects every repository reader found during migration.
 
 Keep the foundation's exact shapes and names:
 
-- `early_termination = {version, entitlements, max_term_seconds, settles_through}`;
+- `early_termination = {version, entitlements, max_term_seconds, settles_through, premature_stop_penalty?}`;
   its top-level `settles_through` is the sole term-end treatment carrier (no mechanism-specific duplicate), separate from
   entitlements keyed by `payer`/`payee`, each `{notice_seconds, settles_through}`.
   Foundation D5 owns the `settles_through` mapping: `started_period` ↔ charged,
@@ -76,18 +76,19 @@ Keep the foundation's exact shapes and names:
   unsupported treatment. `exposure_seconds` and `stop+exposure` are retired.
 - `adjudication = {version, dispute, dispute_window_seconds, case_hold_max_seconds}`;
   `dispute = {interface, origin, account, record_key, params}`.
+- `premature_stop_penalty` is a nonnegative integer amount in the option asset's minor units, encoded as a canonical decimal string; absent/zero means none. It applies to an unentitled seller end, including a spot emergency without notice, not an entitled notice stop. Recommendation: on-demand presets default to 24 periods' price (calculated through the agreed-price accessor), and buyer default acceptance refuses on-demand without a positive penalty because the buyer benefits and enforces it, like partialPeriod. Expose seller override and explicit buyer opt-out; never silently downgrade the default.
 - `bond` stays reserved where the mechanism cannot hold a seller-funded stake.
 
 A payee entitlement means the seller may interrupt; the payment authority enforces
 its notice as a pending stop on that stop authority, not a local schedule.
 On-demand has no payee stop entry. The mandate therefore does not enforce that the seller
-won't preempt; that is enforced by remedy, the buyer's case over held money and the bond.
+won't preempt; that is enforced by the penalty and a buyer's case over held money, not by the mandate.
 The seller's own exit is `exceptional_end(at)`, a dispute filing the seller half journals with
 the end and files with the dispute authority; the seller sends no stop or reverse of its own.
 Arkhai mediation rules a payee-filed request at least as strong as the standard one
 mechanically: stop rate parts now returned (always returned on on-demand), reverse earnings
 since at and each once part's unserved time share, setup all if undelivered and none after
-activation, and award any bond. A buyer contesting the account files a case; mediation
+activation, then reverse min(premature_stop_penalty, earned amounts still held) across parts in mandate order. Bond award stays reserved for hosted bonds. A buyer contesting the account files a case; mediation
 triages every other case, including buyer_end, for a person. There is no compensation enum.
 Entitled rate stops follow the committed per-stopper `settles_through`, computed by the
 payment authority, not a later storefront refund or promise to prorate every end.
@@ -105,7 +106,12 @@ requirement to price identically. Recommendation: shipped recurring presets have
 a payer entitlement and setup once part; spot adds a payee entitlement. Omission
 never grants the payee an implicit entitlement. The foundation owns validation and
 identity inclusion; do not create a second hash rule or require early_termination
-on every compute option.
+on every compute option. Terms injects a preset-helper interface: selected quote/unit,
+period/reserve, setup, bounds, adjudication and early-termination declarations in;
+canonical candidate params or a named derivation refusal out. Spot supplies the
+hosted helper; generic publication tests use injected helpers. Missing helper omits
+the recurring candidate, never reconstructs mechanism params. Neither archive waits
+for the other's execution.
 
 ### D4. The terms are option params
 
@@ -141,7 +147,9 @@ options with an absolute end and a charged final partial period, disclosed in
 the option as term-end `started_period`, not as the returned preset. Exhaustion
 needs no separate rule: reserve-ahead places it on a period boundary.
 
-The selected option's max term and Agreement duration must agree before signature
+Recurring start_utc must resolve to whole-second precision before the final signature;
+refuse a fractional rate start rather than round signed bytes. Preserve once-only
+fractional handling. The selected option's max term and Agreement duration must agree before signature
 and commitment. A decision gate with the foundation/rate builder resolves how an
 absolute bound and a relative start produce the final identity-bound option.
 Recommendation: resolve start and effective horizon before the final seller offer;
@@ -183,7 +191,7 @@ remain disabled in deployed compositions until their consumer gates pass.
 
 Both CLIs show class, recurring charge/period or total, separate setup once charge,
 initial reserve (not spend), maximum end/horizon, payer/payee entitlements, notice,
-per-stopper and term-end `settles_through` treatment, dispute authority/window/
+per-stopper and term-end `settles_through` treatment, premature-stop penalty amount/asset and capped remedy, dispute authority/window/
 case-hold cap and evidence retention. Values come from the selected option, not a stored class. Asking rate keeps its stated unit.
 
 Explain rate start as a journaled effect after lease activation, distinct from buyer
@@ -276,7 +284,7 @@ Destinations are planned, not claims of implemented behavior.
 | Accepted decision | Permanent location |
 |---|---|
 | D1, D2 classes and quote unit | `docs/development/ARCHITECTURE.md`; `openspec/specs/negotiation-protocol/spec.md` |
-| D3, D4 codec application/placement result | `openspec/specs/settlement-configuration/spec.md`; foundation-owned lifecycle contract |
+| D3 penalty codec, 24-period on-demand preset and buyer acceptance recommendations; D4 placement result | `openspec/specs/settlement-configuration/spec.md`; foundation-owned lifecycle contract |
 | D5 listing bounds and omission | `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md`; `openspec/specs/resource-pool-management/spec.md` |
 | D6 servicing doors | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/storefront-publication/architecture.md` |
 | D7, D8 display and seller-policy distinction | `openspec/specs/buyer-orchestration/spec.md`; `openspec/specs/buyer-orchestration/architecture.md` |

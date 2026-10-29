@@ -74,6 +74,12 @@ The buyer may dispute an untrue payee assertion of activation through a case.
 | Spot | setup once by default + time rate (setup contract gated) | payer and seller priced notice |
 | Reserved | once for committed term | existing once semantics |
 
+Carry foundation early_termination.premature_stop_penalty through both recurring
+presets. Recommendation: on-demand defaults to 24 periods' price, seller-overridable;
+spot carries the configured amount (absent/zero means none). Entitled notice stops
+pay none; an emergency without notice files exceptional_end and pays the capped
+penalty after refunds. Buyer acceptance/display belongs to terms.
+
 No class flag is persisted or used for dispatch. One pool may publish on-demand
 and spot at different rates. Neither domain has a required minimum spend. Sellers
 may price setup differently or refuse churners through negotiation policy.
@@ -157,7 +163,7 @@ even where whole-transaction shorthand exists.
 The seller's emergency exit, including a spot hardware failure, is the journaled
 exceptional_end filing, not its own payment stop. On-demand's promise not to preempt
 is enforced by remedy, not by a mandate guarantee of physical service: the buyer
-may bring a case over held money and any supported bond, and the seller's own exit
+may enforce the premature-stop penalty through a case over held money, and the seller's own exit
 is the mechanically ruled self-penalty. Interim charged-only fixtures prove only
 their named mechanics and cannot qualify the standard returned self-penalty.
 
@@ -331,8 +337,9 @@ least as strong as the published standard. Through its own rate stop entry
 {account, notice: PT0S, partialPeriod: chosen}, the standard stops rate parts now
 with returned (always returned for on-demand), reverses rate earnings since at,
 reverses the time-unserved share of once parts (setup all if undelivered, none once
-delivered because its term ends at activation), and awards any bond in full once
-bonds exist. Unsupported hosted bonds remain a publication refusal. These amounts
+delivered because its term ends at activation), then reverses min(premature_stop_penalty,
+earned amounts still held) to the payer across parts in mandate order. Bond award
+stays reserved for hosted bonds. Unsupported hosted bonds remain a publication refusal. These amounts
 and payment effects belong to mediation's published mapping, not to this payment
 adapter. A self-penalty is a package of stop, refunds and bond; a partial seller
 path would still need a dispute. Arkhai mediation records disputes so it can act on
@@ -459,12 +466,9 @@ HTTP doubles serve lane/e2e qualification. Application integration proves seller
 auth, Agreement binding, CLI delegation and both-domain preset integration. Smoke is readiness/auth only. E2e proves
 cross-service effects, not arithmetic permutations.
 
-Lanes use wall time and short advertised notice/dispute windows, not lane-clock
-advancement. Consume the tooling-owned typed control client and due-work barriers:
-each captures its current instant and reports per-authority watermarks, pending
-effects and blocked dependencies. Future work remains pending; blocked effects
-never count as successful completion. Use bounded progress waits, not arbitrary
-sleeps. Injected/advanced clocks belong only in isolated tooling state-machine tests.
+Rate-lane time and progress execution follow convergence's Scenarios and evidence
+and the lane double's typed control contract. This change produces kit/vector and
+re-anchoring evidence; it does not define a parallel lane-clock or progress rule.
 
 Convergence alone owns the consolidated rate qualification matrix in
 [Scenarios and evidence](../converge-ongoing-compute-leases/design.md#scenarios-and-evidence),
@@ -495,7 +499,7 @@ those blockers or enable published production servicing.
 - An extra once fee labelled a minimum: setup is additive, not usage drawdown.
 - Backdated/effective-time payee stop: past exceptional ends are filed through the dispute adapter; mediation applies the standard self-penalty package.
 - Local notice-stop scheduling: it dies with the storefront; pending stops belong at the authority.
-- Claiming the on-demand mandate prevents physical seller preemption: the buyer's case over held money and any supported bond is the remedy; the seller's own exit is the mechanically ruled self-penalty.
+- Claiming the on-demand mandate prevents physical seller preemption: the premature-stop penalty and buyer's case over held money are the remedy; the seller's own exit is the mechanically ruled self-penalty.
 - Seller-side exceptional-end stop/reverse, explicit restitution entries, implicit favourable-payee stop privileges, payee notice waiver and payer early release: exceptional_end is a dispute filing, not a partial payment path.
 - Compound termination authority at payments: a transaction-level event could end billing at an authorized past time, settle rates returned, refund once parts by unserved share and forfeit a bond. Defer until hosted bonds are designed; it also needs dispute-authority recording so terminations inform action against bad sellers. The foundation owns this rejected-alternative record.
 - Payer start or start at approval: start is the payee's responsibility after provisioning; an early start is disputable.

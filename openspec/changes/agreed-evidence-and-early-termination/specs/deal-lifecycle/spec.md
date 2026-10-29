@@ -127,7 +127,7 @@ The payment-adapter protocol MUST send a stop only under a stop entry the mandat
 
 ### Requirement: Lifecycle terms are part of the selected option
 
-A settlement option MAY carry `adjudication` (`version`, `dispute`, `dispute_window_seconds`, `case_hold_max_seconds`), `early_termination` (`version`, `entitlements` keyed by `payer` or `payee` with `notice_seconds` and `settles_through`, `max_term_seconds`, term-end `settles_through`), and `bond` (`version`, `amount`, reserved until a mechanism can hold a seller-funded stake) in its `params`. The shared codec MUST decode them, so they are part of the Agreement bytes and the option ID.
+Option params MAY carry adjudication (version, dispute, dispute_window_seconds, case_hold_max_seconds), early_termination (version, payer/payee entitlements with notice_seconds/settles_through, max_term_seconds, term-end settles_through, premature_stop_penalty), and reserved bond (version, amount). The shared codec MUST decode them as Agreement bytes and option identity; bond MUST remain reserved until a mechanism can hold seller-funded stake.
 
 #### Scenario: A term changes the option ID
 
@@ -201,7 +201,7 @@ The adapter MUST derive entitled stop entries and the option's dispute authority
 #### Scenario: An on-demand option is derived
 
 - **WHEN** an option's `early_termination` has a `payer` entitlement only
-- **THEN** the payer and dispute authority have the derived stop entries, the seller holds no stop entry, and the mandate does not enforce that the seller will not preempt; that is enforced by remedy, a buyer's case over held money and the bond
+- **THEN** the payer and dispute authority have the derived stop entries, the seller holds no stop entry, and the mandate does not enforce that the seller will not preempt; that is enforced by the premature-stop penalty and a buyer's case over held money
 
 ### Requirement: Each party has one priced stop notice
 
@@ -369,7 +369,7 @@ Filing a case MUST NOT itself change delivery; only a verified ruling's delivery
 
 ### Requirement: A seller's exceptional end is a dispute filing
 
-The seller half MUST journal exceptional_end(at) with a delivery end and file it only with the agreement's dispute authority through the dispute adapter. It MUST NOT send a stop or reverse of its own for it, and the payments vocabulary MUST NOT contain an exceptional-end event kind or field. Future at MUST refuse, and unknown filing results MUST resolve by the stable key before retry. Arkhai mediation's standard request, ruled mechanically through its own `{account, notice: PT0S, partialPeriod: chosen}` entry, MUST stop rate parts at now with returned treatment (always returned on an on-demand option), reverse what they earned since at, reverse each once part's unserved time share (setup all if undelivered, none once delivered), and award any bond in full once bonds exist.
+The seller half MUST journal exceptional_end(at) with a delivery end and file it only with the agreement's dispute authority through the dispute adapter. It MUST NOT send a stop or reverse of its own for it, and the payments vocabulary MUST NOT contain an exceptional-end event kind or field. Future at MUST refuse, and unknown filing results MUST resolve by the stable key before retry.
 
 #### Scenario: An administrator ends a once-only deal
 
@@ -385,6 +385,33 @@ The seller half MUST journal exceptional_end(at) with a delivery end and file it
 
 - **WHEN** a payee files an exceptional_end request weaker than the standard request
 - **THEN** the authority enters it into triage rather than ruling it mechanically
+
+### Requirement: The standard seller self-penalty refunds unearned money
+
+Arkhai mediation MUST mechanically rule only payee-filed exceptional_end requests at least as strong as standard. Through its own `{account, notice: PT0S, partialPeriod: chosen}` entry it MUST stop rates now returned (always on on-demand), reverse earnings since at, and reverse unserved once shares by time (setup all if undelivered, none once delivered). Weaker requests MUST enter triage.
+
+#### Scenario: The seller files the standard request
+
+- **WHEN** a payee files the standard exceptional_end request
+- **THEN** mediation applies the returned rate stops and unearned-money reversals, not the seller
+
+### Requirement: Premature-stop penalties consume only held earnings
+
+After unearned-money refunds, mediation MUST reverse min(premature_stop_penalty, earned amounts still held) to the payer across parts in mandate order for an unentitled seller end. An entitled notice stop MUST pay none; a spot emergency without notice MUST pay it. In a buyer-filed case alleging that end, a person MUST apply the same cap. Bond award MUST remain reserved for hosted bonds.
+
+#### Scenario: Held earnings cap the penalty
+
+- **WHEN** an unentitled end carries a 2400 minor-unit penalty and only 900 of earned amounts remain held after refunds
+- **THEN** the remedy reverses 900 across parts in mandate order, not 2400 or money already paid out
+
+### Requirement: Premature-stop penalty is an option term
+
+The codec MUST include early_termination.premature_stop_penalty in Agreement bytes and option identity as a nonnegative integer amount in the option asset's minor units, encoded as a canonical decimal string. Absent or zero MUST mean none; negative, fractional or noncanonical amounts MUST refuse publication and acceptance.
+
+#### Scenario: The seller changes the penalty
+
+- **WHEN** a seller changes the premature-stop penalty and republishes
+- **THEN** the option identity changes and the accepted Agreement's penalty remains fixed
 
 ### Requirement: The seller files ends its terms do not entitle
 
@@ -411,12 +438,30 @@ End service MUST fix min(accepted start, failure-observation time) with never-de
 
 ### Requirement: Cause classification is owned by end service
 
-End service MUST distinguish lawful buyer/authority/terms/ruling ends from unentitled seller failures and correlate site reports to controlling requests. Admission refusal alone MUST NOT create a seller penalty or erase an established earlier seller failure. It MUST expose pending classification and filing-journaling hooks for servicing consumers.
+End service MUST classify evidence as lawful (entitled buyer/payee stop, terms/exhaustion, ruling or surrender), seller failure (unentitled withdrawal, provisioning/start failure, activation lapse or established non-delivery), or pending. It MUST correlate site reports with controlling requests. Classification MUST follow verified evidence and entitlement, not arrival order or event kind; admission refusal or a later clock/payee stop MUST NOT erase earlier non-delivery or alone create a penalty.
 
 #### Scenario: A site report confirms a lawful end
 
 - **WHEN** a site report is correlated to an already recorded lawful authority end
 - **THEN** end service retains both evidence sources without inventing seller fault
+
+### Requirement: Pending correction resolves in the same journal
+
+record_end MUST atomically retain any pending-classification slot beside the end. resolve_correction(source_ref, expected_revision, evidence, classification, filing_intent?) MUST atomically discharge it or journal the fixed-basis filing in that journal. Stale revisions MUST retry without a synthetic end or second journal. Physical work MUST NOT await classification.
+
+#### Scenario: Evidence arrives after a pending end
+
+- **WHEN** later verified evidence resolves an end's pending classification as seller failure
+- **THEN** the same journal atomically resolves the slot and records its fixed-basis filing without repeating physical work
+
+### Requirement: Filing identities and revised requests are safe across callers
+
+The dispute adapter MUST bind the semantic filing identity to commitment, Agreement authority, cause/end revision and fixed request. It MUST resolve/adopt the equivalent payee case without a concurrent-writer duplicate. Revised or linked cases MUST carry prior ruling/effect references and net prior authority effects after unknown originals resolve. Unsupported identity/revision mapping MUST report repair required, not allocate another key or use append as amendment.
+
+#### Scenario: An operator and online replay submit one intent
+
+- **WHEN** operator recovery and online replay submit the same semantic filing identity concurrently
+- **THEN** both resolve one case, or refuse with repair required if the adapter cannot prove safe adoption
 
 ### Requirement: Exceptional-end filings survive a crash
 
@@ -697,12 +742,21 @@ kit/deal-servicing MUST own authorize_delivery for commit, dispatch, start and d
 
 ### Requirement: Billing-start intent and evidence have one owner
 
-End service MUST journal billing-start key and activated-delivery evidence before I/O, using delivery's stable operation key. Delivery MUST retain only an intent reference. The versioned secret-free envelope MUST bind negotiation, commitment, resource identities and validated ready-evidence digest/projection. Activation MUST precede rate start; unknown effects MUST resolve by read/same-key retry before disclosure.
+End service MUST expose begin_billing(operation_key, activated_delivery_ref) and journal its key/evidence before I/O. Delivery MUST retain only an intent reference. The versioned secret-free ActivatedDeliveryRef MUST bind negotiation, commitment, reservation/fulfillment identities, site activation record reference/instant and validated ready-evidence digest/projection. Activation MUST precede rate start; unknown effects MUST resolve by read/same-key retry before disclosure.
 
 #### Scenario: A once-only delivery activates
 
 - **WHEN** validated activation evidence reaches the once-only payment adapter through end service
 - **THEN** billing start is a no-op and the delivery record retains only the end-service intent reference
+
+### Requirement: Delivery phases use a shared evidence-gated protocol
+
+The foundation MUST define reserve, commit, dispatch, activate, start and disclose phases. Current Alkahest MUST compose explicit no-financial-action after typed/versioned selected-stage evidence validation and local admission; missing adapter entries MUST NOT imply allow. Foundation MUST own the neutral acknowledgement binding/verifier in kit/deal-lifecycle for buyer and double consumers, without servicing dependency.
+
+#### Scenario: Alkahest has no rate operation
+
+- **WHEN** current Alkahest authorizes a protected delivery transition
+- **THEN** explicit evidence validation and local admission precede allow, with no fabricated billing start
 
 ### Requirement: Admission shares the end-service transaction and revision
 
@@ -715,7 +769,7 @@ End service MUST provide `admit(negotiation_id, phase, expected_revision) → ad
 
 ### Requirement: End recording and required filing are one operation
 
-End service MUST provide `record_end(final_request, filing_intent?)`, atomically journaling the final request and any required exceptional_end filing in the caller's storefront transaction. An earlier buyer, terms or ruling end MUST NOT cause a seller self-penalty merely because admission is refused.
+End service MUST provide `record_end(final_request, filing_intent? | pending_classification?)`, atomically journaling the final request and any required exceptional_end filing in the caller's storefront transaction. An earlier buyer, terms or ruling end MUST NOT cause a seller self-penalty merely because admission is refused.
 
 #### Scenario: A crash separates recording from payment submission
 

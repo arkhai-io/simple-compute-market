@@ -24,7 +24,7 @@ lane, not a cooperative storefront masquerading as an authority.
   target is per-part authorities, payee-only rate start, pending stops with notice,
   term/exhaustion stops, `{afterStop: dispute_window}` holds and `extend`/`lift`.
   Seller stop entries exist only for entitlements, such as spot notice; on-demand
-  non-preemption is remedy-enforced over held money/bond, not by the mandate. There
+  non-preemption is remedy-enforced through the penalty and a case over held money, not by the mandate. There
   is no seller restitution entry, implicit favourable stop, notice waiver, payer
   early release, multi-entry spot dependency, backdated stop or released-funds refund.
 - Add the dispute authority's file, append and read/watch boundary with signed
@@ -34,7 +34,7 @@ lane, not a cooperative storefront masquerading as an authority.
   mechanical rule is a payee request at least as strong as standard self-penalty:
   mediation's PT0S/chosen entry stops rates now returned, reverses earnings since at
   and unserved once share by time (setup all before activation, none after), and
-  awards the full bond once supported. On-demand self-penalty is always returned.
+  then reverses min(premature_stop_penalty, earned amounts still held) to payer across parts in mandate order; bond award stays reserved for hosted bonds. On-demand self-penalty is always returned.
   Buyer_end remains a person's triage case with payer notice/treatment; signed
   acknowledgements never trigger a mechanical buyer ruling. Only the authority
   applies dispute effects and nets agreement-wide prior remedies. Filings never

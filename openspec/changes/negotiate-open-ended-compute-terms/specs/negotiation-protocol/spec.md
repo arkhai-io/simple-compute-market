@@ -55,6 +55,15 @@ Reserved duration MUST be positive and fit both bounds. Recurring horizons MAY b
 - **THEN** the final identity-bound option and Agreement both bind 10 hours before acceptance
 - **AND** no cached or accepted option is silently mutated
 
+### Requirement: Recurring starts resolve before signature
+
+The terms runtime MUST resolve recurring start_utc to whole-second precision before the final signature, with bound/horizon and canonical option identity fixed. It MUST reject a fractional rate start rather than round accepted bytes. Once-only timestamp handling MUST remain unchanged.
+
+#### Scenario: A recurring start is fractional
+
+- **WHEN** the final recurring proposal carries a fractional-second start
+- **THEN** acceptance refuses before signature rather than silently shifting the window
+
 ### Requirement: Acceptance checks current rate servicing
 
 Seller acceptance MUST refuse recurring selections if the composition no longer

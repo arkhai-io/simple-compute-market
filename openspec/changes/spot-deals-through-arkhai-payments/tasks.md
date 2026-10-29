@@ -69,7 +69,10 @@ publication configuration/builders and their focused publication suites.
       rate Agreement start at materialization and
       partialPeriod capability check. Reject fractional rate starts rather than
       rewriting signed Agreement bytes; once-only rounding stays unchanged.
-      Keep approval_window distinct from adjudication.
+      Keep approval_window distinct from adjudication. Carry foundation's premature_stop_penalty
+      through the injected preset helper: recommended on-demand default 24 periods' price,
+      seller override and spot configured value. Entitled notice pays none; emergency without
+      notice pays the capped mediation penalty, never a seller payment-adapter correction.
       Verify malformed pairs, calendar periods, setup opt-out and insufficient lead.
 - [ ] 2.2 Derive setup-once then rate deterministically through the accessor and
       codec. Include rate end, afterStop hold, maxHoldExtension and exact per-part
@@ -314,10 +317,8 @@ hosted-target evidence.
       (its design's Scenarios and evidence); do not reproduce it here. Retain
       spot's prepared fixtures and typed entry points for its executor. Activation
       owns hosted qualification.
-      Use wall-time lanes, short advertised windows and the tooling-owned typed
-      due-work barriers/client; report per-authority progress, pending effects and
-      blocked dependencies. No lane-wide clock advancement or fabricated completion;
-      injected clocks are confined to isolated tooling state-machine tests.
+      Consume convergence's lane-time requirements and the lane-double-owned readiness/evidence
+      contract; retain adapter re-anchoring evidence production, not a second lane-time contract.
       Activation must list producer snapshot, start and reversal vectors among
       blockers to published qualification; double traces do not satisfy them.
       Check that the matrix consumes maximum-term, on-demand refusal/self-penalty filing

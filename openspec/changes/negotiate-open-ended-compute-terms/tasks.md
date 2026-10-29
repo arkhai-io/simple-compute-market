@@ -17,7 +17,7 @@ added by this reconciliation.
   option params, splitter service terms and both buyer commitment checks by the same
   codec (D4). Do not implement a mechanism-specific term codec. Start from `placement-probe.md`.
 - [ ] 1.3 With the reconciled rate change (`spot-deals-through-arkhai-payments`),
-  freeze `period`, `reserve_ahead_seconds`, separate setup pricing, accessor unit and
+  freeze the injected preset-helper interface (D3), `period`, `reserve_ahead_seconds`, separate setup pricing, accessor unit and
   servicing-declaration contracts. With the foundation, decide and record the
   start/absolute-bound/final-option identity gate in D5 without weakening advertised
   option correlation. This gates acceptance work. Record any required protocol delta.
@@ -36,7 +36,9 @@ added by this reconciliation.
   resolution. Keep bounds on the listing, not on each option. Verify pure validation
   and tier precedence in the package unit suites; no network or lease changes here.
 - [ ] 2.3 In both storefront publication adapters, emit separately priced options on
-  existing listing identities using the foundation codec, and omit unbounded
+  existing listing identities using the foundation codec and injected preset helper; include
+  premature_stop_penalty, recommended on-demand default 24 periods' price with seller override.
+  Missing hosted helper omits recurring candidates. Omit unbounded
   recurring candidates with diagnostics. Consume, do not redo, the foundation's
   Alkahest release-model migration. Unit targets: both domain suites and
   `domains/vms/storefront/tests/unit`; app-integration targets: VM
@@ -53,7 +55,8 @@ added by this reconciliation.
   uses each storefront's typed client and real persistence to prove the cached-option
   refusal has no acceptance side effect.
 - [ ] 3.2 In both negotiation runtimes/policies, resolve start/bounds before final
-  signature according to section 1's identity decision, bind equal duration/max term
+  signature according to section 1's identity decision; require whole-second recurring starts,
+  refusing fractional values without rewriting accepted bytes; bind equal duration/max term
   without rounding, require at least one whole period for recurring horizons, and
   refuse expired/excessive horizons and missing reserved duration. Carry term-end
   `settles_through` into payments `end.partialPeriod` through the foundation codec;
@@ -75,7 +78,9 @@ added by this reconciliation.
 
 - [ ] 4.1 Update both buyer CLIs and policies: optional recurring horizon, required
   reserved duration and D7's display of class/price unit/setup/reserve/terms, including
-  per-stopper and term-end `settles_through`, unrounded effective horizon and
+  per-stopper and term-end `settles_through`, premature-stop penalty amount/asset/cap,
+  recommended default acceptance refusal of on-demand without positive penalty (explicit buyer
+  opt-out), unrounded effective horizon and
   stop-then-hint semantics. Use
   accepted codec values; never promise a reserve-ahead loss cap. Unit targets:
   `domains/vms/buyer/tests/test_buy_resume_cli.py`, `test_explain_cli.py` and

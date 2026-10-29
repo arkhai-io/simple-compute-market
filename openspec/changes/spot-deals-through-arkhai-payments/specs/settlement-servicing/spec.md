@@ -9,8 +9,8 @@ Rate authorities and term ends MUST use the deal-lifecycle codec. Optional setup
 
 #### Scenario: Hold and approval expiry follow the accepted timing
 - **WHEN** a once-only mandate is derived from an Agreement accepted at accepted_at
-- **THEN** its hold is ceil(start_utc - accepted_at) + duration_seconds + dispute_window_seconds whole seconds and approval expires at floor(accepted_at) + approval_window
-- **AND** fractional timestamps remain unchanged in Agreement bytes and its deal hash
+- **THEN** each prepaid once part has absolute end start_utc + duration_seconds and hold {afterStop: dispute_window}; approval expires at floor(accepted_at) + approval_window
+- **AND** delayed approval does not shift the part end or replace the stop-relative hold with a duration from acceptance; fractional Agreement timestamps remain unchanged in its deal hash
 
 #### Scenario: A once mandate is derived
 - **WHEN** the option has only one once part and no early_termination
@@ -41,7 +41,7 @@ SCM MUST derive time rate parts through the agreed-price accessor and lifecycle 
 - **GIVEN** an accepted option with no seller early-termination entitlement
 - **WHEN** the buyer checks a mandate containing a seller stop entry
 - **THEN** it refuses that extra authority before approval
-- **AND** the no-preemption promise is enforced by a buyer case over held money and any supported bond, not a guarantee of physical service
+- **AND** the no-preemption promise is enforced by the premature-stop penalty and a buyer case over held money, not a guarantee of physical service
 
 #### Scenario: Spot has its accepted notice entry
 - **GIVEN** an accepted spot option with a seller notice entitlement

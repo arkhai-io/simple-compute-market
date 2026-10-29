@@ -4,15 +4,13 @@
 
 Both compute buyers MUST display the derived product class, quote with unit,
 separate setup once charge, initial reserve, maximum term/end, selected horizon,
-payer/payee entitlements, notices, per-stopper and term-end `settles_through`, and adjudication/retention terms
-before approval. They MUST distinguish reserve from spend, start from observed
-delivery, and authority guarantees from cooperative seller behavior. They MUST NOT
-present reserve-ahead as a dishonest-seller billing cap.
+payer/payee entitlements, notices, per-stopper and term-end `settles_through`, premature-stop penalty amount/asset/cap, and adjudication/retention terms
+before approval.
 
 #### Scenario: On-demand approval
 
 - **WHEN** a buyer approves a payer-only recurring option with a setup once part
-- **THEN** the display says on-demand, separately shows setup and recurring charge, and states payer notice and started-period treatment without granting the payee an entitled reclaim right; the display does not claim the mandate enforces that the seller will not preempt, since on-demand gives the seller no stop entry and the buyer's remedy is a case over held money and the bond
+- **THEN** the display says on-demand, separately shows setup and recurring charge, and states payer notice and started-period treatment without granting the payee an entitled reclaim right; the display does not claim the mandate enforces that the seller will not preempt, since on-demand gives the seller no stop entry and the buyer's remedy is the penalty and a case over held money
 - **AND** it explains stop-then-hint with service through the effective stop, receipt-only immediate surrender, that the storefront cannot stop billing and the buyer's journaled, retried authority stop does, and the optional buyer_end case for human triage
 
 #### Scenario: Payee treatment is displayed faithfully
@@ -20,6 +18,15 @@ present reserve-ahead as a dishonest-seller billing cap.
 - **WHEN** a buyer selects an interim spot option with `settles_through: started_period` for both parties
 - **THEN** the display says both stops charge the started period, not that seller preemption returns it
 - **AND** setup's own activation end and undelivered-only return are shown separately
+
+### Requirement: Buyer display separates billing guarantees from cooperation
+
+Both compute buyers MUST distinguish reserve from spend, billing start from observed delivery, and authority guarantees from cooperative seller behavior. They MUST NOT present reserve-ahead as a dishonest-seller billing cap.
+
+#### Scenario: Reserve is displayed
+
+- **WHEN** a buyer views the selected option's initial reserve
+- **THEN** display identifies reserved funds, not a spend floor or a cap on dishonest-seller billing
 
 ### Requirement: The buyer refuses seller ends that keep the started period
 
@@ -34,6 +41,15 @@ The buyer's acceptance policy MUST by default refuse an option whose payee entit
 
 - **WHEN** a buyer configures its policy to accept `started_period` on payee stops
 - **THEN** the same option is acceptable
+
+### Requirement: Default acceptance requires an on-demand seller penalty
+
+Buyer acceptance policy SHOULD refuse an on-demand option without positive early_termination.premature_stop_penalty and SHOULD expose explicit buyer opt-out. It MUST display the selected value and explain that an unentitled seller end forfeits at most earned amounts still held after unearned-money refunds; an entitled notice stop pays none. In a buyer case a person applies the remedy.
+
+#### Scenario: An on-demand option has no penalty
+
+- **WHEN** the buyer uses the recommended default acceptance policy and the on-demand penalty is absent or zero
+- **THEN** selection refuses it by name rather than claiming the mandate prevents preemption
 
 ### Requirement: Recurring purchase may omit a horizon
 

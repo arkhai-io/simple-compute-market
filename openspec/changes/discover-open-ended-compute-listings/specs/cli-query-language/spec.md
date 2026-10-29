@@ -4,7 +4,7 @@
 
 Compute discovery MUST consume the shared codec's common
 `early_termination.payer`, `early_termination.payee`,
-`early_termination.payee.notice_seconds`, `adjudication.dispute.interface` and
+`early_termination.payee.notice_seconds`, `early_termination.premature_stop_penalty`, `adjudication.dispute.interface` and
 `adjudication.dispute.account` projections. Billing period MUST remain the registered
 `arkhai_payments.period` projection. Shared selection MUST NOT decode opaque
 mechanism params or depend on the final placement of common terms.
@@ -19,6 +19,15 @@ mechanism params or depend on the final placement of common terms.
 
 - **WHEN** common terms contain an unsupported version or invalid entitlement
 - **THEN** the option fails validation rather than being classified by missing-field fallback
+
+### Requirement: Penalty projection is asset-correlated
+
+Discovery MUST project premature_stop_penalty through the common codec in the option asset's minor units, with absent/zero meaning none. Penalty predicates MUST correlate with asset and every other predicate on that same option. A positive match MUST NOT replace buyer acceptance policy or claim money remains held.
+
+#### Scenario: Penalty and asset belong to different options
+
+- **WHEN** one option satisfies the requested asset and another alone satisfies the penalty floor
+- **THEN** their combination does not qualify either option
 
 ### Requirement: Class expansion narrows every settlement alternative
 

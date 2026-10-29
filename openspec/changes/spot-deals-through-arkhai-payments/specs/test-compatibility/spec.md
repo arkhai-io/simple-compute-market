@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
-### Requirement: Rate-part qualification names contract and authority evidence
-Rate-part qualification MUST use the test-compatibility evidence classes Qualification against the published contract, Qualification against a proposed contract, and Live evidence. It MUST record revision/content hashes, mode and target class, and MUST NOT present double-backed mechanics as proof of external authority ledger, payout or adjudication behavior.
+### Requirement: Rate mechanics qualification consumes the shared lane contract
+Rate mechanics qualification MUST follow "Lane qualification identifies readiness and evidence class". It MUST retain kit/vector and re-anchoring evidence production, while convergence owns rate-lane time and consuming scenarios. It MUST NOT redefine evidence classes or claim live behavior from a double.
 
 #### Scenario: Mechanics run against a proposed contract
 - **WHEN** rate adapter mechanics pass against contract fakes or lane doubles of proposed bytes

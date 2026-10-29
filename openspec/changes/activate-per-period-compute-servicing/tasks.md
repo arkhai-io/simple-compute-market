@@ -39,12 +39,13 @@ stays with its owners.
       failure at Agreement start. Seller sends no stop/reverse. Verify mediation's
       only mechanical ruling: payee request at least as strong as standard, through
       its PT0S/chosen entry for returned rates, rate earnings since at, once unserved
-      shares by time and full bond once supported. On-demand always returns partial
+      shares by time, then min(premature_stop_penalty, earned amounts still held) across
+      parts in mandate order; bond award stays reserved for hosted bonds. On-demand always returns partial
       period. buyer_end is human triage using payer stop at at with payer notice and
       partialPeriod; cases carry exact Agreement verified against mandate deal hash.
       Verify seller stop entries only for entitlements such as spot notice; spot
       emergency files exceptional_end. On-demand non-preemption remedy is buyer case/
-      held money/bond, not mandate prevention. Remove seller restitution entry,
+      held money plus the premature-stop penalty, not mandate prevention. Remove seller restitution entry,
       implicit favourable stop, notice waiver, early release and multi-entry gate.
       Verify storefront signs end_delivery receipt (request has no at), never stops
       buyer billing; buyer half stops first, journals/retries same key through

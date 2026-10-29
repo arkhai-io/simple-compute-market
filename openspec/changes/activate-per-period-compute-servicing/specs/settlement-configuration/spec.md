@@ -27,13 +27,13 @@ Activation MUST requalify foundation/spot's payment and dispute contracts, not i
 
 - **WHEN** an unentitled seller end is handled through the dispute adapter
 - **THEN** the seller files exceptional_end with the Agreement authority, journaled with the end, never future-dated; pre-start failures journal immediately and file at Agreement start, without seller stop/reverse
-- **AND** a payee request at least as strong as standard receives mediation's only mechanical ruling: returned rate stops now through mediation's PT0S/chosen entry, rate reversals since at, once unserved-share refunds by time and full bond award once bonds exist
+- **AND** a payee request at least as strong as standard receives mediation's only mechanical ruling: returned rate stops now through mediation's PT0S/chosen entry, rate reversals since at, once unserved-share refunds by time, then min(premature_stop_penalty, earned amounts still held) to payer across parts in mandate order; bond award stays reserved for hosted bonds
 
 #### Scenario: On-demand non-preemption is remedied
 
 - **WHEN** qualification exercises seller emergency exit in on-demand or spot
 - **THEN** seller entries exist only for entitlements such as spot notice; emergency uses exceptional_end filing, with no seller restitution entry or several-stop-entries dependency
-- **AND** on-demand always returns the partial period under its self-penalty contract; non-preemption is remedied by buyer case over held money and the bond, not enforced by the mandate
+- **AND** on-demand always returns the partial period under its self-penalty contract; non-preemption is remedied by the premature-stop penalty and buyer case over held money, not enforced by the mandate
 
 #### Scenario: Buyer stop is journaled while payments is down
 

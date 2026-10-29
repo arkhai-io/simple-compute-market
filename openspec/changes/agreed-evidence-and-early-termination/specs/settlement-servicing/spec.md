@@ -52,4 +52,15 @@ A refund MUST be seller-initiated through `reverse`. `reverse` is authorized for
 #### Scenario: Only the seller initiates a refund
 
 - **WHEN** delivery fails or the seller voluntarily corrects an unentitled end
-- **THEN** the seller files exceptional_end with the agreement's dispute authority, whose standard ruling reverses unserved held money; the seller itself sends only a voluntary `reverse` of its own choosing, and a buyer disputing that account files a case
+- **THEN** the seller files exceptional_end with the agreement's dispute authority and sends no stop or reverse for it; mediation's standard ruling returns unearned money then applies the capped premature-stop penalty, and a buyer disputing the account files a case
+
+## ADDED Requirements
+
+### Requirement: Snapshot verification accepts bounded identity history
+
+Hosted snapshot verification MUST accept configured current/retiring identities with validity windows, embedded-receipt attestation and a caller-supplied minimum sequence. It MUST refuse unverified, cross-deal, mode-changed or regressing state. A fresh current-key snapshot MAY attest an embedded old receipt while retaining original bytes; consumers MUST NOT implement a parallel verifier.
+
+#### Scenario: Rotation re-anchors an old receipt
+
+- **WHEN** a current-key snapshot attests an old receipt during the configured identity overlap
+- **THEN** verification checks identity windows, commitment and mode binding and minimum sequence before supplying re-anchoring evidence

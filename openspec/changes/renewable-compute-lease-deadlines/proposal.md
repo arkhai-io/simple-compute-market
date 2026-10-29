@@ -39,7 +39,8 @@ held money and kept signed bytes, not on a deadline inside the seller's site.
 
 Renewal and the site's `reclaim` / bounded `grace` / `continue` lapse policy are
 **deferred**, with their design and revisit condition retained in D4. Reclaiming an active lease costs the buyer a working VM and the
-honest storefront a self-penalty awarding any bond in full.
+honest storefront a self-penalty including the premature-stop penalty capped by
+held earnings; hosted bond award is reserved.
 
 ## Capabilities
 

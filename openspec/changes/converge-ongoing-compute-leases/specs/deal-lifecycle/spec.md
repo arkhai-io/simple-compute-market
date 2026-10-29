@@ -147,7 +147,7 @@ Recovery MUST use a seller export, original authority-bound credentials and an i
 
 - **WHEN** an operator requests emergency recovery for an on-demand or spot deal
 - **THEN** the seller files exceptional_end with the Agreement dispute authority and sends no stop or reverse of its own; mediation's sole mechanical ruling is a qualifying payee self-penalty
-- **AND** on-demand non-preemption is remedied by buyer case over held money and the bond, not enforced by the mandate
+- **AND** on-demand non-preemption is remedied by the premature-stop penalty and buyer case over held money, not enforced by the mandate
 
 #### Scenario: Buyer ends delivery during payment outage
 

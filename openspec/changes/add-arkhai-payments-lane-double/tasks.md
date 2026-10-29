@@ -100,7 +100,7 @@ conformance evidence.
       several-entries-per-account dependency. End_delivery grants the storefront no
       buyer billing authority; buyer half journals/retries its own stop under the
       same key during outage and billing runs until it lands. On-demand non-preemption
-      is enforced by buyer remedy over held money/bond, not the mandate. Never
+      is enforced by the premature-stop penalty and buyer case over held money, not the mandate. Never
       conflate approval with rate start or observe compute activation inside the authority.
 - [ ] 2.3 Add held-money partial reverse before/after stop, afterStop payout timing,
       independent extend refs and lift, caps and contract refusal codes. Preserve
@@ -141,8 +141,10 @@ without sibling source trees and fake/HTTP engine parity (03 F2 / 04 F3). No hos
       start. Mechanically rule only a payee-filed request at least as strong as the
       standard self-penalty: through mediation's PT0S/chosen entry stop rate parts now
       returned (always returned on-demand), reverse earnings since at, reverse unserved
-      once share by time, setup all before activation and none after, full bond once
-      supported. Unsupported bond effects refuse, not fabricated completion. Queue
+      once share by time, setup all before activation and none after; then reverse
+      min(premature_stop_penalty, earned amounts still held) across parts in mandate order.
+      Entitled notice pays none; spot emergency pays it. In a buyer case a person applies
+      the same cap. Bond award stays reserved for hosted bonds. Unsupported bond effects refuse, not fabricated completion. Queue
       buyer_end and all other nonqualifying claims for visible triage/outbox regardless
       of acknowledgements. Realize buyer_end as payer stop submitted at at with notice
       and committed partialPeriod, leaving once parts untouched. Present stop plus
@@ -281,7 +283,8 @@ Verification levels/targets:
   `make -C e2e-tests test-e2e-apicredits`, preserving existing payment markers and
   mock provisioning. Run `test-e2e-vm` for its changed wiring. Capture consumer
   revision, contract hashes, initial seed/actors, result and cleanup. Later rate
-  scenarios belong to `spot-deals-through-arkhai-payments`, not this plan.
+  execution belongs to `converge-ongoing-compute-leases`' consolidated matrix;
+  spot supplies adapter/command fixtures, not a second lane matrix.
 
 ## 6. Closeout
 

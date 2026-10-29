@@ -146,7 +146,7 @@ rate-part behavior owned by `spot-deals-through-arkhai-payments`:
   Payments knows accounts, money movement and mandate authorizations, not whose
   interest a stop serves. There is no implicit favourable stop, payee notice waiver
   or payer early release. On-demand's "won't preempt" is enforced by the buyer's
-  remedy over held money and the bond once supported, not by the mandate. A seller's
+  remedy through the premature-stop penalty and a case over held money, not by the mandate. A seller's
   emergency exit, including spot's, is an exceptional_end dispute filing.
 - An entitled `stop {part, at?}` is never backdated: effective time is the later of the requested
   time (or now) and receipt time plus that sender's notice. The earliest pending
@@ -244,9 +244,12 @@ authority identity. Knowing a transaction or case ref grants no permission.
   `{account, notice: PT0S, partialPeriod: chosen}` stop entry, the standard request
   stops rate parts now with returned (always returned for on-demand), reverses their
   earnings since at, and reverses the unserved share of once parts by time. Setup's
-  term ends at activation: all is returned if undelivered, none once delivered. Award
-  any bond in full once bonds exist; do not invent bond support or report unsupported
-  effects complete. Non-payee or weaker requests do not receive this mechanical ruling.
+  term ends at activation: all is returned if undelivered, none once delivered. Then
+  reverse min(premature_stop_penalty, earned amounts still held) to the payer across
+  parts in mandate order. This applies to spot emergency exits too, not entitled
+  notice stops. A person applies the same cap in a buyer's unentitled-seller-end case.
+  Bond award stays reserved for hosted bonds; do not invent support or report
+  unsupported effects complete. Non-payee or weaker requests do not receive this mechanical ruling.
 - Buyer_end(at) and every other nonqualifying claim enter visible triage. A signed
   storefront acknowledgement at filing or later append is evidence for a person,
   never an automatic buyer_end ruling input. **Recommendation:** use a local
@@ -529,17 +532,19 @@ Edits required outside this owned directory (parent coordination, not performed 
 | Foundation end service / buyer half | End_delivery has no at; storefront signs receipt evidence only and cannot stop buyer billing. Buyer half stops first, journals/retries under the same key during outage; billing runs until stop lands. Optional buyer_end stays triaged. Record deferred compound payments termination authority and its bond/dispute-recording prerequisites. |
 | Foundation 2.4 / 7.5 / 13.1 | Put acknowledgement model/verification in a buyer-permitted shared library in round 1 (2.4); leave signing at 13.1. Mediation no longer depends on this verifier. |
 | Foundation test-compatibility delta | Reference the permanent requirement name "Lane qualification identifies readiness and evidence class", remove duplicate mixed-contract scenario and stale change-ID citation; archive that target-naming modification before this change. |
-| Spot and convergence | Consume the shared engine/typed controls; classify by the single lane requirement. Seller exceptional_end is a dispute filing and sole qualifying mechanical self-penalty, including spot emergency exit. On-demand non-preemption is remedy-enforced over held money/bond. Revised authority remedies net prior effects; remove interim restitution-entry/multi-entry gates and direct seller self-correction. Convergence reads authority at funding-timer expiry (E-G), compares exposed current instants and removes lane clock-jump wording. |
+| Spot and convergence | Consume the shared engine/typed controls; classify by the single lane requirement. Seller exceptional_end is a dispute filing and sole qualifying mechanical self-penalty, including spot emergency exit. On-demand non-preemption is remedy-enforced by the premature-stop penalty and a buyer case over held money. Revised authority remedies net prior effects; remove interim restitution-entry/multi-entry gates and direct seller self-correction. Convergence reads authority at funding-timer expiry (E-G), compares exposed current instants and removes lane clock-jump wording. |
 | Terms | Lane-only proposed declarations select installed candidate expressibility for publication, acceptance and mandate derivation; draft identities/contracts remain refused outside lanes. |
 | Activation | Reference the class rule conditionally, include mediation publication when Agreement terms name it, and identify exactly which consumer declaration/artifact is retired, never the tool's proposed selector. |
 | Campaign index / roadmap | Parent updates status/dependencies to the final owner decision (mechanical seller self-penalty only, triaged buyer_end); these files remain outside this worker's authority. |
 
-**Recommended status:** ready for planning once the parent integrates these
-coordination edits. No further full design round is recommended: the central
+**Coordinated status:** ready for implementation after the sibling seam edits.
+The published payments partialPeriod revision is ready for foundation 8.1 vendoring;
+mediation publication remains pending. Exact producer revision is recorded only in
+kit/arkhai-payments/schema/SOURCE.md at vendoring. No further full design round is recommended: the central
 changes are settled owner decisions and the remaining choices above are explicit.
 Implementation remains section-gated on the named contract/fixture seams, and
 missing publications/vectors still prohibit published or live qualification claims.
-This is a recommendation to the parent, not an implicit index edit.
+The campaign index records the final implementation-ready status; no runtime readiness is implied.
 
 ## Reconciliation validation
 

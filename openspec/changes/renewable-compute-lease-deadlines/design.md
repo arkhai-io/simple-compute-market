@@ -166,8 +166,8 @@ Retained option for that future design:
 **Cost of active reclaim:** `reclaim` can destroy a working VM merely because the
 storefront crashed. Billing does not stop on site silence or on that reclaim.
 Honest recovery files `exceptional_end(at)` at the physical end through the dispute
-adapter: mediation rules the self-penalty, including awarding any bond in full once
-bonds exist, even though the original failure was only bookkeeping.
+adapter: mediation rules the self-penalty, including the premature-stop penalty
+capped by earned amounts still held after refunds; bond award is reserved for hosted bonds, even though the original failure was only bookkeeping.
 `grace` only delays that cost; `continue` leaves unpaid-service exposure with the
 seller until the agreed end or a recovered end-service action. None is a buyer
 guarantee. Renewal must be justified by a separate operator's concrete needs before
@@ -202,7 +202,8 @@ delivery. Delivery admission must also honor an expiry claim that wins activatio
 - Seller-direct exceptional-end correction or backdated payee stop — the seller
   files a dispute, not its own stop/reverse. Mediation alone uses its own stop entry
   to stop rate parts now returned, reverse earnings since at, return unserved once
-  shares and award any bond in full. On-demand always uses returned; setup's term
+  shares, then the premature-stop penalty capped by earned amounts still held across
+  parts in mandate order. Bond award stays reserved for hosted bonds. On-demand always uses returned; setup's term
   ends at activation (all returned if undelivered, none once delivered).
 - Compound payment termination authority — deferred until hosted bonds are designed;
   foundation records this alternative and its required dispute-authority recording,
@@ -275,7 +276,7 @@ favourable-stop notes: activation lapse is evidence for journaled exceptional_en
 filing through the dispute adapter, not seller payment self-correction. Mediation
 alone mechanically rules the standard-or-stronger seller self-penalty. No site payment
 logic or new buyer guarantee is introduced. "Won't preempt" is enforced by remedy
-over held money and bond, not the mandate. end_delivery has no at and gives signed
+over held money plus the premature-stop penalty, not the mandate. end_delivery has no at and gives signed
 receipt evidence only; the buyer half owns payment-stop retry while billing continues
 until it lands, with optional buyer_end human triage. Remove restitution stop entries,
 notice waiver/early release and multiple-stop-entry gates; seller stops are entitlements

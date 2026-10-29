@@ -31,7 +31,9 @@ approval. No tests are added by this reconciliation.
   and round-trip publication using the canonical typed registry client.
 - [ ] 2.2 In buyer query/selection and registry pushdown where supported, consume
   common `early_termination.*`/`adjudication.*` fields and registered
-  `arkhai_payments.period`, retaining eligible option IDs. Do not create a second
+  `arkhai_payments.period`, retaining eligible option IDs. Include premature_stop_penalty
+  in option-asset minor units (absent zero), with asset-correlated comparisons; a positive
+  discovery match is not acceptance or a held-money guarantee. Do not create a second
   evaluator or `interruption.*` alias. Unit targets:
   `core/tests/unit/test_query_dsl.py`,
   `core/registry/tests/unit/test_option_aware_filters.py` and

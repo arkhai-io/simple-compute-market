@@ -32,7 +32,7 @@ The typed storefront client MUST settle an Agreement-settled deal with `settle_a
 
 ### Requirement: The buyer's end is backed by its own stop or a case
 
-The buyer half MUST stop at the payment authority first through the payment adapter. If payments is unknown/unreachable, it MUST journal its stop and retry under the same key, and billing runs until the stop lands. The storefront MUST NOT be relied on to stop billing. It MAY additionally file buyer_end(at) with the signed request, receipt and any seller acknowledgement. It MUST use acknowledged receipt when available, otherwise retain its observed time as a contested claim, and MUST NOT claim automatic adjudication. Rate stop sequencing and notice behavior belong to rate servicing.
+The buyer half MUST stop at the payment authority first through the payment adapter. If payments is unknown/unreachable, it MUST journal its stop and retry under the same key, and billing runs until the stop lands. The storefront MUST NOT be relied on to stop billing. It MAY additionally file buyer_end(at) with the signed request, receipt and any seller acknowledgement. Rate stop sequencing MUST follow canonical rate buyer-end servicing.
 
 #### Scenario: The payment authority is down
 
@@ -43,6 +43,15 @@ The buyer half MUST stop at the payment authority first through the payment adap
 
 - **WHEN** the storefront acknowledges surrender while both authorities are unreachable
 - **THEN** the buyer retains receipt evidence and journals its case for retry; delivery, stop and case progress remain distinct
+
+### Requirement: Buyer end claims preserve their evidence basis
+
+The buyer half MUST use acknowledged receipt when available, otherwise retain its observed time as a contested claim. It MUST NOT claim automatic buyer_end adjudication or rely on surrender to erase priced notice.
+
+#### Scenario: No receipt is available
+
+- **WHEN** the buyer files buyer_end without a seller acknowledgement
+- **THEN** its kept observation is a contested claim for a person to rule
 
 ### Requirement: A buyer end filing survives an absent dispute authority
 

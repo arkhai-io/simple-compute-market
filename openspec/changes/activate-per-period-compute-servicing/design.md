@@ -39,7 +39,8 @@ Arkhai mediation's only mechanical ruling is a payee-filed self-penalty request 
 least as strong as standard. Through mediation's own
 `{account, notice: PT0S, partialPeriod: "chosen"}` stop entry, standard ruling stops
 rates now returned, reverses earnings since at, reverses once unserved shares by
-time and awards the full bond once bonds exist. On-demand always returns the
+time, then reverses min(premature_stop_penalty, earned amounts still held) to the
+payer across parts in mandate order. Bond award stays reserved for hosted bonds. On-demand always returns the
 partial period: that is the on-demand contract. Setup's term ends at activation,
 so all returns if undelivered and none once delivered. Seller exit requires this
 complete dispute-recorded package, not direct partial restitution. The authority
@@ -49,7 +50,7 @@ Seller stop entries exist only for entitlements such as spot notice; spot emerge
 exit files exceptional_end. No seller PT0S/returned restitution entry, implicit
 favourable-stop permission, payee notice waiver, payer early release or several-
 stop-entries dependency remains. On-demand non-preemption is remedied by buyer case
-over held money and the bond, not by mandate enforcement. buyer_end is buyer-filed
+over held money plus the premature-stop penalty, not by mandate enforcement. buyer_end is buyer-filed
 and human-triaged, realized as payer stop at at with payer notice and partialPeriod;
 there is no mechanical buyer_end ruling. Cases carry exact Agreement verified
 against mandate deal hash, not a required payment attachment. The storefront signs

@@ -2,7 +2,7 @@
 
 ### Requirement: Rate activation evidence identifies the real authority boundary
 
-Reports MUST use lane-double D6's Qualification against the published contract, Qualification against a proposed contract, and Live evidence per scenario. Both compute lanes MUST pass published qualification against both doubles. Activation MUST also record both-domain live complete deals and required hosted rate/stop/hold/case effects; missing live evidence MUST block completion, never count as a passing double run.
+Reports MUST follow "Lane qualification identifies readiness and evidence class" per scenario. Both compute lanes MUST pass published qualification against both doubles. Activation MUST also record both-domain live complete deals and required hosted rate/stop/hold/case effects; missing live evidence MUST block completion, never count as a passing double run.
 
 #### Scenario: Producer vectors are missing
 

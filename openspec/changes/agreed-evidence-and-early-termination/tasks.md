@@ -3,7 +3,7 @@
 Reconciled design-stage plan, updated 2026-10-29 after triage of reviews 17 and 18.
 No implementation is implied by unchecked tasks. Depends on no open
 change for design or planning. Implementation depends on two external contracts (design.md,
-"Dependencies on the hosted payments service"): the payments service's next contract revision
+"Dependencies on the hosted payments service"): the published payments partialPeriod contract revision, ready to vendor at 8.1
 (hold extensions, per-part start/stop and authorities with notice
 durations, per-part `end` and `afterStop` holds, one re-vendor) gates section 8, and the `arkhai.mediation.v1`
 contract gates live use of section 12's adapter but not its implementation against the test
@@ -12,7 +12,7 @@ double.
 Sections follow the design's implementation cadence. Sections 1–7 are round 1 (foundation,
 wire and buyer side), except 7.5's explicitly round-2 end verification; section 8 joins round 1 once its schema and vectors are vendored
 into `kit/arkhai-payments/schema/`. The per-part lifecycle revision is published;
-`partialPeriod` expressibility and activation-anchored setup still require contract confirmation.
+including `partialPeriod`; activation-anchored setup still requires contract confirmation. The exact producer revision is recorded only in schema/SOURCE.md at 8.1.
 Unsupported terms fail closed; once-only work does not wait for unsupported rate terms.
 Sections 9–15 are round 2 (seller servicing and domain wiring); section 16 is the closeout.
 
@@ -28,7 +28,7 @@ runnable HTTP payments/mediation doubles for lanes and end-to-end runs. This cha
 contracts, clients, adapters and signing fixtures: sections 1–2 (including 2.4's acknowledgement
 model), 8.1, 9.1 and 12.1 (including models/signing fixtures) precede the corresponding
 HTTP double. Section 2.4 owns the neutral acknowledgement binding/verifier over kit/identity;
-13.1 only signs storefront responses. No mechanical rulings exist; section 7.5 runs in round 2
+13.1 only signs storefront responses. Mediation mechanically rules only qualifying seller self-penalties; section 7.5 runs in round 2
 after 12.3 and 13.3. Convergence owns funding
 timers and consuming servicing scenarios; `activate-per-period-compute-servicing` owns hosted
 four-path e2e against the public test deployment (design.md, D15). Sections that change existing deal paths
@@ -40,7 +40,7 @@ while convergence owns consuming servicing scenarios and activation owns hosted 
 Dependency gates for the folded end work: sections 2 and 10's final-request and site-report
 contracts precede section 13's peer/read routes; sections 7 and 13 precede both domain CLI
 paths. `unify-compute-delivery-path` consumes section 10's admission interface and must preserve
-these early-end scenarios. Archive this foundation before unify, spot and convergence;
+these early-end scenarios. Archive this foundation first, renewable before unify, and unify before redesign-authenticated-requests;
 their later MODIFIED requirements must preserve every foundation clause and scenario
 (including option-owned authority, reverse part/amount, normative holds and exclusive
 end-service lease writes). `renewable-compute-lease-deadlines`
@@ -99,7 +99,7 @@ by dispute interface", "Evidence is keyed by negotiation" and "A dispute is one 
 - [ ] 2.2 Create `kit/deal-lifecycle` (foundation library, on the contracts) with the term codec
       for `adjudication` (`dispute` as `{interface, origin, account, record_key, params}`),
       `early_termination` (no `exposure_seconds`; entitlements' and term end's `settles_through`
-      values and `partialPeriod` mapping per D5) and reserved `bond`; malformed and bounded-term refusal
+      values and `partialPeriod` mapping per D5, plus nonnegative minor-unit decimal-string `premature_stop_penalty`, absent/zero meaning none) and reserved `bond`; malformed and bounded-term refusal
       (`case_hold_max_seconds` a nonnegative integer or `null`, minimums from an authority's
       advertisement copy); and the semantics table. Verify: unit tests for each refusal in the
       "Malformed terms are refused" and "Dispute timing terms are bounded" scenarios, and that
@@ -113,7 +113,8 @@ by dispute interface", "Evidence is keyed by negotiation" and "A dispute is one 
       part events, filings and appends; local refusal of a retry with changed content); and the
       evidence-store interface keyed by negotiation ID. Include neutral payment-adapter
       authorize(phase, evidence) and start_billing(operation_key, activated_delivery_evidence)
-      with versioned secret-free identity/digest envelopes; once-only returns allow/no-op
+      with the shared reserve/commit/dispatch/activate/start/disclose enum and versioned secret-free
+      identity/digest envelopes, including activation record reference and instant; once-only returns allow/no-op
       after commitment validation. Verify: unit tests for "A mechanism has
       no adapter for a command", "A deal names an interface with no adapter", "An interface has
       no buyer-end request", "A retry changes content" and the on-demand stop-authority scenario,
@@ -220,7 +221,8 @@ specification and the buyer query client.
 
 - [ ] 5.1 Reserve `adjudication.dispute.interface`, `adjudication.dispute.account`,
       `early_termination.payer`, `early_termination.payee` and
-      `early_termination.payee.notice_seconds` as common fields projected by the
+      `early_termination.payee.notice_seconds` and `early_termination.premature_stop_penalty`
+      (absent zero, asset-correlated minor units) as common fields projected by the
       `kit/deal-lifecycle` codec. Verify: unit tests in `core/tests/unit/test_query_dsl.py` and
       the registry's filter tests; library-integration test in the registry for "A buyer asks
       for buyer-stoppable options" and "A lifecycle term is filtered".
@@ -353,7 +355,13 @@ settle by negotiation". Files: `kit/arkhai-payments/schema/`, `src/market_arkhai
       `end` with its own `partialPeriod`, `afterStop`
       holds; producer signed-snapshot and before/after-start vectors) and refresh vectors. Build one clock-injected payments authority engine in kit/arkhai-payments fixtures.
       The kit's in-process fake uses it directly; the HTTP double wraps it with controls and
-      mediation composition. Both consume the same vectors; no second authority algorithm or
+      mediation composition. Supply installed resource APIs for selected schema/vector bytes,
+      generated models and publication/hash metadata from built wheels. Generate resources from
+      one canonical source; pin any missing capability's candidate bytes in this kit, not tooling.
+      The lane-only proposed declaration selects the same candidate for publication, acceptance,
+      derivation and qualification, never a union. Include producer integration-test evidence
+      for chosen/end/reverse (not a real-HTTP drive), plus partial-reversal vectors before/after stop.
+      Both consume the same vectors; no second authority algorithm or
       kit-to-tooling dependency. Verify: `test_receipt_fixture.py` and the
       vector conformance tests pass against the new content hash.
 - [ ] 8.2 Derive each part's authorities and holds from the terms: prepaid `once` end at term end,
@@ -391,7 +399,10 @@ Implements the design's dependency item "Snapshot-proof verification in SCM" and
 (authority records verified). Files: `kit/arkhai-payments/src/market_arkhai_payments/receipts.py`,
 `test-vectors/`, the receipt-kit fixture.
 
-- [ ] 9.1 Verify snapshot proofs against the receipt identity and refuse unverified snapshots.
+- [ ] 9.1 Verify snapshot proofs against configured current/retiring receipt identities with validity
+      windows, embedded-receipt attestation and a caller-supplied minimum sequence; refuse
+      unverified, cross-deal, mode-changed or regressing snapshots. Current-key snapshots may
+      attest an embedded old receipt without discarding its original bytes.
       Verify: unit tests with a new snapshot vector and receipt-kit fixture for a valid,
       tampered and wrongly signed snapshot.
 
@@ -423,10 +434,13 @@ market-composition's "Marketplace roles hold no payment ledger". Files: new `kit
       through a narrow domain port. Own `admit(negotiation_id, phase, expected_revision) → admitted |
       ended(T), revision` over the caller's storefront database session, with durable revision/CAS
       ordering reservation, dispatch, activation and credential authorization against end recording.
-      Own `record_end(final_request, payment_intent?)`, journaling both atomically in that session;
-      stale revisions retry admission and cannot authorize work. Supply the neutral delivery
+      Own `record_end(final_request, filing_intent? | pending_classification?)`, journaling both atomically in that session;
+      stale revisions retry admission and cannot authorize work. Add the pending-classification slot
+      and resolve_correction(source_ref, expected_revision, evidence, classification, filing_intent?)
+      atomic resolution in the same journal; use D8's closed evidence-based classification,
+      preserving earlier never-delivered failures despite later clock/payee stops. Supply the neutral delivery
       authorization protocol and versioned secret-free evidence envelope from D6. End service
-      alone journals billing-start key/evidence before I/O; accept delivery's stable operation key
+      alone exposes begin_billing(operation_key, activated_delivery_ref) and journals billing-start key/evidence before I/O; accept delivery's stable operation key
       and return an intent reference, never let the delivery record own a competing key.
       These are section-level prerequisites
       for unify's delivery consumer, not a whole-change cycle.
@@ -531,7 +545,9 @@ paid-out money" (client side) and "Dispute writes are idempotent". Files: new
 - [ ] 12.1 Vendor the `arkhai.mediation.v1` contract as published, or, until it is, a draft
       marked unpublished in `SOURCE.md` with live use refused; register the interface in
       `[[disputes]]`. Supply contract models and record-signing fixtures here, before adapter work
-      in 12.2; both the kit fake and runnable-double tooling consume these vector-backed fixtures. Verify: `make check-architecture` accepts the kit and refuses a payment
+      in 12.2; supply installed selected schema/vector/model APIs with publication/hash metadata
+      and built-wheel resource checks, from one canonical source. Both the kit fake and
+      runnable-double tooling consume these vector-backed fixtures, including revision/netting vectors. Verify: `make check-architecture` accepts the kit and refuses a payment
       mechanism token in it.
 - [ ] 12.2 Implement the adapter and client: file, append and read at the Agreement's origin with
       credentials bound by identity; build and validate free-form requests; return the authority's answers, per-part
@@ -552,7 +568,11 @@ paid-out money" (client side) and "Dispute writes are idempotent". Files: new
       stop) in the published mapping. The only mechanical ruling is the standard self-penalty for a
       payee-filed exceptional_end at least as strong: stop rate parts now returned through mediation's
       own `chosen` entry, reverse earnings since at and unserved once shares (setup all if undelivered),
-      award any bond; weaker requests enter triage. Verify the standard and weaker requests.
+      then reverse min(premature_stop_penalty, earned amounts still held) across parts in mandate order;
+      bond award is reserved for hosted bonds; weaker requests enter triage. Verify the standard and weaker requests. Bind the semantic filing identity and same-intent
+      discovery/adoption across online/operator callers without a concurrent-writer duplicate.
+      Qualify revised/linked-case mapping with prior ruling/effect references and netting;
+      unresolved original effects resolve first, unsupported mapping is repair required.
 
 Verification point: `kit/arkhai-mediation` unit and library-integration suites; `make
 check-architecture`; `make check-packaging`; `make test`. End-to-end: none; live mediation is not
@@ -736,7 +756,7 @@ The remaining D1–D15 destinations are listed in proposal.md and task 16.9.
 |---|---|
 | D6 neutral authorization/evidence envelope, sole end-service billing-start intent; D8 cause classification, pre-start timing exception and revised-remedy netting | New `deal-lifecycle` spec/architecture and settlement-servicing spec/architecture at closeout |
 | D8 receipt-only canonical end, buyer stop with retry, stop-or-case and both CLI paths | `openspec/specs/buyer-orchestration/spec.md` and `architecture.md` |
-| D10 one mechanical ruling for the seller self-penalty; D8 exceptional_end filing and stable keys; D9 retained signed evidence; D10 case-carried Agreement and human triage | New `deal-lifecycle` capability's spec and architecture companion (created at archive/closeout) |
+| D5 premature-stop penalty codec and D10 capped held-earnings remedy; D10 one mechanical ruling for the seller self-penalty; D8 exceptional_end filing and stable keys; D9 retained signed evidence; D10 case-carried Agreement and human triage | New `deal-lifecycle` capability's spec and architecture companion (created at archive/closeout) |
 | D8 site-signed intended-end report, transactional event/outbox and recovery | `openspec/specs/site-capacity/spec.md`, `openspec/specs/physical-provisioning/spec.md` and their architecture companions |
 | D8 intended end versus proven release; terminate versus future truncate | `docs/development/ARCHITECTURE.md`, "Site authority", "Fulfillment status and results", "Release"; `openspec/specs/site-capacity/architecture.md` |
 | D8 VM buyer end and second-precision lease effects | `openspec/specs/vm-storefront-fulfillment/spec.md` |

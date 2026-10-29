@@ -43,7 +43,10 @@ Use these exact common fields, read through the shared codec rather than raw par
 
 - `early_termination.payer` and `early_termination.payee`: presence of that entitlement;
 - `early_termination.payee.notice_seconds`: its integer notice, missing if absent;
-- `adjudication.dispute.interface` and `adjudication.dispute.account`.
+- `adjudication.dispute.interface` and `adjudication.dispute.account`;
+- `early_termination.premature_stop_penalty`: integer minor units in the option asset,
+  zero if absent; compare only within the same asset-correlated option. A positive
+  filter is candidate discovery, not proof of buyer acceptance or held-money recovery.
 
 For a valid option without early_termination, entitlement presence projects false;
 missing notice is not zero. Malformed/unsupported terms fail validation, not fallback
@@ -142,6 +145,6 @@ implementation tasks' gates, not claimed evidence for this design reconciliation
 | Accepted decision | Permanent location |
 |---|---|
 | D1 bound fields, filters and missing-value semantics | `openspec/specs/registry-discovery/spec.md`; `openspec/specs/registry-discovery/architecture.md` |
-| D2 shared projections and same-option correlation | `openspec/specs/cli-query-language/spec.md`; `openspec/specs/settlement-configuration/spec.md` |
+| D2 shared projections including asset-correlated premature-stop penalty and same-option correlation | `openspec/specs/cli-query-language/spec.md`; `openspec/specs/settlement-configuration/spec.md` |
 | D3 class sugar and deterministic explanation | `openspec/specs/buyer-orchestration/spec.md`; `openspec/specs/buyer-orchestration/architecture.md` |
 | D4 delivery/dependency currency | `docs/development/ROADMAP.md`; `openspec/changes/README.md` at integration/closeout |
