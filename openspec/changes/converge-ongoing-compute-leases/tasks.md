@@ -1,8 +1,8 @@
 # Tasks — rate-part servicing inside end service
 
 This is an implementation plan, not completed runtime work. All tasks are pending.
-Review the foundation/spot/unified-delivery contracts at their landing revisions
-before code starts; no superseded Goal 8 change is an implementation gate.
+Review the foundation, spot and unified-delivery contracts at their landed
+revisions before code starts; `unify-compute-delivery-path` lands before this change.
 
 ## 1. Dependency and composition gate
 
@@ -15,7 +15,7 @@ before code starts; no superseded Goal 8 change is an implementation gate.
       resolution, never-future timing and pre-start filing at Agreement start.
       Buyer half journals/retries its payment stop under the same key; storefront
       signs receipt evidence only and has no authority to stop billing for the buyer.
-      Foundation owns these neutral interfaces and start journal before unify.
+      Foundation owns these neutral interfaces and the start journal.
       Record exact bindings; stop on a missing interface rather than duplicating it.
 - [ ] 1.2 Confirm spot supplies verified rate authorize/start_billing adapter operations,
       per-stopper and term-end partialPeriod mapping without term rounding, afterStop holds
@@ -29,9 +29,9 @@ before code starts; no superseded Goal 8 change is an implementation gate.
       implicit favourable permission, notice waiver, payer early release or
       multi-stop-entry payments dependency remains. Verify shared original filing
       identities and qualified dispute-adapter revised-request/prior-ruling mapping.
-      Unify tasks 1–3 supply path/protocol consumption, activation/undelivered ports
-      and start-journal reference. This is a section handoff, not an archive gate; converge tasks 1–3 then feed
-      unify 4.4/converge 4 qualification. Gate scenarios on runnable double sections.
+      Confirm `unify-compute-delivery-path` has landed: it supplies the delivery
+      path, protocol consumption, the activation and undelivered ports and the
+      start-journal reference. Gate scenarios on the runnable double sections.
 - [ ] 1.3 Name the composition edits in both storefronts' settlement_composition.py
       and runtime registration: extend the existing lifecycle/end-service wiring,
       inject domain ports and adapters, register the loop on kit/storefront's loop
@@ -92,9 +92,8 @@ before code starts; no superseded Goal 8 change is an implementation gate.
       Accept activation to the Agreement end or verified earlier end, including
       truncation before activation and between lost acknowledgement and retry.
       Consume foundation's sole intent and unify's reference/undelivered handoff;
-      verify both storefront integration suites. Spot's adapter plus this composition
-      gate unify 4.4's consumption of matrix rows 4 and 8, executed only in task 4.1
-      here; foundation's protocol precedes unify 1–3.
+      verify both storefront integration suites. Matrix rows 4 and 8, which drive
+      the delivery path under the rate hook, run in task 4.1 here.
 - [ ] 3.2 Consume foundation's classified end/self-penalty filing journal for
       unentitled site/operator/failed delivery, never future-dated; pre-start failure
       journals immediately and files at Agreement start. Route exceptional_end only
@@ -146,18 +145,21 @@ before code starts; no superseded Goal 8 change is an implementation gate.
 ## 4. Lane qualification and pre-closeout review
 
 - [ ] 4.1 Extend e2e-tests/tests/e2e/roles/scenarios and shared stages with D's full
-      rate matrix (0–11), executing spot's prepared entry points. Rows 4 and 8 own
-      unify 4.4's activate/start/disclose races and post-activation start refusal in
-      both domains, proving no start before activation or duplicate start key across
-      crashes after task 3.1's hook composition; do not repeat these drives in unify.
+      rate matrix (0–11), executing spot's prepared entry points, including:
+      - scenario 4, stop between start and disclosure, both domains: the
+        activate/start/disclose races, no start before activation and no duplicate
+        start key across crashes (formerly unify's task 4.4);
+      - scenario 8, activated but never disclosed, both domains: post-activation
+        start refusal and the started-but-undisclosed failure, filed at the deal
+        start with the buyer-case backstop (formerly unify's task 4.4).
       Record maximum
       term plus on-demand/spot emergency exceptional_end filings, sole mechanical
       payee self-penalty and on-demand returned treatment. Record buyer case/held
       money plus premature-stop-penalty remedy, not mandate-enforced non-preemption. Exercise buyer-half
       same-key payment-stop retry with billing until landing; end_delivery receipt
       grants no storefront payment authority. Rows 7/9 record interim non-default
-      buyer acceptance, separate default-policy refusal and returned-capable acceptance once vendored. Drop once-only
-      activation duplication (unify owns it). Gate on readiness and coherent UTC/skew
+      buyer acceptance, separate default-policy refusal and returned-capable acceptance once vendored. Once-only
+      activation expiry stays unify's. Gate on readiness and coherent UTC/skew
       checks; consume typed due-work barriers with per-authority watermarks, pending
       effects and blocked dependencies (never completed while blocked). Doubles use
       wall-clock mode, short fixture deadlines and event-bounded

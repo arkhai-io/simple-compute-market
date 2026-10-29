@@ -127,7 +127,7 @@ The payment-adapter protocol MUST send a stop only under a stop entry the mandat
 
 ### Requirement: Lifecycle terms are part of the selected option
 
-Option params MAY carry adjudication (version, dispute, dispute_window_seconds, case_hold_max_seconds), early_termination (version, payer/payee entitlements with notice_seconds/settles_through, max_term_seconds, term-end settles_through, premature_stop_penalty), and reserved bond (version, amount). The shared codec MUST decode them as Agreement bytes and option identity; bond MUST remain reserved until a mechanism can hold seller-funded stake.
+A settlement option MUST state its `price` (`asset`, `rates`; absent on a rateless option), its `settlement` (a `schema` naming the mechanism, with that schema's own parameters flat beside it, none named `schema`), and optionally its `lifecycle`, which MAY carry adjudication (version, dispute, dispute_window_seconds, case_hold_max_seconds), early_termination (version, payer/payee entitlements with notice_seconds/settles_through, max_term_seconds, term-end settles_through, premature_stop_penalty), and reserved bond (version, amount). The option ID MUST be the hash of the canonical payload of `price`, `settlement` and `lifecycle`, omitting `lifecycle` when absent. The shared codec MUST decode `lifecycle` as Agreement bytes and option identity; no settlement mechanism's model may own its keys; bond MUST remain reserved until a mechanism can hold seller-funded stake.
 
 #### Scenario: A term changes the option ID
 

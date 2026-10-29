@@ -39,7 +39,7 @@ listing date does not extend accepted deals.
 
 ### D2. Common terms come from the shared codec, per option
 
-Use these exact common fields, read through the shared codec rather than raw params paths:
+Use these exact common fields, read through the shared codec from the option's `lifecycle` rather than raw paths:
 
 - `early_termination.payer` and `early_termination.payee`: presence of that entitlement;
 - `early_termination.payee.notice_seconds`: its integer notice, missing if absent;
@@ -83,7 +83,7 @@ Both CLIs accept `--class reserved|on_demand|spot`:
 | spot | per period | `early_termination.payee=true` |
 
 The billing-kind predicate must come from the mechanism's public registration,
-not a shared parser decoding opaque params. Recurring classes require a payer
+not a shared parser decoding the mechanism's opaque settlement parameters. Recurring classes require a payer
 entitlement as well. A setup once part beside the rate remains recurring. The
 legacy splitter is prepaid interruptible, not reserved, on-demand or spot; its own
 release-condition projection excludes it from reserved without inventing a common
@@ -127,7 +127,7 @@ separately from live deployment. This design reconciliation deploys nothing.
 - Satisfying predicates across options: selects a promise no option actually makes.
 - Treating missing payee notice as zero: invents a notice promise.
 - Treating a matching authority account as buyer approval: exact authority identity is required.
-- Hard-coding params paths in discovery: projections read through the codec, so the registry does not depend on how params are laid out.
+- Hard-coding option paths in discovery: projections read through the codec, so the registry does not depend on how the option is laid out.
 - Waiting for server-only clauses: shared local evaluation can already narrow options.
 - Owning carrier migration here: the storage dependency decides that policy.
 - Mapping prepaid splitter to spot or reserved: its billing and release terms differ.

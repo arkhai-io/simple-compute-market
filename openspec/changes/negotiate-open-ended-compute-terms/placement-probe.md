@@ -120,3 +120,9 @@ commitment checking. Check for silent key loss, unknown-key refusal and any code
 branch on mechanism/arbiter vocabulary. Separate structural carriage from supported
 mechanism semantics: the old splitter is not thereby given a lifecycle adapter.
 Present the full result to the owner before selecting inside-versus-beside params.
+
+Outcome: the owner chose a nested option — `price`, `settlement` with its schema and
+parameters flat beside it, and `lifecycle` holding the shared terms — on the ground
+that the terms are the parties' rights, not the mechanism's parameters (foundation D5,
+"The option's shape"; terms D4). This probe's round-trip result stands as evidence that
+the Alkahest builder carries the objects; task 1.2 reruns it against the nested shape.

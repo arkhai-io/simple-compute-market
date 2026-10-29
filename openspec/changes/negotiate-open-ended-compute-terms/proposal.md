@@ -10,7 +10,8 @@ do not express these products across mechanisms or bound them by an absolute dat
 - Derive reserved, on-demand and spot from billing kind and the selected option's
   payee entitlement. Use `agreed-evidence-and-early-termination`'s shared
   `early_termination` and `adjudication` codec, not an `interruption` object.
-  Both are objects in the selected option's `params` (D4).
+  Both are objects under the selected option's `lifecycle`, beside its `price` and
+  `settlement` (D4; foundation D5, "The option's shape").
 - One `agreed_price(agreement, listing)` accessor returns a quote with unit `total`
   or `per_period`, following `negotiation-driven-capacity-resize`'s multiplier
   contract. A fail-closed repository check refuses direct `Agreement.amount` reads

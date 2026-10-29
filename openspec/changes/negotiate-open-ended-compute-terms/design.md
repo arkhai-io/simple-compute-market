@@ -103,21 +103,21 @@ Unsupported/malformed terms and unknown versions fail closed in the shared codec
 Resolve seller preferences through override > pool hint > configured default,
 keyed per offered preset like its rate. These are seller choices, not a protocol
 requirement to price identically. Recommendation: shipped recurring presets have
-a payer entitlement and setup once part; spot adds a payee entitlement. Omission
+a payer entitlement with `notice_seconds: 0` — a buyer who stops is charged to the started
+period and nothing after, and a seller who wants a tail prices it as a number the buyer sees —
+and a setup once part; spot adds a payee entitlement. Omission
 never grants the payee an implicit entitlement. The foundation owns validation and
 identity inclusion; do not create a second hash rule or require early_termination
 on every compute option. Terms injects a preset-helper interface: selected quote/unit,
 period/reserve, setup, bounds, adjudication and early-termination declarations in;
-canonical candidate params or a named derivation refusal out. Spot supplies the
+a canonical candidate option or a named derivation refusal out. Spot supplies the
 hosted helper; generic publication tests use injected helpers. Missing helper omits
-the recurring candidate, never reconstructs mechanism params. Neither archive waits
+the recurring candidate, never reconstructs the mechanism's parameters. Neither archive waits
 for the other's execution.
 
-### D4. The terms are option params
+### D4. The terms are the option's `lifecycle`
 
-`early_termination` and `adjudication` are objects in the selected option's `params`, and so in the Agreement bytes and the option ID. This follows the foundation's rule that terms take the form `mechanism { fields }` with the payment mechanism primary: what a deal may end by and who adjudicates it are terms of the payment the option offers, not fields beside it. Beside `params` would add typed fields to the shared `SettlementOption` wire that every mechanism and registry must carry, for terms only some mechanisms can enforce.
-
-The codec reads both keys by the same names and shapes whatever the mechanism, and must not branch on the mechanism ID or decode Alkahest arbiter demand trees to read them. A mechanism adapter separately refuses terms it cannot enforce: carrying the keys is not permission to advertise an unsupported Alkahest lifecycle promise. `placement-probe.md` records that the current shared carrier and Alkahest's option builders already keep both objects and that changing them changes the option ID; task 1.2 runs the full check once the foundation's codec exists, as a regression test rather than a decision gate.
+`early_termination` and `adjudication` are objects under the option's `lifecycle`, beside `price` and `settlement`, and so in the Agreement bytes and the option ID (foundation D5, "The option's shape"). They are the parties' rights after commitment — who may end the deal, on what notice, with what treatment of the period in progress, and who decides a dispute — and become payment facts only when exercised, when the adapter derives stop authorities from the entitlements and the hold from the window; they are owned by the lifecycle codec, not by any settlement mechanism, so they do not sit in the mechanism's own parameters under the mechanism's model. The codec reads both keys by the same names and shapes whatever the settlement schema, and never branches on it or decodes Alkahest arbiter demand trees to read them. A mechanism adapter separately refuses terms it cannot enforce: carrying the keys is not permission to advertise an unsupported Alkahest lifecycle promise. `placement-probe.md` records the earlier experiment of carrying both objects inside the mechanism's parameters; task 1.2 runs the full codec check against the nested shape as a regression test, not a decision gate.
 
 ### D5. Two listing bounds compose at the agreed start
 
@@ -199,7 +199,11 @@ case-hold cap and evidence retention. Values come from the selected option, not 
 Explain rate start as a journaled effect after lease activation, distinct from buyer
 credential disclosure; explain each stopper's started-period charge/return/proration,
 the one priced notice, authority-hosted pending stops and adjudication for
-unentitled loss of service. Reserve-ahead is not a dishonest-seller billing cap.
+unentitled loss of service. Reserve-ahead is not a dishonest-seller billing cap, and
+no number the seller publishes caps an honest crash: if the resource is lost while the
+seller's storefront is down, the buyer is charged until its own stop lands, a seller that
+recovers within the dispute window returns everything since the loss, and a case is the
+remedy after that.
 Holds last through stop plus dispute window and accepted case extensions. Keep
 signed evidence through at least the window after the latest delivery end, last
 payout or case close. Sellers file exceptional_end for failed/non-started delivery;
@@ -225,7 +229,7 @@ the rate change derives it.
 
 - Stored class: it can disagree with selected terms.
 - `interruption {seller_may_interrupt, notice_seconds, compensation}`: duplicates the shared codec.
-- Terms as typed fields beside `params`: widens the shared option wire for terms only some mechanisms enforce, against the payment-mechanism-primary rule (D4).
+- Lifecycle terms inside the settlement mechanism's parameters: the parties' rights read by lifecycle adapters placed in a dictionary the mechanism owns, under a name that says the wrong thing (D4; foundation D5).
 - Payee notice entry on on-demand: grants the seller a priced reclaim. On-demand carries no seller stop entry, so won't-preempt is enforced by remedy, a buyer case and the bond, and the seller's exit is the mechanically ruled exceptional_end filing.
 - Bare-metal minimum spend/new payments primitive: churn is seller pricing/refusal policy.
 - Rejecting setup once because it is not minimum spend: name the additive fee honestly.

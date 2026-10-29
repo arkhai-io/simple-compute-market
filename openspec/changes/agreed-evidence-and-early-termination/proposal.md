@@ -67,7 +67,7 @@ Seller-initiated interruption ships in part: an interruptible VM listing, a stor
 
 ## Impact
 
-- **Wire:** lifecycle terms inside option `params` change option IDs; hosted mandates change authorities and holds, so listings re-derive them on republish; new lifecycle routes. Rollout is forward only: hosted payments has had no live use, so storefronts and buyer clients upgrade together and development deployments discard accepted hosted work.
+- **Wire:** the option's shape becomes `price`, `settlement` (a `schema` with its parameters flat beside it) and `lifecycle`, which changes every option ID, hosted or not, so every listing is republished; hosted mandates change authorities and holds, so listings re-derive them on republish; new lifecycle routes. Rollout is forward only: hosted payments has had no live use, so storefronts and buyer clients upgrade together and development deployments discard accepted hosted work.
 - **Persistence:** an evidence store keyed by negotiation ID, lifecycle observation cursors, and an end-service journal per deal; site-owned immutable end reports and their event-keyed outbox. No core-owned financial end decision.
 - **Packaging:** new `kit/deal-lifecycle` (foundation), `kit/deal-lifecycle-contracts`, `kit/deal-lifecycle-client`, `kit/deal-lifecycle-buyer` (buyer side), and `kit/deal-servicing` (storefront side); the hosted adapter in `kit/arkhai-payments`; the `arkhai.mediation.v1` adapter in new `kit/arkhai-mediation`, the first dispute kit; `[[Dispute]]` defaults; storefronts and buyer stages bind them through the role table and a dispute adapter table.
 

@@ -15,15 +15,16 @@ are later amended.
   of `capacity-reservation-lifecycle-hardening`, not its whole implementation.
   Do not recreate missing dependency interfaces locally. Preserve the VM recovery/admission baseline from
   the archived `resolve-compute-family-findings` while rebinding its seams.
-- Tasks 3.3/4.3/4.4's HTTP lane drives wait for
+- Tasks 3.3/4.3's HTTP lane drives wait for
   `add-arkhai-payments-lane-double`. Library integration uses the shared clock-injected
   payments authority engine in kit/arkhai-payments fixtures directly; HTTP wraps
   that engine. Mediation's in-process fake keeps triage plus the sole qualifying seller self-penalty ruling;
   kits never import runnable tooling.
-- Section 4's rate qualification additionally waits for
-  `spot-deals-through-arkhai-payments`' rate adapter and
-  `converge-ongoing-compute-leases`' rate hook. The prepaid path can land independently;
-  rate publication/materialization must stay fail-closed until composed.
+- This change lands before `converge-ongoing-compute-leases`, which depends on it
+  and owns every rate scenario, including the activate/start/disclose race and the
+  started-but-undisclosed recovery (its matrix rows 4 and 8). Section 4 here
+  qualifies only the prepaid and once-only delivery path; rate publication and
+  materialization stay fail-closed until that servicing is composed.
 - `kit-owned-listing-and-fulfillment-lifecycles` must consume this path for the
   transitions it owns here; no dependency on its wider extraction is needed.
 - Follow `docs/development/TESTING.md`: pure window/decision transformations at unit
@@ -237,14 +238,12 @@ pass. New persisted scenarios remain subject to the explicit approval gate above
       before activation until the site's awaiting-activation expiry, recover and
       observe physical release plus the journaled exceptional-end dispute filing. Keep
       authority-application results distinct from local command evidence.
-- [ ] 4.4 After converge task 3.1 composes the rate hook, consume convergence's
-      single rate-servicing lane matrix execution at its task 4.1. The delivery
-      activate/start/disclose race maps to row 4; post-activation start refusal and
-      never-disclosed recovery map to row 8. Both rows there prove no start before
-      activation and no duplicated start key across crashes in both domains against
-      the in-lane doubles. Do not compose another hook or run duplicate rate drives
-      here; unify retains only non-rate delivery qualification. Live authority
-      qualification remains with activation.
+- 4.4 Rate qualification is not this change's: the activate/start/disclose race and
+      the post-activation start refusal and never-disclosed recovery are rows 4 and 8
+      of `converge-ongoing-compute-leases`' rate-servicing matrix, run there in both
+      domains against the in-lane doubles once that change composes the rate hook.
+      This change retains only its non-rate delivery qualification (4.2, 4.3, 4.6);
+      live authority qualification remains with activation.
 - [ ] 4.5 After 4.2/4.3 qualify every commit/recovery caller, change the repository's
       compute-composition activation_deadlines_enabled default introduced by renewable
       in `provisioning/compute/service/src/compute_provisioning_service/container.py`
