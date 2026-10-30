@@ -20,6 +20,7 @@ Semantic correctness of the shell inside those tasks is covered by
 
 from __future__ import annotations
 
+import re
 import unittest
 from pathlib import Path
 
@@ -201,6 +202,20 @@ def _tags(tags) -> list:
     if tags is None:
         return []
     return [tags] if isinstance(tags, str) else list(tags)
+
+
+def _flatten(tasks: list) -> list:
+    """Every task in a task list, the tasks inside blocks included."""
+    flat = []
+    for task in tasks or []:
+        if not isinstance(task, dict):
+            continue
+        if set(task) & BLOCK_KEYWORDS:
+            for section in sorted(set(task) & BLOCK_KEYWORDS):
+                flat.extend(_flatten(task[section]))
+        else:
+            flat.append(task)
+    return flat
 
 
 class TestPassthroughSequencing(unittest.TestCase):
@@ -411,6 +426,107 @@ class TestHostPreparationFailsClosed(unittest.TestCase):
         self.assertLess(loaded, stat)
         self.assertLess(stat, refusal)
         self.assertIn("Hardware virtualization is unavailable", tasks[refusal]["fail"]["msg"])
+
+
+class TestSshRestartHandler(unittest.TestCase):
+    """The SSH hardening takes effect, or preparation fails.
+
+    Security hardening writes sshd_config and notifies a handler to restart the
+    daemon. The daemon's unit is `ssh` on the Debian family, where `sshd` is at
+    most an alias (a default Ubuntu 24.04 install has none), and `sshd`
+    elsewhere; a handler that
+    ignored a failed restart would leave the hardening unapplied, unnoticed, on
+    any run that does not reboot after it.
+    """
+
+    ROLE = ANSIBLE / "roles/vm-setup"
+    HANDLER = "restart sshd"
+    UNIT = "{{ 'ssh' if ansible_os_family == 'Debian' else 'sshd' }}"
+    SSHD_CONFIG = "/etc/ssh/sshd_config"
+
+    SERVICE_MODULES = {"systemd", "systemd_service", "service"}
+    COMMAND_MODULES = {"shell", "command", "raw"}
+
+    # A service manager given a unit named literally `sshd`, whatever the
+    # action or flags, within one command of a shell line.
+    LITERAL_SSHD_COMMAND = re.compile(
+        r"\b(?:systemctl|service|invoke-rc\.d)\b[^\n;&|]*?"
+        r"(?<![\w.-])sshd(?:\.service)?(?![\w.-])"
+    )
+
+    @staticmethod
+    def _module(key: str) -> str:
+        """A module key without its collection, so `ansible.builtin.x` is `x`."""
+        return key.rsplit(".", 1)[-1]
+
+    def _handlers(self) -> list:
+        path = self.ROLE / "handlers/main.yml"
+        return _flatten(yaml.safe_load(path.read_text(encoding="utf-8")))
+
+    def _role_tasks(self) -> list[tuple[Path, dict]]:
+        # Only what the role runs: tasks and handlers. `templates/` and `files/`
+        # hold what it writes onto the host or into an image. The one of them
+        # that restarts `sshd`, the guest cloud-init `user-data.j2`, is rendered
+        # only by the golden image build; scratch guests take their cloud-init
+        # from vm-management's vm-create.yml, which tries `ssh` before `sshd`.
+        found = []
+        for path in sorted((self.ROLE / "tasks").rglob("*.yml")) + [
+            self.ROLE / "handlers/main.yml"
+        ]:
+            document = yaml.safe_load(path.read_text(encoding="utf-8"))
+            found.extend((path, task) for task in _flatten(document))
+        return found
+
+    def test_the_handler_restarts_the_os_familys_unit_and_fails_on_error(self) -> None:
+        (handler,) = [h for h in self._handlers() if h.get("name") == self.HANDLER]
+        (spec,) = [v for k, v in handler.items() if self._module(k) == "systemd"]
+        self.assertEqual(" ".join(spec["name"].split()), self.UNIT)
+        self.assertEqual(spec["state"], "restarted")
+        self.assertNotIn("ignore_errors", handler)
+        self.assertNotIn("failed_when", handler)
+
+    def test_every_notify_in_the_role_names_a_handler(self) -> None:
+        handlers = set()
+        for handler in self._handlers():
+            handlers.add(handler.get("name"))
+            handlers.update(_tags(handler.get("listen")))
+        unresolved = []
+        for path, task in self._role_tasks():
+            for name in _tags(task.get("notify")):
+                if name not in handlers:
+                    unresolved.append(f"{path.relative_to(ROOT)}: {task.get('name')}: {name}")
+        self.assertEqual(unresolved, [])
+
+    def test_every_write_to_sshd_config_notifies_the_restart(self) -> None:
+        writers = []
+        for path, task in self._role_tasks():
+            for key, spec in task.items():
+                if key in TASK_KEYWORDS or not isinstance(spec, dict):
+                    continue
+                if str(spec.get("path") or spec.get("dest") or "") == self.SSHD_CONFIG:
+                    writers.append(task.get("name"))
+                    self.assertIn(
+                        self.HANDLER, _tags(task.get("notify")),
+                        f"{path.relative_to(ROOT)}: {task.get('name')}",
+                    )
+        self.assertTrue(writers, "no task in the role writes sshd_config")
+
+    def test_nothing_in_the_role_hands_a_service_manager_a_literal_sshd_unit(self) -> None:
+        offenders = []
+        for path, task in self._role_tasks():
+            where = f"{path.relative_to(ROOT)}: {task.get('name')}"
+            for key, spec in task.items():
+                module = self._module(key)
+                if module in self.SERVICE_MODULES and isinstance(spec, dict):
+                    if str(spec.get("name", "")).strip() in ("sshd", "sshd.service"):
+                        offenders.append(f"{where}: {key} names sshd")
+                if module in self.COMMAND_MODULES:
+                    body = spec
+                    if isinstance(spec, dict):
+                        body = spec.get("cmd") or " ".join(spec.get("argv") or [])
+                    if isinstance(body, str) and self.LITERAL_SSHD_COMMAND.search(body):
+                        offenders.append(f"{where}: {key} names sshd to a service manager")
+        self.assertEqual(offenders, [])
 
 
 if __name__ == "__main__":

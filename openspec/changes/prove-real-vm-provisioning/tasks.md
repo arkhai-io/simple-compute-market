@@ -720,22 +720,74 @@ found the defect; the golden build's cloud-init template stays out of scope (D9d
 Files: `domains/vms/provisioning/iac/ansible/roles/vm-setup/handlers/main.yml`;
 `domains/vms/provisioning/iac/tests/test_ansible_structure.py`.
 
-- [ ] 7A.1 The `restart sshd` handler restarts `ssh` when `ansible_os_family` is
+- [x] 7A.1 The `restart sshd` handler restarts `ssh` when `ansible_os_family` is
       `Debian` and `sshd` otherwise, and carries no `ignore_errors`, so a failed
       restart fails preparation. Keep the handler's name, which
       `security-hardening.yml` notifies, or rename it and every notify with it. A
       comment says why the unit name depends on the OS family. (D9d)
-- [ ] 7A.2 Unit, `test_ansible_structure.py`: the handler names `ssh` for the Debian
+      The name is kept; the unit is `"{{ 'ssh' if ansible_os_family == 'Debian' else
+      'sshd' }}"`. The fact is there: `vm-setup.yaml`, the only playbook using the
+      role, gathers facts (Ansible's default), and the handler runs only in its play.
+- [x] 7A.2 Unit, `test_ansible_structure.py`: the handler names `ssh` for the Debian
       family and `sshd` otherwise through `ansible_os_family`, and has no
       `ignore_errors`; every `notify` of it in the role resolves to a handler that
       exists; no task or handler in `roles/vm-setup` restarts a unit literally named
       `sshd` outside that expression (the golden-only `templates/` and `files/` are
       excluded and say so in the test). Mutation check: restoring `ignore_errors` or the
       literal `sshd` fails the test. (D9d)
-- [ ] 7A.3 Verification: `make test-provisioning-iac` (the IaC suite, unit); `make
+      Unit, `TestSshRestartHandler` (4 cases): the handler's `systemd` name is the
+      expression read verbatim (as text — the suite runs without Ansible or Jinja, so
+      neither branch is evaluated, and an equivalent spelling such as
+      `ansible_facts['os_family']` would fail it), its state `restarted`, and it has
+      neither `ignore_errors` nor `failed_when`; every `notify` in the role's tasks and
+      handlers, blocks and list notifies included, names a handler (or a `listen`);
+      every task whose module's `path` or `dest` is `/etc/ssh/sshd_config` notifies
+      the restart, and there is one; no `systemd`/`systemd_service`/`service` task
+      or handler, under any collection prefix, names `sshd` in its mapping-form
+      arguments, and no `shell`/`command`/`raw` line (string, `cmd`, or `argv`)
+      hands `systemctl`, `service`, or `invoke-rc.d` a unit named `sshd`, whatever
+      its action or flags, within one command of the line. Not covered: free-form
+      module arguments (`name=sshd`) and arguments under `args:`; a command split by
+      a backslash continuation; a `script` task's file; a unit named through a
+      variable; a write to `sshd_config` by a shell command, or to a drop-in under
+      `sshd_config.d/` (none is written). Correction to the plan's wording: `templates/` is not wholly
+      golden-only (the tunnel client, vfio-bind, and rescue entry templates are
+      not); the test reads only what the role runs, tasks and handlers, and its
+      comment says the one template restarting `sshd`, `user-data.j2`, is rendered
+      only by the golden build. Mutation checks, each run and reverted:
+      `ignore_errors: yes` restored fails the handler case; the literal `sshd`
+      restored fails it and the literal case; a notify of a missing handler and a
+      `systemctl restart sshd.service` shell task fail the notify and literal cases;
+      the hardening's notify removed fails the `sshd_config` case; and an
+      `ansible.builtin.command` `argv` of `systemctl --no-block restart fail2ban
+      sshd` fails the literal case.
+- [x] 7A.3 Verification: `make test-provisioning-iac` (the IaC suite, unit); `make
       test`.
       End-to-end: none in the pipeline — the mock profile runs no playbook. 8.4's live
       re-run of host preparation exercises it.
+      `make test-provisioning-iac` (unit): 86 passed. `make test`: passed (before the
+      fresh-context fixes, which touched only the handler's comment and the IaC test,
+      rerun above). `make check-packaging`: passed. `make check-change`: passed. Not
+      run: `validate`'s inventory and `--syntax-check` parts, as in 3.7 (no Ansible
+      here). End-to-end markers confirmed: none. No CI workflow is owed.
+      Fresh-context check: no guidance break. Fixed: `check-packaging` unrecorded;
+      the literal-`sshd` scan missed flags, several units, `invoke-rc.d`,
+      collection-prefixed modules, and `argv`; the notify check did not tie the
+      restart to the `sshd_config` write; the handler's comment now says it usually
+      runs after the reboot and matters on a run that skips it. Declined: merging
+      `_flatten` into `walk`, which collects findings rather than tasks. A second
+      check: no blocking defect; fixed the comment's claim that a run flushing
+      handlers before the reboot depends on the restart (the reboot still follows),
+      "Ubuntu 24.04 has no `sshd` unit" (true of a default install, where
+      `ssh.service` is socket-activated and its alias absent), the literal case's
+      name (it flags any action, not only restarts), the handler case's tolerance of
+      a collection prefix, and the list of what is not covered.
+      Handoff for 8.4: the handler runs only when the hardening block changes
+      `sshd_config`, so a re-run on the host 8.1 prepared shows `ignored=0`
+      vacuously; 8.4 needs a host whose `sshd_config` lacks the block (a fresh
+      instance). The playbooks run from the provisioning service's image, so the
+      run needs an image built from a revision containing this section, as 8.1 used
+      one built from `8638567c8`.
 
 ## 8. Live verification [log]
 
