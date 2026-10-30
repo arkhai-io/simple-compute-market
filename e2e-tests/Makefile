@@ -97,7 +97,9 @@ BUYER_MODULE ?= e2e_deal_buyer_cli or e2e_buy
 # `e2e_alkahest_trusted_oracle` need only the chain and its funded buyer and
 # seller wallets, and stay here; `multi_registry` reads VM's two registries;
 # `e2e_non_erc20_settlement` settles native-token and ERC1155 escrows against
-# the dev chain's own deployments.
+# the dev chain's own deployments. `e2e_vm_real_provisioning` is in no lane: it
+# provisions on a real KVM host an operator provides, which the pipeline never
+# has, and runs from the operator's machine through `test-module`.
 E2E_MODULE ?= e2e_deal or e2e_deal_buyer_cli or e2e_buy or multi_registry \
               or e2e_compute_dynamic_listings or e2e_alkahest_escrow_codecs \
               or e2e_alkahest_trusted_oracle \

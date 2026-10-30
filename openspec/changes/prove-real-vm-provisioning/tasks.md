@@ -488,18 +488,39 @@ Files: `e2e-tests/tests/e2e/roles/scenarios/vms/host_registry.py`; new
 `…/vms/real_compute_deal_driver.py` and `…/vms/test_real_provisioning_deal.py`;
 `e2e-tests/pyproject.toml` (marker); unit tests under `e2e-tests/tests/unit/`.
 
-- [ ] 6.1 `register_e2e_host` takes an optional SSH connection; when given, a new host is
+- [x] 6.1 `register_e2e_host` takes an optional SSH connection; when given, a new host is
       registered with it and an existing host whose connection differs has it replaced
       through `HostUpdate.connection`, besides the pool reconcile; without it, the mock
       lanes' placeholder is unchanged. Unit with a fake provisioning client: new host,
       unchanged host, changed connection replaced, no connection given. (D2)
-- [ ] 6.2 A real VM driver implementing `ComputeDealDriver` alone: supply from the
+      `host_registry.py`: a connection differs when its kind, version, or any public
+      field the submission states differs (a stored connection also carries its
+      kind's defaults); `provision_e2e_executor` passes `connection` through. Unit,
+      `e2e-tests/tests/unit/test_real_vm_lane.py`, over a fake registry: the four
+      listed cases, and a host registered with another port is not the target.
+- [x] 6.2 A real VM driver implementing `ComputeDealDriver` alone: supply from the
       validated target (a pool stating the GPU-less listing shape derived from
       `capacity`, the host with its connection, one declaration with `capacity`
       unchanged); provision terms carrying the run's public key (5.1); delivery
       assertions that read the delivered access; the lease view as the VM driver reads
       it. Access mode is a parameter it reads from the target. (D2, D6, D8)
-- [ ] 6.3 The module, marker `e2e_vm_real_provisioning`: skips naming the profile and
+      `scenarios/vms/real_compute_deal_driver.py`: `RealVmComputeDealDriver` on a new
+      `VmDealDriverBase` in `compute_deal_driver.py`, which now holds what both VM
+      drivers supply alike (settle response, delivery, settlement selection, lease
+      view, release) and no gate; the mock driver adds its gates on it, unchanged in
+      behaviour. Fixed ids `compute-e2e-real-pool` and `compute-e2e-real-001`, so a
+      rerun reconciles them (the site's declaration write is an upsert). The pool's
+      shape is the listing's own `capacity_source_for` shape, passed in. The
+      delivered access is the settle status's `connection_details` (host, port,
+      user), and its host must be the target's `public_host` under `direct` access.
+      Beyond the plan: the shared `DealLease.resource_consumed` read only the site's
+      GPU mirror, which a GPU-less declaration does not state (`value` and
+      `available_units` are null), so 10b would have failed; it now falls back to
+      the declared and available dimension maps when the mirror is absent, unchanged
+      for a GPU declaration (unit, both cases). 11b's re-reservation claims the whole
+      capacity (`resource_id` and the three dimensions), so a reservation coming
+      back shows all of it released.
+- [x] 6.3 The module, marker `e2e_vm_real_provisioning`: skips naming the profile and
       file when the target is not configured; overrides
       `_ensure_provisioning_host_registered` with a fixture that registers nothing; its
       setup fixtures depend on the validated target and on a first real-only stage that
@@ -508,46 +529,144 @@ Files: `e2e-tests/tests/e2e/roles/scenarios/vms/host_registry.py`; new
       before both pass; it then checks the registered host's public connection against
       the target before any deal stage. (D1, D2, D4a; scenarios "No target is present",
       "The service's VM execution is mocked")
-- [ ] 6.4 A real-only settlement preflight between 08a and 08b that writes
+      `scenarios/vms/test_real_provisioning_deal.py`. Correction: the holds pause the
+      shared services when pytest sets them up, before any stage runs, so a stage
+      cannot precede them. The check is therefore a module fixture,
+      `real_vm_execution` (on `real_vm_target`, which skips or raises
+      `TargetInvalid`), listed first in `usefixtures`, before the holds; stage 00e1
+      makes the same check (`vm_executor_is_real`) to record it in the results and
+      write `_provisioning_execution_confirmed`. That the target and the check are set
+      up before every hold is pinned from pytest's setup plan (unit,
+      `test_scenario_cleanup_order.py`); the mocked-service path has not been run
+      against a stack. 00f2 reads the registered host back
+      and requires its pool, enablement, and whole public connection to be the
+      target's. The module also declares its own listing stages (02b create paused,
+      03b resume and registry read) for a GPU-less offer of the whole capacity, and
+      its own 09a2 over `step_listing_reconciliation`, extracted unchanged from the
+      mock deal's 09a2 into `scenarios/vms/conftest.py`, which the mock deal now
+      calls too; it omits the mock deal's 03a and 09bb. Its state is
+      `RealVmDealState` (`_target_host_confirmed`, `create_job_id`, `vm_name`,
+      `delivered_access`, `_guest_absent`).
+- [x] 6.4 A real-only settlement preflight between 08a and 08b that writes
       `_settle_preflight_passed` only when the preview's chosen host
       (`_evaluate_settle_host_id`) is the target's `host_id`. (D4a; scenario "The
       settlement preview chooses another host")
-- [ ] 6.5 A create-job poll between 08b and 09a: list the fulfillment reservation's jobs
+      Stage 08a2. Unit: its body run with the target, both outcomes.
+- [x] 6.5 A create-job poll between 08b and 09a: list the fulfillment reservation's jobs
       (`list_jobs(capacity_reservation_id=…)`), require exactly one, on the target host;
       poll it to terminal within a named bound; require `succeeded`; record its id and the
       guest's `vm_name`. No match, several matches, failure, and timeout each fail with
       D4's named diagnostics and the job's logs. A real-only stage after 09c checks the
       lease's `create_job_id` equals the recorded id. (D4, "Finding the jobs")
-- [ ] 6.6 SSH access stages after 09c, with the section 5 helper and the delivered
+      Stage 08b3 over `JobWatch` (`JOB_BOUND_SECONDS` 1800, polled every 10 s, the
+      last sleep stopping at the bound; clock and sleep injected); the reservation is
+      read from the fulfillment's status, and the guest from the create result's
+      `detail.vm_name`. Stage 09c3 checks the lease.
+- [x] 6.6 SSH access stages after 09c, with the section 5 helper and the delivered
       access: the delivered user, `nproc` equal to `vcpu_count`, memory within tolerance
       of `ram_gb`, root disk at least `disk_gb`; then an unrelated generated key refused
       for the delivered user. (D7; scenarios "A real deal is delivered", "An unrelated
       key is refused")
-- [ ] 6.7 A teardown-job poll between 11a and 11b (exactly one job besides the create
+      Stages 09d (probe; logs the endpoint, the host key's fingerprint, the shape, and
+      the capacity) and 09e (`assert_key_refused`). The key pair and known hosts live
+      in a module `ssh_session`; the buyer key is negotiated in the provision terms
+      and the settlement preview.
+- [x] 6.7 A teardown-job poll between 11a and 11b (exactly one job besides the create
       job, on the target host, polled as in 6.5); after 11b, a `list_vms` job on the
       target host through the VM operator client, polled within the bound, requiring a
       succeeded, well-formed list without the recorded `vm_name`; then the delivered
       access refused within its bound. (D4, "Observing the guest's absence"; scenario
       "Teardown removes the VM and its access")
-- [ ] 6.8 A module finalizer, when a fulfillment was dispatched and the lane's own
+      Stages 11a3, 11c, and 11d. The list is read from the result's `ansible_result`
+      (the playbook's `vm_list_data`), not its top-level `vms`, which the VM codec
+      omits when no guest is listed; well-formed is `result_kind` `vm_list`, action
+      `list`, status `success`, and `vms` a list of entries each naming a guest.
+- [x] 6.8 A module finalizer, when a fulfillment was dispatched and the lane's own
       teardown did not complete: truncate this deal's lease through the site and advance
       the held workers; look for the teardown job and the guest's absence as in 6.7;
       fail naming fulfillment, reservation, create and teardown job ids, guest, and host
       where removal is not confirmed; then release the module's holds. The module never
       calls `release_reserved_resources`. (D4, "When the run fails"; scenario "The run
       fails with a guest on the host")
-- [ ] 6.9 Register the marker in `e2e-tests/pyproject.toml` and in no lane variable of
+      `recover_failed_run`, listed after the holds, acts when settlement was
+      submitted (`_settle_preflight_passed`) and `_guest_absent` is not set — keyed
+      to submission because 08b records `fulfillment_id` only after its own
+      assertions, while the create already runs — through
+      `RealVmComputeDealDriver.tear_down_after_failure`: the fulfillment from the
+      state or else the settle status (none: nothing dispatched, nothing done); a
+      create still `dispatching` is waited for and converged to `active`, since
+      release waits for an in-flight create (`ReleaseAction.CREATE_IN_FLIGHT`) and
+      convergence is held; an `active` lease whose end is still ahead is truncated
+      (one 10a already back-dated is not, since the site refuses a later end); the
+      watchdog is stepped where no release has begun; convergence advanced to
+      `tearing_down` only from `teardown_dispatch_pending`; the teardown job waited
+      for; `torn_down` and a watchdog step; then the list check. Unit,
+      `test_real_vm_lane.py`, over a stateful fake of the service's convergence and
+      watchdog steps: an in-flight create recovered with no recorded fulfillment, a
+      back-dated lease not truncated again, a guest still listed failing naming
+      fulfillment, reservation, both jobs, guest, and host, and no fulfillment
+      dispatched. Whether the real service's steps move as the fake's do is shown
+      only by a failing live run. A settlement refused at 08b reports a spurious
+      "recover it by hand" where its settle status cannot be read.
+- [x] 6.9 Register the marker in `e2e-tests/pyproject.toml` and in no lane variable of
       `e2e-tests/Makefile`; the module's stage list follows D4a's real-lane order.
       (D5)
-- [ ] 6.10 Unit: job correlation (exactly one, none, several, a failed job, a timeout)
+      The Makefile's lane comment says the marker is in no lane and why.
+- [x] 6.10 Unit: job correlation (exactly one, none, several, a failed job, a timeout)
       and the `list_vms` absence check against fake clients; the preflight's host
       comparison; a stage-list test that the real module runs every shared stage in
       D4a's real-lane order and no mock-only stage. (D4, D4a)
-- [ ] 6.11 Verification: `make -C e2e-tests test-unit`; `make test`; `make -C e2e-tests
+      Unit, `test_real_vm_lane.py`: correlation as listed plus a job on another host
+      and the teardown found besides the create; the list check (absent, empty,
+      present, five malformed lists, a failed list job); `vm_executor_is_real`
+      (real beside a mocked bare-metal one; mocked, absent, none); the delivered
+      endpoint and three incomplete ones; the create's guest name. Unit,
+      `test_compute_deal_stages.py`: the real lane's row joins the generic checks
+      (state base, prerequisites produced earlier, reads produced first, one
+      producer per field, own stages using declared fields); a test pins the real
+      lane's whole order (`REAL_LANE_ORDER`) and that it runs every shared stage in
+      definition order and no mock-lane stage; and a lane-scoped consumption test
+      (every field it produces is read by a later stage or the module's recovery
+      fixture). Unit, `test_scenario_cleanup_order.py`: the real module's holds are
+      released after its other cleanup (the existing check); it takes
+      `ensure_storefront_resumed` and `recover_failed_run` in place of the lane
+      cleanup, never `release_reserved_resources`, and sets up its target and
+      execution check before any hold. Not unit-tested: the driver's composition of
+      these (`create_job`, `teardown_job`, `delivered_access`'s address check, the
+      re-reservation claim), and the stored connection view 00f2 compares against,
+      which the fake registry builds by hand from the SSH kind's model.
+      Correction to 6.7: 11d requires `_teardown_job_completed`, not 11c's
+      `_guest_absent`, so access ending is asserted whether or not the guest is
+      still listed.
+- [x] 6.11 Verification: `make -C e2e-tests test-unit`; `make test`; `make -C e2e-tests
       test-module MODULE=e2e_vm_real_provisioning ACTIVE_PROFILES=local` with no stack
       running skips naming the profile and file.
       End-to-end: `e2e_vm_real_provisioning` is in no lane; the pipeline's lanes must
       still pass. Live evidence is section 8.
+      `make -C e2e-tests test-unit`: 293 passed (unit). `make -C e2e-tests
+      test-module MODULE=e2e_vm_real_provisioning ACTIVE_PROFILES=local` with no
+      stack: 37 skipped, each naming the `real-vm-target` profile and
+      `config-real-vm-target.yml`, none erroring at setup. `make test`: passed
+      (before the review fixes, which touched only e2e-tests files the unit suite
+      reran). `make check-packaging`: passed. `make check-change`: passed.
+      Fresh-context check of the diff: no blocking defect. Fixed: recovery could not
+      remove a guest whose create was still in flight, re-truncated a lease 10a had
+      back-dated, depended on a field 08b writes last, and looked the create job up
+      after the teardown existed; 11d skipped when 11c failed; the shared state's
+      `_supply_seeded` docstring; the setup order pinned by a test. Owed at 9.9:
+      TESTING.md's real-lane subsection says the lane waits on real jobs by polling
+      within a bound, the one wait D4 adds to the stage discipline. End-to-end markers
+      confirmed: `e2e_deal` runs the reworked mock driver (its non-gate parts moved
+      to the base) and the extracted 09a2; every VM lane module is touched by the
+      `register_e2e_host` and `DealLease` changes, unchanged for their inputs; the
+      pipeline's VM lane is that evidence. `e2e_vm_real_provisioning` runs in no
+      lane. No CI workflow beyond the pipeline is owed.
+      Handoff, unproven until section 8's live run: the storefront accepting an
+      explicit GPU-less listing through `create_listing` (the GPU-less deal so far
+      ran only through a publication-derived listing); the admin re-reservation
+      with dimension attributes; a real teardown finishing inside the watchdog's
+      300 s grace after 10a's one-minute back-date (10a to 11b, on the host); and the
+      probe command's first execution.
 
 ## 7. Dead e2e material
 
@@ -639,6 +758,10 @@ The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
       `docs/development/diagrams/` (`e2e-compute-deal`, `e2e-settle-zoom`,
       `e2e-stage-discipline`, `.drawio` and their `.svg` exports) and TESTING.md's
       "One part, zoomed in" are redrawn with the mock gates as mock-lane stages.
+      Amended during section 6: the real-lane subsection says the lane waits for real
+      jobs by reading their status within a named bound, where the stage discipline
+      otherwise waits only on a request a stage made, and that its failure recovery
+      expires only its own deal's lease.
 - [ ] 9.10 **Documentation citations.** `make check-doc-citations
       CHANGE=prove-real-vm-provisioning`; `openspec validate prove-real-vm-provisioning
       --strict`.

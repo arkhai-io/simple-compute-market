@@ -1,0 +1,546 @@
+"""The real-provisioning VM lane's own logic, against fake clients.
+
+The lane's registration of its host, the jobs it finds and waits for, the VM
+list it reads the guest's absence from, its checks of the service's execution,
+the delivered access, and the settlement preview, and the lease view's reading
+of a GPU-less declaration. The scenario module is imported by name, never its
+stage classes, so pytest does not collect them here.
+"""
+
+from __future__ import annotations
+
+import importlib
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
+from compute_provisioning_client import ComputeProvisioningError
+from compute_provisioning_contracts import (
+    ConnectionSubmission,
+    JobListResponse,
+    JobLogsResponse,
+    JobStatusResponse,
+    ResultEnvelope,
+)
+
+from e2e_harness.real_vm_target import RealVmTarget
+from tests.e2e.roles.helpers.compute_deal import DealLease
+from tests.e2e.roles.scenarios.vms.host_registry import register_e2e_host
+from tests.e2e.roles.scenarios.vms.real_compute_deal_driver import (
+    REAL_POOL_ID,
+    JobWatch,
+    RealVmComputeDealDriver,
+    RealVmDealState,
+    assert_guest_absent,
+    assert_registered_as_target,
+    created_guest_name,
+    delivered_endpoint,
+    target_connection,
+    vm_executor_is_real,
+)
+
+real_lane = importlib.import_module("tests.e2e.roles.scenarios.vms.test_real_provisioning_deal")
+
+HOST = "example-kvm-1"
+RESERVATION = "reservation-1"
+#: RFC 5737 documentation addresses and a fictitious key path, as in the
+#: committed example target; they name no real host.
+TARGET = RealVmTarget.model_validate({
+    "version": 1,
+    "host": {
+        "host_id": HOST,
+        "ssh_host": "192.0.2.10",
+        "ssh_user": "provisioner",
+        "ssh_port": 22,
+        "ssh_key_path": "/run/secrets/example-host-key",
+        "public_host": "198.51.100.7",
+        "capacity": {"vcpu_count": 7, "ram_gb": 28, "disk_gb": 160},
+    },
+    "access": {"mode": "direct"},
+})
+
+
+# ---------------------------------------------------------------------------
+# Registering the host
+# ---------------------------------------------------------------------------
+
+class FakeHosts:
+    """The provisioning service's host registry, as `register_e2e_host` uses it."""
+
+    def __init__(self, **hosts: SimpleNamespace) -> None:
+        self.hosts = dict(hosts)
+        self.registered: list = []
+        self.updates: list = []
+
+    def get_host(self, host_id: str):
+        if host_id not in self.hosts:
+            raise ComputeProvisioningError("not found", status_code=404)
+        return self.hosts[host_id]
+
+    def register_host(self, body) -> None:
+        self.registered.append(body)
+        self.hosts[body.host_id] = _host(body.host_id, body.pool_id, body.connection)
+
+    def update_host(self, host_id: str, body) -> None:
+        self.updates.append(body)
+        host = self.hosts[host_id]
+        connection = _view(body.connection) if body.connection else host.connection
+        self.hosts[host_id] = SimpleNamespace(
+            host_id=host_id, pool_id=body.pool_id or host.pool_id, connection=connection,
+            enabled=True,
+        )
+
+
+def _view(submission: ConnectionSubmission) -> SimpleNamespace:
+    # A stored connection carries the defaults its kind fills in.
+    return SimpleNamespace(
+        kind=submission.kind,
+        version=submission.version,
+        public={"public_host": None, "ssh_port": 22, "ssh_user": "root", **submission.public},
+    )
+
+
+def _host(host_id: str, pool_id: str, connection: ConnectionSubmission) -> SimpleNamespace:
+    return SimpleNamespace(
+        host_id=host_id, pool_id=pool_id, connection=_view(connection), enabled=True
+    )
+
+
+def test_a_new_host_is_registered_with_the_connection_given():
+    hosts = FakeHosts()
+    register_e2e_host(hosts, name=HOST, pool_id=REAL_POOL_ID, connection=target_connection(TARGET))
+    (body,) = hosts.registered
+    assert body.connection == target_connection(TARGET)
+    assert hosts.updates == []
+    assert_registered_as_target(hosts.get_host(HOST), TARGET)
+
+
+def test_an_unchanged_host_is_left_as_it_is():
+    hosts = FakeHosts(**{HOST: _host(HOST, REAL_POOL_ID, target_connection(TARGET))})
+    register_e2e_host(hosts, name=HOST, pool_id=REAL_POOL_ID, connection=target_connection(TARGET))
+    assert hosts.registered == [] and hosts.updates == []
+
+
+def test_a_host_an_earlier_run_left_has_its_connection_replaced():
+    stale = ConnectionSubmission(
+        kind="ssh",
+        public={**target_connection(TARGET).public, "ssh_host": "192.0.2.99"},
+    )
+    hosts = FakeHosts(**{HOST: _host(HOST, REAL_POOL_ID, stale)})
+    register_e2e_host(hosts, name=HOST, pool_id=REAL_POOL_ID, connection=target_connection(TARGET))
+    (update,) = hosts.updates
+    assert update.connection == target_connection(TARGET)
+    assert update.pool_id == REAL_POOL_ID
+    assert_registered_as_target(hosts.get_host(HOST), TARGET)
+
+
+def test_without_a_connection_a_new_host_gets_the_placeholder_and_an_old_one_keeps_its_own():
+    hosts = FakeHosts(**{"kvm-old": _host("kvm-old", "old-pool", target_connection(TARGET))})
+    register_e2e_host(hosts, name="kvm-new", pool_id="pool")
+    register_e2e_host(hosts, name="kvm-old", pool_id="pool")
+    (body,) = hosts.registered
+    assert body.connection.public == {
+        "ssh_host": "127.0.0.1", "ssh_user": "e2e", "key_path": "/dev/null"
+    }
+    (update,) = hosts.updates
+    assert update.connection is None and update.pool_id == "pool"
+
+
+def test_a_host_registered_otherwise_is_not_the_target():
+    hosts = FakeHosts(**{HOST: _host(
+        HOST, REAL_POOL_ID,
+        ConnectionSubmission(kind="ssh", public={**target_connection(TARGET).public, "ssh_port": 2200}),
+    )})
+    with pytest.raises(AssertionError, match="not the target's"):
+        assert_registered_as_target(hosts.get_host(HOST), TARGET)
+
+
+# ---------------------------------------------------------------------------
+# The service's execution, the delivered access, and the create's guest
+# ---------------------------------------------------------------------------
+
+def _execution(*entries: tuple[str, bool]) -> SimpleNamespace:
+    return SimpleNamespace(executors=[
+        SimpleNamespace(offering_mode=mode, mocked=mocked) for mode, mocked in entries
+    ])
+
+
+def test_a_real_vm_executor_passes_beside_any_other():
+    assert vm_executor_is_real(_execution(("bare_metal", True), ("vm", False))).mocked is False
+
+
+@pytest.mark.parametrize(
+    "execution",
+    [_execution(("vm", True)), _execution(("bare_metal", False)), _execution()],
+    ids=["vm mocked", "no vm executor", "no executor"],
+)
+def test_a_mocked_or_absent_vm_executor_fails_naming_the_executors(execution):
+    with pytest.raises(AssertionError, match="executors="):
+        vm_executor_is_real(execution)
+
+
+def test_the_delivered_endpoint_is_read_from_the_connection_details():
+    status = SimpleNamespace(extra={
+        "connection_details": '{"host": "198.51.100.7", "port": 30022, "user": "vmuser"}'
+    })
+    endpoint = delivered_endpoint(status)
+    assert (endpoint.host, endpoint.port, endpoint.user) == ("198.51.100.7", 30022, "vmuser")
+
+
+@pytest.mark.parametrize(
+    "details", [None, {"host": "198.51.100.7", "port": 30022}, '{"host": "", "port": 1, "user": "u"}']
+)
+def test_an_incomplete_delivery_fails(details):
+    with pytest.raises(AssertionError, match="no complete SSH endpoint"):
+        delivered_endpoint(SimpleNamespace(extra={"connection_details": details}))
+
+
+def _job(job_id: str, status: str = "succeeded", *, host: str = HOST, result=None) -> JobStatusResponse:
+    return JobStatusResponse(
+        job_id=job_id, status=status, params={}, host_id=host,
+        capacity_reservation_id=RESERVATION, result=result, error=None if status != "failed" else "boom",
+    )
+
+
+def test_the_create_jobs_guest_is_read_from_its_detail():
+    job = _job("create-1", result=ResultEnvelope(
+        offering_mode="vm", result_kind="vm_create",
+        value={"evidence": None, "detail": {"vm_name": "guest-1"}},
+    ))
+    assert created_guest_name(job) == "guest-1"
+    with pytest.raises(AssertionError, match="no guest name"):
+        created_guest_name(_job("create-2"))
+
+
+# ---------------------------------------------------------------------------
+# Finding a reservation's job and waiting for it
+# ---------------------------------------------------------------------------
+
+class FakeJobClient:
+    """The job reads `JobWatch` makes: a listing, and each job's statuses in turn."""
+
+    def __init__(self, jobs: list[JobStatusResponse], statuses: dict[str, list[JobStatusResponse]] | None = None):
+        self.jobs = jobs
+        self.statuses = {job_id: list(seen) for job_id, seen in (statuses or {}).items()}
+        self.listed_with: list[dict] = []
+
+    def list_jobs(self, **query) -> JobListResponse:
+        self.listed_with.append(query)
+        return JobListResponse(jobs=self.jobs, total=len(self.jobs), offset=0, limit=query["limit"])
+
+    def get_job(self, job_id: str) -> JobStatusResponse:
+        seen = self.statuses[job_id]
+        return seen.pop(0) if len(seen) > 1 else seen[0]
+
+    def get_job_logs(self, job_id: str) -> JobLogsResponse:
+        return JobLogsResponse(job_id=job_id, status="failed", logs=f"playbook output of {job_id}")
+
+
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.slept: list[float] = []
+
+    def __call__(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.slept.append(seconds)
+        self.now += seconds
+
+
+def _watch(client: FakeJobClient, *, bound: float = 60.0) -> tuple[JobWatch, FakeClock]:
+    clock = FakeClock()
+    return JobWatch(client, bound=bound, poll_interval=10.0, clock=clock, sleep=clock.sleep), clock
+
+
+def test_exactly_one_job_on_the_target_is_found():
+    client = FakeJobClient([_job("create-1")])
+    watch, _clock = _watch(client)
+    assert watch.only_job(RESERVATION, host_id=HOST, context="dispatching").job_id == "create-1"
+    assert client.listed_with == [
+        {"capacity_reservation_id": RESERVATION, "limit": 100, "sort": "created_at_asc"}
+    ]
+
+
+def test_the_one_job_besides_the_create_is_the_teardown():
+    watch, _clock = _watch(FakeJobClient([_job("create-1"), _job("teardown-1", "running")]))
+    assert watch.only_job(
+        RESERVATION, host_id=HOST, besides=("create-1",), context="tearing down"
+    ).job_id == "teardown-1"
+
+
+def test_no_job_fails_naming_the_reservation_and_the_fulfillment():
+    watch, _clock = _watch(FakeJobClient([]))
+    with pytest.raises(AssertionError, match=f"{RESERVATION} ran no job.*fulfillment f-1 is 'dispatching'"):
+        watch.only_job(RESERVATION, host_id=HOST, context="fulfillment f-1 is 'dispatching'")
+
+
+def test_several_jobs_fail_listing_them():
+    watch, _clock = _watch(FakeJobClient([_job("create-1"), _job("create-2")]))
+    with pytest.raises(AssertionError, match="ran 2 jobs.*create-1.*create-2"):
+        watch.only_job(RESERVATION, host_id=HOST, context="dispatching")
+
+
+def test_a_job_on_another_host_fails():
+    watch, _clock = _watch(FakeJobClient([_job("create-1", host="kvm-other")]))
+    with pytest.raises(AssertionError, match="not the target host"):
+        watch.only_job(RESERVATION, host_id=HOST, context="dispatching")
+
+
+def test_a_job_is_read_until_it_succeeds():
+    client = FakeJobClient([], {"create-1": [
+        _job("create-1", "queued"), _job("create-1", "running"), _job("create-1"),
+    ]})
+    watch, clock = _watch(client)
+    assert watch.until_succeeded("create-1", describe="create job").status == "succeeded"
+    assert clock.slept == [10.0, 10.0]
+
+
+def test_a_failed_job_fails_with_its_error_and_logs():
+    watch, _clock = _watch(FakeJobClient([], {"create-1": [_job("create-1", "failed")]}))
+    with pytest.raises(AssertionError, match="(?s)create job create-1 failed: boom.*playbook output of create-1"):
+        watch.until_succeeded("create-1", describe="create job")
+
+
+def test_a_job_still_running_at_the_bound_fails_with_its_status_and_logs():
+    watch, clock = _watch(FakeJobClient([], {"create-1": [_job("create-1", "running")]}), bound=25.0)
+    with pytest.raises(AssertionError, match="(?s)within 25.0s.*'running'.*playbook output of create-1"):
+        watch.until_succeeded("create-1", describe="create job")
+    # The last sleep stops at the bound rather than running past it.
+    assert clock.slept == [10.0, 10.0, 5.0]
+
+
+# ---------------------------------------------------------------------------
+# The guest's absence from the host's VM list
+# ---------------------------------------------------------------------------
+
+def _listed(*names: str, **listing) -> JobStatusResponse:
+    value = {
+        "ansible_result": {
+            "action": "list", "status": "success",
+            "vms": [{"id": "-", "name": name, "state": "running"} for name in names],
+            **listing,
+        }
+    }
+    return _job("list-1", result=ResultEnvelope(offering_mode="vm", result_kind="vm_list", value=value))
+
+
+def _list_check(listed: JobStatusResponse, vm_name: str = "guest-1"):
+    operator = MagicMock()
+    operator.list_vms.return_value = SimpleNamespace(job_id="list-1")
+    watch, _clock = _watch(FakeJobClient([], {"list-1": [listed]}))
+    try:
+        return assert_guest_absent(watch, operator, host_id=HOST, vm_name=vm_name)
+    finally:
+        operator.list_vms.assert_called_once_with(HOST)
+
+
+def test_a_list_without_the_guest_passes():
+    assert _list_check(_listed("other-guest")) == ["other-guest"]
+    assert _list_check(_listed()) == []
+
+
+def test_a_list_naming_the_guest_fails():
+    with pytest.raises(AssertionError, match="still lists guest 'guest-1'"):
+        _list_check(_listed("guest-1", "other-guest"))
+
+
+@pytest.mark.parametrize(
+    "listed",
+    [
+        _job("list-1"),
+        _listed(status="failed"),
+        _listed(vms="guest-1"),
+        _listed(vms=[{"state": "running"}]),
+        _job("list-1", result=ResultEnvelope(offering_mode="vm", result_kind="vm_list", value={})),
+    ],
+    ids=["no result", "unsuccessful list", "list not a list", "entry without a name", "no list fact"],
+)
+def test_a_missing_or_malformed_list_fails(listed):
+    with pytest.raises(AssertionError, match="VM list job list-1 reported"):
+        _list_check(listed)
+
+
+def test_a_failed_list_job_fails():
+    with pytest.raises(AssertionError, match="VM list job list-1 failed"):
+        _list_check(_job("list-1", "failed"))
+
+
+# ---------------------------------------------------------------------------
+# The settlement preflight
+# ---------------------------------------------------------------------------
+
+def _preflight(chosen: str) -> RealVmDealState:
+    state = RealVmDealState(_evaluate_settle_passed=True, _evaluate_settle_host_id=chosen)
+    real_lane.TestStage08a2_SettlementPreviewChoseTheTarget().test_08a2_the_settlement_preview_chose_the_target_host(
+        TARGET, state
+    )
+    return state
+
+
+def test_the_preflight_passes_when_the_preview_chose_the_target():
+    assert _preflight(HOST)._settle_preflight_passed is True
+
+
+def test_the_preflight_fails_and_settlement_stays_blocked_when_another_host_was_chosen():
+    state = RealVmDealState(_evaluate_settle_passed=True, _evaluate_settle_host_id="kvm-other")
+    with pytest.raises(AssertionError, match="chose host 'kvm-other', not the target"):
+        real_lane.TestStage08a2_SettlementPreviewChoseTheTarget().test_08a2_the_settlement_preview_chose_the_target_host(
+            TARGET, state
+        )
+    assert state._settle_preflight_passed is False
+
+
+# ---------------------------------------------------------------------------
+# Recovering a failed run's guest
+# ---------------------------------------------------------------------------
+
+class _Status(SimpleNamespace):
+    def model_dump(self, mode: str = "python") -> dict:
+        return dict(vars(self))
+
+
+class FakeService(FakeJobClient):
+    """The provisioning service's lease and convergence steps, as recovery drives
+    them: a create the convergence step settles once its job succeeded, a lease
+    the watchdog step expires, and a teardown each convergence step moves on."""
+
+    def __init__(self, *, state: str, lease_status: str = "active", lease_ends_in: float = 3600):
+        create = [_job("create-1", "running"), _job("create-1", result=ResultEnvelope(
+            offering_mode="vm", result_kind="vm_create",
+            value={"evidence": None, "detail": {"vm_name": "guest-1"}},
+        ))]
+        super().__init__([_job("create-1")], {"create-1": create})
+        self.state = state
+        self.lease = SimpleNamespace(
+            status=lease_status,
+            lease_end_utc=datetime.now(timezone.utc) + timedelta(seconds=lease_ends_in),
+            release_job_id=None,
+        )
+        self.listed: list[str] = []
+
+    def get_fulfillment_status(self, fulfillment_id: str) -> _Status:
+        return _Status(capacity_reservation_id=RESERVATION, state=self.state)
+
+    def advance_fulfillment_convergence_cycle(self) -> None:
+        if self.state == "dispatching" and self.statuses["create-1"][-1].status == "succeeded":
+            self.state = "active"
+        elif self.state == "teardown_dispatch_pending":
+            self.state = "tearing_down"
+            self.jobs = [*self.jobs, _job("teardown-1")]
+            self.statuses["teardown-1"] = [_job("teardown-1")]
+        elif self.state == "tearing_down":
+            self.state = "torn_down"
+
+    def get_lease(self, reservation: str) -> SimpleNamespace:
+        return self.lease
+
+    def check_leases(self) -> None:
+        expired = self.lease.lease_end_utc < datetime.now(timezone.utc)
+        if self.lease.status == "active" and expired and self.state == "active":
+            self.lease.status, self.lease.release_job_id = "releasing", "f-1"
+            self.state = "teardown_dispatch_pending"
+        elif self.lease.status == "releasing" and self.state == "torn_down":
+            self.lease.status = "released"
+
+
+def _recover(service: FakeService, *, guests: tuple[str, ...] = (), **state) -> MagicMock:
+    site = MagicMock()
+
+    def truncate(reservation, end):
+        service.lease.lease_end_utc = datetime.fromisoformat(end.replace("Z", "+00:00"))
+        return {}
+
+    site.truncate_lease.side_effect = truncate
+    service.statuses["list-1"] = [_listed(*guests)]
+    operator = MagicMock()
+    operator.list_vms.return_value = SimpleNamespace(job_id="list-1")
+    storefront = MagicMock()
+    storefront.get_settle_status.return_value = SimpleNamespace(fulfillment_id="f-1")
+    clock = FakeClock()
+    driver = RealVmComputeDealDriver(
+        provisioning_client=service, storefront_client=storefront,
+        storefront_admin_client=None, storefront_service_client=None,
+        site_capacity_admin_client=None, site_capacity=site, site_id="site",
+        vm_operator_client=operator, target=TARGET, buyer_public_key="ssh-ed25519 AAAA e2e-buyer",
+        listing_shape={}, jobs=JobWatch(service, clock=clock, sleep=clock.sleep),
+    )
+    driver.tear_down_after_failure(RealVmDealState(
+        real_escrow_uid="0xescrow", _settle_preflight_passed=True, **state
+    ))
+    return site
+
+
+def test_a_create_still_in_flight_is_settled_then_torn_down():
+    """Settle dispatched, 08b failed before recording the fulfillment: the
+    create is waited for and converged, then the lease expired and torn down."""
+    service = FakeService(state="dispatching")
+    site = _recover(service)
+    site.truncate_lease.assert_called_once()
+    assert (service.state, service.lease.status) == ("torn_down", "released")
+
+
+def test_a_lease_already_back_dated_is_not_truncated_again():
+    service = FakeService(state="active", lease_ends_in=-60)
+    site = _recover(service, fulfillment_id="f-1", create_job_id="create-1", vm_name="guest-1")
+    site.truncate_lease.assert_not_called()
+    assert (service.state, service.lease.status) == ("torn_down", "released")
+
+
+def test_a_guest_still_listed_fails_naming_what_an_operator_needs():
+    service = FakeService(state="active")
+    with pytest.raises(AssertionError) as failure:
+        _recover(
+            service, guests=("guest-1",),
+            fulfillment_id="f-1", create_job_id="create-1", vm_name="guest-1",
+        )
+    message = str(failure.value)
+    for named in ("'f-1'", f"'{RESERVATION}'", "'create-1'", "'teardown-1'", "'guest-1'", f"'{HOST}'"):
+        assert named in message, message
+
+
+def test_a_settlement_that_dispatched_no_fulfillment_leaves_nothing_to_tear_down():
+    service = FakeService(state="dispatching")
+    site = MagicMock()
+    storefront = MagicMock()
+    storefront.get_settle_status.return_value = SimpleNamespace(fulfillment_id=None)
+    driver = RealVmComputeDealDriver(
+        provisioning_client=service, storefront_client=storefront,
+        storefront_admin_client=None, storefront_service_client=None,
+        site_capacity_admin_client=None, site_capacity=site, site_id="site",
+        vm_operator_client=MagicMock(), target=TARGET, buyer_public_key="k",
+        listing_shape={}, jobs=JobWatch(service),
+    )
+    driver.tear_down_after_failure(RealVmDealState(real_escrow_uid="0xescrow"))
+    site.truncate_lease.assert_not_called()
+    assert service.listed_with == []
+
+
+# ---------------------------------------------------------------------------
+# The lease view over a GPU-less declaration
+# ---------------------------------------------------------------------------
+
+def _lease_over(row: dict) -> DealLease:
+    site = MagicMock()
+    site.reservations_for_negotiation.return_value = [
+        {"capacity_reservation_id": RESERVATION, "lease_end_utc": "2030-01-01T00:00:00Z"}
+    ]
+    site.snapshot.return_value = [{"resource_id": "res-1", **row}]
+    return DealLease(MagicMock(), site, negotiation_id="negotiation-1")
+
+
+def test_a_gpu_less_declaration_is_held_while_any_dimension_is_short():
+    declared = {"vcpu_count": 7, "ram_gb": 28, "disk_gb": 160}
+    held = _lease_over({"value": None, "capacity": declared, "available": {**declared, "vcpu_count": 0}})
+    free = _lease_over({"value": None, "capacity": declared, "available": declared})
+    assert held.resource_consumed(None, "res-1") is True
+    assert free.resource_consumed(None, "res-1") is False
+
+
+def test_a_gpu_declaration_is_still_read_from_its_mirror():
+    held = _lease_over({"value": 1, "available_units": 0, "capacity": {}, "available": {}})
+    free = _lease_over({"value": 1, "available_units": 1})
+    assert held.resource_consumed(None, "res-1") is True
+    assert free.resource_consumed(None, "res-1") is False

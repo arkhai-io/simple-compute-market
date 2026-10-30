@@ -169,7 +169,8 @@ class ComputeDealState(DomainDealState):
     `seller_listing_id` and `listing_published` by its listing stages, and
     `_listing_reconciled` by the stage that steps its listing's reconciliation
     after the deal holds the capacity. `_supply_seeded` is produced here and
-    required by each domain's first listing stage.
+    required by the lane's stage after it: a mock lane's first listing stage,
+    or a real lane's check of the host it registered.
     """
 
     # Phase 0 — readiness. Each check gates the stages that depend on it.

@@ -10,6 +10,8 @@ The stages module defines two kinds of stage: shared stages, which every lane
 runs, and mock-lane stages (subclasses of ``MockLaneStage``), which only a lane
 delivering through the provisioning mock profile runs. Both are defined in the
 mock lanes' run order, so a mock lane declares every stage in definition order.
+The lane delivering through a real host, ``REAL_LANE``, declares every shared
+stage in that order and none of the mock-lane stages, with its own between them.
 """
 
 from __future__ import annotations
@@ -74,6 +76,63 @@ LANES = (
 )
 #: The lanes that deliver through the provisioning mock profile.
 MOCK_LANES = LANES
+#: The lane that delivers through a real host.
+REAL_LANE = Lane(
+    "vms_real",
+    ROLES / "scenarios" / "vms" / "test_real_provisioning_deal.py",
+    ROLES / "scenarios" / "vms" / "real_compute_deal_driver.py",
+    "RealVmDealState",
+)
+ALL_LANES = (*LANES, REAL_LANE)
+
+#: The real lane's run order: every shared stage, by its name here, with the
+#: lane's own stages, by their declared names, where they replace a mock lane's
+#: gate or prove what the mock lanes cannot.
+REAL_LANE_ORDER = [
+    "Stage00_LifecycleHeld",
+    "Stage00a_StorefrontHealth",
+    "Stage00b_RegistryReachable",
+    "Stage00c_ProvisioningHealth",
+    "Stage00c2_ProvisioningContractPins",
+    "Stage00d_NegotiationStrategy",
+    # The VM-execution check, in place of the mock lanes' 00e.
+    "TestStage00e1_VmExecutionIsReal",
+    "Stage00f1_ExecutorHostRegistry",
+    "TestStage00f2_RegisteredHostIsTheTarget",
+    "Stage00g_AlkahestConfigured",
+    "Stage00h_ProvisioningStorefrontLink",
+    "TestStage02b_ListingCreated",
+    "TestStage03b_ListingPublished",
+    "Stage04a_PrimaryRegistryPublish",
+    "Stage05a_EvaluateNegotiate",
+    "Stage05b_NegotiationStartsAndVisible",
+    "Stage06b_ForceAcceptAndTerminal",
+    "Stage07_OnChainEscrow",
+    "Stage07b_VerifyEscrow",
+    "Stage08a_EvaluateSettle",
+    # The settlement preflight, immediately before settlement.
+    "TestStage08a2_SettlementPreviewChoseTheTarget",
+    "Stage08b_SettlementSubmittedAndJobQueued",
+    # The create-job poll, where a mock lane releases its create gate.
+    "TestStage08b3_CreateJobSucceeded",
+    "Stage09a_FulfillmentConvergesToActive",
+    "TestStage09a2_CapacityEventCycle",
+    "Stage09b_SettlementReadyAndCredentials",
+    "Stage09c_LeaseRecorded",
+    "TestStage09c3_LeaseNamesTheCreateJob",
+    # The access checks.
+    "TestStage09d_BuyerReachesTheNegotiatedShape",
+    "TestStage09e_UnrelatedKeyRefused",
+    "Stage10a_LeaseExpirySetup",
+    "Stage10b_LeaseCycleBeginsTeardown",
+    "Stage11a_TeardownDispatch",
+    # The teardown-job poll, where a mock lane releases its teardown gate.
+    "TestStage11a3_TeardownJobSucceeded",
+    "Stage11b_TeardownCompletion",
+    # The guest's absence from the host, then the end of its access.
+    "TestStage11c_GuestGoneFromHost",
+    "TestStage11d_DeliveredAccessEnded",
+]
 
 
 STAGES_TREE = tree(SHARED)
@@ -151,6 +210,44 @@ def test_a_mock_lane_declares_every_stage_once_in_order(lane: Lane):
     )
 
 
+def test_the_real_lane_runs_every_shared_stage_in_its_order_and_no_mock_stage():
+    declared: list[str] = []
+    for node in domain_stages(REAL_LANE.scenario):
+        defined = [name for name in base_names(node) if name in STAGE_NAMES]
+        if not defined:
+            declared.append(node.name)
+            continue
+        (base,) = defined
+        assert base in SHARED_NAMES, f"the real lane declares mock-lane stage {base}"
+        assert node.name == "Test" + base, (base, node.name)
+        assert len(node.body) == 1 and isinstance(node.body[0], ast.Pass), (
+            f"the real lane's {node.name} has a body of its own"
+        )
+        declared.append(base)
+    assert [name for name in declared if name in SHARED_NAMES] == SHARED_NAMES, (
+        "the real lane runs every shared stage once, in the defined order"
+    )
+    assert declared == REAL_LANE_ORDER, declared
+
+
+def test_the_real_lane_consumes_every_field_it_produces():
+    """The mock lanes' consumption check reads every compute field, and the real
+    lane produces none of the mock gates'; here every field it does produce is
+    read by a later stage, or by the module's own fixtures, whose finalisers
+    read the state once every stage has run."""
+    produced: set[str] = set()
+    consumed: set[str] = set()
+    for _name, use in _scenario(REAL_LANE):
+        consumed |= (use.read | use.required) & produced
+        produced |= use.written
+    fixtures = [
+        node for node in tree(REAL_LANE.scenario).body if isinstance(node, ast.FunctionDef)
+    ]
+    finalised = state_use(fixtures, state=STATE)
+    consumed |= finalised.read | finalised.required
+    assert produced - consumed == set(), sorted(produced - consumed)
+
+
 def test_no_shared_stage_touches_a_mock_gate():
     """A shared stage runs in a real lane too, whose driver has no gates and
     whose stack serves no mock routes.
@@ -209,13 +306,13 @@ def test_settlement_skips_until_the_preflight_before_it_passes():
     driver.settle_dispatched.assert_not_called()
 
 
-@pytest.mark.parametrize("lane", LANES, ids=lambda lane: lane.name)
+@pytest.mark.parametrize("lane", ALL_LANES, ids=lambda lane: lane.name)
 def test_a_lane_state_extends_the_compute_state(lane: Lane):
     node = class_named(tree(lane.state_module), lane.state_class)
     assert "ComputeDealState" in base_names(node), base_names(node)
 
 
-@pytest.mark.parametrize("lane", LANES, ids=lambda lane: lane.name)
+@pytest.mark.parametrize("lane", ALL_LANES, ids=lambda lane: lane.name)
 def test_every_prerequisite_is_produced_by_an_earlier_stage(lane: Lane):
     """A stage requiring a field no earlier stage writes skips forever."""
     produced: set[str] = set()
@@ -228,7 +325,7 @@ def test_every_prerequisite_is_produced_by_an_earlier_stage(lane: Lane):
         produced |= use.written
 
 
-@pytest.mark.parametrize("lane", LANES, ids=lambda lane: lane.name)
+@pytest.mark.parametrize("lane", ALL_LANES, ids=lambda lane: lane.name)
 def test_every_field_read_is_produced_first(lane: Lane):
     produced: set[str] = set()
     for name, use in _scenario(lane):
@@ -240,7 +337,7 @@ def test_every_field_read_is_produced_first(lane: Lane):
         produced |= use.written
 
 
-@pytest.mark.parametrize("lane", LANES, ids=lambda lane: lane.name)
+@pytest.mark.parametrize("lane", ALL_LANES, ids=lambda lane: lane.name)
 def test_each_compute_state_field_has_one_producer(lane: Lane):
     """A handoff written by two stages lets a consumer read the first
     producer's value when the second fails, instead of skipping."""
@@ -272,7 +369,7 @@ def test_the_stages_use_only_declared_fields():
     assert used - declared == set(), used - declared
 
 
-@pytest.mark.parametrize("lane", LANES, ids=lambda lane: lane.name)
+@pytest.mark.parametrize("lane", ALL_LANES, ids=lambda lane: lane.name)
 def test_a_lane_stage_uses_only_its_states_fields(lane: Lane):
     declared = (
         fields(class_named(tree(lane.state_module), lane.state_class))

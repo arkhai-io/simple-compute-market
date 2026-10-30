@@ -107,7 +107,7 @@ from market_alkahest.alkahest import (
 from market_alkahest.dev_chain import anvil_address_book_path
 from registry_client import ValidatePublishRequest
 
-from tests.e2e.roles.helpers.compute_deal import advance_storefront, dry_run_storefront
+from tests.e2e.roles.helpers.compute_deal import advance_storefront
 from tests.e2e.roles.helpers.compute_deal_stages import (
     DEAL_TOKEN,
     DURATION_HOURS,
@@ -145,7 +145,11 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
 )
 from tests.e2e.roles.scenarios.vms.compute_deal_driver import E2E_RESOURCE_ID
 from tests.e2e.roles.helpers.domain_deal import require_state
-from tests.e2e.roles.scenarios.vms.conftest import DealState, capacity_source_for, one_site
+from tests.e2e.roles.scenarios.vms.conftest import (
+    DealState,
+    capacity_source_for,
+    step_listing_reconciliation,
+)
 
 log = logging.getLogger(__name__)
 
@@ -442,71 +446,16 @@ class TestStage09a2_CapacityEventCycle:
         """Step the capacity-event loop before asserting its effect.
 
         VM's listing-reconciliation stage. The deal holds this scenario's
-        sellable unit, so its listing is no longer satisfiable. The settle path reserves capacity and leaves the
-        derived-listing reconciliation to the capacity-delta subscriber, which
-        this scenario holds paused -- so 09b's `status=closed` is only true
-        once a cycle has run, and this stage is where it is asked for.
-
-        Dry run first, while the listing is still open: that is the cause,
-        named, and separable from the effect 09b asserts.
+        sellable unit, so its listing is no longer satisfiable; the loop that
+        closes it is held, so 09b's `status=closed` is only true once a cycle
+        has run, and this stage is where it is asked for
+        (`step_listing_reconciliation`).
         """
         require_state(deal_state, "seller_listing_id", "provisioning_result_injected")
 
-        preview = dry_run_storefront(storefront_admin_client, "capacity-events")
-        pending = one_site(preview)
-        assert pending["error"] is None, (
-            f"capacity-event dry run failed for site {pending['site']!r}: "
-            f"{pending['error']}"
-        )
-        assert not pending["would_position"], (
-            "the dry run would position at the feed head rather than apply "
-            "this deal's events, so the poller's cursor was lost"
-        )
-        assert pending["pending_count"] >= 1, (
-            "the deal reserved capacity, so its authority has events waiting; "
-            f"the feed reports none (cursor={pending['cursor']!r} "
-            f"head={pending['feed_head']!r})"
-        )
-
-        # Projections before deltas. The close path decides from the
-        # storefront's own projection cache, and only the site-projections
-        # loop refills it -- held here like every other loop. Applying the
-        # deltas against a pre-deal projection closes nothing however many of
-        # them there are, which is exactly what the previous run showed: four
-        # events applied, listing still open.
-        projections = advance_storefront(storefront_admin_client, "site-projections")
-        assert projections.get("sites"), (
-            "the site-projections advance reported no site state, so the "
-            "projection the close path reads was not refreshed and the "
-            "capacity cycle below would decide from stale availability"
-        )
-
-        applied_total = 0
-        for step in range(5):
-            cycle = one_site(
-                advance_storefront(storefront_admin_client, "capacity-events")
-            )
-            assert cycle["error"] is None, (
-                f"capacity-event cycle {step} failed for site "
-                f"{cycle['site']!r}: {cycle['error']}"
-            )
-            applied_total += int(cycle["applied_count"])
-            if not cycle["truncated"]:
-                break
-        else:
-            raise AssertionError(
-                "capacity-event feed still reports a truncated page after "
-                f"five cycles (applied {applied_total} events)"
-            )
-        assert applied_total >= pending["pending_count"], (
-            f"the advance applied {applied_total} event(s) where the dry run "
-            f"named {pending['pending_count']} pending"
-        )
+        pending, applied = step_listing_reconciliation(storefront_admin_client)
         deal_state._listing_reconciled = True
-        log.info(
-            "[09a2] Capacity events stepped: %s pending, %s applied",
-            pending["pending_count"], applied_total,
-        )
+        log.info("[09a2] Capacity events stepped: %s pending, %s applied", pending, applied)
 
 
 class TestStage09b_SettlementReadyAndCredentials(Stage09b_SettlementReadyAndCredentials):

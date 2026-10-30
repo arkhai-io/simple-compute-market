@@ -467,11 +467,21 @@ class DealLease:
         return self.refresh()
 
     def resource_consumed(self, storefront_admin_client, resource_id: str) -> bool:
-        """Whether the deal's capacity is still held, per the ledger."""
+        """Whether the deal's capacity is still held, per the ledger.
+
+        Read from the site's mirror dimension where the declaration states it.
+        A declaration without it, such as a machine with no GPUs, has no scalar
+        total, so its capacity is held while any dimension it declares has less
+        available than declared.
+        """
         for row in self._site.snapshot():
             if str(row.get("resource_id")) == resource_id:
-                total = int(row.get("value") or 0)
-                return int(row.get("available_units") or 0) < total
+                if row.get("value") is not None:
+                    return int(row.get("available_units") or 0) < int(row["value"])
+                declared = row.get("capacity") or {}
+                available = row.get("available") or {}
+                assert declared, f"Resource {resource_id!r} declares no capacity: {row}"
+                return any(available.get(name, 0) < amount for name, amount in declared.items())
         pytest.fail(
             f"Resource {resource_id!r} not found in site capacity snapshot"
         )
