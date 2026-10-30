@@ -63,7 +63,7 @@ reboots once from cloud-init after first boot. The VM domain does not deliver th
 guest's host key. The only scenario that opens SSH today is
 `scenarios/bare_metal/test_bare_metal_deal.py`, by `subprocess`.
 
-**Dead material.** `e2e-tests/.github/workflows/e2e.yml` is never run (GitHub reads
+**Dead material.** The e2e package's own nested `e2e.yml` workflow is never run (GitHub reads
 only the repository root's workflows). `e2e-tests/README.md` documents
 `e2e-mock-happy`/`e2e-mock-failure`, which do not exist.
 `docs/development/VALIDATION_RUNBOOK.md` §21–26 describes a manual real-host proof
@@ -408,7 +408,7 @@ to be re-evaluated by `fix-golden-image-config` before its configuration is fixe
 
 ### D11. Dead material
 
-`e2e-tests/.github/workflows/e2e.yml` is deleted; the README's nonexistent targets
+The e2e package's nested `e2e.yml` workflow is deleted; the README's nonexistent targets
 are removed; `VALIDATION_RUNBOOK.md` §21–26 is rewritten as the manual counterpart of
 the real lane, against the current signed admin API and the D9 defaults, for an
 operator-provided host. The dead markers `mock_provisioning*`, `roles_*`, and

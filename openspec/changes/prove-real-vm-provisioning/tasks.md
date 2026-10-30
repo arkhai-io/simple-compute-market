@@ -672,18 +672,42 @@ Files: `e2e-tests/tests/e2e/roles/scenarios/vms/host_registry.py`; new
 
 Delivers D11's removals and the e2e package's own run instructions (D11, D5).
 
-Files: `e2e-tests/.github/workflows/e2e.yml` (deleted); `e2e-tests/README.md`.
+Files: the e2e package's nested `e2e.yml` workflow (deleted); `e2e-tests/README.md`.
 
-- [ ] 7.1 Delete `e2e-tests/.github/workflows/e2e.yml`, and the directory if it is left
-      empty. (D11)
-- [ ] 7.2 Remove `e2e-mock-happy`/`e2e-mock-failure` from `e2e-tests/README.md`, and add
+- [x] 7.1 Delete the e2e package's nested `e2e.yml` workflow, and the directory if it is
+      left empty. (D11)
+      Deleted with `git rm`; it was the directory's only file, so the directory is
+      gone. The mentions of its path in `proposal.md`, `design.md`, and here were
+      reworded, since a citation of a path that no longer exists is a blocking
+      defect.
+- [x] 7.2 Remove `e2e-mock-happy`/`e2e-mock-failure` from `e2e-tests/README.md`, and add
       how to run `e2e_vm_real_provisioning`: copy the example profile, render or fill the
       real file, forward the stack's services to the `local` ports, run the module with
       `ACTIVE_PROFILES=local,real-vm-target`. (D5, D11)
-- [ ] 7.3 Verification: no tracked file references the deleted workflow or the removed
+      The mock-provisioning section, which also ran the dead `mock_provisioning_happy`
+      marker, is replaced by a short "End-to-end lanes" note and a "Real VM
+      provisioning" section: what the scenario proves, why it is in no lane, the
+      prepared GPU-less host, the three steps, and the skip and failure behaviour.
+      Beyond the plan: the "CI/CD" section described the deleted workflow
+      (a staging profile, a 02:00 nightly, report artefacts); it now points to the
+      root `E2E` workflow and `TESTING.md`.
+- [x] 7.3 Verification: no tracked file references the deleted workflow or the removed
       targets; `make check-doc-citations CHANGE=prove-real-vm-provisioning` reports
       nothing for them.
       End-to-end: none.
+      A repository search (`e2e-tests/\.github`, `e2e-mock-happy`, `e2e-mock-failure`)
+      finds them only in this change's own documents, where the workflow is no longer
+      named by path; the archived changes' references are to the root workflow, which
+      remains. `make check-doc-citations CHANGE=prove-real-vm-provisioning`: passed
+      after the rewording (before it, it reported two mentions of the deleted file).
+      That check reads only the change's documents and only paths with a file suffix,
+      so the proposal's directory mention was found by the fresh-context review, and
+      the README's two relative links (the root workflow and TESTING.md's section 4
+      anchor) were checked by hand. `make test`: passed. End-to-end markers: none. No
+      CI workflow is owed. Fresh-context check: fixed the README's lane description
+      (a lane replaces its stack and leaves it running; `PROVISIONING_MODE` decides
+      the profile), its copy step's wording, the proposal's directory citation, and
+      these notes.
 
 ## 8. Live verification [log]
 

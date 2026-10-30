@@ -31,7 +31,7 @@ Three further defects stand in the way of doing so:
 
 The e2e helpers also cannot describe a GPU-less shape (`capacity_source_for` reads
 `gpu_model` unconditionally), and the repository carries a live-environment workflow
-under `e2e-tests/.github/workflows/` that GitHub never runs.
+nested inside the e2e package's own directory, which GitHub never runs.
 
 ## What Changes
 

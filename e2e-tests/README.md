@@ -174,25 +174,56 @@ make test ACTIVE_PROFILES=staging CONFIG_DIRECTORY=/mnt/e2e-config
 make test PYTEST_ARGS="-k test_contract_owner -v --tb=long"
 ```
 
-### E2E mock provisioning tests
+### End-to-end lanes
 
-These targets spin up the full docker-compose stack, wait for services to be
-ready (including on-chain agent registration), run the tests, then tear down.
+Each market domain's lane replaces its own compose stack with a fresh one,
+builds its images, and runs its scenarios against it: `make test-e2e-vm`, `make
+test-e2e-bare-metal`, and `make test-e2e-apicredits`. Each leaves its stack
+running; `make e2e-<lane>-down` takes it down. `make test-e2e` runs all three in
+turn, taking each stack down before the next. The compute lanes' provisioning
+services run the mock profile unless `PROVISIONING_MODE=real`.
 
-```bash
-make e2e-mock-happy       # deal lifecycle: create → negotiate → escrow → fulfill → arbitrate → close
-make e2e-mock-failure     # provisioning fails → orders reopen
-```
+### Real VM provisioning
 
-Each target uses the CLI (`market listing create`, `market listing history`,
-`market listing show --negotiation --credentials --show-password`) to drive
-order creation and inspect results. CLI output is captured in the pytest log.
+`e2e_vm_real_provisioning` runs the canonical compute deal against a real KVM
+host: the create and teardown jobs run the real playbooks, the scenario
+connects to the delivered VM over SSH with a key it generates for the run, and
+it confirms the VM is gone from the host once the lease ends. It is in no lane,
+because the pipeline has no host to provision on; it runs from an operator's
+machine against a deployed stack whose provisioning service is outside its
+mock profile and holds the key it reaches the host with. The host is prepared
+beforehand with the host-kit's `vm-setup.yaml`, and needs hardware
+virtualization; it needs no GPU.
 
-To run against an already-running stack without lifecycle management:
+1. Copy the example target to its real name beside it and fill it in for the
+   host, or render that file from your environment's own records:
 
-```bash
-ACTIVE_PROFILES=local,e2e-mock uv run pytest -m mock_provisioning_happy -v --tb=long
-```
+   ```bash
+   cp config/config-real-vm-target.yml.example config/config-real-vm-target.yml
+   ```
+
+   `config-real-vm-target.yml` is ignored and never committed. Its
+   `REAL_VM_TARGET` section names the host's identifier, the address, user,
+   and port the provisioning service connects to, where the service reads its
+   key, the address buyers reach the host's guests at, and the capacity the host
+   sells (`vcpu_count`, `ram_gb`, `disk_gb`): its hardware less what is kept for
+   the host itself. The scenario registers the host and deals on all of that
+   capacity in one VM. A missing or misspelled field fails the run naming it.
+2. Forward the stack's services to the ports the `local` profile names
+   (`config/config-local.yml`): the storefront, the registry, the provisioning
+   service, and the chain. The stack must trust the `local` profile's
+   principals.
+3. Run the module with both profiles:
+
+   ```bash
+   make test-module MODULE=e2e_vm_real_provisioning ACTIVE_PROFILES=local,real-vm-target
+   ```
+
+Without the `real-vm-target` profile, or with its file missing, every stage
+skips naming the profile and file, and nothing is written to the stack. A run
+that fails after settlement expires its own deal's lease so the provisioning
+service tears the VM down, and fails naming the fulfillment, jobs, VM, and host
+where it cannot confirm the VM is gone.
 
 ---
 
@@ -243,16 +274,10 @@ Alkahest mock-deal scenario remains selected unchanged.
 
 ## CI/CD
 
-The GitHub Actions workflow at `.github/workflows/e2e.yml` can be triggered:
-
-- **Manually** via `workflow_dispatch` — choose profile and optional pytest args
-- **On a schedule** — nightly at 02:00 UTC against staging
-
-Secrets are passed from the GitHub environment and written into a
-`config-<profile>.yml` file in a temporary runtime config directory,
-matching the same mechanism used in Kubernetes deployments.
-
-Test reports are uploaded as workflow artefacts and retained for 30 days.
+The repository's [`E2E` workflow](../.github/workflows/e2e.yml) runs the three
+lanes, each as its own job, nightly and on demand. See "System Integration Tests"
+in [`TESTING.md`](../docs/development/TESTING.md#4-system-integration-tests-end-to-end)
+for dispatching it on a branch and fetching its logs.
 
 ---
 
