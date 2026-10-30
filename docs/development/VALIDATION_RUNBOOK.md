@@ -899,7 +899,9 @@ Prepare the host from the operator's machine with the host kit's
 `vm-setup.yaml`, naming no image or passthrough option: preparation defaults to
 the scratch image market fulfillment creates VMs from, and configures GPU
 passthrough only where a GPU is present. The inventory is local to the
-operator's machine and never committed.
+operator's machine and never committed. Start from this repository's root;
+after sections 17 to 20 the shell is in the ops repo, and `cd "$APP_REPO"`
+returns to it.
 
 ```bash
 cd domains/vms/provisioning/iac
@@ -921,6 +923,8 @@ ANSIBLE_CONFIG=ansible/ansible.cfg \
   ansible/playbooks/host-kit/vm-setup.yaml \
   --limit kvm-real-1 \
   -e "vm_ssh_authorized_key=<provisioning-service-public-key>"
+
+cd ../../../..
 ```
 
 `vm_ssh_authorized_key` authorizes the provisioning service's key for the
@@ -961,8 +965,8 @@ failing with the executors it found before anything is held or registered.
 ## 24. Describe The Target
 
 ```bash
-cd e2e-tests
-cp config/config-real-vm-target.yml.example config/config-real-vm-target.yml
+cp e2e-tests/config/config-real-vm-target.yml.example \
+  e2e-tests/config/config-real-vm-target.yml
 ```
 
 Fill in the copy's `REAL_VM_TARGET` section:
@@ -1028,7 +1032,6 @@ section 21 made, wherever it was provided:
 
 ```bash
 rm -f /tmp/kvm-hosts.ini
-cd e2e-tests
-rm -f config/config-real-vm-target.yml
+rm -f e2e-tests/config/config-real-vm-target.yml
 ```
 

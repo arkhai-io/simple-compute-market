@@ -873,6 +873,10 @@ The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
       `--virt-type kvm`, presence-gated passthrough and `gpu_passthrough`; the
       architecture bullets; the parameter reference; the passthrough tag example), with
       the owner's permission for this run to edit under `domains/`.
+      Closeout triage fix (68 F1): §21–26 now keep the runbook's repository-root
+      convention. §22 says to start from the root (`cd "$APP_REPO"` after §17–20) and
+      ends with `cd ../../../..`. §24 and §26 use `e2e-tests/config/…` paths, with no
+      `cd`. §25 already ran from the root. Traced in order from §20's final directory.
 - [x] 9.10 **Documentation citations.** `make check-doc-citations
       CHANGE=prove-real-vm-provisioning`; `openspec validate prove-real-vm-provisioning
       --strict`.
