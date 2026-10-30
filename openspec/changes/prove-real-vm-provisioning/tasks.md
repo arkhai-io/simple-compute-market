@@ -1163,6 +1163,30 @@ public revision of this branch the run used.
       waived another design review. It stays within `e2e-tests/`, so 8.2 is met by a run
       from a checkout of a public revision that includes 7C against a fresh stack of
       `f52f07973`'s published images and chart.
+      Run 3, owner-supplied and sanitized: the scenario from a clean checkout of
+      `cb05d625f` (sections 1–7C) against a freshly deployed, unmocked stack of
+      `f52f07973`'s published images and chart (7C changed only `e2e-tests/`, so the
+      deployed code is the same), an empty host registry, and the host prepared at
+      `f52f07973` (`failed=0 ignored=0`). 37 passed, none skipped or failed. Against
+      the acceptance:
+      - 00e1 reported `offering_mode='vm' mocked=False`; 00f2 the host registered as
+        the target;
+      - 08b3's create job and 11a3's teardown job `succeeded` on the target host; the
+        only other job the run caused is 11c's `list`;
+      - 09a converged the fulfillment to `active`;
+      - 09d connected as the delivered user at the host's address and forwarded port,
+        logged the guest's host-key fingerprint (`SHA256:…`), and probed
+        `vcpu_count=7, memory_gib=27.41, root_disk_gib=160.0` against the sold `7 / 28
+        / 160` (memory 2.1% short, within the 5% tolerance);
+      - 09e: the unrelated key refused with `Permission denied (publickey,password)`;
+      - 11b passed: the released capacity was reserved again under 7C's claim;
+      - 11c: the guest gone from the host, which lists `[]`;
+      - 11d: the delivered access timed out after teardown.
+      Every stage passes and none skips, and the values match "A real deal is
+      delivered", "An unrelated key is refused", and "Teardown removes the VM and its
+      access": acceptance met at `cb05d625f`. Left unchecked because section 8 returns
+      to planning before it is committed (8.3); the infra side runs 8.2 again at the
+      fix's revision, so both runs are at the final revision.
 - [ ] 8.3 **[log]** A second run of the scenario against the same stack. Acceptance: it
       passes, the host's registration being reconciled rather than duplicated. (D2)
       Run 1, owner-supplied and sanitized: the same revision, stack, and host as
@@ -1188,6 +1212,51 @@ public revision of this branch the run used.
       resource when its shape matches the target, and fails naming the listings
       otherwise, and waived another design review. 8.3 is met by a second run, straight
       after 8.2's, against the same stack.
+      Run 2, owner-supplied and sanitized: `cb05d625f`, straight after 8.2's run 3,
+      against the same stack and host. 21 passed, 1 failed, 15 skipped. 00f1 and 00f2
+      passed (the registration reconciled, not duplicated) and 02b adopted run 3's
+      listing — 7C's adoption holds live. 08b failed: "fulfillment_id absent from
+      settle status after job_submitted event", the settle status `provisioning`;
+      every later stage skipped. Acceptance not met.
+      Cause, read from the source at `cb05d625f`: `VmDealDriverBase.settle_dispatched`
+      (`scenarios/vms/compute_deal_driver.py`) waits for the storefront's
+      `provision/job_submitted` stage event filtered only by `listing_id`, with no
+      `since_id` mark. With the listing adopted, the previous run's `job_submitted` for
+      the same listing is already in the event log, so the wait returns at once and the
+      settle status is read before this run's fulfillment is recorded. The event also
+      carries `negotiation_id` (`market_storefront/services/vm_fulfillment_service.py`,
+      `_record_fulfillment_id`), which is unique to the run, and
+      `wait_for_stage_event` already passes a `negotiation_id` filter, so filtering on
+      this deal's negotiation, or a `since_id` mark taken before 08b settles, would
+      wait for this run's own event. The fix is in the VM driver base, which the mock
+      VM lane shares: its one negotiation per lane run makes either filter unchanged in
+      outcome there.
+      The other event and state waits the real lane makes, looked over for the same
+      staleness on an adopted listing: 05b's and 06b's negotiation events are
+      filtered by this run's `negotiation_id`; 11b's release event waits after a
+      `since_id` mark; 09b's `closed` listing is this run's, since 02b adopts only an
+      open one; the lease view reads reservations by negotiation. One check is vacuous
+      on adoption, not stale: 03b's registry read finds the listing already published
+      by the previous run, since pausing does not unpublish; 03b's own advance,
+      resume answering `published`, still holds, and 04a reads the same registry.
+      A second gap the run showed: run 2's settlement had dispatched a real create
+      (`succeeded`, reservation `leased`, lease ending about an hour later), yet the
+      module's recovery tore nothing down and raised nothing (the summary has no
+      teardown error; the recovery's own log line was not supplied). Read from the
+      source, the one path that does so: 08b recorded no `fulfillment_id`, so
+      `tear_down_after_failure` read it from the settle status, which by then still
+      named none, and returned "nothing to tear down" — so a settlement answered
+      `provisioning` can still leave its guest on the host silently. The infra side is
+      removing that guest by replacing the host. Whether recovery waits for this
+      negotiation's `job_submitted` within a bound before concluding nothing was
+      dispatched, and fails naming the escrow and negotiation where none arrives, is
+      left to planning beside the 08b fix.
+      Returned to planning: the owner decided, relayed by the infra-side coordinator,
+      that the 08b defect is fixed in this change, as 7A, 7B, and 7C were (the
+      coordinator suggests a section 7D). Nothing of the fix is implemented. If it
+      stays within `e2e-tests/`, the infra side prepares a fresh host, deploys a fresh
+      stack at `f52f07973` with no republish, and runs the scenario twice from the new
+      head, for 8.2 and 8.3 both at the final revision.
 - [ ] 8.4 **[log]** Host preparation re-run, as in 8.1, at a public revision of this
       branch that includes section 7A, on the same kind of host. Supplied: the play
       recap and the handler's result from the log. Acceptance: the recap shows
