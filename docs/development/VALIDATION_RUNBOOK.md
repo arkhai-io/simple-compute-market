@@ -563,12 +563,20 @@ and values, and the directory there holding its component validators, which
 this repository does not ship; the GCP project and region, the Helm release,
 and the values files that repository keeps for the application-resources chart
 and for this repository's chart. Each command stops, naming the variable, while
-one is unset.
+one is unset. The braced group resolves the two directories to absolute paths
+and stops as a whole, naming the variable, while either is unset or is not a
+directory, so neither is exported empty.
 
 ```bash
 export APP_REPO="$(pwd)"
-export OPS_REPO="$(cd "${OPS_REPO:?set OPS_REPO to your operations repository checkout}" && pwd)"
-export OPS_VALIDATORS="$(cd "${OPS_VALIDATORS:?set OPS_VALIDATORS to the component-validator directory of the operations repository}" && pwd)"
+{
+  : "${OPS_REPO:?set OPS_REPO to your operations repository checkout}"
+  : "${OPS_VALIDATORS:?set OPS_VALIDATORS to the component-validator directory of the operations repository}"
+  OPS_REPO="$(cd "$OPS_REPO" && pwd)"
+  export OPS_REPO="${OPS_REPO:?set OPS_REPO to an existing directory}"
+  OPS_VALIDATORS="$(cd "$OPS_VALIDATORS" && pwd)"
+  export OPS_VALIDATORS="${OPS_VALIDATORS:?set OPS_VALIDATORS to an existing directory}"
+}
 
 export ENV="${ENV:-dev}"
 export GCP_PROJECT="${GCP_PROJECT:?set GCP_PROJECT to your GCP project ID}"
@@ -581,9 +589,12 @@ export OPS_APP_VALUES="${OPS_APP_VALUES:?set OPS_APP_VALUES to the application c
 ```
 
 Keep apostrophes out of those messages: bash reads a quote inside `${...}` as
-opening a quoted string even within double quotes.
+opening a quoted string even within double quotes. Keep each check outside a
+command substitution, too: a failure inside `$(...)` does not stop the shell,
+and `export` reports success whatever the substitution returned.
 
-Sanity-check the branch and sibling repo:
+Sanity-check the branch and sibling repo. The validator loop only reports, on
+standard error, each validator missing from `$OPS_VALIDATORS`; it stops nothing:
 
 ```bash
 git status --short --branch

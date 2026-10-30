@@ -1440,6 +1440,19 @@ change to implementation.
       (`add-harness-scenario-contract`, `restore-issue-discovery-thin-runner`). The
       scoped check, `make check-change-index`, and `make check-change` passed.
 
+      A further review 20 F1 correction to section 17's required directories, found by
+      the supervising session's shell probe:
+      - **The failure:** `export OPS_REPO="$(cd "${OPS_REPO:?…}" && pwd)"`, and the
+        same form for `OPS_VALIDATORS`, did not stop. The check failed inside the
+        command substitution, `export` returned 0, and the variable was exported empty.
+      - **The fix:** a braced group now checks both variables in the calling shell,
+        resolves each with `cd` and `pwd`, and exports it only through a second `:?`
+        check. A missing or empty variable, or one that names no directory, stops the
+        group with a message naming it.
+      - **The proof:** isolated `env -i` runs of only that prefix exited nonzero in each
+        failing case, without reaching the next command. Valid absolute, relative, and
+        symlinked paths were exported resolved as before. `bash -n` passed on the block.
+
 - [x] 15.11 **Archival.** Run `openspec archive repair-compute-purchase-recovery -y`,
       which merges the `physical-provisioning`, `fulfillment`,
       `storefront-publication`, `settlement-servicing`, `negotiation-protocol`, and
