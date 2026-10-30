@@ -305,9 +305,10 @@ that value was truthy. `vm-create.yml` reports the relay block on every create, 
 no relay it reports `enabled: false` and `remote_port: "N/A"`, so a direct-access
 create's forwarded port became `"N/A"`, `create_evidence` could not read it as a port,
 and the create reported no delivery evidence: the fulfillment failed though the guest
-was running and reachable. The mock lanes never interpret playbook output, and the
-codec's unit fixtures were hand-built payloads without the relay block the playbook
-emits, so nothing caught it.
+was running and reachable. The mock lanes' create output passes through the same codec,
+but their facts report a disabled relay block with no port, which the truthiness test
+passed over, and the codec's unit fixtures were hand-built payloads without the relay
+block the playbook emits, so nothing caught it.
 
 The relay's `remote_port` replaces the access port only when the playbook reports the
 relay enabled — the same rule `create_evidence` already applies to a relayed guest — and

@@ -798,14 +798,17 @@ on the direct path. Planned after 8.2's first run found the defect.
 Files: `domains/vms/provisioning/adapter/src/vm_provisioning_adapter/codec.py`;
 `domains/vms/provisioning/adapter/tests/unit/test_vm_codec.py`.
 
-- [ ] 7B.1 In `build_result_payload`, the relay block's `remote_port` replaces the
+- [x] 7B.1 In `build_result_payload`, the relay block's `remote_port` replaces the
       payload's `ssh_port` only when the relay is reported enabled — the rule
       `_relay_reported` already applies — and the value is a port number; otherwise
       the port parsed from the playbook's output stands. The relay block itself is
       still carried into the payload as before. A comment says why: the playbook
       reports the block on every create, with `"N/A"` placeholders when there is no
       relay. (D4b)
-- [ ] 7B.2 Unit, `test_vm_codec.py`: (a) `build_result_payload` with the playbook's
+      `_relay_reported(payload)` gates it; a new `_is_port` accepts an `int`, or its
+      ASCII decimal text (surrounding whitespace allowed), in 1–65535, and refuses a
+      `bool`. The replaced value keeps the type the playbook printed, as before.
+- [x] 7B.2 Unit, `test_vm_codec.py`: (a) `build_result_payload` with the playbook's
       disabled relay block (`enabled` false, `relay_addr`, `remote_port`, and
       `ssh_access` all `"N/A"`) keeps the parsed port; (b) an enabled block with a
       port-valued `remote_port` still replaces it (the existing
@@ -819,10 +822,76 @@ Files: `domains/vms/provisioning/adapter/src/vm_provisioning_adapter/codec.py`;
       relay enabled and leased (`relay_id`, `vm_remote_port`) yields the relay's address
       and the leased port. Mutation checks: restoring the unconditional replacement fails
       (a) and (d); dropping the port-number test fails (c). (D4b)
-- [ ] 7B.3 Verification: `make test-provisioning-adapter` (the adapter's suite, unit);
+      Unit, `test_vm_codec.py`: (a) `test_a_disabled_relay_keeps_the_forwarded_port`,
+      `enabled` as `False` and `"False"`, `remote_port` as `"N/A"` and, beyond the
+      plan, a port number, so the enabled gate is pinned on its own; (b) the existing
+      test, its block now `enabled: True` with a `relay_addr` (the playbook emits no
+      `subdomain`, which it carried); (c)
+      `test_an_enabled_relay_without_a_port_keeps_the_forwarded_port` over `"N/A"`,
+      `""`, `"0"`, `"65536"`, `"40001x"`, a non-ASCII digit, `True`, `4.5`, and
+      `None`; (d) `test_a_direct_create_reports_the_port_it_forwarded` and (e)
+      `test_a_relayed_create_reports_the_relay_and_its_leased_port`, both through
+      `AnsibleJobExecutor` with a stand-in runner (`_executed`, now shared with the
+      existing executor test), over output built by `_create_fact_output`: the
+      provided-key `vm_creation_data` fact of `vm-create.yml` field for field,
+      printed as `json-output.yml` prints it under the YAML result format both
+      `ansible.cfg` files select — the `debug: var:` task as bare YAML, then the
+      `to_nice_json` string as a `msg: |-` block — so the codec reads it through
+      `extract_vm_fact`'s `msg` fallback, as it reads a real run's (test (d) asserts
+      the output has no `"vm_creation_data":` key for the named-fact branch to take).
+      They are unit tests of the codec through its executor seam, not runs of the
+      playbook: the fact's shape and its printing were read from `vm-create.yml`,
+      `json-output.yml`, and the `ansible.cfg` files, not captured from Ansible.
+      Assumed, as ansible-core 2.19's native templating renders them (the version
+      8.4's image ran; the image's pin also admits 2.17 and 2.18, whose rendering was
+      not checked): `enabled` prints as a JSON boolean (the codec accepts either
+      form, and (a) covers both), and a leased `remote_port` as an integer, which
+      (e) pins in the detail. Mutation checks, each run and
+      reverted: the unconditional replacement restored fails (a)'s four cases, (c)'s
+      seven non-empty non-port values, and (d), rerun after the printed form was
+      corrected; the enabled gate kept and the port test replaced by the old
+      truthiness test fails (c)'s seven; the port test kept and the enabled gate
+      dropped fails (a)'s two port-valued cases. `""` and `None` pass under each of
+      these, since the old truthiness test skipped them too.
+- [x] 7B.3 Verification: `make test-provisioning-adapter` (the adapter's suite, unit);
       `make test`; `make check-packaging`.
       End-to-end: none in the pipeline — the mock lanes never interpret playbook
       output. 8.2's and 8.3's runs exercise it against a real host.
+      `make test-provisioning-adapter` (unit): 273 passed, before and after the
+      fresh-context fixes. `make test`: passed (before those fixes, which touched only
+      the codec's comment and the adapter's test, rerun above). `make
+      check-packaging`: passed. `make check-change`: passed. Fresh-context check: no
+      layering, packaging, test-level, or placement break; the codec correct against
+      the buyer-key create fact (the generated-key fact's block it does not read; see
+      the handoff). Fixed: (d) and (e) printed the fact as JSON, which took
+      `extract_fact`'s named-fact branch, while the YAML result format the
+      `ansible.cfg` files select makes a real run's fact read from its `msg` block;
+      the fixture's `gpu` block lacked three of the fact's fields, so "field for
+      field" was false; `design.md` D4b said the mock lanes never interpret playbook
+      output; a mutation's wording; the codec comment now names the buyer-key fact,
+      since the generated-key fact names its block `relay`; the codec comment's
+      wrapping. A second check found the fixture's output takes the codec's real
+      parsing path and the mutation counts right; fixed: this note's claim about
+      both facts, the undisclosed integer `remote_port` assumption, and 8.2's note.
+      Declined: calling `VmAnsibleCodec.interpret` directly in (d) and (e) rather than
+      through the executor — the plan names the executor seam, the existing executor
+      test uses it, and the stand-in runner keeps it a unit test.
+      End-to-end markers, correcting the plan's "the mock lanes never interpret
+      playbook output" above: the mock lanes' create output does pass through this codec (the
+      mock executor's output is parsed by the adapter's real result path), and the
+      VM scenarios' mock create facts (`compute_deal_driver.py`'s
+      `_CREATE_RESULT_STDOUT` and its copies in `e2e_deal_buyer_cli`, `e2e_buy`,
+      `e2e_listing_shapes`, and `e2e_non_erc20_settlement`) carry `"frp":
+      {"enabled": false}` with no `remote_port`, which neither the old rule nor the
+      new one replaces the port from. Those lanes are therefore unchanged in outcome
+      and are no evidence for this section;
+      `e2e_vm_real_provisioning`, in no lane, is, through 8.2 and 8.3. No CI
+      workflow is owed.
+      Handoff: the generated-key create fact (`vm-create.yml`, the variant used when
+      no buyer key is given) names its relay block `relay`, not `frp`, so the codec
+      reads no relay from it and such a relayed create reports no evidence. The
+      market always negotiates a buyer key, so the real lane never takes that
+      variant; left as it is, outside D4b, for the relay-backed follow-up to weigh.
 
 ## 8. Live verification [log]
 
@@ -937,6 +1006,10 @@ public revision of this branch the run used.
       and waiving another design review. No spec delta: "A real deal is delivered"
       already requires delivery. The Impact list now names the codec. 8.2 is met by a
       run at a public revision that includes 7B.
+      Correction, found implementing 7B: the mock lanes' create output does pass
+      through the codec, but their facts' relay block is disabled and names no port,
+      which the old rule passed over; that, not an uninterpreted output, is why no
+      lane exercised the defect (7B.3).
 - [ ] 8.3 **[log]** A second run of the scenario against the same stack. Acceptance: it
       passes, the host's registration being reconciled rather than duplicated. (D2)
 - [ ] 8.4 **[log]** Host preparation re-run, as in 8.1, at a public revision of this

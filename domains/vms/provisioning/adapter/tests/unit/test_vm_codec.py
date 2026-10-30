@@ -12,7 +12,9 @@ the service's integration tests.
 from __future__ import annotations
 
 import asyncio
+import json
 import re
+import textwrap
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -524,10 +526,26 @@ class TestBuildResultPayload:
         assert payload["ssh_command"] == "ssh -p 2222 u@h"
 
     def test_relay_remote_port_overrides_ssh_port(self):
-        fact = {"action": "create", "frp": {"remote_port": "54321", "subdomain": "vm-abc"}}
-        payload = build_result_payload(_output(ssh_port="2222", ansible_result=fact))
+        frp = {"enabled": True, "relay_addr": "198.51.100.7", "remote_port": "54321"}
+        payload = build_result_payload(_output(ssh_port="2222", ansible_result={"action": "create", "frp": frp}))
         assert payload["ssh_port"] == "54321"
-        assert payload["frp"]["subdomain"] == "vm-abc"
+        assert payload["frp"] == frp
+
+    @pytest.mark.parametrize("enabled", [False, "False"])
+    @pytest.mark.parametrize("remote_port", ["N/A", "54321"])
+    def test_a_disabled_relay_keeps_the_forwarded_port(self, enabled, remote_port):
+        """The playbook reports the relay block on every create; without a relay
+        it is disabled and its fields are ``N/A``."""
+        frp = {"enabled": enabled, "relay_addr": "N/A", "remote_port": remote_port, "ssh_access": "N/A"}
+        payload = build_result_payload(_output(ssh_port="2222", ansible_result={"action": "create", "frp": frp}))
+        assert payload["ssh_port"] == "2222"
+        assert payload["frp"] == frp
+
+    @pytest.mark.parametrize("remote_port", ["N/A", "", "0", "65536", "40001x", "²", True, 4.5, None])
+    def test_an_enabled_relay_without_a_port_keeps_the_forwarded_port(self, remote_port):
+        frp = {"enabled": True, "relay_addr": "198.51.100.7", "remote_port": remote_port}
+        payload = build_result_payload(_output(ssh_port="2222", ansible_result={"action": "create", "frp": frp}))
+        assert payload["ssh_port"] == "2222"
 
     def test_vm_list_with_count(self):
         vms = [{"name": "vm-a"}, {"name": "vm-b"}]
@@ -573,13 +591,8 @@ class TestCredentials:
         assert split_credentials(payload, "vm") == (payload, ())
 
 
-def test_a_run_reports_the_vm_result_and_credentials() -> None:
-    """End to end through the executor with a stand-in runner."""
-    stdout = (
-        'ok: [kvm1] => {\n    "vm_creation_data": {"action": "create", "status": "running", '
-        '"tenant_user": "tenant", "external_ssh_port": "2222", '
-        '"authentication": {"root": {"password": "r"}, "tenant": {"password": "t"}}}\n}\n'
-    )
+def _executed(stdout: str, parameters: dict) -> tuple[JobSuccess, MagicMock]:
+    """A create run through the executor, its runner a stand-in printing ``stdout``."""
     runner = MagicMock()
     runner.write_inventory.return_value = MaterializedInventory(path=Path("/tmp/does-not-exist.ini"))
     runner.start_playbook.return_value = SimpleNamespace(process_id=4242)
@@ -589,13 +602,24 @@ def test_a_run_reports_the_vm_result_and_credentials() -> None:
 
     runner.wait_for_playbook = wait
 
-    outcome = asyncio.run(
-        _executor(runner=runner).execute(
-            _run({"host_id": "kvm1", "vm_action": "create", "offering_mode": "vm"})
-        )
+    outcome = asyncio.run(_executor(runner=runner).execute(_run(parameters)))
+    assert isinstance(outcome, JobSuccess)
+    return outcome, runner
+
+
+_CREATE_PARAMETERS = {"host_id": "kvm1", "vm_action": "create", "offering_mode": "vm"}
+
+
+def test_a_run_reports_the_vm_result_and_credentials() -> None:
+    """End to end through the executor with a stand-in runner."""
+    stdout = (
+        'ok: [kvm1] => {\n    "vm_creation_data": {"action": "create", "status": "running", '
+        '"tenant_user": "tenant", "external_ssh_port": "2222", '
+        '"authentication": {"root": {"password": "r"}, "tenant": {"password": "t"}}}\n}\n'
     )
 
-    assert isinstance(outcome, JobSuccess)
+    outcome, runner = _executed(stdout, _CREATE_PARAMETERS)
+
     assert outcome.result.result_kind == CREATE_JOB_RESULT_KIND
     created = CreateJobResult.model_validate(outcome.result.value)
     assert created.evidence is None  # the fact reported no time it became ready
@@ -605,6 +629,115 @@ def test_a_run_reports_the_vm_result_and_credentials() -> None:
     assert "authentication" not in str(outcome.result.value)
     assert '"password": "[REDACTED]"' in outcome.logs
     assert runner.write_inventory.call_args.kwargs["group"] == VM_INVENTORY_GROUP
+
+
+def _create_fact_output(*, relay: dict | None) -> str:
+    """Output carrying the fact ``vm-create.yml`` sets for a create with a
+    buyer-provided key, printed as ``json-output.yml`` prints it under the YAML
+    result format both ``ansible.cfg`` files select: the ``debug: var:`` task
+    as bare YAML, then the ``to_nice_json`` string as a ``msg: |-`` block,
+    which is the form the codec reads.
+
+    Without ``relay`` the guest is reached through the port forwarded on its
+    host, and the relay block is reported disabled with ``N/A`` placeholders, as
+    the playbook reports it then. With ``relay`` (its address and leased port)
+    the guest is reached through the relay.
+    """
+    user = "tenant1"
+    if relay is None:
+        port, address = "2222", "203.0.113.1"
+        network = {
+            "mode": "direct_port_forwarding",
+            "port_forwarding": "203.0.113.1:2222 -> 192.168.122.9:22",
+        }
+        frp = {"enabled": False, "relay_addr": "N/A", "remote_port": "N/A", "ssh_access": "N/A"}
+        external_ssh_port = port
+    else:
+        port, address = relay["port"], relay["address"]
+        network = {"mode": "relay_tunnel", "port_forwarding": "N/A - reached through the relay"}
+        frp = {
+            "enabled": True,
+            "relay_addr": address,
+            "remote_port": port,
+            "ssh_access": f"ssh -p {port} {user}@{address}",
+        }
+        external_ssh_port = "N/A - Using FRP"
+    fact = {
+        "action": "create",
+        "vm_name": "tenant-1",
+        "timestamp": "2030-01-01T00:00:01Z",
+        "host": "203.0.113.1",
+        "status": "success",
+        "vm_state": "running",
+        "vm_ip_internal": "192.168.122.9",
+        "external_ssh_port": external_ssh_port,
+        "tenant_user": user,
+        "tenant_user_creation_method": "post-boot-ssh",
+        "authentication": {
+            "root": {
+                "password": "r",
+                "ssh_key_path_host": "~/.ssh/root_key",
+                "ssh_commands": {
+                    "internal": "ssh -i ~/.ssh/root_key root@192.168.122.9",
+                    "external": f"ssh -i ~/.ssh/root_key -p {port} root@{address}",
+                },
+            },
+            "tenant": {
+                "password": "t",
+                "key_type": "provided",
+                "public_key": "ssh-ed25519 AAAA buyer",
+                "ssh_commands": {
+                    "internal": f"ssh -i <your_private_key> {user}@192.168.122.9",
+                    "external": f"ssh -i <your_private_key> -p {port} {user}@{address}",
+                },
+            },
+        },
+        "network": network,
+        "frp": frp,
+        "gpu": {
+            "provisioned": False,
+            "pci_address": "N/A",
+            "model": "N/A",
+            "mode": "N/A",
+            "partition_type": "N/A",
+            "partition_size": "N/A",
+            "audio_device": {"pci_address": "N/A", "attached": False},
+        },
+        "system": {"random_string": "abc123", "cloud_init_method": "basic-networking-only"},
+    }
+    printed_var = yaml.safe_dump({"vm_creation_data": fact}, sort_keys=False)
+    printed_json = json.dumps(fact, indent=4, sort_keys=True)
+    return (
+        "TASK [vm-management : Output VM creation data as parsable JSON] ***\n"
+        "ok: [kvm1] => \n" + textwrap.indent(printed_var, "  ") + "\n"
+        "TASK [vm-management : Output VM creation JSON string for external parsing] ***\n"
+        "ok: [kvm1] => \n  msg: |-\n" + textwrap.indent(printed_json, "    ") + "\n"
+    )
+
+
+def test_a_direct_create_reports_the_port_it_forwarded() -> None:
+    output = _create_fact_output(relay=None)
+    # The fact is read from the printed JSON string, as a real run's is.
+    assert '"vm_creation_data":' not in output
+
+    outcome, _ = _executed(output, _CREATE_PARAMETERS)
+
+    created = CreateJobResult.model_validate(outcome.result.value)
+    (endpoint,) = created.evidence.endpoints
+    assert (endpoint.host, endpoint.port, endpoint.user) == ("203.0.113.1", 2222, "tenant1")
+    assert created.detail["ssh_port"] == "2222"
+
+
+def test_a_relayed_create_reports_the_relay_and_its_leased_port() -> None:
+    outcome, _ = _executed(
+        _create_fact_output(relay={"address": "198.51.100.7", "port": 40001}),
+        {**_CREATE_PARAMETERS, "relay_id": "r1", "vm_remote_port": 40001},
+    )
+
+    created = CreateJobResult.model_validate(outcome.result.value)
+    (endpoint,) = created.evidence.endpoints
+    assert (endpoint.host, endpoint.port, endpoint.user) == ("198.51.100.7", 40001, "tenant1")
+    assert created.detail["ssh_port"] == 40001
 
 
 _DIRECT = {
