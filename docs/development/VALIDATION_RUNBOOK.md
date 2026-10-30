@@ -45,48 +45,14 @@ host.
     live and expired claims, retry age, and non-terminal lifecycle age. It must
     not contain credentials, provider metadata, or owner principals.
 
-## Optional Local Automation
+## Running The Local Pass
 
-If your local `.scm-local/` checkout contains the helper script, the manual
-steps below are mirrored by:
-
-```bash
-.scm-local/scripts/validate-local-stack.sh
-```
-
-That script assumes host prerequisites already exist; it verifies them but does
-not install Docker, ZeroTier, `uv`, or other tools.
-
-Useful toggles:
-
-```bash
-KEEP_STACK=1 .scm-local/scripts/validate-local-stack.sh          # leave compose up
-SKIP_BUILD=1 .scm-local/scripts/validate-local-stack.sh          # reuse existing images
-RUN_CODE_TESTS=0 .scm-local/scripts/validate-local-stack.sh      # stack tests only
-RUN_STACK_TESTS=0 .scm-local/scripts/validate-local-stack.sh     # code/build tests only
-RUN_HELM_RENDER=1 .scm-local/scripts/validate-local-stack.sh     # require helm render check
-RUN_IAC_VALIDATE=1 .scm-local/scripts/validate-local-stack.sh    # require Ansible IAC validation
-FIX_STOREFRONT_VOLUME_OWNERSHIP=0 .scm-local/scripts/validate-local-stack.sh  # skip volume chown workaround
-RUN_INTEGRATION_SWEEP=1 .scm-local/scripts/validate-local-stack.sh
-```
-
-Defaults:
-
-- Build is enabled.
-- Code-level tests are enabled.
-- Compose smoke/e2e tests are enabled.
-- Redis host-port publishing is disabled through `/tmp/scm-no-redis-port.yml`.
-- `domains/vms/provisioning/iac` contract tests run by default because they do not
-  require a live KVM host or Ansible inventory.
-- Bob/Alice storefront named volumes are pre-chowned to UID/GID `1000:1000`
-  before stack startup to avoid the known SQLite volume ownership failure.
-- A quiet `anvil_dumpState` check runs after Anvil is reachable.
-- Helm render validation runs automatically when `helm` is available.
-- Compute-provisioning IAC validation runs automatically when Ansible tooling
-  and the inventory directory `domains/vms/provisioning/iac/ansible/inventory/`
-  (`hosts` and `provisioning-hosts.ini`) are available.
-- The single-pass `e2e-tests make test` sweep is off by default because
-  it reruns stack-mutating e2e tests after the marker-specific runs.
+No script in this repository runs the local pass: sections 1 to 14 are the
+procedure, run by hand and in order. Section 5's Ansible validation and Helm
+render are optional and need their tools; section 8's volume ownership fix
+applies only when a storefront exits with a SQLite error; and section 13's
+single-pass sweep is optional, since it reruns stack-mutating tests after the
+marker-specific runs.
 
 ## 1. Prerequisites
 
@@ -593,23 +559,29 @@ exported variables below.
 
 Run from this repo first. Every value below is the operator's own: the
 operations repository that holds the environment's Terraform, Makefile targets,
-and values, the GCP project and region, the Helm release, and the values files
-that repository keeps for the application-resources chart and for this
-repository's chart. Each command stops, naming the variable, while one is unset.
+and values, and the directory there holding its component validators, which
+this repository does not ship; the GCP project and region, the Helm release,
+and the values files that repository keeps for the application-resources chart
+and for this repository's chart. Each command stops, naming the variable, while
+one is unset.
 
 ```bash
 export APP_REPO="$(pwd)"
 export OPS_REPO="$(cd "${OPS_REPO:?set OPS_REPO to your operations repository checkout}" && pwd)"
+export OPS_VALIDATORS="$(cd "${OPS_VALIDATORS:?set OPS_VALIDATORS to the component-validator directory of the operations repository}" && pwd)"
 
 export ENV="${ENV:-dev}"
 export GCP_PROJECT="${GCP_PROJECT:?set GCP_PROJECT to your GCP project ID}"
 export REGION="${REGION:?set REGION to your GCP region}"
 
 export RELEASE="${RELEASE:?set RELEASE to your Helm release name}"
-export OPS_APPS_CHART="${OPS_APPS_CHART:?set OPS_APPS_CHART to the operations repository's application-resources chart}"
-export OPS_APPS_VALUES="${OPS_APPS_VALUES:?set OPS_APPS_VALUES to that chart's values for this environment}"
-export OPS_APP_VALUES="${OPS_APP_VALUES:?set OPS_APP_VALUES to this environment's values for the application chart}"
+export OPS_APPS_CHART="${OPS_APPS_CHART:?set OPS_APPS_CHART to the application-resources chart of the operations repository}"
+export OPS_APPS_VALUES="${OPS_APPS_VALUES:?set OPS_APPS_VALUES to the values of that chart for this environment}"
+export OPS_APP_VALUES="${OPS_APP_VALUES:?set OPS_APP_VALUES to the application chart values for this environment}"
 ```
+
+Keep apostrophes out of those messages: bash reads a quote inside `${...}` as
+opening a quoted string even within double quotes.
 
 Sanity-check the branch and sibling repo:
 
@@ -617,6 +589,10 @@ Sanity-check the branch and sibling repo:
 git status --short --branch
 test -d "$OPS_REPO"
 git -C "$OPS_REPO" status --short --branch
+
+for validator in tfstate artifact-registry networking gke secrets api-gateway; do
+  test -f "$OPS_VALIDATORS/$validator.sh" || echo "missing: $OPS_VALIDATORS/$validator.sh" >&2
+done
 
 for cmd in gcloud terraform helm kubectl docker jq curl openssl ssh ssh-keygen python3; do
   command -v "$cmd"
@@ -632,7 +608,7 @@ PY
 
 This section creates or validates platform-level GCP and Kubernetes
 infrastructure. Terraform owns these resources. Apply `api-gateway` here, but
-do not run `scripts/validate/api-gateway.sh` until section 20; that validator
+do not run the `api-gateway` validator until section 20; that validator
 probes application routes that do not exist yet.
 
 Authenticate first:
@@ -652,7 +628,7 @@ create command and run the validator.
 ```bash
 make bootstrap-apis ENV="$ENV"
 make bootstrap-tfstate ENV="$ENV"
-bash scripts/validate/tfstate.sh "$ENV"
+bash "$OPS_VALIDATORS/tfstate.sh" "$ENV"
 ```
 
 Use component validators as you go. Do not use full `make validate-env` as an
@@ -661,20 +637,20 @@ early gate; it checks resources that do not exist until later in this sequence.
 ```bash
 make tf-init  ENV="$ENV" COMPONENT=artifact-registry
 make tf-apply ENV="$ENV" COMPONENT=artifact-registry
-bash scripts/validate/artifact-registry.sh "$ENV"
+bash "$OPS_VALIDATORS/artifact-registry.sh" "$ENV"
 
 make tf-init  ENV="$ENV" COMPONENT=networking
 make tf-apply ENV="$ENV" COMPONENT=networking
-bash scripts/validate/networking.sh "$ENV"
+bash "$OPS_VALIDATORS/networking.sh" "$ENV"
 
 make tf-init  ENV="$ENV" COMPONENT=gke
 make tf-apply ENV="$ENV" COMPONENT=gke
 make get-credentials ENV="$ENV"
-bash scripts/validate/gke.sh "$ENV"
+bash "$OPS_VALIDATORS/gke.sh" "$ENV"
 
 make tf-init  ENV="$ENV" COMPONENT=secret-shells
 make tf-apply ENV="$ENV" COMPONENT=secret-shells
-bash scripts/validate/secrets.sh "$ENV"
+bash "$OPS_VALIDATORS/secrets.sh" "$ENV"
 
 make tf-init  ENV="$ENV" COMPONENT=api-gateway
 make tf-apply ENV="$ENV" COMPONENT=api-gateway
@@ -832,7 +808,7 @@ kubectl get pods -n kong
 make forward ENV="$ENV"
 curl -sf http://localhost:8081/health | jq
 curl -sf http://localhost:8081/api/v1/system/status | jq
-bash scripts/validate/api-gateway.sh "$ENV"
+bash "$OPS_VALIDATORS/api-gateway.sh" "$ENV"
 make unforward
 ```
 
@@ -974,11 +950,16 @@ failing with the executors it found before anything is held or registered.
 ## 24. Describe The Target
 
 ```bash
-cp e2e-tests/config/config-real-vm-target.yml.example \
-  e2e-tests/config/config-real-vm-target.yml
+(
+  cd e2e-tests/config
+  example=config-real-vm-target.yml.example
+  cp "$example" "${example%.example}"
+)
 ```
 
-Fill in the copy's `REAL_VM_TARGET` section:
+The copy is the committed example's name without `.example`,
+`config-real-vm-target.yml`, which the `real-vm-target` profile loads from the
+e2e config directory. Fill in its `REAL_VM_TARGET` section:
 
 - `host_id`: the identifier the scenario registers the host under;
 - `ssh_host`, `ssh_user`, `ssh_port`: where the provisioning service connects
@@ -1047,7 +1028,11 @@ section 21 made, wherever it was provided:
 
 ```bash
 rm -f /tmp/kvm-hosts.ini
-rm -f e2e-tests/config/config-real-vm-target.yml
+(
+  cd e2e-tests/config
+  example=config-real-vm-target.yml.example
+  rm -f "${example%.example}"
+)
 ```
 
 

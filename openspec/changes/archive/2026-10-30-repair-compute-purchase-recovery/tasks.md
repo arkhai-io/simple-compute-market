@@ -1177,6 +1177,14 @@ change to implementation.
       `Depends on` entry names this change, and no other row changed.
       `make check-change-index` passed.
 
+      Closeout triage, review 20 F2 (accepted by the supervising session under the
+      owner's standing instruction): the preface sentence that still named this change
+      as the owner of the tenant-address item now says this change delivered it, links
+      the archive, and says a buyer's SSH endpoint is built from the registered host's
+      tenant-facing address and port, each falling back to the connection's. The row
+      stays `in closeout`; no other row, status, or dependency changed.
+      `make check-change-index` passed.
+
 - [x] 15.7 **Packaging.** Run `make check-packaging` and
       `make check-architecture-change CHANGE=repair-compute-purchase-recovery`. Run
       `make check-agent-skills` only if the change touched `.agents/`, `.claude/`, or
@@ -1413,6 +1421,24 @@ change to implementation.
         pinned `openspec validate --strict`: passed.
       - Unscoped, the check reports the repository's existing 10, the same as on the
         merged head before closeout. The promoted documents add none.
+
+      Closeout triage, review 20 F1 (accepted by the supervising session under the
+      owner's standing instruction), in `docs/development/VALIDATION_RUNBOOK.md`:
+      - "Running The Local Pass" replaces "Optional Local Automation", which pointed
+        at a helper this repository does not ship. No inbound link named its anchor.
+      - Every call to the operations repository's component validators keeps its
+        arguments, working directory, and section. It names the script through
+        `OPS_VALIDATORS`, which section 17 requires and checks once, rather than
+        through a path that read as this repository's `scripts/`.
+      - Sections 24 and 26 derive the rendered target's name,
+        `config-real-vm-target.yml`, from the committed example, in a subshell in the
+        e2e config directory. The name and loading are unchanged.
+      - Section 17's unset-variable messages carry no apostrophes. With one, the
+        block failed `bash -n`, before this correction as after.
+
+      Unscoped, the check now reports 3, each in another active change's `tasks.md`
+      (`add-harness-scenario-contract`, `restore-issue-discovery-thin-runner`). The
+      scoped check, `make check-change-index`, and `make check-change` passed.
 
 - [x] 15.11 **Archival.** Run `openspec archive repair-compute-purchase-recovery -y`,
       which merges the `physical-provisioning`, `fulfillment`,
