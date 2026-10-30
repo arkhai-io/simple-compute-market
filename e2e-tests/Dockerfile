@@ -49,6 +49,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Stage 2: Lean runtime image
 FROM python:${PYTHON_VERSION}-slim AS runtime
 
+# The real-host bare-metal scenario proves a tenant's access, and its
+# revocation, by running the system `ssh` client, which the slim base lacks.
+RUN apt-get update && apt-get install -y --no-install-recommends openssh-client \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY --from=builder /app/.venv ./.venv

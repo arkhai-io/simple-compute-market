@@ -3570,6 +3570,84 @@ pointer from each note they correct.
       pipeline, and its image; the live bare-metal lane's publication to its
       registry.
 
+**Integration of `prove-real-vm-provisioning` after 14.18.** This branch merged that
+change's branch twice before any live run, so both live lanes qualify one candidate
+holding both changes' code (`design.md`, "Coordination with
+`prove-real-vm-provisioning`"). S6, found on that candidate's e2e image, is a
+prerequisite of this change's live bare-metal lane.
+
+- [x] 14.19 Record the merges, what they brought, and what stays each change's.
+
+      Done:
+      - **The merges.** `e9200603f` merged that change's branch at its Section 5
+        commit, `37b605f4d`; `c96e3828c` merged its head,
+        `9839cbe73d80859b116b38e77866bbfcedd7c9fd`, its round-1 triage of the SSH
+        refusal bound (its 5.7). `0fa8d221e..c96e3828c` holds 13 commits, the two
+        merges among them; an independent count of 12 was one short.
+      - **What came in**, that change's Sections 1–5 as its `tasks.md` records them:
+        - the canonical deal's shared stages split at their mock gates, the gates
+          moved to a `MockGates` driver part only the mock drivers implement, and
+          both mock lanes listing their mock-only stages;
+        - GPU-optional shapes in the VM e2e helpers: `capacity_source_for` and the
+          VM driver's terms name GPU fields only for a resource that has them;
+        - KVM preconditions: host preparation refuses a host without `vmx` or `svm`,
+          or without `/dev/kvm` once its modules load; every `virt-install` passes
+          `--virt-type kvm`, and a create refuses a host without `/dev/kvm` before
+          it; passthrough boot configuration and binding follow an NVIDIA or AMD
+          GPU's presence or the operator's `gpu_passthrough`; preparation defaults
+          to the scratch image;
+        - the typed, versioned `REAL_VM_TARGET` description, its `.example`
+          profile, and the ignore rules that keep a rendered profile out of Git and
+          out of the e2e image;
+        - the domain-neutral SSH access helper, `roles/helpers/ssh_access.py`.
+      - **What this change keeps.** No decision in `design.md` changed: D1, D3, D4,
+        D9, D11–D14, S3, and S5 hold on the merged tree. S5's F1 and F2 were
+        corrected at `0fa8d221e` (14.18), before either merge, and are not reopened.
+      - **What stays that change's.** Its Sections 6–9, the GPU-less
+        `e2e_vm_real_provisioning` lane among them, and its `test-compatibility`
+        and `physical-provisioning` deltas, which name no requirement this
+        change's deltas name. `openspec archive` archives only the change it is
+        given, so 15.11 archives none of that change's deltas; its own closeout
+        does. Neither change depends on the other.
+      - **This change's acceptance is unchanged:** a GPU-backed guest and a whole
+        bare-metal GPU machine, each bought through the buyer commands, recovered,
+        reached over SSH, checked by a bounded GPU computation, released normally,
+        refused after teardown, and with its capacity restored.
+
+      Evidence, on `c96e3828c`: the full local validation passed (packaging 88.4 s,
+      tests 3162.7 s); pipeline run 40974364531, all three lanes successful; the
+      Helm validation this change owns passed. None of it evidences a live lane.
+- [ ] 14.20 S6: the e2e image carries the system SSH client `e2e_bare_metal_deal`
+      runs (`design.md`, "S6: an SSH client in the e2e image").
+
+      The supervising session accepted S6 under the owner's delegated authority to
+      complete the live qualification prerequisites.
+
+      Found on `c96e3828c`'s e2e image: `timeout` and `market` are on its `PATH`,
+      and `shutil.which("ssh")` is `None`. Its runtime stage is the slim Python
+      image, which has no OpenSSH client, and the scenario's access and
+      revocation attempts (`roles/helpers/bare_metal_access.py`) run `ssh`.
+
+      Done, in `e2e-tests/Dockerfile` alone: the runtime stage installs
+      `openssh-client` with `--no-install-recommends` and removes the apt lists.
+      No Python source, test, dependency, lock, or version changes, and no key,
+      known-hosts file, or endpoint enters the image. It is not
+      `prove-real-vm-provisioning`'s packaging of its own lane for the scenario
+      pod, which that change's proposal leaves for later.
+
+      Owed before this task is checked, on an image built from its commit:
+      - `ssh -V` runs in it, and `timeout` and `market` are still on its `PATH`;
+      - its copy of the scenario's modules equals the checkout's, byte for byte;
+      - `make check-packaging`, `make check-change`, and
+        `make check-comment-hygiene`;
+      - the pipeline's three lanes and the Helm validation, which build and run
+        the image.
+
+      End-to-end: no lane runs `e2e_bare_metal_deal`; its SSH runs only in the
+      live bare-metal lane. `c96e3828c`'s full local run stays evidence for every
+      Python project, none of which changes here; whether it is reused for this
+      candidate is settled under the owner's reuse policy.
+
 ## 15. Closeout
 
 The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.

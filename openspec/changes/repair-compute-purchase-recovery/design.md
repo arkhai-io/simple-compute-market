@@ -1185,6 +1185,44 @@ changes. The merge changed no decision above:
   kit (0.6.0) and the two adapters (0.12.0 and 0.16.0) were already above `dev`'s and
   are unchanged.
 
+## Coordination with `prove-real-vm-provisioning`
+
+After S5's corrections (`tasks.md` 14.18), and before any live run, this branch merged
+`prove-real-vm-provisioning`'s branch twice: `e9200603f` at that change's Section 5,
+and `c96e3828c` at its head, `9839cbe73d80859b116b38e77866bbfcedd7c9fd`, its round-1
+triage of the SSH access helper. Both live lanes therefore qualify one candidate
+holding both changes' code. What came in is that change's, recorded in its own
+`tasks.md`, Sections 1–5:
+
+- the canonical deal's shared stages split at their mock gates, with the gates on a
+  `MockGates` driver part that only mock drivers implement;
+- GPU-optional shapes in the VM e2e helpers;
+- KVM preconditions: host preparation refuses a host without hardware
+  virtualization, every `virt-install` requests KVM and a create checks for it first,
+  passthrough boot configuration follows GPU presence or the operator's override, and
+  host preparation defaults to the scratch image;
+- the typed, versioned real-provisioning target description, its example profile, and
+  the ignore rules that keep a rendered one out of Git and out of the e2e image;
+- the domain-neutral SSH access helper.
+
+The merges changed no decision above: D1, D3, D4, D9, D11–D14, S3, and S5 hold on the
+merged tree, which passed its full local run, Helm, and the pipeline.
+
+What stays that change's:
+- its Sections 6–9: the GPU-less real-provisioning lane, its removal of dead e2e
+  material, its live verification, and its closeout. The SSH client S6 adds to the e2e
+  image is this change's bare-metal prerequisite, not that change's packaging of its
+  lane for the scenario pod, which its proposal leaves for later;
+- its `test-compatibility` and `physical-provisioning` deltas. They name no requirement
+  this change's deltas name, so the two archives write disjoint requirements, and
+  `openspec archive` archives only the change it is given: each change's closeout
+  archives its own deltas.
+
+Neither change depends on the other. This change's live acceptance is unchanged: the
+GPU-backed guest and the whole bare-metal GPU machine, each bought through the buyer
+commands, recovered, reached over SSH, checked by a bounded GPU computation, released
+normally, refused after teardown, and with its capacity restored.
+
 ## S5: the bare-metal storefront's registry bearer token
 
 A registry may gate writes behind a bearer token, which a storefront sends beside its
@@ -1229,6 +1267,27 @@ Alternatives rejected:
 - *Ignore a token naming no configured registry, as the VM storefront does.* That
   keeps the silent drop for a mistyped URL, the failure this fixes.
 - *A token in public configuration.* The values schema already refuses it, as for VM.
+
+## S6: an SSH client in the e2e image
+
+The real-host bare-metal scenario (D14) proves a tenant's access, and its revocation,
+by running the system `ssh`. The candidate `e2e-tests` image has `timeout` and
+`market` on its `PATH` and no `ssh`, because its runtime stage is the slim Python
+image, which carries no OpenSSH client. The scenario could not run from that image.
+Found on the candidate after the merges above. The supervising session accepted S6
+under the owner's delegated authority to complete the live qualification
+prerequisites.
+
+- **The fix.** The runtime stage installs `openssh-client`, with no recommended
+  packages, and removes the apt lists, as the provisioning service's runtime stage
+  installs its own. Nothing else is installed: no other utility, no Python package,
+  and no dependency or lock change.
+- **Nothing private enters the image.** The scenario's key and pinned known-hosts file
+  stay role inputs an operator supplies at run time.
+- **Proved on the image.** A unit test reading the Dockerfile would only restate it.
+  The evidence is an image built from the commit running `ssh -V`, still carrying
+  `timeout` and `market`, and holding the scenario's source unchanged, then the lanes
+  and Helm that build and run it.
 
 ## Compatibility, migration, and rollback
 
@@ -1305,6 +1364,14 @@ suites and packaging, and together make Round 2's new candidate. That candidate 
 the round's one full `make test`, the review's amendment, and validation again before
 either live purchase; the earlier candidate's passes are not reused for it.
 
+The merges of `prove-real-vm-provisioning` ("Coordination with
+`prove-real-vm-provisioning`") made the candidate `c96e3828c`, which passed the full
+local run, Helm, and the pipeline. S6 changes only the e2e image's system packages, and
+no Python source, test, or lock, so that full local run remains evidence for every
+Python project; which of `c96e3828c`'s results stand for S6's candidate, and what its
+image adds, is settled under the owner's reuse policy. None of these results is
+evidence of either live lane.
+
 ## Open questions
 
 None. D7's open items, the resource type of a declaration without GPUs and the
@@ -1336,6 +1403,8 @@ closeout, under the heading named.
 | D13 the readiness wait and autostart | `openspec/specs/physical-provisioning/spec.md` ("A GPU guest's readiness wait and autostart are set by its pool's operator", by the archive); `domains/vms/provisioning/iac/README.md` under "VM Management Operations (vm-management role)", beside the passthrough variables: the three `extra_vars`, their defaults, and why a host passing through its only GPU sets `vm_autostart` false |
 | D14 the real-host bare-metal scenario | `docs/bare-metal-seller-quickstart.md` under "Release-qualified deal evidence": the role inputs, the pinned known-hosts file among them, `--run-id`, teardown to `released`, and revocation proven only by an authentication refusal. `docs/development/TESTING.md` is unchanged: its sentence on `e2e_bare_metal_deal` stays true |
 | The role's task files parsed by the repository's syntax check (Round 2 review F1, `tasks.md` 14.8 and 14.14) | `docs/development/TESTING.md`, beside "Chart Render Tests", and `domains/vms/provisioning/iac/README.md` under "Validation": `validate-playbooks` parses the `vm-management` task files, a capacity check's included, through a parse-only playbook importing them in the role's context, what a syntax check does not show, and that a free-form `shell` string's unbalanced quote fails its task file as it loads |
+| S6 the e2e image's SSH client | None beyond `e2e-tests/Dockerfile`'s own comment: which system packages an image carries is its Dockerfile's to state |
+| Coordination with `prove-real-vm-provisioning` | None: change history. That change promotes its own decisions and archives its own deltas at its closeout |
 | Live qualification of both lanes | None: external evidence, recorded at closeout as live evidence or named blockers (`tasks.md`, the closeout's end-to-end part) |
 | Roadmap currency | `docs/development/ROADMAP.md` "Goal 1 — Consolidate physical-resource authority in the provisioning service" (the real runner's evidence row) and "Payment qualification boundaries". Goal 2 is unchanged: this change no longer sells VM shapes without GPUs |
 | Campaign index currency | `openspec/changes/README.md`: this change's row. The dependency line to `gpu-optional-compute-shapes` and that change's `Depends on` entry were removed with D7's withdrawal |

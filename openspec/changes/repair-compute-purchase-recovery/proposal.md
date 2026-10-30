@@ -103,6 +103,9 @@ once carried is withdrawn (D7).
   read, as the VM storefront does; a token naming no configured registry refuses
   startup. Without it a registry that gates writes refuses the live lane's
   listing.
+- **An SSH client in the e2e image (S6).** The `e2e-tests` image's runtime stage
+  installs `openssh-client`, since the real-host bare-metal scenario (D14) runs `ssh`
+  and the slim base image has none. No Python package or lock changes.
 
 ## Capabilities
 
@@ -188,7 +191,8 @@ None.
   - `e2e-tests` (test only: five VM scenario modules drop their fixed create output,
     three scenario helpers register their hosts at `ssh` version 2, and the real-host
     bare-metal scenario and the harness's run-id resolver are corrected, with unit
-    tests);
+    tests; and its image's runtime stage installs `openssh-client`, which that
+    scenario runs, S6);
   - the host registration requests in `docs/development/VALIDATION_RUNBOOK.md` and
     `tools/issue-discovery`'s local phase configuration, which state `ssh` version 2.
   - Each changed package bumps its minor version once against `dev`, to the next
@@ -217,6 +221,12 @@ None.
   unimplemented (D7). Neither change depends on the other. This branch merged `dev`
   after it landed, reconciling the INI parser and one VM scenario with it (`design.md`,
   "Coordination with `gpu-optional-compute-shapes`").
+- `prove-real-vm-provisioning`, in implementation, owns its whole scope. This branch
+  merged that change's branch at its Sections 1–5, so this change's candidate carries
+  that code. Its real-provisioning lane, its Sections 6–9, and its
+  `test-compatibility` and `physical-provisioning` deltas stay its own, archived by
+  its own closeout. Neither change depends on the other (`design.md`, "Coordination
+  with `prove-real-vm-provisioning`").
 - `resolve-compute-family-findings` plans edits to files this change also edits:
   `lease_lifecycle.py`, `fulfillment_convergence.py`, the VM storefront's
   `admin_controller.py`, and the VM codec tests, which it moves. The edits touch
