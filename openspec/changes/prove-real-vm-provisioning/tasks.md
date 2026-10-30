@@ -485,6 +485,32 @@ Files: a new `e2e-tests/tests/e2e/roles/helpers/ssh_access.py`; a new
       connection did not finish. Declined: a full-length timeout whose kill overhead
       lands milliseconds past the bound fails as "only after" — consistent with the
       bound as stated; `bound <= 0` fails without an attempt — no caller passes one.
+- [x] 5.8 Round triage fix (53 F1): `assert_refused` counted an attempt that ran its
+      full time out as refused. `ssh` gives up within its `ConnectTimeout` when nothing
+      answers, so such an attempt shows something answered and stayed connected, and
+      after teardown that is what 11d must catch. 5.3's "refused, or times out", 5.5's
+      "counted as refused by `assert_refused`", 5.7's "a full-length attempt's timeout
+      still counts as refused", and D7's "refused or timed out" now read as `ssh`'s own
+      failure: refused, or its `ConnectTimeout` expiring (exit 255).
+      `ssh_access.py`: only an `ssh` failure is a refusal. An attempt that runs out of
+      time, full-length or cut short, is retried within the bound like an accepted
+      connection, and the check fails when the bound closes, "not shown to refuse" when
+      the last attempt had not finished, "still accepted" otherwise. The other 5.7 rules
+      hold. The live runs' 11d reasons were `ssh`'s own `Connection timed out` (8.2,
+      8.3), so they meet the rule unchanged.
+      Unit, `test_ssh_access.py` (32 cases): the combined hang test split in two, `run`
+      retrying a hang and `assert_refused` retrying one and returning the refusal that
+      follows; new: a hang lasting to the bound fails as not shown, and a hang then an
+      accepted connection fails as still accepted. The first two fail on the code
+      before the fix (reasoned from it, not run). `make -C e2e-tests test-unit`: 315
+      passed (unit). `make test`: passed. `make check-packaging`: passed. `make
+      check-change`: passed. No dependency change. End-to-end: none; 11d runs only
+      by hand against a real host (section 8), and the fix needs no rerun as above.
+      Fresh-context check of the diff: no blocking defect. Fixed: the failure message
+      and docstring claimed a cut-short attempt was still connected, which only a
+      full-length one shows; no test covered a hang then an accepted connection
+      (added). Left: the hang tests wait half a second of real time per attempt, as
+      5.5 records.
 
 ## 6. The real-provisioning lane
 
@@ -675,6 +701,10 @@ Files: `e2e-tests/tests/e2e/roles/scenarios/vms/host_registry.py`; new
       with dimension attributes; a real teardown finishing inside the watchdog's
       300 s grace after 10a's one-minute back-date (10a to 11b, on the host); and the
       probe command's first execution.
+- [x] 6.12 Round triage fix (53 F2): the comment on `provision_terms`'s negotiated key
+      in `real_compute_deal_driver.py` said it is "the only one that can pass", the
+      claim D7 narrowed (10 F4). It now says the access checks show that the key
+      negotiated here was installed. Checks as 5.8's.
 
 ## 7. Dead e2e material
 

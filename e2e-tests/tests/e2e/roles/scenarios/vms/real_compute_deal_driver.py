@@ -390,7 +390,7 @@ class RealVmComputeDealDriver(VmDealDriverBase):
             "payload": {
                 "duration_seconds": DURATION_HOURS * 3600,
                 # The run's own key: the access checks connect with its private
-                # half, so a key negotiated here is the only one that can pass.
+                # half, so they show that the key negotiated here was installed.
                 "ssh_public_key": self.buyer_public_key,
             },
         }

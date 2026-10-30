@@ -309,32 +309,39 @@ class SshSession:
         *,
         bound: float = REFUSAL_BOUND_SECONDS,
     ) -> str:
-        """Assert a connection with ``key`` is refused, or times out, within ``bound``.
+        """Assert a connection with ``key`` is refused within ``bound``, and return why.
 
-        Returns why it was refused. The refusal must be seen by the time the
-        bound closes: no attempt starts after it, an attempt is cut short where
-        it would run past it, and a refusal that returns later fails. An
-        attempt cut short that runs out of time shows only that the connection
-        had not finished, so it fails too; only a full attempt's timeout counts
-        as refused. A connection still accepted when the bound closes fails.
+        Refused means ``ssh`` itself failed: the host refused the connection or
+        the key, or ``ssh``'s own ``ConnectTimeout`` expired. An attempt that
+        runs out of time is no refusal: given its full time it shows that
+        something answered and the connection had not finished, since ``ssh``
+        gives up within its ``ConnectTimeout`` when nothing answers, and cut
+        short by the bound it shows nothing. It is retried like an accepted
+        connection. The refusal must be seen by the time the bound closes: no
+        attempt starts after it, an attempt is cut short where it would run past
+        it, and a refusal that returns later fails. A connection still accepted,
+        or whose last attempt had not finished, when the bound closes fails.
         """
         deadline = self._clock() + bound
         target = f"{endpoint.user}@{endpoint.host}:{endpoint.port}"
+        unfinished = False
         while True:
             remaining = deadline - self._clock()
             if remaining <= 0:
+                if unfinished:
+                    raise SshAccessError(
+                        f"{target} was not shown to refuse {key.private_key.name} "
+                        f"within {bound}s: the last attempt had not finished when it "
+                        f"ran out of time"
+                    )
                 raise SshAccessError(
                     f"{target} still accepted {key.private_key.name} after {bound}s"
                 )
             limit = min(self._attempt_seconds, remaining)
             result = self._attempt(endpoint, key, "true", timeout=limit)
-            if result is None and limit < self._attempt_seconds:
-                raise SshAccessError(
-                    f"{target} was not shown to refuse {key.private_key.name} within "
-                    f"{bound}s: the last attempt was still connected when it closed"
-                )
-            if result is None or result.returncode == _SSH_FAILED:
-                reason = _failure(result) or "refused"
+            unfinished = result is None
+            if result is not None and result.returncode == _SSH_FAILED:
+                reason = result.stderr.strip() or "refused"
                 if self._clock() > deadline:
                     raise SshAccessError(
                         f"{target} refused {key.private_key.name} only after {bound}s: "
