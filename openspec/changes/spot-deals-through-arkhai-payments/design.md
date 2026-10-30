@@ -9,8 +9,8 @@ and adjudication. Both are option params (the foundation's negotiated terms, and
 derivation consumes the common codec, not another mechanism-specific copy.
 
 The current kit/arkhai-payments derives a single once part. Its vendored schema
-still has mandate-level authorities and HoldUntilStop, not per-part notice
-authorities, maxHoldExtension or pendingStop. The revised contract below is an
+predates per-part authorities (the revised contract has no mandate-level
+authorities), maxHoldExtension and pendingStop. The revised contract below is an
 implementation gate, not a claim about current generated models. The foundation
 vendors it once for both changes.
 

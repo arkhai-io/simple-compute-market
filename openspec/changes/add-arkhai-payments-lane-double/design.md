@@ -14,8 +14,8 @@ Observed on the reconciliation base:
 - `kit/arkhai-payments/src/market_arkhai_payments/fixtures/payments_client.py`
   is an in-process `FakePaymentsClient`; its snapshot proof is a placeholder, its
   parts are held/reversed, and it has no rate-part stop or case extensions.
-- `kit/arkhai-payments/schema/SOURCE.md` pins the mandate-level-authority
-  publication, which already supports rate parts. SCM currently derives once-only
+- `kit/arkhai-payments/schema/SOURCE.md` pins an earlier publication with mandate-level authorities,
+  which already supports rate parts. SCM currently derives once-only
   mandates. The foundation's per-part-authority revision is not yet vendored.
 - `e2e-tests/Makefile` owns three isolated Compose lanes and their cleanup targets;
   payment settings are blank by default. Bare-metal and credits payment scenarios
