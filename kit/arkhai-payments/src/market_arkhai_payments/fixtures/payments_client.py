@@ -14,7 +14,7 @@ from typing import Any
 
 from market_identity import Signer
 
-from market_arkhai_payments.canonical import jcs_bytes
+from market_arkhai_payments.canonical import jcs_bytes, wire_json
 from market_arkhai_payments.errors import (
     PaymentsAPIError,
     PaymentsProtocolError,
@@ -186,7 +186,7 @@ class FakePaymentsClient:
 
     def _snapshot(self, transaction: str) -> SignedTransactionSnapshot:
         assert self.receipt is not None
-        receipt = self.receipt.model_dump(mode="json", by_alias=True, exclude_none=True)
+        receipt = wire_json(self.receipt)
         state = "reversed" if self.reversed else "held"
         parts = [
             {
@@ -198,6 +198,7 @@ class FakePaymentsClient:
                 "reversed": part["gross"] if self.reversed else "0",
                 "feePaid": "0" if self.reversed else part["fee"],
                 "hold": part["hold"],
+                "extensions": [],
                 "status": state,
             }
             for index, part in enumerate(receipt["receipt"]["parts"])

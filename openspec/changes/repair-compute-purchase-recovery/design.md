@@ -1289,6 +1289,172 @@ prerequisites.
   `timeout` and `market`, and holding the scenario's source unchanged, then the lanes
   and Helm that build and run it.
 
+## S7: the payments mandate in the service's current wire contract
+
+A test-mode preflight approval was refused by the payments service with `400
+invalid_request`. The service's current `ApprovalRequest` requires each part's own
+`authorities` and `maxHoldExtension`, and refuses a mandate-level `authorities`, which
+is what SCM sends. The supervising session reproduced the refusal offline, in under a
+second, against the service's own request validator through the client's mock
+transport. No transaction exists for the mandate and no rental started. The vendored
+contract (83 definitions) predates the service's part-owned lifecycle. The service's
+published OpenAPI 3.1 document defines 93. The supervising session accepted S7 under
+the owner's delegated authority as a prerequisite of both live lanes, which settle
+through `arkhai.payments.v1`.
+
+The change is to the one shared payments kit, `kit/arkhai-payments`. Every VM,
+bare-metal, and API-credit buyer and seller derives, checks, approves, and verifies
+through it, and none builds a mandate of its own, so no domain changes.
+
+- **The contract's source.** The vendored schema becomes the neutral artifact extracted
+  from the published OpenAPI document: its `components.schemas` as `$defs`, references
+  rewritten to `#/$defs/`, and the neutral `$id` and title. Nothing else is edited.
+  - It keeps the producer's OpenAPI rendering as published: a one-value `enum` where the
+    previous publication said `const`, nullable fields as an `allOf` with a type list,
+    and no safe-integer maxima.
+  - It keeps one defect: `HttpUrl`'s pattern ends in a leaked regular-expression flag
+    (`$/i`), so it matches no URL. Only cash, top-up, onboarding, and billing-portal
+    types use it, and SCM calls none of them.
+  - Correcting either in the vendored file would make it neither the publication nor a
+    faithful extraction of it. `schema/SOURCE.md` records the artifact's hash, how it was
+    extracted, and the defect.
+- **The vectors.** Current-wire producer vectors were not supplied with this schema
+  snapshot; the kit retains the previous publication for canonical framing and uses an
+  explicit SCM synthetic current-wire fixture. No producer provenance is invented.
+  - The previous publication stays byte-identical, as evidence of what does not depend
+    on a part's shape: the JCS transaction identity of its raw mandates, the receipt's
+    signing frame and its Ed25519 signature over the raw body, and attachment hashing.
+  - Its mandates and receipt use the previous wire, so the generated models now refuse
+    them, and the vector check asserts that refusal.
+  - Current-wire conformance is SCM's own synthetic fixture. It is a literal
+    `ApprovalRequest`, written from the published schema and the service's documented
+    normalization of mandate-level authorities. The derived mandate must equal it and the
+    generated models must accept it. It is not producer provenance, and `SOURCE.md` says
+    so. Current-wire producer vectors, once supplied, replace both the previous vectors
+    and this fixture.
+- **The derived mandate.** It has one `once` part, as before, now carrying its own
+  lifecycle:
+  - `authorities.stop`: buyer and payee, each with `notice` `P0D` and `partialPeriod`
+    `charged`;
+  - `authorities.reverse`: payee and dispute authority;
+  - `authorities.extend`: empty;
+  - `maxHoldExtension`: `P0D`;
+  - no mandate-level `authorities`.
+
+  This is the service's own normalization of the previous mandate-level authorities for
+  a `once` part: immediate stop, no extension, the same reversers. A `once` part has no
+  `start` authority. Hold, approval expiry, amount, asset, fee, deal, nonce, payer, and
+  payee are derived as before. No extension right, notice delay, spending cap, or attempt
+  limit is added.
+- **The mechanism identifier is unchanged.** `arkhai.payments.v1` names SCM's option
+  and the mandate nonce. The service's contract is identified by the vendored schema's
+  content hash, not by a version SCM owns.
+  - A new identifier would change every transaction ID and listing for no compatibility
+    gain, since the service refuses the previous wire anyway.
+  - A buyer and seller on different kit versions derive different mandates, and the
+    buyer's exact check refuses before approval.
+  - The kit takes a minor version for the incompatible wire change. Every dependant
+    raises its lower bound to it, and the bare-metal roles' exact pins move with it.
+- **History stays historical.** Accepted Agreement bytes, stored mandates, and
+  transaction IDs are never rewritten.
+  - A stored mandate in the previous wire is refused when it is parsed, not upgraded
+    behind the counterparty's back.
+  - The most recent approval, the refused one, created no transaction. An earlier
+    test-mode purchase in the previous wire, a separate attempt, did create one. The
+    supervising session's read-back of it, external evidence and not this
+    repository's, found it fully reversed with nothing held or reserved, its seller
+    record refunded and so outside the automatic reconciliation of unsettled payments,
+    its negotiation terminal, and its fulfillment lifecycle recorded. Its accepted
+    Agreement bytes, mandate, transaction ID, run log, and database history are kept
+    as they are.
+  - No legacy mandate reader or adaptor is added. The current kit reads a retained
+    previous-wire transaction's current snapshot by its original transaction ID,
+    which needs no mandate. It refuses a stored previous-wire mandate in accepted
+    `PaymentSettlementData`, so the buyer commands' and storefronts' settle and
+    refund workflows cannot run on those accepted artifacts. For this known refunded
+    deal, the original-ID read and the preserved history suffice. A non-terminal
+    previous-wire deal is reconciled deliberately with the payments service by its
+    original transaction ID, never by rewriting its accepted wire or approving it
+    again.
+  - Before the first live qualification on a candidate carrying S7, every retained
+    previous-wire payment is read from the service by its original transaction ID
+    and its disposition is known. One that is not terminal stops the qualification
+    until it is reconciled with the service directly. That read-back is the
+    supervising session's external check, not a test of this repository.
+- **Snapshots.** A part snapshot now always carries `extensions`, and the kit's fake
+  client serves an empty list. Reversal is still judged by each part's `reversed`
+  status, and the reverse event is unchanged.
+
+Alternatives rejected:
+- *Patching the three fields the refusal named into the old schema.* Every other
+  definition would stay stale, among them the snapshot's required `extensions`, and the
+  vendored file would match no publication.
+- *Keeping the previous vectors as the conformance set.* They pin the wire the service
+  refuses.
+- *A domain-specific mandate or request rewrite.* The kit is the one implementation the
+  three domains share.
+
+### S7, continued: the required nullable maximum hold extension
+
+After 14.25, the supervising session's offline check against the service's request
+validator found one remaining mismatch, outside this repository. Both part kinds'
+`maxHoldExtension` is required, and the service accepts `null` for it. The published
+schema states it as `allOf: [{$ref: Duration}, {type: [string, null]}]`, and that
+intersection admits no null, since `Duration` is a string. So the generated models typed
+it `Duration` and refused null. Separately, every wire dump in the kit used
+`exclude_none`, which would drop a required null even from a corrected model and change
+both the approval body and the transaction ID's JCS.
+
+The same check found that the kit's derived mandate, approval request, and transaction
+ID already agree with the service. That was the supervisor's run, not this
+repository's, and it is not evidence here. The kit's derived mandates state `P0D`, so the
+mismatch affects only reading or hashing a mandate whose part states null, such as a
+counterparty's.
+
+Decisions:
+- **The vendored schema stays byte for byte as published** (`5cf22707…`).
+  `kit/arkhai-payments/scripts/generate_models.py` generates from a normalized copy:
+  - Exactly `OncePart.maxHoldExtension` and `RatePart.maxHoldExtension` become
+    `anyOf: [{$ref: Duration}, {type: null}]`, still required.
+  - Generation stops if either is no longer required or no longer has its published
+    form, so a corrected publication is reviewed, not silently reinterpreted.
+  - The generated models change in only those two fields' type.
+  - `kit/arkhai-payments/schema/SOURCE.md` records the discrepancy.
+- **No other `allOf` is reinterpreted.** `ConnectStatus.connectedAccount` has the same
+  published form. The kit calls no onboarding operation, and nothing here shows what the
+  service accepts there, so it is generated as published.
+- **One wire serializer, within the shared kit.**
+  `market_arkhai_payments.canonical.wire_json` omits an optional property that has no
+  value and keeps a required one's null. Opaque JSON, such as an attached Agreement, is
+  returned whole. Every kit dump uses it: the client's request bodies, `jcs_bytes` and
+  therefore the transaction ID, settlement data's wire form and binding check, the
+  buyer's mandate check, receipt framing and verification, and the fixtures. Approval,
+  hashing, and signing therefore cannot drift apart inside the kit. Where no required
+  null is present, its output equals the previous `exclude_none` dump, which a test
+  asserts, so no existing mandate's ID or receipt frame moves.
+  - An optional property stated as an explicit null, such as a part's `end`, is
+    normalized away: the models accept it, the wire form omits it, and the transaction
+    ID is that of the normalized mandate. Settlement data pairing such a mandate with
+    the hash of its raw JSON is refused, and a unit test pins this.
+  - The VM, bare-metal, and API-credit storefronts each dump a verified receipt into
+    their own settlement evidence with the model's `exclude_none` dump, not
+    `wire_json`, which the kit does not export at its top level. A receipt has no
+    required nullable property, so the two forms are identical today. Should the
+    receipt contract gain one, those three seams move to the shared serializer;
+    nothing changes now.
+- **Business permissions are unchanged.** The kit never derives null, and the buyer's
+  check and `require_bound_to` refuse a null where the Agreement derives `P0D`.
+
+Alternatives rejected:
+- *Editing the vendored schema.* It would then match no publication.
+- *Reading every `allOf` with a null type list as nullable.* That would change
+  definitions with no evidence, `ConnectStatus` among them.
+- *Hand-editing `models.py`.* `--check` would then fail, and the next regeneration would
+  silently revert the edit.
+- *Dumping with `exclude_unset`.* An optional property set explicitly to `None` would
+  then reach the wire as null, and a model built with `model_construct` would lose
+  required fields.
+
 ## Compatibility, migration, and rollback
 
 - **No schema migration.** `public_port` lives in the connection envelope's public
@@ -1372,6 +1538,13 @@ Python project; which of `c96e3828c`'s results stand for S6's candidate, and wha
 image adds, is settled under the owner's reuse policy. None of these results is
 evidence of either live lane.
 
+S7 changes the shared payments kit, its version, the pins and locks of every project
+that installs it, and its tests, so neither `c96e3828c`'s nor S6's candidate results
+stand for it. Its slice is gated by the kit's own gates and the focused payment suites
+of every buyer and seller that composes the kit, and packaging; the frozen candidate it
+makes owes the round's one full local run, the review's amendment, and validation
+before either live purchase.
+
 ## Open questions
 
 None. D7's open items, the resource type of a declaration without GPUs and the
@@ -1404,6 +1577,9 @@ closeout, under the heading named.
 | D14 the real-host bare-metal scenario | `docs/bare-metal-seller-quickstart.md` under "Release-qualified deal evidence": the role inputs, the pinned known-hosts file among them, `--run-id`, teardown to `released`, and revocation proven only by an authentication refusal. `docs/development/TESTING.md` is unchanged: its sentence on `e2e_bare_metal_deal` stays true |
 | The role's task files parsed by the repository's syntax check (Round 2 review F1, `tasks.md` 14.8 and 14.14) | `docs/development/TESTING.md`, beside "Chart Render Tests", and `domains/vms/provisioning/iac/README.md` under "Validation": `validate-playbooks` parses the `vm-management` task files, a capacity check's included, through a parse-only playbook importing them in the role's context, what a syntax check does not show, and that a free-form `shell` string's unbalanced quote fails its task file as it loads |
 | S6 the e2e image's SSH client | None beyond `e2e-tests/Dockerfile`'s own comment: which system packages an image carries is its Dockerfile's to state |
+| S7 the mandate's part-owned lifecycle | `openspec/specs/settlement-servicing/spec.md` ("The payments mandate is derived exactly from the Agreement", by the archive) |
+| S7 the contract's source and vector provenance | `kit/arkhai-payments/schema/SOURCE.md`, written with the contract (14.22): the extracted artifact's hash and extraction, its one defect, the previous publication kept as framing evidence, and the synthetic current-wire fixture that is not producer provenance; `docs/development/TESTING.md` under "Payment Receipts in Tests", whose sentence on the published vectors says which wire they pin and that current-wire producer vectors were not supplied with this schema snapshot, so the kit retains the previous publication for canonical framing and uses an explicit SCM synthetic current-wire fixture; `docs/development/ROADMAP.md` "Payment qualification boundaries": that current-wire producer vectors were not supplied with the schema snapshot |
+| S7 the required nullable maximum hold extension and the one wire serializer | `kit/arkhai-payments/schema/SOURCE.md` ("Required nullable durations"), written with the fix (14.26): the published form, the generation normalization of exactly two properties, the unnormalized `ConnectStatus`, and `wire_json` as the one wire form; `kit/arkhai-payments/README.md`; the code is its own record (`kit/arkhai-payments/scripts/generate_models.py`, `market_arkhai_payments.canonical`). No permanent specification changes: the derived mandate still states `P0D` |
 | Coordination with `prove-real-vm-provisioning` | None: change history. That change promotes its own decisions and archives its own deltas at its closeout |
 | Live qualification of both lanes | None: external evidence, recorded at closeout as live evidence or named blockers (`tasks.md`, the closeout's end-to-end part) |
 | Roadmap currency | `docs/development/ROADMAP.md` "Goal 1 — Consolidate physical-resource authority in the provisioning service" (the real runner's evidence row) and "Payment qualification boundaries". Goal 2 is unchanged: this change no longer sells VM shapes without GPUs |

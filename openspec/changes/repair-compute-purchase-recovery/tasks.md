@@ -3648,6 +3648,242 @@ prerequisite of this change's live bare-metal lane.
       Python project, none of which changes here; whether it is reused for this
       candidate is settled under the owner's reuse policy.
 
+**The payments mandate in the service's current wire (S7).** A test-mode preflight
+approval was refused with `400 invalid_request`: the service's current `ApprovalRequest`
+requires each part's own `authorities` and `maxHoldExtension` and refuses the
+mandate-level `authorities` the kit sends (`design.md`, "S7: the payments mandate in the
+service's current wire contract"). The supervising session reproduced it offline against
+the service's request validator; no transaction exists and no rental started. Every
+change is in `kit/arkhai-payments`, the one payments implementation the VM, bare-metal,
+and API-credit roles share, and in the pins and locks of the projects that install it.
+
+- [x] 14.21 Regression first, at the mandate seam (unit, `tests/test_wire_contract.py`
+      and `tests/test_mandates.py`), red against the vendored previous contract:
+      - the previous publication's mandates and receipt, and a derived mandate with
+        mandate-level `authorities` added, are refused by the generated models; a part
+        without its own `authorities` or `maxHoldExtension` is refused;
+      - the derived mandate equals a literal current-wire `ApprovalRequest` written from
+        the published schema and the service's normalization of the previous
+        authorities, and the generated `ApprovalRequest` accepts it;
+      - the seller's settlement data and the buyer's check agree on one transaction ID;
+      - the buyer's check refuses an added extend authority, a nonzero maximum hold
+        extension, a stop notice, another partial period, and a `start` on the part;
+      - stored settlement data in the previous wire is refused, not upgraded;
+      - a receipt and a snapshot for the derived mandate verify and validate, and the
+        reverse event validates.
+
+      Red, on the vendored previous contract: 12 failed, 1 passed (the nonzero
+      maximum hold extension was already refused, as an extra key). Green after
+      14.22 and 14.23: 13 passed. The fixture's expected request is written by hand
+      from the published schema; only the deal hash is computed, by the kit's JCS,
+      which the previous vectors still pin.
+- [x] 14.22 The contract and its provenance, in `kit/arkhai-payments`:
+      - `schema/payments.schema.json` becomes the neutral artifact extracted from the
+        published OpenAPI document, unedited;
+      - `src/market_arkhai_payments/models.py` is regenerated from it by
+        `kit/arkhai-payments/scripts/generate_models.py`;
+      - `schema/SOURCE.md` records the artifact's hash, its extraction, and its
+        `HttpUrl` defect; that the vectors are the previous publication, kept for
+        framing only; and that the current wire is pinned by a synthetic fixture that
+        is not producer provenance;
+      - `kit/arkhai-payments/scripts/check_vectors.py` checks the previous vectors'
+        framing over raw JSON and asserts that the current models refuse their
+        mandates and receipt.
+
+      Done. The vendored schema is the supplied extraction byte for byte, SHA-256
+      `5cf22707c0e5c1c1c3ffd398d0a1710e136e719eee841c39323eba837e0ea848`, 93
+      definitions; the vectors are unchanged,
+      `e1a26e4c3fcde9724e5ec9bc606d20bebe49404554eca69a4cb78e4146215631`. Against
+      the previous 83: `Authorities`, `EventRequest`, `HoldUntilStop`, and
+      `TransactionStop` are gone; `OnceAuthorities`, `RateAuthorities`,
+      `StopAuthority`, `PartialPeriod`, `StopPartialPeriod`, `HoldAfterStop`,
+      `HoldExtension`, `PendingStop`, `PartStop`, `PartEnd`, `StopCause`,
+      `UntilLiftBalanceHold`, `BillingPortalRequest`, and `BillingPortalSession` are
+      new; 23 others changed in meaning, among them `Mandate`, both part kinds,
+      `PartSnapshot` (required `extensions`), `TransactionSnapshot` (no `stop`),
+      `LifecycleEvent` (`extend` and `lift`), and `ApiErrorCode`; the rest changed
+      only in rendering.
+
+      Two consequences reached code. The OpenAPI rendering states a constant as a
+      one-value `enum`, which the generator made an `Enum` class, so a receipt
+      issuer's scheme no longer equalled its wire string and every receipt failed
+      verification; the generator now types a one-value `enum` as a literal
+      (`--enum-field-as-literal one`), the typing `const` produced, and the schema
+      is not edited. `DealCommitment` is now its own string pattern rather than a
+      reference to `Sha256Hex`, so `deal.root.root` became `deal.root` in the client
+      and receipt verification, and the VM storefront's payment evidence now reads
+      the deal from the receipt's wire form instead of the generated nesting.
+
+      Evidence: `kit/arkhai-payments/scripts/generate_models.py --check`, current;
+      `kit/arkhai-payments/scripts/check_vectors.py`, `ok 5`.
+- [x] 14.23 Derivation and consumption, in the kit alone:
+      - `mandates.py` derives the one `once` part with its own stop (no notice, partial
+        period charged), reverse, and empty extend authorities and `maxHoldExtension`
+        `P0D`, and no mandate-level authorities;
+      - `agreement.py`'s `require_bound_to` reads the reverse authorities from the
+        stored mandate's one part;
+      - `fixtures/payments_client.py` serves each part snapshot's `extensions`;
+      - the receipt fixture's tests reproduce the previous publication's framing and
+        signature from its raw body, and sign and verify a current-wire receipt.
+
+      Done as listed; `require_bound_to` also refuses a stored mandate without
+      exactly one part. `test_mandates.py` and `test_agreement.py` assert the part's
+      authorities where they asserted the mandate's; `test_mandates.py`'s tampered
+      mandate-level `authorities` case now passes as a refusal of the previous wire.
+      The kit's unit suite: 106 passed (unit). The kit's README states the contract's
+      source and the part's authorities.
+- [x] 14.24 Packaging: `arkhai-kit-arkhai-payments` takes its one minor bump against
+      `dev`, 0.4.0; the bare-metal buyer's and storefront's exact pins move to it, and
+      every other dependant's lower bound rises to it, since each needs the current
+      wire; `make lock` refreshes the locks; no other version moves.
+
+      Done. Each dependant whose requirement changed takes its own minor bump
+      against `dev`: bare-metal buyer 0.7.0, API-credit buyer 0.8.0, API-credit
+      storefront 0.18.0, API-credit domain 0.9.0, VM buyer 0.10.0. The VM and
+      bare-metal storefronts are already above `dev` in this change and are not
+      bumped again. `e2e-tests`' lower bound rises. No exact pin on a bumped
+      dependant exists, so none moves.
+
+      `make lock`, under uv 0.12.19, rewrote ten locks and only their internal
+      entries: `kit/arkhai-payments`, `domains/apicredits` and its buyer, service,
+      and storefront, the VM and bare-metal buyers and storefronts, and `e2e-tests`.
+      No third-party pin moved. A second `make lock` left them byte for byte, and
+      each project's `make reinit` rewrote none; every one of the ten environments
+      installs the kit at 0.4.0 from its lock.
+- [x] 14.25 Verification:
+      - the kit's gates: `make -C kit/arkhai-payments test` (type check, vectors,
+        generated models, unit);
+      - the payment suites of every buyer and seller that composes the kit: VM buyer
+        and storefront, bare-metal buyer and storefront, API-credit buyer, storefront,
+        and domain;
+      - `make check-packaging`, `make check-change`, and
+        `make check-comment-hygiene`.
+
+      Evidence, every suite from its refreshed lock (14.24), each target exiting 0:
+      - `make -C kit/arkhai-payments test`: type check, no issues in 16 files;
+        vectors, `ok 5`; generated models current; unit, 106 passed;
+      - each consumer's whole `make test`: VM buyer, 213 passed; bare-metal buyer,
+        17 passed; API-credit buyer, 35 passed; API-credit domain (`test-domain`), 41
+        passed; API-credit service, 79 passed; API-credit storefront, 248 passed;
+        bare-metal storefront, 536 passed; VM storefront, unit 1198 passed and 1
+        skipped, integration 501 passed, the payment evidence path changed in 14.22
+        among them;
+      - `make -C e2e-tests test-unit`: 279 passed;
+      - `make check-packaging`, `make check-change`, `make check-change-index`, and
+        `make check-comment-hygiene`: passed.
+
+      An earlier pass ran the same suites with the 0.4.0 wheel installed over each
+      locked environment; it was diagnostic and is superseded by this one.
+
+      Not run: the fresh-context diff check, since this session runs no subagent.
+
+      End-to-end: `e2e_bare_metal_payment_deal` and the API-credit payment scenario
+      run against a configured payments target only, and the pipeline configures none,
+      so no lane exercises the wire. Owed by validation: the round's full local run,
+      Helm, and the pipeline on the candidate this makes; the live lanes' approval
+      against the service is the supervising session's.
+
+**The required nullable maximum hold extension (S7, continued).** The supervising
+session's offline check against the service's request validator found that both part
+kinds' `maxHoldExtension` is required and accepts `null`. The published schema's
+`allOf` admits no null, so the generated models refused it, and the kit's
+`exclude_none` dumps would have dropped it (`design.md`, "S7, continued: the required
+nullable maximum hold extension"). The kit's own mandates state `P0D` and are not
+affected. The kit stays at 0.4.0, since it is unreleased in this change, and no lock
+moves.
+
+- [x] 14.26 Regression first, then the fix, in `kit/arkhai-payments` alone:
+      - `tests/test_required_nullable.py` (unit), with SCM synthetic mandates. It
+        covers both part kinds:
+        - null is accepted and kept, and omission is refused;
+        - `P0D` dumps exactly as before;
+        - the transaction ID equals the SHA-256 of a hand-written literal JCS;
+        - a mock-transport approval body keeps the null and the attached Agreement's
+          own null, and omits the absent `end` and `label`;
+        - a receipt and a snapshot for a null mandate verify;
+        - the kit derives `P0D` and its buyer check and `require_bound_to` refuse
+          null;
+        - generation changes exactly the two properties, and refuses a publication
+          that is corrected, not nullable, or optional, while the vendored schema keeps
+          its hash.
+      - `kit/arkhai-payments/scripts/generate_models.py` generates from a normalized
+        copy in which exactly `OncePart.maxHoldExtension` and
+        `RatePart.maxHoldExtension` are `anyOf` `Duration` or null, after asserting
+        each is required and in its published form. `models.py` changes in those two
+        types and its header only, and the vendored schema is unchanged.
+      - `market_arkhai_payments.canonical.wire_json` replaces every `exclude_none` wire
+        dump in the kit: the client bodies, `jcs_bytes`, settlement data, the mandate
+        check, receipt framing and verification, and the fixtures.
+      - `schema/SOURCE.md` ("Required nullable durations") and the README record the
+        discrepancy, the normalization, and why `ConnectStatus.connectedAccount`, of the
+        same form, is generated as published.
+
+      Red: 7 of the 17 new tests fail with the previous `models.py` and the new
+      serializer; 6 fail with the new models and an `exclude_none` serializer. Green:
+      17 passed.
+- [x] 14.27 Verification of 14.26:
+      - `make -C kit/arkhai-payments test`, exit 0: type check, no issues in 16 files;
+        vectors, `ok 5`; generated models current; unit, 123 passed.
+      - `make check-packaging`, exit 0. It rebuilt the wheelhouse, and every lock is
+        current and unchanged.
+      - Each consumer re-synced from its lock with `make reinit`, which installs the
+        rebuilt 0.4.0 wheel. Whole suites: VM buyer 213 passed, bare-metal buyer 17,
+        API-credit buyer 35, API-credit domain 41, API-credit service 79, and
+        `e2e-tests` unit 279.
+      - Each storefront's payment-path modules, since only the kit's serializer and
+        two model types changed:
+        - VM: `test_payment_settlement`, `test_settlement_composition`,
+          `test_admin_settle_service`, and `test_buyer_selection_negotiation`, 53
+          passed;
+        - bare metal: `test_payment_settlement_client`, `test_http_settlement`,
+          `test_domain_runtime`, and `test_app_composition`, 97 passed;
+        - API credits: `test_payment_recovery`, `test_payment_settlement`,
+          `test_credits_buy_selection`, `test_credits_negotiate_cli`, and
+          `test_exact_selection_api`, 23 passed.
+      - `make check-change`, `make check-change-index`, and
+        `make check-comment-hygiene`: passed.
+
+      The storefronts' whole suites stand from 14.25, on the non-null path this fix
+      leaves byte for byte as it was; they are not rerun here. Owed by aggregate
+      validation: the storefronts' whole suites on the frozen candidate, the
+      fresh-context review, the root `make test`, Helm, and the pipeline.
+
+**The S7 review's corrections.** An independent review of S7's public source raised no
+blocking finding. Its minor findings are settled in documentation and one unit test;
+no production code, schema, vector, version, or lock changes.
+
+- [x] 14.28 Corrections, in `design.md` (S7), `kit/arkhai-payments/schema/SOURCE.md`,
+      `kit/arkhai-payments/README.md`, and
+      `kit/arkhai-payments/tests/test_required_nullable.py`:
+      - the history claim is narrowed. The refused approval created no transaction,
+        but an earlier test-mode purchase in the previous wire did; the supervising
+        session's read-back found it fully reversed and refunded, and it is kept as
+        it is. Before the first live qualification, every retained previous-wire
+        payment is read from the service by its original transaction ID and its
+        disposition known; one that is not terminal is reconciled with the service
+        directly, never by rewriting or re-approving its wire. That read-back is the
+        supervising session's external evidence, not a test of this repository;
+      - `SOURCE.md`'s update procedure also revises
+        `kit/arkhai-payments/scripts/check_vectors.py`'s refusal assertions and the
+        README's wording on the previous vectors, when current-wire producer vectors
+        replace them;
+      - `wire_json` is described as the shared kit's one serializer. The VM,
+        bare-metal, and API-credit storefronts' receipt-evidence dumps keep
+        `exclude_none`: identical today, since a receipt has no required nullable
+        property, and moved to the shared serializer only if one appears;
+      - a unit test pins the normalization of an optional explicit null: a part's
+        `end: null` validates, `wire_json` omits it, the transaction ID hashes the
+        normalized mandate, and settlement data paired with the raw JSON's hash is
+        refused. `SOURCE.md` states the rule.
+
+      Validation: the shared kit passes 124 unit tests, typing, vectors, and
+      generated-model checks; packaging, change validation, and comment hygiene pass.
+      The full root `make test` passed before this correction. Every production file,
+      schema, vector, and dependency lock matches that run's input; the added unit
+      case is covered by the fresh kit run. The changed README's wheel metadata is
+      covered by fresh packaging. CI, owned Helm validation, and physical rental
+      qualification remain outstanding.
+
 ## 15. Closeout
 
 The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
@@ -3677,7 +3913,10 @@ change to implementation.
           requirement states per-listing pause semantics, no test closes a paused
           listing by reconciliation and reopens it, and bare metal has no test of a
           paused listing refusing an opening;
-        - the live lanes' state at closeout, as evidence or as named blockers.
+        - the live lanes' state at closeout, as evidence or as named blockers;
+        - S7's payments contract: current-wire producer vectors were not supplied
+          with this schema snapshot; the kit retains the previous publication for
+          canonical framing and uses an explicit SCM synthetic current-wire fixture.
       - "Goal 2 — Negotiate full compute capability, not GPU count alone" is
         unchanged by this change: D7 is withdrawn, and `gpu-optional-compute-shapes`,
         archived, delivered that scope.
@@ -3782,6 +4021,13 @@ change to implementation.
         - every accepted deal drained, with no refund taken as proof;
         - the precondition that a refresh or reopen under the same identity keeps
           the pause.
+      - `docs/development/TESTING.md` "Payment Receipts in Tests": the published
+        vectors pin the previous wire's framing; current-wire producer vectors were not
+        supplied with this schema snapshot, so the kit uses an explicit SCM synthetic
+        current-wire fixture (S7). The
+        section's example reproduces the vector signature from the raw body, since the
+        current models refuse that body; "Private Service Dependencies"' current
+        example says the same of the kit's conformance.
       - `openspec/specs/README.md`: no new capability or companion, so no edit.
         Confirm it.
       - Complete the promotion record.
@@ -3789,7 +4035,7 @@ change to implementation.
       `make check-doc-citations CHANGE=repair-compute-purchase-recovery`, then
       `openspec validate repair-compute-purchase-recovery --strict`.
 - [ ] 15.11 **Archival.** Run `openspec archive repair-compute-purchase-recovery -y`,
-      which merges the `physical-provisioning`, `fulfillment`, and
-      `storefront-publication` deltas into
+      which merges the `physical-provisioning`, `fulfillment`,
+      `storefront-publication`, and `settlement-servicing` deltas into
       `openspec/specs/`. The deltas were not promoted by hand, so `--skip-specs` is
       not used.

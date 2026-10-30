@@ -96,7 +96,8 @@ once carried is withdrawn (D7).
   before any host effect. Defaults keep today's wait and autostart.
 - **CPU-only shapes and `aarch64` guests (D7): withdrawn.** Their slice returned to
   `gpu-optional-compute-shapes`, which has since delivered it on `dev` and is archived.
-- **Payments.** No code change. Environments are rebuilt from the wheelhouse.
+- **Payments.** The receipt refusal needed no code; environments are rebuilt from the
+  wheelhouse. The mandate's wire did change (S7, below).
 - **Registry bearer token on bare metal (S5).** The bare-metal storefront reads
   `[registry.auth]`, a URL-to-token map from its Secret overlay, and sends each
   registry its own token beside its signature, on publication and on its status
@@ -106,6 +107,17 @@ once carried is withdrawn (D7).
 - **An SSH client in the e2e image (S6).** The `e2e-tests` image's runtime stage
   installs `openssh-client`, since the real-host bare-metal scenario (D14) runs `ssh`
   and the slim base image has none. No Python package or lock changes.
+- **The payments mandate in the service's current wire (S7).** The payments service now
+  refuses a mandate with mandate-level `authorities`: each part carries its own
+  lifecycle authorities and `maxHoldExtension`. The shared payments kit vendors the
+  contract extracted from the service's published OpenAPI document, regenerates its
+  models from it, and derives the one `once` part with the service's own normalization
+  of the previous authorities: buyer and payee may stop it at once, payee and dispute
+  authority may reverse it, nobody may extend its hold. Buyer and seller still derive
+  the identical mandate, and a stored mandate in the previous wire is refused, not
+  upgraded. Current-wire producer vectors were not supplied with this schema snapshot;
+  the kit retains the previous publication for canonical framing and uses an explicit
+  SCM synthetic current-wire fixture, recorded as such.
 
 ## Capabilities
 
@@ -127,6 +139,8 @@ once carried is withdrawn (D7).
 - `storefront-publication`: a bare-metal storefront refuses to start on a registry pin
   or `[registry.auth]` token naming no configured registry, or one registry's token
   stated twice (S5).
+- `settlement-servicing`: the payments mandate's `once` part carries its own stop,
+  reverse, and (empty) extend authorities and a zero maximum hold extension (S7).
 
 ### New Capabilities
 
@@ -142,7 +156,8 @@ None.
 - Guest network or security redesign. The subnet-wide masquerade rule and the root
   password posture of guests are unchanged.
 - Marketplace, pricing, or payment redesign. The buyer's refusal of a five-minute
-  purchase at some rates is recorded only. No payments kit or service change.
+  purchase at some rates is recorded only. No payments service change, and the payments
+  kit changes only to follow the service's current wire (S7).
 - Unrelated route, publication, and trading-pause defects. The bare-metal
   storefront's dropped registry token (S5) is not unrelated: it stops the live
   bare-metal lane from publishing to a registry that gates writes.
@@ -193,6 +208,11 @@ None.
     bare-metal scenario and the harness's run-id resolver are corrected, with unit
     tests; and its image's runtime stage installs `openssh-client`, which that
     scenario runs, S6);
+  - `kit/arkhai-payments` (S7: the vendored contract, its generated models and
+    provenance, mandate derivation and the stored mandate's binding, the receipt and
+    snapshot fixtures, the vector check, and tests), and the lower bound or exact pin
+    on it, with the locks, of every project that installs it: the VM, bare-metal, and
+    API-credit buyers and storefronts, `domains/apicredits`, and `e2e-tests`;
   - the host registration requests in `docs/development/VALIDATION_RUNBOOK.md` and
     `tools/issue-discovery`'s local phase configuration, which state `ssh` version 2.
   - Each changed package bumps its minor version once against `dev`, to the next
@@ -209,6 +229,9 @@ None.
   - No automatic schema migration.
   - No downgrade to `ssh` version 1 is provided or qualified; retained test hosts
     are moved forward explicitly in the coordinated rollout (`design.md`, D3).
+  - A payments mandate is sent in the service's current wire only (S7). Accepted
+    Agreements, stored mandates, and transaction IDs are never rewritten; a stored
+    mandate in the previous wire is refused.
 - **Deployment:** none required by the code. Qualifying the lanes needs rebuilt
   buyer environments and images, re-registers each retained host at `ssh` version 2,
   records the buyer route in host records, and sets the VM pool's GPU `extra_vars`.
@@ -245,7 +268,7 @@ None.
 
 - [x] `docs/development/ARCHITECTURE.md`
 - [x] Existing subsystem specification: `physical-provisioning`, `fulfillment`,
-  `storefront-publication`
+  `storefront-publication`, `settlement-servicing`
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
@@ -281,3 +304,9 @@ None.
   `docs/development/VALIDATION_RUNBOOK.md`.
 - Roadmap: Goal 1's gap row on the real runner's evidence, and the payment
   qualification boundaries, in `docs/development/ROADMAP.md`.
+- The payments mandate's part-owned lifecycle (S7):
+  `openspec/specs/settlement-servicing/spec.md` (delta). The contract's source and
+  vector provenance: `kit/arkhai-payments/schema/SOURCE.md`;
+  `docs/development/TESTING.md` ("Payment Receipts in Tests"); and, in
+  `docs/development/ROADMAP.md`, that current-wire producer vectors were not supplied
+  with the schema snapshot.

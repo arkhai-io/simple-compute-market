@@ -13,6 +13,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from market_arkhai_payments.canonical import wire_json
 from market_arkhai_payments.errors import MandatePolicyError
 from market_arkhai_payments.mandates import MandatePolicy, PaymentsOptionParams, derive_mandate
 from market_arkhai_payments.models import AccountId, Mandate
@@ -132,7 +133,7 @@ class PaymentSettlementData(BaseModel):
 
     def to_wire(self) -> dict[str, Any]:
         return {
-            "mandate": self.mandate.model_dump(mode="json", by_alias=True, exclude_none=True),
+            "mandate": wire_json(self.mandate),
             "transaction_id": self.transaction_id,
         }
 
@@ -148,7 +149,10 @@ class PaymentSettlementData(BaseModel):
 
         wire = self.to_wire()["mandate"]
         payee = selected_payment_option(agreement).payee_account
-        others = [account for account in wire["authorities"]["reverse"] if account != payee]
+        parts = wire["parts"]
+        if len(parts) != 1:
+            raise MandatePolicyError("stored payment mandate does not have exactly one part")
+        others = [account for account in parts[0]["authorities"]["reverse"] if account != payee]
         if len(others) > 1:
             raise MandatePolicyError("stored payment mandate names extra reverse authorities")
         try:
@@ -160,7 +164,7 @@ class PaymentSettlementData(BaseModel):
         except (KeyError, TypeError, ValueError) as exc:
             raise MandatePolicyError("stored payment mandate is malformed") from exc
         derived = derive_mandate(dict(agreement), policy)
-        if derived.model_dump(mode="json", by_alias=True, exclude_none=True) != wire:
+        if wire_json(derived) != wire:
             raise MandatePolicyError("stored payment mandate differs from the accepted Agreement")
 
 
