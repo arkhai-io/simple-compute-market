@@ -1,0 +1,59 @@
+---
+# Whether this host has a GPU that passthrough would serve, and so whether its
+# boot configuration is changed for passthrough at all.
+#
+# Read-only, and independent of the IOMMU: each PCI device's class and vendor
+# are in sysfs whether or not the IOMMU is enabled. The passthrough audit
+# cannot make this decision. With the IOMMU disabled it assesses nothing and
+# reports no GPUs, and enabling the IOMMU is part of the configuration being
+# decided, so a GPU host whose IOMMU starts disabled would never be prepared.
+#
+# Presence is keyed to the vendor as well as the class. A server's management
+# controller and the emulated display of most KVM cloud instances are display
+# controllers too (class 0300), so a class test alone would change the boot of
+# exactly the GPU-less hosts this rule spares. A display or 3D controller (0300,
+# 0302) from NVIDIA (10de) or AMD (1002) -- the vendors whose GPUs are passed
+# through -- is a GPU; another vendor's is treated as none until the operator
+# sets `gpu_passthrough: enabled`.
+#
+# Binding is not decided here: it still follows an assessable audit after the
+# reboot (gpu-bind.yml).
+
+- name: Detect a GPU from a vendor whose GPUs are passed through
+  shell:
+    cmd: |
+      set -uo pipefail
+      sysfs="${SYSFS_ROOT:-/sys}"
+      present=false
+      for dev in "${sysfs}"/bus/pci/devices/*; do
+        [ -r "${dev}/class" ] && [ -r "${dev}/vendor" ] || continue
+        class="$(cat "${dev}/class")"
+        vendor="$(cat "${dev}/vendor")"
+        case "${class:0:6}" in
+          0x0300|0x0302) ;;
+          *) continue ;;
+        esac
+        case "${vendor}" in
+          0x10de|0x1002) present=true ;;
+        esac
+      done
+      echo "${present}"
+    executable: /bin/bash
+  register: gpu_presence_probe
+  changed_when: false
+
+- name: Decide whether GPU passthrough is configured on this host
+  set_fact:
+    gpu_present: "{{ (gpu_presence_probe.stdout | trim) == 'true' }}"
+    gpu_passthrough_configured: >-
+      {{ gpu_passthrough == 'enabled'
+         or (gpu_passthrough == 'auto' and (gpu_presence_probe.stdout | trim) == 'true') }}
+
+- name: Report the GPU passthrough decision
+  debug:
+    msg:
+      - "GPU present: {{ gpu_present }}"
+      - "gpu_passthrough: {{ gpu_passthrough }}"
+      - >-
+        Passthrough boot configuration and binding:
+        {{ 'applied' if gpu_passthrough_configured | bool else 'skipped; the boot configuration is left as it is' }}

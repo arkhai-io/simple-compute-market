@@ -346,12 +346,14 @@ remains blocked; it is never counted as a successful live deal.
 
 #### The canonical compute deal
 
-The compute family's canonical deal settles through Alkahest on the dev chain
-and delivers through the provisioning mock profile. The diagram draws it part
-by part, from holding the loops to resuming them. Each box is one part of the
-deal, its preview, advance, and measurement folded into a sentence or two, and
-the tag at its right is the deal stage the shared state records for it. The
-bare-metal lane runs a second deal on the freed host before its loops resume.
+The compute family's canonical deal settles through Alkahest on the dev chain.
+The pipeline's lanes deliver it through the provisioning mock profile; the
+[real-provisioning lane](#the-real-provisioning-lane) delivers it through a real
+KVM host. The diagram draws it part by part, from holding the loops to resuming
+them. Each box is one part of the deal, its preview, advance, and measurement
+folded into a sentence or two, and the tag at its right is the deal stage the
+shared state records for it. The bare-metal lane runs a second deal on the freed
+host before its loops resume.
 
 ![The canonical compute deal, part by part, from holding the loops to resuming them](diagrams/e2e-compute-deal.svg)
 
@@ -369,14 +371,33 @@ every compute conftest provides under one set of names supply who is calling,
 and each domain's `ComputeDealDriver`
 (`e2e-tests/tests/e2e/roles/scenarios/vms/compute_deal_driver.py`,
 `e2e-tests/tests/e2e/roles/scenarios/bare_metal/compute_deal_driver.py`)
-supplies supply seeding, provision terms, the mock rules and their release, the
-settlement preview's expectations, the settlement's dispatch, the delivery
-assertions, the lease view, and the re-reservation of released supply.
+supplies supply seeding, provision terms, the settlement preview's expectations,
+the settlement's dispatch, the delivery assertions, the lease view, and the
+re-reservation of released supply.
 Negotiation has no driver hook: a compute domain that negotiates differently is
-resolved in its storefront composition. `e2e-tests/tests/unit/test_compute_deal_stages.py`
-checks the stage set from source: each domain subclasses every shared stage once,
-in order, with an empty body, and every state field has one producer that runs
-before any stage reads it.
+resolved in its storefront composition.
+
+A shared stage never depends on the mock profile. Holding a provisioning job at
+a mock rule's gate, releasing it, evaluating the rule, and confirming the mock
+profile are mock gates: each is a mock-lane stage of its own (`MockLaneStage`),
+which only a lane delivering through the mock profile declares, between the
+shared stages it surrounds. A mock driver supplies the gates through a second
+part, `MockGates`, which a real driver does not implement. A stage that would
+both advance the deal and touch a gate is split at the gate, so its gate-free
+part stays shared: the escrow apart from arming the create gate, the advance to
+`active` apart from releasing and draining the create job, the lease expiry
+apart from arming the teardown gate, and teardown's completion apart from
+releasing and draining the teardown job. A gate answered by a real driver with a
+no-op would report a hold that never happened, and a shared assertion would hold
+under one driver and be vacuous under another. Settlement submits only once the
+lane's last check before it has passed: the mock rule's evaluation in a mock
+lane, the check of the previewed host in the real lane.
+
+`e2e-tests/tests/unit/test_compute_deal_stages.py` checks the stage set from
+source: a mock lane subclasses every stage once, in definition order, with an
+empty body; the real lane runs every shared stage in that order and no mock-lane
+stage; no shared stage names a mock gate or the mock test client; and every
+state field has one producer that runs before any stage reads it.
 
 Settlement by introduction is defined once the same way, in
 `e2e-tests/tests/e2e/roles/helpers/introduction_stages.py`: disclosure of the
@@ -394,15 +415,17 @@ each domain to the shared stages and fields.
 
 #### One part, zoomed in
 
-Settle has the fullest shape of any part, so it is the one drawn open. The
-stage previews twice, through the storefront's evaluate-settle and the
-provisioning service's evaluate-job, advances with one settle call, and
-measures a fulfillment dispatched and held at the mock gate. What it reads
-from and writes to the shared deal state is what ties it to the parts before
-and after: `require_state` on the escrow, listing, negotiation, and armed gate
-on the way in, and the placed host and fulfillment ids on the way out, the
-latter read next by the deliver part. Every other box in the deal diagram
-opens the same way, with its own previews, advance, and measurement.
+Settle has the fullest shape of any part, so it is the one drawn open, as a
+mock lane runs it. It previews twice, through the storefront's evaluate-settle
+and, in a mock-lane stage, the provisioning service's evaluate-job, advances
+with one settle call, and measures a fulfillment dispatched and not yet
+converged. The real lane previews the same settlement and checks, in place of
+evaluate-job, that the previewed host is its target. What the part reads from
+and writes to the shared deal state is what ties it to the parts before and
+after: `require_state` on the escrow, listing, negotiation, and the passed
+preflight on the way in, and the placed host and fulfillment ids on the way
+out, the latter read next by the deliver part. Every other box in the deal
+diagram opens the same way, with its own previews, advance, and measurement.
 
 ![One part of the compute deal, settle, zoomed in: its two previews, one advance, and measurement](diagrams/e2e-settle-zoom.svg)
 
@@ -500,7 +523,9 @@ A mock-provisioned deal proves the services compose into a working deal, not
 that a real resource was delivered. Bare metal's release-qualified deal
 (`e2e_bare_metal_deal`) needs a real whole host to grant and revoke access on,
 which the pipeline never has, so no lane selects it: real access and its
-revocation remain a separate protected lane's evidence.
+revocation remain a separate protected lane's evidence. VM's real delivery is
+proven the same way, outside every lane, by
+[the real-provisioning lane](#the-real-provisioning-lane).
 
 The VM multi-registry scenario seeds Bob's and Alice's separate provisioning
 authorities through typed administration clients and refreshes both site
@@ -531,6 +556,76 @@ Each successful fetch also creates `<run-id>.zip` beside the run directory,
 containing that directory and its logs. Repeated fetches replace the ZIP.
 An unavailable artifact is reported without discarding other logs. A successful
 fetch means diagnostics were retrieved; it does not mean the tests passed.
+
+#### The real-provisioning lane
+
+`e2e_vm_real_provisioning`
+(`e2e-tests/tests/e2e/roles/scenarios/vms/test_real_provisioning_deal.py`) runs
+the canonical compute deal against a provisioning service outside its mock
+profile and a real KVM host, and proves what a mock-provisioned deal cannot: the
+service's VM execution is not mocked; the create and teardown jobs ran on the
+target host and succeeded; the buyer, with a key generated for the run and
+negotiated in the deal, reaches the guest at the delivered access as the
+delivered user and finds the negotiated vCPUs, memory within a stated tolerance,
+and at least the negotiated disk; an unrelated key is refused for that user; and
+once the lease expires and its capacity is released, a VM list job on the host
+no longer names the guest and the delivered access no longer connects. It claims
+nothing about the guest's other credentials, which a batch-mode SSH client never
+tries. The guest's host key is trusted on first use for the run only, and a
+later connection presenting another fails the run. The lane proves direct access
+through the host's forwarded port; no lane runs a relay-backed pool.
+
+It is in no lane, because the pipeline has no host to provision on. It runs from
+an operator's machine against a deployed stack's forwarded services, signing as
+the `local` profile's principals, with `ACTIVE_PROFILES=local,real-vm-target`:
+[`e2e-tests/README.md`](../../e2e-tests/README.md#real-vm-provisioning) gives the
+steps, and [`VALIDATION_RUNBOOK.md`](VALIDATION_RUNBOOK.md#21-provide-a-kvm-host)
+the operator procedure around them. Its target is the `REAL_VM_TARGET` section
+of `config-real-vm-target.yml`, which an environment owner renders into
+`e2e-tests/config/` beside the committed example, `config-real-vm-target.yml.example`,
+and which Git ignores.
+`e2e-tests/src/e2e_harness/real_vm_target.py` validates it before anything else.
+Version 1 describes one host — its identity, the address, user, and port the
+provisioning service connects to, where the service reads its key, the address
+buyers reach, and the capacity it sells — and admits only direct access; a
+missing or misspelled field fails naming it, and an unknown version is refused.
+Without the profile every stage skips naming it, and nothing is written to the
+stack.
+
+The lane registers its own supply from the target — a pool stating a GPU-less
+shape, the host with its connection, and one declaration selling the whole
+capacity — after checking, before its holds are taken, that the service reports
+its VM executor real. It runs every shared stage and no mock-lane stage, and
+inserts its own: a check that the settlement preview chose the target host,
+before settlement; a create-job poll after it; SSH access stages once the lease
+is recorded; a teardown-job poll; and the VM-list and access-ended checks after
+release. Where a mock lane releases a gate, the real lane waits for the real job
+instead, found through the fulfillment's capacity reservation in the operator
+job list and read by its status within a named bound. That poll is the one wait
+the lane adds to the stage discipline, which otherwise waits only on a request a
+stage made; a failed or timed-out job fails the stage with its logs.
+
+A rerun against the same stack reconciles rather than duplicates. The host's
+connection is replaced where it differs and the declaration rewritten, and the
+open listing an earlier run left on the scenario's resource is adopted, paused,
+rather than created, since a publication source backs one listing for good,
+whether it is open or closed. Several listings, a closed one, or one of another
+shape fail naming them, for an operator to recover. The settle stage waits for
+the deal's own `job_submitted` event, filtered by its negotiation and counted
+from a mark taken before settling, because an adopted listing's event log holds
+earlier deals' events.
+
+A run that fails after the storefront accepted its settlement, and before the
+guest is confirmed gone, is recovered by a module finaliser. It expires only its
+own deal's lease, through the site, and advances the held workers, so the
+provisioning service tears the guest down through its own lease lifecycle; it
+then confirms the teardown job and the guest's absence. It takes any settlement
+the storefront records, or whose dispatch it logs within a bound, as having
+dispatched a fulfillment, unless the settlement's status shows a refund begun
+before delivery. Where it cannot find the fulfillment or confirm the removal, it
+fails naming the escrow, negotiation, fulfillment, reservation, jobs, guest, and
+host. It never releases reservations fleet-wide, which would return the host's
+capacity to the market while its guest may still run.
 
 ## Coverage Contract Between Levels
 

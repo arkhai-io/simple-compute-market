@@ -12,3 +12,6 @@
 **/node_modules
 **/target
 dev-env/state
+# A real host's description, rendered into the e2e config directory on an
+# operator's machine; an image built from that checkout must not carry it.
+e2e-tests/config/config-real-vm-target.yml

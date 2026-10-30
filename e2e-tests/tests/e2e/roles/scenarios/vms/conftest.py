@@ -59,6 +59,7 @@ from tests.e2e.roles.helpers.compute_deal import SiteCapacity
 from tests.e2e.roles.helpers.compute_deal_stages import ComputeDealState
 from tests.e2e.roles.helpers.domain_deal import require_state
 from tests.e2e.roles.scenarios.vms.compute_deal_driver import VmComputeDealDriver
+from tests.e2e.roles.scenarios.vms.host_registry import resource_gpus
 
 log = logging.getLogger(__name__)
 
@@ -80,9 +81,11 @@ class DealState(ComputeDealState):
     # VM's own stage of the typed-client deal: 03a validates the publish 03b
     # performs.
     _registry_validate_passed: bool = False
-    # The buyer-CLI and one-shot scenarios' own sentinels: the listing resumed
-    # into publication, the executor host registered, and the capacity-event
-    # loop stepped (`B4c` and the buyer-CLI deal's capacity-event stage).
+    # The buyer-CLI and one-shot scenarios' own sentinels: provisioning runs its
+    # mock profile, the listing resumed into publication, the executor host
+    # registered, and the capacity-event loop stepped (`B4c` and the buyer-CLI
+    # deal's capacity-event stage).
+    _provisioning_mock_mode: bool = False
     resume_confirmed: bool = False
     _executor_host_registered: bool = False
     _capacity_events_advanced: bool = False
@@ -172,10 +175,15 @@ def capacity_source_for(resource: dict[str, Any], *, site_id: str | None = None)
     resource publishes, so this is derived from the resource rather than
     restated alongside it — a hand-written copy is a second place that has to
     stay in sync.
+
+    The GPU family appears only for a resource that carries GPUs
+    (`resource_gpus`); a GPU-less shape states its CPU, memory, and storage
+    alone.
     """
-    shape: dict[str, dict[str, Any]] = {
-        "gpu": {"count": resource.get("gpu_count", 1), "model": resource["gpu_model"]},
-    }
+    shape: dict[str, dict[str, Any]] = {}
+    gpus = resource_gpus(resource)
+    if gpus is not None:
+        shape["gpu"] = {"count": gpus[0], "model": gpus[1]}
     for family, field_name, published in (
         ("cpu", "count", "vcpu_count"),
         ("memory", "gib", "ram_gb"),
@@ -301,6 +309,67 @@ def one_site(report: dict) -> dict:
         f"{[site.get('site') for site in sites]!r}"
     )
     return sites[0]
+
+
+def step_listing_reconciliation(storefront_admin_client) -> tuple[int, int]:
+    """Step the held capacity-event loop once a deal has reserved capacity, and
+    return how many events were pending and how many the steps applied.
+
+    The settle path reserves capacity and leaves the derived-listing
+    reconciliation to the capacity-delta subscriber, which a module holding the
+    storefront's loops holds too, so a listing closes only once a stage steps it.
+
+    Dry run first, while the listing is still open: that is the cause, named,
+    and separable from the effect a later stage asserts. Projections are
+    refreshed before the deltas are applied, because the close path decides
+    from the storefront's own projection cache, and applying the deltas against
+    a pre-deal projection closes nothing however many of them there are.
+    """
+    preview = compute_deal.dry_run_storefront(storefront_admin_client, "capacity-events")
+    pending = one_site(preview)
+    assert pending["error"] is None, (
+        f"capacity-event dry run failed for site {pending['site']!r}: "
+        f"{pending['error']}"
+    )
+    assert not pending["would_position"], (
+        "the dry run would position at the feed head rather than apply "
+        "this deal's events, so the poller's cursor was lost"
+    )
+    assert pending["pending_count"] >= 1, (
+        "the deal reserved capacity, so its authority has events waiting; "
+        f"the feed reports none (cursor={pending['cursor']!r} "
+        f"head={pending['feed_head']!r})"
+    )
+
+    projections = compute_deal.advance_storefront(storefront_admin_client, "site-projections")
+    assert projections.get("sites"), (
+        "the site-projections advance reported no site state, so the "
+        "projection the close path reads was not refreshed and the "
+        "capacity cycle below would decide from stale availability"
+    )
+
+    applied_total = 0
+    for step in range(5):
+        cycle = one_site(
+            compute_deal.advance_storefront(storefront_admin_client, "capacity-events")
+        )
+        assert cycle["error"] is None, (
+            f"capacity-event cycle {step} failed for site "
+            f"{cycle['site']!r}: {cycle['error']}"
+        )
+        applied_total += int(cycle["applied_count"])
+        if not cycle["truncated"]:
+            break
+    else:
+        raise AssertionError(
+            "capacity-event feed still reports a truncated page after "
+            f"five cycles (applied {applied_total} events)"
+        )
+    assert applied_total >= pending["pending_count"], (
+        f"the advance applied {applied_total} event(s) where the dry run "
+        f"named {pending['pending_count']} pending"
+    )
+    return pending["pending_count"], applied_total
 
 
 # ---------------------------------------------------------------------------

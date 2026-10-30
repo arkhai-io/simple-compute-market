@@ -12,7 +12,7 @@ Bindings MUST be applied while an operator or automation holds a live connection
 
 Declared GPU capacity MUST count devices that can be assigned to a guest, not devices present, so a host does not publish capacity no fulfillment can satisfy.
 
-Passthrough boot configuration — the IOMMU kernel arguments, passthrough module loading, the rescue boot entry, and GPU detection — MUST be applied only to a host whose audit finds at least one GPU to pass through, unless the operator explicitly enables or disables it for that host. A host with nothing to pass through has its boot configuration left as it was, because changing the boot of a machine reachable only over its network buys nothing and risks the machine.
+Passthrough boot configuration — the IOMMU kernel arguments, passthrough module loading, the rescue boot entry, and GPU detection — MUST be applied only to a host on which a GPU is present, unless the operator explicitly enables or disables it for that host. Presence MUST be decided without the IOMMU, from each PCI device's class and vendor: a display or 3D controller from a vendor whose GPUs are passed through. The passthrough audit cannot decide it, because it assesses nothing until the IOMMU is enabled and enabling the IOMMU is part of this configuration; a display controller's class alone cannot either, because a server's management controller and a virtual machine's emulated display present it. Binding still follows only an assessable audit, and is attempted only where this configuration is applied, since binding applies through what it installs. A host with no GPU present has its boot configuration left as it was, because changing the boot of a machine reachable only over its network buys nothing and risks the machine. An override value other than enabling, disabling, or leaving the decision to presence MUST fail preparation, naming the value.
 
 #### Scenario: A GPU shares its group with a host-critical device
 
@@ -36,13 +36,23 @@ Passthrough boot configuration — the IOMMU kernel arguments, passthrough modul
 
 #### Scenario: A host has no GPU
 
-- **WHEN** host preparation runs on a host whose audit finds no GPU to pass through, and the operator has not enabled passthrough
+- **WHEN** host preparation runs on a host with no GPU present — including one whose only display controller is a management controller's or an emulated one — and the operator has not enabled passthrough
 - **THEN** its kernel command line, module loading, and boot entries are unchanged, no GPU-detection service is installed, and preparation otherwise completes
+
+#### Scenario: A GPU host's IOMMU starts disabled
+
+- **WHEN** host preparation runs on a host with a GPU present whose IOMMU is not yet enabled, and the operator has not disabled passthrough
+- **THEN** passthrough boot configuration is applied, enabling the IOMMU on the next boot, and no device is bound until an audit after that boot can assess it
 
 #### Scenario: The operator forces passthrough configuration
 
 - **WHEN** the operator enables or disables passthrough configuration for a host
-- **THEN** preparation applies or skips it as instructed, whatever the audit found, and the audit's findings still decide which devices may be bound
+- **THEN** preparation applies or skips it as instructed, whatever is present, and the audit's findings still decide which devices may be bound
+
+#### Scenario: The override names an unknown value
+
+- **WHEN** the operator's passthrough override is neither enabled, disabled, nor left to presence
+- **THEN** preparation fails before changing the host, naming the value
 
 ## ADDED Requirements
 

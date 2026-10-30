@@ -1,10 +1,11 @@
 """A mock-provisioned whole-host deal, on the bare-metal lane.
 
 Bare metal's run of the compute family's canonical deal, stage for stage with
-VM's typed-client deal. The stages bare metal shares with VM are defined once in
-``helpers/compute_deal_stages.py`` and declared here, in order, by subclassing;
-``BareMetalComputeDealDriver`` supplies bare metal's part of them. Bare metal's
-own stages are inserted in place:
+VM's typed-client deal. The stages bare metal shares with VM, and the mock-lane
+stages that hold and release its jobs at the mock rules' gates, are defined once
+in ``helpers/compute_deal_stages.py`` and declared here, in order, by
+subclassing; ``BareMetalComputeDealDriver`` supplies bare metal's part of them.
+Bare metal's own stages are inserted in place:
 
   03a  Publication preview:  the dry run would publish the deal's machine
   03b  Publication step:     one pass publishes it
@@ -62,16 +63,20 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     Stage05a_EvaluateNegotiate,
     Stage05b_NegotiationStartsAndVisible,
     Stage06b_ForceAcceptAndTerminal,
-    Stage07_OnChainEscrowAndProvGate,
+    Stage07_OnChainEscrow,
+    Stage07a_ArmCreateGate,
     Stage07b_VerifyEscrow,
     Stage08a_EvaluateSettle,
+    Stage08b2_ReleaseCreateGateAndDrain,
     Stage08b_SettlementSubmittedAndJobQueued,
     Stage08c_EvaluateProvisioningJob,
-    Stage09a_ProvisioningCompletes,
+    Stage09a_FulfillmentConvergesToActive,
     Stage09b_SettlementReadyAndCredentials,
+    Stage09c2_ArmTeardownGate,
     Stage09c_LeaseRecorded,
     Stage10a_LeaseExpirySetup,
     Stage10b_LeaseCycleBeginsTeardown,
+    Stage11a2_ReleaseTeardownGateAndDrain,
     Stage11a_TeardownDispatch,
     Stage11b_TeardownCompletion,
     alkahest_opening,
@@ -224,7 +229,11 @@ class TestStage06b_ForceAcceptAndTerminal(Stage06b_ForceAcceptAndTerminal):
     pass
 
 
-class TestStage07_OnChainEscrowAndProvGate(Stage07_OnChainEscrowAndProvGate):
+class TestStage07_OnChainEscrow(Stage07_OnChainEscrow):
+    pass
+
+
+class TestStage07a_ArmCreateGate(Stage07a_ArmCreateGate):
     pass
 
 
@@ -244,7 +253,11 @@ class TestStage08b_SettlementSubmittedAndJobQueued(Stage08b_SettlementSubmittedA
     pass
 
 
-class TestStage09a_ProvisioningCompletes(Stage09a_ProvisioningCompletes):
+class TestStage08b2_ReleaseCreateGateAndDrain(Stage08b2_ReleaseCreateGateAndDrain):
+    pass
+
+
+class TestStage09a_FulfillmentConvergesToActive(Stage09a_FulfillmentConvergesToActive):
     pass
 
 
@@ -341,6 +354,10 @@ class TestStage09c_LeaseRecorded(Stage09c_LeaseRecorded):
 # Phases 10 and 11 — lease expiry, teardown, and release
 # ===========================================================================
 
+class TestStage09c2_ArmTeardownGate(Stage09c2_ArmTeardownGate):
+    pass
+
+
 class TestStage10a_LeaseExpirySetup(Stage10a_LeaseExpirySetup):
     pass
 
@@ -350,6 +367,10 @@ class TestStage10b_LeaseCycleBeginsTeardown(Stage10b_LeaseCycleBeginsTeardown):
 
 
 class TestStage11a_TeardownDispatch(Stage11a_TeardownDispatch):
+    pass
+
+
+class TestStage11a2_ReleaseTeardownGateAndDrain(Stage11a2_ReleaseTeardownGateAndDrain):
     pass
 
 
