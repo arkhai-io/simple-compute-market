@@ -4344,13 +4344,16 @@ changes a real executor, job, receipt, price, lease, or role task.
         changed;
       - no CI dispatch, no image build, and no live action.
 
+      Correction (14.44): S11 is committed as `e957c418b`.
+
 **The merge of `prove-real-vm-provisioning` as archived (S12).** Both live
 qualifications already passed. Under the owner's standing authorization for needed
 upstream integration, the supervising session merged that change's final head,
 `72a49b6d45da89b26a0fe8c4e8975289f289398c`, at which it is archived (`design.md`, "S12:
 merging `prove-real-vm-provisioning` as archived"). No individual owner answer is
 recorded. `dev`'s squash of the same work has the identical tree, and reconciling that
-ancestry is left to a later merge of `dev`.
+ancestry is left to a later merge of `dev`. Correction (14.44): it is recorded already,
+by `2d9b23624`.
 
 - [x] 14.42 Resolve the merge so both changes hold, and record what came in:
       - `docs/development/VALIDATION_RUNBOOK.md`, the one conflict. That change's
@@ -4439,6 +4442,115 @@ ancestry is left to a later merge of `dev`.
       qualifications ran on runtime source this merge leaves byte-identical; nothing
       here is new live evidence. Owed by validation: the pipeline's VM lane on the
       merged candidate, whose shared settle stage now waits by negotiation.
+
+**`dev`'s squashed ancestry.** After the S12 merge, the supervising session merged `dev`'s
+squash of the same work, so this branch's history holds it.
+
+- [x] 14.44 Record what `2d9b23624` did:
+      - **Parents and trees, as read from the repository.**
+        - Its parents are `ca35f2264`, the S12 merge, and `c7dd275c5`, `dev`'s squash
+          of `prove-real-vm-provisioning`.
+        - Its tree equals `ca35f2264`'s, `5d81b488…`.
+        - `c7dd275c5`'s tree equals that change's archived head `72a49b6d4`'s,
+          `b319840d…`.
+        - `c7dd275c5`'s parent `182818a79` was already in this branch's history.
+        - So the merge brought no content and dropped none of `dev`'s: it records
+          that `dev`'s squash is an ancestor.
+      - **Records.**
+        - `design.md` S12 now states this, and 14.41 and S12's preamble carry a
+          correction pointing here.
+        - The index row names S11 beside S12.
+        - S11 is committed as `e957c418b`. The triages of `07`, `08`, `10`, and `17`,
+          dated snapshots that called S11 uncommitted, each gain a later note saying
+          so.
+
+**The parse-only refusal under tag selection, and the gate's native list (S13).** A fresh
+pre-closeout review of `2d9b23624` raised three findings. The supervising session
+fact-checked and accepted all three under the owner's standing instruction to complete
+this plan, to be fixed before closeout (`design.md`, "S13: the parse-only refusal under
+tag selection, and the gate's native list"). No individual owner answer is recorded, and
+no earlier validation stands for these corrections.
+
+- [x] 14.45 Review 18 F1: each parse-only playbook's refusal holds under any `--tags`
+      selection.
+
+      Done:
+      - **The refusal.**
+        `domains/vms/provisioning/iac/ansible/playbooks/host-kit/vm-setup-task-files.yaml`
+        and `ansible/playbooks/single-tenant/vm-management-task-files.yaml` each tag
+        their `Refuse to run` task `always`.
+      - **The comments.** They say why the tag is needed, and that an explicit
+        `--skip-tags always` or `--start-at-task` still passes over the refusal.
+      - **The structure tests.** `tests/test_ansible_structure.py`'s two wrapper tests
+        assert, through `refuses_under_every_tag`, that each play's first task is a
+        `fail` tagged `always`.
+      - **Unchanged.** No role, playbook the service runs, or other file changes.
+
+      Red and green:
+      - **Red: the task lists.** `ansible-playbook --list-tasks`, which executes
+        nothing, in the provisioning image with the IaC tree read-only and no network,
+        on the untagged refusal:
+        - under `--tags kvm_config`, vm-setup's list began with the imported
+          `always` tasks, "Ensure we have root privileges" and the install-script
+          copy;
+        - under `--tags vm_create`, vm-management's began with its `always` checks
+          and "Ensure libvirtd is running";
+        - neither list held the refusal.
+      - **Red: the structure tests.** The two wrapper tests failed (2 failed, 26
+        passed).
+      - **Green: the task lists.** Both lists begin with `Refuse to run`, tagged
+        `always`.
+      - **Green: a tag-selected run of each playbook.** Run in the same isolated
+        image under the `ansible.posix.json` callback, each exited 2. The report
+        names one task executed, `Refuse to run`, failed with its own message, and
+        stats of 1 failure, 0 ok, and 0 changed.
+      - **Green: the structure tests.** 28 passed.
+- [x] 14.46 Review 18 F3: the native gate's list is held.
+
+      Done, in `tests/test_ansible_structure.py`:
+      - `native_gate_modules` reads `NATIVE` from the Python the gate passes its
+        interpreter, by parsing that inline Python and evaluating the list literal.
+        It relies on nothing else in the script's text.
+      - `native_test_modules` finds every `tests/test_*.py` defining the `_ansible`
+        guard.
+      - `test_the_native_gate_runs_every_native_test_module` holds the list non-empty,
+        without duplicates, and equal to those modules.
+      - The gate itself is unchanged: it still fails on a skipped test, no test, a
+        missing or unsupported Ansible, or a missing callback.
+
+      The current one-module list passes. Each mutation ran in a scratch copy outside
+      the checkout:
+      - the list emptied: fails;
+      - a second guarded module added and not listed: fails;
+      - the same module added and listed: passes;
+      - a module without the guard listed: fails.
+- [x] 14.47 Verification of 14.44 to 14.46, each exiting 0:
+      - `make -C domains/vms/provisioning/iac test`: 151 passed, 7 skipped (the native
+        tests, by design), 2 subtests passed (unit);
+      - `make test-provisioning-iac-native` in the provisioning image built from
+        `2d9b23624`, with the checkout's IaC tree mounted: ansible-core 2.19.14,
+        `ansible.posix` 1.5.4, 7 playbooks syntax-checked, and the relay-wait test's 7
+        tests, none skipped (integration);
+      - `make check-packaging`, `make check-comment-hygiene`,
+        `make check-change CHANGE=repair-compute-purchase-recovery`,
+        `make check-change-index`,
+        `make check-doc-citations CHANGE=repair-compute-purchase-recovery`,
+        `make check-architecture`, and
+        `make check-architecture-change CHANGE=repair-compute-purchase-recovery`.
+
+      **Equality against `2d9b23624`.** The tracked changes are the two parse-only
+      playbooks, the structure test, and this change's records; nothing else
+      changes. Every `src/` module, role, playbook the service runs, lock,
+      `pyproject.toml`, Dockerfile, ignore file, and e2e input is byte-identical,
+      and so is every wheel. The provisioning image built from this tree differs
+      only in its copy of the IaC tree: the two parse-only playbooks and the
+      structure test, which the service never runs.
+
+      Not run: other suites, since no input of theirs changed; the root `make test`;
+      CI and Helm; images; and a fresh-context compliance check, since this
+      invocation allowed no subagent. Owed: a fresh focused review of this patch, and
+      validation of what it changed. The latest validation's CI and Helm results
+      describe `2d9b23624` and do not stand for these corrections.
 
 ## 15. Closeout
 
@@ -4597,10 +4709,13 @@ change to implementation.
         variables and state (S1, 14.12; S11, 14.39).
       - `docs/development/TESTING.md`, beside "Chart Render Tests", and
         `domains/vms/provisioning/iac/README.md` "Validation": the parse-only
-        `vm-setup-task-files.yaml`, and `make test-provisioning-iac-native`, which
-        runs every playbook's syntax check and the relay-wait test with the built
-        provisioning image's Ansible, fails on any skip, and runs in the VM
-        end-to-end lane (S11, 14.40).
+        `vm-setup-task-files.yaml`, each parse-only playbook refusing to run first
+        under any `--tags` selection though not an explicit `--skip-tags always` or
+        `--start-at-task`, and `make test-provisioning-iac-native`, which runs every
+        playbook's syntax check and every test module that runs a shipped task
+        through `ansible-playbook` with the built provisioning image's Ansible, fails
+        on any skip, and runs in the VM end-to-end lane (S11, 14.40; S13, 14.45,
+        14.46).
       - `openspec/specs/README.md`: no new capability or companion, so no edit.
         Confirm it.
       - Complete the promotion record.

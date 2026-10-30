@@ -25,12 +25,18 @@
   gather_facts: no
   tasks:
     # The imports below act on a KVM host when run. Refusing first keeps a run of
-    # this playbook from reaching any of them.
+    # this playbook from reaching any of them. The refusal is tagged `always`
+    # because the imported tasks keep their own tags, some of them `always`: a
+    # `--tags` selection skips an untagged task and still runs those. An
+    # operator's explicit `--skip-tags always` or `--start-at-task` passes over
+    # the refusal; nothing in a play can refuse those.
     - name: Refuse to run
       fail:
         msg: >-
           vm-management-task-files.yaml exists only to be syntax-checked; run the
           role through vm-operations.yaml.
+      tags:
+        - always
 
     - name: Parse the prerequisites
       import_role:

@@ -1576,8 +1576,12 @@ below is already written by that change's promotion. Its runbook sections are
 lane-specific, and D10's generic live-lane section is still owed.
 
 That change's GPU-less lane is its own evidence and is not this change's GPU
-acceptance; D7 stays withdrawn. Reconciling `dev`'s equivalent squashed ancestry is
-left to the merge of `dev` that follows.
+acceptance; D7 stays withdrawn.
+
+`dev`'s equivalent squashed ancestry is recorded by `2d9b23624`. It is a merge whose
+parents are this merge, `ca35f2264`, and `dev`'s squash, `c7dd275c5`. Its tree equals
+this merge's, and `c7dd275c5`'s tree equals that change's archived head's. So it brings
+no content: it records that `dev`'s squash is in this branch's history.
 
 ## S9: a bare-metal purchase pays its option's exact total
 
@@ -1757,6 +1761,38 @@ Alternatives rejected:
 - *A per-push gate in `tests.yml`.* That needs the provisioning image in per-push CI,
   which builds no images.
 
+## S13: the parse-only refusal under tag selection, and the gate's native list
+
+A fresh pre-closeout review of `2d9b23624` (review 18) raised three findings. The
+supervising session accepted all three under the owner's standing instruction to
+complete this plan; no individual owner answer is recorded.
+
+- **The refusal holds under any `--tags` selection.** Each parse-only playbook,
+  `vm-setup-task-files.yaml` and `vm-management-task-files.yaml`, refused to run with an
+  untagged first task. The tasks they import keep their own tags, and some carry
+  `always`, so a `--tags` selection skipped the refusal and ran those tasks on
+  localhost. Each refusal is now tagged `always`, so it runs first under every `--tags`
+  selection. An operator's explicit `--skip-tags always` or `--start-at-task` still
+  passes over it, since nothing in a play can refuse those; the playbooks' comments
+  say so. The structure tests hold each play's first task to an `always`-tagged
+  `fail`. The syntax check is unchanged, since it executes no task, and no role or
+  playbook the service runs changes.
+- **The gate's native list is held.** The native gate runs the test modules its
+  runner's `NATIVE` lists. A module that skips without a supported Ansible, as the
+  relay-wait test does through its `_ansible` guard, would skip in the default suite
+  and, if left out of that list, go unrun by the gate too. A structure test holds the
+  list equal to every test module defining that guard, read from the runner's own
+  Python rather than from the script's text.
+- **The records are current.** S11 is committed as `e957c418b`, and the S12 section
+  above records `2d9b23624`. The index row names S11 beside S12.
+
+Alternatives rejected:
+- *Discover native modules in the gate by the guard.* That changes the gate's design,
+  where a test of its list keeps it explicit and catches the same omission.
+- *Run the parse-only playbooks under `--tags` in the gate.* That would execute a
+  task, where the gate only parses; the refusal is proved once by hand, inside the
+  provisioning image with the IaC tree read-only and no network.
+
 ## Compatibility, migration, and rollback
 
 - **No schema migration.** `public_port` lives in the connection envelope's public
@@ -1884,6 +1920,13 @@ built provisioning image, a Docker build-context probe, and packaging. The candi
 it makes owes the VM lane's pipeline run, which now includes the gate. Its own
 image-content comparison records that the real-path inputs are unchanged.
 
+S13 changes two parse-only playbooks, which only the syntax check reads, and one
+structure test; no role, playbook the service runs, `src/` module, lock, or image input
+besides the IaC tree's copy. Its slice is gated by the structure tests red and green,
+the VM IaC suite, the native gate, and a tag-selected run of each parse-only playbook
+in the provisioning image, read-only and offline, stopping at its refusal. The
+candidate it makes owes a fresh focused review and validation of what changed.
+
 ## Open questions
 
 None. D7's open items, the resource type of a declaration without GPUs and the
@@ -1916,7 +1959,7 @@ closeout, under the heading named.
 | D14 the real-host bare-metal scenario | `docs/bare-metal-seller-quickstart.md` under "Release-qualified deal evidence": the role inputs, the pinned known-hosts file among them, `--run-id`, teardown to `released`, and revocation proven only by an authentication refusal. `docs/development/TESTING.md` is unchanged: its sentence on `e2e_bare_metal_deal` stays true |
 | The role's task files parsed by the repository's syntax check (Round 2 review F1, `tasks.md` 14.8 and 14.14) | `docs/development/TESTING.md`, beside "Chart Render Tests", and `domains/vms/provisioning/iac/README.md` under "Validation": `validate-playbooks` parses the `vm-management` task files, a capacity check's included, through a parse-only playbook importing them in the role's context, what a syntax check does not show, and that a free-form `shell` string's unbalanced quote fails its task file as it loads |
 | S1 the provisioning service image's own ignore file, with S11's Terraform exclusions | `docs/development/BUILD_AND_PACKAGING.md` under "Images", beside its rule that a Dockerfile with a deny-all ignore file admits `scripts/uv_project.py` explicitly: an ignore file beside a Dockerfile replaces the root's, so one that admits a tree whole states that tree's exclusions itself, an operator's credentials, keys, inventories, variable files, and Terraform state and variables, and a checkout's logs, retry files, caches, and environments |
-| S11 the native Ansible gate and the `vm-setup` parse-only playbook | `docs/development/TESTING.md`, beside "Chart Render Tests", in the paragraph the role's syntax check is promoted to: `make test-provisioning-iac-native` runs the syntax check of every playbook, `vm-setup-task-files.yaml` included, and the relay-wait test, with the built provisioning image's Ansible, failing on any skip, and the VM end-to-end lane runs it; `domains/vms/provisioning/iac/README.md` under "Validation", the same. The mock reclaim's booleans need no destination beyond D2's |
+| S11 the native Ansible gate and the `vm-setup` parse-only playbook, with S13's refusal and list | `docs/development/TESTING.md`, beside "Chart Render Tests", in the paragraph the role's syntax check is promoted to: `make test-provisioning-iac-native` runs the syntax check of every playbook, `vm-setup-task-files.yaml` included, and every test module that runs a shipped task through `ansible-playbook`, with the built provisioning image's Ansible, failing on any skip, and the VM end-to-end lane runs it; each parse-only playbook refuses to run first under any `--tags` selection, though not under an explicit `--skip-tags always` or `--start-at-task`; `domains/vms/provisioning/iac/README.md` under "Validation", the same. The mock reclaim's booleans need no destination beyond D2's |
 | S6 the e2e image's SSH client | None beyond `e2e-tests/Dockerfile`'s own comment: which system packages an image carries is its Dockerfile's to state |
 | S7 the mandate's part-owned lifecycle | `openspec/specs/settlement-servicing/spec.md` ("The payments mandate is derived exactly from the Agreement", by the archive) |
 | S7 the contract's source and vector provenance | `kit/arkhai-payments/schema/SOURCE.md`, written with the contract (14.22): the extracted artifact's hash and extraction, its one defect, the previous publication kept as framing evidence, and the synthetic current-wire fixture that is not producer provenance; `docs/development/TESTING.md` under "Payment Receipts in Tests", whose sentence on the published vectors says which wire they pin and that current-wire producer vectors were not supplied with this schema snapshot, so the kit retains the previous publication for canonical framing and uses an explicit SCM synthetic current-wire fixture; `docs/development/ROADMAP.md` "Payment qualification boundaries": that current-wire producer vectors were not supplied with the schema snapshot |

@@ -144,6 +144,12 @@ once carried is withdrawn (D7).
   and the relay-wait test with the provisioning image's own Ansible in the VM
   end-to-end lane, and fails rather than skips when Ansible or its callback is
   missing. No role task, real executor, job, receipt, price, or lease path changes.
+- **The parse-only refusal under tag selection, and the gate's list held (S13).** Each
+  parse-only playbook's refusal is tagged `always`, so a `--tags` selection no longer
+  skips it and runs the `always`-tagged tasks its imports bring; an explicit
+  `--skip-tags always` or `--start-at-task` still bypasses it. A structure test holds
+  the native gate's list of test modules to every module that skips without a
+  supported Ansible. No role, playbook the service runs, or runtime input changes.
 
 ## Capabilities
 
@@ -271,6 +277,7 @@ None.
     scripts, and its structure tests; a root `Makefile` target and one step in
     `.github/workflows/e2e.yml`'s VM lane that run the gate in the built
     provisioning image.
+  - S13: the VM IaC's two parse-only playbooks and its structure tests.
   - Each changed package bumps its minor version once against `dev`, to the next
     minor above `dev`'s own where `dev` has already taken one (`design.md`,
     "Coordination with `gpu-optional-compute-shapes`"). Dependants' floors and locks
