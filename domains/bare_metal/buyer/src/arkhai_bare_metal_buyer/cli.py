@@ -42,7 +42,6 @@ from core_buyer.run_log import RunLog
 from market_core.schemas import (
     SettlementOption,
     SettlementSelection,
-    compute_rate_total,
 )
 from market_identity import TrustedIdentitySet
 from pydantic_core import to_jsonable_python
@@ -56,10 +55,19 @@ from market_arkhai_payments import PaymentApproval
 
 from .arkhai_payments import BareMetalSettlementTransport
 from .settlement_composition import BUYER_STAGES
+from .settlement_stages import purchase_quote, require_quoted_agreement
 
 # The commands build their collaborators through the factories below: a Typer
 # command has no constructor to inject through, so these are the seam a test
 # replaces.
+
+
+class AgreementOffQuote(Exception):
+    """The seller accepted an Agreement that does not pay this run's quote."""
+
+    def __init__(self, reason: str, negotiation_id: str | None) -> None:
+        super().__init__(reason)
+        self.negotiation_id = negotiation_id
 
 
 def fresh_identity() -> ResolvedBuyerIdentity:
@@ -401,9 +409,18 @@ def buy_bare_metal(
         raise typer.BadParameter(
             "buy requires a supported priced settlement option"
         ) from exc
-    rate = selected.rates[0]
-    amount = compute_rate_total(rate, duration_seconds)
+    try:
+        amount = purchase_quote(selected, duration_seconds)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     approval = payment_approval(buyer_config)
+
+    def validate_acceptance(accepted: Any) -> None:
+        try:
+            require_quoted_agreement(accepted, amount=amount, duration_seconds=duration_seconds)
+        except ValueError as exc:
+            raise AgreementOffQuote(str(exc), accepted.negotiation_id) from exc
+        stage.validate_acceptance(accepted, approval)
     run_log = RunLog.start(
         profile_id=identity.profile_id,
         principal=identity.principal,
@@ -423,38 +440,47 @@ def buy_bare_metal(
         option_id=selected.option_id,
         params={"payer_account": buyer_config.payer_account},
     )
-    outcome = negotiate_with_seller(
-        seller_url=listing.storefront_url,
-        principal=identity.principal,
-        signer=identity.signer,
-        listing_id=listing_id,
-        resolve_seller_principals=lambda: seller_principals,
-        initial_price=amount,
-        max_price=amount,
-        unit_count=duration_seconds / 3600,
-        provision_terms=BareMetalProvisionTerms(
-            payload={
-                "duration_seconds": duration_seconds,
-                "access_method": "ssh",
-                "ssh_public_key": ssh_public_key,
-            },
-        ),
-        decode_provision_terms=BareMetalProvisionTerms.model_validate,
-        settlement_selection=selection,
-        # The opening policy reads from the selected option whether it bargains
-        # an amount; without it the opening carries none, and the amount this
-        # buyer derived from the option's rate never enters the negotiation.
-        policy_params={"_selected_settlement_option": selected.model_dump(mode="json")},
-        max_rounds=buyer_config.default_max_rounds,
-        validate_acceptance=lambda accepted: stage.validate_acceptance(
-            accepted, approval
-        ),
-    )
-    if outcome.status != "agreed" or outcome.negotiation_id is None:
-        run_log.end("exited", reason=outcome.reason)
-        _json({"run_id": run_log.run_id, **outcome.to_dict()})
-        return
-    stage.validate_acceptance(outcome, approval)
+    try:
+        outcome = negotiate_with_seller(
+            seller_url=listing.storefront_url,
+            principal=identity.principal,
+            signer=identity.signer,
+            listing_id=listing_id,
+            resolve_seller_principals=lambda: seller_principals,
+            # The quote is already the whole lease's total, so it is one unit: scaling
+            # it by the lease's hours would charge for the duration twice.
+            initial_price=amount,
+            max_price=amount,
+            unit_count=1,
+            provision_terms=BareMetalProvisionTerms(
+                payload={
+                    "duration_seconds": duration_seconds,
+                    "access_method": "ssh",
+                    "ssh_public_key": ssh_public_key,
+                },
+            ),
+            decode_provision_terms=BareMetalProvisionTerms.model_validate,
+            settlement_selection=selection,
+            # The opening policy reads from the selected option whether it bargains
+            # an amount; without it the opening carries none, and the amount this
+            # buyer derived from the option's rate never enters the negotiation.
+            policy_params={"_selected_settlement_option": selected.model_dump(mode="json")},
+            max_rounds=buyer_config.default_max_rounds,
+            validate_acceptance=validate_acceptance,
+        )
+        if outcome.status != "agreed" or outcome.negotiation_id is None:
+            run_log.end("exited", reason=outcome.reason)
+            _json({"run_id": run_log.run_id, **outcome.to_dict()})
+            return
+        validate_acceptance(outcome)
+    except AgreementOffQuote as refused:
+        # Refused inside the negotiation or after it: nothing is approved, and the
+        # run ends here rather than staying open with no outcome.
+        reason = f"agreement_off_quote: {refused}"
+        run_log.end("exited", reason=reason, negotiation_id=refused.negotiation_id)
+        _json({"run_id": run_log.run_id, "status": "exited", "reason": reason,
+               "negotiation_id": refused.negotiation_id})
+        raise typer.Exit(code=1) from None
     run_log.event(
         "agreement_accepted",
         negotiation_id=outcome.negotiation_id,

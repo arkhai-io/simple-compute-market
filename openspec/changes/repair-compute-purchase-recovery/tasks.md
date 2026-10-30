@@ -3927,6 +3927,104 @@ again, at `cb05d625f02c99e239a9028e677eb645f1a37293` (`design.md`, "S8: merging
       Helm, and the live lanes, owed on the frozen candidate. That change's GPU-less
       scenario is no evidence of this change's GPU lanes.
 
+**A bare-metal purchase pays its option's exact total (S9).** A synthetic reproduction
+showed the bare-metal `buy` command applying the lease's quantity twice, and the seller's
+exact-selection path accepting the result as given (`design.md`, "S9: a bare-metal
+purchase pays its option's exact total"). Both packages are already above `dev`, so no
+version or lock moves.
+
+- [x] 14.31 Correct both ends, at their existing seams:
+      - `domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/settlement_stages.py`:
+        - `purchase_quote` quotes the option's one time-scaled `amount` rate, chosen by
+          its field, over the duration, truncated to whole base units, and refuses a
+          zero quote;
+        - `require_quoted_agreement` refuses an Agreement for another amount or
+          duration;
+        - `validate_option` reads the rate the same way, not by position;
+      - `domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/cli.py`: `buy` negotiates
+        the quote with a unit count of one, refuses a zero quote before any request,
+        and runs the Agreement check inside the negotiation and again before approval;
+      - `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/negotiation_runtime.py`:
+        for a mechanism that settles from the Agreement alone, an exact selection of a
+        time-priced option is accepted only at the option's total. A different amount,
+        a zero total, or more than one `amount` rate is refused before anything is kept,
+        and no amount is accepted at the total;
+      - tests at the owning seams, with synthetic values only:
+        - `domains/bare_metal/buyer/tests/test_cli_completion.py`: the bounds for 1800,
+          3600, 7200, and 1801 seconds; a zero quote refused before any negotiation or
+          run log; an Agreement for half or double the quote, or another duration,
+          refused before approval, and by the in-negotiation check; and the rate read
+          by its field;
+        - `domains/bare_metal/storefront/tests/test_selection_dispatch.py`: under- and
+          overcharge refused with no negotiation, settlement data, or settlement record
+          kept; the exact amount, no amount, 1801 seconds, and two hours accepted at the
+          option's total; a zero-priced duration refused, with nothing kept;
+      - deltas: `specs/negotiation-protocol/spec.md` and `specs/buyer-orchestration/spec.md`.
+
+      Red, in place against `e155cb9ad`'s versions, each restored and checked by hash:
+      the buyer's old `cli.py` fails 7 of the new cases (1800, 7200, and 1801 seconds,
+      the zero quote, and the three off-quote Agreements; 3600 seconds passes, the
+      masked case); the storefront's old `negotiation_runtime.py` fails the under- and
+      overcharge and zero-total cases. The acceptance cases pass on both, as they must.
+- [x] 14.32 Verification of 14.31, after `make dist`, each suite re-synced from its lock
+      and exiting 0:
+      - `make -C domains/bare_metal/buyer test`: 26 passed;
+      - `make -C domains/bare_metal/storefront test`: 543 passed;
+      - `make -C e2e-tests test-unit`: 340 passed;
+      - the VM storefront, which installs the bare-metal storefront for its shell's
+        bare-metal domain, re-synced with `make reinit`: its nine modules that wire,
+        configure, or reconcile the bare-metal domain, 289 passed;
+      - `make check-packaging`: passed, every lock current and unchanged;
+      - `make check-change`, `make check-change-index`, and
+        `make check-comment-hygiene`: passed.
+
+      Not run: the VM storefront's whole suite and the root `make test`; CI, Helm, the
+      bare-metal storefront, VM storefront, and e2e images, and any buyer image; and the
+      live lanes. All are owed on the frozen candidate. No lane exercises a duration other
+      than an hour, and none settles through payments in the pipeline.
+
+- [x] 14.33 The S9 implementation review's findings, at its candidate (base `e155cb9ad`
+      plus the S9 diff), under the owner's standing instruction to make the necessary
+      repairs:
+      - **F1, the plan records S9 and its deltas** (should): resolved before this task,
+        by 14.31 and 14.32 and the two delta files, which the captured candidate the
+        review read did not yet include;
+      - **F2, rates on other fields** (minor, accepted): `_time_price` in
+        `domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/settlement_stages.py`
+        refuses an option with any rate on a field other than `amount`, before any
+        negotiation, while still finding the `amount` rate by its field. The test that
+        enshrined a `deposit` rate being ignored now asserts the refusal, beside an
+        option charging another field alone (already refused before, for having no
+        `amount` rate; the test now pins the reason);
+      - **F3, a refused Agreement leaves the run open** (minor, accepted): in
+        `domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/cli.py`, the quote check
+        raises a command-owned `AgreementOffQuote`, which `buy` catches around the
+        negotiation and its post-return check. It ends the run as `exited` with the
+        refusal and the negotiation ID, prints that, and exits 1; nothing is approved and
+        no `agreement_accepted` is logged. Any other error propagates as before.
+        `test_cli_completion.py` covers half, double, and another duration, each raised
+        inside the negotiator and after it returns, and asserts one `run_ended` record,
+        `exited`, and no acceptance or approval event;
+      - the `buyer-orchestration` delta states both refinements.
+
+      Red, in place against the S9 candidate's two buyer files, reconstructed by reversing
+      exactly these edits, then restored and checked by hash: the 6 run-end cases and
+      the 2 other-field cases fail; the other 7 pass.
+
+      Verification, each exiting 0:
+      - `make dist`, then `make -C domains/bare_metal/buyer test`: 30 passed;
+      - `domains/bare_metal/storefront/tests/test_selection_dispatch.py`, after `make -C
+        domains/bare_metal/storefront reinit`, which installs the rebuilt buyer wheel:
+        14 passed;
+      - `make -C e2e-tests test-unit`: 340 passed;
+      - `make check-packaging`, `make check-change`, `make check-change-index`, and
+        `make check-comment-hygiene`: passed.
+
+      Reused, since F2 and F3 change only the bare-metal buyer's two modules and its
+      tests: 14.32's whole bare-metal storefront suite and the VM storefront's
+      bare-metal modules, whose source and installed bare-metal storefront are unchanged.
+      Owed, as for 14.32: CI, Helm, the images, and the live lanes.
+
 ## 15. Closeout
 
 The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
@@ -4079,6 +4177,6 @@ change to implementation.
       `openspec validate repair-compute-purchase-recovery --strict`.
 - [ ] 15.11 **Archival.** Run `openspec archive repair-compute-purchase-recovery -y`,
       which merges the `physical-provisioning`, `fulfillment`,
-      `storefront-publication`, and `settlement-servicing` deltas into
-      `openspec/specs/`. The deltas were not promoted by hand, so `--skip-specs` is
+      `storefront-publication`, `settlement-servicing`, `negotiation-protocol`, and
+      `buyer-orchestration` deltas into `openspec/specs/`. The deltas were not promoted by hand, so `--skip-specs` is
       not used.

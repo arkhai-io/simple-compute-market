@@ -41,6 +41,7 @@ from market_core.schemas import (
     SettlementPlan,
     SettlementSelection,
     compute_rate_total,
+    rate_scales_by_time,
     Agreement,
 )
 from market_alkahest.proposals import (
@@ -337,6 +338,21 @@ def _seller_reference_amount(
             "scalar listing has no advertised amount rate", status_code=409
         )
     return 0
+
+
+def _time_scaled_total(option: SettlementOption, duration_seconds: int) -> int | None:
+    """What ``option`` charges for ``duration_seconds``, or ``None`` when it names no time price.
+
+    The price is the option's one ``amount`` rate, whatever its position among the
+    option's rates, over the duration, truncated to whole base units by the same rule
+    the seller's reference amount uses. An option with no ``amount`` rate, more than
+    one, or one that scales by a counted unit names no time price here.
+    """
+
+    amount_rates = [rate for rate in option.rates if rate.field == "amount"]
+    if len(amount_rates) != 1 or not rate_scales_by_time(amount_rates[0]):
+        return None
+    return compute_rate_total(amount_rates[0], duration_seconds)
 
 
 def _accepted_terms(listing: Any, message: BareMetalMessage, listing_id: str) -> BareMetalTerms:
@@ -658,6 +674,28 @@ def build_bare_metal_negotiation_runtime(
                 "selected mechanism does not negotiate a settlement amount",
                 status_code=400,
             )
+        elif built is None:
+            # A mechanism that settles from the Agreement alone builds no obligation
+            # to carry an amount, so the Agreement's amount is the whole payment.
+            # A time-priced option is accepted only at its own total for the
+            # requested duration: a buyer's amount is never taken as given.
+            if sum(rate.field == "amount" for rate in selected_option.rates) > 1:
+                raise BareMetalNegotiationRefusal(
+                    "selected option advertises more than one amount rate",
+                    status_code=400,
+                )
+            trusted_amount = _time_scaled_total(selected_option, message.duration_seconds)
+            if trusted_amount is not None:
+                if trusted_amount < 1:
+                    raise BareMetalNegotiationRefusal(
+                        "selected option prices the requested duration at zero",
+                        status_code=400,
+                    )
+                if proposed_amount is not None and proposed_amount != trusted_amount:
+                    raise BareMetalNegotiationRefusal(
+                        "settlement amount differs from the trusted accepted amount",
+                        status_code=400,
+                    )
         plan: SettlementPlan | None = None
         if built is not None:
             try:
@@ -676,9 +714,7 @@ def build_bare_metal_negotiation_runtime(
             if built is not None and built.amount is not None
             else proposed_amount
             if proposed_amount is not None
-            else compute_rate_total(selected_option.rates[0], message.duration_seconds)
-            if selected_option.rates and selected_option.rates[0].per in {"hour"}
-            else 0
+            else _time_scaled_total(selected_option, message.duration_seconds) or 0
         )
         accepted_proposal = {
             "settlement_selection": selection.model_dump(mode="json"),

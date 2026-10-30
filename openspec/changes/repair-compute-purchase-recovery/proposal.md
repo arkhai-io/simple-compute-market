@@ -118,6 +118,15 @@ once carried is withdrawn (D7).
   upgraded. Current-wire producer vectors were not supplied with this schema snapshot;
   the kit retains the previous publication for canonical framing and uses an explicit
   SCM synthetic current-wire fixture, recorded as such.
+- **A bare-metal purchase pays its option's exact total (S9).** The `buy` command
+  quoted the lease's total and then had it scaled by the lease's hours a second time,
+  so a purchase under an hour signed too little and one over an hour too much. The
+  seller's exact-selection path accepted the amount as given. The buyer now negotiates
+  its quote, the option's time-scaled `amount` rate over the duration truncated to whole
+  base units, as one unit. It refuses a zero quote before any request, and refuses an
+  Agreement for another amount or duration before approval. The seller accepts an exact
+  selection of such an option, for a mechanism that settles from the Agreement alone,
+  only at that total, and keeps nothing for a refused one.
 
 ## Capabilities
 
@@ -141,6 +150,10 @@ once carried is withdrawn (D7).
   stated twice (S5).
 - `settlement-servicing`: the payments mandate's `once` part carries its own stop,
   reverse, and (empty) extend authorities and a zero maximum hold extension (S7).
+- `negotiation-protocol`: an exact selection of a time-priced option settled from the
+  Agreement alone is accepted only at the option's total for the duration (S9).
+- `buyer-orchestration`: a bare-metal purchase pays the selected option's total for its
+  duration, once (S9).
 
 ### New Capabilities
 
@@ -213,6 +226,9 @@ None.
     snapshot fixtures, the vector check, and tests), and the lower bound or exact pin
     on it, with the locks, of every project that installs it: the VM, bare-metal, and
     API-credit buyers and storefronts, `domains/apicredits`, and `e2e-tests`;
+  - `domains/bare_metal/buyer` and `domains/bare_metal/storefront` (S9: the purchase
+    quote, its bounds and Agreement check, and the seller's exact-selection total, with
+    tests; both packages are already above `dev`, so no version or lock moves);
   - the merge of `prove-real-vm-provisioning` through its Section 7C (S8): its
     conflicts in the VM adapter's codec and its tests and in the VM e2e driver and host
     registry, resolved so both changes hold, and its real-target connection stated at
@@ -236,6 +252,10 @@ None.
   - A payments mandate is sent in the service's current wire only (S7). Accepted
     Agreements, stored mandates, and transaction IDs are never rewritten; a stored
     mandate in the previous wire is refused.
+  - A bare-metal exact selection of a time-priced option settled from the Agreement is
+    accepted only at its total, and a bare-metal purchase approves only an Agreement for
+    its quote (S9). Both apply to new negotiations and purchases; no accepted Agreement,
+    thread, mandate, or run log is re-read under them or rewritten.
 - **Deployment:** none required by the code. Qualifying the lanes needs rebuilt
   buyer environments and images, re-registers each retained host at `ssh` version 2,
   records the buyer route in host records, and sets the VM pool's GPU `extra_vars`.
@@ -274,7 +294,8 @@ None.
 
 - [x] `docs/development/ARCHITECTURE.md`
 - [x] Existing subsystem specification: `physical-provisioning`, `fulfillment`,
-  `storefront-publication`, `settlement-servicing`
+  `storefront-publication`, `settlement-servicing`, `negotiation-protocol`,
+  `buyer-orchestration`
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
@@ -316,3 +337,6 @@ None.
   `docs/development/TESTING.md` ("Payment Receipts in Tests"); and, in
   `docs/development/ROADMAP.md`, that current-wire producer vectors were not supplied
   with the schema snapshot.
+- A bare-metal purchase pays its option's exact total (S9):
+  `openspec/specs/negotiation-protocol/spec.md` and
+  `openspec/specs/buyer-orchestration/spec.md` (deltas).

@@ -1500,6 +1500,76 @@ of its GPU-less scenario. That scenario is not this change's acceptance, which r
 the GPU-backed guest and the whole bare-metal GPU machine ("Live qualification"). No
 decision above changed.
 
+## S9: a bare-metal purchase pays its option's exact total
+
+A synthetic reproduction showed a bare-metal purchase of less than an hour signing too little.
+The selected payment option charges 1000000 base units of `USD/6` an hour, and the buyer asks for
+1800 seconds, so the purchase should pay 500000. The `buy` command computed that total with
+`compute_rate_total`, then handed it to `negotiate_with_seller` as a per-unit price with a unit
+count of 0.5. The negotiator multiplies its bounds by the unit count, so the opening and the
+ceiling became 250000. The seller's exact-selection path, for a mechanism that settles from the
+Agreement alone, takes a proposed amount as given, so it accepted 250000. The payments kit then
+derived and signed a mandate for exactly the Agreement's amount, as it should.
+
+The quantity was therefore applied twice:
+- under an hour, the purchase under-paid;
+- at exactly 3600 seconds, the unit count was one and the defect was masked;
+- over an hour, it over-paid;
+- at most other durations, the scaled bound was not a whole number of base units and the buyer
+  refused before contacting the seller.
+
+The VM buyer derives the per-unit rate and scales it once, so it is not affected. Its refusal of
+durations whose per-unit product is fractional is a separate limitation, outside this correction.
+
+Decisions:
+- **The total is truncated once, by the seller's rule.** The buyer's quote and the seller's
+  trusted amount are both the option's one time-scaled `amount` rate over the duration,
+  truncated to whole base units (`compute_rate_total`). The rate is chosen by its field, never
+  by its position among the option's rates. Both sides name the same amount for every
+  whole-second duration, 1801 seconds included.
+- **The buyer negotiates the quote as one unit.** The quote is already the whole lease's total,
+  so it is passed with a unit count of one. A quote that truncates to zero is refused before any
+  request, since there is nothing to pay and no mandate for it.
+- **The buyer holds the Agreement to its quote before approval.** The mandate is derived from
+  the Agreement and checked against it, so the Agreement is where the quote is enforced. The
+  check runs inside the negotiation, before an accepted round is kept, and again before the
+  stage approves. An Agreement for another amount or another duration is refused, and the
+  command then ends its run as exited, naming the refusal, before it exits nonzero, so the
+  run is never left open and nothing is approved. Recovery commands work from the run log
+  and approve nothing, so they are unaffected.
+- **The buyer pays only an `amount` rate.** An option that also charges on another field, a
+  deposit for instance, is refused, as is one with no `amount` rate. Buying it at the
+  `amount` total alone would leave that charge unpaid. The rate is still found by its field.
+- **The seller accepts an exact time-priced selection only at its total.** For a mechanism that
+  builds no obligation and settles from the Agreement alone, a selection of an option with one
+  time-scaled `amount` rate is accepted only at that option's total for the requested duration:
+  - a different proposed amount is refused, under-charge or over-charge alike;
+  - a total of zero is refused;
+  - an option with more than one `amount` rate is refused;
+  - each refusal happens before any thread, Agreement, or settlement data is kept;
+  - a selection with no amount is accepted at the total.
+
+  This is the "trusted amount, without price policy" the path already promised. Mechanisms that
+  build an obligation, unpriced introductions, and options without a time-scaled `amount` rate
+  keep their behaviour.
+- **Accepted history is unchanged.** Both checks apply when a negotiation opens and when a
+  purchase is approved. No stored Agreement, thread, mandate, run log, or transaction is read
+  again under them or rewritten.
+
+Alternatives rejected:
+- *Passing the per-unit rate and the hours, as the VM buyer does.* `scaled_base_units` refuses
+  a fractional product where the seller truncates, so durations like 1801 seconds could not be
+  bought.
+- *An absolute-bounds parameter on the core negotiator.* That changes an API every buyer shares,
+  for one caller that a unit count of one already serves exactly.
+- *Bargaining the selection through the seller's price policy.* The exact-selection path settles
+  at a trusted amount by design; bargaining is a feature, not this correction.
+- *Changing the default duration or its minimum.* That would only hide the defect.
+
+Outside this correction: on a seller acceptance, the core buyer negotiator compares the
+Agreement's amount with the seller's own echoed proposal, not with the buyer's opening or
+ceiling. It is recorded as a separate finding, not changed here.
+
 ## Compatibility, migration, and rollback
 
 - **No schema migration.** `public_port` lives in the connection envelope's public
@@ -1598,6 +1668,14 @@ checks, and packaging. S7's full local run stands for every project whose inputs
 leaves unchanged; the candidate S8 makes owes CI, Helm, and the live lanes, which run
 after it is frozen.
 
+S9 changes the bare-metal buyer's `buy` command and payment stage, and the bare-metal
+storefront's exact-selection acceptance, and no lock, dependency, or version: both packages
+are already above `dev`. Its slice is gated by both packages' whole suites, the e2e unit
+suite, and packaging. The candidate S9 makes owes a full local run for the projects whose
+inputs it changes, CI, Helm, the images that carry either package (the bare-metal
+storefront's, the VM storefront's, whose shell installs the bare-metal storefront, the e2e
+image, and any buyer image), and the live lanes.
+
 ## Open questions
 
 None. D7's open items, the resource type of a declaration without GPUs and the
@@ -1634,6 +1712,7 @@ closeout, under the heading named.
 | S7 the contract's source and vector provenance | `kit/arkhai-payments/schema/SOURCE.md`, written with the contract (14.22): the extracted artifact's hash and extraction, its one defect, the previous publication kept as framing evidence, and the synthetic current-wire fixture that is not producer provenance; `docs/development/TESTING.md` under "Payment Receipts in Tests", whose sentence on the published vectors says which wire they pin and that current-wire producer vectors were not supplied with this schema snapshot, so the kit retains the previous publication for canonical framing and uses an explicit SCM synthetic current-wire fixture; `docs/development/ROADMAP.md` "Payment qualification boundaries": that current-wire producer vectors were not supplied with the schema snapshot |
 | S7 the required nullable maximum hold extension and the one wire serializer | `kit/arkhai-payments/schema/SOURCE.md` ("Required nullable durations"), written with the fix (14.26): the published form, the generation normalization of exactly two properties, the unnormalized `ConnectStatus`, and `wire_json` as the one wire form; `kit/arkhai-payments/README.md`; the code is its own record (`kit/arkhai-payments/scripts/generate_models.py`, `market_arkhai_payments.canonical`). No permanent specification changes: the derived mandate still states `P0D` |
 | Coordination with `prove-real-vm-provisioning` | None: change history. That change promotes its own decisions and archives its own deltas at its closeout |
+| S9 a bare-metal purchase pays its option's exact total | `openspec/specs/negotiation-protocol/spec.md` ("An exact selection of a time-priced option settled from the Agreement is accepted only at its total") and `openspec/specs/buyer-orchestration/spec.md` ("A bare-metal purchase pays the selected option's total for its duration"), both by the archive |
 | S8 the merge of `prove-real-vm-provisioning` through its Section 7C | None: change history. Each resolution follows a decision whose destination is recorded above (D1, D2, D3); that change promotes and archives its own |
 | Live qualification of both lanes | None: external evidence, recorded at closeout as live evidence or named blockers (`tasks.md`, the closeout's end-to-end part) |
 | Roadmap currency | `docs/development/ROADMAP.md` "Goal 1 — Consolidate physical-resource authority in the provisioning service" (the real runner's evidence row) and "Payment qualification boundaries". Goal 2 is unchanged: this change no longer sells VM shapes without GPUs |
