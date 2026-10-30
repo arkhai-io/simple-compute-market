@@ -1010,8 +1010,71 @@ public revision of this branch the run used.
       through the codec, but their facts' relay block is disabled and names no port,
       which the old rule passed over; that, not an uninterpreted output, is why no
       lane exercised the defect (7B.3).
+      Run 2, owner-supplied and sanitized: revision `f52f07973` (sections 1–7B), its
+      published images and chart, provisioning unmocked, an empty host registry, a
+      freshly created and prepared GPU-less nested-KVM host (preparation at this
+      revision `failed=0 ignored=0`, the SSH restart handler `changed`), the scenario
+      run from a clean checkout of the same revision. 36 passed, 1 failed (11b).
+      Against the acceptance:
+      - 00e1 reported `offering_mode='vm' mocked=False`;
+      - 08b3's create job and 11a3's teardown job both `succeeded` on the target
+        host; the only other job the run caused is 11c's `list`;
+      - 09d connected with the negotiated key as the delivered user at the host's
+        address and forwarded port, logged the guest's host-key fingerprint
+        (`SHA256:…`), and probed `vcpu_count=7, memory_gib=27.41,
+        root_disk_gib=160.0` against the sold `7 / 28 / 160`: vCPUs equal, memory
+        2.1% short (within the 5% tolerance), disk equal — so 7B's direct-access
+        evidence reached delivery;
+      - 09e: the unrelated key refused with `Permission denied (publickey,password)`;
+      - 11c: the guest gone from the host, which lists `[]`;
+      - 11d: the delivered access timed out after teardown.
+      Every scenario of "A real deal is delivered", "An unrelated key is refused", and
+      "Teardown removes the VM and its access" is shown, but the acceptance ("every
+      stage passes") is not met: 11b failed after the release itself completed (the
+      reservation `released`, the resource `torn_down`, the bucket back at `7 / 28 /
+      160`, and 11b's own checks before the re-reservation passed). Its
+      re-reservation returned 409 "no available capacity matched the claim".
+      Cause, from the source: `RealVmComputeDealDriver.reserve_released_capacity`
+      (`real_compute_deal_driver.py`) sends `required_attributes={"resource_id": …,
+      **self.capacity}`, so `vcpu_count`, `ram_gb`, and `disk_gb` are matched as
+      resource attributes, which the declaration states only as capacity dimensions
+      (its attributes are the region and SLA); `admin_reserve_capacity` takes only
+      `required_attributes`. 6.2's note chose this claim, and 6.11's handoff listed
+      "the admin re-reservation with dimension attributes" as unproven until this run.
+      The mock VM driver claims `resource_id` and `gpu_count`, which its GPU
+      declaration does carry as attributes, and bare metal claims `gpu_model`.
+      Observed by the owner from inside the guest between 09e and 10a, outside any
+      stage: the instance metadata service gave the guest no service-account token,
+      and the forwarded port answered only the host's allowed sources. Not acceptance
+      points; recorded as context.
+      Returned to planning: the owner decided, relayed by the infra-side coordinator,
+      that this defect and 8.3's are fixed in this change, as 7A and 7B were. Left to
+      planning: the section (the coordinator suggests 7C), the claim 11b's
+      re-reservation makes of a GPU-less declaration (what it can pin through
+      attributes alone, and how it shows the whole capacity came back — 11b's
+      checks before it already read the bucket's dimensions), and whether either fix
+      needs a design record as D4b did. Nothing of the fixes is implemented. If they
+      stay within `e2e-tests/`, the infra side deploys a fresh stack at `f52f07973`
+      with no republish and runs 8.2 and 8.3 from a checkout of the new head.
 - [ ] 8.3 **[log]** A second run of the scenario against the same stack. Acceptance: it
       passes, the host's registration being reconciled rather than duplicated. (D2)
+      Run 1, owner-supplied and sanitized: the same revision, stack, and host as
+      8.2's run 2, straight after it. 11 passed, 1 failed, 25 skipped. 00f1 and 00f2
+      passed: the run found the host registered with the target's connection and went
+      on, so the registration was reconciled, not duplicated. 02b failed: creating the
+      listing returned 409 "this publication source is already bound to another
+      listing". Run 2's listing had been reopened when its capacity was released
+      (`capacity_released` named it among `reopened_listing_ids`) and republished, so
+      it still holds the publication source — the listing shape derived from the same
+      `capacity` — that this run's identical listing would bind; every later stage
+      skipped on its prerequisite. Acceptance not met. D2 makes the pool, host, and
+      declaration reconcile on a rerun but says nothing of the listing, and the module
+      leaves its listing open; the mock lanes never meet this, since each lane run
+      replaces its stack. Returned to planning with 8.2's defect (above): left to
+      planning, and possibly to a design record extending D2, is whether a rerun
+      reuses the open listing on its source or the module closes its listing when it
+      ends (a closed listing then no longer holding the source would need checking),
+      and what a run interrupted before that cleanup leaves for the next.
 - [ ] 8.4 **[log]** Host preparation re-run, as in 8.1, at a public revision of this
       branch that includes section 7A, on the same kind of host. Supplied: the play
       recap and the handler's result from the log. Acceptance: the recap shows
