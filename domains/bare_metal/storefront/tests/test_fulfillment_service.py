@@ -15,6 +15,7 @@ from core_storefront.domain_registry import StorefrontDomainBindingError
 from arkhai_bare_metal import BareMetalListing, BareMetalTerms
 from market_core import VersionedEnvelope
 from market_identity import Ed25519Signer
+from market_site.ledger import dict_resource_satisfies_claim
 from market_core import SettlementEvidence
 from arkhai_bare_metal_storefront.settlement_evidence import (
     EvidencePayload,
@@ -565,9 +566,52 @@ async def test_a_listing_no_authority_stands_behind_reserves_nothing() -> None:
     assert fulfillment.schedules == []
 
 
-async def test_a_listing_naming_no_attributes_reserves_nothing() -> None:
-    """The claim's attributes come only from the trusted listing record; without
-    them the reservation is refused rather than made on units alone."""
+async def test_a_machine_without_gpus_reserves_one_unit_with_no_attribute() -> None:
+    """A trusted record carrying an empty set of claimed attributes, as a
+    listing whose shape states no attribute has, reserves its Physical Resource
+    by units alone, which the site's own admission matcher admits for the
+    machine it declares."""
+    db = FakeDb()
+    db.listing = BareMetalListing(
+        capacity_backing="backed",
+        region="us-west",
+        vcpu_count=64,
+        ram_gb=512,
+        host_id="machine-a",
+        physical_host_id="host-a",
+        access_methods=["ssh"],
+    )
+    db.context["claimed_attributes"] = db.listing.claimed_attributes
+    capacity = FakeCapacity()
+    service = BareMetalFulfillmentService(
+        db=db,
+        capacity_client=capacity,
+        fulfillment_client=FakeFulfillment(),
+        read_verified_evidence=db.verified_evidence,
+    )
+
+    await service.begin(negotiation_id="neg-a", settlement_ref="escrow-a", buyer_principal=BUYER)
+
+    (reserve,) = capacity.reserves
+    assert reserve["claim"] == {
+        "resource_id": "resource-a",
+        "dimensions": {"units": 1},
+        "offering_mode": "bare_metal",
+    }
+    declaration = {
+        "resource_id": "resource-a",
+        "pool_id": "pool-a",
+        "resource_type": "compute.bare-metal",
+        "available": {"units": 1, "vcpu_count": 64, "ram_gb": 512},
+        "attributes": {"physical_host_id": "host-a"},
+    }
+    assert dict_resource_satisfies_claim(declaration, reserve["claim"]) is True
+
+
+async def test_a_record_carrying_no_claimed_attributes_reserves_nothing() -> None:
+    """The claim's attributes come only from the trusted listing record; a
+    record carrying none at all, rather than an empty set, is broken, and the
+    reservation is refused rather than made from it."""
     db = FakeDb()
     db.context.pop("claimed_attributes")
     capacity = FakeCapacity()
@@ -578,7 +622,7 @@ async def test_a_listing_naming_no_attributes_reserves_nothing() -> None:
         read_verified_evidence=db.verified_evidence,
     )
 
-    with pytest.raises(BareMetalFulfillmentError, match="no attributes to claim"):
+    with pytest.raises(BareMetalFulfillmentError, match="carries no claimed attributes"):
         await service.begin(
             negotiation_id="neg-a",
             settlement_ref="escrow-a",

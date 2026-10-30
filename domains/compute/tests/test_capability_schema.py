@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from market_capability_shape import FieldKind, flatten_shape, unflatten_shape
+import pytest
+from market_capability_shape import (
+    CapabilityShapeError,
+    FieldKind,
+    flatten_shape,
+    unflatten_shape,
+)
 
 from arkhai_compute import (
     COMPUTE_CAPABILITY_SCHEMA,
@@ -30,9 +36,25 @@ def test_the_one_attribute_is_the_gpu_model():
     assert COMPUTE_CAPABILITY_SCHEMA.flat_names(FieldKind.ATTRIBUTE) == (GPU_MODEL_ATTRIBUTE,)
 
 
-def test_only_the_gpu_family_is_required():
-    required = {field.path for field in COMPUTE_CAPABILITY_SCHEMA.fields if field.required}
-    assert required == {"gpu.count", "gpu.model"}
+def _refused_paths(shape) -> set[str]:
+    with pytest.raises(CapabilityShapeError) as refused:
+        flatten_shape(shape, COMPUTE_CAPABILITY_SCHEMA)
+    return {problem.path for problem in refused.value.problems}
+
+
+def test_a_shape_stating_no_gpus_is_accepted():
+    flat = flatten_shape({"cpu": {"count": 8}, "memory": {"gib": 32}}, COMPUTE_CAPABILITY_SCHEMA)
+
+    assert dict(flat.quantities) == {"vcpu_count": 8, "ram_gb": 32}
+    assert dict(flat.attributes) == {}
+
+
+def test_a_gpu_model_without_a_count_is_refused():
+    assert _refused_paths({"gpu": {"model": "H100"}, "cpu": {"count": 8}}) == {"gpu.count"}
+
+
+def test_a_gpu_count_without_a_model_is_refused():
+    assert _refused_paths({"gpu": {"count": 2}}) == {"gpu.model"}
 
 
 def test_a_whole_machine_round_trips_through_its_flat_names():

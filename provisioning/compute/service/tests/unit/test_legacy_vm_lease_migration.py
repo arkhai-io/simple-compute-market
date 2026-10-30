@@ -82,8 +82,8 @@ def _insert_host(engine, *, name="kvm1", pool_id="default"):
         connection.execute(text(
             """
             INSERT INTO hosts (host_id, connection_kind, connection_version, connection_public, connection_protected,
-                                gpu_count, enabled, pool_id)
-            VALUES (:name, 'ssh', 1, '{"ssh_host": "10.0.0.1", "public_host": null, "ssh_port": 22, "ssh_user": "root", "key_path": "/keys/id_ed25519"}', '{}', 0, 1, :pool_id)
+                                enabled, pool_id)
+            VALUES (:name, 'ssh', 1, '{"ssh_host": "10.0.0.1", "public_host": null, "ssh_port": 22, "ssh_user": "root", "key_path": "/keys/id_ed25519"}', '{}', 1, :pool_id)
             """
         ), {"name": name, "pool_id": pool_id})
 

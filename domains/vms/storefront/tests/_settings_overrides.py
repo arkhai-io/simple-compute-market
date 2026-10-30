@@ -57,14 +57,18 @@ def replaced_setting(key: str, value: Any) -> Iterator[None]:
     configuration already holds: a table replaces the table, and a list the
     list. Dynaconf keeps an empty table set on a dotted key, so to empty a
     section, replace it at its root.
+
+    The key's root table is what is restored: Dynaconf's `unset` of a dotted
+    key leaves the nested key in place, so a key that was absent would
+    otherwise outlive the test.
     """
     settings = _agent_config.settings
-    original = deepcopy(settings.get(key))
+    root = key.split(".", 1)[0]
+    original = deepcopy(settings.get(root))
     settings.set(key, deepcopy(value), merge=False)
     try:
         yield
     finally:
-        if original is None:
-            settings.unset(key, force=True)
-        else:
-            settings.set(key, original, merge=False)
+        settings.unset(root, force=True)
+        if original is not None:
+            settings.set(root, original, merge=False)

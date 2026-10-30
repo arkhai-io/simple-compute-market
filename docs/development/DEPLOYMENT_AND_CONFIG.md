@@ -949,7 +949,14 @@ in `listing_shapes: {vm: [{gpu: {count: 1, model: H100}, memory: {gib: 32}}]}`.
 Structure is checked wherever the pool is written; whether a shape's families
 exist is judged by the storefront, which reports a shape it cannot read and holds
 that pool's listings. A pool that states no shapes publishes its domain's default
-shapes: for VM, one GPU-only shape per count, per GPU model. A shape is a
+shapes: for VM, one GPU-only shape per count, per GPU model, generated from the
+members that declare GPUs. A shape need not state GPUs: `{cpu: {count: 8},
+memory: {gib: 32}}` sells a VM without GPUs, on any member with the vCPUs and
+memory free, a GPU host included. The VM default generates no shape from a member
+declaring no GPUs, so a VM pool that has enabled members, none declaring GPUs,
+publishes nothing until it states `listing_shapes`, on its hint or a storefront
+override; the storefront reports such a pool once, by site and pool, in system
+status (`publication_derivation`, reason `listing_shapes_required`). A shape is a
 commitment: the reservation holds every quantity it states. A dimension it omits
 is outside the listing's and the reservation's commitment: fulfillment may supply
 it from the pool's configured VM defaults (`default_vm_ram`, `default_vm_vcpus`,
@@ -967,8 +974,11 @@ No host write, from the inventory, the import API, or the host API, places a hos
 in a pool it does not name or declares any of its capacity: an INI entry's
 `pool_id=<id>` places or moves the host, an empty `pool_id=` unplaces it, and an
 entry with no `pool_id` leaves an existing host's pool unchanged and a new host
-unplaced. `gpus=` and `gpu_model=` are descriptive; a host sells only through a
-capacity declaration.
+unplaced. A host record describes how to reach a machine, not its hardware: an
+entry's `gpus=` and `gpu_model=`, like every variable the parser does not read,
+are ignored without a warning, and the host API ignores `gpu_count` and
+`gpu_model` in a request body as it ignores any field it does not define. A
+machine's hardware is stated, and sold, only through a capacity declaration.
 
 ### Reconciliation follows the document, not the process
 
@@ -1052,9 +1062,11 @@ exactly the effect of the same `PUT /api/v1/capacity/resources/{resource_id}`.
   closed except for availability, and system status names it.
 - **A bare-metal declaration describes one whole machine.** Set
   `capacity.units` to `1`, and state its hardware under the compute family's
-  capacity names: `gpu_count`, and optionally `vcpu_count`, `ram_gb`, and
-  `disk_gb`. Set `attributes.gpu_model`. `gpu_count` and `gpu_model` are required
-  for bare-metal publication, and the machine's pool must state a `region`. Do
+  capacity names: `gpu_count`, `vcpu_count`, `ram_gb`, and `disk_gb`, with
+  `attributes.gpu_model` naming its GPUs. `gpu_count` and `gpu_model` are stated
+  together or not at all: a machine without GPUs omits both, rather than declaring
+  `gpu_count: 0`, which is refused. A declaration must state at least one quantity
+  besides `units`, and the machine's pool must state a `region`. Do
   not put authoritative hardware in `bare_metal_publication`. What a storefront
   publishes and holds from these declarations is specified in the
   [storefront publication specification](../../openspec/specs/storefront-publication/spec.md#requirement-a-bare-metal-listings-shape-is-derived-from-its-declaration).
@@ -1151,6 +1163,23 @@ stay, unread, as an operator's extraction input until a later change drops
 them; `docs/seller-quickstart.md`'s "Upgrading from CSV inventory" describes
 declaring their contents at provisioning.
 
+Upgrading the compute provisioning service past the drop of `hosts.gpu_count`
+and `hosts.gpu_model` is fail-forward too. The migration rebuilds `hosts` from
+its model, keeping every other column of every row, and discards the two
+values without logging them: a host's hardware is stated only by its capacity
+declaration, and the one derivation of declarations from those columns ran
+earlier in the chain. An older provisioner maps both columns and cannot read
+the rebuilt table, and the migration is recorded as applied, so rolling the
+service back past it means restoring the database backup taken before the
+upgrade; take one first. The drop departs from
+[`ARCHITECTURE.md`](ARCHITECTURE.md#build-packaging-and-initialization)'s
+expand/contract rule, which protects old and new readers sharing a database
+and a rollback after a failed deployment. No two provisioner versions share
+one: the chart deploys the service with `strategy: Recreate` over one
+ReadWriteOnce volume, and one operator upgrades sites and storefronts together
+([`ARCHITECTURE.md`, "Operators"](ARCHITECTURE.md#operators)). Rollback is what
+remains, and the pre-upgrade backup answers it.
+
 Identity-bearing database migrations validate the complete service-owned
 population and commit canonical principals, replay state, and ownership
 history transactionally while preserving public cross-service and operation
@@ -1224,9 +1253,9 @@ system status names the retired keys.
   nothing about negotiability: write a fixed value with `min` and `max` equal to it.
   Each value is a positive integer, `min` is not above `max`, an `offer` lies within
   its own range, a mapping states at least one key, and any other key is refused.
-  Constraints apply to quantities only; `gpu.count` and `gpu.model` are required, so
-  `gpu.count` always states an `offer`. Changing only a range keeps the listing's
-  identity.
+  Constraints apply to quantities only; `gpu.count` and `gpu.model` are required
+  together, so a shape that states a `gpu` family always gives `gpu.count` an
+  `offer`. Changing only a range keeps the listing's identity.
 
 - **The storefront's configured default fills unconstrained bounds.**
   `[admissibility.defaults.vm]` in the VM storefront's settings uses the same family

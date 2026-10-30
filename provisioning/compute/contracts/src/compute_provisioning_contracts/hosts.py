@@ -6,6 +6,11 @@ A request submits a connection's public fields and any secrets; a secret is
 write-only: it is protected by the kind's codec before it is stored, and a
 response names each protected value and its scheme, never its content. The site
 authority references a host only by ``host_id``.
+
+A host describes no hardware: what a machine has, and sells, is stated only by
+its capacity declaration. The request models ignore any field they do not
+define, ``gpu_count`` and ``gpu_model`` among them, so a body carrying them is
+accepted with them ignored.
 """
 
 from __future__ import annotations
@@ -52,10 +57,6 @@ class HostCreate(BaseModel):
 
     host_id: str = Field(description="The host's identity, e.g. 'kvm1' or 'bm-node-1'.")
     connection: ConnectionSubmission
-    gpu_count: int = Field(default=0, ge=0, description="Number of GPU cards on the host.")
-    gpu_model: Optional[str] = Field(
-        default=None, description="Descriptive GPU model, e.g. 'H100', 'A100'.",
-    )
     enabled: bool = Field(default=True, description="Whether this host is available for jobs.")
     pool_id: Optional[str] = Field(
         default=None,
@@ -76,8 +77,6 @@ class HostUpdate(BaseModel):
     connection: Optional[ConnectionSubmission] = Field(
         default=None, description="A replacement connection."
     )
-    gpu_count: Optional[int] = Field(default=None, ge=0)
-    gpu_model: Optional[str] = Field(default=None, description="Updated descriptive GPU model.")
     enabled: Optional[bool] = Field(default=None)
     pool_id: Optional[str] = Field(
         default=None,
@@ -93,8 +92,6 @@ class HostResponse(BaseModel):
 
     host_id: str
     connection: ConnectionView
-    gpu_count: int
-    gpu_model: Optional[str] = None
     enabled: bool
     pool_id: Optional[str] = Field(description="The host's pool, or null when it is unplaced.")
     created_at: datetime

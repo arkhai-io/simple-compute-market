@@ -100,18 +100,23 @@ def encode_compute_lease(
     )
     human_price_per_hour = Decimal(hourly_rate.amount) / (10**token_meta.decimals)
 
-    lease_terms = {
-        "gpu_model": (
+    # A GPU field the listing does not state is left out rather than written
+    # as null: a null would state a value the deal never committed to.
+    lease_terms: dict[str, Any] = {}
+    if compute.gpu_model is not None:
+        lease_terms["gpu_model"] = (
             compute.gpu_model.value
             if hasattr(compute.gpu_model, "value")
             else str(compute.gpu_model)
-        ),
-        "region": (
-            compute.region.value
-            if hasattr(compute.region, "value")
-            else str(compute.region)
-        ),
-        "gpu_count": compute.gpu_count,
+        )
+    lease_terms["region"] = (
+        compute.region.value
+        if hasattr(compute.region, "value")
+        else str(compute.region)
+    )
+    if compute.gpu_count is not None:
+        lease_terms["gpu_count"] = compute.gpu_count
+    lease_terms |= {
         "sla": compute.sla,
         "duration_seconds": duration_seconds,
         "token_symbol": token_meta.symbol,

@@ -59,8 +59,6 @@ def parse_inventory_ini(
             InventoryHost(
                 host_id=entry["host_id"],
                 connection=connection,
-                gpu_count=entry["gpu_count"],
-                gpu_model=entry.get("gpu_model"),
                 pool_id=entry["pool_id"],
             )
         )
@@ -74,15 +72,12 @@ def _parse_entries(ini_text: str) -> list[dict]:
     ``[group:vars]`` section holds variables and a ``[group:children]``
     section names groups; neither lists hosts, and both are skipped.
 
-    Returns a list of ``{"host_id", "ssh_host", "ssh_user", "ssh_port",
-    "gpu_count", "gpu_model", "pool_id", "ansible_ssh_private_key_file"}``
-    dicts. Entries missing ``ansible_host`` or ``ansible_user`` are skipped
-    with a warning.
+    Returns a list of ``{"host_id", "ssh_host", "public_host", "ssh_user",
+    "ssh_port", "pool_id", "ansible_ssh_private_key_file"}`` dicts. Entries
+    missing ``ansible_host`` or ``ansible_user`` are skipped with a warning.
 
     Variable mapping:
         ``ansible_port=``                 → ``ssh_port`` (int, default 22)
-        ``gpus=``                         → ``gpu_count`` (int, default 0)
-        ``gpu_model=``                    → ``gpu_model`` (str, default None)
         ``public_host=``                  → ``public_host`` (tenant-facing addr)
         ``ansible_ssh_private_key_file=`` → preserved verbatim
         ``pool_id=<id>``                  → the Resource Pool to place the host in
@@ -124,16 +119,10 @@ def _parse_entries(ini_text: str) -> list[dict]:
             )
             continue
 
-        # A malformed gpus= degrades to 0: it describes the host and sells
-        # nothing, so a wrong value only misreports. A malformed ansible_port=
-        # instead skips the entry, because substituting 22 would turn an
-        # operator's typo into a host that cannot be reached at all — a failure
-        # that looks like a network problem rather than a bad inventory line.
-        try:
-            gpu_count = int(host_vars.get("gpus", 0))
-        except ValueError:
-            gpu_count = 0
-
+        # A malformed ansible_port= skips the entry, because substituting 22
+        # would turn an operator's typo into a host that cannot be reached at
+        # all — a failure that looks like a network problem rather than a bad
+        # inventory line.
         ssh_port = 22
         if "ansible_port" in host_vars:
             try:
@@ -155,8 +144,6 @@ def _parse_entries(ini_text: str) -> list[dict]:
             "public_host": host_vars.get("public_host"),
             "ssh_user": ssh_user,
             "ssh_port": ssh_port,
-            "gpu_count": gpu_count,
-            "gpu_model": host_vars.get("gpu_model"),
             # A non-empty pool_id= names a pool, an empty one unplaces the
             # host, and no pool_id says nothing: an existing host stays where
             # it is, so an older inventory never unplaces it.

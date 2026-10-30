@@ -111,8 +111,8 @@ def _insert_unplaced(engine, host_id: str) -> None:
         connection.execute(
             text(
                 "INSERT INTO hosts (host_id, connection_kind, connection_version, "
-                "connection_public, connection_protected, gpu_count, enabled) "
-                "VALUES (:id, 'ssh', 1, '{}', '{}', 0, 1)"
+                "connection_public, connection_protected, enabled) "
+                "VALUES (:id, 'ssh', 1, '{}', '{}', 1)"
             ),
             {"id": host_id},
         )
@@ -133,7 +133,6 @@ def test_existing_hosts_keep_their_pools_and_every_value_as_the_column_is_relaxe
     }
     for name, host in _HOSTS.items():
         row = rows[name]
-        assert (row["gpu_count"], row["gpu_model"]) == (host["gpu_count"], host["gpu_model"])
         assert json.loads(row["connection_public"])["ssh_host"] == host["kvm_host"]
     # An embedded key, protected at rest, comes through the chain and the
     # rebuild as the stored ciphertext.
@@ -182,8 +181,8 @@ def test_the_rebuilt_table_still_refuses_an_unknown_pool(tmp_path):
             connection.execute(text("PRAGMA foreign_keys=ON"))
             connection.execute(text(
                 "INSERT INTO hosts (host_id, connection_kind, connection_version, "
-                "connection_public, connection_protected, gpu_count, enabled, pool_id) "
-                "VALUES ('kvm9', 'ssh', 1, '{}', '{}', 0, 1, 'no-such-pool')"
+                "connection_public, connection_protected, enabled, pool_id) "
+                "VALUES ('kvm9', 'ssh', 1, '{}', '{}', 1, 'no-such-pool')"
             ))
 
 

@@ -12,6 +12,7 @@ FastAPI app with dependency overrides.
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from datetime import datetime
 from market_policy.listing_source import ListingSourceVerdict
@@ -963,6 +964,63 @@ class TestCreateListing:
             result.listing_id if hasattr(result, "listing_id") else result["listing_id"]
         )
         assert listing_id, "listing_id must be non-empty"
+
+    async def test_a_listing_resource_without_gpus_is_created_with_no_gpu_key(
+        self, seller_auth_full_client
+    ):
+        c, db = seller_auth_full_client
+        offer = {
+            k: v for k, v in _OFFER.items() if k not in ("gpu_model", "gpu_count")
+        } | {"vcpu_count": 8, "ram_gb": 32}
+        result = await c.create_listing(
+            listing_resource=offer,
+            capacity_source={
+                **_CAPACITY_SOURCE,
+                "listing_shape": {"cpu": {"count": 8}, "memory": {"gib": 32}},
+            },
+            accepted_escrows=_ACCEPTED_ESCROWS,
+            paused=True,
+        )
+
+        stored = json.loads(
+            (await db.load_listing(listing_id=result.listing_id))["listing_resource"]
+        )
+        assert (stored["vcpu_count"], stored["ram_gb"]) == (8, 32)
+        assert "gpu_count" not in stored
+        assert "gpu_model" not in stored
+
+    async def test_a_gpu_listing_resource_naming_no_resource_type_parses_as_compute(
+        self, seller_auth_full_client
+    ):
+        """The shape every stored VM listing has: GPU fields, no resource type."""
+        c, db = seller_auth_full_client
+        assert "resource_type" not in _OFFER
+        result = await c.create_listing(
+            listing_resource=_OFFER,
+            capacity_source=_CAPACITY_SOURCE,
+            accepted_escrows=_ACCEPTED_ESCROWS,
+            paused=True,
+        )
+
+        stored = json.loads(
+            (await db.load_listing(listing_id=result.listing_id))["listing_resource"]
+        )
+        assert (stored["gpu_count"], stored["gpu_model"]) == (1, "H200")
+
+    async def test_a_compute_listing_resource_stating_no_quantity_is_refused(
+        self, seller_auth_full_client
+    ):
+        c, _ = seller_auth_full_client
+        offer = {k: v for k, v in _OFFER.items() if k not in ("gpu_model", "gpu_count")}
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await c.create_listing(
+                listing_resource=offer,
+                capacity_source=_CAPACITY_SOURCE,
+                accepted_escrows=_ACCEPTED_ESCROWS,
+                paused=True,
+            )
+        assert exc_info.value.status_code == 400
+        assert "a shape must name at least one family" in str(exc_info.value)
 
     async def test_rejects_capacity_source_that_disagrees_with_offer(
         self,

@@ -14,65 +14,49 @@ concurrency:
 permissions:
   contents: read
 
-# Runs every package's unit + integration suite (integration tests are
-# mocked at the boundary — no external services), plus the TypeScript and
-# Rust middleware suites. Each Python package is tested in isolation with
-# `uv run` resolving its workspace deps; `--with pytest[-asyncio]` supplies
-# the runner regardless of whether the package declares it.
+# Runs `make test` as a change's validation runs it locally: one job per
+# target `make test` is made of, each the same command a developer runs, so a
+# suite passes here exactly when it passes there. Integration tests are mocked
+# at the boundary and reach no external service. A test asserts that the
+# matrix names every one of `make test`'s targets
+# (scripts/tests/test_tests_workflow.py).
 #
-# Not included here: the docker-compose end-to-end suite (e2e-tests/),
-# which builds the full image stack and is too heavy for per-push CI — it
-# belongs in a separate (e.g. scheduled) workflow. tools/issue-discovery
+# Not included here: the docker-compose end-to-end suite (e2e-tests/), which
+# builds the full image stack and runs in the e2e workflow. tools/issue-discovery
 # is also excluded (its bootstrap tests probe the host system).
 
 jobs:
-  python:
-    name: py · ${{ matrix.name }}
+  test:
+    name: test · ${{ matrix.target }}
     runs-on: ubuntu-latest
     env:
-      ACTIVE_PROFILES: mock
-      # CI has no controlling TTY, so Rich falls back to COLUMNS for help
-      # width; pin it wide so `typer --help` renders option flags
-      # un-truncated (several plugin tests assert on flag substrings).
-      COLUMNS: '200'
+      # Typer forces Rich's terminal mode whenever GITHUB_ACTIONS is set, which
+      # styles CLI output and error panels with escape codes a local run never
+      # emits; CLI tests assert on that output's text.
+      _TYPER_FORCE_DISABLE_TERMINAL: '1'
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { name: kit-alkahest,           dir: kit/alkahest, predist: true }
-          - { name: kit-config,             dir: kit/config, predist: true }
-          - { name: kit-identity,           dir: kit/identity }
-          - { name: kit-policy,             dir: kit/policy, predist: true }
-          - { name: kit-settlement-runtime, dir: kit/settlement-runtime, predist: true }
-          - { name: kit-negotiation-runtime, dir: kit/negotiation-runtime, predist: true }
-          - { name: core,                   dir: core }
-          - { name: core-buyer,             dir: core/buyer, predist: true }
-          - { name: core-storefront,        dir: core/storefront, predist: true }
-          - { name: core-storefront-client, dir: core/storefront-client, predist: true }
-          - { name: core-registry,          dir: core/registry, predist: true }
-          - { name: core-registry-client,   dir: core/registry-client, predist: true }
-          - { name: kit-site,              dir: kit/site, predist: true }
-          - { name: kit-site-client,       dir: kit/site-client, predist: true }
-          - { name: kit-resource-pools,     dir: kit/resource-pools, predist: true }
-          - { name: kit-fulfillment,        dir: kit/fulfillment, predist: true }
-          - { name: compute-provisioning,   dir: provisioning/compute, predist: true }
-          - { name: vms-domain,             dir: domains/vms/domain, predist: true }
-          - { name: bare-metal,            dir: domains/bare_metal, predist: true }
-          - { name: bare-metal-storefront, dir: domains/bare_metal/storefront, predist: true }
-          - { name: bare-metal-buyer,      dir: domains/bare_metal/buyer, predist: true }
-          - { name: bare-metal-provisioning-adapter, dir: domains/bare_metal/provisioning/adapter, predist: true }
-          # The deselected tests assert that injected/static option flags
-          # appear in `typer --help` output; under headless pytest capture
-          # in CI the Rich-rendered options panel comes back empty (passes
-          # locally with a TTY). Tracked for a test-side fix.
-          - { name: vms-buyer,              dir: domains/vms/buyer, predist: true, pytest_args: "--deselect tests/test_plugin_export.py::test_assembled_listing_is_vm_rendering_not_generic_fallback --deselect tests/test_plugin_export.py::test_assembled_listing_uses_typed_resource_query --deselect tests/test_policy_cli_injection.py::test_policy_params_become_flags_and_land_in_kwargs --deselect tests/test_policy_cli_injection.py::test_assembled_buy_and_negotiate_surface_the_default_policy_flags --deselect tests/test_settlement_config_template.py::test_removed_mechanism_and_private_key_flags_are_rejected" }
-          - { name: vms-storefront,         dir: domains/vms/storefront, predist: true }
-          - { name: compute-provisioning-service, dir: provisioning/compute/service, predist: true }
-          - { name: apicredits-buyer,        dir: domains/apicredits/buyer, predist: true, pytest_args: "--deselect tests/test_plugin_export.py::test_buy_surface_has_quantity_key_and_scalar_price_flags --deselect tests/test_plugin_export.py::test_listing_surface_is_token_rendering_not_generic_fallback --deselect tests/test_plugin_export.py::test_listing_surface_uses_typed_resource_query" }
-          - { name: apicredits-storefront,   dir: domains/apicredits/storefront, predist: true }
-          - { name: apicredits-service,      dir: domains/apicredits/service, predist: true }
-          - { name: apicredits-middleware,   dir: domains/apicredits/middleware/python }
-          - { name: apicredits-sample-app,   dir: domains/apicredits/sample-app, predist: true }
+        target:
+          - test-core
+          - test-kits
+          - test-compute-provisioning-contracts
+          - test-compute-provisioning-client
+          - test-compute-provisioning
+          - test-compute-provisioning-ansible
+          - test-provisioning
+          - test-provisioning-iac
+          - test-registry
+          - test-registry-client
+          - test-storefront
+          - test-provisioning-adapter
+          - test-bare-metal
+          - test-compute
+          - test-vms-domain
+          - test-vms-buyer
+          - test-apicredits
+          - test-e2e-unit
+          - test-deployment-packaging
     steps:
       - uses: actions/checkout@v4
       - name: Use the repository's declared Python version
@@ -80,20 +64,28 @@ jobs:
       - uses: astral-sh/setup-uv@v3
         with:
           version: "0.12.19"
-      - name: Create wheelhouse
-        run: mkdir -p .dist
-      - name: Build sibling wheels into .dist
-        # Package ordering and inventory belong to the repository build graph.
-        if: matrix.predist
+      # The API-credits suite includes the TypeScript and Rust middleware.
+      - if: matrix.target == 'test-apicredits'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - if: matrix.target == 'test-apicredits'
+        uses: dtolnay/rust-toolchain@stable
+      - if: matrix.target == 'test-apicredits'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: domains/apicredits/middleware/rust
+      - if: matrix.target == 'test-deployment-packaging'
+        uses: azure/setup-helm@v4
+        with:
+          version: "v4.3.0"
+      - name: Build the repository's wheels
         run: make dist-ci
-      - name: pytest
-        working-directory: ${{ matrix.dir }}
-        env:
-          PYTEST_ARGS: ${{ matrix.pytest_args }}
-        run: uv run --find-links "$GITHUB_WORKSPACE/.dist" --with pytest --with pytest-asyncio pytest -q $PYTEST_ARGS
+      - name: make ${{ matrix.target }}
+        run: make ${{ matrix.target }}
 
   arkhai-payments-kit:
-    name: py · kit-arkhai-payments
+    name: build · kit-arkhai-payments
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -102,55 +94,16 @@ jobs:
           version: "0.12.19"
       - name: Build repository wheels
         run: make dist-ci
-      - name: Check generated wire models, typing, and upstream vectors
-        run: make -C kit/arkhai-payments test
       - name: Build the portable wheel
         run: make -C kit/arkhai-payments build
 
-  release-deployment:
-    name: release · deployment contracts
+  architecture:
+    name: check · architecture
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
         with:
           version: "0.12.19"
-      - uses: azure/setup-helm@v4
-        with:
-          version: "v4.3.0"
       - name: Check package architecture
         run: make check-architecture
-      - name: Run release and package boundary tests
-        run: make test-release-tooling
-      - name: Run Helm schema and render contracts
-        run: make -C helm test-render
-
-  ts-middleware:
-    name: ts · apicredits-middleware
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: domains/apicredits/middleware/typescript
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: domains/apicredits/middleware/typescript/package-lock.json
-      - run: npm ci
-      - run: npm run check   # tsc --noEmit + node --test conformance/gate suites
-
-  rust-middleware:
-    name: rust · apicredits-middleware
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: domains/apicredits/middleware/rust
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: domains/apicredits/middleware/rust
-      - run: cargo test --locked

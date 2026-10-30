@@ -32,6 +32,7 @@ memory.
 | Validation | `change-validate` | `make validate CHANGE=<change>` | `reviews/NN-validation.md`; pushes `HEAD`, runs the pipeline (`make run-e2e`, `make fetch-e2e-logs`), and dispatches and reads each CI workflow the change's complete sections owe (`make run-ci`, `make validate-ci`) |
 | Triage | `change-triage` | `make triage CHANGE=<change>` | `reviews/NN-<kind>.triage.md` ending with `## Next`, the exit it chose in prose; an outcome naming that exit and the records it triaged; `interventions.jsonl`, accepted fixes in one commit, the index row when a phase-closing review's triage advances the change; whatever it edited that no fix commit holds, in one commit of its own |
 | Pre-closeout review | `change-review` | `make review CHANGE=<change> KIND=pre-closeout` | `reviews/NN-pre-closeout.md` |
+| Merge | `change-merge` | `make merge CHANGE=<change> [FROM=<branch>]`, once the pre-closeout triage advances the change | the branch the change lands on — `dev` unless `FROM` names another — merged into the change's branch, its conflicts resolved and the change's code reconciled with it, in the merge commit or one after it; the index row (`ready for closeout`) when it advances with `HEAD` validated |
 | Closeout | `change-closeout` | `make closeout CHANGE=<change>` | permanent documents, the promotion record, the archived change, one commit |
 | Closeout review | `change-review` | `make review CHANGE=<change> KIND=closeout` | `reviews/NN-closeout.md` |
 | Archive cleanup | `change-archive-cleanup` | `make archive-cleanup CHANGE=<change>` | the index (dependents released, row `archived`), any waiver as a ledger line, one commit, `reviews/pull-request.md`; the capacity figure its latest validation measured (`make record-capacity`), in a commit of its own, or none when nothing was measured; then tears down the change's validation namespace and images (`make -C helm teardown`) and, for a change worked in its own clone, copies its history into your workspace (`make change-history`) |
@@ -105,8 +106,9 @@ a check of the tooling run by hand, not part of any change's validation.
 The order is the one the phases give: design and its review until the design
 review's triage advances the change; planning; then, per implementation round,
 implementation, its review beside validation of the same commit, and one triage of
-both; a pre-closeout review and its triage; closeout; the closeout review and its
-triage; archive cleanup. A review is not a gate: its triage names its exit among
+both; a pre-closeout review and its triage; the merge of the branch the change
+lands on; closeout; the
+closeout review and its triage; archive cleanup. A review is not a gate: its triage names its exit among
 those its node declares — the step that advances the change, the plan's next round
 after an implementation round; another review of the same kind; or, before
 closeout, a return to design or planning — asking the owner which once every
@@ -137,8 +139,8 @@ step, so every step after it — the closeout review, its triage, validation, ar
 cleanup — finds the change under `openspec/changes/archive/` by its name
 (`python3 scripts/find_change.py <change>`). `make review KIND=closeout` refuses a
 change that is not archived, and `make archive-cleanup` one that is not. Planning,
-closeout, and archive cleanup ask the next-step computation as they start, and go
-on only when it names them — archive cleanup also when it names a validation
+the merge, closeout, and archive cleanup ask the next-step computation as they
+start, and go on only when it names them — archive cleanup also when it names a validation
 before it, which it then checks for your waiver.
 
 `make check-change CHANGE=<change>` runs a step's closing checks — comment hygiene,
@@ -183,7 +185,9 @@ cadence is asked about once per round.
 **Following a running step.** The session says when it starts a long unattended
 turn. `make change-watch CHANGE=<change>` follows each step's progress file in
 another terminal — one line per tool call — moving to the next step's as it starts,
-and into the archive when closeout moves the change there.
+and into the archive when closeout moves the change there. Run it from your
+workspace: a change worked in its own clone is followed in the clone, where its
+steps write.
 
 **Answering and taking over.** A step that asks ends its turn with a question; your
 answer, relayed by the orchestrating session, resumes the same session by the
@@ -278,8 +282,26 @@ step's defect: the orchestrating session brings it to you and commits it only on
 your word. The branch is the guard against unfinished work: only `dev` is
 protected.
 
-**Merging `dev`.** On your word, the orchestrating session merges `dev` into the
-change's branch between steps — never while a round view is open, nor between a
+**The merge before closeout.** Once the pre-closeout triage advances the change,
+the merge step (`change-merge`) brings the branch the change lands on into the
+change's branch, so the validation before closeout tests the change as it will
+land. That is the branch it was branched from: `make merge` merges `dev` unless
+`FROM=<branch>` names another, which you give the orchestrating session for a
+change branched from elsewhere. It resolves every conflict, and reconciles the
+change's own code — its end-to-end scenarios above all, which no local suite runs —
+with what that branch renamed or removed, which merges
+without a conflict and fails only when it runs. Then it judges what the merge
+needs. Its default, taken without asking, is closeout after a passing validation of
+the merged `HEAD`. Another pre-closeout review, when the merge changed what the
+change does, and closeout without that validation are each yours to confirm: the
+merge asks, and a waived validation is your direction to closeout. A failed
+validation of the merged `HEAD` sends the change back to the merge, which repairs
+what it found; an inconclusive one comes to you. After a review of the merge, its
+triage advances to the merge again, which merges what the branch gained meanwhile, if
+anything, and otherwise advances.
+
+**Merging `dev` at other times.** On your word, the orchestrating session merges
+`dev` into the change's branch between steps — never while a round view is open, nor between a
 round's sections being committed and that round's triage, so a merge never moves
 the commit a round's validation and review describe. It resolves conflicts in the
 change index, change documents, the step table, and skills itself, and brings a

@@ -16,11 +16,13 @@ import pytest
 from core_storefront.sqlite_migrations import migrate_storefront_domain_bindings_schema
 from arkhai_vms_listings.pricing_resolution import GpuPricingFields
 from arkhai_vms_listings.reconciler import (
+    POOL_SHAPES_REQUIRED_MESSAGE,
     PoolHintResolutionSettings,
     declared_shape_feasibility,
     listing_pool_key,
     open_listing_resource_keys,
     pool_id_for_listing,
+    site_derivation_entries,
     site_id_for_listing,
 )
 from arkhai_vms_listings.listing_shapes import CONFIGURED_DEFAULT_TIER, resolve_shape
@@ -551,17 +553,37 @@ class TestUnbackedDerivation:
 
 
 class TestEnumerationQuantity:
-    def test_absent_count_yields_nothing_and_is_reported(self, db_path):
-        pool = _declared_pool("broker-a", [("res-1", None, 0)], tags=_UNBACKED)
+    def test_a_pool_of_members_without_gpus_stating_no_shapes_is_reported_once(self, db_path):
+        pool = _declared_pool(
+            "broker-a", [("res-1", None, 0), ("res-2", None, 0)], tags=_UNBACKED
+        )
 
         assert _slices(db_path, [pool]) == []
-        assert _site_report()["members_without_gpu_count"] == {"res-1": "broker-a"}
+        report = _site_report()
+        assert report["pools_without_default_shapes"] == ["broker-a"]
+        assert "members_without_gpu_count" not in report
+        assert [entry for entry in site_derivation_entries(report)] == [
+            (
+                "report",
+                {
+                    "pool_id": "broker-a",
+                    "reason": "listing_shapes_required",
+                    "message": POOL_SHAPES_REQUIRED_MESSAGE,
+                },
+            )
+        ]
 
-    def test_declared_zero_yields_nothing_silently(self, db_path):
-        pool = _declared_pool("broker-a", [("res-1", 0, 0)], tags=_UNBACKED)
+    def test_a_member_without_gpus_beside_a_gpu_member_is_not_reported(self, db_path):
+        pool = _declared_pool("broker-a", [("res-1", None, 0), ("res-2", 2, 2)], tags=_UNBACKED)
 
-        assert _slices(db_path, [pool]) == []
-        assert _site_report()["members_without_gpu_count"] == {}
+        assert sorted(s["gpu_count"] for s in _slices(db_path, [pool])) == [1, 2]
+        assert site_derivation_entries(_site_report()) == []
+
+    def test_declared_zero_beside_a_gpu_member_yields_nothing_silently(self, db_path):
+        pool = _declared_pool("broker-a", [("res-1", 0, 0), ("res-2", 1, 1)], tags=_UNBACKED)
+
+        assert [s["gpu_count"] for s in _slices(db_path, [pool])] == [1]
+        assert site_derivation_entries(_site_report()) == []
 
     def test_malformed_count_holds_a_whole_fungible_pool(self, db_path):
         pool = _declared_pool(
@@ -890,6 +912,73 @@ class TestListingShapes:
 
         assert [row["resource_id"] for row in _shape_slices(db_path, [pool], holds=holds)] == ["m1"]
         assert holds == {("resource", "site-a", "m2")}
+
+
+_CPU_SHAPE = {"cpu": {"count": 16}, "memory": {"gib": 64}}
+
+
+def _cpu_member(resource_id, *, available=None):
+    member = _member(
+        resource_id, capacity={"vcpu_count": 64, "ram_gb": 512}, available=available
+    )
+    member["attributes"] = {"region": "us-east"}
+    return member
+
+
+class TestShapesWithoutGpus:
+    """Mixed and GPU-less pools derive through a real database."""
+
+    def test_a_gpu_less_pool_publishes_its_stated_shape_with_no_gpu_field(self, db_path):
+        pool = _shaped_pool("cpu", [_cpu_member("c1")], shapes=[_CPU_SHAPE])
+
+        (row,) = _shape_slices(db_path, [pool])
+
+        assert (row["vcpu_count"], row["ram_gb"]) == (16, 64)
+        assert "gpu_count" not in row and "gpu_model" not in row
+        assert row["listing_shape"] == _CPU_SHAPE
+        assert site_derivation_entries(_site_report()) == []
+
+    def test_a_mixed_pool_publishes_its_gpu_and_gpu_less_shapes(self, db_path):
+        pool = _shaped_pool(
+            "mixed",
+            [_member("g1", capacity=_BIG), _cpu_member("c1")],
+            shapes=[{"gpu": {"count": 2, "model": "H100"}}, _CPU_SHAPE],
+        )
+
+        shapes = sorted(
+            (row.get("gpu_count") or 0, row["listing_shape"] == _CPU_SHAPE)
+            for row in _shape_slices(db_path, [pool])
+        )
+
+        assert shapes == [(0, True), (2, False)]
+
+    def test_a_closed_gpu_less_listing_reopens_in_a_deterministic_order(self, db_path):
+        small_cpu_shape = {"cpu": {"count": 8}, "memory": {"gib": 32}}
+        for listing_id, shape in (("cpu-b", _CPU_SHAPE), ("cpu-a", small_cpu_shape)):
+            _seed_listing(
+                db_path,
+                listing_id=listing_id,
+                status="closed",
+                pool_id="cpu",
+                site_id="site-a",
+                listing_shape=shape,
+            )
+        _seed_listing(
+            db_path, listing_id="gpu-1", status="closed", pool_id="cpu", site_id="site-a",
+            gpu_count=1,
+        )
+        pool = _shaped_pool(
+            "cpu",
+            [_member("g1", capacity=_BIG)],
+            shapes=[_CPU_SHAPE, small_cpu_shape, {"gpu": {"count": 1, "model": "H100"}}],
+        )
+
+        reopenable = closed_available_listing_ids(
+            db_path, site_pool_projection={"site-a": [pool]}
+        )
+
+        # A listing stating no GPUs orders as zero, then by id.
+        assert reopenable == ["cpu-a", "cpu-b", "gpu-1"]
 
 
 class TestFamilyRateDerivationThroughTheDatabase:

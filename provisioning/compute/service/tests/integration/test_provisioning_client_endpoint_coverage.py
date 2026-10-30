@@ -225,6 +225,5 @@ def _register_host_record(host_id: str) -> None:
         HostCreate(
             host_id=host_id,
             connection=ssh_connection(ssh_host="192.0.2.10", ssh_user="root", key_path="/fake/id_ed25519"),
-            gpu_count=0,
         )
     )

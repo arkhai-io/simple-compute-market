@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1810" viewBox="0 0 1920 1810" content="&lt;mxfile host=&quot;generated&quot; type=&quot;device&quot;&gt;
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1930" viewBox="0 0 1920 1930" content="&lt;mxfile host=&quot;generated&quot; type=&quot;device&quot;&gt;
 &lt;diagram id=&quot;change-workflow-graph&quot; name=&quot;Change workflow graph&quot;&gt;
-&lt;mxGraphModel dx=&quot;0&quot; dy=&quot;0&quot; grid=&quot;0&quot; gridSize=&quot;10&quot; guides=&quot;1&quot; tooltips=&quot;1&quot; connect=&quot;1&quot; arrows=&quot;1&quot; fold=&quot;1&quot; page=&quot;1&quot; pageScale=&quot;1&quot; pageWidth=&quot;1920&quot; pageHeight=&quot;1810&quot; math=&quot;0&quot; shadow=&quot;0&quot;&gt;
+&lt;mxGraphModel dx=&quot;0&quot; dy=&quot;0&quot; grid=&quot;0&quot; gridSize=&quot;10&quot; guides=&quot;1&quot; tooltips=&quot;1&quot; connect=&quot;1&quot; arrows=&quot;1&quot; fold=&quot;1&quot; page=&quot;1&quot; pageScale=&quot;1&quot; pageWidth=&quot;1920&quot; pageHeight=&quot;1930&quot; math=&quot;0&quot; shadow=&quot;0&quot;&gt;
 &lt;root&gt;
 &lt;mxCell id=&quot;0&quot;/&gt;
 &lt;mxCell id=&quot;1&quot; parent=&quot;0&quot;/&gt;
@@ -13,15 +13,16 @@
 &lt;mxCell id=&quot;triage_implementation&quot; value=&quot;&amp;lt;b&amp;gt;triage:implementation&amp;lt;/b&amp;gt;&amp;lt;br&amp;gt;entry: a review of its kind, or a validation after it, awaits triage&quot; style=&quot;rounded=1;arcSize=8;whiteSpace=wrap;html=1;verticalAlign=top;spacingTop=2;fontSize=10;fontColor=#1f2340;fillColor=#fff6ec;strokeColor=#e3a765;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;540&quot; y=&quot;770&quot; width=&quot;240&quot; height=&quot;64&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
 &lt;mxCell id=&quot;review_pre_closeout&quot; value=&quot;&amp;lt;b&amp;gt;review:pre-closeout&amp;lt;/b&amp;gt;&amp;lt;br&amp;gt;entry: the latest validation passed for HEAD, or for an ancestor it differs from only in records, or after a pre-closeout triage only in openspec/ and docs/ (waivable)&quot; style=&quot;rounded=1;arcSize=8;whiteSpace=wrap;html=1;verticalAlign=top;spacingTop=2;fontSize=10;fontColor=#1f2340;fillColor=#fff6ec;strokeColor=#e3a765;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;520&quot; y=&quot;960&quot; width=&quot;280&quot; height=&quot;96&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
 &lt;mxCell id=&quot;triage_pre_closeout&quot; value=&quot;&amp;lt;b&amp;gt;triage:pre-closeout&amp;lt;/b&amp;gt;&amp;lt;br&amp;gt;entry: a review of its kind, or a validation after it, awaits triage&quot; style=&quot;rounded=1;arcSize=8;whiteSpace=wrap;html=1;verticalAlign=top;spacingTop=2;fontSize=10;fontColor=#1f2340;fillColor=#fff6ec;strokeColor=#e3a765;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;540&quot; y=&quot;1130&quot; width=&quot;240&quot; height=&quot;64&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
-&lt;mxCell id=&quot;closeout&quot; value=&quot;&amp;lt;b&amp;gt;closeout&amp;lt;/b&amp;gt;&quot; style=&quot;rounded=1;arcSize=8;whiteSpace=wrap;html=1;verticalAlign=top;spacingTop=2;fontSize=10;fontColor=#1f2340;fillColor=#f3faea;strokeColor=#9fbf6a;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;540&quot; y=&quot;1270&quot; width=&quot;240&quot; height=&quot;32&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
-&lt;mxCell id=&quot;review_closeout&quot; value=&quot;&amp;lt;b&amp;gt;review:closeout&amp;lt;/b&amp;gt;&amp;lt;br&amp;gt;entry: the change is archived&quot; style=&quot;rounded=1;arcSize=8;whiteSpace=wrap;html=1;verticalAlign=top;spacingTop=2;fontSize=10;fontColor=#1f2340;fillColor=#f3faea;strokeColor=#9fbf6a;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;540&quot; y=&quot;1370&quot; width=&quot;240&quot; height=&quot;48&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
-&lt;mxCell id=&quot;triage_closeout&quot; value=&quot;&amp;lt;b&amp;gt;triage:closeout&amp;lt;/b&amp;gt;&amp;lt;br&amp;gt;entry: the change is archived&amp;lt;br&amp;gt;entry: a review of its kind, or a validation after it, awaits triage&quot; style=&quot;rounded=1;arcSize=8;whiteSpace=wrap;html=1;verticalAlign=top;spacingTop=2;fontSize=10;fontColor=#1f2340;fillColor=#f3faea;strokeColor=#9fbf6a;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;540&quot; y=&quot;1480&quot; width=&quot;240&quot; height=&quot;80&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
-&lt;mxCell id=&quot;archive_cleanup&quot; value=&quot;&amp;lt;b&amp;gt;archive-cleanup&amp;lt;/b&amp;gt;&amp;lt;br&amp;gt;entry: the change is archived&quot; style=&quot;rounded=1;arcSize=8;whiteSpace=wrap;html=1;verticalAlign=top;spacingTop=2;fontSize=10;fontColor=#1f2340;fillColor=#f3faea;strokeColor=#9fbf6a;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;540&quot; y=&quot;1630&quot; width=&quot;240&quot; height=&quot;48&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
-&lt;mxCell id=&quot;done&quot; value=&quot;&amp;lt;b&amp;gt;done&amp;lt;/b&amp;gt;&amp;lt;br&amp;gt;entry: reached only by archive cleanup's exit&quot; style=&quot;rounded=1;arcSize=8;whiteSpace=wrap;html=1;verticalAlign=top;spacingTop=2;fontSize=10;fontColor=#1f2340;fillColor=#f3faea;strokeColor=#9fbf6a;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;540&quot; y=&quot;1740&quot; width=&quot;240&quot; height=&quot;48&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
+&lt;mxCell id=&quot;merge&quot; value=&quot;&amp;lt;b&amp;gt;merge&amp;lt;/b&amp;gt;&amp;lt;br&amp;gt;entry: the change is not archived&quot; style=&quot;rounded=1;arcSize=8;whiteSpace=wrap;html=1;verticalAlign=top;spacingTop=2;fontSize=10;fontColor=#1f2340;fillColor=#fff6ec;strokeColor=#e3a765;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;540&quot; y=&quot;1250&quot; width=&quot;240&quot; height=&quot;48&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
+&lt;mxCell id=&quot;closeout&quot; value=&quot;&amp;lt;b&amp;gt;closeout&amp;lt;/b&amp;gt;&quot; style=&quot;rounded=1;arcSize=8;whiteSpace=wrap;html=1;verticalAlign=top;spacingTop=2;fontSize=10;fontColor=#1f2340;fillColor=#f3faea;strokeColor=#9fbf6a;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;540&quot; y=&quot;1390&quot; width=&quot;240&quot; height=&quot;32&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
+&lt;mxCell id=&quot;review_closeout&quot; value=&quot;&amp;lt;b&amp;gt;review:closeout&amp;lt;/b&amp;gt;&amp;lt;br&amp;gt;entry: the change is archived&quot; style=&quot;rounded=1;arcSize=8;whiteSpace=wrap;html=1;verticalAlign=top;spacingTop=2;fontSize=10;fontColor=#1f2340;fillColor=#f3faea;strokeColor=#9fbf6a;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;540&quot; y=&quot;1490&quot; width=&quot;240&quot; height=&quot;48&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
+&lt;mxCell id=&quot;triage_closeout&quot; value=&quot;&amp;lt;b&amp;gt;triage:closeout&amp;lt;/b&amp;gt;&amp;lt;br&amp;gt;entry: the change is archived&amp;lt;br&amp;gt;entry: a review of its kind, or a validation after it, awaits triage&quot; style=&quot;rounded=1;arcSize=8;whiteSpace=wrap;html=1;verticalAlign=top;spacingTop=2;fontSize=10;fontColor=#1f2340;fillColor=#f3faea;strokeColor=#9fbf6a;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;540&quot; y=&quot;1600&quot; width=&quot;240&quot; height=&quot;80&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
+&lt;mxCell id=&quot;archive_cleanup&quot; value=&quot;&amp;lt;b&amp;gt;archive-cleanup&amp;lt;/b&amp;gt;&amp;lt;br&amp;gt;entry: the change is archived&quot; style=&quot;rounded=1;arcSize=8;whiteSpace=wrap;html=1;verticalAlign=top;spacingTop=2;fontSize=10;fontColor=#1f2340;fillColor=#f3faea;strokeColor=#9fbf6a;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;540&quot; y=&quot;1750&quot; width=&quot;240&quot; height=&quot;48&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
+&lt;mxCell id=&quot;done&quot; value=&quot;&amp;lt;b&amp;gt;done&amp;lt;/b&amp;gt;&amp;lt;br&amp;gt;entry: reached only by archive cleanup's exit&quot; style=&quot;rounded=1;arcSize=8;whiteSpace=wrap;html=1;verticalAlign=top;spacingTop=2;fontSize=10;fontColor=#1f2340;fillColor=#f3faea;strokeColor=#9fbf6a;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;540&quot; y=&quot;1860&quot; width=&quot;240&quot; height=&quot;48&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
 &lt;mxCell id=&quot;round_view&quot; value=&quot;&amp;lt;b&amp;gt;round-view&amp;lt;/b&amp;gt;&quot; style=&quot;rounded=1;arcSize=8;whiteSpace=wrap;html=1;verticalAlign=top;spacingTop=2;fontSize=10;fontColor=#1f2340;fillColor=#f4f5f9;strokeColor=#8a8fa8;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;270&quot; y=&quot;648&quot; width=&quot;160&quot; height=&quot;32&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
 &lt;mxCell id=&quot;validate&quot; value=&quot;&amp;lt;b&amp;gt;validate&amp;lt;/b&amp;gt;&amp;lt;br&amp;gt;entry: it carries a target that is a node&quot; style=&quot;rounded=1;arcSize=8;whiteSpace=wrap;html=1;verticalAlign=top;spacingTop=2;fontSize=10;fontColor=#1f2340;fillColor=#f4f5f9;strokeColor=#8a8fa8;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;110&quot; y=&quot;960&quot; width=&quot;220&quot; height=&quot;48&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
 &lt;mxCell id=&quot;join_triage_implementation&quot; value=&quot;&amp;lt;b&amp;gt;join&amp;lt;/b&amp;gt;&quot; style=&quot;shape=hexagon;perimeter=hexagonPerimeter2;size=0.15;whiteSpace=wrap;html=1;fontSize=10;fontColor=#1f2340;fillColor=#fff6ec;strokeColor=#e3a765;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;600&quot; y=&quot;640&quot; width=&quot;120&quot; height=&quot;48&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
-&lt;mxCell id=&quot;guards&quot; value=&quot;&amp;lt;b&amp;gt;Guards on the exits: condition ⇒ the step that remedies it&amp;lt;/b&amp;gt;&amp;lt;br&amp;gt;G1: a dependency gating planning released ⇒ owner (held)&amp;lt;br&amp;gt;G2: the owner's confirmation ⇒ owner&amp;lt;br&amp;gt;G3: a dependency gating implementation released ⇒ owner (held)&amp;lt;br&amp;gt;G4: HEAD validated, records exempt ⇒ validate, failed or inconclusive: owner&amp;lt;br&amp;gt;G5: in a clone, the bootstrap finished ⇒ wait, failed: owner (held)&amp;lt;br&amp;gt;G6: the fix commit validated, records exempt ⇒ validate, failed or inconclusive: owner&amp;lt;br&amp;gt;G7: a fix committed since the review read ⇒ round-view&amp;lt;br&amp;gt;G8: a fix committed since the review validated ⇒ validate, failed or inconclusive: owner&amp;lt;br&amp;gt;G9: a dependency gating closeout released ⇒ owner (held)&amp;lt;br&amp;gt;G10: HEAD validated, openspec/ and docs/ exempt ⇒ validate, failed or inconclusive: owner&amp;lt;br&amp;gt;G11: a fix outside openspec/ and docs/ validated ⇒ validate, failed or inconclusive: owner&amp;lt;br&amp;gt;G12: a path outside openspec/ and docs/ changed since the first closeout review: HEAD validated ⇒ validate, failed or inconclusive: owner&amp;lt;br&amp;gt;(held): the computation holds a stretch of the workflow on it, before the change is read&quot; style=&quot;text;html=1;align=left;verticalAlign=top;whiteSpace=wrap;spacing=8;fontSize=10;fontColor=#4a4f6a;fillColor=#ffffff;strokeColor=#c9ccd8;rounded=1;arcSize=2;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;1300&quot; y=&quot;40&quot; width=&quot;600&quot; height=&quot;246&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
+&lt;mxCell id=&quot;guards&quot; value=&quot;&amp;lt;b&amp;gt;Guards on the exits: condition ⇒ the step that remedies it&amp;lt;/b&amp;gt;&amp;lt;br&amp;gt;G1: a dependency gating planning released ⇒ owner (held)&amp;lt;br&amp;gt;G2: the owner's confirmation ⇒ owner&amp;lt;br&amp;gt;G3: a dependency gating implementation released ⇒ owner (held)&amp;lt;br&amp;gt;G4: HEAD validated, records exempt ⇒ validate, failed or inconclusive: owner&amp;lt;br&amp;gt;G5: in a clone, the bootstrap finished ⇒ wait, failed: owner (held)&amp;lt;br&amp;gt;G6: the fix commit validated, records exempt ⇒ validate, failed or inconclusive: owner&amp;lt;br&amp;gt;G7: a fix committed since the review read ⇒ round-view&amp;lt;br&amp;gt;G8: a fix committed since the review validated ⇒ validate, failed or inconclusive: owner&amp;lt;br&amp;gt;G9: a dependency gating closeout released ⇒ owner (held)&amp;lt;br&amp;gt;G10: the merged HEAD validated, openspec/ and docs/ exempt ⇒ validate, failed: merge, inconclusive: owner&amp;lt;br&amp;gt;G11: a fix outside openspec/ and docs/ validated ⇒ validate, failed or inconclusive: owner&amp;lt;br&amp;gt;G12: a path outside openspec/ and docs/ changed since the first closeout review: HEAD validated ⇒ validate, failed or inconclusive: owner&amp;lt;br&amp;gt;G13: the merged HEAD validated, records exempt ⇒ validate, failed: merge, inconclusive: owner&amp;lt;br&amp;gt;(held): the computation holds a stretch of the workflow on it, before the change is read&quot; style=&quot;text;html=1;align=left;verticalAlign=top;whiteSpace=wrap;spacing=8;fontSize=10;fontColor=#4a4f6a;fillColor=#ffffff;strokeColor=#c9ccd8;rounded=1;arcSize=2;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;1300&quot; y=&quot;40&quot; width=&quot;600&quot; height=&quot;262&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
 &lt;mxCell id=&quot;e1&quot; value=&quot;&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;design&quot; target=&quot;review_design&quot;&gt;&lt;mxGeometry relative=&quot;1&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
 &lt;mxCell id=&quot;e2&quot; value=&quot;&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;review_design&quot; target=&quot;triage_design&quot;&gt;&lt;mxGeometry relative=&quot;1&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
 &lt;mxCell id=&quot;e3&quot; value=&quot;advance&amp;lt;br&amp;gt;G1&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;triage_design&quot; target=&quot;plan&quot;&gt;&lt;mxGeometry relative=&quot;1&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
@@ -38,14 +39,14 @@
 &lt;mxCell id=&quot;e14&quot; value=&quot;a return&amp;lt;br&amp;gt;G2&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=0;exitY=0.25;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;triage_implementation&quot; target=&quot;plan&quot;&gt;&lt;mxGeometry x=&quot;-0.547&quot; relative=&quot;1&quot; as=&quot;geometry&quot;&gt;&lt;Array as=&quot;points&quot;&gt;&lt;mxPoint x=&quot;470&quot; y=&quot;786&quot;/&gt;&lt;mxPoint x=&quot;470&quot; y=&quot;414&quot;/&gt;&lt;/Array&gt;&lt;/mxGeometry&gt;&lt;/mxCell&gt;
 &lt;mxCell id=&quot;e15&quot; value=&quot;a return&amp;lt;br&amp;gt;G2&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=0;exitY=0.75;exitDx=0;exitDy=0;entryX=0;entryY=0.4167;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;triage_implementation&quot; target=&quot;design&quot;&gt;&lt;mxGeometry x=&quot;0.205&quot; relative=&quot;1&quot; as=&quot;geometry&quot;&gt;&lt;Array as=&quot;points&quot;&gt;&lt;mxPoint x=&quot;240&quot; y=&quot;818&quot;/&gt;&lt;mxPoint x=&quot;240&quot; y=&quot;60&quot;/&gt;&lt;/Array&gt;&lt;/mxGeometry&gt;&lt;/mxCell&gt;
 &lt;mxCell id=&quot;e16&quot; value=&quot;&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;review_pre_closeout&quot; target=&quot;triage_pre_closeout&quot;&gt;&lt;mxGeometry relative=&quot;1&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
-&lt;mxCell id=&quot;e17&quot; value=&quot;advance&amp;lt;br&amp;gt;G9 · G10&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;triage_pre_closeout&quot; target=&quot;closeout&quot;&gt;&lt;mxGeometry relative=&quot;1&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
+&lt;mxCell id=&quot;e17&quot; value=&quot;advance&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;triage_pre_closeout&quot; target=&quot;merge&quot;&gt;&lt;mxGeometry relative=&quot;1&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
 &lt;mxCell id=&quot;e18&quot; value=&quot;another round&amp;lt;br&amp;gt;G11&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.6667;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;triage_pre_closeout&quot; target=&quot;review_pre_closeout&quot;&gt;&lt;mxGeometry relative=&quot;1&quot; as=&quot;geometry&quot;&gt;&lt;Array as=&quot;points&quot;&gt;&lt;mxPoint x=&quot;840&quot; y=&quot;1162&quot;/&gt;&lt;mxPoint x=&quot;840&quot; y=&quot;1024&quot;/&gt;&lt;/Array&gt;&lt;/mxGeometry&gt;&lt;/mxCell&gt;
 &lt;mxCell id=&quot;e19&quot; value=&quot;a return&amp;lt;br&amp;gt;G2&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=1;exitY=0.75;exitDx=0;exitDy=0;entryX=1;entryY=0.25;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;triage_pre_closeout&quot; target=&quot;plan&quot;&gt;&lt;mxGeometry x=&quot;-0.357&quot; relative=&quot;1&quot; as=&quot;geometry&quot;&gt;&lt;Array as=&quot;points&quot;&gt;&lt;mxPoint x=&quot;1260&quot; y=&quot;1178&quot;/&gt;&lt;mxPoint x=&quot;1260&quot; y=&quot;402&quot;/&gt;&lt;/Array&gt;&lt;/mxGeometry&gt;&lt;/mxCell&gt;
 &lt;mxCell id=&quot;e20&quot; value=&quot;a return&amp;lt;br&amp;gt;G2&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=0;exitY=0.75;exitDx=0;exitDy=0;entryX=0;entryY=0.125;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;triage_pre_closeout&quot; target=&quot;design&quot;&gt;&lt;mxGeometry x=&quot;0.012&quot; relative=&quot;1&quot; as=&quot;geometry&quot;&gt;&lt;Array as=&quot;points&quot;&gt;&lt;mxPoint x=&quot;80&quot; y=&quot;1178&quot;/&gt;&lt;mxPoint x=&quot;80&quot; y=&quot;46&quot;/&gt;&lt;/Array&gt;&lt;/mxGeometry&gt;&lt;/mxCell&gt;
 &lt;mxCell id=&quot;e21&quot; value=&quot;&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;closeout&quot; target=&quot;review_closeout&quot;&gt;&lt;mxGeometry relative=&quot;1&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
 &lt;mxCell id=&quot;e22&quot; value=&quot;&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;review_closeout&quot; target=&quot;triage_closeout&quot;&gt;&lt;mxGeometry relative=&quot;1&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
 &lt;mxCell id=&quot;e23&quot; value=&quot;advance&amp;lt;br&amp;gt;G12&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;triage_closeout&quot; target=&quot;archive_cleanup&quot;&gt;&lt;mxGeometry relative=&quot;1&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
-&lt;mxCell id=&quot;e24&quot; value=&quot;another round&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;triage_closeout&quot; target=&quot;review_closeout&quot;&gt;&lt;mxGeometry relative=&quot;1&quot; as=&quot;geometry&quot;&gt;&lt;Array as=&quot;points&quot;&gt;&lt;mxPoint x=&quot;840&quot; y=&quot;1520&quot;/&gt;&lt;mxPoint x=&quot;840&quot; y=&quot;1394&quot;/&gt;&lt;/Array&gt;&lt;/mxGeometry&gt;&lt;/mxCell&gt;
+&lt;mxCell id=&quot;e24&quot; value=&quot;another round&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;triage_closeout&quot; target=&quot;review_closeout&quot;&gt;&lt;mxGeometry relative=&quot;1&quot; as=&quot;geometry&quot;&gt;&lt;Array as=&quot;points&quot;&gt;&lt;mxPoint x=&quot;840&quot; y=&quot;1640&quot;/&gt;&lt;mxPoint x=&quot;840&quot; y=&quot;1514&quot;/&gt;&lt;/Array&gt;&lt;/mxGeometry&gt;&lt;/mxCell&gt;
 &lt;mxCell id=&quot;e25&quot; value=&quot;&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;archive_cleanup&quot; target=&quot;done&quot;&gt;&lt;mxGeometry relative=&quot;1&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
 &lt;mxCell id=&quot;e26&quot; value=&quot;the owner's reading&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;round_view&quot; target=&quot;join_triage_implementation&quot;&gt;&lt;mxGeometry x=&quot;0.4&quot; relative=&quot;1&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
 &lt;mxCell id=&quot;e27&quot; value=&quot;another round&amp;lt;br&amp;gt;G7 · G8&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;round_view&quot; target=&quot;review_implementation&quot;&gt;&lt;mxGeometry x=&quot;0.291&quot; relative=&quot;1&quot; as=&quot;geometry&quot;&gt;&lt;Array as=&quot;points&quot;&gt;&lt;mxPoint x=&quot;350&quot; y=&quot;490&quot;/&gt;&lt;mxPoint x=&quot;1100&quot; y=&quot;490&quot;/&gt;&lt;/Array&gt;&lt;/mxGeometry&gt;&lt;/mxCell&gt;
@@ -55,16 +56,20 @@
 &lt;mxCell id=&quot;e31&quot; value=&quot;sections out of the plan's order&amp;lt;br&amp;gt;G6&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=0.2955;exitY=0;exitDx=0;exitDy=0;entryX=0.1667;entryY=1;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;validate&quot; target=&quot;round&quot;&gt;&lt;mxGeometry x=&quot;0.315&quot; relative=&quot;1&quot; as=&quot;geometry&quot;&gt;&lt;mxPoint x=&quot;0&quot; y=&quot;14&quot; as=&quot;offset&quot;/&gt;&lt;Array as=&quot;points&quot;&gt;&lt;mxPoint x=&quot;175&quot; y=&quot;616&quot;/&gt;&lt;mxPoint x=&quot;580&quot; y=&quot;616&quot;/&gt;&lt;/Array&gt;&lt;/mxGeometry&gt;&lt;/mxCell&gt;
 &lt;mxCell id=&quot;e32&quot; value=&quot;advance, after the last round&amp;lt;br&amp;gt;G6&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;validate&quot; target=&quot;review_pre_closeout&quot;&gt;&lt;mxGeometry relative=&quot;1&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
 &lt;mxCell id=&quot;e33&quot; value=&quot;another round&amp;lt;br&amp;gt;G7 · G8&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=0.6818;exitY=1;exitDx=0;exitDy=0;entryX=0.7;entryY=1;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;validate&quot; target=&quot;review_implementation&quot;&gt;&lt;mxGeometry x=&quot;0.142&quot; relative=&quot;1&quot; as=&quot;geometry&quot;&gt;&lt;Array as=&quot;points&quot;&gt;&lt;mxPoint x=&quot;260&quot; y=&quot;1080&quot;/&gt;&lt;mxPoint x=&quot;1140&quot; y=&quot;1080&quot;/&gt;&lt;/Array&gt;&lt;/mxGeometry&gt;&lt;/mxCell&gt;
-&lt;mxCell id=&quot;e34&quot; value=&quot;advance&amp;lt;br&amp;gt;G9 · G10&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=0.4091;exitY=1;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;validate&quot; target=&quot;closeout&quot;&gt;&lt;mxGeometry x=&quot;0.45&quot; relative=&quot;1&quot; as=&quot;geometry&quot;&gt;&lt;Array as=&quot;points&quot;&gt;&lt;mxPoint x=&quot;200&quot; y=&quot;1286&quot;/&gt;&lt;/Array&gt;&lt;/mxGeometry&gt;&lt;/mxCell&gt;
+&lt;mxCell id=&quot;e34&quot; value=&quot;advance&amp;lt;br&amp;gt;G9 · G10&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=0.4091;exitY=1;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;validate&quot; target=&quot;closeout&quot;&gt;&lt;mxGeometry x=&quot;0.45&quot; relative=&quot;1&quot; as=&quot;geometry&quot;&gt;&lt;Array as=&quot;points&quot;&gt;&lt;mxPoint x=&quot;200&quot; y=&quot;1406&quot;/&gt;&lt;/Array&gt;&lt;/mxGeometry&gt;&lt;/mxCell&gt;
 &lt;mxCell id=&quot;e35&quot; value=&quot;another round&amp;lt;br&amp;gt;G11&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=1;exitY=0.875;exitDx=0;exitDy=0;entryX=0;entryY=0.875;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;validate&quot; target=&quot;review_pre_closeout&quot;&gt;&lt;mxGeometry relative=&quot;1&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
-&lt;mxCell id=&quot;e36&quot; value=&quot;advance&amp;lt;br&amp;gt;G12&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=0.2273;exitY=1;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;validate&quot; target=&quot;archive_cleanup&quot;&gt;&lt;mxGeometry x=&quot;0.669&quot; relative=&quot;1&quot; as=&quot;geometry&quot;&gt;&lt;Array as=&quot;points&quot;&gt;&lt;mxPoint x=&quot;160&quot; y=&quot;1654&quot;/&gt;&lt;/Array&gt;&lt;/mxGeometry&gt;&lt;/mxCell&gt;
+&lt;mxCell id=&quot;e36&quot; value=&quot;advance&amp;lt;br&amp;gt;G12&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=0.2273;exitY=1;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;validate&quot; target=&quot;archive_cleanup&quot;&gt;&lt;mxGeometry x=&quot;0.669&quot; relative=&quot;1&quot; as=&quot;geometry&quot;&gt;&lt;Array as=&quot;points&quot;&gt;&lt;mxPoint x=&quot;160&quot; y=&quot;1774&quot;/&gt;&lt;/Array&gt;&lt;/mxGeometry&gt;&lt;/mxCell&gt;
 &lt;mxCell id=&quot;e37&quot; value=&quot;&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;join_triage_implementation&quot; target=&quot;triage_implementation&quot;&gt;&lt;mxGeometry relative=&quot;1&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
+&lt;mxCell id=&quot;e38&quot; value=&quot;advance&amp;lt;br&amp;gt;G9 · G10&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;merge&quot; target=&quot;closeout&quot;&gt;&lt;mxGeometry relative=&quot;1&quot; as=&quot;geometry&quot;/&gt;&lt;/mxCell&gt;
+&lt;mxCell id=&quot;e39&quot; value=&quot;another round&amp;lt;br&amp;gt;G13&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.8333;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;merge&quot; target=&quot;review_pre_closeout&quot;&gt;&lt;mxGeometry x=&quot;-0.4&quot; relative=&quot;1&quot; as=&quot;geometry&quot;&gt;&lt;Array as=&quot;points&quot;&gt;&lt;mxPoint x=&quot;900&quot; y=&quot;1274&quot;/&gt;&lt;mxPoint x=&quot;900&quot; y=&quot;1040&quot;/&gt;&lt;/Array&gt;&lt;/mxGeometry&gt;&lt;/mxCell&gt;
+&lt;mxCell id=&quot;e40&quot; value=&quot;a return&amp;lt;br&amp;gt;G2&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=1;exitY=0.75;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;merge&quot; target=&quot;plan&quot;&gt;&lt;mxGeometry x=&quot;-0.658&quot; relative=&quot;1&quot; as=&quot;geometry&quot;&gt;&lt;Array as=&quot;points&quot;&gt;&lt;mxPoint x=&quot;1280&quot; y=&quot;1286&quot;/&gt;&lt;mxPoint x=&quot;1280&quot; y=&quot;414&quot;/&gt;&lt;/Array&gt;&lt;/mxGeometry&gt;&lt;/mxCell&gt;
+&lt;mxCell id=&quot;e41&quot; value=&quot;a return&amp;lt;br&amp;gt;G2&quot; style=&quot;endArrow=block;endFill=1;html=1;rounded=0;strokeColor=#2f3350;fontSize=10;fontColor=#4a4f6a;labelBackgroundColor=#ffffff;exitX=0;exitY=0.75;exitDx=0;exitDy=0;entryX=0.25;entryY=0;entryDx=0;entryDy=0;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;merge&quot; target=&quot;design&quot;&gt;&lt;mxGeometry x=&quot;-0.879&quot; relative=&quot;1&quot; as=&quot;geometry&quot;&gt;&lt;Array as=&quot;points&quot;&gt;&lt;mxPoint x=&quot;60&quot; y=&quot;1286&quot;/&gt;&lt;mxPoint x=&quot;60&quot; y=&quot;20&quot;/&gt;&lt;mxPoint x=&quot;600&quot; y=&quot;20&quot;/&gt;&lt;/Array&gt;&lt;/mxGeometry&gt;&lt;/mxCell&gt;
 &lt;/root&gt;
 &lt;/mxGraphModel&gt;
 &lt;/diagram&gt;
 &lt;/mxfile&gt;
 ">
-<rect x="0" y="0" width="1920" height="1810" fill="#ffffff"/>
+<rect x="0" y="0" width="1920" height="1930" fill="#ffffff"/>
 <g fill="none" stroke="#2f3350" stroke-width="1.2">
 <polyline points="660,88 660,150"/>
 <polyline points="660,182 660,250"/>
@@ -82,15 +87,15 @@
 <polyline points="540,786 470,786 470,414 540,414"/>
 <polyline points="540,818 240,818 240,60 540,60"/>
 <polyline points="660,1056 660,1130"/>
-<polyline points="660,1194 660,1270"/>
+<polyline points="660,1194 660,1250"/>
 <polyline points="780,1162 840,1162 840,1024 800,1024"/>
 <polyline points="780,1178 1260,1178 1260,402 780,402"/>
 <polyline points="540,1178 80,1178 80,46 540,46"/>
-<polyline points="660,1302 660,1370"/>
-<polyline points="660,1418 660,1480"/>
-<polyline points="660,1560 660,1630"/>
-<polyline points="780,1520 840,1520 840,1394 780,1394"/>
-<polyline points="660,1678 660,1740"/>
+<polyline points="660,1422 660,1490"/>
+<polyline points="660,1538 660,1600"/>
+<polyline points="660,1680 660,1750"/>
+<polyline points="780,1640 840,1640 840,1514 780,1514"/>
+<polyline points="660,1798 660,1860"/>
 <polyline points="430,664 600,664"/>
 <polyline points="350,648 350,490 1100,490 1100,648"/>
 <polyline points="330,966 520,972"/>
@@ -99,10 +104,14 @@
 <polyline points="175,960 175,616 580,616 580,568"/>
 <polyline points="330,984 520,1008"/>
 <polyline points="260,1008 260,1080 1140,1080 1140,680"/>
-<polyline points="200,1008 200,1286 540,1286"/>
+<polyline points="200,1008 200,1406 540,1406"/>
 <polyline points="330,1002 520,1044"/>
-<polyline points="160,1008 160,1654 540,1654"/>
+<polyline points="160,1008 160,1774 540,1774"/>
 <polyline points="660,688 660,770"/>
+<polyline points="660,1298 660,1390"/>
+<polyline points="780,1274 900,1274 900,1040 800,1040"/>
+<polyline points="780,1286 1280,1286 1280,414 780,414"/>
+<polyline points="540,1286 60,1286 60,20 600,20 600,40"/>
 </g>
 <g fill="#2f3350">
 <polygon points="655,141 665,141 660,150"/>
@@ -121,27 +130,31 @@
 <polygon points="531,409 531,419 540,414"/>
 <polygon points="531,55 531,65 540,60"/>
 <polygon points="655,1121 665,1121 660,1130"/>
-<polygon points="655,1261 665,1261 660,1270"/>
+<polygon points="655,1241 665,1241 660,1250"/>
 <polygon points="809,1019 809,1029 800,1024"/>
 <polygon points="789,397 789,407 780,402"/>
 <polygon points="531,41 531,51 540,46"/>
-<polygon points="655,1361 665,1361 660,1370"/>
-<polygon points="655,1471 665,1471 660,1480"/>
-<polygon points="655,1621 665,1621 660,1630"/>
-<polygon points="789,1389 789,1399 780,1394"/>
-<polygon points="655,1731 665,1731 660,1740"/>
+<polygon points="655,1481 665,1481 660,1490"/>
+<polygon points="655,1591 665,1591 660,1600"/>
+<polygon points="655,1741 665,1741 660,1750"/>
+<polygon points="789,1509 789,1519 780,1514"/>
+<polygon points="655,1851 665,1851 660,1860"/>
 <polygon points="591,659 591,669 600,664"/>
 <polygon points="1095,639 1105,639 1100,648"/>
-<polygon points="510.84,976.72 511.16,966.72 520,972"/>
+<polygon points="510.85,976.71 511.16,966.72 520,972"/>
 <polygon points="625,697 635,697 630,688"/>
 <polygon points="555,577 565,577 560,568"/>
 <polygon points="575,577 585,577 580,568"/>
 <polygon points="510.44,1011.83 511.70,1001.91 520,1008"/>
 <polygon points="1135,689 1145,689 1140,680"/>
-<polygon points="531,1281 531,1291 540,1286"/>
+<polygon points="531,1401 531,1411 540,1406"/>
 <polygon points="510.13,1046.94 512.29,1037.18 520,1044"/>
-<polygon points="531,1649 531,1659 540,1654"/>
+<polygon points="531,1769 531,1779 540,1774"/>
 <polygon points="655,761 665,761 660,770"/>
+<polygon points="655,1381 665,1381 660,1390"/>
+<polygon points="809,1035 809,1045 800,1040"/>
+<polygon points="789,409 789,419 780,414"/>
+<polygon points="595,31 605,31 600,40"/>
 </g>
 <g stroke-width="1.2">
 <rect x="540" y="40" width="240" height="48" rx="5" fill="#fdf2fb" stroke="#c98ac4"/>
@@ -153,15 +166,16 @@
 <rect x="540" y="770" width="240" height="64" rx="5" fill="#fff6ec" stroke="#e3a765"/>
 <rect x="520" y="960" width="280" height="96" rx="5" fill="#fff6ec" stroke="#e3a765"/>
 <rect x="540" y="1130" width="240" height="64" rx="5" fill="#fff6ec" stroke="#e3a765"/>
-<rect x="540" y="1270" width="240" height="32" rx="5" fill="#f3faea" stroke="#9fbf6a"/>
-<rect x="540" y="1370" width="240" height="48" rx="5" fill="#f3faea" stroke="#9fbf6a"/>
-<rect x="540" y="1480" width="240" height="80" rx="5" fill="#f3faea" stroke="#9fbf6a"/>
-<rect x="540" y="1630" width="240" height="48" rx="5" fill="#f3faea" stroke="#9fbf6a"/>
-<rect x="540" y="1740" width="240" height="48" rx="5" fill="#f3faea" stroke="#9fbf6a"/>
+<rect x="540" y="1250" width="240" height="48" rx="5" fill="#fff6ec" stroke="#e3a765"/>
+<rect x="540" y="1390" width="240" height="32" rx="5" fill="#f3faea" stroke="#9fbf6a"/>
+<rect x="540" y="1490" width="240" height="48" rx="5" fill="#f3faea" stroke="#9fbf6a"/>
+<rect x="540" y="1600" width="240" height="80" rx="5" fill="#f3faea" stroke="#9fbf6a"/>
+<rect x="540" y="1750" width="240" height="48" rx="5" fill="#f3faea" stroke="#9fbf6a"/>
+<rect x="540" y="1860" width="240" height="48" rx="5" fill="#f3faea" stroke="#9fbf6a"/>
 <rect x="270" y="648" width="160" height="32" rx="5" fill="#f4f5f9" stroke="#8a8fa8"/>
 <rect x="110" y="960" width="220" height="48" rx="5" fill="#f4f5f9" stroke="#8a8fa8"/>
 <polygon points="618,640 702,640 720,664 702,688 618,688 600,664" fill="#fff6ec" stroke="#e3a765"/>
-<rect x="1300" y="40" width="600" height="246" rx="4" fill="#ffffff" stroke="#c9ccd8"/>
+<rect x="1300" y="40" width="600" height="262" rx="4" fill="#ffffff" stroke="#c9ccd8"/>
 </g>
 <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#1f2340" text-anchor="middle">
 <text x="660" y="55" font-weight="bold">design</text>
@@ -186,17 +200,19 @@
 <text x="660" y="1145" font-weight="bold">triage:pre-closeout</text>
 <text x="660" y="1159">entry: a review of its kind,</text>
 <text x="660" y="1172">or a validation after it, awaits triage</text>
-<text x="660" y="1290" font-weight="bold">closeout</text>
-<text x="660" y="1385" font-weight="bold">review:closeout</text>
-<text x="660" y="1399">entry: the change is archived</text>
-<text x="660" y="1495" font-weight="bold">triage:closeout</text>
-<text x="660" y="1509">entry: the change is archived</text>
-<text x="660" y="1522">entry: a review of its kind,</text>
-<text x="660" y="1535">or a validation after it, awaits triage</text>
-<text x="660" y="1645" font-weight="bold">archive-cleanup</text>
-<text x="660" y="1659">entry: the change is archived</text>
-<text x="660" y="1755" font-weight="bold">done</text>
-<text x="660" y="1769">entry: reached only by archive cleanup's exit</text>
+<text x="660" y="1265" font-weight="bold">merge</text>
+<text x="660" y="1279">entry: the change is not archived</text>
+<text x="660" y="1410" font-weight="bold">closeout</text>
+<text x="660" y="1505" font-weight="bold">review:closeout</text>
+<text x="660" y="1519">entry: the change is archived</text>
+<text x="660" y="1615" font-weight="bold">triage:closeout</text>
+<text x="660" y="1629">entry: the change is archived</text>
+<text x="660" y="1642">entry: a review of its kind,</text>
+<text x="660" y="1655">or a validation after it, awaits triage</text>
+<text x="660" y="1765" font-weight="bold">archive-cleanup</text>
+<text x="660" y="1779">entry: the change is archived</text>
+<text x="660" y="1875" font-weight="bold">done</text>
+<text x="660" y="1889">entry: reached only by archive cleanup's exit</text>
 <text x="350" y="668" font-weight="bold">round-view</text>
 <text x="220" y="975" font-weight="bold">validate</text>
 <text x="220" y="989">entry: it carries a target that is a node</text>
@@ -216,12 +232,12 @@
 <rect x="921.5" y="806" width="77" height="24"/>
 <rect x="445" y="728" width="50" height="24"/>
 <rect x="215" y="288" width="50" height="24"/>
-<rect x="635" y="1220" width="50" height="24"/>
+<rect x="637.5" y="1215" width="45" height="14"/>
 <rect x="801.5" y="1091" width="77" height="24"/>
 <rect x="1235" y="1088" width="50" height="24"/>
 <rect x="55" y="588" width="50" height="24"/>
-<rect x="637.5" y="1583" width="45" height="24"/>
-<rect x="801.5" y="1450" width="77" height="14"/>
+<rect x="637.5" y="1703" width="45" height="24"/>
+<rect x="801.5" y="1570" width="77" height="14"/>
 <rect x="494.5" y="657" width="109" height="14"/>
 <rect x="841.5" y="478" width="77" height="24"/>
 <rect x="368" y="957" width="114" height="24"/>
@@ -230,9 +246,13 @@
 <rect x="266" y="618" width="178" height="24"/>
 <rect x="344" y="984" width="162" height="24"/>
 <rect x="921.5" y="1068" width="77" height="24"/>
-<rect x="345" y="1274" width="50" height="24"/>
+<rect x="312" y="1394" width="50" height="24"/>
 <rect x="386.5" y="1011" width="77" height="24"/>
-<rect x="347.5" y="1642" width="45" height="24"/>
+<rect x="327.5" y="1762" width="45" height="24"/>
+<rect x="635" y="1332" width="50" height="24"/>
+<rect x="861.5" y="1246" width="77" height="24"/>
+<rect x="1075" y="1274" width="50" height="24"/>
+<rect x="375" y="1274" width="50" height="24"/>
 </g>
 <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#4a4f6a" text-anchor="middle">
 <text x="660" y="350">advance</text><text x="660" y="362">G1</text>
@@ -248,12 +268,12 @@
 <text x="960" y="816">another round</text><text x="960" y="828">G7 · G8</text>
 <text x="470" y="738">a return</text><text x="470" y="750">G2</text>
 <text x="240" y="298">a return</text><text x="240" y="310">G2</text>
-<text x="660" y="1230">advance</text><text x="660" y="1242">G9 · G10</text>
+<text x="660" y="1225.5">advance</text>
 <text x="840" y="1101">another round</text><text x="840" y="1113">G11</text>
 <text x="1260" y="1098">a return</text><text x="1260" y="1110">G2</text>
 <text x="80" y="598">a return</text><text x="80" y="610">G2</text>
-<text x="660" y="1593">advance</text><text x="660" y="1605">G12</text>
-<text x="840" y="1460.5">another round</text>
+<text x="660" y="1713">advance</text><text x="660" y="1725">G12</text>
+<text x="840" y="1580.5">another round</text>
 <text x="549" y="667.5">the owner's reading</text>
 <text x="880" y="488">another round</text><text x="880" y="500">G7 · G8</text>
 <text x="425" y="967">nothing to implement</text><text x="425" y="979">G4</text>
@@ -262,9 +282,13 @@
 <text x="355" y="628">sections out of the plan's order</text><text x="355" y="640">G6</text>
 <text x="425" y="994">advance, after the last round</text><text x="425" y="1006">G6</text>
 <text x="960" y="1078">another round</text><text x="960" y="1090">G7 · G8</text>
-<text x="370" y="1284">advance</text><text x="370" y="1296">G9 · G10</text>
+<text x="337" y="1404">advance</text><text x="337" y="1416">G9 · G10</text>
 <text x="425" y="1021">another round</text><text x="425" y="1033">G11</text>
-<text x="370" y="1652">advance</text><text x="370" y="1664">G12</text>
+<text x="350" y="1772">advance</text><text x="350" y="1784">G12</text>
+<text x="660" y="1342">advance</text><text x="660" y="1354">G9 · G10</text>
+<text x="900" y="1256">another round</text><text x="900" y="1268">G13</text>
+<text x="1100" y="1284">a return</text><text x="1100" y="1296">G2</text>
+<text x="400" y="1284">a return</text><text x="400" y="1296">G2</text>
 </g>
 <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#4a4f6a" text-anchor="start">
 <text x="1310" y="58" font-weight="bold" fill="#1f2340">Guards on the exits: condition ⇒ the step that remedies it</text>
@@ -277,10 +301,11 @@
 <text x="1310" y="163">G7: a fix committed since the review read ⇒ round-view</text>
 <text x="1310" y="178">G8: a fix committed since the review validated ⇒ validate, failed or inconclusive: owner</text>
 <text x="1310" y="193">G9: a dependency gating closeout released ⇒ owner (held)</text>
-<text x="1310" y="208">G10: HEAD validated, openspec/ and docs/ exempt ⇒ validate, failed or inconclusive: owner</text>
+<text x="1310" y="208">G10: the merged HEAD validated, openspec/ and docs/ exempt ⇒ validate, failed: merge, inconclusive: owner</text>
 <text x="1310" y="223">G11: a fix outside openspec/ and docs/ validated ⇒ validate, failed or inconclusive: owner</text>
 <text x="1310" y="238">G12: a path outside openspec/ and docs/ changed since the first closeout review: HEAD validated ⇒ validate,</text>
 <text x="1330" y="253">failed or inconclusive: owner</text>
-<text x="1310" y="272">(held): the computation holds a stretch of the workflow on it, before the change is read</text>
+<text x="1310" y="268">G13: the merged HEAD validated, records exempt ⇒ validate, failed: merge, inconclusive: owner</text>
+<text x="1310" y="287">(held): the computation holds a stretch of the workflow on it, before the change is read</text>
 </g>
 </svg>

@@ -41,9 +41,16 @@ job is SSH users, key material, and addressing, and an Ansible inventory is a po
 carrier for declarations because it exists to describe how to reach a machine.
 Keeping GPUs on hosts and moving the other dimensions to declarations would have
 left two partial authorities in one service. So declarations own every dimension,
-and a host's GPU count and model are descriptive. Only the ordered migration ever
-reads them for capacity: once, at upgrade, a host with GPUs that no declaration
-named received a declaration derived from it. No host write declares capacity —
+and a host record describes no hardware at all: it carries no GPU count or model,
+and its storage has no column for either. Keeping them as descriptive fields would
+have left a second, unchecked statement of hardware beside the declaration. A host
+API request or an INI entry that still carries them has them ignored, as any field
+or variable the host contract does not define is ignored: refusing or warning would
+be code kept until something retires it, guarding a mistake — expecting a field
+that affects nothing to be recorded — that is easily diagnosed and fixed. Before
+the columns were dropped, the ordered migration read them for capacity once, at
+upgrade: a host with GPUs that no declaration named received a declaration derived
+from it. No host write declares capacity —
 not an INI inventory applied at startup or through the import API, and not the
 host API — because a declaration made as a side effect of listing a host would sell
 it before its administrator decided how, and would make one host behave

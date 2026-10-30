@@ -118,8 +118,8 @@ def engine():
         connection.execute(text(
             """
             INSERT INTO hosts (host_id, connection_kind, connection_version, connection_public, connection_protected,
-                                gpu_count, enabled, pool_id)
-            VALUES ('kvm1', 'ssh', 1, '{"ssh_host": "10.0.0.1", "public_host": null, "ssh_port": 22, "ssh_user": "root", "key_path": "/keys/id_ed25519"}', '{}', 0, 1, 'default')
+                                enabled, pool_id)
+            VALUES ('kvm1', 'ssh', 1, '{"ssh_host": "10.0.0.1", "public_host": null, "ssh_port": 22, "ssh_user": "root", "key_path": "/keys/id_ed25519"}', '{}', 1, 'default')
             """
         ))
         # One legacy lease per non-terminal backfill state.

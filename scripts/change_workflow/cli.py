@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
+from change_clone import clone_of
 from change_workflow.common import KINDS, ORCHESTRATOR, ROOT, StepError
 from change_workflow.convert import convert_change
 from change_workflow.harness import UNATTENDED_RUN
@@ -225,6 +226,18 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
     args = _parser().parse_args(argv)
     wrapper = wrapper or Wrapper(root=root)
     try:
+        if args.command == "watch":
+            # A change worked in its own clone writes its progress files there, and
+            # the workspace receives them only when archive cleanup copies the
+            # change's history, so from the workspace its clone is followed.
+            watched = clone_of(wrapper.root, args.change) or wrapper.root
+            log_path(watched, args.change)
+            try:
+                watch(lambda: log_path(watched, args.change).parent,
+                      echo=lambda line: print(line, flush=True))
+            except KeyboardInterrupt:
+                pass
+            return 0
         path = (history_log_path if args.command == "log" else log_path)(wrapper.root,
                                                                           args.change)
         if args.command == "record":
@@ -278,12 +291,6 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
                 entries = last_entries(path, args.last)
             for entry in entries:
                 print(json.dumps(entry, ensure_ascii=False))
-        elif args.command == "watch":
-            try:
-                watch(lambda: log_path(wrapper.root, args.change).parent,
-                      echo=lambda line: print(line, flush=True))
-            except KeyboardInterrupt:
-                pass
         elif args.command == "denials":
             entry = next((e for e in read_log(path) if e.get("seq") == args.seq), None)
             if entry is None:

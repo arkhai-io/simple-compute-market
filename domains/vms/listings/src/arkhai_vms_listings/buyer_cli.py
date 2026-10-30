@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
-
-
+from arkhai_vms_listings.models import COMPUTE_RESOURCE_TYPE, payload_resource_type
 
 
 def short_contract_address(value: str) -> str:
@@ -20,8 +18,8 @@ def format_resource(resource: dict) -> str:
         return "-"
     if not isinstance(resource, dict):
         return str(resource)
-    is_compute = resource.get("type") == "compute" or "gpu_model" in resource
-    if is_compute:
+    # The parser's dispatch rule, so a slice without GPUs renders as compute.
+    if payload_resource_type(resource) == COMPUTE_RESOURCE_TYPE:
         ordered_keys = (
             "type",
             "gpu_model",
@@ -41,21 +39,19 @@ def format_resource(resource: dict) -> str:
         extra_keys = sorted(k for k in resource.keys() if k not in ordered_keys)
         lines.extend(f"{key}={resource[key]}" for key in extra_keys)
         return "\n".join(lines) if lines else "-"
-    if "token" in resource:
-        token = resource.get("token", {})
-        amount = resource.get("amount")
-        lines = []
-        if isinstance(token, dict):
-            symbol = token.get("symbol")
-            contract = token.get("contract_address")
-            if symbol:
-                lines.append(f"symbol={symbol}")
-            if contract:
-                lines.append(f"contract_address={short_contract_address(str(contract))}")
-        if amount is not None:
-            lines.append(f"amount={amount}")
-        return "\n".join(lines) if lines else "-"
-    return json.dumps(resource, separators=(",", ":"), sort_keys=True)
+    token = resource.get("token", {})
+    amount = resource.get("amount")
+    lines = []
+    if isinstance(token, dict):
+        symbol = token.get("symbol")
+        contract = token.get("contract_address")
+        if symbol:
+            lines.append(f"symbol={symbol}")
+        if contract:
+            lines.append(f"contract_address={short_contract_address(str(contract))}")
+    if amount is not None:
+        lines.append(f"amount={amount}")
+    return "\n".join(lines) if lines else "-"
 
 
 def format_accepted_escrows(entries: list) -> str:

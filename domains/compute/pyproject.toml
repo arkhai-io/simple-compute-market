@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-compute"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 description = "Compute-family market vocabulary shared by the VM and bare-metal domains."
 requires-python = ">=3.12,<3.14"
@@ -8,7 +8,7 @@ requires-python = ">=3.12,<3.14"
 # depends on nothing but the capability-shape foundation kit: a domain can bind
 # it without importing another domain, and the market core stays free of it.
 dependencies = [
-    "arkhai-kit-capability-shape>=0.2.0",
+    "arkhai-kit-capability-shape>=0.3.0",
 ]
 
 [build-system]

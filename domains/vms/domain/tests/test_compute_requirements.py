@@ -22,7 +22,7 @@ def test_schema_quantities_are_the_dimension_vocabulary():
     assert set(VM_CAPABILITY_SCHEMA.flat_names(FieldKind.QUANTITY)) == set(DIMENSION_KEYS)
 
 
-def test_only_the_gpu_family_is_required():
+def test_gpu_count_and_model_are_the_only_required_fields():
     required = {field.path for field in VM_CAPABILITY_SCHEMA.fields if field.required}
     assert required == {"gpu.count", "gpu.model"}
 

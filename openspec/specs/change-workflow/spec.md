@@ -22,7 +22,17 @@ order, except where the owner directs a step, as the requirement on the owner's
 directions allows; no direction crosses the archive. The design phase MUST end with a design review, the implementation phase
 with a pre-closeout review, and the closeout phase with a closeout review; a phase
 ending in a review MUST NOT be treated as finished until that review has been
-triaged and its triage's outcome names, as its exit, a step of the next phase. The
+triaged and its triage's outcome names, as its exit, a step of the next phase — for
+the implementation phase, the merge that precedes closeout. Once the pre-closeout
+review's triage advances the change, a merge step MUST bring the branch the change
+lands on — the branch it was branched from, `dev` unless the owner names another —
+into the change's branch, resolve its conflicts, and reconcile the change's own code
+with what that branch changed even where the merge reported no conflict, before closeout
+starts; closeout MUST NOT start until a validation of the merged `HEAD` passed,
+unless the owner waives it. The merge MUST judge whether its resolutions merit
+another pre-closeout review and whether its validation may be waived, and MUST
+take either only on the owner's confirmation; without either, it MUST advance to
+closeout without waiting for the owner. The
 repository owner MUST be consulted for the design discussion's questions, for their
 notes on each implementation round before its triage, for the disposition of every
 finding, and for whether the dispositions merit another review round, which triage
@@ -126,7 +136,8 @@ Each change of a change's phase or state MUST be written to its row in the
 active-change index by the skill that makes it, in the same step: design
 discussion starting, triage recording that a phase-closing review's change
 advances, planning starting and finishing, the first implementation section
-starting, closeout starting, and archive cleanup. An implementation review after a
+starting, the merge before closeout advancing, closeout starting, and archive
+cleanup. An implementation review after a
 section MUST NOT change the status. Each step that edits the index MUST check it
 afterwards: every row has its
 table's cell count; its link resolves to its change's directory, or to its archive
@@ -156,7 +167,11 @@ directory has exactly one row. An archived change MAY have no row.
 #### Scenario: A pre-closeout review's triage advances the change
 
 - **WHEN** a change's pre-closeout review's triage records that the change advances
-- **THEN** the triage step sets the change's index row to `ready for closeout`
+- **THEN** the triage step leaves the change's index row as it is, and the merge
+  before closeout runs next
+- **AND** the merge sets the row to `ready for closeout` when it advances to
+  closeout with the latest validation passed for `HEAD`, and otherwise leaves it,
+  closeout accepting the row as it stands once the computation names closeout
 
 ### Requirement: Review records
 
@@ -575,8 +590,8 @@ read them again.
 #### Scenario: A pre-closeout triage commits only documents
 
 - **WHEN** a pre-closeout review's triage advances the change with no fix, and
-  commits its edits to the change's documents and the index row after the latest
-  validation passed
+  commits its edits to the change's documents after the latest validation passed,
+  and the merge that follows finds the branch the change lands on merged already
 - **THEN** closeout starts without the commit being validated again
 
 #### Scenario: An implementation triage commits only documents
@@ -977,11 +992,13 @@ a return, the returned review MUST NOT govern what follows, so the work the retu
 leads to is implemented, validated, and reviewed afresh, as a round of its own even
 where it reworks a section the returned round implemented; a return the owner
 declined, or one recorded at closeout, MUST be brought to the owner. An
-implementation or pre-closeout round MUST advance only on a `passed` validation
-naming its final commit, or a commit from which its final commit differs only in
-changes' records — or, after a pre-closeout review, only in paths under `openspec/`
-and `docs/`; an `inconclusive` validation MUST be brought to the owner. Nothing
-routes on a triage file's `## Next`.
+implementation round, and the merge before closeout, MUST advance only on a
+`passed` validation naming its final commit, or a commit from which its final commit
+differs only in changes' records — or, for the merge's advance to closeout, only in
+paths under `openspec/` and `docs/`; an `inconclusive` validation MUST be brought to
+the owner, and a `failed` validation of the merged `HEAD` MUST name the merge again,
+which repairs what it found or asks the owner. Nothing routes on a triage file's
+`## Next`.
 
 #### Scenario: Reviews await triage
 
@@ -1182,10 +1199,32 @@ routes on a triage file's `## Next`.
 
 #### Scenario: A validation before closeout passes
 
-- **WHEN** a pre-closeout review's triage named closeout, the computation named
-  validation of `HEAD` with closeout as its target, and the validation passed,
-  naming closeout as its exit
+- **WHEN** the merge after a pre-closeout review's triage named closeout, the
+  computation named validation of the merged `HEAD` with closeout as its target,
+  and the validation passed, naming closeout as its exit
 - **THEN** the computation names closeout
+
+#### Scenario: A validation of the merged HEAD fails
+
+- **WHEN** the merge named closeout or a pre-closeout review, and the validation of
+  the merged `HEAD` failed
+- **THEN** the computation names the merge, carrying the exit it named, so the merge
+  repairs what the validation found
+- **AND** an `inconclusive` validation of the merged `HEAD` names the owner
+
+#### Scenario: The merge proposes another pre-closeout review
+
+- **WHEN** the merge resolved a conflict in the change's own code by a decision,
+  and the owner confirms the review it proposes
+- **THEN** the merge names the pre-closeout review, which runs once the merged
+  `HEAD` is validated, and that review's triage advances to the merge again
+
+#### Scenario: The owner waives the merge's validation
+
+- **WHEN** the owner, asked by the merge, waives the validation of the merged
+  `HEAD`
+- **THEN** the merge names closeout and the owner's direction to closeout is
+  recorded, which checks no exit guard, so closeout starts unvalidated
 
 #### Scenario: A validation names another exit
 
@@ -1623,8 +1662,9 @@ take, and MUST NOT be checked against the owner's directions. Entry guards MUST 
 checked on every entry to their node: an unwaivable one MUST refuse every entry
 while unmet, and a waivable one MUST take the owner's direction as its override.
 The change's archive MUST be an unwaivable entry guard of the closeout review, its
-triage, and archive cleanup, and its absence one of design, planning, and
-implementation. A triage node's entry guard MUST be that a review of its kind
+triage, and archive cleanup, and its absence one of design, planning,
+implementation, and the merge before closeout. Closeout MUST be reached by a step's
+exit only from the merge. A triage node's entry guard MUST be that a review of its kind
 awaits triage, or a validation record numbered after the latest review, which is
 of its kind and not a design review. Validation's entry guard MUST be unwaivable:
 that it carries a

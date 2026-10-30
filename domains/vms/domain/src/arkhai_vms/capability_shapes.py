@@ -12,12 +12,14 @@ from typing import Any
 
 from market_capability_shape import (
     CapabilityShapeError,
+    FieldKind,
     FlatShape,
     ShapeProblem,
     canonical_shape,
     flatten_shape,
     shape_digest,
     shape_problems,
+    unflatten_shape,
 )
 from market_capability_pricing import (
     FamilyRate,
@@ -56,6 +58,28 @@ def vm_shape_problems(shape: Any) -> tuple[ShapeProblem, ...]:
 def flatten_vm_shape(shape: Any) -> FlatShape:
     """A VM shape's published quantities and attributes by wire name."""
     return flatten_shape(shape, VM_CAPABILITY_SCHEMA)
+
+
+def vm_listing_resource_shape(resource: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """The VM shape a flat listing resource publishes, read through the schema.
+
+    Only the resource's schema fields are shape input, and a field it carries as
+    ``None`` states nothing, exactly as one it omits. Refuses, naming the shape
+    kit's reasons, a resource whose fields do not form a valid shape: one GPU
+    field without the other, a quantity that is not a positive integer, or no
+    quantity at all.
+    """
+    values = {
+        kind: {
+            name: resource[name]
+            for name in VM_CAPABILITY_SCHEMA.flat_names(kind)
+            if resource.get(name) is not None
+        }
+        for kind in (FieldKind.QUANTITY, FieldKind.ATTRIBUTE)
+    }
+    return unflatten_shape(
+        values[FieldKind.QUANTITY], values[FieldKind.ATTRIBUTE], VM_CAPABILITY_SCHEMA
+    )
 
 
 def canonical_vm_shape(shape: Any) -> dict[str, dict[str, Any]]:
@@ -108,6 +132,7 @@ __all__ = [
     "flatten_vm_shape",
     "price_vm_shape",
     "vm_family_rate",
+    "vm_listing_resource_shape",
     "vm_shape_digest",
     "vm_shape_problems",
 ]

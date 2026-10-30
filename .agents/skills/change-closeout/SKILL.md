@@ -107,12 +107,13 @@ names it again, to be resumed, or its outcome recorded with the command above.
   `python3 scripts/run_change_step.py log <change> --branch <that branch>`; a line
   it prints is that decision, and the branch is accepted.
 - **Route.** `python3 scripts/change_next_step.py <change>` names `closeout`,
-  whatever the status says: the pre-closeout triage's exit, once a validation
-  cleared `HEAD`, or the owner's direction to closeout, which checks no exit guard.
-  A row still `in implementation` is so accepted: the triage advanced before its
-  fix commit was validated, so it could not set `ready for closeout`. When the
-  computation names anything else — the pre-closeout review's triage, a validation
-  of `HEAD`, the owner — stop: the change is not ready, and the computation's reason
+  whatever the status says: the exit of the merge that follows the pre-closeout
+  triage, bringing in the branch the change lands on, once a validation cleared the merged `HEAD`, or the owner's
+  direction to closeout, which checks no exit guard. A row still `in
+  implementation` is so accepted: the merge advanced before its merged `HEAD` was
+  validated, so it could not set `ready for closeout`. When the computation names
+  anything else — the pre-closeout review's triage, the merge, a validation of
+  `HEAD`, the owner — stop: the change is not ready, and the computation's reason
   says what comes first.
 - **Where it stopped.** Find the change with `python3 scripts/find_change.py
   <change>`. When it prints a directory under `openspec/changes/archive/` while the

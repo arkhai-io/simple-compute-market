@@ -9,8 +9,8 @@ from typing import Any, Callable
 
 ROOT = Path(__file__).resolve().parents[2]
 CHANGES = Path("openspec/changes")
-STEPS = ("design", "plan", "review", "triage", "implement", "validate", "closeout",
-         "archive-cleanup")
+STEPS = ("design", "plan", "review", "triage", "implement", "validate", "merge",
+         "closeout", "archive-cleanup")
 KINDS = ("design", "implementation", "pre-closeout", "closeout")
 ORCHESTRATOR = "orchestrator"
 

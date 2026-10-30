@@ -143,7 +143,7 @@ The computation names where the change is worked before any step:
 
 ## Run the computed step
 
-For `design`, `plan`, `implement`, `triage`, `validate`, `closeout`, or
+For `design`, `plan`, `implement`, `triage`, `validate`, `merge`, `closeout`, or
 `archive-cleanup`, run `make -C <clone> <step> CHANGE=<change> UNATTENDED=1`, or
 `make <step> CHANGE=<change> UNATTENDED=1` for a change worked in the workspace.
 Pass computed implementation `sections` as `SECTIONS=<comma-separated-ids>`; each
@@ -203,7 +203,8 @@ exit it holds.
 Before any long-running unattended turn — validation, implementation, a review,
 closeout, or a discussion resumed to apply fixes or run checks — tell the owner
 what is running and give `make change-watch CHANGE=<change>` to follow it in
-another terminal, run in the clone for a change worked there. When the owner asks
+another terminal, from the workspace or the clone: run from the workspace, it
+follows a change worked in its clone there. When the owner asks
 for status, read the step's current progress file under `reviews/transcripts/` —
 one line per tool call, its time and what it touched, not the transcript, which you
 read only through the denials report; the harness's task panel does not show
@@ -321,6 +322,25 @@ the owner may waive that validation, judging the paths its reason names. Only on
 the owner's word, record `--by owner --next archive-cleanup` with no `resolves`,
 the paths in its reason; archive cleanup finds the direction in the log and writes
 the waiver to the ledger.
+
+After the pre-closeout triage, the merge step brings the branch the change lands on
+into the change's branch and proposes what follows it. `make merge` merges the
+target's default branch unless given `FROM=<branch>`: pass the branch the change
+was branched from — the `FROM` you created its clone with, or the one the owner
+named — and when you no longer know it, as after compaction, ask the owner rather
+than taking the default. A review of the merge, and closeout without
+validating the merged `HEAD`, are each the owner's to confirm: the merge asks, and
+you relay its question and the owner's answer as with any step. When the owner's
+answer waives the validation, the merge finishes naming closeout and says so;
+record the waiver as the owner's direction past the guard, resolving the merge's
+run, with the owner's words:
+
+```text
+python3 scripts/run_change_step.py note <change> orchestrator --by owner --resolves <merge-seq> --next closeout --decision "closeout without validating the merged HEAD" --reason <the owner's words>
+```
+
+A failed validation of the merged `HEAD` names the merge again, which repairs it;
+an inconclusive one names the owner, as any validation's does.
 
 **An interactive run left unrecorded.** A step the owner runs interactively records
 its own outcome with `record`. When the owner tells you they ran a step themselves
@@ -524,9 +544,11 @@ refuses any other: while the waiver's ledger line waits for planning, the commit
 waits too. Never write the change's feature work of your own accord; never read a
 finding's code to decide what to change.
 
-Merging `dev`, or another branch whose workflow tooling the change's later rounds
-need, into the change's branch is workflow maintenance too, done only on the
-owner's word: `git -C <clone> pull --no-rebase origin dev`, or `workspace
+The merge before closeout is a step of the graph (`merge`), not maintenance: run it
+when the computation names it. Merging `dev` at any other time, or another branch whose workflow tooling the change's later rounds need, into the
+change's branch is workflow maintenance, done only on the owner's word — and, after
+the pre-closeout triage, name the merge step to the owner instead, since it
+validates what it brings in and a merge of yours does not: `git -C <clone> pull --no-rebase origin dev`, or `workspace
 <branch>` for another branch, then `make -C <clone> push-branch`. Make it only
 between the change's steps, never while its round view is open, and never between
 a round's sections being committed and that round's triage, so the merge never

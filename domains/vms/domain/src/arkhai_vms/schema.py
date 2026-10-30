@@ -8,6 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from market_core.schemas import SettlementOption, SettlementSelection
 
+from .capability_shapes import vm_listing_resource_shape
 from .provision_terms import VM_PROVISION_KIND, VmProvisionTerms
 
 
@@ -36,10 +37,10 @@ class VmListing(BaseModel):
     def _validate_listing(self) -> "VmListing":
         if not self.listing_resource:
             raise ValueError("listing_resource must be non-empty")
-        if "gpu_model" not in self.listing_resource:
-            raise ValueError("listing_resource must include gpu_model")
-        if "gpu_count" not in self.listing_resource:
-            raise ValueError("listing_resource must include gpu_count")
+        # The listing's shape is read through the compute schema, so a GPU
+        # count without a model, a model without a count, or no quantity at all
+        # is refused by the shape kit rather than by a rule restated here.
+        vm_listing_resource_shape(self.listing_resource)
         return self
 
 

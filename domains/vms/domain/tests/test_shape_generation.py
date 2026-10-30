@@ -68,6 +68,21 @@ def test_members_without_a_usable_count_or_model_are_skipped():
     assert gpu_count_shapes(members, UNCONSTRAINED) == ({"gpu": {"count": 1, "model": "H100"}},)
 
 
+def test_a_gpu_member_beside_one_declaring_no_gpus_yields_only_the_gpu_defaults():
+    gpu_less = {
+        "capacity": {"vcpu_count": 64, "ram_gb": 512},
+        "attributes": {},
+        "enabled": True,
+    }
+    shapes = gpu_count_shapes([gpu_less, _member(2)], UNCONSTRAINED)
+    assert shapes == tuple({"gpu": {"count": n, "model": "H100"}} for n in (1, 2))
+
+
+def test_members_declaring_no_gpus_yield_no_default_shape():
+    gpu_less = {"capacity": {"vcpu_count": 64, "ram_gb": 512}, "attributes": {}, "enabled": True}
+    assert gpu_count_shapes([gpu_less, dict(gpu_less)], UNCONSTRAINED) == ()
+
+
 def test_with_no_configured_default_every_count_is_generated():
     shapes = gpu_count_shapes([_member(3)], _policy({}))
     assert [shape["gpu"]["count"] for shape in shapes] == [1, 2, 3]

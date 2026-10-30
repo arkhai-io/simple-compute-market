@@ -12,7 +12,7 @@
 # registries whose declared id matches; registries without the header match
 # any domain for compatibility with pre-identity deployments.
 
-version: 6
+version: 7
 
 schema:
   id: compute.market
@@ -39,6 +39,12 @@ listing_shape:
   # (seller tooling to storefront) already rejects the retired key, and a
   # registry that quietly accepts what the storefront refuses is the
   # inconsistency, not the strictness.
+  #
+  # v7: a listing may omit `gpu_model` and `gpu_count`, since a machine
+  # without GPUs states neither; only `region` is required of the listing
+  # resource. The GPU filters keep `on_missing: fail`, so such a listing is
+  # excluded from every query bounding a GPU field and appears in queries that
+  # bound none.
   required: [listing_id, listing_resource, storefront_url]
   not:
     anyOf:
@@ -56,7 +62,7 @@ listing_shape:
     storefront_url: {type: string, minLength: 1}
     listing_resource:
       type: object
-      required: [gpu_model, region]
+      required: [region]
       additionalProperties: true
       # v6: `virtualization_type` is the retired spelling of `offering_mode`.
       not:

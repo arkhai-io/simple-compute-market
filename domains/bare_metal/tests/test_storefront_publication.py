@@ -297,9 +297,36 @@ def test_a_pool_without_a_region_holds_its_resources():
     assert classification.candidates == ()
 
 
+def test_a_machine_without_gpus_is_a_candidate_whose_payload_has_no_gpu_key():
+    classification = classify_bare_metal_resources(
+        _generation(
+            _resource(
+                "cpu-only",
+                capacity={"units": 1, "vcpu_count": 64, "ram_gb": 512},
+                attributes={"physical_host_id": "p"},
+            )
+        ),
+        pool_backings=_BACKED,
+        pool_admission={"pool-1": POOL_ADMITTED},
+        pool_regions=_regions("pool-1"),
+    )
+
+    assert _classes(classification) == {"cpu-only": CANDIDATE}
+    (candidate,) = classification.candidates
+    shape = {"cpu": {"count": 64}, "memory": {"gib": 512}}
+    assert candidate["shape_digest"] == shape_digest(shape)
+    published = candidate["listing_resource"]
+    assert (published["vcpu_count"], published["ram_gb"]) == (64, 512)
+    assert "gpu_count" not in published and "gpu_model" not in published
+
+
 @pytest.mark.parametrize(
     ("capacity", "attributes", "problem"),
     [
+        pytest.param(
+            {"units": 1}, {}, "a shape must name at least one family", id="only the machine"
+        ),
+        pytest.param({"units": 1, "gpu_count": 0}, {}, "gpu.count", id="zero gpus"),
         pytest.param({"units": 1, "gpu_count": 8}, {}, "gpu.model", id="no model"),
         pytest.param({"units": 1}, {"gpu_model": "H200"}, "gpu.count", id="no count"),
         pytest.param({"gpu_count": 8}, {"gpu_model": "H200"}, "units", id="no units"),

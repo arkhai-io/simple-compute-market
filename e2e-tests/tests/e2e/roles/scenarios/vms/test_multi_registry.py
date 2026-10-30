@@ -98,7 +98,6 @@ from compute_provisioning_client import SyncComputeProvisioningClient
 from market_identity import create_signer
 from e2e_harness.settings import settings
 from tests.e2e.roles.scenarios.vms.host_registry import (
-    E2E_HOST_GPU_COUNT,
     E2E_MULTI_REGISTRY_HOST,
     E2E_MULTI_REGISTRY_POOL_ID,
     provision_e2e_executor,
@@ -511,7 +510,7 @@ class TestStage02a_BobInventory:
             attributes={"gpu_model": "RTX 5080", "region": BOB_OFFER["region"],
                         "sla": "90.0"},
         )
-        assert (host.gpu_count or 0) >= E2E_HOST_GPU_COUNT
+        assert host.host_id == E2E_MULTI_REGISTRY_HOST
         refresh_storefront_projections(storefront_admin_client)
         mr_state.bob_inventory_seeded = True
 
@@ -532,7 +531,7 @@ class TestStage02b_AliceInventory:
             attributes={"gpu_model": "RTX 5080", "region": ALICE_OFFER["region"],
                         "sla": "90.0"},
         )
-        assert (host.gpu_count or 0) >= E2E_HOST_GPU_COUNT
+        assert host.host_id == f"{E2E_MULTI_REGISTRY_HOST}-ny"
         refresh_storefront_projections(alice_admin_client)
         mr_state.alice_inventory_seeded = True
 
