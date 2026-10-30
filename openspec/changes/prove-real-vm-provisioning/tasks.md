@@ -1,7 +1,8 @@
 # Tasks
 
 Planned against the design settled in `design.md` and advanced by
-`reviews/10-design.triage.md`. Every task answers to a decision (D1–D11), a delta
+`reviews/10-design.triage.md`. Every task answers to a decision (D1–D11, with D2a,
+D4a, D4b, and D9d), a delta
 requirement under `specs/`, or a repository obligation cited at the task:
 `openspec/README.md#plan-closeout-requirements`, the task rules in
 `openspec/config.yaml`, `docs/development/TESTING.md`'s level definitions, and
@@ -13,8 +14,13 @@ Test levels follow `docs/development/TESTING.md`: unit (no stack); system (the
 their shell logic against a fake filesystem.
 
 Order: sections 1–5 deliver everything the mock lanes and unit tests can prove; sections
-6–8 deliver the real lane, its documentation, and its live verification; section 9 is
-the closeout. Section 6 needs sections 1, 2, 4, and 5. Section 8 is evidence the owner
+6–8 deliver the real lane, its documentation, and its live verification; section 7A,
+added after 8.1's run, fixes the SSH restart handler that run found (D9d) and 8.4
+re-runs host preparation to show it; section 7B, added after 8.2's first run, fixes
+the direct-access port (D4b); section 7C, added after 8.2's and 8.3's runs at 7B's
+revision, adopts a rerun's listing and corrects 11b's claim (D2a); section 9 is the
+closeout. Section 6 needs sections 1, 2, 4, and 5; 8.4 needs section 7A; 8.2 and 8.3
+need sections 7B and 7C. Section 8 is evidence the owner
 supplies from a run against a real host (`design.md`, "Implementation cadence"); until it
 is supplied the change is `blocked in implementation`. No dependency gates
 implementation.
@@ -488,18 +494,39 @@ Files: `e2e-tests/tests/e2e/roles/scenarios/vms/host_registry.py`; new
 `…/vms/real_compute_deal_driver.py` and `…/vms/test_real_provisioning_deal.py`;
 `e2e-tests/pyproject.toml` (marker); unit tests under `e2e-tests/tests/unit/`.
 
-- [ ] 6.1 `register_e2e_host` takes an optional SSH connection; when given, a new host is
+- [x] 6.1 `register_e2e_host` takes an optional SSH connection; when given, a new host is
       registered with it and an existing host whose connection differs has it replaced
       through `HostUpdate.connection`, besides the pool reconcile; without it, the mock
       lanes' placeholder is unchanged. Unit with a fake provisioning client: new host,
       unchanged host, changed connection replaced, no connection given. (D2)
-- [ ] 6.2 A real VM driver implementing `ComputeDealDriver` alone: supply from the
+      `host_registry.py`: a connection differs when its kind, version, or any public
+      field the submission states differs (a stored connection also carries its
+      kind's defaults); `provision_e2e_executor` passes `connection` through. Unit,
+      `e2e-tests/tests/unit/test_real_vm_lane.py`, over a fake registry: the four
+      listed cases, and a host registered with another port is not the target.
+- [x] 6.2 A real VM driver implementing `ComputeDealDriver` alone: supply from the
       validated target (a pool stating the GPU-less listing shape derived from
       `capacity`, the host with its connection, one declaration with `capacity`
       unchanged); provision terms carrying the run's public key (5.1); delivery
       assertions that read the delivered access; the lease view as the VM driver reads
       it. Access mode is a parameter it reads from the target. (D2, D6, D8)
-- [ ] 6.3 The module, marker `e2e_vm_real_provisioning`: skips naming the profile and
+      `scenarios/vms/real_compute_deal_driver.py`: `RealVmComputeDealDriver` on a new
+      `VmDealDriverBase` in `compute_deal_driver.py`, which now holds what both VM
+      drivers supply alike (settle response, delivery, settlement selection, lease
+      view, release) and no gate; the mock driver adds its gates on it, unchanged in
+      behaviour. Fixed ids `compute-e2e-real-pool` and `compute-e2e-real-001`, so a
+      rerun reconciles them (the site's declaration write is an upsert). The pool's
+      shape is the listing's own `capacity_source_for` shape, passed in. The
+      delivered access is the settle status's `connection_details` (host, port,
+      user), and its host must be the target's `public_host` under `direct` access.
+      Beyond the plan: the shared `DealLease.resource_consumed` read only the site's
+      GPU mirror, which a GPU-less declaration does not state (`value` and
+      `available_units` are null), so 10b would have failed; it now falls back to
+      the declared and available dimension maps when the mirror is absent, unchanged
+      for a GPU declaration (unit, both cases). 11b's re-reservation claims the whole
+      capacity (`resource_id` and the three dimensions), so a reservation coming
+      back shows all of it released.
+- [x] 6.3 The module, marker `e2e_vm_real_provisioning`: skips naming the profile and
       file when the target is not configured; overrides
       `_ensure_provisioning_host_registered` with a fixture that registers nothing; its
       setup fixtures depend on the validated target and on a first real-only stage that
@@ -508,63 +535,464 @@ Files: `e2e-tests/tests/e2e/roles/scenarios/vms/host_registry.py`; new
       before both pass; it then checks the registered host's public connection against
       the target before any deal stage. (D1, D2, D4a; scenarios "No target is present",
       "The service's VM execution is mocked")
-- [ ] 6.4 A real-only settlement preflight between 08a and 08b that writes
+      `scenarios/vms/test_real_provisioning_deal.py`. Correction: the holds pause the
+      shared services when pytest sets them up, before any stage runs, so a stage
+      cannot precede them. The check is therefore a module fixture,
+      `real_vm_execution` (on `real_vm_target`, which skips or raises
+      `TargetInvalid`), listed first in `usefixtures`, before the holds; stage 00e1
+      makes the same check (`vm_executor_is_real`) to record it in the results and
+      write `_provisioning_execution_confirmed`. That the target and the check are set
+      up before every hold is pinned from pytest's setup plan (unit,
+      `test_scenario_cleanup_order.py`); the mocked-service path has not been run
+      against a stack. 00f2 reads the registered host back
+      and requires its pool, enablement, and whole public connection to be the
+      target's. The module also declares its own listing stages (02b create paused,
+      03b resume and registry read) for a GPU-less offer of the whole capacity, and
+      its own 09a2 over `step_listing_reconciliation`, extracted unchanged from the
+      mock deal's 09a2 into `scenarios/vms/conftest.py`, which the mock deal now
+      calls too; it omits the mock deal's 03a and 09bb. Its state is
+      `RealVmDealState` (`_target_host_confirmed`, `create_job_id`, `vm_name`,
+      `delivered_access`, `_guest_absent`).
+- [x] 6.4 A real-only settlement preflight between 08a and 08b that writes
       `_settle_preflight_passed` only when the preview's chosen host
       (`_evaluate_settle_host_id`) is the target's `host_id`. (D4a; scenario "The
       settlement preview chooses another host")
-- [ ] 6.5 A create-job poll between 08b and 09a: list the fulfillment reservation's jobs
+      Stage 08a2. Unit: its body run with the target, both outcomes.
+- [x] 6.5 A create-job poll between 08b and 09a: list the fulfillment reservation's jobs
       (`list_jobs(capacity_reservation_id=…)`), require exactly one, on the target host;
       poll it to terminal within a named bound; require `succeeded`; record its id and the
       guest's `vm_name`. No match, several matches, failure, and timeout each fail with
       D4's named diagnostics and the job's logs. A real-only stage after 09c checks the
       lease's `create_job_id` equals the recorded id. (D4, "Finding the jobs")
-- [ ] 6.6 SSH access stages after 09c, with the section 5 helper and the delivered
+      Stage 08b3 over `JobWatch` (`JOB_BOUND_SECONDS` 1800, polled every 10 s, the
+      last sleep stopping at the bound; clock and sleep injected); the reservation is
+      read from the fulfillment's status, and the guest from the create result's
+      `detail.vm_name`. Stage 09c3 checks the lease.
+- [x] 6.6 SSH access stages after 09c, with the section 5 helper and the delivered
       access: the delivered user, `nproc` equal to `vcpu_count`, memory within tolerance
       of `ram_gb`, root disk at least `disk_gb`; then an unrelated generated key refused
       for the delivered user. (D7; scenarios "A real deal is delivered", "An unrelated
       key is refused")
-- [ ] 6.7 A teardown-job poll between 11a and 11b (exactly one job besides the create
+      Stages 09d (probe; logs the endpoint, the host key's fingerprint, the shape, and
+      the capacity) and 09e (`assert_key_refused`). The key pair and known hosts live
+      in a module `ssh_session`; the buyer key is negotiated in the provision terms
+      and the settlement preview.
+- [x] 6.7 A teardown-job poll between 11a and 11b (exactly one job besides the create
       job, on the target host, polled as in 6.5); after 11b, a `list_vms` job on the
       target host through the VM operator client, polled within the bound, requiring a
       succeeded, well-formed list without the recorded `vm_name`; then the delivered
       access refused within its bound. (D4, "Observing the guest's absence"; scenario
       "Teardown removes the VM and its access")
-- [ ] 6.8 A module finalizer, when a fulfillment was dispatched and the lane's own
+      Stages 11a3, 11c, and 11d. The list is read from the result's `ansible_result`
+      (the playbook's `vm_list_data`), not its top-level `vms`, which the VM codec
+      omits when no guest is listed; well-formed is `result_kind` `vm_list`, action
+      `list`, status `success`, and `vms` a list of entries each naming a guest.
+- [x] 6.8 A module finalizer, when a fulfillment was dispatched and the lane's own
       teardown did not complete: truncate this deal's lease through the site and advance
       the held workers; look for the teardown job and the guest's absence as in 6.7;
       fail naming fulfillment, reservation, create and teardown job ids, guest, and host
       where removal is not confirmed; then release the module's holds. The module never
       calls `release_reserved_resources`. (D4, "When the run fails"; scenario "The run
       fails with a guest on the host")
-- [ ] 6.9 Register the marker in `e2e-tests/pyproject.toml` and in no lane variable of
+      `recover_failed_run`, listed after the holds, acts when settlement was
+      submitted (`_settle_preflight_passed`) and `_guest_absent` is not set — keyed
+      to submission because 08b records `fulfillment_id` only after its own
+      assertions, while the create already runs — through
+      `RealVmComputeDealDriver.tear_down_after_failure`: the fulfillment from the
+      state or else the settle status (none: nothing dispatched, nothing done); a
+      create still `dispatching` is waited for and converged to `active`, since
+      release waits for an in-flight create (`ReleaseAction.CREATE_IN_FLIGHT`) and
+      convergence is held; an `active` lease whose end is still ahead is truncated
+      (one 10a already back-dated is not, since the site refuses a later end); the
+      watchdog is stepped where no release has begun; convergence advanced to
+      `tearing_down` only from `teardown_dispatch_pending`; the teardown job waited
+      for; `torn_down` and a watchdog step; then the list check. Unit,
+      `test_real_vm_lane.py`, over a stateful fake of the service's convergence and
+      watchdog steps: an in-flight create recovered with no recorded fulfillment, a
+      back-dated lease not truncated again, a guest still listed failing naming
+      fulfillment, reservation, both jobs, guest, and host, and no fulfillment
+      dispatched. Whether the real service's steps move as the fake's do is shown
+      only by a failing live run. A settlement refused at 08b reports a spurious
+      "recover it by hand" where its settle status cannot be read.
+- [x] 6.9 Register the marker in `e2e-tests/pyproject.toml` and in no lane variable of
       `e2e-tests/Makefile`; the module's stage list follows D4a's real-lane order.
       (D5)
-- [ ] 6.10 Unit: job correlation (exactly one, none, several, a failed job, a timeout)
+      The Makefile's lane comment says the marker is in no lane and why.
+- [x] 6.10 Unit: job correlation (exactly one, none, several, a failed job, a timeout)
       and the `list_vms` absence check against fake clients; the preflight's host
       comparison; a stage-list test that the real module runs every shared stage in
       D4a's real-lane order and no mock-only stage. (D4, D4a)
-- [ ] 6.11 Verification: `make -C e2e-tests test-unit`; `make test`; `make -C e2e-tests
+      Unit, `test_real_vm_lane.py`: correlation as listed plus a job on another host
+      and the teardown found besides the create; the list check (absent, empty,
+      present, five malformed lists, a failed list job); `vm_executor_is_real`
+      (real beside a mocked bare-metal one; mocked, absent, none); the delivered
+      endpoint and three incomplete ones; the create's guest name. Unit,
+      `test_compute_deal_stages.py`: the real lane's row joins the generic checks
+      (state base, prerequisites produced earlier, reads produced first, one
+      producer per field, own stages using declared fields); a test pins the real
+      lane's whole order (`REAL_LANE_ORDER`) and that it runs every shared stage in
+      definition order and no mock-lane stage; and a lane-scoped consumption test
+      (every field it produces is read by a later stage or the module's recovery
+      fixture). Unit, `test_scenario_cleanup_order.py`: the real module's holds are
+      released after its other cleanup (the existing check); it takes
+      `ensure_storefront_resumed` and `recover_failed_run` in place of the lane
+      cleanup, never `release_reserved_resources`, and sets up its target and
+      execution check before any hold. Not unit-tested: the driver's composition of
+      these (`create_job`, `teardown_job`, `delivered_access`'s address check, the
+      re-reservation claim), and the stored connection view 00f2 compares against,
+      which the fake registry builds by hand from the SSH kind's model.
+      Correction to 6.7: 11d requires `_teardown_job_completed`, not 11c's
+      `_guest_absent`, so access ending is asserted whether or not the guest is
+      still listed.
+- [x] 6.11 Verification: `make -C e2e-tests test-unit`; `make test`; `make -C e2e-tests
       test-module MODULE=e2e_vm_real_provisioning ACTIVE_PROFILES=local` with no stack
       running skips naming the profile and file.
       End-to-end: `e2e_vm_real_provisioning` is in no lane; the pipeline's lanes must
       still pass. Live evidence is section 8.
+      `make -C e2e-tests test-unit`: 293 passed (unit). `make -C e2e-tests
+      test-module MODULE=e2e_vm_real_provisioning ACTIVE_PROFILES=local` with no
+      stack: 37 skipped, each naming the `real-vm-target` profile and
+      `config-real-vm-target.yml`, none erroring at setup. `make test`: passed
+      (before the review fixes, which touched only e2e-tests files the unit suite
+      reran). `make check-packaging`: passed. `make check-change`: passed.
+      Fresh-context check of the diff: no blocking defect. Fixed: recovery could not
+      remove a guest whose create was still in flight, re-truncated a lease 10a had
+      back-dated, depended on a field 08b writes last, and looked the create job up
+      after the teardown existed; 11d skipped when 11c failed; the shared state's
+      `_supply_seeded` docstring; the setup order pinned by a test. Owed at 9.9:
+      TESTING.md's real-lane subsection says the lane waits on real jobs by polling
+      within a bound, the one wait D4 adds to the stage discipline. End-to-end markers
+      confirmed: `e2e_deal` runs the reworked mock driver (its non-gate parts moved
+      to the base) and the extracted 09a2; every VM lane module is touched by the
+      `register_e2e_host` and `DealLease` changes, unchanged for their inputs; the
+      pipeline's VM lane is that evidence. `e2e_vm_real_provisioning` runs in no
+      lane. No CI workflow beyond the pipeline is owed.
+      Handoff, unproven until section 8's live run: the storefront accepting an
+      explicit GPU-less listing through `create_listing` (the GPU-less deal so far
+      ran only through a publication-derived listing); the admin re-reservation
+      with dimension attributes; a real teardown finishing inside the watchdog's
+      300 s grace after 10a's one-minute back-date (10a to 11b, on the host); and the
+      probe command's first execution.
 
 ## 7. Dead e2e material
 
 Delivers D11's removals and the e2e package's own run instructions (D11, D5).
 
-Files: `e2e-tests/.github/workflows/e2e.yml` (deleted); `e2e-tests/README.md`.
+Files: the e2e package's nested `e2e.yml` workflow (deleted); `e2e-tests/README.md`.
 
-- [ ] 7.1 Delete `e2e-tests/.github/workflows/e2e.yml`, and the directory if it is left
-      empty. (D11)
-- [ ] 7.2 Remove `e2e-mock-happy`/`e2e-mock-failure` from `e2e-tests/README.md`, and add
+- [x] 7.1 Delete the e2e package's nested `e2e.yml` workflow, and the directory if it is
+      left empty. (D11)
+      Deleted with `git rm`; it was the directory's only file, so the directory is
+      gone. The mentions of its path in `proposal.md`, `design.md`, and here were
+      reworded, since a citation of a path that no longer exists is a blocking
+      defect.
+- [x] 7.2 Remove `e2e-mock-happy`/`e2e-mock-failure` from `e2e-tests/README.md`, and add
       how to run `e2e_vm_real_provisioning`: copy the example profile, render or fill the
       real file, forward the stack's services to the `local` ports, run the module with
       `ACTIVE_PROFILES=local,real-vm-target`. (D5, D11)
-- [ ] 7.3 Verification: no tracked file references the deleted workflow or the removed
+      The mock-provisioning section, which also ran the dead `mock_provisioning_happy`
+      marker, is replaced by a short "End-to-end lanes" note and a "Real VM
+      provisioning" section: what the scenario proves, why it is in no lane, the
+      prepared GPU-less host, the three steps, and the skip and failure behaviour.
+      Beyond the plan: the "CI/CD" section described the deleted workflow
+      (a staging profile, a 02:00 nightly, report artefacts); it now points to the
+      root `E2E` workflow and `TESTING.md`.
+- [x] 7.3 Verification: no tracked file references the deleted workflow or the removed
       targets; `make check-doc-citations CHANGE=prove-real-vm-provisioning` reports
       nothing for them.
       End-to-end: none.
+      A repository search (`e2e-tests/\.github`, `e2e-mock-happy`, `e2e-mock-failure`)
+      finds them only in this change's own documents, where the workflow is no longer
+      named by path; the archived changes' references are to the root workflow, which
+      remains. `make check-doc-citations CHANGE=prove-real-vm-provisioning`: passed
+      after the rewording (before it, it reported two mentions of the deleted file).
+      That check reads only the change's documents and only paths with a file suffix,
+      so the proposal's directory mention was found by the fresh-context review, and
+      the README's two relative links (the root workflow and TESTING.md's section 4
+      anchor) were checked by hand. `make test`: passed. End-to-end markers: none. No
+      CI workflow is owed. Fresh-context check: fixed the README's lane description
+      (a lane replaces its stack and leaves it running; `PROVISIONING_MODE` decides
+      the profile), its copy step's wording, the proposal's directory citation, and
+      these notes.
+
+## 7A. Host preparation restarts the SSH daemon by its unit name
+
+Delivers D9d: the SSH hardening host preparation writes takes effect through a restart of
+the unit the host has, and a failed restart fails preparation. Planned after 8.1's run
+found the defect; the golden build's cloud-init template stays out of scope (D9d, D10).
+
+Files: `domains/vms/provisioning/iac/ansible/roles/vm-setup/handlers/main.yml`;
+`domains/vms/provisioning/iac/tests/test_ansible_structure.py`.
+
+- [x] 7A.1 The `restart sshd` handler restarts `ssh` when `ansible_os_family` is
+      `Debian` and `sshd` otherwise, and carries no `ignore_errors`, so a failed
+      restart fails preparation. Keep the handler's name, which
+      `security-hardening.yml` notifies, or rename it and every notify with it. A
+      comment says why the unit name depends on the OS family. (D9d)
+      The name is kept; the unit is `"{{ 'ssh' if ansible_os_family == 'Debian' else
+      'sshd' }}"`. The fact is there: `vm-setup.yaml`, the only playbook using the
+      role, gathers facts (Ansible's default), and the handler runs only in its play.
+- [x] 7A.2 Unit, `test_ansible_structure.py`: the handler names `ssh` for the Debian
+      family and `sshd` otherwise through `ansible_os_family`, and has no
+      `ignore_errors`; every `notify` of it in the role resolves to a handler that
+      exists; no task or handler in `roles/vm-setup` restarts a unit literally named
+      `sshd` outside that expression (the golden-only `templates/` and `files/` are
+      excluded and say so in the test). Mutation check: restoring `ignore_errors` or the
+      literal `sshd` fails the test. (D9d)
+      Unit, `TestSshRestartHandler` (4 cases): the handler's `systemd` name is the
+      expression read verbatim (as text — the suite runs without Ansible or Jinja, so
+      neither branch is evaluated, and an equivalent spelling such as
+      `ansible_facts['os_family']` would fail it), its state `restarted`, and it has
+      neither `ignore_errors` nor `failed_when`; every `notify` in the role's tasks and
+      handlers, blocks and list notifies included, names a handler (or a `listen`);
+      every task whose module's `path` or `dest` is `/etc/ssh/sshd_config` notifies
+      the restart, and there is one; no `systemd`/`systemd_service`/`service` task
+      or handler, under any collection prefix, names `sshd` in its mapping-form
+      arguments, and no `shell`/`command`/`raw` line (string, `cmd`, or `argv`)
+      hands `systemctl`, `service`, or `invoke-rc.d` a unit named `sshd`, whatever
+      its action or flags, within one command of the line. Not covered: free-form
+      module arguments (`name=sshd`) and arguments under `args:`; a command split by
+      a backslash continuation; a `script` task's file; a unit named through a
+      variable; a write to `sshd_config` by a shell command, or to a drop-in under
+      `sshd_config.d/` (none is written). Correction to the plan's wording: `templates/` is not wholly
+      golden-only (the tunnel client, vfio-bind, and rescue entry templates are
+      not); the test reads only what the role runs, tasks and handlers, and its
+      comment says the one template restarting `sshd`, `user-data.j2`, is rendered
+      only by the golden build. Mutation checks, each run and reverted:
+      `ignore_errors: yes` restored fails the handler case; the literal `sshd`
+      restored fails it and the literal case; a notify of a missing handler and a
+      `systemctl restart sshd.service` shell task fail the notify and literal cases;
+      the hardening's notify removed fails the `sshd_config` case; and an
+      `ansible.builtin.command` `argv` of `systemctl --no-block restart fail2ban
+      sshd` fails the literal case.
+- [x] 7A.3 Verification: `make test-provisioning-iac` (the IaC suite, unit); `make
+      test`.
+      End-to-end: none in the pipeline — the mock profile runs no playbook. 8.4's live
+      re-run of host preparation exercises it.
+      `make test-provisioning-iac` (unit): 86 passed. `make test`: passed (before the
+      fresh-context fixes, which touched only the handler's comment and the IaC test,
+      rerun above). `make check-packaging`: passed. `make check-change`: passed. Not
+      run: `validate`'s inventory and `--syntax-check` parts, as in 3.7 (no Ansible
+      here). End-to-end markers confirmed: none. No CI workflow is owed.
+      Fresh-context check: no guidance break. Fixed: `check-packaging` unrecorded;
+      the literal-`sshd` scan missed flags, several units, `invoke-rc.d`,
+      collection-prefixed modules, and `argv`; the notify check did not tie the
+      restart to the `sshd_config` write; the handler's comment now says it usually
+      runs after the reboot and matters on a run that skips it. Declined: merging
+      `_flatten` into `walk`, which collects findings rather than tasks. A second
+      check: no blocking defect; fixed the comment's claim that a run flushing
+      handlers before the reboot depends on the restart (the reboot still follows),
+      "Ubuntu 24.04 has no `sshd` unit" (true of a default install, where
+      `ssh.service` is socket-activated and its alias absent), the literal case's
+      name (it flags any action, not only restarts), the handler case's tolerance of
+      a collection prefix, and the list of what is not covered.
+      Handoff for 8.4: the handler runs only when the hardening block changes
+      `sshd_config`, so a re-run on the host 8.1 prepared shows `ignored=0`
+      vacuously; 8.4 needs a host whose `sshd_config` lacks the block (a fresh
+      instance). The playbooks run from the provisioning service's image, so the
+      run needs an image built from a revision containing this section, as 8.1 used
+      one built from `8638567c8`.
+
+## 7B. A direct-access create reports the port it forwarded
+
+Delivers D4b: a create without a relay reports delivery evidence at the port the
+playbook forwarded, so the requirement's scenario "A real deal is delivered" can hold
+on the direct path. Planned after 8.2's first run found the defect.
+
+Files: `domains/vms/provisioning/adapter/src/vm_provisioning_adapter/codec.py`;
+`domains/vms/provisioning/adapter/tests/unit/test_vm_codec.py`.
+
+- [x] 7B.1 In `build_result_payload`, the relay block's `remote_port` replaces the
+      payload's `ssh_port` only when the relay is reported enabled — the rule
+      `_relay_reported` already applies — and the value is a port number; otherwise
+      the port parsed from the playbook's output stands. The relay block itself is
+      still carried into the payload as before. A comment says why: the playbook
+      reports the block on every create, with `"N/A"` placeholders when there is no
+      relay. (D4b)
+      `_relay_reported(payload)` gates it; a new `_is_port` accepts an `int`, or its
+      ASCII decimal text (surrounding whitespace allowed), in 1–65535, and refuses a
+      `bool`. The replaced value keeps the type the playbook printed, as before.
+- [x] 7B.2 Unit, `test_vm_codec.py`: (a) `build_result_payload` with the playbook's
+      disabled relay block (`enabled` false, `relay_addr`, `remote_port`, and
+      `ssh_access` all `"N/A"`) keeps the parsed port; (b) an enabled block with a
+      port-valued `remote_port` still replaces it (the existing
+      `test_relay_remote_port_overrides_ssh_port`, whose block gains `enabled`); (c) an
+      enabled block whose `remote_port` is not a port keeps the parsed port; (d) through
+      the executor, as `test_a_run_reports_the_vm_result_and_credentials` runs, a
+      direct create whose fact has the shape `vm-create.yml`'s create fact actually
+      reports — its `network` block with `direct_port_forwarding`, its disabled relay
+      block, and a `timestamp` — yields a `CreateJobResult` whose evidence names the
+      host's address, the forwarded port, and the tenant user; (e) the same with the
+      relay enabled and leased (`relay_id`, `vm_remote_port`) yields the relay's address
+      and the leased port. Mutation checks: restoring the unconditional replacement fails
+      (a) and (d); dropping the port-number test fails (c). (D4b)
+      Unit, `test_vm_codec.py`: (a) `test_a_disabled_relay_keeps_the_forwarded_port`,
+      `enabled` as `False` and `"False"`, `remote_port` as `"N/A"` and, beyond the
+      plan, a port number, so the enabled gate is pinned on its own; (b) the existing
+      test, its block now `enabled: True` with a `relay_addr` (the playbook emits no
+      `subdomain`, which it carried); (c)
+      `test_an_enabled_relay_without_a_port_keeps_the_forwarded_port` over `"N/A"`,
+      `""`, `"0"`, `"65536"`, `"40001x"`, a non-ASCII digit, `True`, `4.5`, and
+      `None`; (d) `test_a_direct_create_reports_the_port_it_forwarded` and (e)
+      `test_a_relayed_create_reports_the_relay_and_its_leased_port`, both through
+      `AnsibleJobExecutor` with a stand-in runner (`_executed`, now shared with the
+      existing executor test), over output built by `_create_fact_output`: the
+      provided-key `vm_creation_data` fact of `vm-create.yml` field for field,
+      printed as `json-output.yml` prints it under the YAML result format both
+      `ansible.cfg` files select — the `debug: var:` task as bare YAML, then the
+      `to_nice_json` string as a `msg: |-` block — so the codec reads it through
+      `extract_vm_fact`'s `msg` fallback, as it reads a real run's (test (d) asserts
+      the output has no `"vm_creation_data":` key for the named-fact branch to take).
+      They are unit tests of the codec through its executor seam, not runs of the
+      playbook: the fact's shape and its printing were read from `vm-create.yml`,
+      `json-output.yml`, and the `ansible.cfg` files, not captured from Ansible.
+      Assumed, as ansible-core 2.19's native templating renders them (the version
+      8.4's image ran; the image's pin also admits 2.17 and 2.18, whose rendering was
+      not checked): `enabled` prints as a JSON boolean (the codec accepts either
+      form, and (a) covers both), and a leased `remote_port` as an integer, which
+      (e) pins in the detail. Mutation checks, each run and
+      reverted: the unconditional replacement restored fails (a)'s four cases, (c)'s
+      seven non-empty non-port values, and (d), rerun after the printed form was
+      corrected; the enabled gate kept and the port test replaced by the old
+      truthiness test fails (c)'s seven; the port test kept and the enabled gate
+      dropped fails (a)'s two port-valued cases. `""` and `None` pass under each of
+      these, since the old truthiness test skipped them too.
+- [x] 7B.3 Verification: `make test-provisioning-adapter` (the adapter's suite, unit);
+      `make test`; `make check-packaging`.
+      End-to-end: none in the pipeline — the mock lanes never interpret playbook
+      output. 8.2's and 8.3's runs exercise it against a real host.
+      `make test-provisioning-adapter` (unit): 273 passed, before and after the
+      fresh-context fixes. `make test`: passed (before those fixes, which touched only
+      the codec's comment and the adapter's test, rerun above). `make
+      check-packaging`: passed. `make check-change`: passed. Fresh-context check: no
+      layering, packaging, test-level, or placement break; the codec correct against
+      the buyer-key create fact (the generated-key fact's block it does not read; see
+      the handoff). Fixed: (d) and (e) printed the fact as JSON, which took
+      `extract_fact`'s named-fact branch, while the YAML result format the
+      `ansible.cfg` files select makes a real run's fact read from its `msg` block;
+      the fixture's `gpu` block lacked three of the fact's fields, so "field for
+      field" was false; `design.md` D4b said the mock lanes never interpret playbook
+      output; a mutation's wording; the codec comment now names the buyer-key fact,
+      since the generated-key fact names its block `relay`; the codec comment's
+      wrapping. A second check found the fixture's output takes the codec's real
+      parsing path and the mutation counts right; fixed: this note's claim about
+      both facts, the undisclosed integer `remote_port` assumption, and 8.2's note.
+      Declined: calling `VmAnsibleCodec.interpret` directly in (d) and (e) rather than
+      through the executor — the plan names the executor seam, the existing executor
+      test uses it, and the stand-in runner keeps it a unit test.
+      End-to-end markers, correcting the plan's "the mock lanes never interpret
+      playbook output" above: the mock lanes' create output does pass through this codec (the
+      mock executor's output is parsed by the adapter's real result path), and the
+      VM scenarios' mock create facts (`compute_deal_driver.py`'s
+      `_CREATE_RESULT_STDOUT` and its copies in `e2e_deal_buyer_cli`, `e2e_buy`,
+      `e2e_listing_shapes`, and `e2e_non_erc20_settlement`) carry `"frp":
+      {"enabled": false}` with no `remote_port`, which neither the old rule nor the
+      new one replaces the port from. Those lanes are therefore unchanged in outcome
+      and are no evidence for this section;
+      `e2e_vm_real_provisioning`, in no lane, is, through 8.2 and 8.3. No CI
+      workflow is owed.
+      Handoff: the generated-key create fact (`vm-create.yml`, the variant used when
+      no buyer key is given) names its relay block `relay`, not `frp`, so the codec
+      reads no relay from it and such a relayed create reports no evidence. The
+      market always negotiates a buyer key, so the real lane never takes that
+      variant; left as it is, outside D4b, for the relay-backed follow-up to weigh.
+
+## 7C. A rerun adopts its listing, and 11b claims capacity as dimensions
+
+Delivers D2a: a second run against the same stack reconciles its listing as it does its
+registrations, and the real lane's re-reservation claims the released capacity in the
+shape the site matches, so 8.2 ("every stage passes") and 8.3 (a rerun passes) can
+hold. Planned after 8.2's and 8.3's runs at 7B's revision found both. Confined to the
+e2e package: no published image or chart changes.
+
+Files: `e2e-tests/tests/e2e/roles/scenarios/vms/real_compute_deal_driver.py`;
+`e2e-tests/tests/e2e/roles/scenarios/vms/test_real_provisioning_deal.py`;
+`e2e-tests/tests/unit/test_real_vm_lane.py`.
+
+- [x] 7C.1 `RealVmComputeDealDriver.reserve_released_capacity` claims
+      `required_attributes={"resource_id": REAL_RESOURCE_ID, "dimensions":
+      dict(self.capacity)}`: the resource as its one attribute, everything the host
+      sells as dimensions, so a reservation coming back still shows all of it was
+      released. The comment says why the quantities go under `dimensions` (the site
+      matches attributes exactly and reads quantities only from `dimensions`). (D2a,
+      "The re-reservation's claim")
+      As planned. That the site reads a claim's `dimensions` as its quantity request
+      and matches every other key against the resource was read from
+      `kit/site/src/market_site/ledger.py`, not run here; 8.2 is its first live use.
+- [x] 7C.2 The driver gains the listing reconciliation D2a describes, as a method 02b
+      calls (for example `listing_for_run`): it lists the storefront's listings
+      (`list_listings`, paging until every listing is read) and selects those whose
+      `listing_resource` names `REAL_RESOURCE_ID`. None: returns nothing, and 02b
+      creates the listing paused as before. Exactly one, `open`, whose stated
+      `vcpu_count`, `ram_gb`, and `disk_gb` equal the target's `capacity`: pauses it
+      unless already paused (`pause_listing`), reads it back paused and open
+      (`get_listing`), and returns it. Several, or one `closed`, or one whose shape
+      differs: fails naming each listing's id, status, and shape and the target's
+      capacity, for an operator to recover. 02b records the adopted or created listing
+      as `seller_listing_id` and logs which it did; 03b is unchanged. Nothing before 02b
+      writes a listing, so a refused adoption leaves the stack as the previous run left
+      it. (D2a)
+      `listing_for_run` on the driver, over `storefront_admin_client`: pages of 200
+      (the storefront's largest; a short page ends the read), selecting listings whose
+      `listing_resource.resource_id` is `REAL_RESOURCE_ID`; adoption requires one
+      listing, `status` `open`, whose `vcpu_count`, `ram_gb`, and `disk_gb` equal the
+      target's capacity. Any other status fails as `closed` does. The failure names
+      each listing's id, status, paused flag, and stated shape, and the capacity, and
+      says closing a listing does not free its source: rerun with the target the
+      listing was made for, or against a fresh stack. 02b adopts or creates and logs
+      which. Correction to "a refused adoption leaves the stack as the previous run
+      left it": that holds of listings; 00f1, before 02b, still reconciles the host's
+      connection and the declaration's capacity (D2), so a target whose capacity
+      changed between runs has its declaration rewritten and its old listing refused,
+      and only the old target or a fresh stack recovers it.
+- [x] 7C.3 Unit, `test_real_vm_lane.py`, against a fake storefront client in the
+      file's existing fakes' style: (a) the re-reservation's claim is `resource_id`
+      plus `dimensions` equal to the target's capacity, with no quantity among its
+      attributes; (b) no listing on the resource → nothing returned, no pause; (c)
+      one open listing of the target's shape, unpaused → paused and returned; (d) the
+      same already paused → returned, no second pause; (e) a closed one, (f) two, and
+      (g) one whose disk differs → fail naming the listings and the capacity, nothing
+      paused; (h) listings on other resources are ignored; (i) a listing found only on
+      a later page is still found. Mutation checks: restoring the attributes-only claim
+      fails (a); dropping the shape comparison fails (g); dropping the status check
+      fails (e). (D2a)
+      Unit, `test_real_vm_lane.py` (10 new cases): (a) the claim is exactly
+      `resource_id` and `dimensions` equal to the target's capacity; (b)–(i) as
+      listed, over `FakeStorefront` (paged `list_listings`, `pause_listing`,
+      `get_listing` over `storefront_client.models.ListingSummary` rows), (e)–(g)
+      asserting the message names the capacity and each listing's id, status,
+      paused flag, and shape, and that nothing was paused; (i) puts the listing at
+      201st behind 200 on another resource and asserts the reads `(200, 0)`,
+      `(200, 200)`. Beyond the plan: 02b's body, called with the fakes, records an
+      adopted listing and calls no `create_listing`; 02b's create path is not
+      unit-tested. Mutation checks, each run and reverted: the attributes-only claim
+      restored fails (a); the shape comparison dropped fails (g); the status check
+      dropped fails (e). That the storefront's stored `listing_resource` keeps the
+      `resource_id` and the three counts the listing was created with is read from
+      the create path, not tested; 8.3 is its first live use.
+- [x] 7C.4 Verification: `make -C e2e-tests test-unit` (unit); `make test`; `make
+      check-change CHANGE=prove-real-vm-provisioning`. No dependency or lock changes, so
+      no packaging check is owed beyond `make test`'s.
+      End-to-end: `e2e_vm_real_provisioning`, in no lane, through 8.2 and 8.3 against a
+      real host; no pipeline lane runs it, and the mock lanes' drivers and stages are
+      untouched, so their results are no evidence for this section. No CI workflow is
+      owed.
+      `make -C e2e-tests test-unit` (unit): 303 passed, before and after the
+      fresh-context fixes. `make test`: passed (before those fixes, which touched only
+      the driver's failure message and comments, 02b's docstring, and the unit test,
+      rerun above). `make check-change`: passed. End-to-end markers confirmed: only
+      `e2e_vm_real_provisioning`, which runs in no lane. No CI workflow is owed.
+      Fresh-context check: no layering, import, packaging, test-level, or comment
+      break; the paging, the shape comparison, and the message correct. Fixed: the
+      message assertion passed without naming the capacity in two of three cases (it
+      now matches the capacity and each listing's id, status, paused flag, and shape);
+      a redundant claim assertion and a duplicated capacity literal; 02b's docstring
+      stated the refusal too narrowly; the message names how an operator recovers;
+      the page constant's comment; the 7C.2 correction above.
+      Handoff for 8.2 and 8.3: the fix stays within `e2e-tests/`, so the runs need a
+      checkout of a public revision including this section against a fresh stack of
+      `f52f07973`'s published images and chart. A fresh stack's 02b creates its
+      listing; the rerun's 02b should log the earlier run's listing adopted.
 
 ## 8. Live verification [log]
 
@@ -581,6 +1009,53 @@ public revision of this branch the run used.
       succeeds; the kernel command line is unchanged; nested virtualization is on and
       `/dev/kvm` exists; no GPU-detection service is installed; no golden-image step ran.
       (D9)
+      Correction: the unit the playbook installs is `gpu-detect.service`
+      (`roles/vm-setup/tasks/gpu-detection-service.yml`); `gpu-detection.service` is
+      the task file's name, not a unit's. The evidence checks both names.
+      Revision: `8638567c8` (sections 1–7), from its published provisioning image,
+      `vm-setup.yaml` with no extra variables, on a GPU-less x86-64 Ubuntu 24.04 cloud
+      instance with nested virtualization. Owner-supplied, sanitized. Against the
+      acceptance, each holds:
+      - preparation succeeds: recap `failed=0 unreachable=0`, `ignored=1` (below);
+      - kernel command line byte-identical before and after preparation's reboot;
+      - after the reboot `kvm_intel`'s `nested` is `Y` and `/dev/kvm` exists
+        (`crw-rw---- root kvm 10, 232`);
+      - no GPU-detection unit under either name, before or after;
+      - no golden-image, Packer, or image-build task among the log's task headers.
+      The GPU decision shows D9b on a GPU-less host: `GPU present: False`,
+      `gpu_passthrough: auto`, the play's note that passthrough boot configuration and
+      binding were skipped and the boot configuration left as it is, and the audit
+      reporting IOMMU disabled, not assessable, no GPUs.
+      What the run does not show: the host type loads `kvm_intel` with nested on at
+      boot, so `nested` and `/dev/kvm` were already present before preparation; the run
+      shows preparation keeps them through its reboot, not that `kvm-setup.yml` enables
+      them. D9a's two refusals (no `vmx`/`svm`; `/dev/kvm` absent after the modules
+      load) cannot fire on a capable host and rest on 3.6's structural tests.
+      The ignored failure is the `restart sshd` handler (`roles/vm-setup/handlers/main.yml`,
+      `ignore_errors: yes`, notified by `security-hardening.yml`), which this change
+      did not touch: on Ubuntu 24.04 the unit is `ssh.service` and Ansible finds no
+      `sshd`. It runs after preparation's reboot, which is tagged `always`, so the
+      reboot had already started the daemon with the hardened configuration; a change
+      to that configuration on a host that is not rebooted would not be applied.
+      Every point of the acceptance holds on this evidence. The task is left
+      unchecked only because section 8 returns to planning before it is committed
+      (below); it is checked when the section is.
+      Returned to planning: the owner decided the handler is fixed in this change, a
+      fix outside the design's decisions and the plan's tasks. The fix this session
+      proposed: the handler restarts the unit the host's OS names (`ssh` on the
+      Debian family, `sshd` elsewhere) and no longer ignores its failure, with a
+      structural test in `domains/vms/provisioning/iac/tests/`. Left to planning:
+      where the task sits (section 8 is evidence only), whether 8.1 is re-run to show
+      the recap with `ignored=0`, and whether the guest's cloud-init template
+      (`roles/vm-setup/templates/user-data.j2`, `systemctl restart sshd`), which
+      the owner did not rule on, is in scope; the proposal's Impact list names
+      neither file. Nothing of the fix is implemented. 8.2 and 8.3 still await the
+      owner-supplied scenario runs.
+      Planned: the fix is section 7A (D9d), shown by 8.4's re-run. The template is
+      rendered only by the golden image build — scratch guests' cloud-init is written
+      by `vm-create.yml`, which already tries `ssh` then `sshd` — so the owner left it
+      out of scope with the golden image (D10), noted on `fix-golden-image-config`'s
+      row. The Impact list now names the handler.
 - [ ] 8.2 **[log]** The scenario: `make -C e2e-tests test-module
       MODULE=e2e_vm_real_provisioning ACTIVE_PROFILES=local,real-vm-target` against the
       provided stack. Supplied: pytest's summary and per-stage results; the VM-execution
@@ -590,8 +1065,157 @@ public revision of this branch the run used.
       refusal. Acceptance: every stage passes and none skips; the values match the
       requirement's scenarios "A real deal is delivered", "An unrelated key is
       refused", and "Teardown removes the VM and its access". (D4, D7)
+      Run 1, owner-supplied and sanitized: revision `fa27649fe` (sections 1–7A), its
+      published images and chart, provisioning unmocked, an empty host registry, the
+      scenario run from a clean checkout of the same revision. Stages 00 to 08b3
+      passed: 00e1 reported `offering_mode='vm' mocked=False`; the host registered
+      as the target; listing, negotiation, escrow, and settlement completed; 08b3's
+      create job succeeded on the target host with a running guest and its DNAT
+      forward. 09a failed: the fulfillment went `failed`
+      (`provider_reported_failure`, "the create job succeeded without usable
+      delivery evidence"), every later stage skipped on its prerequisite, and the
+      module's recovery reported the lease `RELEASE_FAILED` with the guest possibly
+      left on the host (the infra side cleaned the host; the stack is replaced for the
+      next run). Acceptance not met.
+      Cause, an application defect read from the source at that revision and the
+      job's stored result: the playbook reports an `frp` block even with FRP
+      disabled (`enabled: False`, `remote_port: "N/A"`), and the VM adapter's
+      `build_result_payload` (`domains/vms/provisioning/adapter/src/vm_provisioning_adapter/codec.py`)
+      copies any truthy `frp.remote_port` over the `ssh_port` parsed from the
+      playbook, so the stored detail's `ssh_port` is `"N/A"`; `create_evidence`
+      takes the direct branch (the job leased no relay) and `int("N/A")` raises
+      inside its `try`, so it returns `None`. A direct-access create can therefore
+      never report delivery evidence. The mock lanes never interpret playbook
+      output, so no lane exercised it. The run itself showed the real lane's
+      pre-delivery half working against a real host and the failure path's
+      reporting; the recovery could not tear the guest down, since no lease reached
+      `active` (D4, "When the run fails", names that case for an operator).
+      Returned to planning: the owner's decision, relayed by the infra-side
+      coordinator and confirmed by the return, is that the codec defect is fixed in
+      this change, as 7A was — a fix outside the design's decisions and the
+      proposal's Impact list. The relayed fix shape: `frp.remote_port` replaces
+      `ssh_port` only when FRP is enabled and the value is a port number; an adapter
+      unit test of a direct-forwarding create whose output carries a disabled `frp`
+      block yields evidence with the parsed port. Left to planning: the section, the
+      design record (as D9d), and whether a spec delta or the proposal's Impact list
+      changes.
+      Nothing of the fix is implemented. After it is pushed, the infra side
+      republishes, deploys a fresh stack, re-prepares a fresh host, and runs the
+      scenario twice for 8.2 and 8.3.
+      Planned: the fix is section 7B (D4b), the owner choosing that the relay's port
+      replaces the access port only when the relay is enabled and the value is a port,
+      and waiving another design review. No spec delta: "A real deal is delivered"
+      already requires delivery. The Impact list now names the codec. 8.2 is met by a
+      run at a public revision that includes 7B.
+      Correction, found implementing 7B: the mock lanes' create output does pass
+      through the codec, but their facts' relay block is disabled and names no port,
+      which the old rule passed over; that, not an uninterpreted output, is why no
+      lane exercised the defect (7B.3).
+      Run 2, owner-supplied and sanitized: revision `f52f07973` (sections 1–7B), its
+      published images and chart, provisioning unmocked, an empty host registry, a
+      freshly created and prepared GPU-less nested-KVM host (preparation at this
+      revision `failed=0 ignored=0`, the SSH restart handler `changed`), the scenario
+      run from a clean checkout of the same revision. 36 passed, 1 failed (11b).
+      Against the acceptance:
+      - 00e1 reported `offering_mode='vm' mocked=False`;
+      - 08b3's create job and 11a3's teardown job both `succeeded` on the target
+        host; the only other job the run caused is 11c's `list`;
+      - 09d connected with the negotiated key as the delivered user at the host's
+        address and forwarded port, logged the guest's host-key fingerprint
+        (`SHA256:…`), and probed `vcpu_count=7, memory_gib=27.41,
+        root_disk_gib=160.0` against the sold `7 / 28 / 160`: vCPUs equal, memory
+        2.1% short (within the 5% tolerance), disk equal — so 7B's direct-access
+        evidence reached delivery;
+      - 09e: the unrelated key refused with `Permission denied (publickey,password)`;
+      - 11c: the guest gone from the host, which lists `[]`;
+      - 11d: the delivered access timed out after teardown.
+      Every scenario of "A real deal is delivered", "An unrelated key is refused", and
+      "Teardown removes the VM and its access" is shown, but the acceptance ("every
+      stage passes") is not met: 11b failed after the release itself completed (the
+      reservation `released`, the resource `torn_down`, the bucket back at `7 / 28 /
+      160`, and 11b's own checks before the re-reservation passed). Its
+      re-reservation returned 409 "no available capacity matched the claim".
+      Cause, from the source: `RealVmComputeDealDriver.reserve_released_capacity`
+      (`real_compute_deal_driver.py`) sends `required_attributes={"resource_id": …,
+      **self.capacity}`, so `vcpu_count`, `ram_gb`, and `disk_gb` are matched as
+      resource attributes, which the declaration states only as capacity dimensions
+      (its attributes are the region and SLA); `admin_reserve_capacity` takes only
+      `required_attributes`. 6.2's note chose this claim, and 6.11's handoff listed
+      "the admin re-reservation with dimension attributes" as unproven until this run.
+      The mock VM driver claims `resource_id` and `gpu_count`, which its GPU
+      declaration does carry as attributes, and bare metal claims `gpu_model`.
+      Observed by the owner from inside the guest between 09e and 10a, outside any
+      stage: the instance metadata service gave the guest no service-account token,
+      and the forwarded port answered only the host's allowed sources. Not acceptance
+      points; recorded as context.
+      Returned to planning: the owner decided, relayed by the infra-side coordinator,
+      that this defect and 8.3's are fixed in this change, as 7A and 7B were. Left to
+      planning: the section (the coordinator suggests 7C), the claim 11b's
+      re-reservation makes of a GPU-less declaration (what it can pin through
+      attributes alone, and how it shows the whole capacity came back — 11b's
+      checks before it already read the bucket's dimensions), and whether either fix
+      needs a design record as D4b did. Nothing of the fixes is implemented. If they
+      stay within `e2e-tests/`, the infra side deploys a fresh stack at `f52f07973`
+      with no republish and runs 8.2 and 8.3 from a checkout of the new head.
+      Planned: the fix is section 7C (D2a, "The re-reservation's claim"): 11b claims
+      the resource as its attribute and the sold capacity as `dimensions`, the shape the
+      storefront's admin reserve already accepts for a GPU-less listing; the owner
+      waived another design review. It stays within `e2e-tests/`, so 8.2 is met by a run
+      from a checkout of a public revision that includes 7C against a fresh stack of
+      `f52f07973`'s published images and chart.
 - [ ] 8.3 **[log]** A second run of the scenario against the same stack. Acceptance: it
       passes, the host's registration being reconciled rather than duplicated. (D2)
+      Run 1, owner-supplied and sanitized: the same revision, stack, and host as
+      8.2's run 2, straight after it. 11 passed, 1 failed, 25 skipped. 00f1 and 00f2
+      passed: the run found the host registered with the target's connection and went
+      on, so the registration was reconciled, not duplicated. 02b failed: creating the
+      listing returned 409 "this publication source is already bound to another
+      listing". Run 2's listing had been reopened when its capacity was released
+      (`capacity_released` named it among `reopened_listing_ids`) and republished, so
+      it still holds the publication source — the listing shape derived from the same
+      `capacity` — that this run's identical listing would bind; every later stage
+      skipped on its prerequisite. Acceptance not met. D2 makes the pool, host, and
+      declaration reconcile on a rerun but says nothing of the listing, and the module
+      leaves its listing open; the mock lanes never meet this, since each lane run
+      replaces its stack. Returned to planning with 8.2's defect (above): left to
+      planning, and possibly to a design record extending D2, is whether a rerun
+      reuses the open listing on its source or the module closes its listing when it
+      ends (a closed listing then no longer holding the source would need checking),
+      and what a run interrupted before that cleanup leaves for the next.
+      Planned: section 7C (D2a). A listing's binding is unique across open and closed
+      listings and survives a close, so closing at the end would not free the source;
+      the owner chose that a rerun adopts the one open listing on the scenario's
+      resource when its shape matches the target, and fails naming the listings
+      otherwise, and waived another design review. 8.3 is met by a second run, straight
+      after 8.2's, against the same stack.
+- [ ] 8.4 **[log]** Host preparation re-run, as in 8.1, at a public revision of this
+      branch that includes section 7A, on the same kind of host. Supplied: the play
+      recap and the handler's result from the log. Acceptance: the recap shows
+      `failed=0` and `ignored=0`; the handler restarts the OS family's SSH unit without
+      error; 8.1's other acceptance points still hold. (D9d)
+      Revision: `fa27649fe` (sections 1–7A), from its published provisioning image
+      (ansible-core 2.19), `vm-setup.yaml` with no extra variables, on a freshly
+      created host of 8.1's kind (GPU-less x86-64 Ubuntu 24.04 cloud instance with
+      nested virtualization), so the hardening `blockinfile` changed `sshd_config`
+      and notified the handler. Owner-supplied, sanitized. Against the acceptance,
+      each holds:
+      - recap `failed=0 unreachable=0 ignored=0`; no task or handler failed or was
+        ignored anywhere in the log;
+      - `RUNNING HANDLER [restart sshd]` reports `changed` without error, the play's
+        last handler, after the reboot task; the log records the result, not the
+        resolved unit name, which on this Debian-family host the expression makes
+        `ssh`;
+      - kernel command line byte-identical before and after preparation's reboot;
+      - after the reboot `kvm_intel`'s `nested` is `Y` and `/dev/kvm` exists;
+      - no GPU-detection unit under either name, before or after;
+      - none of the log's task headers names a golden-image, Packer, or image-build
+        task; the GPU decision reads `GPU present: False`, `gpu_passthrough: auto`,
+        and passthrough boot configuration and binding skipped.
+      As in 8.1, the host type already had nested virtualization and `/dev/kvm`
+      before preparation. Acceptance met. Left unchecked only because section 8
+      returns to planning before it is committed (8.2); checked when the section is.
+      When the fix 8.2 found is implemented, the infra side re-prepares a fresh host
+      at that revision, which gives the handler another run; 8.4 does not need it.
 
 ## 9. Closeout
 
@@ -639,6 +1263,22 @@ The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
       `docs/development/diagrams/` (`e2e-compute-deal`, `e2e-settle-zoom`,
       `e2e-stage-discipline`, `.drawio` and their `.svg` exports) and TESTING.md's
       "One part, zoomed in" are redrawn with the mock gates as mock-lane stages.
+      Amended during section 6: the real-lane subsection says the lane waits for real
+      jobs by reading their status within a named bound, where the stage discipline
+      otherwise waits only on a request a stage made, and that its failure recovery
+      expires only its own deal's lease.
+      Amended at the D9d replanning: D9d has no permanent destination; it repairs a
+      handler to do what it already claimed, and the reason the unit name follows the OS
+      family is the handler's own comment (7A.1). The design-promotion record says so.
+      Amended at the D4b replanning: D4b has no permanent destination either; it repairs
+      the codec to deliver what a direct create already promised, and why the relay's
+      port is gated is the codec's own comment (7B.1). The design-promotion record says
+      so.
+      Amended at the D2a replanning: TESTING.md's real-lane subsection says a rerun
+      against the same stack reconciles the lane's registrations and adopts its open
+      listing, since a publication source backs one listing for good, and fails naming
+      the listings it cannot adopt. The re-reservation's claim shape is the driver's own
+      comment (7C.1). The design-promotion record names both.
 - [ ] 9.10 **Documentation citations.** `make check-doc-citations
       CHANGE=prove-real-vm-provisioning`; `openspec validate prove-real-vm-provisioning
       --strict`.

@@ -1455,6 +1455,51 @@ Alternatives rejected:
   then reach the wire as null, and a model built with `model_construct` would lose
   required fields.
 
+## S8: merging `prove-real-vm-provisioning` through its Section 7C
+
+Before either live run, this branch merged that change's branch again, at its Section
+7C, `cb05d625f02c99e239a9028e677eb645f1a37293`. Its eleven new commits are that
+change's Sections 6, 7, 7A, 7B, and 7C, with their plans and live-verification notes.
+What came in is that change's, recorded in its own `tasks.md`:
+- the GPU-less real-provisioning lane, `e2e_vm_real_provisioning`: its driver, built on
+  a VM driver base it splits from the mock driver; its scenario; its unit tests; and
+  its marker. No pipeline lane selects it, and it skips without its target profile;
+- dead e2e material removed, among it the e2e directory's own workflow copy;
+- host preparation's SSH restart handler naming the OS family's unit, `ssh` on the
+  Debian family and `sshd` elsewhere, and failing preparation when the restart fails;
+- a direct-access create reporting the port it forwarded: a relay block the playbook
+  prints disabled, with `N/A` for its port, no longer replaces it;
+- a rerun adopting its own listing, and its lane claiming capacity as dimensions.
+
+Four files conflicted. Each is resolved so both changes' behaviour holds:
+- `domains/vms/provisioning/adapter/src/vm_provisioning_adapter/codec.py`. This change
+  reads the relay block from the one fact its action printed (D1); that change accepts
+  a relay port only when it is a TCP port. Both hold: an enabled relay reporting a TCP
+  port replaces the forwarded port, and `re` is imported again for that check.
+- `domains/vms/provisioning/adapter/tests/unit/test_vm_codec.py`. Both changes' relay
+  tests are kept, and the override is tested for an enabled flag given as `True` and as
+  `"True"`. That change's two executor tests of the printed create fact now name their
+  guest as the job's `vm_target`, since a create yields evidence only from a fact that
+  names its job's guest (D1).
+- `e2e-tests/tests/e2e/roles/scenarios/vms/compute_deal_driver.py`. That change's split
+  into `VmDealDriverBase` and the mock driver is kept, and so is this change's removal
+  of the fixed create output, since the mock lane renders the per-job default (D2): the
+  moved mock create gate states no output.
+- `e2e-tests/tests/e2e/roles/scenarios/vms/host_registry.py`. That change's optional
+  connection and its reconciliation are kept, and the placeholder connection is
+  registered at `ssh` version 2, the only version the service accepts (D3).
+
+One fix lies outside the conflicts. That change's real-target connection, in
+`e2e-tests/tests/e2e/roles/scenarios/vms/real_compute_deal_driver.py`, stated no
+version and so defaulted to 1, which the service refuses (D3). It now states version
+2, its registration check compares the version too, and
+`e2e-tests/tests/unit/test_real_vm_lane.py` covers both.
+
+What stays that change's: its live verification and closeout, its deltas, and the claims
+of its GPU-less scenario. That scenario is not this change's acceptance, which remains
+the GPU-backed guest and the whole bare-metal GPU machine ("Live qualification"). No
+decision above changed.
+
 ## Compatibility, migration, and rollback
 
 - **No schema migration.** `public_port` lives in the connection envelope's public
@@ -1545,6 +1590,14 @@ of every buyer and seller that composes the kit, and packaging; the frozen candi
 makes owes the round's one full local run, the review's amendment, and validation
 before either live purchase.
 
+S8 changes the VM adapter's codec, which the provisioning service installs, host
+preparation's SSH restart handler, and e2e scenario and unit modules, and no lock,
+dependency, or version. Its slice is gated by the adapter's, the VM IaC's, the
+provisioning service's, and the e2e unit suites, the playbook syntax and inventory
+checks, and packaging. S7's full local run stands for every project whose inputs S8
+leaves unchanged; the candidate S8 makes owes CI, Helm, and the live lanes, which run
+after it is frozen.
+
 ## Open questions
 
 None. D7's open items, the resource type of a declaration without GPUs and the
@@ -1581,6 +1634,7 @@ closeout, under the heading named.
 | S7 the contract's source and vector provenance | `kit/arkhai-payments/schema/SOURCE.md`, written with the contract (14.22): the extracted artifact's hash and extraction, its one defect, the previous publication kept as framing evidence, and the synthetic current-wire fixture that is not producer provenance; `docs/development/TESTING.md` under "Payment Receipts in Tests", whose sentence on the published vectors says which wire they pin and that current-wire producer vectors were not supplied with this schema snapshot, so the kit retains the previous publication for canonical framing and uses an explicit SCM synthetic current-wire fixture; `docs/development/ROADMAP.md` "Payment qualification boundaries": that current-wire producer vectors were not supplied with the schema snapshot |
 | S7 the required nullable maximum hold extension and the one wire serializer | `kit/arkhai-payments/schema/SOURCE.md` ("Required nullable durations"), written with the fix (14.26): the published form, the generation normalization of exactly two properties, the unnormalized `ConnectStatus`, and `wire_json` as the one wire form; `kit/arkhai-payments/README.md`; the code is its own record (`kit/arkhai-payments/scripts/generate_models.py`, `market_arkhai_payments.canonical`). No permanent specification changes: the derived mandate still states `P0D` |
 | Coordination with `prove-real-vm-provisioning` | None: change history. That change promotes its own decisions and archives its own deltas at its closeout |
+| S8 the merge of `prove-real-vm-provisioning` through its Section 7C | None: change history. Each resolution follows a decision whose destination is recorded above (D1, D2, D3); that change promotes and archives its own |
 | Live qualification of both lanes | None: external evidence, recorded at closeout as live evidence or named blockers (`tasks.md`, the closeout's end-to-end part) |
 | Roadmap currency | `docs/development/ROADMAP.md` "Goal 1 — Consolidate physical-resource authority in the provisioning service" (the real runner's evidence row) and "Payment qualification boundaries". Goal 2 is unchanged: this change no longer sells VM shapes without GPUs |
 | Campaign index currency | `openspec/changes/README.md`: this change's row. The dependency line to `gpu-optional-compute-shapes` and that change's `Depends on` entry were removed with D7's withdrawal |

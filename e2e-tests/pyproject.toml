@@ -108,6 +108,7 @@ markers = [
     "e2e_credits_deal: Full API-credits deal driven by `market credits buy` — discover, negotiate a new key, settle, consume to 402, top up the existing key, consume again",
     "e2e_credits_payment_deal: API-credit deal settled through arkhai.payments.v1 — approval, receipt-gated issuance, run-log re-drive, and a seller refund; blocked without a reachable payments target",
     "e2e_bare_metal_deal: Full installed-plugin whole-host deal — discovery, negotiation, settlement, SSH access, teardown, and access revocation",
+    "e2e_vm_real_provisioning: The canonical compute deal provisioned for real on an operator-provided KVM host — real create and teardown jobs, SSH access to the negotiated GPU-less shape, an unrelated key refused, the guest gone from the host's VM list; in no lane, and skips without the real-vm-target profile",
     "e2e_bare_metal_publication: Bare-metal lane — publication from pool declarations, discovery, withdrawal, and reinstatement against a mock-profile site",
     "e2e_bare_metal_payment_deal: Bare-metal fixed-term payment purchase — receipt-gated mock access, same-settlement re-drive, seller refund and separate physical teardown; blocked without a reachable payments target",
     "e2e_bare_metal_mock_deal: Bare-metal lane — the canonical compute deal on a mock-profile site, stage for stage with VM's typed-client deal, then a second deal on the freed machine",

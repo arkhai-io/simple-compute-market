@@ -3884,6 +3884,49 @@ no production code, schema, vector, version, or lock changes.
       covered by fresh packaging. CI, owned Helm validation, and physical rental
       qualification remain outstanding.
 
+**The merge of `prove-real-vm-provisioning` through its Section 7C (S8).** The owner
+directed that change's branch merged. Before either live run, this branch merged it
+again, at `cb05d625f02c99e239a9028e677eb645f1a37293` (`design.md`, "S8: merging
+`prove-real-vm-provisioning` through its Section 7C").
+
+- [x] 14.29 Resolve the merge so both changes hold, and record what came in:
+      - `domains/vms/provisioning/adapter/src/vm_provisioning_adapter/codec.py`:
+        the relay block is read from the action's own fact, and its port replaces
+        the forwarded one only from an enabled relay and only as a TCP port;
+      - `domains/vms/provisioning/adapter/tests/unit/test_vm_codec.py`: both sides'
+        relay tests are kept, and that change's two executor tests name their guest
+        as the job's `vm_target`;
+      - `e2e-tests/tests/e2e/roles/scenarios/vms/compute_deal_driver.py`: that
+        change's driver split is kept, with the mock create gate stating no output;
+      - `e2e-tests/tests/e2e/roles/scenarios/vms/host_registry.py`: that change's
+        optional connection is kept, and the placeholder is at `ssh` version 2;
+      - outside the conflicts, `real_compute_deal_driver.py` states its target
+        connection at `ssh` version 2 and its registration check compares the
+        version, with a unit test in `e2e-tests/tests/unit/test_real_vm_lane.py`.
+
+      Done. The auto-merged files were reviewed against both sides: the VM IaC's
+      restart handler and its structure tests, the e2e `pyproject.toml` marker, the
+      VM conftest's listing reconciliation, the shared deal stages and their tests,
+      the scenario cleanup-order test, and this index's two rows. The only runtime
+      Python change is the VM adapter's codec. Only the adapter and
+      `provisioning/compute/service` lock the adapter, and the adapter is already at
+      0.16.0 against `dev`'s 0.15.0, so no version, dependency, or lock moves.
+- [x] 14.30 Verification of 14.29, after `make dist`, each suite re-synced from its
+      lock and exiting 0:
+      - `make -C domains/vms/provisioning/adapter test`: 288 passed;
+      - `make -C domains/vms/provisioning/iac test`: 155 passed, 15 subtests passed;
+        `validate-playbooks` and `validate-inventory` passed;
+      - `make -C provisioning/compute/service test`: unit 607 passed, integration 480
+        passed;
+      - `make -C e2e-tests test-unit`: 340 passed;
+      - every changed Python file compiles in its project's interpreter;
+      - `make check-packaging`: passed, every lock current and unchanged.
+
+      Not run: a type check, since no target gates these projects on one; the root
+      `make test`, whose S7 run stands for every project S8 leaves unchanged; and CI,
+      Helm, and the live lanes, owed on the frozen candidate. That change's GPU-less
+      scenario is no evidence of this change's GPU lanes.
+
 ## 15. Closeout
 
 The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.

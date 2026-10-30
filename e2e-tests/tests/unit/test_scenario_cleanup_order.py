@@ -26,8 +26,12 @@ PROJECT = TESTS.parent
 SCENARIOS = TESTS / "e2e" / "roles" / "scenarios"
 LANES = ("vms", "bare_metal")
 
-#: The VM lane's module cleanup, which every VM scenario module takes.
+#: The VM lane's module cleanup, which every mock-provisioned VM scenario module
+#: takes.
 VM_CLEANUP = ("ensure_storefront_resumed", "reap_buyer_settle_subprocess", "release_reserved_resources")
+#: The real-provisioning VM module, and its cleanup in place of the lane's.
+REAL_VM_MODULE = SCENARIOS / "vms" / "test_real_provisioning_deal.py"
+REAL_VM_CLEANUP = ("ensure_storefront_resumed", "recover_failed_run")
 
 _FIXTURE_LINE = re.compile(r"^\s+(SETUP|TEARDOWN)\s+M (\S+)(?: \(fixtures used: (.*)\))?$")
 _TEST_LINE = re.compile(r"^\s{8}(\S+\.py)::")
@@ -158,11 +162,32 @@ def test_holds_are_released_after_the_modules_other_cleanup(path, plans, finalis
 
 
 @pytest.mark.parametrize(
-    "path", sorted((SCENARIOS / "vms").glob("test_*.py")), ids=lambda path: path.name
+    "path",
+    sorted(path for path in (SCENARIOS / "vms").glob("test_*.py") if path != REAL_VM_MODULE),
+    ids=lambda path: path.name,
 )
 def test_every_vm_module_still_runs_the_lane_cleanup(path, plans):
     set_up = {name for name, _ in plans[str(path.relative_to(PROJECT))]["setup"]}
     assert set(VM_CLEANUP) <= set_up, (path.name, sorted(set(VM_CLEANUP) - set_up))
+
+
+def test_the_real_vm_module_recovers_its_own_guest_and_releases_nothing_fleet_wide(plans):
+    """The real-provisioning module tears down only its own deal's guest. A
+    fleet-wide release would return the host's capacity to the market while a
+    failed run's guest may still run on it."""
+    set_up = {name for name, _ in plans[str(REAL_VM_MODULE.relative_to(PROJECT))]["setup"]}
+    assert set(REAL_VM_CLEANUP) <= set_up, sorted(set(REAL_VM_CLEANUP) - set_up)
+    assert "release_reserved_resources" not in set_up
+
+
+def test_the_real_vm_module_checks_its_target_and_execution_before_any_hold(plans):
+    """A hold pauses a shared service when it is set up, so the module writes
+    nothing to the stack only if its target is validated and its VM execution
+    found real first."""
+    order = [name for name, _ in plans[str(REAL_VM_MODULE.relative_to(PROJECT))]["setup"]]
+    holds = [order.index(name) for name in order if name in HOLD_FIXTURE_NAMES]
+    assert holds, order
+    assert order.index("real_vm_target") < order.index("real_vm_execution") < min(holds), order
 
 
 def _planted(setups: list[str], teardowns: list[str]) -> str:

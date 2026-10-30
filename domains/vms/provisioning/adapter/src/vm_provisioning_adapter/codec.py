@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -480,10 +481,11 @@ def build_result_payload(result: VmPlaybookOutput) -> dict:
     if frp:
         payload["frp"] = frp
         # The buyer-key fact prints its relay block on the direct path too,
-        # disabled and with no port; only an enabled relay's port replaces the
-        # forwarded one.
+        # disabled and with "N/A" placeholders for its port. Only an enabled
+        # relay reporting a TCP port replaces the port the playbook forwarded
+        # on the host.
         relay = _relay_reported(ar)
-        if relay is not None and relay.get("remote_port"):
+        if relay is not None and _is_port(relay.get("remote_port")):
             payload["ssh_port"] = relay["remote_port"]
 
     for key in ("gpu", "network", "vm_ip_internal", "vm_state",
@@ -565,6 +567,15 @@ def _relay_reported(payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
     if enabled is True or str(enabled).lower() == "true":
         return frp
     return None
+
+
+def _is_port(value: Any) -> bool:
+    """Whether ``value`` is a TCP port number, as an integer or its decimal text."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, str) and re.fullmatch(r"[0-9]{1,5}", value.strip()):
+        value = int(value.strip())
+    return isinstance(value, int) and 0 < value <= 65535
 
 
 def create_evidence(payload: Mapping[str, Any], params: VmJobParams) -> DeliveryEvidence | None:

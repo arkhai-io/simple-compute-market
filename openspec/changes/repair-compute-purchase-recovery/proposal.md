@@ -213,6 +213,10 @@ None.
     snapshot fixtures, the vector check, and tests), and the lower bound or exact pin
     on it, with the locks, of every project that installs it: the VM, bare-metal, and
     API-credit buyers and storefronts, `domains/apicredits`, and `e2e-tests`;
+  - the merge of `prove-real-vm-provisioning` through its Section 7C (S8): its
+    conflicts in the VM adapter's codec and its tests and in the VM e2e driver and host
+    registry, resolved so both changes hold, and its real-target connection stated at
+    `ssh` version 2;
   - the host registration requests in `docs/development/VALIDATION_RUNBOOK.md` and
     `tools/issue-discovery`'s local phase configuration, which state `ssh` version 2.
   - Each changed package bumps its minor version once against `dev`, to the next
@@ -245,11 +249,13 @@ None.
   after it landed, reconciling the INI parser and one VM scenario with it (`design.md`,
   "Coordination with `gpu-optional-compute-shapes`").
 - `prove-real-vm-provisioning`, in implementation, owns its whole scope. This branch
-  merged that change's branch at its Sections 1–5, so this change's candidate carries
-  that code. Its real-provisioning lane, its Sections 6–9, and its
-  `test-compatibility` and `physical-provisioning` deltas stay its own, archived by
-  its own closeout. Neither change depends on the other (`design.md`, "Coordination
-  with `prove-real-vm-provisioning`").
+  merged that change's branch at its Sections 1–5, and again through its Section 7C
+  (S8), so this change's candidate carries that code. Its GPU-less real-provisioning
+  lane, its live verification and closeout, and its `test-compatibility` and
+  `physical-provisioning` deltas stay its own, archived by its own closeout. Neither
+  change depends on the other (`design.md`, "Coordination with
+  `prove-real-vm-provisioning`" and "S8: merging `prove-real-vm-provisioning` through
+  its Section 7C").
 - `resolve-compute-family-findings` plans edits to files this change also edits:
   `lease_lifecycle.py`, `fulfillment_convergence.py`, the VM storefront's
   `admin_controller.py`, and the VM codec tests, which it moves. The edits touch

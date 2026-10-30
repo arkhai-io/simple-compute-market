@@ -63,7 +63,7 @@ reboots once from cloud-init after first boot. The VM domain does not deliver th
 guest's host key. The only scenario that opens SSH today is
 `scenarios/bare_metal/test_bare_metal_deal.py`, by `subprocess`.
 
-**Dead material.** `e2e-tests/.github/workflows/e2e.yml` is never run (GitHub reads
+**Dead material.** The e2e package's own nested `e2e.yml` workflow is never run (GitHub reads
 only the repository root's workflows). `e2e-tests/README.md` documents
 `e2e-mock-happy`/`e2e-mock-failure`, which do not exist.
 `docs/development/VALIDATION_RUNBOOK.md` §21–26 describes a manual real-host proof
@@ -169,6 +169,43 @@ The registrations follow the VM scenario convention: they are left in place, and
 next run's registration reconciles them (10 F6). Pools are disabled, never deleted,
 hosts are disabled, never deleted, and the site has no operation that retracts a
 declaration; idempotency here is that a rerun reconciles, not that a run removes.
+
+### D2a. A rerun adopts the listing on its source
+
+Settled by the owner after live verification 8.3's first run; another design review
+waived. A publication source — site, offering mode, contract, pool, resource — backs
+one listing ever: the storefront's listing binding keys it uniquely across open and
+closed listings, and closing a listing never removes its binding. A rerun against the
+same stack derives the same source from the same target, so creating a second listing
+on it is refused (`this publication source is already bound to another listing`), and
+the first run's listing, reopened when its capacity was released, still holds it.
+
+The listing is reconciled on a rerun like the registrations (D2). 02b lists the
+storefront's listings and selects those whose resource is the scenario's resource:
+
+- none: it creates the listing paused, as before;
+- exactly one, open, whose stated vCPUs, memory, and disk equal the target's
+  `capacity`: it pauses that listing and records it as the run's listing, and 03b
+  resumes and republishes it as for a new one;
+- several, or one that is closed, or one whose shape differs from the target's: it
+  fails naming the listings, for an operator to recover, before any deal stage writes.
+
+It uses only the storefront client's existing listing calls (list, get, pause).
+
+Rejected: closing the listing when the module ends (the binding outlives the close, so
+the next run's create is still refused); a fresh resource id per run (the site cannot
+retract a declaration, so each run would leave the host's capacity declared again and
+the host selling it twice); requiring a fresh stack for every run (contradicts D2's
+rerun reconciliation and 8.3).
+
+**The re-reservation's claim.** 11b re-reserves the released capacity through the
+listing's binding to show it came back. The site matches a claim's attributes exactly
+against a resource's attributes, and reads quantities from its `dimensions` map, which
+attribute matching skips. The real lane's claim therefore names `resource_id` as its
+attribute and the target's `capacity` as its `dimensions` — the shape the storefront's
+admin reserve already accepts for a GPU-less listing. Claiming the sold quantities as
+attributes, as the real driver first did, matches no resource, which 8.2's run at
+7B's revision showed.
 
 ### D3. The scenario's credentials are the local profile's
 
@@ -295,6 +332,33 @@ Rejected: generalising the gate hooks into semantic ones (`hold_create`,
 would then report a gate stage as passed when nothing was held, and a shared stage's
 assertion would hold under one driver and be vacuous under another.
 
+### D4b. A direct-access create reports the port it forwarded
+
+Settled by the owner after live verification 8.2's first run; another design review
+waived. The VM adapter's result codec (`build_result_payload` in
+`domains/vms/provisioning/adapter/src/vm_provisioning_adapter/codec.py`) replaced the
+port it parsed from the playbook's output with the relay block's `remote_port` whenever
+that value was truthy. `vm-create.yml` reports the relay block on every create, and with
+no relay it reports `enabled: false` and `remote_port: "N/A"`, so a direct-access
+create's forwarded port became `"N/A"`, `create_evidence` could not read it as a port,
+and the create reported no delivery evidence: the fulfillment failed though the guest
+was running and reachable. The mock lanes' create output passes through the same codec,
+but their facts report a disabled relay block with no port, which the truthiness test
+passed over, and the codec's unit fixtures were hand-built payloads without the relay
+block the playbook emits, so nothing caught it.
+
+The relay's `remote_port` replaces the access port only when the playbook reports the
+relay enabled — the same rule `create_evidence` already applies to a relayed guest — and
+the value is a port number; otherwise the port parsed from the output stands. The codec
+is tested against the fact shape `vm-create.yml` actually emits, through the executor,
+with the relay disabled.
+
+Rejected: removing the replacement (the relay branch of the evidence already reads the
+relay's port, but what a relayed create reports as its `ssh_port` would change on a path
+no lane runs live); changing the playbook to omit the relay block or report nulls when
+there is no relay (two fact blocks change, and the codec would still mis-read any
+`"N/A"` placeholder).
+
 ### D5. Placement and invocation
 
 A marker, `e2e_vm_real_provisioning`, registered in `e2e-tests/pyproject.toml` and in
@@ -396,6 +460,23 @@ evidence `relay-vm-access-without-a-dashboard` needs to close.
 - **9c. Host preparation defaults to the scratch image**, the image market
   fulfillment creates from. The golden image becomes an explicit choice, and the
   documentation that states the default is updated with it.
+- **9d. The SSH hardening is applied by restarting the daemon's own unit** (settled by
+  the owner after live verification 8.1; another design review waived). Preparation's
+  `restart sshd` handler, notified when the hardening block is written to
+  `sshd_config`, named a unit Ubuntu 24.04 does not have (`ssh.service` there) and
+  ignored its own failure. In 8.1's run the preparation reboot, tagged `always`,
+  restarted the daemon first, so nothing was lost; on a host whose configuration
+  changes without that reboot the hardening would silently not take effect. The
+  handler restarts the unit the host's OS family names — `ssh` for the Debian family,
+  `sshd` otherwise, the `ansible_os_family` idiom the provisioning roles already use —
+  and a failure fails preparation. Rejected: a static `ssh` (breaks the non-Debian
+  hosts the role does not otherwise exclude); keeping `ignore_errors` (the defect is
+  that a failed restart went unnoticed); tracking it as an issue (the owner chose to
+  fix it here, since the run that found it is this change's). The golden image's
+  Packer cloud-init template (`roles/vm-setup/templates/user-data.j2`) also restarts
+  `sshd`, but only the golden build renders it — scratch guests take their cloud-init
+  from `vm-create.yml`, which already tries `ssh` then `sshd` — so it stays with the
+  golden image under D10, noted on `fix-golden-image-config`.
 
 ### D10. The golden image is out of scope
 
@@ -408,7 +489,7 @@ to be re-evaluated by `fix-golden-image-config` before its configuration is fixe
 
 ### D11. Dead material
 
-`e2e-tests/.github/workflows/e2e.yml` is deleted; the README's nonexistent targets
+The e2e package's nested `e2e.yml` workflow is deleted; the README's nonexistent targets
 are removed; `VALIDATION_RUNBOOK.md` §21–26 is rewritten as the manual counterpart of
 the real lane, against the current signed admin API and the D9 defaults, for an
 operator-provided host. The dead markers `mock_provisioning*`, `roles_*`, and
@@ -423,7 +504,12 @@ Two rounds, one session each.
   VM creation changes with their IaC tests; the target settings model, `.example`,
   and ignore rule (D1); the SSH helper and its unit tests (D7).
 - **Round 2 — the real lane:** the real driver and scenario module (D2, D4, D5, D7),
-  marker registration, and the D11 documentation. Its validation is a run against a
+  marker registration, and the D11 documentation; then, added after 8.1's run, the
+  D9d handler fix, ahead of the remaining live verification and a re-run of host
+  preparation that shows it; then, added after 8.2's first run, the D4b codec fix,
+  ahead of the scenario's runs; then, added after 8.2's and 8.3's runs at the D4b
+  revision, the D2a listing adoption and re-reservation claim, ahead of their re-runs.
+  Its validation is a run against a
   real host; the evidence recorded here is the scenario's result, the access checks'
   output, and the teardown checks, with no environment identifiers.
 
