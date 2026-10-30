@@ -860,6 +860,43 @@ public revision of this branch the run used.
       refusal. Acceptance: every stage passes and none skips; the values match the
       requirement's scenarios "A real deal is delivered", "An unrelated key is
       refused", and "Teardown removes the VM and its access". (D4, D7)
+      Run 1, owner-supplied and sanitized: revision `fa27649fe` (sections 1–7A), its
+      published images and chart, provisioning unmocked, an empty host registry, the
+      scenario run from a clean checkout of the same revision. Stages 00 to 08b3
+      passed: 00e1 reported `offering_mode='vm' mocked=False`; the host registered
+      as the target; listing, negotiation, escrow, and settlement completed; 08b3's
+      create job succeeded on the target host with a running guest and its DNAT
+      forward. 09a failed: the fulfillment went `failed`
+      (`provider_reported_failure`, "the create job succeeded without usable
+      delivery evidence"), every later stage skipped on its prerequisite, and the
+      module's recovery reported the lease `RELEASE_FAILED` with the guest possibly
+      left on the host (the infra side cleaned the host; the stack is replaced for the
+      next run). Acceptance not met.
+      Cause, an application defect read from the source at that revision and the
+      job's stored result: the playbook reports an `frp` block even with FRP
+      disabled (`enabled: False`, `remote_port: "N/A"`), and the VM adapter's
+      `build_result_payload` (`domains/vms/provisioning/adapter/src/vm_provisioning_adapter/codec.py`)
+      copies any truthy `frp.remote_port` over the `ssh_port` parsed from the
+      playbook, so the stored detail's `ssh_port` is `"N/A"`; `create_evidence`
+      takes the direct branch (the job leased no relay) and `int("N/A")` raises
+      inside its `try`, so it returns `None`. A direct-access create can therefore
+      never report delivery evidence. The mock lanes never interpret playbook
+      output, so no lane exercised it. The run itself showed the real lane's
+      pre-delivery half working against a real host and the failure path's
+      reporting; the recovery could not tear the guest down, since no lease reached
+      `active` (D4, "When the run fails", names that case for an operator).
+      Returned to planning: the owner's decision, relayed by the infra-side
+      coordinator and confirmed by the return, is that the codec defect is fixed in
+      this change, as 7A was — a fix outside the design's decisions and the
+      proposal's Impact list. The relayed fix shape: `frp.remote_port` replaces
+      `ssh_port` only when FRP is enabled and the value is a port number; an adapter
+      unit test of a direct-forwarding create whose output carries a disabled `frp`
+      block yields evidence with the parsed port. Left to planning: the section, the
+      design record (as D9d), and whether a spec delta or the proposal's Impact list
+      changes.
+      Nothing of the fix is implemented. After it is pushed, the infra side
+      republishes, deploys a fresh stack, re-prepares a fresh host, and runs the
+      scenario twice for 8.2 and 8.3.
 - [ ] 8.3 **[log]** A second run of the scenario against the same stack. Acceptance: it
       passes, the host's registration being reconciled rather than duplicated. (D2)
 - [ ] 8.4 **[log]** Host preparation re-run, as in 8.1, at a public revision of this
@@ -867,6 +904,29 @@ public revision of this branch the run used.
       recap and the handler's result from the log. Acceptance: the recap shows
       `failed=0` and `ignored=0`; the handler restarts the OS family's SSH unit without
       error; 8.1's other acceptance points still hold. (D9d)
+      Revision: `fa27649fe` (sections 1–7A), from its published provisioning image
+      (ansible-core 2.19), `vm-setup.yaml` with no extra variables, on a freshly
+      created host of 8.1's kind (GPU-less x86-64 Ubuntu 24.04 cloud instance with
+      nested virtualization), so the hardening `blockinfile` changed `sshd_config`
+      and notified the handler. Owner-supplied, sanitized. Against the acceptance,
+      each holds:
+      - recap `failed=0 unreachable=0 ignored=0`; no task or handler failed or was
+        ignored anywhere in the log;
+      - `RUNNING HANDLER [restart sshd]` reports `changed` without error, the play's
+        last handler, after the reboot task; the log records the result, not the
+        resolved unit name, which on this Debian-family host the expression makes
+        `ssh`;
+      - kernel command line byte-identical before and after preparation's reboot;
+      - after the reboot `kvm_intel`'s `nested` is `Y` and `/dev/kvm` exists;
+      - no GPU-detection unit under either name, before or after;
+      - none of the log's task headers names a golden-image, Packer, or image-build
+        task; the GPU decision reads `GPU present: False`, `gpu_passthrough: auto`,
+        and passthrough boot configuration and binding skipped.
+      As in 8.1, the host type already had nested virtualization and `/dev/kvm`
+      before preparation. Acceptance met. Left unchecked only because section 8
+      returns to planning before it is committed (8.2); checked when the section is.
+      When the fix 8.2 found is implemented, the infra side re-prepares a fresh host
+      at that revision, which gives the handler another run; 8.4 does not need it.
 
 ## 9. Closeout
 
