@@ -724,6 +724,48 @@ public revision of this branch the run used.
       succeeds; the kernel command line is unchanged; nested virtualization is on and
       `/dev/kvm` exists; no GPU-detection service is installed; no golden-image step ran.
       (D9)
+      Correction: the unit the playbook installs is `gpu-detect.service`
+      (`roles/vm-setup/tasks/gpu-detection-service.yml`); `gpu-detection.service` is
+      the task file's name, not a unit's. The evidence checks both names.
+      Revision: `8638567c8` (sections 1–7), from its published provisioning image,
+      `vm-setup.yaml` with no extra variables, on a GPU-less x86-64 Ubuntu 24.04 cloud
+      instance with nested virtualization. Owner-supplied, sanitized. Against the
+      acceptance, each holds:
+      - preparation succeeds: recap `failed=0 unreachable=0`, `ignored=1` (below);
+      - kernel command line byte-identical before and after preparation's reboot;
+      - after the reboot `kvm_intel`'s `nested` is `Y` and `/dev/kvm` exists
+        (`crw-rw---- root kvm 10, 232`);
+      - no GPU-detection unit under either name, before or after;
+      - no golden-image, Packer, or image-build task among the log's task headers.
+      The GPU decision shows D9b on a GPU-less host: `GPU present: False`,
+      `gpu_passthrough: auto`, the play's note that passthrough boot configuration and
+      binding were skipped and the boot configuration left as it is, and the audit
+      reporting IOMMU disabled, not assessable, no GPUs.
+      What the run does not show: the host type loads `kvm_intel` with nested on at
+      boot, so `nested` and `/dev/kvm` were already present before preparation; the run
+      shows preparation keeps them through its reboot, not that `kvm-setup.yml` enables
+      them. D9a's two refusals (no `vmx`/`svm`; `/dev/kvm` absent after the modules
+      load) cannot fire on a capable host and rest on 3.6's structural tests.
+      The ignored failure is the `restart sshd` handler (`roles/vm-setup/handlers/main.yml`,
+      `ignore_errors: yes`, notified by `security-hardening.yml`), which this change
+      did not touch: on Ubuntu 24.04 the unit is `ssh.service` and Ansible finds no
+      `sshd`. It runs after preparation's reboot, which is tagged `always`, so the
+      reboot had already started the daemon with the hardened configuration; a change
+      to that configuration on a host that is not rebooted would not be applied.
+      Every point of the acceptance holds on this evidence. The task is left
+      unchecked only because section 8 returns to planning before it is committed
+      (below); it is checked when the section is.
+      Returned to planning: the owner decided the handler is fixed in this change, a
+      fix outside the design's decisions and the plan's tasks. The fix this session
+      proposed: the handler restarts the unit the host's OS names (`ssh` on the
+      Debian family, `sshd` elsewhere) and no longer ignores its failure, with a
+      structural test in `domains/vms/provisioning/iac/tests/`. Left to planning:
+      where the task sits (section 8 is evidence only), whether 8.1 is re-run to show
+      the recap with `ignored=0`, and whether the guest's cloud-init template
+      (`roles/vm-setup/templates/user-data.j2`, `systemctl restart sshd`), which
+      the owner did not rule on, is in scope; the proposal's Impact list names
+      neither file. Nothing of the fix is implemented. 8.2 and 8.3 still await the
+      owner-supplied scenario runs.
 - [ ] 8.2 **[log]** The scenario: `make -C e2e-tests test-module
       MODULE=e2e_vm_real_provisioning ACTIVE_PROFILES=local,real-vm-target` against the
       provided stack. Supplied: pytest's summary and per-stage results; the VM-execution
