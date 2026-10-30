@@ -242,6 +242,20 @@ lane correlates through the fulfillment's `capacity_reservation_id`, which the s
   matches fail listing them; a failed job fails with its error and its
   `get_job_logs` output; a timeout fails with the job's last status and its logs.
 
+**Finding this deal's dispatch.** Recorded after 8.3's run at the D2a revision, where
+the owner decided the defect it found is fixed in this change and the return to
+planning was confirmed. 08b waits for the storefront's `provision/job_submitted` event
+before reading the settle status's `fulfillment_id`. Once a rerun adopts its listing
+(D2a), the listing's event log already holds the previous run's `job_submitted`, so a
+wait filtered only by listing returns at once and reads the status before this run's
+fulfillment is recorded. The wait is this deal's: filtered by its `negotiation_id`,
+which the event carries and which no other run shares, and counted from a `since_id`
+mark taken before settlement. The mock VM lane shares the wait; one negotiation per lane
+run leaves its outcome there unchanged. The other waits the real lane makes already
+filter by this run's negotiation or a mark, or read state that is this run's; 03b's
+registry read is vacuous on an adopted listing, which pausing does not unpublish, and
+its own advance, resume answering `published`, still proves the publication.
+
 **Observing the guest's absence (10 F2).** A succeeded teardown job reports what the
 playbook did, and a refused connection is as consistent with a running guest whose
 forward or key was removed; neither shows the guest gone. Once the teardown job has
@@ -261,7 +275,17 @@ looks for the teardown job and the guest's absence as above, and where it cannot
 confirm removal — no lease because the fulfillment never reached `active`, a failed or
 timed-out teardown, the guest still listed — it fails the run naming the fulfillment,
 reservation, create and teardown job ids, guest name, and host, for an operator to
-recover by hand. Only then are the module's worker holds released. The real module
+recover by hand. Only then are the module's worker holds released.
+
+A settlement the storefront accepted (its status `provisioning` or later) dispatched a
+fulfillment, whether or not 08b recorded it. Where neither the deal's state nor the
+settle status names it yet, the finalizer waits within a bound for this deal's
+`job_submitted` (as 08b does) and reads the status again; where it still names none, it
+fails naming the escrow, negotiation, settle status, and host, since a guest may be on
+the host. Only a settlement the storefront did not accept leaves nothing to tear down.
+8.3's run at the D2a revision showed the gap: its recovery read a status that did not
+yet name the fulfillment, concluded nothing was dispatched, and left a running guest
+unreported. The real module
 never uses `release_reserved_resources`: `admin_release_reservations` is fleet-wide,
 and would return the host's capacity to the market while its guest still runs.
 
@@ -508,7 +532,9 @@ Two rounds, one session each.
   D9d handler fix, ahead of the remaining live verification and a re-run of host
   preparation that shows it; then, added after 8.2's first run, the D4b codec fix,
   ahead of the scenario's runs; then, added after 8.2's and 8.3's runs at the D4b
-  revision, the D2a listing adoption and re-reservation claim, ahead of their re-runs.
+  revision, the D2a listing adoption and re-reservation claim, ahead of their re-runs;
+  then, added after 8.3's run at the D2a revision, the D4 dispatch wait and recovery
+  ahead of the final runs.
   Its validation is a run against a
   real host; the evidence recorded here is the scenario's result, the access checks'
   output, and the teardown checks, with no environment identifiers.

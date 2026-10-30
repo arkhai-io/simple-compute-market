@@ -18,9 +18,11 @@ Order: sections 1–5 deliver everything the mock lanes and unit tests can prove
 added after 8.1's run, fixes the SSH restart handler that run found (D9d) and 8.4
 re-runs host preparation to show it; section 7B, added after 8.2's first run, fixes
 the direct-access port (D4b); section 7C, added after 8.2's and 8.3's runs at 7B's
-revision, adopts a rerun's listing and corrects 11b's claim (D2a); section 9 is the
+revision, adopts a rerun's listing and corrects 11b's claim (D2a); section 7D, added
+after 8.3's run at 7C's revision, makes 08b wait for this deal's own dispatch and
+recovery find it (D4); section 9 is the
 closeout. Section 6 needs sections 1, 2, 4, and 5; 8.4 needs section 7A; 8.2 and 8.3
-need sections 7B and 7C. Section 8 is evidence the owner
+need sections 7B, 7C, and 7D. Section 8 is evidence the owner
 supplies from a run against a real host (`design.md`, "Implementation cadence"); until it
 is supplied the change is `blocked in implementation`. No dependency gates
 implementation.
@@ -994,6 +996,61 @@ Files: `e2e-tests/tests/e2e/roles/scenarios/vms/real_compute_deal_driver.py`;
       `f52f07973`'s published images and chart. A fresh stack's 02b creates its
       listing; the rerun's 02b should log the earlier run's listing adopted.
 
+## 7D. A deal waits for its own dispatch, and recovery finds it
+
+Delivers D4's "Finding this deal's dispatch" and its recovery rule: 08b reads this run's
+fulfillment however many runs the listing has served, and a run that fails after its
+settlement was accepted never leaves a guest unreported, so 8.3 (a rerun passes) can
+hold. Planned after 8.3's run at 7C's revision found both. Confined to the e2e package:
+no published image or chart changes.
+
+Files: `e2e-tests/tests/e2e/roles/scenarios/vms/compute_deal_driver.py`
+(`VmDealDriverBase.settle_dispatched`, shared with the mock VM lane);
+`e2e-tests/tests/e2e/roles/helpers/compute_deal_stages.py` only if 08b must take the
+mark before it settles; `e2e-tests/tests/e2e/roles/scenarios/vms/real_compute_deal_driver.py`
+(`tear_down_after_failure`); `e2e-tests/tests/unit/test_real_vm_lane.py`, and the unit
+module that covers the shared VM driver or 08b (`test_compute_deal_stages.py` or a new
+one beside it).
+
+- [ ] 7D.1 08b's dispatch wait is this deal's: `settle_dispatched` waits for
+      `provision/job_submitted` filtered by the deal's `negotiation_id` and counted from a
+      `since_id` mark taken before settlement is submitted (read with `get_events`, as
+      11b reads its mark), keeping the listing filter. Where the mark is taken — in 08b
+      before `settle_evm`, or in a driver method 08b calls first — is the
+      implementer's, recorded in the note; bare metal's driver is untouched. (D4,
+      "Finding this deal's dispatch")
+- [ ] 7D.2 Recovery finds an accepted settlement's fulfillment:
+      `tear_down_after_failure`, where neither the deal's state nor the settle status
+      names a fulfillment, reads the settle status; a status the storefront reports as
+      accepted (`provisioning` or a later status — read the settle status model for the
+      set) waits within a named bound for this negotiation's `job_submitted` and reads
+      the status again; where it still names none, it raises naming the escrow, the
+      negotiation, the settle status, and the host. Only a status that is not accepted
+      logs "nothing to tear down" and returns. With a fulfillment found, recovery goes
+      on as today. (D4, "When the run fails")
+- [ ] 7D.3 Unit tests at the lowest level that proves each (`docs/development/TESTING.md`,
+      unit): (a) with an earlier `job_submitted` for the same listing but another
+      negotiation already in the fake event log, `settle_dispatched` does not return on
+      it — it waits for this deal's event and returns this run's fulfillment; (b) the
+      wait passes this deal's `negotiation_id` and a mark taken before settlement;
+      (c) recovery with an accepted status naming no fulfillment, whose
+      `job_submitted` then arrives and whose status then names it, tears the guest
+      down as `test_a_create_still_in_flight_is_settled_then_torn_down` does; (d) the
+      same status that never names one raises naming the escrow, negotiation, status,
+      and host; (e) a status that is not accepted still returns with nothing torn down
+      (the existing test, its status made explicit). Mutation checks, each run and
+      reverted: dropping the negotiation filter fails (a); restoring the
+      return-on-no-fulfillment fails (d).
+- [ ] 7D.4 Verification: `make -C e2e-tests test-unit` (unit); `make test`; `make
+      check-change CHANGE=prove-real-vm-provisioning`. No dependency or lock changes, so
+      no packaging check is owed beyond `make test`'s.
+      End-to-end: `e2e_vm_real_provisioning`, in no lane, through 8.2 and 8.3 against a
+      real host. The shared `settle_dispatched` also runs in the mock VM scenarios that
+      use the VM driver, `e2e_deal` (`test_full_deal.py`) and
+      `e2e_non_erc20_settlement` (`test_non_erc20_settlement.py`): their pipeline result
+      is evidence that the narrower wait still finds a single run's event there. No CI
+      workflow is owed.
+
 ## 8. Live verification [log]
 
 Requires a prepared, GPU-less, nested-virtualization KVM host and a deployed stack the
@@ -1187,6 +1244,8 @@ public revision of this branch the run used.
       access": acceptance met at `cb05d625f`. Left unchecked because section 8 returns
       to planning before it is committed (8.3); the infra side runs 8.2 again at the
       fix's revision, so both runs are at the final revision.
+      Planned: 8.2 is met by the first of 8.3's two runs at a revision that includes
+      7D (8.3, "Planned").
 - [ ] 8.3 **[log]** A second run of the scenario against the same stack. Acceptance: it
       passes, the host's registration being reconciled rather than duplicated. (D2)
       Run 1, owner-supplied and sanitized: the same revision, stack, and host as
@@ -1257,6 +1316,12 @@ public revision of this branch the run used.
       stays within `e2e-tests/`, the infra side prepares a fresh host, deploys a fresh
       stack at `f52f07973` with no republish, and runs the scenario twice from the new
       head, for 8.2 and 8.3 both at the final revision.
+      Planned: section 7D (D4, "Finding this deal's dispatch" and the recovery rule
+      under "When the run fails"): 08b waits for this deal's own `job_submitted`, and
+      recovery finds an accepted settlement's fulfillment or fails naming it. It stays
+      within `e2e-tests/`, so 8.2 and 8.3 are met by two runs, straight after one
+      another, from a checkout of a public revision that includes 7D against a fresh
+      stack of `f52f07973`'s published images and chart and a freshly prepared host.
 - [ ] 8.4 **[log]** Host preparation re-run, as in 8.1, at a public revision of this
       branch that includes section 7A, on the same kind of host. Supplied: the play
       recap and the handler's result from the log. Acceptance: the recap shows
