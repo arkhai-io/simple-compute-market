@@ -170,6 +170,43 @@ next run's registration reconciles them (10 F6). Pools are disabled, never delet
 hosts are disabled, never deleted, and the site has no operation that retracts a
 declaration; idempotency here is that a rerun reconciles, not that a run removes.
 
+### D2a. A rerun adopts the listing on its source
+
+Settled by the owner after live verification 8.3's first run; another design review
+waived. A publication source — site, offering mode, contract, pool, resource — backs
+one listing ever: the storefront's listing binding keys it uniquely across open and
+closed listings, and closing a listing never removes its binding. A rerun against the
+same stack derives the same source from the same target, so creating a second listing
+on it is refused (`this publication source is already bound to another listing`), and
+the first run's listing, reopened when its capacity was released, still holds it.
+
+The listing is reconciled on a rerun like the registrations (D2). 02b lists the
+storefront's listings and selects those whose resource is the scenario's resource:
+
+- none: it creates the listing paused, as before;
+- exactly one, open, whose stated vCPUs, memory, and disk equal the target's
+  `capacity`: it pauses that listing and records it as the run's listing, and 03b
+  resumes and republishes it as for a new one;
+- several, or one that is closed, or one whose shape differs from the target's: it
+  fails naming the listings, for an operator to recover, before any deal stage writes.
+
+It uses only the storefront client's existing listing calls (list, get, pause).
+
+Rejected: closing the listing when the module ends (the binding outlives the close, so
+the next run's create is still refused); a fresh resource id per run (the site cannot
+retract a declaration, so each run would leave the host's capacity declared again and
+the host selling it twice); requiring a fresh stack for every run (contradicts D2's
+rerun reconciliation and 8.3).
+
+**The re-reservation's claim.** 11b re-reserves the released capacity through the
+listing's binding to show it came back. The site matches a claim's attributes exactly
+against a resource's attributes, and reads quantities from its `dimensions` map, which
+attribute matching skips. The real lane's claim therefore names `resource_id` as its
+attribute and the target's `capacity` as its `dimensions` — the shape the storefront's
+admin reserve already accepts for a GPU-less listing. Claiming the sold quantities as
+attributes, as the real driver first did, matches no resource, which 8.2's run at
+7B's revision showed.
+
 ### D3. The scenario's credentials are the local profile's
 
 The scenario signs as the principals of the `local` profile and reaches services on
@@ -470,7 +507,9 @@ Two rounds, one session each.
   marker registration, and the D11 documentation; then, added after 8.1's run, the
   D9d handler fix, ahead of the remaining live verification and a re-run of host
   preparation that shows it; then, added after 8.2's first run, the D4b codec fix,
-  ahead of the scenario's runs. Its validation is a run against a
+  ahead of the scenario's runs; then, added after 8.2's and 8.3's runs at the D4b
+  revision, the D2a listing adoption and re-reservation claim, ahead of their re-runs.
+  Its validation is a run against a
   real host; the evidence recorded here is the scenario's result, the access checks'
   output, and the teardown checks, with no environment identifiers.
 

@@ -1,7 +1,8 @@
 # Tasks
 
 Planned against the design settled in `design.md` and advanced by
-`reviews/10-design.triage.md`. Every task answers to a decision (D1–D11), a delta
+`reviews/10-design.triage.md`. Every task answers to a decision (D1–D11, with D2a,
+D4a, D4b, and D9d), a delta
 requirement under `specs/`, or a repository obligation cited at the task:
 `openspec/README.md#plan-closeout-requirements`, the task rules in
 `openspec/config.yaml`, `docs/development/TESTING.md`'s level definitions, and
@@ -15,8 +16,11 @@ their shell logic against a fake filesystem.
 Order: sections 1–5 deliver everything the mock lanes and unit tests can prove; sections
 6–8 deliver the real lane, its documentation, and its live verification; section 7A,
 added after 8.1's run, fixes the SSH restart handler that run found (D9d) and 8.4
-re-runs host preparation to show it; section 9 is the closeout. Section 6 needs
-sections 1, 2, 4, and 5; 8.4 needs section 7A. Section 8 is evidence the owner
+re-runs host preparation to show it; section 7B, added after 8.2's first run, fixes
+the direct-access port (D4b); section 7C, added after 8.2's and 8.3's runs at 7B's
+revision, adopts a rerun's listing and corrects 11b's claim (D2a); section 9 is the
+closeout. Section 6 needs sections 1, 2, 4, and 5; 8.4 needs section 7A; 8.2 and 8.3
+need sections 7B and 7C. Section 8 is evidence the owner
 supplies from a run against a real host (`design.md`, "Implementation cadence"); until it
 is supplied the change is `blocked in implementation`. No dependency gates
 implementation.
@@ -893,6 +897,57 @@ Files: `domains/vms/provisioning/adapter/src/vm_provisioning_adapter/codec.py`;
       market always negotiates a buyer key, so the real lane never takes that
       variant; left as it is, outside D4b, for the relay-backed follow-up to weigh.
 
+## 7C. A rerun adopts its listing, and 11b claims capacity as dimensions
+
+Delivers D2a: a second run against the same stack reconciles its listing as it does its
+registrations, and the real lane's re-reservation claims the released capacity in the
+shape the site matches, so 8.2 ("every stage passes") and 8.3 (a rerun passes) can
+hold. Planned after 8.2's and 8.3's runs at 7B's revision found both. Confined to the
+e2e package: no published image or chart changes.
+
+Files: `e2e-tests/tests/e2e/roles/scenarios/vms/real_compute_deal_driver.py`;
+`e2e-tests/tests/e2e/roles/scenarios/vms/test_real_provisioning_deal.py`;
+`e2e-tests/tests/unit/test_real_vm_lane.py`.
+
+- [ ] 7C.1 `RealVmComputeDealDriver.reserve_released_capacity` claims
+      `required_attributes={"resource_id": REAL_RESOURCE_ID, "dimensions":
+      dict(self.capacity)}`: the resource as its one attribute, everything the host
+      sells as dimensions, so a reservation coming back still shows all of it was
+      released. The comment says why the quantities go under `dimensions` (the site
+      matches attributes exactly and reads quantities only from `dimensions`). (D2a,
+      "The re-reservation's claim")
+- [ ] 7C.2 The driver gains the listing reconciliation D2a describes, as a method 02b
+      calls (for example `listing_for_run`): it lists the storefront's listings
+      (`list_listings`, paging until every listing is read) and selects those whose
+      `listing_resource` names `REAL_RESOURCE_ID`. None: returns nothing, and 02b
+      creates the listing paused as before. Exactly one, `open`, whose stated
+      `vcpu_count`, `ram_gb`, and `disk_gb` equal the target's `capacity`: pauses it
+      unless already paused (`pause_listing`), reads it back paused and open
+      (`get_listing`), and returns it. Several, or one `closed`, or one whose shape
+      differs: fails naming each listing's id, status, and shape and the target's
+      capacity, for an operator to recover. 02b records the adopted or created listing
+      as `seller_listing_id` and logs which it did; 03b is unchanged. Nothing before 02b
+      writes a listing, so a refused adoption leaves the stack as the previous run left
+      it. (D2a)
+- [ ] 7C.3 Unit, `test_real_vm_lane.py`, against a fake storefront client in the
+      file's existing fakes' style: (a) the re-reservation's claim is `resource_id`
+      plus `dimensions` equal to the target's capacity, with no quantity among its
+      attributes; (b) no listing on the resource → nothing returned, no pause; (c)
+      one open listing of the target's shape, unpaused → paused and returned; (d) the
+      same already paused → returned, no second pause; (e) a closed one, (f) two, and
+      (g) one whose disk differs → fail naming the listings and the capacity, nothing
+      paused; (h) listings on other resources are ignored; (i) a listing found only on
+      a later page is still found. Mutation checks: restoring the attributes-only claim
+      fails (a); dropping the shape comparison fails (g); dropping the status check
+      fails (e). (D2a)
+- [ ] 7C.4 Verification: `make -C e2e-tests test-unit` (unit); `make test`; `make
+      check-change CHANGE=prove-real-vm-provisioning`. No dependency or lock changes, so
+      no packaging check is owed beyond `make test`'s.
+      End-to-end: `e2e_vm_real_provisioning`, in no lane, through 8.2 and 8.3 against a
+      real host; no pipeline lane runs it, and the mock lanes' drivers and stages are
+      untouched, so their results are no evidence for this section. No CI workflow is
+      owed.
+
 ## 8. Live verification [log]
 
 Requires a prepared, GPU-less, nested-virtualization KVM host and a deployed stack the
@@ -1056,6 +1111,12 @@ public revision of this branch the run used.
       needs a design record as D4b did. Nothing of the fixes is implemented. If they
       stay within `e2e-tests/`, the infra side deploys a fresh stack at `f52f07973`
       with no republish and runs 8.2 and 8.3 from a checkout of the new head.
+      Planned: the fix is section 7C (D2a, "The re-reservation's claim"): 11b claims
+      the resource as its attribute and the sold capacity as `dimensions`, the shape the
+      storefront's admin reserve already accepts for a GPU-less listing; the owner
+      waived another design review. It stays within `e2e-tests/`, so 8.2 is met by a run
+      from a checkout of a public revision that includes 7C against a fresh stack of
+      `f52f07973`'s published images and chart.
 - [ ] 8.3 **[log]** A second run of the scenario against the same stack. Acceptance: it
       passes, the host's registration being reconciled rather than duplicated. (D2)
       Run 1, owner-supplied and sanitized: the same revision, stack, and host as
@@ -1075,6 +1136,12 @@ public revision of this branch the run used.
       reuses the open listing on its source or the module closes its listing when it
       ends (a closed listing then no longer holding the source would need checking),
       and what a run interrupted before that cleanup leaves for the next.
+      Planned: section 7C (D2a). A listing's binding is unique across open and closed
+      listings and survives a close, so closing at the end would not free the source;
+      the owner chose that a rerun adopts the one open listing on the scenario's
+      resource when its shape matches the target, and fails naming the listings
+      otherwise, and waived another design review. 8.3 is met by a second run, straight
+      after 8.2's, against the same stack.
 - [ ] 8.4 **[log]** Host preparation re-run, as in 8.1, at a public revision of this
       branch that includes section 7A, on the same kind of host. Supplied: the play
       recap and the handler's result from the log. Acceptance: the recap shows
@@ -1161,6 +1228,11 @@ The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
       the codec to deliver what a direct create already promised, and why the relay's
       port is gated is the codec's own comment (7B.1). The design-promotion record says
       so.
+      Amended at the D2a replanning: TESTING.md's real-lane subsection says a rerun
+      against the same stack reconciles the lane's registrations and adopts its open
+      listing, since a publication source backs one listing for good, and fails naming
+      the listings it cannot adopt. The re-reservation's claim shape is the driver's own
+      comment (7C.1). The design-promotion record names both.
 - [ ] 9.10 **Documentation citations.** `make check-doc-citations
       CHANGE=prove-real-vm-provisioning`; `openspec validate prove-real-vm-provisioning
       --strict`.
