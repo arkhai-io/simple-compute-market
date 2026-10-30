@@ -351,11 +351,14 @@ ansible-playbook -i inventory/ playbooks/host-kit/vm-setup.yaml \
 - `frp_server_addr`: IP address of the FRP server for remote access integration
 - `frp_server_port`: Port number for FRP server communication (default: 7000)
 - `frp_auth_token`: Authentication token for FRP server client connections
-- `image_setup_type`: Image setup method - "scratch" for base Ubuntu images, "golden" for custom built images
+- `image_setup_type`: Image setup method - "scratch" (the default) for base Ubuntu images, "golden" for custom built images
+- `gpu_passthrough`: `auto` (the default), `enabled`, or `disabled`; see the notes below
 
 **Notes**:
 - If libvirt security setup fails due to conflicts with BIOS, CPU, or machine configuration, you can skip it with `-e skip_libvirt_security=true`.
-- You can change `image_setup_type=scratch` to `image_setup_type=golden` if you want to build a custom golden image. Otherwise, it will download and use the base Ubuntu cloud image.
+- Preparation defaults to the scratch image, the one market fulfillment creates VMs from, which needs only the host's outbound network to download the base Ubuntu cloud image. Name `image_setup_type=golden` to build a custom golden image instead; only then do the object-storage, service-account, and Packer steps run.
+- The host must provide hardware virtualization. Preparation fails before changing anything when the CPU exposes neither `vmx` nor `svm` (create a cloud instance with nested virtualization enabled), and fails when `/dev/kvm` is absent once the KVM modules load. VM creation passes `--virt-type kvm`, so a VM is never created under software emulation.
+- GPU passthrough's boot configuration — the IOMMU kernel arguments, vfio module loading, the rescue boot entry, and the GPU detection service — is applied only when a GPU is present: a display or 3D controller (PCI class `0300` or `0302`) from NVIDIA or AMD, read from sysfs without the IOMMU. A management controller's or a VM's emulated display does not count. A host with no GPU keeps its kernel command line and boot entries as they were. Binding still follows the passthrough audit after the reboot, and runs only where the configuration was applied. `-e gpu_passthrough=enabled` or `disabled` forces the configuration either way; any other value fails preparation before the host changes. Skipping it does not undo a configuration an earlier preparation applied.
 
 ### 3. Create Your First VM
 Create a variables file with your VM configuration and run the playbook:
@@ -602,9 +605,9 @@ packer_variables:
 - **System Package Installation**: Essential tools including vim, nano, git, python3, pip, net-tools, at scheduler, SELinux utilities, and development packages
 - **Firewall Configuration**: UFW setup with SSH access rules and default deny policy
 - **KVM/QEMU Installation**: Complete virtualization stack with qemu-kvm, libvirt-daemon-system, libvirt-clients, bridge-utils, virtinst, virt-manager, virt-viewer, libguestfs-tools, and qemu-guest-agent
-- **Hardware Virtualization**: CPU virtualization support detection, nested virtualization enablement for Intel VT-x and AMD-V, IOMMU configuration
+- **Hardware Virtualization**: required — preparation refuses a host whose CPU exposes neither Intel VT-x (`vmx`) nor AMD-V (`svm`), or that has no `/dev/kvm` once the KVM modules load; nested virtualization is enabled where supported
 - **User Permissions**: Automatic addition of users to libvirt and kvm groups for virtualization access
-- **GPU Passthrough Support**: NVIDIA and AMD GPU detection, PCI device identification, IOMMU group analysis, VFIO driver configuration, and GPU isolation for VM assignment
+- **GPU Passthrough Support**: applied only where an NVIDIA or AMD GPU is present, or as `gpu_passthrough` forces: IOMMU configuration, VFIO driver configuration, and binding of the GPUs the IOMMU group audit finds bindable
 - **Network Configuration**: KVM bridge networking setup, network isolation rules, and persistent iptables configurations
 - **Security Hardening**: SSH access restrictions from VM networks, iptables rules blocking VM-to-host SSH, network isolation service, audit logging setup
 - **Intrusion Prevention**: Fail2ban installation with custom jails for SSH protection, VM network attack detection, bridged network monitoring, and iptables-allports banning
@@ -612,7 +615,7 @@ packer_variables:
 - **Golden Image Pipeline**: Packer installation, GCP SDK setup, HashiCorp repository configuration, and automated image building with GCS storage integration
 
 > **Operational reboot guardrail**: Shut down running VMs before rebooting the host. If guests are still running, `libvirtd` can block systemd shutdown while it waits for those domains to stop, which in turn makes host reboots hang indefinitely.
-- **GPU Detection Service**: Automated GPU monitoring service, hardware detection scripts, and resource availability tracking
+- **GPU Detection Service**: Automated GPU monitoring service, hardware detection scripts, and resource availability tracking, installed with GPU passthrough's configuration
 
 #### VM Setup Command Examples
 
@@ -703,7 +706,8 @@ ansible-playbook -i inventory/ playbooks/host-kit/vm-setup.yaml \
   --tags "system_setup,kvm_config" \
   --limit kvm1
 
-# Only configure GPU passthrough
+# Only configure GPU passthrough (skipped under the default gpu_passthrough=auto
+# where no GPU is present)
 ansible-playbook -i inventory/ playbooks/host-kit/vm-setup.yaml \
   --tags "gpu_passthrough" \
   --limit kvm1
@@ -732,8 +736,9 @@ ansible-playbook -i inventory/ playbooks/host-kit/vm-setup.yaml \
 - `frp_server_port`: FRP server port (default: `7000`)
 - `frp_auth_token`: Authentication token for FRP client-server connection
 - `skip_libvirt_security`: Skip SELinux/libvirt security hardening when BIOS/OS doesn't support it (set to `true` or `false`)
-- `image_setup_type`: Image type - `scratch` for base Ubuntu, `golden` for custom Packer build
+- `image_setup_type`: Image type - `scratch` (the default) for base Ubuntu, `golden` for custom Packer build
 - `vm_image_type`: Alternative parameter for image type (used internally, same values as `image_setup_type`)
+- `gpu_passthrough`: `auto` (the default) applies GPU passthrough's configuration only when an NVIDIA or AMD GPU is present; `enabled` and `disabled` force it either way
 - `packer_build_name`: Name for Packer build (e.g., `ubuntu_noble`, `ubuntu_jammy`)
 - `packer_build_version`: Version string for built image (e.g., `1.0.0`, `2.1.3`)
 - `gcp_project_id`: Google Cloud Project ID for GCS storage
@@ -1321,7 +1326,7 @@ All VM operations provide JSON-formatted output for API integration. Example cre
 - SSH keys are auto-generated if `vm_tenant_pubkey` is not provided
 - Credentials are saved to `ansible/keys/<vm-name>/` directory
 - Monitor action provides real-time metrics without requiring VM restart
-- GPU passthrough requires host setup with `gpu_passthrough` tag enabled
+- GPU passthrough requires a host prepared with passthrough configured: one with an NVIDIA or AMD GPU present, or prepared with `gpu_passthrough=enabled`
 
 ### Docker Application Deployment (docker-app role) - Optional
 

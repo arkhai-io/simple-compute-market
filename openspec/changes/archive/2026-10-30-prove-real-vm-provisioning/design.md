@@ -191,6 +191,9 @@ storefront's listings and selects those whose resource is the scenario's resourc
   fails naming the listings, for an operator to recover, before any deal stage writes.
 
 It uses only the storefront client's existing listing calls (list, get, pause).
+Nothing before 02b writes a listing, but the registrations before it still reconcile
+(D2): a target whose capacity changed between runs has its declaration rewritten and
+its old listing refused, and only the old target or a fresh stack recovers it.
 
 Rejected: closing the listing when the module ends (the binding outlives the close, so
 the next run's create is still refused); a fresh resource id per run (the site cannot
@@ -283,6 +286,17 @@ settle status names it yet, the finalizer waits within a bound for this deal's
 `job_submitted` (as 08b does) and reads the status again; where it still names none, it
 fails naming the escrow, negotiation, settle status, and host, since a guest may be on
 the host. Only a settlement the storefront did not accept leaves nothing to tear down.
+As implemented the rule fails closed: only a `refunding` settle status, a refund begun
+before any delivery was recorded, counts as not accepted, and every other status, one
+the storefront adds later included, counts as accepted. A settle status the storefront
+has no record of yet (404) is waited on like an accepted one, since a submission whose
+response was lost may still be being recorded; it returns with nothing to tear down only
+where no dispatch is logged within the bound. Failing closed costs a wait of the bound
+and then a failure asking an operator to look, though nothing was dispatched, for a
+settlement refused at the storefront's evidence check (it reads `provisioning`), one
+refunded before delivery once the refund completes (`refunded`), a delivery that failed
+before a fulfillment began (`failed`), and a delivery scheduled to start later than the
+bound. The escrow and negotiation join every recovery failure's named fields.
 8.3's run at the D2a revision showed the gap: its recovery read a status that did not
 yet name the fulfillment, concluded nothing was dispatched, and left a running guest
 unreported. The real module
@@ -574,3 +588,57 @@ naming its profile.
 ## Open Questions
 
 None.
+
+## Implementation notes
+
+Found in implementation and left as found, each recorded where it was found:
+
+- The generated-key create fact (`vm-create.yml`, used when no buyer key is given)
+  names its relay block `relay`, not `frp`, so the codec reads no relay from it and
+  such a relayed create reports no delivery evidence. The market always negotiates a
+  buyer key, so no deal takes that variant; the relay-backed follow-up (D8) weighs it.
+- 11b's own release mark reads one page of 500 stage events; 08b's dispatch mark reads
+  every page.
+- After teardown, a host presenting another key on the forwarded port raises the SSH
+  helper's host-key error rather than counting as refused.
+- The codec tests assume ansible-core 2.19's native templating (the version the live
+  runs' image ran) prints the relay's `enabled` as a JSON boolean and a leased
+  `remote_port` as an integer; 2.17 and 2.18, which the image's pin admits, were not
+  checked.
+- Observed by the owner inside the live run's guest, outside any stage: the instance
+  metadata service gave the guest no service-account token, and the forwarded port
+  answered only the host's allowed sources.
+
+Declined in the sections' fresh-context checks: merging the SSH handler test's
+`_flatten` into its `walk` (one collects findings, the other tasks); calling the
+codec's `interpret` directly rather than through the executor seam the plan named;
+matching a 404 settle status's detail text as well as its status, since the recovery
+wait covers a 404 from anywhere; failing a refusal whose kill overhead lands
+milliseconds past the bound, which is consistent with the bound as stated; and
+amending the `test-compatibility` delta for an accepted settlement whose fulfillment
+is not yet named, since its recovery requirement still holds of the behaviour, an
+accepted settlement having dispatched one and the failure naming those fields and more.
+
+## Design promotion record
+
+| Accepted decision | Permanent location |
+|---|---|
+| D1. The target is a typed, versioned settings section in an ignored profile file | `openspec/specs/test-compatibility/spec.md#requirement-a-real-provisioning-target-is-a-typed-versioned-settings-section` (written by the archive); `docs/development/TESTING.md#the-real-provisioning-lane`; the fields documented by `e2e-tests/src/e2e_harness/real_vm_target.py` and the example profile `config-real-vm-target.yml.example` in `e2e-tests/config/` |
+| D2. The scenario registers its own supply, and a rerun reconciles it | `openspec/specs/test-compatibility/spec.md#requirement-a-real-provisioning-vm-scenario-proves-delivery-on-a-real-host` (archive); `docs/development/TESTING.md#the-real-provisioning-lane` |
+| D2a. A rerun adopts the listing on its source | `docs/development/TESTING.md#the-real-provisioning-lane`; the re-reservation's claim shape is `reserve_released_capacity`'s own comment in `e2e-tests/tests/e2e/roles/scenarios/vms/real_compute_deal_driver.py` |
+| D3. The scenario's credentials are the local profile's | `docs/development/TESTING.md#the-real-provisioning-lane`; `docs/development/VALIDATION_RUNBOOK.md#23-run-provisioning-for-real` |
+| D4. Determinism without job gates: polling within a bound, job correlation, the guest's absence, this deal's dispatch, recovery | `openspec/specs/test-compatibility/spec.md#requirement-a-real-provisioning-vm-scenario-proves-delivery-on-a-real-host` (archive); `docs/development/TESTING.md#the-real-provisioning-lane` |
+| D4a. Shared stages split at their mock gates; `MockGates` | `openspec/specs/test-compatibility/spec.md#requirement-the-canonical-compute-deals-shared-stages-are-defined-once` (modified by the archive); `docs/development/TESTING.md#the-canonical-compute-deal` and "One part, zoomed in"; `docs/development/diagrams/e2e-compute-deal`, `e2e-settle-zoom`, and `e2e-stage-discipline` (`.drawio` and `.svg`) |
+| D4b. A direct-access create reports the port it forwarded | No permanent destination: it repairs the codec to deliver what a direct create already promised; why the relay's port is gated is `build_result_payload`'s own comment in `domains/vms/provisioning/adapter/src/vm_provisioning_adapter/codec.py` |
+| D5. Placement and invocation | `docs/development/TESTING.md#the-real-provisioning-lane`; `e2e-tests/README.md#real-vm-provisioning`; the spec requirement's "belongs to no default lane" |
+| D6. GPU-less shapes in the e2e helpers | `openspec/specs/test-compatibility/spec.md#requirement-a-real-provisioning-vm-scenario-proves-delivery-on-a-real-host` ("a shape that declares no GPUs") |
+| D7. What the scenario proves over SSH | `openspec/specs/test-compatibility/spec.md#requirement-a-real-provisioning-vm-scenario-proves-delivery-on-a-real-host` (archive); `docs/development/TESTING.md#the-real-provisioning-lane` |
+| D8. Direct access only; the relay-backed lane is a follow-up | `docs/development/ROADMAP.md#goal-1--consolidate-physical-resource-authority-in-the-provisioning-service` (the relay-backed gap row, unowned) |
+| D9a. Hardware virtualization is required | `openspec/specs/physical-provisioning/spec.md#requirement-vm-hosts-must-provide-hardware-virtualization` (archive); `domains/vms/provisioning/iac/README.md`; `docs/development/VALIDATION_RUNBOOK.md#22-prepare-the-host` |
+| D9b. Passthrough boot configuration follows GPU presence; binding follows the audit | `openspec/specs/physical-provisioning/spec.md#requirement-passthrough-binding-cannot-strand-a-host` (modified by the archive); `domains/vms/provisioning/iac/README.md` |
+| D9c. Host preparation defaults to the scratch image | `openspec/specs/physical-provisioning/spec.md#requirement-host-preparation-defaults-to-the-image-vm-creation-uses` (archive); `domains/vms/provisioning/iac/README.md`; `docs/development/VALIDATION_RUNBOOK.md#22-prepare-the-host` |
+| D9d. The SSH hardening is applied by restarting the daemon's own unit | No permanent destination: it repairs a handler to do what it already claimed; why the unit follows the OS family is the handler's own comment in `domains/vms/provisioning/iac/ansible/roles/vm-setup/handlers/main.yml` |
+| D10. The golden image is out of scope | `openspec/changes/README.md`, `fix-golden-image-config`'s row |
+| D11. Dead material | The removals themselves; `docs/development/VALIDATION_RUNBOOK.md#21-provide-a-kvm-host` (§21–26 rewritten as the scenario's operator procedure); `e2e-tests/README.md#real-vm-provisioning` |
+| Roadmap currency | `docs/development/ROADMAP.md` Goal 1: the current state says the real VM path is proven; the gap row this change owned is removed |
+| Campaign index currency | `openspec/changes/README.md`, this change's row in "Reach hosts and VMs that have no inbound route"; the campaign graph is unchanged |
