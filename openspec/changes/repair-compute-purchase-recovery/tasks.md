@@ -3617,7 +3617,7 @@ prerequisite of this change's live bare-metal lane.
       Evidence, on `c96e3828c`: the full local validation passed (packaging 88.4 s,
       tests 3162.7 s); pipeline run 40974364531, all three lanes successful; the
       Helm validation this change owns passed. None of it evidences a live lane.
-- [ ] 14.20 S6: the e2e image carries the system SSH client `e2e_bare_metal_deal`
+- [x] 14.20 S6: the e2e image carries the system SSH client `e2e_bare_metal_deal`
       runs (`design.md`, "S6: an SSH client in the e2e image").
 
       The supervising session accepted S6 under the owner's delegated authority to
@@ -3647,6 +3647,22 @@ prerequisite of this change's live bare-metal lane.
       live bare-metal lane. `c96e3828c`'s full local run stays evidence for every
       Python project, none of which changes here; whether it is reused for this
       candidate is settled under the owner's reuse policy.
+
+      Evidence, on the e2e image built from `afa48148c`. `e2f0790f1` leaves every
+      runtime, dependency, build, and e2e input of that image unchanged: it moves one
+      service test byte for byte and clarifies documentation.
+      - `ssh -V` exits 0 (OpenSSH 10.0p2), and `ssh`, `timeout`, and `market` are on its
+        `PATH`;
+      - its copied e2e modules and installed buyers equal the committed source;
+      - `make check-packaging`, `make check-change`, `make check-change-index`, and
+        `make check-comment-hygiene`: passed;
+      - pipeline run 41126589665: all three lanes passed, with the bare-metal payment
+        cases skipped because no payments target was configured, which is no payment
+        evidence; the owned Helm validation passed, with each served role's image
+        identity checked.
+
+      No pipeline lane runs the SSH this image carries; the live bare-metal lane's
+      evidence is recorded at closeout.
 
 **The payments mandate in the service's current wire (S7).** A test-mode preflight
 approval was refused with `400 invalid_request`: the service's current `ApprovalRequest`
