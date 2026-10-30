@@ -13,8 +13,10 @@ Test levels follow `docs/development/TESTING.md`: unit (no stack); system (the
 their shell logic against a fake filesystem.
 
 Order: sections 1–5 deliver everything the mock lanes and unit tests can prove; sections
-6–8 deliver the real lane, its documentation, and its live verification; section 9 is
-the closeout. Section 6 needs sections 1, 2, 4, and 5. Section 8 is evidence the owner
+6–8 deliver the real lane, its documentation, and its live verification; section 7A,
+added after 8.1's run, fixes the SSH restart handler that run found (D9d) and 8.4
+re-runs host preparation to show it; section 9 is the closeout. Section 6 needs
+sections 1, 2, 4, and 5; 8.4 needs section 7A. Section 8 is evidence the owner
 supplies from a run against a real host (`design.md`, "Implementation cadence"); until it
 is supplied the change is `blocked in implementation`. No dependency gates
 implementation.
@@ -709,6 +711,32 @@ Files: the e2e package's nested `e2e.yml` workflow (deleted); `e2e-tests/README.
       the profile), its copy step's wording, the proposal's directory citation, and
       these notes.
 
+## 7A. Host preparation restarts the SSH daemon by its unit name
+
+Delivers D9d: the SSH hardening host preparation writes takes effect through a restart of
+the unit the host has, and a failed restart fails preparation. Planned after 8.1's run
+found the defect; the golden build's cloud-init template stays out of scope (D9d, D10).
+
+Files: `domains/vms/provisioning/iac/ansible/roles/vm-setup/handlers/main.yml`;
+`domains/vms/provisioning/iac/tests/test_ansible_structure.py`.
+
+- [ ] 7A.1 The `restart sshd` handler restarts `ssh` when `ansible_os_family` is
+      `Debian` and `sshd` otherwise, and carries no `ignore_errors`, so a failed
+      restart fails preparation. Keep the handler's name, which
+      `security-hardening.yml` notifies, or rename it and every notify with it. A
+      comment says why the unit name depends on the OS family. (D9d)
+- [ ] 7A.2 Unit, `test_ansible_structure.py`: the handler names `ssh` for the Debian
+      family and `sshd` otherwise through `ansible_os_family`, and has no
+      `ignore_errors`; every `notify` of it in the role resolves to a handler that
+      exists; no task or handler in `roles/vm-setup` restarts a unit literally named
+      `sshd` outside that expression (the golden-only `templates/` and `files/` are
+      excluded and say so in the test). Mutation check: restoring `ignore_errors` or the
+      literal `sshd` fails the test. (D9d)
+- [ ] 7A.3 Verification: `make test-provisioning-iac` (the IaC suite, unit); `make
+      test`.
+      End-to-end: none in the pipeline — the mock profile runs no playbook. 8.4's live
+      re-run of host preparation exercises it.
+
 ## 8. Live verification [log]
 
 Requires a prepared, GPU-less, nested-virtualization KVM host and a deployed stack the
@@ -766,6 +794,11 @@ public revision of this branch the run used.
       the owner did not rule on, is in scope; the proposal's Impact list names
       neither file. Nothing of the fix is implemented. 8.2 and 8.3 still await the
       owner-supplied scenario runs.
+      Planned: the fix is section 7A (D9d), shown by 8.4's re-run. The template is
+      rendered only by the golden image build — scratch guests' cloud-init is written
+      by `vm-create.yml`, which already tries `ssh` then `sshd` — so the owner left it
+      out of scope with the golden image (D10), noted on `fix-golden-image-config`'s
+      row. The Impact list now names the handler.
 - [ ] 8.2 **[log]** The scenario: `make -C e2e-tests test-module
       MODULE=e2e_vm_real_provisioning ACTIVE_PROFILES=local,real-vm-target` against the
       provided stack. Supplied: pytest's summary and per-stage results; the VM-execution
@@ -777,6 +810,11 @@ public revision of this branch the run used.
       refused", and "Teardown removes the VM and its access". (D4, D7)
 - [ ] 8.3 **[log]** A second run of the scenario against the same stack. Acceptance: it
       passes, the host's registration being reconciled rather than duplicated. (D2)
+- [ ] 8.4 **[log]** Host preparation re-run, as in 8.1, at a public revision of this
+      branch that includes section 7A, on the same kind of host. Supplied: the play
+      recap and the handler's result from the log. Acceptance: the recap shows
+      `failed=0` and `ignored=0`; the handler restarts the OS family's SSH unit without
+      error; 8.1's other acceptance points still hold. (D9d)
 
 ## 9. Closeout
 
@@ -828,6 +866,9 @@ The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
       jobs by reading their status within a named bound, where the stage discipline
       otherwise waits only on a request a stage made, and that its failure recovery
       expires only its own deal's lease.
+      Amended at the D9d replanning: D9d has no permanent destination; it repairs a
+      handler to do what it already claimed, and the reason the unit name follows the OS
+      family is the handler's own comment (7A.1). The design-promotion record says so.
 - [ ] 9.10 **Documentation citations.** `make check-doc-citations
       CHANGE=prove-real-vm-provisioning`; `openspec validate prove-real-vm-provisioning
       --strict`.

@@ -96,8 +96,9 @@ None.
 - `domains/vms/provisioning/iac/ansible/`: `vm-setup.yaml` default,
   `roles/vm-setup/defaults/main.yml`, `roles/vm-setup/tasks/{main,kvm-setup}.yml`
   and a new `gpu-presence.yml` (the passthrough includes, binding's among them, are
-  conditioned in `main.yml`; the audit's report wording), the `vm-management`
-  role's `vm-create.yml` and `gpu-virt-install-*.yml`, and their IaC tests.
+  conditioned in `main.yml`; the audit's report wording), the `restart sshd` handler
+  in `roles/vm-setup/handlers/main.yml`, the `vm-management` role's `vm-create.yml`
+  and `gpu-virt-install-*.yml`, and their IaC tests.
 - `docs/development/TESTING.md`, `docs/development/VALIDATION_RUNBOOK.md`, host-kit
   and seller documentation that states the preparation default.
 - No wire, persistence, chart, or image change. Existing mock lanes keep their

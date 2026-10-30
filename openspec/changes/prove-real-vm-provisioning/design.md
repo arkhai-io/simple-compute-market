@@ -396,6 +396,23 @@ evidence `relay-vm-access-without-a-dashboard` needs to close.
 - **9c. Host preparation defaults to the scratch image**, the image market
   fulfillment creates from. The golden image becomes an explicit choice, and the
   documentation that states the default is updated with it.
+- **9d. The SSH hardening is applied by restarting the daemon's own unit** (settled by
+  the owner after live verification 8.1; another design review waived). Preparation's
+  `restart sshd` handler, notified when the hardening block is written to
+  `sshd_config`, named a unit Ubuntu 24.04 does not have (`ssh.service` there) and
+  ignored its own failure. In 8.1's run the preparation reboot, tagged `always`,
+  restarted the daemon first, so nothing was lost; on a host whose configuration
+  changes without that reboot the hardening would silently not take effect. The
+  handler restarts the unit the host's OS family names — `ssh` for the Debian family,
+  `sshd` otherwise, the `ansible_os_family` idiom the provisioning roles already use —
+  and a failure fails preparation. Rejected: a static `ssh` (breaks the non-Debian
+  hosts the role does not otherwise exclude); keeping `ignore_errors` (the defect is
+  that a failed restart went unnoticed); tracking it as an issue (the owner chose to
+  fix it here, since the run that found it is this change's). The golden image's
+  Packer cloud-init template (`roles/vm-setup/templates/user-data.j2`) also restarts
+  `sshd`, but only the golden build renders it — scratch guests take their cloud-init
+  from `vm-create.yml`, which already tries `ssh` then `sshd` — so it stays with the
+  golden image under D10, noted on `fix-golden-image-config`.
 
 ### D10. The golden image is out of scope
 
@@ -423,7 +440,9 @@ Two rounds, one session each.
   VM creation changes with their IaC tests; the target settings model, `.example`,
   and ignore rule (D1); the SSH helper and its unit tests (D7).
 - **Round 2 — the real lane:** the real driver and scenario module (D2, D4, D5, D7),
-  marker registration, and the D11 documentation. Its validation is a run against a
+  marker registration, and the D11 documentation; then, added after 8.1's run, the
+  D9d handler fix, ahead of the remaining live verification and a re-run of host
+  preparation that shows it. Its validation is a run against a
   real host; the evidence recorded here is the scenario's result, the access checks'
   output, and the teardown checks, with no environment identifiers.
 
