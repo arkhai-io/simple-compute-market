@@ -241,11 +241,12 @@ class BareMetalComputeDealDriver:
         assert result.get("site_id") == self.site_id, result
         return result.get("host_id")
 
-    def settle_dispatched(self, settle_response: Any, deal_state: Any) -> str:
+    def settle_dispatched(self, settle_response: Any, deal_state: Any, *, events_since: int) -> str:
         """Bare metal's settle verifies; its first servicing pass begins delivery.
 
         So the fulfillment exists when settle returns, and the buyer reads it
-        through the fulfillments route rather than settle status.
+        through the fulfillments route rather than settle status; with no event
+        to wait for, ``events_since`` goes unused.
         """
         assert settle_response.status == "settlement_verified", (
             f"Expected status=settlement_verified, got: {settle_response.status!r}. "

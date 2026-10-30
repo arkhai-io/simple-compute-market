@@ -95,17 +95,23 @@ class VmDealDriverBase:
         assert "vm_target" not in result, result
         return result.get("host_id")
 
-    def settle_dispatched(self, settle_response: Any, deal_state: Any) -> str:
+    def settle_dispatched(self, settle_response: Any, deal_state: Any, *, events_since: int) -> str:
         assert settle_response.status == "provisioning", (
             f"Expected status=provisioning, got: {settle_response.status!r}. "
             f"Full response: {settle_response}"
         )
         # job_submitted fires after the DB row is updated; resource_reserved
-        # would race because it fires before the job_id exists.
+        # would race because it fires before the job_id exists. The wait is
+        # this deal's, by its negotiation and from the mark taken before it
+        # settled: a listing serves one deal at a time but keeps every earlier
+        # deal's events, so a wait by listing alone can return on an earlier
+        # deal's and read this deal's status before its fulfillment is recorded.
         wait_for_stage_event(
             self.storefront_admin_client,
             "provision", "job_submitted",
             listing_id=deal_state.seller_listing_id,
+            negotiation_id=deal_state.negotiation_id,
+            since_id=events_since,
             timeout=15.0,
         )
         status = self.storefront_client.get_settle_status(deal_state.real_escrow_uid)

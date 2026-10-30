@@ -27,6 +27,7 @@ from typing import Any, Optional
 
 import pytest
 from compute_provisioning_contracts import ConnectionSubmission
+from storefront_client import StorefrontClientError
 
 from e2e_harness.real_vm_target import RealVmTarget
 from tests.e2e.roles.helpers.compute_deal import advance_fulfillment_to
@@ -64,6 +65,16 @@ _LOG_TAIL = 4000
 #: The most listings one read of the storefront's listings asks for: the
 #: largest page the storefront serves, which refuses a larger limit.
 _LISTING_PAGE = 200
+#: How long a failed run's recovery waits for an accepted settlement's dispatch
+#: to be recorded, where the settle status names no fulfillment yet.
+DISPATCH_BOUND_SECONDS = 60
+#: The settle statuses that show the storefront dispatched nothing: a refund
+#: begun before any delivery was recorded, since a recorded delivery's own
+#: status is what settle status reports. Recovery takes every other status as
+#: an accepted settlement, one the storefront adds later included: passing over
+#: an accepted one leaves a guest running unreported, where reporting one that
+#: dispatched nothing costs an operator a look.
+UNDISPATCHED_SETTLE_STATUSES = frozenset({"refunding"})
 
 
 @dataclass
@@ -286,6 +297,7 @@ class RealVmComputeDealDriver(VmDealDriverBase):
     listing_shape: dict[str, Any]
     jobs: JobWatch
     reserved_resource_id: str = REAL_RESOURCE_ID
+    dispatch_bound: float = DISPATCH_BOUND_SECONDS
 
     @property
     def capacity(self) -> dict[str, int]:
@@ -466,13 +478,65 @@ class RealVmComputeDealDriver(VmDealDriverBase):
 
     # -- a failed run ---------------------------------------------------
 
+    def dispatched_fulfillment(self, deal_state: RealVmDealState) -> Optional[str]:
+        """The fulfillment the deal's settlement dispatched, read from the storefront.
+
+        None only for a settlement the storefront did not accept: one whose
+        status shows nothing dispatched, or one it still holds no record of
+        once the deal's dispatch has been waited for. An accepted one
+        dispatched a fulfillment whether or not the run recorded it, and its
+        settle status names it only once the dispatch is recorded, which the
+        deal's ``job_submitted`` event marks: where the status names none, or
+        no settlement is recorded yet, that event is waited for within
+        ``dispatch_bound`` and the status read again. The wait covers a
+        settlement still being recorded when its submission failed on the
+        client's side. A recorded status that still names none fails, since a
+        guest may be on the host.
+        """
+        status = self._settle_status(deal_state)
+        if status is not None and (
+            status.fulfillment_id or status.status in UNDISPATCHED_SETTLE_STATUSES
+        ):
+            return status.fulfillment_id
+        try:
+            self.storefront_admin_client.wait_for_stage_event(
+                "provision", "job_submitted",
+                negotiation_id=deal_state.negotiation_id,
+                timeout=self.dispatch_bound,
+            )
+            dispatched = True
+        except TimeoutError:
+            dispatched = False
+            log.info("[recovery] No job_submitted for the deal within %ss", self.dispatch_bound)
+        status = self._settle_status(deal_state)
+        if status is None and not dispatched:
+            return None
+        stated = "unrecorded" if status is None else repr(status.status)
+        assert status is not None and status.fulfillment_id, (
+            f"the storefront accepted the deal's settlement or logged its dispatch, but "
+            f"its settle status, {stated}, names no fulfillment after up to "
+            f"{self.dispatch_bound}s for its dispatch to be recorded"
+        )
+        return status.fulfillment_id
+
+    def _settle_status(self, deal_state: RealVmDealState) -> Optional[Any]:
+        """The deal's settle status, or None where the storefront records no
+        settlement for its escrow."""
+        try:
+            return self.storefront_client.get_settle_status(deal_state.real_escrow_uid)
+        except StorefrontClientError as error:
+            if error.status_code == 404:
+                return None
+            raise
+
     def tear_down_after_failure(self, deal_state: RealVmDealState) -> None:
         """Have the provisioning service tear down the guest a failed run left.
 
         For a run that submitted settlement and did not confirm its guest gone.
-        The fulfillment is read from the deal's state, or from the settle status
-        where the stage that records it failed after settle dispatched it; a
-        settlement that dispatched none leaves nothing to tear down.
+        The fulfillment is read from the deal's state, or where the stage that
+        records it failed, from the settlement (``dispatched_fulfillment``);
+        only a settlement the storefront did not accept leaves nothing to tear
+        down.
 
         A create still in flight is waited for and converged first: release
         waits for it, and convergence is held. The lease is then expired at the
@@ -484,6 +548,8 @@ class RealVmComputeDealDriver(VmDealDriverBase):
         guest by hand where its removal is not confirmed.
         """
         known: dict[str, Any] = {
+            "escrow": deal_state.real_escrow_uid,
+            "negotiation": deal_state.negotiation_id,
             "fulfillment": deal_state.fulfillment_id,
             "reservation": None,
             "create job": deal_state.create_job_id,
@@ -492,11 +558,9 @@ class RealVmComputeDealDriver(VmDealDriverBase):
             "host": self.target.host.host_id,
         }
         try:
-            fulfillment_id = deal_state.fulfillment_id or self.storefront_client.get_settle_status(
-                deal_state.real_escrow_uid
-            ).fulfillment_id
+            fulfillment_id = deal_state.fulfillment_id or self.dispatched_fulfillment(deal_state)
             if not fulfillment_id:
-                log.info("[recovery] Settlement dispatched no fulfillment; nothing to tear down")
+                log.info("[recovery] The storefront did not accept settlement; nothing to tear down")
                 return
             known["fulfillment"] = fulfillment_id
             reservation, state = self.reservation_of(fulfillment_id)

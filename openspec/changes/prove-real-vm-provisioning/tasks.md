@@ -1012,14 +1012,36 @@ mark before it settles; `e2e-tests/tests/e2e/roles/scenarios/vms/real_compute_de
 module that covers the shared VM driver or 08b (`test_compute_deal_stages.py` or a new
 one beside it).
 
-- [ ] 7D.1 08b's dispatch wait is this deal's: `settle_dispatched` waits for
+- [x] 7D.1 08b's dispatch wait is this deal's: `settle_dispatched` waits for
       `provision/job_submitted` filtered by the deal's `negotiation_id` and counted from a
       `since_id` mark taken before settlement is submitted (read with `get_events`, as
       11b reads its mark), keeping the listing filter. Where the mark is taken — in 08b
       before `settle_evm`, or in a driver method 08b calls first — is the
       implementer's, recorded in the note; bare metal's driver is untouched. (D4,
       "Finding this deal's dispatch")
-- [ ] 7D.2 Recovery finds an accepted settlement's fulfillment:
+      The mark is taken in 08b, before `settle_evm`, by a new helper
+      `latest_stage_event_id(client, negotiation_id=…)` in `helpers/compute_deal.py`:
+      the id of the latest stage event naming the deal's negotiation, read page by page
+      through the storefront's `truncated` flag (11b's own mark reads one page of 500
+      only; left as it is). The mark is scoped to the negotiation, the same filter the
+      wait applies, so it is a few events rather than the whole log; it therefore
+      passes over nothing of another deal's on its own — the negotiation filter does
+      that, and the mark excludes only this negotiation's earlier events, of which
+      none is a `job_submitted` — and the protocol's docstring says a driver waiting
+      from it must filter by the same negotiation. 08b now takes the
+      `storefront_admin_client` fixture, which every lane running it provides (11b
+      already takes it). Correction to "bare metal's driver is untouched": the mark
+      reaches the driver as a keyword, `settle_dispatched(…, events_since=…)`, on
+      `ComputeDealDriver`, so bare metal's `settle_dispatched` accepts it and its
+      docstring says it goes unused (its fulfillment exists when settle returns).
+      Its driver's behaviour is unchanged, but the bare-metal lane's 08b now makes the
+      signed read of the storefront's event log for the mark, which no unit test runs
+      against bare metal's storefront. The other route, a `ComputeDealState`
+      field 08b writes and the driver reads, fails the mock lanes'
+      `test_every_compute_state_field_is_consumed_after_it_is_produced`, which counts
+      only stages' reads, and a driver method 08b calls first would have needed a bare
+      metal body too.
+- [x] 7D.2 Recovery finds an accepted settlement's fulfillment:
       `tear_down_after_failure`, where neither the deal's state nor the settle status
       names a fulfillment, reads the settle status; a status the storefront reports as
       accepted (`provisioning` or a later status — read the settle status model for the
@@ -1028,7 +1050,36 @@ one beside it).
       negotiation, the settle status, and the host. Only a status that is not accepted
       logs "nothing to tear down" and returns. With a fulfillment found, recovery goes
       on as today. (D4, "When the run fails")
-- [ ] 7D.3 Unit tests at the lowest level that proves each (`docs/development/TESTING.md`,
+      `RealVmComputeDealDriver.dispatched_fulfillment`, within `DISPATCH_BOUND_SECONDS`
+      (60, the driver's `dispatch_bound`), waiting through the storefront client's own
+      `wait_for_stage_event` (negotiation filter, no mark: only this settlement logs
+      that negotiation's `job_submitted`) and catching its `TimeoutError` so the status
+      is read again either way. Read from the VM storefront (`load_vm_settlement_job`,
+      looked up by this lane's escrow uid), settle status reports the delivery record
+      merged over the escrow row where a delivery is recorded (inserted `provisioning`,
+      then `ready`, `failed`, or `refunded`), else the escrow row alone (inserted
+      `provisioning` by the settle path before it checks the settlement's evidence, so
+      a settlement refused there also reads `provisioning`; or `refunding`, inserted by
+      a refund begun before any escrow row; later `refunded`), else 404. (Its refund
+      evidence branch is keyed by negotiation id, which this lane's reference is not.)
+      The rule is written the other way from the plan's wording, so it fails closed:
+      `UNDISPATCHED_SETTLE_STATUSES` is `refunding` alone, the one status that shows no
+      delivery was recorded, and every other status, one added later included, is
+      taken as accepted. A 404 is a settlement the storefront holds no record of yet:
+      recovery waits for the deal's `job_submitted` as for an accepted status, since a
+      submission that failed on the client's side may still be being recorded, and
+      returns with nothing to tear down only where none comes within the bound and the
+      status is still unrecorded; where the event came, an unrecorded or
+      fulfillment-less status fails. That removes the spurious "recover it by hand"
+      6.8 noted for a settlement refused at 08b, at the cost of a wait of the bound.
+      The cost of failing closed, each a wait of the bound and then a failure asking an
+      operator to look though nothing was dispatched: a settlement refused at the
+      evidence check (`provisioning`); one refunded before delivery once the refund
+      completes (`refunded`); a delivery that failed before the provisioning service
+      began a fulfillment (`failed`, no fulfillment); and a delivery scheduled to start
+      later than the bound. The escrow and negotiation join the recovery failure's
+      named fields for every failure, not only this one.
+- [x] 7D.3 Unit tests at the lowest level that proves each (`docs/development/TESTING.md`,
       unit): (a) with an earlier `job_submitted` for the same listing but another
       negotiation already in the fake event log, `settle_dispatched` does not return on
       it — it waits for this deal's event and returns this run's fulfillment; (b) the
@@ -1041,7 +1092,37 @@ one beside it).
       (the existing test, its status made explicit). Mutation checks, each run and
       reverted: dropping the negotiation filter fails (a); restoring the
       return-on-no-fulfillment fails (d).
-- [ ] 7D.4 Verification: `make -C e2e-tests test-unit` (unit); `make test`; `make
+      Unit, a new `e2e-tests/tests/unit/test_vm_deal_dispatch.py` (4 cases), over
+      `FakeEventLog`, a fake of the storefront's stage-event log that filters reads and
+      waits as the storefront's query does (after `since_id`, oldest first, every
+      filter given) and logs its "arriving" events when a wait first finds nothing,
+      and a settle status naming the fulfillment once this deal's event is logged:
+      (a) `VmDealDriverBase.settle_dispatched` called with `events_since=0`, so the
+      negotiation filter alone is under test; (b) 08b's body run with the base driver,
+      asserting the mark is read before `settle_evm` and the wait after it, with the
+      listing, the negotiation, and the mark (the latest event of this negotiation, past
+      an earlier deal's), and the fulfillment recorded is this deal's; beyond the plan,
+      the mark read past two full pages, and a deal with no event marked 0. Unit,
+      `test_real_vm_lane.py` (5 new cases, 1 reworked), over `FakeSettlement`, a settle
+      status and `job_submitted` wait whose status names the fulfillment once the event
+      has come, or answers 404 as a `StorefrontClientError` until it has: (c) the wait
+      is for `job_submitted` under `negotiation-1`, then the guest torn down to
+      `torn_down` and `released`; (d) the failure names `'0xescrow'`,
+      `'negotiation-1'`, the status, and the host, and nothing was listed, for
+      `provisioning` and, beyond the plan, for a status recovery does not know; (e)
+      status `refunding` returns with no wait, no truncation, and no list, and, beyond
+      the plan, a 404 with no dispatch returns after one wait with no truncation;
+      beyond the plan, a 404 whose dispatch is then logged is torn down. The existing
+      `test_settlement_skips_until_the_preflight_before_it_passes` passes the new
+      fixture. Mutation checks, each run and reverted: the negotiation filter dropped
+      fails (a) and (b); the return on no fulfillment restored (`if True:`) fails (c)
+      and both cases of (d); a return at once on a 404 fails the late-recorded 404 case
+      and (e)'s 404 case. The fakes stand in for the storefront's filtering, read
+      from its `stage_events` query and the client's `wait_for_stage_event`, and for
+      its settle status, read from the VM storefront's settle controller and payment
+      repository; none is run against them. 8.3 is the live check that the filter
+      finds the event; the recovery paths run live only on a failing run.
+- [x] 7D.4 Verification: `make -C e2e-tests test-unit` (unit); `make test`; `make
       check-change CHANGE=prove-real-vm-provisioning`. No dependency or lock changes, so
       no packaging check is owed beyond `make test`'s.
       End-to-end: `e2e_vm_real_provisioning`, in no lane, through 8.2 and 8.3 against a
@@ -1050,6 +1131,46 @@ one beside it).
       `e2e_non_erc20_settlement` (`test_non_erc20_settlement.py`): their pipeline result
       is evidence that the narrower wait still finds a single run's event there. No CI
       workflow is owed.
+      `make -C e2e-tests test-unit` (unit): 312 passed (309 before the fresh-context
+      fixes). `make test`: passed, before and after both checks' fixes. `make check-packaging`: passed (run though no lock
+      changed, as `AGENTS.md` requires). `make check-change`: passed. End-to-end
+      markers, correcting the plan: `e2e_non_erc20_settlement` does not use the VM
+      driver's wait — it settles and waits by listing in its own body, unchanged here
+      — so it is no evidence. The shared 08b, with its mark and the new keyword, runs
+      in `e2e_deal` (the VM driver's narrower wait) and `e2e_bare_metal_mock_deal`
+      (bare metal's driver, ignoring the mark, but its 08b making the new event-log
+      read); their pipeline results are evidence that one run's settlement still finds
+      its dispatch and that the mark's read works against both storefronts.
+      `e2e_vm_real_provisioning` is the evidence for the rerun, through 8.3. No CI
+      workflow is owed.
+      Fresh-context check: no layering, import, test-level, comment-hygiene, or
+      public-repository break. Fixed: the comments on the mark said it alone made the
+      awaited event this settlement's, where it counts only the negotiation's events
+      and the negotiation filter does that work; the accepted-status allow-list failed
+      open for a status the storefront adds later (now `UNDISPATCHED_SETTLE_STATUSES`,
+      failing closed); a 404 settle status raised a spurious recovery failure; a
+      garbled sentence in the real module's docstring; `check-packaging` unrun; these
+      notes' claims that an escrow row's `provisioning` shows acceptance and that bare
+      metal is unchanged. A second check: no guidance break; fixed: a 404 taken at
+      once as not accepted could pass over a guest whose settle response was lost
+      while the storefront was still recording it (now waited for, as above); these
+      notes' account of where `refunding` comes from and of what failing closed costs;
+      the 9.9 sentence below, now amended into 9.9 itself, as sections 1 and 6 did.
+      Declined: matching the 404's detail text as well as its status — the wait now
+      covers a 404 from elsewhere too. Declined: amending the `test-compatibility`
+      delta in this section — its recovery requirement ("after a fulfillment is
+      dispatched", failing "naming the fulfillment, reservation, jobs, guest, and
+      host") still holds of the behaviour, since an accepted settlement has dispatched
+      one and the failure names those fields and more; whether the delta gains a
+      scenario for an accepted settlement whose fulfillment is not yet named is the
+      triage's to weigh, as a plan change. Owed at 9.9 (amended there): TESTING.md's
+      real-lane subsection says the dispatch wait is the deal's own, and how recovery
+      finds an accepted settlement's fulfillment.
+      Handoff for 8.2 and 8.3: the fix stays within `e2e-tests/`, so the runs need a
+      checkout of a public revision including this section against a fresh stack of
+      `f52f07973`'s published images and chart and a freshly prepared host. The
+      rerun's 08b should pass with the earlier run's listing adopted; the recovery
+      paths this section adds run only on a failing run.
 
 ## 8. Live verification [log]
 
@@ -1413,6 +1534,13 @@ The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
       listing, since a publication source backs one listing for good, and fails naming
       the listings it cannot adopt. The re-reservation's claim shape is the driver's own
       comment (7C.1). The design-promotion record names both.
+      Amended during section 7D: TESTING.md's real-lane subsection says 08b waits for
+      the deal's own dispatch event, by its negotiation and from a mark taken before
+      settling, since an adopted listing logs earlier deals' events; and that recovery
+      takes any settlement the storefront records, or whose dispatch it logs within a
+      bound, as having dispatched a fulfillment unless its status shows a refund begun
+      before delivery, failing naming the escrow and negotiation where the fulfillment
+      cannot be found. The design-promotion record names D4's two paragraphs.
 - [ ] 9.10 **Documentation citations.** `make check-doc-citations
       CHANGE=prove-real-vm-provisioning`; `openspec validate prove-real-vm-provisioning
       --strict`.

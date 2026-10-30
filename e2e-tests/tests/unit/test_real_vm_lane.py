@@ -24,6 +24,7 @@ from compute_provisioning_contracts import (
     JobStatusResponse,
     ResultEnvelope,
 )
+from storefront_client import StorefrontClientError
 from storefront_client.models import ListingListResponse, ListingSummary
 
 from e2e_harness.real_vm_target import RealVmTarget
@@ -576,7 +577,38 @@ class FakeService(FakeJobClient):
             self.lease.status = "released"
 
 
-def _recover(service: FakeService, *, guests: tuple[str, ...] = (), **state) -> MagicMock:
+class FakeSettlement:
+    """The storefront's settle status, and the wait for the deal's
+    ``job_submitted``: the status names the fulfillment once that event has
+    come, which ``arrives`` says whether it ever does. A ``status`` of None is
+    a settlement the storefront holds no record of (404) until that event, as
+    for a submission that failed on the client's side while the storefront
+    was still recording it."""
+
+    def __init__(self, *, status: str | None = "provisioning", arrives: bool = True) -> None:
+        self.status = status
+        self.arrives = arrives
+        self.recorded = False
+        self.waits: list[dict] = []
+
+    def get_settle_status(self, escrow_uid: str) -> SimpleNamespace:
+        if self.status is None and not self.recorded:
+            raise StorefrontClientError(f"No settlement job for escrow {escrow_uid}", status_code=404)
+        return SimpleNamespace(
+            status=self.status or "provisioning", fulfillment_id="f-1" if self.recorded else None
+        )
+
+    def wait_for_stage_event(self, stage: str, event: str, **query) -> SimpleNamespace:
+        self.waits.append({"stage": stage, "event": event, **query})
+        if not self.arrives:
+            raise TimeoutError(f"{stage}/{event} not seen within {query.get('timeout')}s")
+        self.recorded = True
+        return SimpleNamespace(stage=stage, event=event)
+
+
+def _recover(
+    service: FakeService, *, guests: tuple[str, ...] = (), settlement=None, **state
+) -> MagicMock:
     site = MagicMock()
 
     def truncate(reservation, end):
@@ -587,18 +619,20 @@ def _recover(service: FakeService, *, guests: tuple[str, ...] = (), **state) -> 
     service.statuses["list-1"] = [_listed(*guests)]
     operator = MagicMock()
     operator.list_vms.return_value = SimpleNamespace(job_id="list-1")
-    storefront = MagicMock()
-    storefront.get_settle_status.return_value = SimpleNamespace(fulfillment_id="f-1")
+    if settlement is None:
+        settlement = MagicMock()
+        settlement.get_settle_status.return_value = SimpleNamespace(fulfillment_id="f-1")
     clock = FakeClock()
     driver = RealVmComputeDealDriver(
-        provisioning_client=service, storefront_client=storefront,
-        storefront_admin_client=None, storefront_service_client=None,
+        provisioning_client=service, storefront_client=settlement,
+        storefront_admin_client=settlement, storefront_service_client=None,
         site_capacity_admin_client=None, site_capacity=site, site_id="site",
         vm_operator_client=operator, target=TARGET, buyer_public_key="ssh-ed25519 AAAA e2e-buyer",
         listing_shape={}, jobs=JobWatch(service, clock=clock, sleep=clock.sleep),
     )
     driver.tear_down_after_failure(RealVmDealState(
-        real_escrow_uid="0xescrow", _settle_preflight_passed=True, **state
+        real_escrow_uid="0xescrow", negotiation_id="negotiation-1",
+        _settle_preflight_passed=True, **state
     ))
     return site
 
@@ -631,19 +665,62 @@ def test_a_guest_still_listed_fails_naming_what_an_operator_needs():
         assert named in message, message
 
 
-def test_a_settlement_that_dispatched_no_fulfillment_leaves_nothing_to_tear_down():
+def test_an_accepted_settlement_whose_dispatch_is_recorded_late_is_torn_down():
+    """08b failed before the settle status named the fulfillment: recovery
+    waits for the deal's ``job_submitted``, reads the status again, and tears
+    the guest down as for a create still in flight."""
+    service = FakeService(state="dispatching")
+    settlement = FakeSettlement()
+    site = _recover(service, settlement=settlement)
+    assert [(wait["event"], wait["negotiation_id"]) for wait in settlement.waits] == [
+        ("job_submitted", "negotiation-1")
+    ]
+    site.truncate_lease.assert_called_once()
+    assert (service.state, service.lease.status) == ("torn_down", "released")
+
+
+@pytest.mark.parametrize("status", ["provisioning", "a-status-added-later"])
+def test_an_accepted_settlement_that_never_names_its_fulfillment_fails_naming_it(status):
+    """A status recovery does not know is taken as accepted, so a guest is
+    never passed over for a status the storefront adds later."""
+    service = FakeService(state="dispatching")
+    with pytest.raises(AssertionError) as failure:
+        _recover(service, settlement=FakeSettlement(status=status, arrives=False))
+    message = str(failure.value)
+    for named in ("'0xescrow'", "'negotiation-1'", f"'{status}'", f"'{HOST}'"):
+        assert named in message, message
+    assert service.listed_with == []
+
+
+def test_a_settlement_recorded_only_after_its_submission_failed_is_torn_down():
+    """No settlement is recorded when recovery first reads, but the deal's
+    dispatch is logged within the bound: the guest is torn down."""
+    service = FakeService(state="dispatching")
+    settlement = FakeSettlement(status=None)
+    site = _recover(service, settlement=settlement)
+    assert len(settlement.waits) == 1
+    site.truncate_lease.assert_called_once()
+    assert (service.state, service.lease.status) == ("torn_down", "released")
+
+
+@pytest.mark.parametrize(
+    ("status", "waits"), [("refunding", 0), (None, 1)], ids=["refund before delivery", "no record"],
+)
+def test_a_settlement_the_storefront_did_not_accept_leaves_nothing_to_tear_down(status, waits):
+    """A status showing nothing dispatched returns at once; a settlement never
+    recorded returns once its dispatch has not come within the bound."""
     service = FakeService(state="dispatching")
     site = MagicMock()
-    storefront = MagicMock()
-    storefront.get_settle_status.return_value = SimpleNamespace(fulfillment_id=None)
+    settlement = FakeSettlement(status=status, arrives=False)
     driver = RealVmComputeDealDriver(
-        provisioning_client=service, storefront_client=storefront,
-        storefront_admin_client=None, storefront_service_client=None,
+        provisioning_client=service, storefront_client=settlement,
+        storefront_admin_client=settlement, storefront_service_client=None,
         site_capacity_admin_client=None, site_capacity=site, site_id="site",
         vm_operator_client=MagicMock(), target=TARGET, buyer_public_key="k",
         listing_shape={}, jobs=JobWatch(service),
     )
     driver.tear_down_after_failure(RealVmDealState(real_escrow_uid="0xescrow"))
+    assert len(settlement.waits) == waits
     site.truncate_lease.assert_not_called()
     assert service.listed_with == []
 
