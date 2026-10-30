@@ -272,20 +272,51 @@ def test_the_first_host_key_is_trusted_and_logged(
     ) is None
 
 
-def test_an_attempt_that_hangs_counts_as_a_connection_failure(
-    tmp_path: Path, fake_ssh, clock: Clock
-):
+@pytest.fixture
+def hanging_session(tmp_path: Path, fake_ssh, clock: Clock) -> SshSession:
+    """A session whose attempts run out of time after half a second of real time."""
     directory = tmp_path / "hung"
     directory.mkdir(mode=0o700)
-    session = SshSession(
+    return SshSession(
         directory, ssh=fake_ssh.path, clock=clock, sleep=clock.sleep,
         connect_retry_seconds=60, attempt_seconds=0.5,
     )
+
+
+def test_an_attempt_that_hangs_is_retried_as_a_connection_failure(
+    hanging_session: SshSession, fake_ssh
+):
     fake_ssh.plan({"hang": 5}, {"host_key": HOST_KEY, "stdout": "up"})
-    key = session.new_key("buyer")
-    assert session.run(ENDPOINT, key, "true") == "up"
+    assert hanging_session.run(ENDPOINT, hanging_session.new_key("buyer"), "true") == "up"
+    assert len(fake_ssh.calls()) == 2
+
+
+def test_an_attempt_that_hangs_is_not_a_refusal_but_is_retried(
+    hanging_session: SshSession, fake_ssh, clock: Clock
+):
+    """Something answered and stayed connected: only ``ssh`` failing later refuses."""
+    fake_ssh.plan({"hang": 5}, {"rc": 255, "stderr": "Connection refused"})
+    key = hanging_session.new_key("buyer")
+    assert hanging_session.assert_refused(ENDPOINT, key) == "Connection refused"
+    assert len(fake_ssh.calls()) == 2
+    assert clock.sleeps == [RETRY_INTERVAL_SECONDS]
+
+
+def test_access_still_hanging_at_the_bound_fails(
+    hanging_session: SshSession, fake_ssh
+):
     fake_ssh.plan({"hang": 5})
-    assert session.assert_refused(ENDPOINT, key) == "the connection timed out"
+    with pytest.raises(SshAccessError, match="not shown to refuse buyer within 10s"):
+        hanging_session.assert_refused(ENDPOINT, hanging_session.new_key("buyer"), bound=10)
+    assert len(fake_ssh.calls()) == 10 // RETRY_INTERVAL_SECONDS
+
+
+def test_access_accepted_after_a_hang_fails_as_still_accepted(
+    hanging_session: SshSession, fake_ssh
+):
+    fake_ssh.plan({"hang": 5}, {"host_key": HOST_KEY})
+    with pytest.raises(SshAccessError, match="still accepted buyer after 10s"):
+        hanging_session.assert_refused(ENDPOINT, hanging_session.new_key("buyer"), bound=10)
 
 
 def test_a_changed_host_key_fails_without_a_retry(session: SshSession, fake_ssh):
@@ -347,7 +378,7 @@ def test_an_attempt_cut_short_by_the_bound_is_not_a_refusal(
     tmp_path: Path, fake_ssh, clock: Clock
 ):
     """Cut to the half second left, the attempt runs out of time while still
-    connected; a full attempt's timeout would count as refused."""
+    connected, and the bound has closed before any refusal was seen."""
     directory = tmp_path / "short"
     directory.mkdir(mode=0o700)
     session = SshSession(

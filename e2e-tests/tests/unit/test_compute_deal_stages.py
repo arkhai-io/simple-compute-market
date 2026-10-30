@@ -293,6 +293,7 @@ def test_settlement_skips_until_the_preflight_before_it_passes():
     """08b submits settlement, so a failed preflight must stop it, not let it
     submit onto a deal nothing checked."""
     storefront = MagicMock()
+    storefront_admin = MagicMock()
     provisioning = MagicMock()
     driver = MagicMock()
     state = ComputeDealState(
@@ -300,7 +301,7 @@ def test_settlement_skips_until_the_preflight_before_it_passes():
     )
     with pytest.raises(pytest.skip.Exception, match="_settle_preflight_passed"):
         Stage08b_SettlementSubmittedAndJobQueued().test_08b_settlement_submitted_and_provisioning_job_queued(
-            storefront, provisioning, {"wallet_address": "0xbuyer"}, driver, state,
+            storefront, storefront_admin, provisioning, {"wallet_address": "0xbuyer"}, driver, state,
         )
     storefront.settle_evm.assert_not_called()
     driver.settle_dispatched.assert_not_called()

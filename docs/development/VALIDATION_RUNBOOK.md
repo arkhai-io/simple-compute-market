@@ -2,7 +2,8 @@
 
 Goal: run the code-level unit/integration tests, bring up the local deployed
 stack in mock mode, optionally repeat the same manual path on a clean Ubuntu VM,
-then run a CLI-first GCP proof for real Ansible/KVM provisioning.
+deploy to GCP, then prove real VM provisioning against an operator-provided KVM
+host.
 
 ## Notes
 
@@ -583,31 +584,31 @@ rm -f /tmp/scm-manual-local.tgz
 
 ## 17. GCP Proof Overview And Preflight
 
-This proves the current real provisioning path on GCP by using one manually
-created GCE VM as a KVM host. It does not validate the future
-`GCPComputeProvider` or resource-pool design.
+Sections 17 to 20 deploy the stack to GCP in mock mode. Sections 21 to 26 then
+prove real VM provisioning against one KVM host an operator provides, such as a
+GCE VM created with nested virtualization; they need nothing GCP-specific.
 
 Run the commands in one shell where possible. Later GCP sections reuse the
 exported variables below.
 
-Run from this repo first:
+Run from this repo first. Every value below is the operator's own: the
+operations repository that holds the environment's Terraform, Makefile targets,
+and values, the GCP project and region, the Helm release, and the values files
+that repository keeps for the application-resources chart and for this
+repository's chart. Each command stops, naming the variable, while one is unset.
 
 ```bash
 export APP_REPO="$(pwd)"
-export OPS_REPO="$(cd ../compute-market-internal-infra && pwd)"
+export OPS_REPO="$(cd "${OPS_REPO:?set OPS_REPO to your operations repository checkout}" && pwd)"
 
-export ENV=dev
-export GCP_PROJECT=compute-market-1-dev
-export REGION=us-central1
-export ZONE=us-central1-a
+export ENV="${ENV:-dev}"
+export GCP_PROJECT="${GCP_PROJECT:?set GCP_PROJECT to your GCP project ID}"
+export REGION="${REGION:?set REGION to your GCP region}"
 
-export RELEASE=arkhai-node-operator
-export KVM_HOST_ALIAS=gce-kvm1
-export KVM_VM_NAME=scm-kvm-host-1
-export KVM_ADDRESS_NAME=scm-kvm-host-1-ip
-export KVM_TAG=scm-kvm-host
-export NETWORK=compute-market-1-dev-vpc
-export SUBNET=compute-market-1-dev-gke-nodes
+export RELEASE="${RELEASE:?set RELEASE to your Helm release name}"
+export OPS_APPS_CHART="${OPS_APPS_CHART:?set OPS_APPS_CHART to the operations repository's application-resources chart}"
+export OPS_APPS_VALUES="${OPS_APPS_VALUES:?set OPS_APPS_VALUES to that chart's values for this environment}"
+export OPS_APP_VALUES="${OPS_APP_VALUES:?set OPS_APP_VALUES to this environment's values for the application chart}"
 ```
 
 Sanity-check the branch and sibling repo:
@@ -682,8 +683,8 @@ make tf-apply ENV="$ENV" COMPONENT=api-gateway
 ## 19. Runtime Inputs
 
 The secret shells must exist before these commands run. The initial
-`HOSTS_INI=/dev/null` is intentional for the mock deployment; the real GCE KVM
-host is registered through the provisioning API later.
+`HOSTS_INI=/dev/null` is intentional: the real-provisioning scenario registers
+its KVM host itself (section 25).
 Use explicit `gcloud secrets versions add` commands for the provisioning SSH key
 until the ops repo helper target is corrected. Also render the storefront
 Secret value directly from the application chart: the current app chart expects
@@ -725,6 +726,8 @@ values, which the chart renders into its public `storefront.json`.
   TMPDIR="$(mktemp -d)"
   trap 'rm -rf "$TMPDIR"' EXIT
 
+  # A well-known Anvil development key, for the dev chain alone; never use it
+  # on a public network.
   cat > "$TMPDIR/storefront.secrets.toml" <<'TOML'
 [wallet]
 private_key = "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
@@ -748,9 +751,9 @@ make push-dev-images AR_PROJECT="$GCP_PROJECT"
 
 ## 20. Kubernetes App Bootstrap In Mock Mode
 
-The `argocd-apps` chart owns the application-side Kubernetes resources that sit
-on top of the platform: ExternalSecrets, the Kong `Gateway`, HTTPRoutes, and the
-route ReferenceGrant. Patch the storefront ExternalSecret after install until
+The operations repository's application-resources chart (`$OPS_APPS_CHART`) owns
+the application-side Kubernetes resources that sit on top of the platform:
+ExternalSecrets, the Kong `Gateway`, HTTPRoutes, and the route ReferenceGrant. Patch the storefront ExternalSecret after install until
 the ops repo template is updated to emit `storefront.secrets.toml`.
 
 ```bash
@@ -758,8 +761,8 @@ cd "$OPS_REPO"
 
 INGRESS_IP="$(make --silent get-ingress-lb-ip ENV="$ENV")"
 
-helm upgrade --install argocd-apps helm/argocd-apps \
-  --values helm/argocd-apps/envs/dev/values.yaml \
+helm upgrade --install argocd-apps "$OPS_APPS_CHART" \
+  --values "$OPS_APPS_VALUES" \
   --set "gateway.ingressLbIp=${INGRESS_IP}" \
   --namespace default
 
@@ -791,7 +794,7 @@ for secret in \
   simple-market-service-provisioning-ssh-key \
   simple-market-service-provisioning-secrets \
   simple-market-service-storefront-arkhai \
-  arkhai-node-operator-e2e-tests-e2e-secret; do
+  "${RELEASE}-e2e-tests-e2e-secret"; do
   kubectl get secret "$secret" -n default
 done
 
@@ -810,7 +813,7 @@ Anvil chain state.
 ```bash
 helm upgrade --install "$RELEASE" "$APP_REPO/helm" \
   --values "$APP_REPO/helm/values.yaml" \
-  --values "$OPS_REPO/helm/argocd-apps/envs/dev/simple-market-service-values.yaml" \
+  --values "$OPS_APP_VALUES" \
   --namespace default \
   --wait \
   --timeout 10m
@@ -868,436 +871,182 @@ The `local` profile addresses each service on `localhost` at those ports, and
 reads Mailpit's API at `http://localhost:8025`. The scenario holds the
 storefront's loops while it runs and resumes them when it finishes.
 
-## 21. Manual GCE KVM Host
+## 21. Provide A KVM Host
 
-Create a local operator key for the manual Ansible setup run. The provisioning
-service has its own SSH key in Secret Manager; add both public keys to the GCE
-VM so local Ansible and the in-cluster provisioning pod can both SSH as
-`ubuntu`.
+Sections 21 to 26 are the operator procedure around the real-provisioning
+scenario, `e2e_vm_real_provisioning`, which is the proof itself: from the
+operator's machine it registers the host and its capacity through the
+provisioning service's signed admin API, runs the canonical compute deal to an
+active lease, reaches the delivered VM over SSH, expires the lease, and confirms
+the VM is gone from the host and its access has ended.
+[`TESTING.md`](TESTING.md#the-real-provisioning-lane) says what it proves and
+what it does not.
 
-```bash
-cd "$APP_REPO"
-mkdir -p .scm-local/gcp
+The host needs:
 
-test -f .scm-local/gcp/scm-kvm-operator_ed25519 || \
-  ssh-keygen -t ed25519 -N "" \
-    -f .scm-local/gcp/scm-kvm-operator_ed25519 \
-    -C "scm-gcp-kvm-operator"
+- hardware virtualization its operating system can see: the CPU flags include
+  `vmx` or `svm`. Create a cloud instance with nested virtualization enabled.
+  Host preparation refuses a host without it before changing anything;
+- an x86-64 Ubuntu 24.04 install, the platform the scenario has run against,
+  with outbound network access, which scratch-image VM creation uses to fetch
+  its cloud image;
+- no GPU. A host with an NVIDIA or AMD GPU is given passthrough boot
+  configuration (section 22), and the scenario deals a GPU-less shape either
+  way;
+- SSH as one user with sudo, from the operator's machine to prepare it and from
+  the provisioning service with the key the service holds;
+- inbound TCP from the operator's machine to ports 10000–65000, where VM
+  creation forwards each guest's SSH. The scenario connects to the guest
+  through that port.
 
-PROVISIONING_PUBKEY="$(cd "$OPS_REPO" && make --silent get-provisioning-ssh-pubkey ENV="$ENV")"
+Decide what the host sells: its vCPUs, memory in GiB, and disk in GiB, less
+what is kept for the host itself. The scenario deals all of it as one VM.
 
-cat >.scm-local/gcp/kvm-host-ssh-keys <<EOF
-ubuntu:$(cat .scm-local/gcp/scm-kvm-operator_ed25519.pub)
-ubuntu:${PROVISIONING_PUBKEY}
-EOF
-```
+## 22. Prepare The Host
 
-Reserve an external IP and create temporary firewall rules:
-
-```bash
-cd "$OPS_REPO"
-
-gcloud compute addresses describe "$KVM_ADDRESS_NAME" \
-  --project "$GCP_PROJECT" \
-  --region "$REGION" >/dev/null 2>&1 || \
-  gcloud compute addresses create "$KVM_ADDRESS_NAME" \
-    --project "$GCP_PROJECT" \
-    --region "$REGION"
-
-KVM_EXTERNAL_IP="$(gcloud compute addresses describe "$KVM_ADDRESS_NAME" \
-  --project "$GCP_PROJECT" \
-  --region "$REGION" \
-  --format='value(address)')"
-
-NAT_IP="$(gcloud compute addresses describe "${GCP_PROJECT}-nat" \
-  --project "$GCP_PROJECT" \
-  --region "$REGION" \
-  --format='value(address)')"
-
-OPERATOR_IP="$(curl -fsS https://ifconfig.me/ip)"
-
-if gcloud compute firewall-rules describe "${KVM_VM_NAME}-ssh" \
-  --project "$GCP_PROJECT" >/dev/null 2>&1; then
-  gcloud compute firewall-rules update "${KVM_VM_NAME}-ssh" \
-    --project "$GCP_PROJECT" \
-    --rules tcp:22 \
-    --source-ranges "${OPERATOR_IP}/32,${NAT_IP}/32" \
-    --target-tags "$KVM_TAG"
-else
-  gcloud compute firewall-rules create "${KVM_VM_NAME}-ssh" \
-    --project "$GCP_PROJECT" \
-    --network "$NETWORK" \
-    --direction INGRESS \
-    --action ALLOW \
-    --rules tcp:22 \
-    --source-ranges "${OPERATOR_IP}/32,${NAT_IP}/32" \
-    --target-tags "$KVM_TAG"
-fi
-
-if gcloud compute firewall-rules describe "${KVM_VM_NAME}-buyer-dnat" \
-  --project "$GCP_PROJECT" >/dev/null 2>&1; then
-  gcloud compute firewall-rules update "${KVM_VM_NAME}-buyer-dnat" \
-    --project "$GCP_PROJECT" \
-    --rules tcp:10000-65000 \
-    --source-ranges 0.0.0.0/0 \
-    --target-tags "$KVM_TAG"
-else
-  gcloud compute firewall-rules create "${KVM_VM_NAME}-buyer-dnat" \
-    --project "$GCP_PROJECT" \
-    --network "$NETWORK" \
-    --direction INGRESS \
-    --action ALLOW \
-    --rules tcp:10000-65000 \
-    --source-ranges 0.0.0.0/0 \
-    --target-tags "$KVM_TAG"
-fi
-```
-
-Verify the Ubuntu image family, then create the VM:
+Prepare the host from the operator's machine with the host kit's
+`vm-setup.yaml`, naming no image or passthrough option: preparation defaults to
+the scratch image market fulfillment creates VMs from, and configures GPU
+passthrough only where a GPU is present. The inventory is local to the
+operator's machine and never committed. Start from this repository's root;
+after sections 17 to 20 the shell is in the ops repo, and `cd "$APP_REPO"`
+returns to it.
 
 ```bash
-gcloud compute images describe-from-family ubuntu-2404-lts-amd64 \
-  --project ubuntu-os-cloud \
-  --format='value(selfLink)'
-
-if gcloud compute instances describe "$KVM_VM_NAME" \
-  --project "$GCP_PROJECT" \
-  --zone "$ZONE" >/dev/null 2>&1; then
-  :
-else
-  gcloud compute instances create "$KVM_VM_NAME" \
-    --project "$GCP_PROJECT" \
-    --zone "$ZONE" \
-    --machine-type n2-standard-8 \
-    --network "$NETWORK" \
-    --subnet "$SUBNET" \
-    --address "$KVM_EXTERNAL_IP" \
-    --tags "$KVM_TAG" \
-    --boot-disk-size 100GB \
-    --image-family ubuntu-2404-lts-amd64 \
-    --image-project ubuntu-os-cloud \
-    --enable-nested-virtualization \
-    --metadata-from-file "ssh-keys=${APP_REPO}/.scm-local/gcp/kvm-host-ssh-keys"
-fi
-
-gcloud compute instances add-tags "$KVM_VM_NAME" \
-  --project "$GCP_PROJECT" \
-  --zone "$ZONE" \
-  --tags "$KVM_TAG"
-
-gcloud compute instances add-metadata "$KVM_VM_NAME" \
-  --project "$GCP_PROJECT" \
-  --zone "$ZONE" \
-  --metadata-from-file "ssh-keys=${APP_REPO}/.scm-local/gcp/kvm-host-ssh-keys"
-```
-
-## 22. Local Ansible Proof Against The GCE Host
-
-```bash
-cd "$APP_REPO"
-
-command -v ansible
-command -v ansible-galaxy
-command -v ansible-playbook
-
-cat >.scm-local/gcp/kvm-hosts.ini <<EOF
-[kvm_hosts]
-${KVM_HOST_ALIAS} ansible_host=${KVM_EXTERNAL_IP} ansible_user=ubuntu ansible_ssh_private_key_file=${APP_REPO}/.scm-local/gcp/scm-kvm-operator_ed25519
-EOF
-
-ssh_ready=0
-for attempt in $(seq 1 30); do
-  if ssh \
-    -i "$APP_REPO/.scm-local/gcp/scm-kvm-operator_ed25519" \
-    -o StrictHostKeyChecking=no \
-    -o UserKnownHostsFile=/dev/null \
-    -o ConnectTimeout=10 \
-    "ubuntu@${KVM_EXTERNAL_IP}" \
-    'cloud-init status --wait >/dev/null'; then
-    ssh_ready=1
-    break
-  fi
-  sleep 10
-done
-test "$ssh_ready" -eq 1
-
 cd domains/vms/provisioning/iac
+
+cat >/tmp/kvm-hosts.ini <<'EOF'
+[kvm_hosts]
+kvm-real-1 ansible_host=<host-address> ansible_user=<ssh-user> ansible_ssh_private_key_file=<operator-private-key>
+EOF
 
 ANSIBLE_CONFIG=ansible/ansible.cfg \
   ansible-galaxy collection install -r ansible/requirements.yml
 
 ANSIBLE_CONFIG=ansible/ansible.cfg \
-  ansible -i "$APP_REPO/.scm-local/gcp/kvm-hosts.ini" \
-  "$KVM_HOST_ALIAS" -m ping
+  ansible -i /tmp/kvm-hosts.ini kvm-real-1 -m ping
 
 ANSIBLE_CONFIG=ansible/ansible.cfg \
   ansible-playbook \
-  -i "$APP_REPO/.scm-local/gcp/kvm-hosts.ini" \
+  -i /tmp/kvm-hosts.ini \
   ansible/playbooks/host-kit/vm-setup.yaml \
-  --limit "$KVM_HOST_ALIAS" \
-  -e image_setup_type=scratch \
-  -e "vm_ssh_authorized_key=${PROVISIONING_PUBKEY}" \
-  -e vm_ssh_key_user=ubuntu
+  --limit kvm-real-1 \
+  -e "vm_ssh_authorized_key=<provisioning-service-public-key>"
 
-ANSIBLE_CONFIG=ansible/ansible.cfg \
-  ./scripts/run_acceptance_validation.sh \
-  --inventory "$APP_REPO/.scm-local/gcp/kvm-hosts.ini" \
-  --kvm-host "$KVM_HOST_ALIAS" \
-  --vm-image-type scratch
+cd ../../../..
 ```
 
-Do not continue until the acceptance run can create, check, destroy, and
-undefine a nested VM on the GCE host.
+`vm_ssh_authorized_key` authorizes the provisioning service's key for the
+connection user. Preparation reboots the host once. Then check that:
 
-## 23. Real Provisioning Cutover
+- the play recap shows `failed=0` and `ignored=0`;
+- the play reports `GPU present: False` and `gpu_passthrough: auto`, and that
+  passthrough boot configuration and binding were skipped, so the kernel
+  command line is the one the host booted with;
+- after the reboot `/dev/kvm` exists, and nested virtualization is on
+  (`/sys/module/kvm_intel/parameters/nested`, or `kvm_amd`'s).
 
-This changes application runtime state from mock provisioning to real
-provisioning. Leave the port-forward running after the readiness check; sections
-24 and 25 use the same local provisioning API endpoint.
+A host whose CPU exposes neither `vmx` nor `svm` fails at the start, before
+anything on it changes, and one with no `/dev/kvm` once the KVM modules load
+fails too. `gpu_passthrough=enabled` or `disabled` overrides the presence
+decision, and `image_setup_type=golden` prepares the golden image; neither is
+needed here. [The host kit's README](../../domains/vms/provisioning/iac/README.md#2-setup-kvm-host-infrastructure)
+documents both.
+
+## 23. Run Provisioning For Real
+
+Deploy, or redeploy, the stack the scenario runs against with its provisioning
+service outside the mock profile: on a Helm release, `provisioning.mockMode=false`,
+which the umbrella chart's values set to `true`. The stack must also:
+
+- give the provisioning service the private key whose public half section 22
+  authorized, at a path in the service's filesystem; that path is the target's
+  `ssh_key_path`;
+- let the provisioning service reach the host's SSH;
+- run the dev chain and trust the `local` profile's principals
+  (`e2e-tests/config/config-local.yml`), which the scenario signs as. They are
+  well-known development identities: never deploy them on a public network.
+
+Mock delivery is never reported as real: the scenario's first check reads the
+provisioning service's executors and requires its VM executor reported real,
+failing with the executors it found before anything is held or registered.
+
+## 24. Describe The Target
 
 ```bash
-cd "$OPS_REPO"
-
-helm upgrade --install "$RELEASE" "$APP_REPO/helm" \
-  --values "$APP_REPO/helm/values.yaml" \
-  --values "$OPS_REPO/helm/argocd-apps/envs/dev/simple-market-service-values.yaml" \
-  --set provisioning.mockMode=false \
-  --namespace default \
-  --wait \
-  --timeout 10m
-
-for deployment in "${RELEASE}-provisioning" "${RELEASE}-storefront-arkhai"; do
-  kubectl rollout restart "deploy/${deployment}" -n default
-  kubectl rollout status "deploy/${deployment}" -n default --timeout=10m
-done
-
-ACTIVE_PROFILES="$(kubectl exec deploy/"${RELEASE}-provisioning" -n default -- printenv ACTIVE_PROFILES)"
-printf '%s\n' "$ACTIVE_PROFILES"
-case ",${ACTIVE_PROFILES}," in
-  *,mock,*) echo "ERROR: provisioning is still in mock mode"; exit 1 ;;
-esac
-
-make forward ENV="$ENV"
-# A degraded status answers 503 with the same body, so read it without -f.
-curl -s http://localhost:8081/api/v1/system/status \
-  | tee /tmp/scm-provisioning-status.json \
-  | jq
-jq -e '.execution.mocked == false
-  and ([.components[] | select(.name == "ansible") | .ready] == [true])' \
-  /tmp/scm-provisioning-status.json
+cp e2e-tests/config/config-real-vm-target.yml.example \
+  e2e-tests/config/config-real-vm-target.yml
 ```
 
-## 24. Provisioning Host Registration And Capacity
+Fill in the copy's `REAL_VM_TARGET` section:
 
-This section assumes the `make forward` port-forward from section 23 is still
-running.
+- `host_id`: the identifier the scenario registers the host under;
+- `ssh_host`, `ssh_user`, `ssh_port`: where the provisioning service connects
+  to the host;
+- `ssh_key_path`: section 23's path;
+- `public_host`: the host's address as the operator's machine reaches its
+  forwarded guest ports;
+- `capacity`: what section 21 decided the host sells, as `vcpu_count`,
+  `ram_gb`, and `disk_gb`.
+
+The scenario registers the host with an `ssh` connection at version 2, the only
+version the provisioning service serves, naming `ssh_key_path` as its `key_path`
+and `public_host` as the buyer-facing address. A run replaces the connection an
+earlier registration left, so a host stored at an older version is moved forward;
+the key itself stays in the service's filesystem and never enters the target.
+
+`access.mode` stays `direct`, the only mode version 1 admits. Git ignores the
+file; never commit it. The model in `e2e-tests/src/e2e_harness/real_vm_target.py`
+documents every field, and the scenario refuses a missing, misspelled, or
+unknown one, naming it, before anything else runs.
+
+## 25. Run The Real-Provisioning Scenario
+
+Forward the stack's chain, registry, storefront, and provisioning service to the
+ports the `local` profile names (8545, 8080, 8001, and 8081), then, from the
+repository root:
 
 ```bash
-curl -sf http://localhost:8081/health | jq
-
-cat >/tmp/scm-gcp-host.json <<EOF
-{
-  "host_id":"${KVM_HOST_ALIAS}",
-  "connection":{
-    "kind":"ssh",
-    "version":2,
-    "public":{
-      "ssh_host":"${KVM_EXTERNAL_IP}",
-      "ssh_user":"ubuntu",
-      "key_path":"/home/appuser/.ssh/id_ed25519"
-    }
-  },
-  "enabled":true
-}
-EOF
-
-register_status="$(curl -sS -o /tmp/scm-host-register.json -w '%{http_code}' \
-  -X POST http://localhost:8081/api/v1/hosts/ \
-  -H 'Content-Type: application/json' \
-  --data @/tmp/scm-gcp-host.json)"
-
-cat /tmp/scm-host-register.json | jq
-
-if [ "$register_status" = "409" ]; then
-  curl -sf -X PUT "http://localhost:8081/api/v1/hosts/${KVM_HOST_ALIAS}" \
-    -H 'Content-Type: application/json' \
-    -d "{
-      \"connection\":{
-        \"kind\":\"ssh\",
-        \"version\":2,
-        \"public\":{
-          \"ssh_host\":\"${KVM_EXTERNAL_IP}\",
-          \"ssh_user\":\"ubuntu\",
-          \"key_path\":\"/home/appuser/.ssh/id_ed25519\"
-        }
-      }
-    }" | jq
-
-  curl -sf -X POST "http://localhost:8081/api/v1/hosts/${KVM_HOST_ALIAS}/enable" | jq
-elif [ "$register_status" != "201" ]; then
-  exit 1
-fi
-
-curl -sf "http://localhost:8081/api/v1/hosts/${KVM_HOST_ALIAS}" | jq
-curl -sf "http://localhost:8081/api/v1/hosts/${KVM_HOST_ALIAS}/connectivity" \
-  | tee /tmp/scm-host-connectivity.json \
-  | jq
-jq -e '.reachable == true' /tmp/scm-host-connectivity.json
+make -C e2e-tests test-module MODULE=e2e_vm_real_provisioning ACTIVE_PROFILES=local,real-vm-target
 ```
 
-Submit a capacity check and poll the job:
+A run takes as long as a real create and teardown; each job is polled for up to
+30 minutes. On a host that meets section 21 every stage passes and none skips,
+and the log records:
 
-```bash
-CAPACITY_JOB_ID="$(curl -sf "http://localhost:8081/api/v1/hosts/${KVM_HOST_ALIAS}/capacity" | jq -r '.job_id')"
+- the provisioning service's VM executor reported real;
+- the create and teardown jobs, each `succeeded` on the target host, and the
+  guest's name;
+- the delivered endpoint, the guest's host-key fingerprint, and the probed
+  vCPUs, memory, and root disk beside the capacity sold (memory may read up to
+  5% short);
+- the unrelated key refused with `Permission denied`;
+- a VM list on the host without the guest, and the delivered access no longer
+  connecting.
 
-while true; do
-  curl -sf "http://localhost:8081/api/v1/jobs/${CAPACITY_JOB_ID}" | tee /tmp/scm-capacity-job.json | jq
-  status="$(jq -r '.status' /tmp/scm-capacity-job.json)"
-  case "$status" in succeeded|failed|cancelled) break ;; esac
-  sleep 5
-done
-test "$status" = succeeded
+A second run against the same stack passes too: it reconciles the host's
+registration and adopts, paused, the listing the first run left, rather than
+creating another. A listing on the scenario's resource that it cannot adopt —
+several, a closed one, or one of another shape, as after the target's capacity
+changes — fails the run naming them; rerun with the target they were made for,
+or against a fresh stack.
 
-curl -sf "http://localhost:8081/api/v1/jobs/${CAPACITY_JOB_ID}/logs" | jq -r '.logs'
-```
-
-## 25. Provisioning VM Lifecycle Proof
-
-This is the end-to-end provisioning API proof against the registered GCE KVM
-host.
-
-```bash
-export SELLER_AGENT_ID=eip155:31337:0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC:1
-export BUYER_AGENT_ID=eip155:31337:0x70997970C51812dc3A010C7d01b50e0d17dc79C8:2
-export PROOF_VM_NAME=gcp-proof-vm-01
-
-CREATE_JOB_ID="$(curl -sf -X POST "http://localhost:8081/api/v1/hosts/${KVM_HOST_ALIAS}/vms/" \
-  -H 'Content-Type: application/json' \
-  -H "X-Agent-ID: ${SELLER_AGENT_ID}" \
-  -d "{
-    \"vm_target\":\"${PROOF_VM_NAME}\",
-    \"image_setup_type\":\"scratch\",
-    \"vm_ram\":2048,
-    \"vm_vcpus\":2,
-    \"vm_disk_size\":\"20G\",
-    \"buyer_agent_id\":\"${BUYER_AGENT_ID}\"
-  }" | jq -r '.job_id')"
-
-while true; do
-  curl -sf "http://localhost:8081/api/v1/jobs/${CREATE_JOB_ID}" | tee /tmp/scm-create-job.json | jq
-  status="$(jq -r '.status' /tmp/scm-create-job.json)"
-  case "$status" in succeeded|failed|cancelled) break ;; esac
-  sleep 10
-done
-test "$status" = succeeded
-
-curl -sf "http://localhost:8081/api/v1/jobs/${CREATE_JOB_ID}/logs" | jq -r '.logs'
-curl -sf "http://localhost:8081/api/v1/jobs/${CREATE_JOB_ID}/credentials" \
-  -H "X-Agent-ID: ${SELLER_AGENT_ID}" | jq
-curl -sf "http://localhost:8081/api/v1/jobs/${CREATE_JOB_ID}/credentials" \
-  -H "X-Agent-ID: ${BUYER_AGENT_ID}" \
-  | tee /tmp/scm-buyer-credentials.json \
-  | jq
-curl -sf "http://localhost:8081/api/v1/jobs/${CREATE_JOB_ID}" \
-  | tee /tmp/scm-create-job-final.json \
-  | jq '.result'
-```
-
-Use the returned SSH command or credentials to verify buyer access to the nested
-VM. Then prove the lease-end cleanup path by scheduling expiry through the
-provisioning API and watching the host-side cleanup remove the libvirt domain.
-
-```bash
-LEASE_END_UTC="$(date -u -d '+10 minutes' '+%Y-%m-%d %H:%M')"
-
-EXPIRY_JOB_ID="$(curl -sf -X POST "http://localhost:8081/api/v1/hosts/${KVM_HOST_ALIAS}/vms/${PROOF_VM_NAME}/expiry" \
-  -H 'Content-Type: application/json' \
-  -H "X-Agent-ID: ${SELLER_AGENT_ID}" \
-  -d "{
-    \"vm_expiry_at\":\"${LEASE_END_UTC}\",
-    \"buyer_agent_id\":\"${BUYER_AGENT_ID}\"
-  }" | jq -r '.job_id')"
-
-while true; do
-  curl -sf "http://localhost:8081/api/v1/jobs/${EXPIRY_JOB_ID}" | tee /tmp/scm-expiry-job.json | jq
-  status="$(jq -r '.status' /tmp/scm-expiry-job.json)"
-  case "$status" in succeeded|failed|cancelled) break ;; esac
-  sleep 5
-done
-test "$status" = succeeded
-
-curl -sf "http://localhost:8081/api/v1/jobs/${EXPIRY_JOB_ID}/logs" | jq -r '.logs'
-
-ssh -i "$APP_REPO/.scm-local/gcp/scm-kvm-operator_ed25519" \
-  -o StrictHostKeyChecking=no \
-  -o UserKnownHostsFile=/dev/null \
-  "ubuntu@${KVM_EXTERNAL_IP}" \
-  "atq; sudo cat /var/log/vm-lease-end/${PROOF_VM_NAME}/scheduled_info.txt"
-
-cleanup_done=0
-for attempt in $(seq 1 30); do
-  if ssh -i "$APP_REPO/.scm-local/gcp/scm-kvm-operator_ed25519" \
-    -o StrictHostKeyChecking=no \
-    -o UserKnownHostsFile=/dev/null \
-    "ubuntu@${KVM_EXTERNAL_IP}" \
-    "sudo virsh dominfo '${PROOF_VM_NAME}' >/dev/null 2>&1"; then
-    sleep 30
-  else
-    cleanup_done=1
-    break
-  fi
-done
-test "$cleanup_done" -eq 1
-
-ssh -i "$APP_REPO/.scm-local/gcp/scm-kvm-operator_ed25519" \
-  -o StrictHostKeyChecking=no \
-  -o UserKnownHostsFile=/dev/null \
-  "ubuntu@${KVM_EXTERNAL_IP}" \
-  "sudo sh -c 'tail -n +1 /var/log/vm-lease-end/${PROOF_VM_NAME}/lease_end_*.log'"
-```
+A run that fails after its settlement was accepted expires its own deal's lease
+so the provisioning service tears the VM down. Where it cannot confirm the VM
+gone, it fails naming the escrow, negotiation, fulfillment, reservation, jobs,
+VM, and host; recover that VM by hand from those names.
 
 ## 26. Restore And Cleanup
 
-Run this when the proof is complete. If you want to keep testing real
-provisioning, leave this section for later.
+The scenario leaves its pool, host, capacity declaration, and listing in place,
+and the next run reconciles them; nothing is deleted from the provisioning
+service. Return the stack to mock provisioning by redeploying it with its
+default values (`provisioning.mockMode=true`). Once the host is no longer
+needed, delete the local files and release the host, and the network openings
+section 21 made, wherever it was provided:
 
 ```bash
-cd "$OPS_REPO"
-
-make forward ENV="$ENV"
-curl -sf -X POST "http://localhost:8081/api/v1/hosts/${KVM_HOST_ALIAS}/disable" | jq || true
-make unforward
-
-helm upgrade --install "$RELEASE" "$APP_REPO/helm" \
-  --values "$APP_REPO/helm/values.yaml" \
-  --values "$OPS_REPO/helm/argocd-apps/envs/dev/simple-market-service-values.yaml" \
-  --namespace default \
-  --wait \
-  --timeout 10m
-
-for deployment in "${RELEASE}-provisioning" "${RELEASE}-storefront-arkhai"; do
-  kubectl rollout restart "deploy/${deployment}" -n default
-  kubectl rollout status "deploy/${deployment}" -n default --timeout=10m
-done
-
-kubectl exec deploy/"${RELEASE}-provisioning" -n default -- printenv ACTIVE_PROFILES
-
-gcloud compute instances delete "$KVM_VM_NAME" \
-  --project "$GCP_PROJECT" \
-  --zone "$ZONE"
-
-gcloud compute addresses delete "$KVM_ADDRESS_NAME" \
-  --project "$GCP_PROJECT" \
-  --region "$REGION"
-
-gcloud compute firewall-rules delete "${KVM_VM_NAME}-ssh" \
-  --project "$GCP_PROJECT"
-
-gcloud compute firewall-rules delete "${KVM_VM_NAME}-buyer-dnat" \
-  --project "$GCP_PROJECT"
-
-rm -f "$APP_REPO/.scm-local/gcp/scm-kvm-operator_ed25519" \
-      "$APP_REPO/.scm-local/gcp/scm-kvm-operator_ed25519.pub" \
-      "$APP_REPO/.scm-local/gcp/kvm-host-ssh-keys" \
-      "$APP_REPO/.scm-local/gcp/kvm-hosts.ini"
+rm -f /tmp/kvm-hosts.ini
+rm -f e2e-tests/config/config-real-vm-target.yml
 ```
+

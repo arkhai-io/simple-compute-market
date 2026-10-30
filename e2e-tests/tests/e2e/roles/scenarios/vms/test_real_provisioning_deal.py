@@ -37,10 +37,11 @@ stages:
   11c  A VM list job on the host no longer names the guest
   11d  The delivered access no longer connects
 
-A run that fails after its fulfillment was dispatched, before the guest is
-confirmed gone, has its lease truncated by the module's recovery so the
+A run that fails after the storefront accepted its settlement, before the guest
+is confirmed gone, has its lease truncated by the module's recovery so the
 provisioning service tears the guest down through its own lifecycle; where that
-cannot be confirmed the run fails naming what an operator needs to recover it.
+cannot be confirmed, or the dispatched fulfillment cannot be found, the run
+fails naming what an operator needs to recover it.
 The module never releases reservations fleet-wide: the host's capacity must not
 return to the market while its guest may still run.
 """

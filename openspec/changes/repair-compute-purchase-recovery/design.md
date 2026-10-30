@@ -1245,6 +1245,9 @@ GPU-backed guest and the whole bare-metal GPU machine, each bought through the b
 commands, recovered, reached over SSH, checked by a bounded GPU computation, released
 normally, refused after teardown, and with its capacity restored.
 
+That change has since closed out and archived its own deltas, and this branch merged
+its archived head (S12).
+
 ## S5: the bare-metal storefront's registry bearer token
 
 A registry may gate writes behind a bearer token, which a storefront sends beside its
@@ -1521,6 +1524,60 @@ What stays that change's: its live verification and closeout, its deltas, and th
 of its GPU-less scenario. That scenario is not this change's acceptance, which remains
 the GPU-backed guest and the whole bare-metal GPU machine ("Live qualification"). No
 decision above changed.
+
+## S12: merging `prove-real-vm-provisioning` as archived
+
+After both live qualifications, this branch merged that change's final branch head,
+`72a49b6d45da89b26a0fe8c4e8975289f289398c`, at which it is closed out and archived, at
+`openspec/changes/archive/2026-10-30-prove-real-vm-provisioning/`. `dev`'s squash of the
+same work has the identical tree. Its eight commits since S8's `cb05d625f` are that
+change's own:
+- **Section 7D.** A deal waits for its own dispatch: the shared settle stage marks the
+  deal's latest stage event before settling, and the VM driver waits for a
+  `job_submitted` event naming the deal's negotiation after that mark, rather than any
+  event on the listing. A failed real run's recovery finds the fulfillment its accepted
+  settlement dispatched before tearing it down.
+- **Its live verification, closeout, and archive.** Its deltas are merged into the
+  permanent `physical-provisioning` and `test-compatibility` specifications. It promoted
+  `TESTING.md` "The real-provisioning lane", its three deal diagrams,
+  `VALIDATION_RUNBOOK.md` sections 21–26, the host kit's README, and `ROADMAP.md`.
+
+What it changes is e2e harness, unit tests, documentation, and specifications: no
+module under any `src/`, no role or playbook, no lock, `pyproject.toml`, Dockerfile,
+chart, or workflow. The bare-metal real-host scenario imports none of the changed
+harness modules. The calls the new cursor makes are within the storefront client and
+route as they stand: `get_events` by negotiation, a page of at most the route's cap of
+500, and `wait_for_stage_event` with `since_id`.
+
+One file conflicted, `docs/development/VALIDATION_RUNBOOK.md`. That change replaced
+the hand-run sections 21–26, among them the registration requests this change had moved
+to `ssh` version 2. They are now an operator procedure around the real-provisioning
+scenario, run from the repository root. The resolution keeps that procedure whole, and
+this change's version 2 on the local mock host request in section 9. Section 24 gains
+one paragraph: the scenario registers its host at `ssh` version 2, the only version
+served, with the target's `ssh_key_path` as the connection's `key_path`. A run
+replaces an older connection, so a host stored at an older version is moved forward.
+That is what `real_compute_deal_driver.py`'s `target_connection` and its seeding do.
+The runbook's GCP sections also named a private operations repository, a cloud project,
+a release, and paths inside that repository, all inherited. They now read the
+operator's own values from required variables, and the dev chain's wallet key there is
+labelled as the well-known development key it is.
+
+Against this change's six deltas, the merged permanent specifications hold:
+- no title one of them adds;
+- every title one of them modifies;
+- no requirement one of them modifies that the merge changed. The merge changed three
+  `physical-provisioning` requirements: passthrough binding, hardware virtualization,
+  and host preparation's image default.
+
+Those govern host preparation, and are consistent with D11 and D12, which govern a
+guest's image and its boot-GPU attachment. No destination in the promotion record
+below is already written by that change's promotion. Its runbook sections are
+lane-specific, and D10's generic live-lane section is still owed.
+
+That change's GPU-less lane is its own evidence and is not this change's GPU
+acceptance; D7 stays withdrawn. Reconciling `dev`'s equivalent squashed ancestry is
+left to the merge of `dev` that follows.
 
 ## S9: a bare-metal purchase pays its option's exact total
 
@@ -1864,9 +1921,10 @@ closeout, under the heading named.
 | S7 the mandate's part-owned lifecycle | `openspec/specs/settlement-servicing/spec.md` ("The payments mandate is derived exactly from the Agreement", by the archive) |
 | S7 the contract's source and vector provenance | `kit/arkhai-payments/schema/SOURCE.md`, written with the contract (14.22): the extracted artifact's hash and extraction, its one defect, the previous publication kept as framing evidence, and the synthetic current-wire fixture that is not producer provenance; `docs/development/TESTING.md` under "Payment Receipts in Tests", whose sentence on the published vectors says which wire they pin and that current-wire producer vectors were not supplied with this schema snapshot, so the kit retains the previous publication for canonical framing and uses an explicit SCM synthetic current-wire fixture; `docs/development/ROADMAP.md` "Payment qualification boundaries": that current-wire producer vectors were not supplied with the schema snapshot |
 | S7 the required nullable maximum hold extension and the one wire serializer | `kit/arkhai-payments/schema/SOURCE.md` ("Required nullable durations"), written with the fix (14.26): the published form, the generation normalization of exactly two properties, the unnormalized `ConnectStatus`, and `wire_json` as the one wire form; `kit/arkhai-payments/README.md`; the code is its own record (`kit/arkhai-payments/scripts/generate_models.py`, `market_arkhai_payments.canonical`). No permanent specification changes: the derived mandate still states `P0D` |
-| Coordination with `prove-real-vm-provisioning` | None: change history. That change promotes its own decisions and archives its own deltas at its closeout |
+| Coordination with `prove-real-vm-provisioning` | None: change history. That change promoted its own decisions and archived its own deltas at its closeout, at `openspec/changes/archive/2026-10-30-prove-real-vm-provisioning/` |
 | S10 a healthy pending poll is not spaced by failure backoff | `openspec/specs/fulfillment/spec.md` ("Fulfillment convergence worker" and the recovery-lease paragraph, by the archive); `docs/development/ARCHITECTURE.md`, the paragraph on `FulfillmentConvergenceWatchdog`, whose "per-row exponential backoff and jitter between attempts" becomes backoff between consecutive failed attempts, with a healthy pending poll spaced by the initial interval |
 | S9 a bare-metal purchase pays its option's exact total | `openspec/specs/negotiation-protocol/spec.md` ("An exact selection of a time-priced option settled from the Agreement is accepted only at its total") and `openspec/specs/buyer-orchestration/spec.md` ("A bare-metal purchase pays the selected option's total for its duration"), both by the archive |
+| S12 the merge of `prove-real-vm-provisioning` as archived | None: change history. The runbook's version 2 paragraph and placeholders are written in the merge itself; that change promoted and archived its own work |
 | S8 the merge of `prove-real-vm-provisioning` through its Section 7C | None: change history. Each resolution follows a decision whose destination is recorded above (D1, D2, D3); that change promotes and archives its own |
 | Live qualification of both lanes | None: external evidence, recorded at closeout as live evidence or named blockers (`tasks.md`, the closeout's end-to-end part) |
 | Roadmap currency | `docs/development/ROADMAP.md` "Goal 1 — Consolidate physical-resource authority in the provisioning service" (the real runner's evidence row) and "Payment qualification boundaries". Goal 2 is unchanged: this change no longer sells VM shapes without GPUs |

@@ -260,6 +260,23 @@ def wait_for_stage_event(
         pytest.fail(str(exc))
 
 
+def latest_stage_event_id(client, *, negotiation_id: str) -> int:
+    """The id of the latest stage event naming ``negotiation_id``, or 0.
+
+    A ``since_id`` mark for ``wait_for_stage_event``, taken before the action
+    whose event the wait is for. It counts only that negotiation's events, so
+    an event the wait finds came after the action only when the wait filters
+    by the same negotiation. Read page by page: a page holds the oldest events
+    after its cursor, and only the storefront can say whether more follow it.
+    """
+    mark = 0
+    while True:
+        page = client.get_events(since_id=mark, limit=500, negotiation_id=negotiation_id)
+        mark = max((event.id for event in page.events), default=mark)
+        if not page.truncated or not page.events:
+            return mark
+
+
 # ---------------------------------------------------------------------------
 # Provisioning mock rules and fulfillment convergence
 # ---------------------------------------------------------------------------

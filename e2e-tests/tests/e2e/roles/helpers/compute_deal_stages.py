@@ -54,6 +54,7 @@ from tests.e2e.roles.helpers.compute_deal import (
     advance_fulfillment_to,
     assert_lease_watchdog_held,
     assert_storefront_loops_held,
+    latest_stage_event_id,
     wait_for_stage_event,
 )
 from tests.e2e.roles.helpers.domain_deal import DomainDealState, require_state
@@ -296,9 +297,18 @@ class ComputeDealDriver(Protocol):
     def check_evaluate_settle(self, result: dict[str, Any]) -> str:
         """Assert the domain's preview expectations; return the host it placed."""
 
-    def settle_dispatched(self, settle_response: Any, deal_state: ComputeDealState) -> str:
+    def settle_dispatched(
+        self, settle_response: Any, deal_state: ComputeDealState, *, events_since: int
+    ) -> str:
         """Assert the domain's settle response and return the fulfillment it
-        dispatched, read where the domain reports it."""
+        dispatched, read where the domain reports it.
+
+        ``events_since`` is the id of the latest stage event naming the deal's
+        negotiation before settlement was submitted. A domain that learns of
+        its dispatch from an event waits for one naming the same negotiation
+        after it: the mark counts only that negotiation's events, so the
+        negotiation filter is what passes over another deal's.
+        """
 
     def assert_delivery(self, deal_state: ComputeDealState) -> None:
         """Assert the ready settlement's result and access, where the domain
@@ -1126,7 +1136,7 @@ class Stage08c_EvaluateProvisioningJob(MockLaneStage):
 
 class Stage08b_SettlementSubmittedAndJobQueued:
     def test_08b_settlement_submitted_and_provisioning_job_queued(
-        self, storefront_client, provisioning_client, buyer_config,
+        self, storefront_client, storefront_admin_client, provisioning_client, buyer_config,
         deal_driver: ComputeDealDriver, deal_state: ComputeDealState,
     ):
         """Settlement submitted + fulfillment dispatched — advance + observe.
@@ -1146,6 +1156,11 @@ class Stage08b_SettlementSubmittedAndJobQueued:
         """
         require_state(deal_state, "negotiation_id", "real_escrow_uid", "_settle_preflight_passed")
 
+        # The deal's own events as they stand before settling, so an event the
+        # domain then waits for under this negotiation followed settlement.
+        events_since = latest_stage_event_id(
+            storefront_admin_client, negotiation_id=deal_state.negotiation_id
+        )
         settle_resp = storefront_client.settle_evm(
             deal_state.real_escrow_uid,
             negotiation_id=deal_state.negotiation_id,
@@ -1153,7 +1168,9 @@ class Stage08b_SettlementSubmittedAndJobQueued:
         )
         # What settle answers and where the dispatched fulfillment is read are
         # the domain's; that a fulfillment was dispatched, and is held, is not.
-        fulfillment_id = deal_driver.settle_dispatched(settle_resp, deal_state)
+        fulfillment_id = deal_driver.settle_dispatched(
+            settle_resp, deal_state, events_since=events_since
+        )
         assert fulfillment_id, (
             f"no fulfillment was dispatched after settlement: {settle_resp}"
         )

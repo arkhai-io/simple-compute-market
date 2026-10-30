@@ -257,6 +257,11 @@ None.
     conflicts in the VM adapter's codec and its tests and in the VM e2e driver and host
     registry, resolved so both changes hold, and its real-target connection stated at
     `ssh` version 2;
+  - the merge of `prove-real-vm-provisioning` as archived (S12): its Section 7D e2e
+    harness changes, closeout, and archive, with no runtime module; and its one
+    conflict, in `docs/development/VALIDATION_RUNBOOK.md`, resolved to its scenario
+    procedure, with the scenario's `ssh` version 2 registration stated and the GCP
+    sections' operator values read from variables;
   - the host registration requests in `docs/development/VALIDATION_RUNBOOK.md` and
     `tools/issue-discovery`'s local phase configuration, which state `ssh` version 2.
   - S11: `domains/bare_metal/provisioning/adapter`'s mock output (mock profile only;
@@ -303,14 +308,16 @@ None.
   unimplemented (D7). Neither change depends on the other. This branch merged `dev`
   after it landed, reconciling the INI parser and one VM scenario with it (`design.md`,
   "Coordination with `gpu-optional-compute-shapes`").
-- `prove-real-vm-provisioning`, in implementation, owns its whole scope. This branch
-  merged that change's branch at its Sections 1–5, and again through its Section 7C
-  (S8), so this change's candidate carries that code. Its GPU-less real-provisioning
-  lane, its live verification and closeout, and its `test-compatibility` and
-  `physical-provisioning` deltas stay its own, archived by its own closeout. Neither
-  change depends on the other (`design.md`, "Coordination with
-  `prove-real-vm-provisioning`" and "S8: merging `prove-real-vm-provisioning` through
-  its Section 7C").
+- `prove-real-vm-provisioning` owned its whole scope, and is archived, at
+  `openspec/changes/archive/2026-10-30-prove-real-vm-provisioning/`. This branch merged
+  that change's branch at its Sections 1–5, through its Section 7C (S8), and at its
+  archived head (S12), so this change's candidate carries that code. Its GPU-less
+  real-provisioning lane, its live verification, and its `test-compatibility` and
+  `physical-provisioning` deltas, merged into the permanent specifications by its own
+  archive, stay its own. Neither change depends on the other (`design.md`,
+  "Coordination with `prove-real-vm-provisioning`", "S8: merging
+  `prove-real-vm-provisioning` through its Section 7C", and "S12: merging
+  `prove-real-vm-provisioning` as archived").
 - `resolve-compute-family-findings` plans edits to files this change also edits:
   `lease_lifecycle.py`, `fulfillment_convergence.py`, the VM storefront's
   `admin_controller.py`, and the VM codec tests, which it moves. The edits touch

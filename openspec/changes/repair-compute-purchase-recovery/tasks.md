@@ -4344,6 +4344,102 @@ changes a real executor, job, receipt, price, lease, or role task.
         changed;
       - no CI dispatch, no image build, and no live action.
 
+**The merge of `prove-real-vm-provisioning` as archived (S12).** Both live
+qualifications already passed. Under the owner's standing authorization for needed
+upstream integration, the supervising session merged that change's final head,
+`72a49b6d45da89b26a0fe8c4e8975289f289398c`, at which it is archived (`design.md`, "S12:
+merging `prove-real-vm-provisioning` as archived"). No individual owner answer is
+recorded. `dev`'s squash of the same work has the identical tree, and reconciling that
+ancestry is left to a later merge of `dev`.
+
+- [x] 14.42 Resolve the merge so both changes hold, and record what came in:
+      - `docs/development/VALIDATION_RUNBOOK.md`, the one conflict. That change's
+        sections 21–26 are kept whole: the operator procedure around the
+        real-provisioning scenario, run from the repository root, replacing the
+        hand-run sections where this change had set `ssh` version 2. This change's
+        version 2 on the local mock host request in section 9 is kept. Section 24
+        gains a paragraph: the scenario registers its host at `ssh` version 2, the only
+        version served, with `ssh_key_path` as its `key_path` and `public_host` as the
+        buyer-facing address, and a run replaces an older connection. That is what
+        `real_compute_deal_driver.py`'s `target_connection` and seeding do, as merged.
+      - **Public discipline.** The runbook's inherited GCP sections named a private
+        operations repository, a cloud project, a release, and paths inside that
+        repository. Each is now a required variable naming what the operator
+        supplies, so the commands stop, naming it, while one is unset. The dev chain's
+        wallet key there is labelled as the well-known Anvil development key.
+        Unchanged, and outside this merge's files: the root `Makefile`'s default
+        `AR_PROJECT`.
+      - **What came in, all staged as that change left it.** Its Section 7D is in the
+        e2e harness and its unit tests:
+        - the settle stage marks the deal's latest stage event before settling, by
+          `latest_stage_event_id`;
+        - the VM driver waits for `job_submitted` naming the deal's negotiation after
+          that mark;
+        - the real lane's recovery finds the fulfillment an accepted settlement
+          dispatched.
+
+        Also: `ssh_access.py` and its tests; its live verification, closeout, and
+        archive at `openspec/changes/archive/2026-10-30-prove-real-vm-provisioning/`;
+        its deltas merged into the permanent `physical-provisioning` and
+        `test-compatibility` specifications; and its promotions to `TESTING.md`, three
+        deal diagrams, the runbook, the host kit's README, `ROADMAP.md`, and its own
+        index row.
+      - **Runtime equality.** Against `e957c418`, the merge result changes no file
+        under any `src/`, no role or playbook in either IaC tree, and no `uv.lock`,
+        `pyproject.toml`, Dockerfile, ignore file, chart, workflow, `Makefile`, or
+        `e2e-tests/src` or `config` file. The codec, linkage, `ssh` version 2,
+        compensation, pricing, convergence, and mock code are byte-identical, as are
+        the S11 checks.
+      - **e2e image.** It copies `tests`, so its harness modules change. The bare-metal
+        real-host scenario imports `buyer_cli`, `bare_metal_access`, and
+        `domain_deal`, none of which the merge changes. `ssh_access.py` serves only
+        that change's GPU-less lane.
+      - **Client contract.** The cursor's calls are within the storefront client and
+        route as they stand: `get_events` filtered by negotiation, with a page of 500,
+        the route's `STAGE_EVENT_PAGE_CAP`; and `wait_for_stage_event` with
+        `negotiation_id` and `since_id`.
+      - **Specifications.** Against this change's six deltas, the merged permanent
+        specifications hold no title one adds, and every title one modifies. No
+        modified requirement was changed by the merge. The merge changed three
+        `physical-provisioning` requirements: passthrough binding, hardware
+        virtualization, and host preparation's image default. They govern host
+        preparation, consistently with D11 and D12. No destination in `design.md`'s
+        promotion record is written by that change's promotion, and every heading it
+        names still exists.
+      - **Change documents.** `design.md` gains S12, a coordination note, and a
+        promotion row. The proposal's dependencies and Impact say the change is
+        archived and name its archive. That change's own documents, archive, and
+        index row are as it left them. D7 stays withdrawn, and the GPU-less lane is no
+        evidence of this change's GPU acceptance.
+- [x] 14.43 Verification of 14.42, each exiting 0:
+      - `make -C e2e-tests test-unit`: 352 passed (unit), after its `reinit`, which
+        left its lock unchanged; the imported `test_vm_deal_dispatch.py` among them;
+      - `pytest --collect-only tests/e2e` in the e2e environment: 263 scenario tests
+        collected, the changed drivers and stages importing;
+      - `make check-packaging`, `make check-comment-hygiene`,
+        `make check-change CHANGE=repair-compute-purchase-recovery`,
+        `make check-change-index`,
+        `make check-doc-citations CHANGE=repair-compute-purchase-recovery`,
+        `make check-architecture`, and
+        `make check-architecture-change CHANGE=repair-compute-purchase-recovery`.
+
+      **Unscoped citations.** Unscoped, `make check-doc-citations` reports the
+      repository's existing debt, and the merge adds none of its own:
+      - the merged tree's 10 unresolvable citations are exactly the ones on that
+        change's archived head;
+      - this branch's head had 9 of them;
+      - the tenth is that change's runbook command that copies the committed
+        `config-real-vm-target.yml.example` profile to its git-ignored rendered name,
+        which no checkout holds, and that command is kept as written;
+      - the other 9 are the GCP sections' calls to scripts in the operator's own
+        repository, and two other active changes' task notes.
+
+      Not run, since no input of theirs changed: the provisioning service, VM
+      storefront, adapter, IaC, and root suites; CI; Helm; and images. The live
+      qualifications ran on runtime source this merge leaves byte-identical; nothing
+      here is new live evidence. Owed by validation: the pipeline's VM lane on the
+      merged candidate, whose shared settle stage now waits by negotiation.
+
 ## 15. Closeout
 
 The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
