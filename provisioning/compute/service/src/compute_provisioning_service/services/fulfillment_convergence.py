@@ -142,13 +142,12 @@ class FulfillmentConvergenceWatchdog:
         """Run one cycle guaranteed to reach this worker's own claimed rows.
 
         `run_cycle` alone is an advance *attempt*, not an advance. A row this
-        worker claimed and left claimed -- which is what the `pending`
-        branches deliberately do, so that the claim lease acts as the
-        inter-poll backoff -- is invisible to `claim_pending` until that lease
-        lapses. The first lease is
-        `fulfillment_convergence_backoff_initial_seconds` (5s) and doubles per
-        claim, so a caller asking for "one more cycle" straight after a
-        pending poll got a cycle that could not touch the row at all.
+        worker claimed and left claimed is invisible to `claim_pending` until
+        that lease lapses: a healthy `pending` poll keeps its claim for
+        `fulfillment_convergence_backoff_initial_seconds` (5s), so the lease
+        spaces polls, and a failed attempt keeps it for a backoff that doubles
+        with each consecutive failure. A caller asking for "one more cycle"
+        straight after either would get a cycle that could not touch the row.
 
         Releasing this worker's own claims first makes the cycle deterministic
         for a caller that has already stopped the timer. Refused while the
@@ -438,6 +437,7 @@ class FulfillmentConvergenceWatchdog:
         try:
             status = await self._provider_status(record, "provider_metadata")
             if status.state is ProviderOperationState.pending:
+                self._poll_again(record.capacity_reservation_id, SettlementRecordState.dispatching)
                 return
             if status.state is ProviderOperationState.succeeded:
                 provider = self._providers.require(record.provider)
@@ -482,6 +482,7 @@ class FulfillmentConvergenceWatchdog:
         try:
             status = await self._provider_status(record, "teardown_provider_metadata")
             if status.state is ProviderOperationState.pending:
+                self._poll_again(record.capacity_reservation_id, SettlementRecordState.tearing_down)
                 return
             if status.state is ProviderOperationState.succeeded:
                 self._apply_teardown_success(record.capacity_reservation_id)
@@ -490,6 +491,20 @@ class FulfillmentConvergenceWatchdog:
                 self._apply_teardown_failure(record.capacity_reservation_id, status.detail)
         except Exception as exc:
             self._log_retry("teardown status", record.capacity_reservation_id, exc)
+
+    def _poll_again(self, reservation_id: str, state: SettlementRecordState) -> None:
+        """Keep this worker's claim on a healthy pending operation for one poll interval.
+
+        The claim was leased for the backoff its attempt count sets, which
+        grows only with consecutive failed attempts. A provider answering
+        "still pending" has not failed, so the row is polled again after the
+        initial interval and its count starts again: a job that finishes in
+        seconds is observed on the next cycle, not after a backoff.
+        """
+        self._with_owned_record(
+            reservation_id, state.value, lambda db: None,
+            poll_again_in=self._backoff.delay_seconds(1),
+        )
 
     async def _provider_status(self, record, metadata_field: str):
         provider = self._providers.require(record.provider)
@@ -667,8 +682,14 @@ class FulfillmentConvergenceWatchdog:
         reservation_id: str,
         expected_state: str,
         apply: Callable[[Any], None],
+        *,
+        poll_again_in: float | None = None,
     ) -> bool:
         """Apply one outcome only while this worker still owns the claim.
+
+        The outcome is healthy progress, so the row's count of consecutive
+        failed attempts starts again. The claim is then released, or, with
+        ``poll_again_in``, kept for that many seconds.
 
         Acquires SQLite's write reservation (BEGIN IMMEDIATE) before reading
         and checking ownership, not after: a plain SELECT does not open a
@@ -691,8 +712,9 @@ class FulfillmentConvergenceWatchdog:
             ):
                 return False
             apply(db)
-            self._repository.clear_claim(
-                db, reservation_id, worker_id=self._worker_id
+            self._repository.record_progress(
+                db, reservation_id, worker_id=self._worker_id,
+                lease_seconds=poll_again_in,
             )
             db.commit()
             return True

@@ -1570,6 +1570,59 @@ Outside this correction: on a seller acceptance, the core buyer negotiator compa
 Agreement's amount with the seller's own echoed proposal, not with the buyer's opening or
 ceiling. It is recorded as a separate finding, not changed here.
 
+## S10: a healthy pending poll is not spaced by failure backoff
+
+A normal lease expiry failed its release in a synthetic reproduction:
+
+1. A fulfillment's create converged after several pending observations, leaving the
+   row's `attempt_count` at 9.
+2. At the lease's end the teardown job started and succeeded in seconds.
+3. The convergence worker read it as pending and kept its claim, as a pending read
+   does, so that the claim's lease spaces the next poll.
+4. That lease was `Backoff.delay_seconds(attempt_count)`. `claim_pending` increments
+   the count on every claim and nothing ever reset it, so the teardown's first status
+   claim, attempt 11, was leased for the 300-second cap.
+5. The lease watchdog's 300-second grace period ran out first. It recorded
+   `release_failed` with `teardown_timeout` just before the next cycle observed the
+   finished teardown and set the fulfillment `torn_down`.
+
+The remove job, its result kind, and its metadata were all correct; the job's own status
+was what convergence read. The fault was the claim's lease length: the count measured
+every claim the row ever had, so a healthy operation was polled at a spacing earned by
+other phases and by successful polls.
+
+The fulfillment specification already says what the backoff is for: "a row that keeps
+failing keeps retrying with backoff". The lease watchdog decides timeouts from
+fulfillment status alone, through the release-status port, and is correct.
+
+Decisions:
+- **`attempt_count` counts consecutive unproductive claims.** An applied outcome, or a
+  provider answering that its operation is still pending, starts it again, so a phase
+  never inherits the backoff of an earlier one, and only consecutive failures grow the
+  lease. There is still no ceiling, and failures still back off exactly as before.
+- **A pending read keeps its claim for the initial poll interval.** The claim still
+  spaces polls, so a burst of cycles still does not re-poll and `advance_cycle` keeps
+  its purpose. The spacing is the initial interval, and a job that finishes in seconds
+  is observed on the next cycle, well inside an unchanged grace period.
+- **Ownership is unchanged.** Both resets happen in the owning worker's guarded
+  transaction, through the repository's new `record_progress`. A worker whose claim
+  lapsed and was taken changes neither the new owner's claim, nor its expiry, nor its
+  count, and applies no outcome.
+- **Nothing else changes:** the lease watchdog and its grace period, teardown results,
+  stored history, capacity, and job submission. A lease that already timed out while
+  its teardown finished stays `release_failed`; the supported `retry_release` adopts
+  the torn-down fulfillment and frees the capacity without a new job.
+
+Alternatives rejected:
+- *Releasing the claim after a pending read.* Every cycle, and every burst of explicit
+  cycles, would poll again, which drops the spacing the existing design and its tests
+  rely on.
+- *Resetting only on a phase change.* A long healthy create or teardown would still climb
+  to the 300-second lease inside one phase.
+- *A longer grace period, a shorter backoff cap, or a timeout path in the lease layer that
+  reads provider metadata.* Each hides the spacing defect or crosses the release-status
+  boundary.
+
 ## Compatibility, migration, and rollback
 
 - **No schema migration.** `public_port` lives in the connection envelope's public
@@ -1676,6 +1729,13 @@ inputs it changes, CI, Helm, the images that carry either package (the bare-meta
 storefront's, the VM storefront's, whose shell installs the bare-metal storefront, the e2e
 image, and any buyer image), and the live lanes.
 
+S10 changes the fulfillment kit's repository, by one additive method, and the compute
+provisioning service's convergence worker. No lock, dependency, or version moves: both
+packages are already above `dev`. Its slice is gated by both packages' whole suites, the
+suites of the projects that lock the kit and could call its claim API, the e2e unit
+suite, and packaging. The candidate S10 makes owes the frozen round's aggregate run, CI,
+Helm, the images that carry either package, and the live lanes.
+
 ## Open questions
 
 None. D7's open items, the resource type of a declaration without GPUs and the
@@ -1712,6 +1772,7 @@ closeout, under the heading named.
 | S7 the contract's source and vector provenance | `kit/arkhai-payments/schema/SOURCE.md`, written with the contract (14.22): the extracted artifact's hash and extraction, its one defect, the previous publication kept as framing evidence, and the synthetic current-wire fixture that is not producer provenance; `docs/development/TESTING.md` under "Payment Receipts in Tests", whose sentence on the published vectors says which wire they pin and that current-wire producer vectors were not supplied with this schema snapshot, so the kit retains the previous publication for canonical framing and uses an explicit SCM synthetic current-wire fixture; `docs/development/ROADMAP.md` "Payment qualification boundaries": that current-wire producer vectors were not supplied with the schema snapshot |
 | S7 the required nullable maximum hold extension and the one wire serializer | `kit/arkhai-payments/schema/SOURCE.md` ("Required nullable durations"), written with the fix (14.26): the published form, the generation normalization of exactly two properties, the unnormalized `ConnectStatus`, and `wire_json` as the one wire form; `kit/arkhai-payments/README.md`; the code is its own record (`kit/arkhai-payments/scripts/generate_models.py`, `market_arkhai_payments.canonical`). No permanent specification changes: the derived mandate still states `P0D` |
 | Coordination with `prove-real-vm-provisioning` | None: change history. That change promotes its own decisions and archives its own deltas at its closeout |
+| S10 a healthy pending poll is not spaced by failure backoff | `openspec/specs/fulfillment/spec.md` ("Fulfillment convergence worker" and the recovery-lease paragraph, by the archive); `docs/development/ARCHITECTURE.md`, the paragraph on `FulfillmentConvergenceWatchdog`, whose "per-row exponential backoff and jitter between attempts" becomes backoff between consecutive failed attempts, with a healthy pending poll spaced by the initial interval |
 | S9 a bare-metal purchase pays its option's exact total | `openspec/specs/negotiation-protocol/spec.md` ("An exact selection of a time-priced option settled from the Agreement is accepted only at its total") and `openspec/specs/buyer-orchestration/spec.md` ("A bare-metal purchase pays the selected option's total for its duration"), both by the archive |
 | S8 the merge of `prove-real-vm-provisioning` through its Section 7C | None: change history. Each resolution follows a decision whose destination is recorded above (D1, D2, D3); that change promotes and archives its own |
 | Live qualification of both lanes | None: external evidence, recorded at closeout as live evidence or named blockers (`tasks.md`, the closeout's end-to-end part) |

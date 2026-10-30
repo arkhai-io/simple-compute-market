@@ -126,7 +126,15 @@ once carried is withdrawn (D7).
   base units, as one unit. It refuses a zero quote before any request, and refuses an
   Agreement for another amount or duration before approval. The seller accepts an exact
   selection of such an option, for a mechanism that settles from the Agreement alone,
-  only at that total, and keeps nothing for a refused one.
+  only at that total, and keeps nothing for a refused one. An option charging on any
+  field besides `amount` is refused before negotiation, and an Agreement off the quote
+  ends the run as exited, with the refusal as its reason.
+- **A healthy pending poll is not spaced by failure backoff (S10).** The convergence
+  worker spaced its polls of a pending operation by a backoff that grew with every claim
+  the row ever had, so a fast teardown after a long create was not observed until after
+  the lease watchdog's grace period, and a normal expiry recorded `teardown_timeout`.
+  The attempt count now counts consecutive unproductive claims, and a pending read keeps
+  its claim for the initial poll interval; failures back off as before.
 
 ## Capabilities
 
@@ -144,7 +152,8 @@ once carried is withdrawn (D7).
     passthrough binding;
   - the GPU guest's operator-set readiness wait and autostart.
 - `fulfillment`: the `failed` → `teardown_dispatch_pending` edge and the compensating
-  teardown operation.
+  teardown operation; a recovery claim's attempt count restarts at
+  healthy progress, and a pending poll is spaced by the initial interval (S10).
 - `storefront-publication`: a bare-metal storefront refuses to start on a registry pin
   or `[registry.auth]` token naming no configured registry, or one registry's token
   stated twice (S5).
@@ -226,6 +235,10 @@ None.
     snapshot fixtures, the vector check, and tests), and the lower bound or exact pin
     on it, with the locks, of every project that installs it: the VM, bare-metal, and
     API-credit buyers and storefronts, `domains/apicredits`, and `e2e-tests`;
+  - `kit/fulfillment` (S10: the repository's `record_progress`) and
+    `provisioning/compute/service` (S10: the convergence worker's pending poll and
+    outcome accounting), with tests; both are already above `dev`, so no version or
+    lock moves;
   - `domains/bare_metal/buyer` and `domains/bare_metal/storefront` (S9: the purchase
     quote, its bounds and Agreement check, and the seller's exact-selection total, with
     tests; both packages are already above `dev`, so no version or lock moves);
@@ -252,6 +265,10 @@ None.
   - A payments mandate is sent in the service's current wire only (S7). Accepted
     Agreements, stored mandates, and transaction IDs are never rewritten; a stored
     mandate in the previous wire is refused.
+  - A recovery claim's attempt count restarts at an applied outcome or a pending read
+    (S10). The column, its type, and every stored value are unchanged; no migration.
+    A lease already `release_failed` with `teardown_timeout` whose fulfillment is
+    `torn_down` is recovered by the supported `retry_release`, with no new job.
   - A bare-metal exact selection of a time-priced option settled from the Agreement is
     accepted only at its total, and a bare-metal purchase approves only an Agreement for
     its quote (S9). Both apply to new negotiations and purchases; no accepted Agreement,
@@ -337,6 +354,9 @@ None.
   `docs/development/TESTING.md` ("Payment Receipts in Tests"); and, in
   `docs/development/ROADMAP.md`, that current-wire producer vectors were not supplied
   with the schema snapshot.
+- A healthy pending poll is not spaced by failure backoff (S10):
+  `openspec/specs/fulfillment/spec.md` (delta), and `docs/development/ARCHITECTURE.md`'s
+  paragraph on the convergence watchdog.
 - A bare-metal purchase pays its option's exact total (S9):
   `openspec/specs/negotiation-protocol/spec.md` and
   `openspec/specs/buyer-orchestration/spec.md` (deltas).

@@ -4025,6 +4025,66 @@ version or lock moves.
       bare-metal modules, whose source and installed bare-metal storefront are unchanged.
       Owed, as for 14.32: CI, Helm, the images, and the live lanes.
 
+**A healthy pending poll is not spaced by failure backoff (S10).** A synthetic
+reproduction of a normal lease expiry recorded `teardown_timeout` for a teardown that had
+succeeded in seconds, because the convergence worker's poll spacing had grown with every
+claim the row ever had (`design.md`, "S10: a healthy pending poll is not spaced by
+failure backoff"). Both changed packages are already above `dev`, so no version or lock
+moves.
+
+- [x] 14.34 Regression first, then the fix, at the owning boundary:
+      - tests, synthetic, with the service's own backoff settings (5 s doubling to a
+        300 s cap) and time passing by moving recorded instants back, never by sleeping:
+        - `provisioning/compute/service/tests/integration/test_fulfillment_convergence.py`:
+          - after nine create claims, a pending teardown, and a pending create, is held
+            only for the initial interval with its count cleared, is not polled again
+            inside it, and converges one 30-second cycle later;
+          - an operation that stays pending stays pending, polled once per interval;
+          - failed status reads still back off (5 s, then 10 s) until a healthy read
+            clears the count;
+          - a pending read never changes a claim another worker took meanwhile;
+          - a dispatched teardown starts its count afresh;
+        - `provisioning/compute/service/tests/unit/services/test_ledger_lease_lifecycle.py`:
+          - over one SQLite database with the real ledger, fulfillment repository,
+            lease lifecycle, and convergence worker, a fast teardown after a long create
+            is released, with its capacity, within the unchanged 300-second grace;
+          - a lease already timed out while its teardown finished is freed by
+            `retry_release`, with no new teardown dispatched;
+        - `kit/fulfillment/tests/unit/test_settlement_repository.py`: `record_progress`
+          releases or re-leases the owner's claim and clears its count, and changes
+          nothing for a worker whose claim was taken;
+      - `kit/fulfillment/src/market_fulfillment/settlement_repository.py`:
+        `record_progress`, ownership-guarded;
+      - `provisioning/compute/service/src/compute_provisioning_service/services/fulfillment_convergence.py`:
+        an applied outcome records progress and releases the claim; a pending read
+        records progress and keeps the claim for the initial interval (`_poll_again`);
+        exceptions leave the grown lease as before;
+      - the `fulfillment` delta's convergence and recovery-lease paragraphs, with two
+        scenarios.
+
+      Red, on `7b626c989`'s source: 5 of the new convergence cases fail (both
+      healthy-pending cases, the still-pending case, the failed-read case at its
+      clearing step, and the fresh-phase case), and so does the end-to-end lease case
+      (the aggregate is still `tearing_down` after 30 s, its claim leased for 300 s).
+      The ownership and `retry_release` cases pass on both, as invariants that must
+      hold. Green: all pass.
+- [x] 14.35 Verification of 14.34, after `make dist`, each suite re-synced from its lock
+      and exiting 0:
+      - `make -C kit/fulfillment test`: 203 passed;
+      - `make -C provisioning/compute/service test`: unit 609 passed, integration 486
+        passed;
+      - the other projects whose locks name the fulfillment kit, each whole:
+        `provisioning/compute` 281, `provisioning/compute/ansible` 134,
+        `domains/vms/provisioning/adapter` 288, `domains/bare_metal/provisioning/adapter`
+        88, and `make -C e2e-tests test-unit` 340;
+      - `make check-packaging`: passed, every lock current and unchanged;
+      - `make check-change`, `make check-change-index`, and
+        `make check-comment-hygiene`: passed.
+
+      Not run: the VM storefront's whole suite, which locks the kit and calls none of its
+      claim API; the method is additive. Also not run: the root `make test`, CI, Helm,
+      the images, and the live lanes, all owed on the frozen candidate.
+
 ## 15. Closeout
 
 The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
@@ -4092,6 +4152,10 @@ change to implementation.
 - [ ] 15.9 **Promotion**, per `design.md`'s promotion record:
       - `docs/development/ARCHITECTURE.md` "Release": the table's `failed` row splits
         into compensable and not.
+      - `docs/development/ARCHITECTURE.md`, the paragraph on
+        `FulfillmentConvergenceWatchdog`: backoff and jitter apply between consecutive
+        failed attempts, and a healthy pending poll is spaced by the initial interval
+        (S10).
       - `openspec/specs/physical-provisioning/architecture.md`:
         - "Durable jobs, transient workers": fact reading and linkage, and a
           bare-metal reclaim's diagnostic result, whose teardown the reclaim
