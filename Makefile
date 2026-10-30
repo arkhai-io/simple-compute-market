@@ -16,7 +16,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: check-architecture check-architecture-layers check-architecture-scope check-architecture-dependencies check-architecture-kinds check-architecture-change architecture-report
 .PHONY: test-release-tooling test-deployment-packaging test-registry-client test-provisioning-adapter test-e2e-unit
 .PHONY: dist-arkhai-core-registry
-.PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits
+.PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits test-provisioning-iac-native
 .PHONY: dist-bare-metal-buyer
 .PHONY: run-e2e run-ci fetch-e2e-logs
 .PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
@@ -507,6 +507,20 @@ build-bare-metal-storefront:
 
 build-provisioning:
 	cd provisioning/compute/service && make build IMAGE_SUFFIX=$(IMAGE_SUFFIX)
+
+# The VM IaC's native Ansible gate, with the Ansible, collections, and PyYAML the
+# provisioning image installs: the image `build-provisioning` built, running the
+# checkout's VM IaC tree, mounted read-only, with no network but loopback. It
+# syntax-checks every playbook and runs the tests that drive a shipped task through
+# ansible-playbook, and fails where the default IaC suite would skip them.
+PROVISIONING_IMAGE ?= arkhai:compute-provisioning$(IMAGE_SUFFIX)
+test-provisioning-iac-native: ## Run the VM IaC's syntax checks and native Ansible tests in the built provisioning image
+	@docker image inspect $(PROVISIONING_IMAGE) >/dev/null 2>&1 || { \
+		echo "no $(PROVISIONING_IMAGE) image: build it first, with make build-provisioning" >&2; exit 1; }
+	docker run --rm --network none \
+		-v "$(CURDIR)/domains/vms/provisioning/iac:/iac:ro" -w /iac \
+		-e PYTHON=/home/appuser/ansible-venv/bin/python \
+		$(PROVISIONING_IMAGE) bash scripts/native_ansible_gate.sh
 
 # API-credits domain images (item 6). Built from the repo root so each
 # Dockerfile's `COPY .dist/` + `COPY domains/` resolve. The api-credits

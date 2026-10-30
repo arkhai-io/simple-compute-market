@@ -135,6 +135,15 @@ once carried is withdrawn (D7).
   the lease watchdog's grace period, and a normal expiry recorded `teardown_timeout`.
   The attempt count now counts consecutive unproductive claims, and a pending read keeps
   its claim for the initial poll interval; failures back off as before.
+- **Inherited review findings, settled in mocks, build exclusions, and checks (S11).**
+  The bare-metal mock's default reclaim prints `account_locked` and `account_deleted`
+  as the booleans the role prints. The provisioning service image's ignore file also
+  leaves out the VM IaC tree's Terraform variables, state, and plans. The VM IaC's
+  syntax check also parses the `vm-setup` role's dynamically included task files,
+  through a second parse-only playbook. A native Ansible gate runs that syntax check
+  and the relay-wait test with the provisioning image's own Ansible in the VM
+  end-to-end lane, and fails rather than skips when Ansible or its callback is
+  missing. No role task, real executor, job, receipt, price, or lease path changes.
 
 ## Capabilities
 
@@ -216,7 +225,9 @@ None.
   - `provisioning/compute` (eligibility, release decision and status, teardown port,
     and the lease lifecycle's refusal handling);
   - `provisioning/compute/service` (convergence's teardown-failure write,
-    composition, and integration tests);
+    composition, and integration tests), and its image's
+    `Dockerfile.dockerignore`, which states its own exclusions for the IaC trees it
+    admits (S1; build context only, no runtime change);
   - `domains/vms/storefront` (the fulfillment resume reader);
   - `domains/bare_metal/buyer` (test only);
   - `domains/bare_metal/storefront` (`[registry.auth]`, its composition into
@@ -248,6 +259,13 @@ None.
     `ssh` version 2;
   - the host registration requests in `docs/development/VALIDATION_RUNBOOK.md` and
     `tools/issue-discovery`'s local phase configuration, which state `ssh` version 2.
+  - S11: `domains/bare_metal/provisioning/adapter`'s mock output (mock profile only;
+    the package is already above `dev`, so no version or lock moves);
+    `provisioning/compute/service/Dockerfile.dockerignore` (build context only); the
+    VM IaC's parse-only `vm-setup-task-files.yaml`, its syntax-check and native-gate
+    scripts, and its structure tests; a root `Makefile` target and one step in
+    `.github/workflows/e2e.yml`'s VM lane that run the gate in the built
+    provisioning image.
   - Each changed package bumps its minor version once against `dev`, to the next
     minor above `dev`'s own where `dev` has already taken one (`design.md`,
     "Coordination with `gpu-optional-compute-shapes`"). Dependants' floors and locks
@@ -360,3 +378,9 @@ None.
 - A bare-metal purchase pays its option's exact total (S9):
   `openspec/specs/negotiation-protocol/spec.md` and
   `openspec/specs/buyer-orchestration/spec.md` (deltas).
+- An ignore file beside a Dockerfile replaces the root's, so one admitting a tree whole
+  states that tree's exclusions itself (S1, S11): `docs/development/BUILD_AND_PACKAGING.md`
+  ("Images").
+- The VM IaC's native Ansible gate, and the parse-only playbooks it syntax-checks
+  (S11): `docs/development/TESTING.md`, beside "Chart Render Tests", and
+  `domains/vms/provisioning/iac/README.md` ("Validation").

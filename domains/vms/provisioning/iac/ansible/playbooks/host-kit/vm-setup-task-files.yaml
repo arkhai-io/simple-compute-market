@@ -1,0 +1,93 @@
+---
+# Parse-only: `make validate-playbooks` syntax-checks this playbook, and nothing
+# runs it.
+#
+# The vm-setup role reaches every task file it runs through include_tasks, which
+# `ansible-playbook --syntax-check` does not follow, so checking vm-setup.yaml
+# parses the role's main.yml and none of the files that prepare a host. This play
+# imports each of those files statically instead: a static import is parsed when
+# the playbook is, so the syntax check reads every task, keyword, and block in
+# them. It imports through import_role, so each file is parsed as part of the
+# role, with the role's defaults, vars, handlers, and files, as it is when the
+# role runs.
+#
+# A syntax check templates nothing and executes nothing: it shows that these files
+# parse, not that their Jinja renders or that they prepare a host correctly.
+- name: Host Kit / parse the vm-setup role's task files
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  tasks:
+    # The imports below install packages, rewrite boot configuration, and reboot
+    # a KVM host when run. Refusing first keeps a run of this playbook from
+    # reaching any of them.
+    - name: Refuse to run
+      fail:
+        msg: >-
+          vm-setup-task-files.yaml exists only to be syntax-checked; prepare a host
+          through vm-setup.yaml.
+
+    - name: Parse the system packages tasks
+      import_role:
+        name: ../../roles/vm-setup
+        tasks_from: system-packages
+
+    - name: Parse the passthrough audit tasks
+      import_role:
+        name: ../../roles/vm-setup
+        tasks_from: passthrough-audit
+
+    - name: Parse the GPU presence tasks
+      import_role:
+        name: ../../roles/vm-setup
+        tasks_from: gpu-presence
+
+    - name: Parse the GPU passthrough tasks
+      import_role:
+        name: ../../roles/vm-setup
+        tasks_from: gpu-passthrough
+
+    - name: Parse the rescue boot entry tasks
+      import_role:
+        name: ../../roles/vm-setup
+        tasks_from: rescue-boot-entry
+
+    - name: Parse the KVM setup tasks
+      import_role:
+        name: ../../roles/vm-setup
+        tasks_from: kvm-setup
+
+    - name: Parse the KVM network tasks
+      import_role:
+        name: ../../roles/vm-setup
+        tasks_from: kvm-network
+
+    - name: Parse the security hardening tasks
+      import_role:
+        name: ../../roles/vm-setup
+        tasks_from: security-hardening
+
+    - name: Parse the SSH authorized keys tasks
+      import_role:
+        name: ../../roles/vm-setup
+        tasks_from: ssh-authorized-keys
+
+    - name: Parse the tunnel client tasks
+      import_role:
+        name: ../../roles/vm-setup
+        tasks_from: frp-client
+
+    - name: Parse the golden image build tasks
+      import_role:
+        name: ../../roles/vm-setup
+        tasks_from: golden-image-build
+
+    - name: Parse the GPU detection service tasks
+      import_role:
+        name: ../../roles/vm-setup
+        tasks_from: gpu-detection-service
+
+    - name: Parse the GPU bind tasks
+      import_role:
+        name: ../../roles/vm-setup
+        tasks_from: gpu-bind

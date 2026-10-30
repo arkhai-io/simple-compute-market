@@ -125,6 +125,40 @@ async def test_default_reclaim_reports_the_reclaim_and_its_policy() -> None:
     assert outcome.result.value["account_present"] is True
 
 
+#: The reclaim role sets each from one boolean expression, so its fact prints them
+#: as JSON booleans.
+RECLAIM_ACCOUNT_FIELDS = {"account_present": True, "account_locked": False,
+                          "account_deleted": False}
+
+
+def test_the_default_reclaim_prints_its_account_fields_as_booleans() -> None:
+    """As the reclaim role prints them: bare in the ``var:`` display, and JSON
+    booleans in the ``msg:`` block the fact reader returns."""
+    stdout = bare_metal_mock_output(
+        MockPlaybook(
+            parameters=_params(NODE_RECLAIM_ACCESS_ACTION).model_dump(mode="json"),
+            limit=HOST.host_id,
+            hosts={HOST.host_id: inventory_target(HOST)},
+        )
+    )
+
+    fact = read_fact(stdout, f"{NODE_RECLAIM_ACCESS_ACTION}_data",
+                     action=NODE_RECLAIM_ACCESS_ACTION)
+    for name, value in RECLAIM_ACCOUNT_FIELDS.items():
+        assert type(fact[name]) is bool and fact[name] is value, (name, fact[name])
+        assert f"        {name}: {str(value).lower()}\n" in stdout
+
+
+@pytest.mark.asyncio
+async def test_the_default_reclaim_result_carries_its_account_fields_as_booleans() -> None:
+    """Through the real executor and codec, the reclaim's result keeps them."""
+    outcome = await _execute(_mock(), _params(NODE_RECLAIM_ACCESS_ACTION))
+
+    assert isinstance(outcome, JobSuccess)
+    for name, value in RECLAIM_ACCOUNT_FIELDS.items():
+        assert outcome.result.value[name] is value, (name, outcome.result.value[name])
+
+
 @pytest.mark.asyncio
 async def test_a_rule_holds_then_fails_a_grant() -> None:
     mock = _mock()

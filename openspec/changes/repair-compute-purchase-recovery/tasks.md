@@ -1643,7 +1643,8 @@ what its fulfillment proves". Files:
 - `provisioning/compute/tests/integration/test_release.py`
 - `provisioning/compute/service/tests/integration/test_lease_release_api.py`,
   `test_fulfillment_convergence.py`, and `test_compute_contract_api.py`
-- `provisioning/compute/service/tests/unit/services/test_ledger_lease_lifecycle.py`
+- `provisioning/compute/service/tests/integration/test_ledger_lease_lifecycle.py`
+  (under `tests/unit/services/` when this section edited it; 14.36 moved it)
 
 `resolve-compute-family-findings` plans edits to `lease_lifecycle.py` and
 `fulfillment_convergence.py`. This section edits other functions in them, and changes
@@ -1727,7 +1728,8 @@ convergence's teardown-failure write are as this section's tasks describe them.
 - [x] 8.7 Update the tests that pin the old behaviour. The design found the set
       below; re-list it at section start:
       - `provisioning/compute/tests/integration/test_release.py`
-      - `provisioning/compute/service/tests/unit/services/test_ledger_lease_lifecycle.py`
+      - `provisioning/compute/service/tests/integration/test_ledger_lease_lifecycle.py`
+        (under `tests/unit/services/` when this section edited it; 14.36 moved it)
       - `provisioning/compute/service/tests/integration/test_lease_release_api.py`
       - `provisioning/compute/service/tests/integration/test_compute_contract_api.py`
 
@@ -4060,7 +4062,8 @@ moves.
             clears the count;
           - a pending read never changes a claim another worker took meanwhile;
           - a dispatched teardown starts its count afresh;
-        - `provisioning/compute/service/tests/unit/services/test_ledger_lease_lifecycle.py`:
+        - `provisioning/compute/service/tests/integration/test_ledger_lease_lifecycle.py`
+          (under `tests/unit/services/` when these cases were added; 14.36 moved it):
           - over one SQLite database with the real ledger, fulfillment repository,
             lease lifecycle, and convergence worker, a fast teardown after a long create
             is released, with its capacity, within the unchanged 300-second grace;
@@ -4123,6 +4126,223 @@ moves.
       `make check-change`, `make check-change-index`, and `make check-comment-hygiene`
       passed. The tracked source, locks, and `pyproject.toml` files are unchanged, and so
       are the rebuilt fulfillment-kit and service wheels, so 14.35's suites stand.
+      Correction (14.37): Section 8's file list, 8.7, and 14.34 now cite the module at
+      its current path, each noting where it was.
+
+**The pre-closeout review's record findings.** An independent pre-closeout review of
+`48b3e4129` found the source ready for closeout and raised three record findings. The
+supervising session directed all three fixed before closeout begins; no closeout part is
+started by them.
+
+- [x] 14.37 Reconcile the change's records with its review history:
+      - **F1, the review history.** The Round 2 implementation review and its later
+        amendments (S3/S4, S5, the merges of `prove-real-vm-provisioning` through its
+        Section 5, S6, S7, S8, S9 twice, and S10) and the pre-closeout review are saved verbatim in the
+        change's untracked `reviews/` as `06` to `16-implementation-external.md` and
+        `17-pre-closeout-external.md`. Each has a triage written from the dispositions
+        these task notes record, labelled as a current reconciliation of decisions
+        already made, with no owner reply or exit added. Five minor findings have no
+        recorded disposition and stay open there: the syntax check and the real-Ansible
+        relay test run by no CI job (`07` F1, `08` F1), the bare-metal mock's two
+        remaining text booleans (`07` F2), the image ignore file's missing Terraform
+        exclusions (`07` F3), and the `vm-setup` role's included task files outside
+        any syntax check (`10` F2). Round 1's triage is closed with its later
+        results. The intervention ledger gains no entry: no new disposition is
+        established by the owner's own words.
+      - **F2, S1's record.** `design.md` gains "S1: the provisioning service image's
+        own ignore file" and a promotion row, the proposal's Impact names the file
+        and its knowledge to promote, and 15.9 names
+        `docs/development/BUILD_AND_PACKAGING.md` "Images". Nothing is promoted now,
+        and no build input changes.
+      - **F3, the moved lease test.** Section 8's file list, 8.7, and 14.34 cite
+        `provisioning/compute/service/tests/integration/test_ledger_lease_lifecycle.py`,
+        each noting it sat under `tests/unit/services/` when that work was done.
+
+      Verification, each exiting 0: `make check-packaging`, `make check-comment-hygiene`,
+      `make check-change CHANGE=repair-compute-purchase-recovery`, and
+      `make check-change-index`. Every tracked source, lock, `pyproject.toml`,
+      Dockerfile, ignore file, and e2e input is unchanged, and so is every rebuilt wheel.
+      Correction (14.41): the five open findings are fixed by 14.38 to 14.40, and their
+      triages record it.
+
+**The inherited minor findings (S11).** The supervising session accepted the five open
+findings 14.37 names, under the owner's standing instruction to do the necessary work,
+to be fixed rather than deferred (`design.md`, "S11: the inherited minor findings, in
+mocks, build exclusions, and checks"). No individual owner answer is recorded. Both
+live qualifications are already recorded in the latest validation, and nothing here
+changes a real executor, job, receipt, price, lease, or role task.
+
+- [x] 14.38 `07` F2: the bare-metal mock's default reclaim prints `account_locked` and
+      `account_deleted` as booleans, `False`, in
+      `domains/bare_metal/provisioning/adapter/src/bare_metal_provisioning_adapter/services/mock_output.py`.
+      A regression in `tests/test_bare_metal_mock_output.py` reads the default reclaim
+      through the shared fact reader and through the real executor and codec, and
+      asserts the three account fields are booleans. Red first against the text values.
+
+      Done. The default reclaim stands for one under the default `remove_lease_key`
+      policy, which neither locks nor deletes, so both are `False`, as the role's
+      `.changed | default(false)` prints them. Two unit tests, through the real mock
+      runner, executor, and codec over the module's own fixture host:
+      `test_the_default_reclaim_prints_its_account_fields_as_booleans` reads the fact
+      with `read_fact` and asserts each field's type and its bare `var:` display;
+      `test_the_default_reclaim_result_carries_its_account_fields_as_booleans` asserts
+      the job result's values. Red on the text values: both fail, `'false' is False`,
+      and the module's other 8 pass. Green: `make -C domains/bare_metal/provisioning/adapter
+      test`, 90 passed (unit). The adapter is composed with this mock only under the
+      mock profile, and it is already 0.12.0 against `dev`'s 0.11.0, so no version,
+      floor, or lock moves.
+- [x] 14.39 `07` F3: `provisioning/compute/service/Dockerfile.dockerignore` leaves out
+      the VM IaC tree's Terraform patterns, as `domains/vms/provisioning/iac/.gitignore`
+      ignores them under `terraform/*/`, and its comment claims only what it excludes. A
+      synthetic Docker build-context probe, with Docker's own ignore matching, in a
+      scratch directory outside the checkout, shows the patterns excluded and every
+      tracked IaC file and example still admitted.
+
+      Done. The five patterns are mirrored under the
+      `domains/vms/provisioning/iac/terraform/*/` prefix: variables, state, state
+      backups, `.terraform*`, and plans. The comment lists what the file excludes and
+      no longer says it follows every rule of the trees it admits; `design.md`'s S1
+      says the same. The bare-metal IaC tree has no ignore rules of its own.
+
+      The probe ran under Docker 29.9.2's BuildKit, in a scratch context holding
+      every tracked and new IaC file plus synthetic placeholders:
+      - **Placeholders:** a module's variables, auto-variables, state, state backup,
+        provider directory, lock file, plan, and `main.tf`, with keys, credentials, a
+        local inventory, a log, a retry file, and an environment beside them;
+      - **Build:** a `FROM scratch` / `COPY . /ctx` Dockerfile beside each ignore file,
+        exported with `-o type=local`;
+      - **Results:**
+        - every one of the 100 IaC files was admitted under both ignore files;
+        - the HEAD ignore file admitted all seven Terraform placeholders and
+          `main.tf`;
+        - the new one admitted only `main.tf`;
+        - both excluded every other placeholder.
+
+      No Terraform file is tracked, so no file a built image takes changes. This
+      corrects a claim; no leak is implied, since images built earlier were
+      compared with their source. The scratch context is removed, and nothing was
+      written in the checkout.
+- [x] 14.40 `07` F1 / `08` F1 and `10` F2: a native Ansible gate, and `vm-setup`'s
+      included task files parsed:
+      - `domains/vms/provisioning/iac/ansible/playbooks/host-kit/vm-setup-task-files.yaml`,
+        parse-only, refusing first, imports every task file `vm-setup`'s `main.yml`
+        and their own includes reach, through `import_role`;
+      - `domains/vms/provisioning/iac/scripts/validate_playbooks.sh` syntax-checks
+        every playbook, from one list, and `make validate-playbooks` runs it;
+      - `domains/vms/provisioning/iac/scripts/native_ansible_gate.sh` runs it, then
+        `tests/test_frp_proxy_wait.py` with `unittest`, and fails on any skip;
+      - the root `make test-provisioning-iac-native` runs the gate in the built
+        provisioning image, with the checkout's VM IaC tree mounted read-only;
+      - `.github/workflows/e2e.yml`'s VM lane runs that target as its own step;
+      - `tests/test_ansible_structure.py` holds the new playbook's imports to the
+        files the role reaches, and both parse-only playbooks to the script's list.
+
+      Done.
+      - **The wrapper.** It imports all 13 task files `vm-setup` reaches, `gpu-bind`'s
+        own include of the audit among them, behind a first `fail`. No role task file
+        changed: the syntax check found no defect in any of them.
+      - **The gate.** It prints the Ansible version and the `ansible.posix`
+        collection, keeps no Ansible log, and writes nothing in the tree it is given.
+        It fails when a test is skipped or none ran.
+      - **The image run.** `make test-provisioning-iac-native` runs it as the image's
+        `appuser`, with `--network none`, since the relay test's HTTP peer is
+        loopback. It fails, naming `make build-provisioning`, when the image is
+        absent.
+      - **The CI step.** It runs on success or failure of the scenarios, not on
+        cancellation, so its result stands alone.
+      - **The default suite.** `make -C domains/vms/provisioning/iac test` keeps the
+        tool-free structural tests and still skips the seven native tests without
+        Ansible.
+
+      Unit structure tests, in `tests/test_ansible_structure.py`:
+      - the vm-setup wrapper refuses first, imports nothing dynamically, and imports
+        exactly once each file `main.yml` and its includes reach, which is every task
+        file but `main.yml`;
+      - the script's list equals every playbook under `ansible/playbooks`;
+      - `make validate-playbooks` and the gate both run the script;
+      - the vm-management test now checks the script's list rather than the Makefile.
+
+      Red, each in a scratch copy outside the checkout:
+      - **The wrapper and the list:**
+        - without the wrapper and the script, as at HEAD, the three syntax-check tests
+          fail;
+        - with the wrapper's last import removed, its test fails;
+        - with the wrapper dropped from the script, two fail.
+      - **The syntax check:** with an apostrophe added to a `kvm-setup.yml` shell
+        comment, `vm-setup.yaml`'s syntax check still passes (exit 0), and
+        `vm-setup-task-files.yaml`'s fails (exit 4, "failed at splitting arguments").
+      - **The gate** in the built image, against the checkout:
+        - with no collections, it fails at the syntax check, exit 4;
+        - with `ansible.posix` alone hidden, it fails at the syntax check, exit 4;
+        - in the e2e image, which has no Ansible, it fails, exit 127.
+      - **The runner alone:** where all seven native tests skip, it exits 1, though
+        `unittest` reports `OK (skipped=7)`.
+- [x] 14.41 Verification and records of 14.38 to 14.40: the bare-metal adapter's whole
+      suite; the provisioning service's integration modules that compose the
+      bare-metal mock, after `make dist` and its `reinit`; the VM IaC suite; the native
+      gate in a built provisioning image; packaging, comment hygiene, change, and index
+      checks; equality of every real-path input. The triages of `07`, `08`, and `10`
+      record the dispositions from what was observed.
+
+      Verification, each exiting 0:
+      - **Bare-metal adapter:** `make -C domains/bare_metal/provisioning/adapter test`,
+        90 passed (unit).
+      - **Wheels:** `make dist`, after which the only wheel whose bytes changed is
+        `arkhai_bare_metal_provisioning_adapter-0.12.0`; its `mock_output.py` equals
+        the source, and its other modules' sources are unchanged.
+      - **Service:** after `make -C provisioning/compute/service reinit`, whose lock
+        did not change, the integration modules that compose the bare-metal mock, run
+        with the mock profile: `test_bare_metal_mock_profile`, `test_lease_release_api`,
+        `test_fulfillment_api`, `test_system_api`, `test_test_controller`, and
+        `test_provisioning_client_endpoint_coverage`, 96 passed (application
+        integration through the typed clients, with direct-storage setup in some).
+      - **VM IaC suite:** `make -C domains/vms/provisioning/iac test`, 150 passed,
+        7 skipped (the native tests, by design), 2 subtests passed (unit).
+      - **The native gate:** `make test-provisioning-iac-native` in a provisioning
+        image built from `afa48148c`, whose Ansible toolchain and collections are what
+        this candidate's image installs, with the checkout's VM IaC tree mounted.
+        - It ran ansible-core 2.19.14 under Python 3.13.12, with `ansible.posix`
+          1.5.4.
+        - It syntax-checked 7 playbooks, and ran the relay-wait test's 7 tests, with
+          none skipped (integration).
+        - ansible-core 2.17 was not run: the image resolves `>=2.17,<2.20` to 2.19.
+      - **Checks:** `make check-packaging`, `make check-comment-hygiene`,
+        `make check-change CHANGE=repair-compute-purchase-recovery`,
+        `make check-change-index`, `make check-architecture`, and
+        `make check-architecture-change CHANGE=repair-compute-purchase-recovery`.
+
+      **Real-path equality.** Against `48b3e4129`, the working tree changes the
+      bare-metal mock and its test, the service image's ignore file, the VM IaC
+      `Makefile` and structure test, the root `Makefile`, and `e2e.yml`. It adds the
+      wrapper and the two scripts. Every role task file, `vm-operations.yaml`,
+      `vm-setup.yaml`, the bare-metal IaC tree, `ansible.cfg`, every Dockerfile, lock,
+      and `pyproject.toml`, every `e2e-tests` file, and every `src/` file but the mock
+      are byte-identical. The service runs `vm-operations.yaml` and `node-access.yaml`,
+      and composes the mock only under the mock profile, so no executor, job, receipt,
+      price, lease, or playbook path either live rental used changes.
+
+      **Image impact.** The provisioning image built from this tree differs from the
+      one the rentals used in two places:
+      - the bare-metal adapter's `mock_output.py`, which a non-mock profile never
+        imports;
+      - the IaC tree it copies: the new wrapper, the two scripts, and the changed IaC
+        `Makefile` and structure test, which the service never runs.
+
+      No other image changes.
+
+      End-to-end: no scenario asserts on the reclaim's account fields. The VM lane's
+      pipeline run is owed by validation, and the gate is now its own step there.
+      Owed by validation: `e2e.yml`, job `e2e-vm`, its step "VM IaC native Ansible
+      gate" passing, with 7 playbooks syntax-checked and 7 native tests run and none
+      skipped.
+
+      Not run:
+      - no fresh-context compliance check, since this invocation allowed no subagent;
+      - no root `make test`;
+      - no whole service, VM storefront, or e2e suite: none of them imports the
+        bare-metal adapter's mock but the six service modules above, and no lock
+        changed;
+      - no CI dispatch, no image build, and no live action.
 
 ## 15. Closeout
 
@@ -4272,6 +4492,19 @@ change to implementation.
         section's example reproduces the vector signature from the raw body, since the
         current models refuse that body; "Private Service Dependencies"' current
         example says the same of the kit's conformance.
+      - `docs/development/BUILD_AND_PACKAGING.md` "Images", beside its rule that a
+        Dockerfile with a deny-all ignore file admits `scripts/uv_project.py`
+        explicitly: an ignore file beside a Dockerfile replaces the root's, so one
+        that admits a tree whole states that tree's exclusions itself, an operator's
+        credentials, keys, inventories, and variable files, and a checkout's logs,
+        retry files, caches, and environments, and the VM IaC tree's Terraform
+        variables and state (S1, 14.12; S11, 14.39).
+      - `docs/development/TESTING.md`, beside "Chart Render Tests", and
+        `domains/vms/provisioning/iac/README.md` "Validation": the parse-only
+        `vm-setup-task-files.yaml`, and `make test-provisioning-iac-native`, which
+        runs every playbook's syntax check and the relay-wait test with the built
+        provisioning image's Ansible, fails on any skip, and runs in the VM
+        end-to-end lane (S11, 14.40).
       - `openspec/specs/README.md`: no new capability or companion, so no edit.
         Confirm it.
       - Complete the promotion record.

@@ -59,6 +59,37 @@ def task_files() -> list[Path]:
     return files
 
 
+def syntax_checked_playbooks() -> list[str]:
+    """The playbooks `scripts/validate_playbooks.sh` syntax-checks, as listed."""
+    script = (ROOT / "scripts/validate_playbooks.sh").read_text(encoding="utf-8")
+    match = re.search(r"^PLAYBOOKS=\(\n(.*?)^\)$", script, re.MULTILINE | re.DOTALL)
+    assert match, "validate_playbooks.sh lists no PLAYBOOKS"
+    return match.group(1).split()
+
+
+def included_task_files(path: Path) -> set[str]:
+    """Every task file `path` reaches through include_tasks or import_tasks, and
+    every file those reach, by file name in its tasks directory."""
+    reached: set[str] = set()
+    pending = [path]
+    while pending:
+        document = yaml.safe_load(pending.pop().read_text(encoding="utf-8")) or []
+        stack = list(document)
+        while stack:
+            task = stack.pop()
+            if not isinstance(task, dict):
+                continue
+            for section in BLOCK_KEYWORDS & set(task):
+                stack.extend(task[section] or [])
+            for key in ("include_tasks", "import_tasks"):
+                spec = task.get(key)
+                name = spec if isinstance(spec, str) else (spec or {}).get("file")
+                if name and name not in reached:
+                    reached.add(name)
+                    pending.append(path.parent / name)
+    return reached
+
+
 def walk(tasks: list, path: Path, findings: list[str], where: str = "") -> None:
     for index, task in enumerate(tasks):
         label = f"{path.relative_to(ROOT)}{where}[{index}]"
@@ -184,8 +215,51 @@ class TestPlaybookStructure(unittest.TestCase):
             "prerequisites", "vm-create", "gpu-virt-install-retry",
             "gpu-virt-install-multi-retry", "vm-remove", "vm-undefine", "vm-check",
         ]))
+        self.assertIn(str(path.relative_to(ROOT)), syntax_checked_playbooks())
+
+    def test_vm_setup_task_files_are_imported_for_the_syntax_check(self) -> None:
+        """So that --syntax-check parses every task file that prepares a host,
+        which the vm-setup role reaches only through include_tasks.
+
+        Each file the role's main.yml includes, and each file those include, is
+        imported statically and in the role's context, exactly once; the play
+        refuses to run before any import; and the syntax check lists it.
+        """
+        path = ANSIBLE / "playbooks/host-kit/vm-setup-task-files.yaml"
+        tasks = yaml.safe_load(path.read_text(encoding="utf-8"))[0]["tasks"]
+        self.assertIn("fail", tasks[0])
+        self.assertFalse(any(
+            key in task for task in tasks
+            for key in ("include_tasks", "include_role", "import_tasks")
+        ))
+        imported = []
+        for task in tasks[1:]:
+            role = task["import_role"]
+            self.assertEqual(role["name"], "../../roles/vm-setup")
+            imported.append(f"{role['tasks_from']}.yml")
+        role_tasks = ANSIBLE / "roles/vm-setup/tasks"
+        self.assertEqual(len(imported), len(set(imported)))
+        self.assertEqual(set(imported), included_task_files(role_tasks / "main.yml"))
+        # Every task file but main.yml is one the role reaches.
+        self.assertEqual(
+            set(imported),
+            {p.name for p in role_tasks.glob("*.yml")} - {"main.yml"},
+        )
+        self.assertIn(str(path.relative_to(ROOT)), syntax_checked_playbooks())
+
+    def test_the_syntax_check_lists_every_playbook_and_both_targets_run_it(self) -> None:
+        """One list, in the script `make validate-playbooks` and the native
+        Ansible gate both run, names every playbook this tree ships."""
+        shipped = {
+            str(p.relative_to(ROOT)) for p in (ANSIBLE / "playbooks").rglob("*.yaml")
+        }
+        listed = syntax_checked_playbooks()
+        self.assertEqual(len(listed), len(set(listed)))
+        self.assertEqual(set(listed), shipped)
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-        self.assertIn(f"{path.relative_to(ROOT)} --syntax-check", makefile)
+        self.assertIn("validate-playbooks:\n\tscripts/validate_playbooks.sh\n", makefile)
+        gate = (ROOT / "scripts/native_ansible_gate.sh").read_text(encoding="utf-8")
+        self.assertIn("\nbash scripts/validate_playbooks.sh\n", gate)
 
     def test_audit_playbook_writes_nothing(self) -> None:
         """The audit runs against hardware nothing else has touched.

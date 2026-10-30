@@ -1185,6 +1185,28 @@ changes. The merge changed no decision above:
   kit (0.6.0) and the two adapters (0.12.0 and 0.16.0) were already above `dev`'s and
   are unchanged.
 
+## S1: the provisioning service image's own ignore file
+
+The provisioning service's image is built with `provisioning/compute/service/Dockerfile.dockerignore`
+beside its Dockerfile. Docker reads an ignore file beside a Dockerfile in place of the
+root `.dockerignore`, so none of the root's exclusions apply to that image, and the file
+admits both IaC trees whole, because the image runs their roles. A checkout's
+environments and caches under the VM IaC tree were therefore in the build context.
+Found while checking the image's packaging after the Round 2 implementation review; the
+supervising session accepted it under the owner's delegated judgement (`tasks.md`
+14.12).
+
+- **The rule.** An ignore file that replaces the root's and admits a tree whole states
+  that tree's exclusions itself. This one leaves out environments and caches, Ansible
+  logs and retry files, an operator's credentials, keys, local inventories, and
+  Ansible variable files, and the VM IaC tree's Terraform variables, state, plans, and
+  working directories. It re-admits the tracked keys-directory `.gitignore` and the two
+  inventory examples. As first written, it did not carry the tree's Terraform rules;
+  S11 adds them. No Terraform file is tracked, so no tracked file's inclusion changes.
+- **No new runtime scope.** The policy is the existing `Dockerfile.dockerignore`. It
+  narrows what the build context may carry; the image's tracked IaC files, wheels, and
+  runtime are unchanged.
+
 ## Coordination with `prove-real-vm-provisioning`
 
 After S5's corrections (`tasks.md` 14.18), and before any live run, this branch merged
@@ -1626,6 +1648,58 @@ Alternatives rejected:
   reads provider metadata.* Each hides the spacing defect or crosses the release-status
   boundary.
 
+## S11: the inherited minor findings, in mocks, build exclusions, and checks
+
+Five minor findings of Round 2's later implementation reviews had no recorded
+disposition until the record reconciliation of the pre-closeout review found them
+(`tasks.md` 14.37). The supervising session accepted all five, under the owner's
+standing instruction to do the necessary work, to be fixed rather than deferred. None
+touches a role task, a real executor, a job, a receipt, a price, or a lease.
+
+- **The mock reclaim's booleans.** The bare-metal mock's default reclaim prints
+  `account_locked` and `account_deleted` as the booleans the reclaim role prints, as D2
+  requires and as `account_present` already does. A default reclaim stands for one under
+  the default `remove_lease_key` policy, so both are false. Nothing reads either field.
+  The mock is composed only under the mock profile, and the adapter is already above
+  `dev`, so its version and every lock stay as they are.
+- **The image's Terraform exclusions.** The service image's ignore file leaves out what
+  the VM IaC tree's own `.gitignore` ignores under `terraform/`: variables files, state
+  and its backups, Terraform's working directories and lock files, and plans. The image
+  runs Ansible alone and no Terraform file is tracked, so no file the image takes
+  changes. The file's comment, and S1 above, now claim only what the file does.
+- **`vm-setup`'s included task files are parsed.** The `vm-setup` role reaches every
+  task file through `include_tasks`, which a syntax check does not follow. A second
+  parse-only playbook, `playbooks/host-kit/vm-setup-task-files.yaml`, imports each of
+  them through `import_role` behind a first task that refuses to run, as
+  `vm-management-task-files.yaml` does for `vm-management`. A structure test holds its
+  imports to exactly the files the role's `main.yml` and their own includes reach.
+  Nothing executes host setup to check it.
+- **A native Ansible gate that cannot skip.** The syntax check and the relay-wait test
+  need an in-range ansible-core and the `ansible.posix` callback. Neither is in the IaC
+  project's test environment, so CI and `make test` skipped both. The provisioning image
+  already installs exactly the Ansible that runs these roles, its collections, and
+  PyYAML. So the gate runs there:
+  - `make test-provisioning-iac-native` runs
+    `domains/vms/provisioning/iac/scripts/native_ansible_gate.sh` from the checkout's VM
+    IaC tree, mounted read-only into the built provisioning image;
+  - the script syntax-checks every playbook through the one list
+    `make validate-playbooks` also uses, then runs the relay-wait test with the standard
+    library's `unittest`;
+  - it fails when any test is skipped, so a missing Ansible or callback fails the gate.
+
+  The VM end-to-end lane runs the target as its own step once its stack's images are
+  built, so the image is the one the lane deploys. The default IaC suite keeps its
+  tool-free structural tests and may still skip the native test where Ansible is absent.
+
+Alternatives rejected:
+- *Ansible in the IaC project's dev group, run by `make test`.* That makes a second,
+  independently resolved Ansible toolchain the tests could drift from, and puts Galaxy
+  collection installs into every test environment.
+- *A separate CI job that installs Ansible.* That is a third toolchain and a second job
+  setup, where the VM lane already builds the image whose Ansible runs the roles.
+- *A per-push gate in `tests.yml`.* That needs the provisioning image in per-push CI,
+  which builds no images.
+
 ## Compatibility, migration, and rollback
 
 - **No schema migration.** `public_port` lives in the connection envelope's public
@@ -1739,6 +1813,20 @@ suites of the projects that lock the kit and could call its claim API, the e2e u
 suite, and packaging. The candidate S10 makes owes the frozen round's aggregate run, CI,
 Helm, the images that carry either package, and the live lanes.
 
+S11 follows both live qualifications, which ran on runtime source this slice leaves
+byte-identical on every real path, so it owes no new rental. It changes:
+- the bare-metal adapter's mock output, which is mock-profile code only;
+- the service image's build context, by exclusions matching no tracked file;
+- IaC check plumbing: a parse-only playbook, two scripts, and structure tests;
+- a root `Makefile` target and one VM-lane CI step.
+
+Its slice is gated by the bare-metal adapter's whole suite, and the provisioning
+service's integration modules that compose the bare-metal mock, after the rebuilt
+wheel is installed. It is also gated by the VM IaC suite, the native gate run in a
+built provisioning image, a Docker build-context probe, and packaging. The candidate
+it makes owes the VM lane's pipeline run, which now includes the gate. Its own
+image-content comparison records that the real-path inputs are unchanged.
+
 ## Open questions
 
 None. D7's open items, the resource type of a declaration without GPUs and the
@@ -1770,6 +1858,8 @@ closeout, under the heading named.
 | D13 the readiness wait and autostart | `openspec/specs/physical-provisioning/spec.md` ("A GPU guest's readiness wait and autostart are set by its pool's operator", by the archive); `domains/vms/provisioning/iac/README.md` under "VM Management Operations (vm-management role)", beside the passthrough variables: the three `extra_vars`, their defaults, and why a host passing through its only GPU sets `vm_autostart` false |
 | D14 the real-host bare-metal scenario | `docs/bare-metal-seller-quickstart.md` under "Release-qualified deal evidence": the role inputs, the pinned known-hosts file among them, `--run-id`, teardown to `released`, and revocation proven only by an authentication refusal. `docs/development/TESTING.md` is unchanged: its sentence on `e2e_bare_metal_deal` stays true |
 | The role's task files parsed by the repository's syntax check (Round 2 review F1, `tasks.md` 14.8 and 14.14) | `docs/development/TESTING.md`, beside "Chart Render Tests", and `domains/vms/provisioning/iac/README.md` under "Validation": `validate-playbooks` parses the `vm-management` task files, a capacity check's included, through a parse-only playbook importing them in the role's context, what a syntax check does not show, and that a free-form `shell` string's unbalanced quote fails its task file as it loads |
+| S1 the provisioning service image's own ignore file, with S11's Terraform exclusions | `docs/development/BUILD_AND_PACKAGING.md` under "Images", beside its rule that a Dockerfile with a deny-all ignore file admits `scripts/uv_project.py` explicitly: an ignore file beside a Dockerfile replaces the root's, so one that admits a tree whole states that tree's exclusions itself, an operator's credentials, keys, inventories, variable files, and Terraform state and variables, and a checkout's logs, retry files, caches, and environments |
+| S11 the native Ansible gate and the `vm-setup` parse-only playbook | `docs/development/TESTING.md`, beside "Chart Render Tests", in the paragraph the role's syntax check is promoted to: `make test-provisioning-iac-native` runs the syntax check of every playbook, `vm-setup-task-files.yaml` included, and the relay-wait test, with the built provisioning image's Ansible, failing on any skip, and the VM end-to-end lane runs it; `domains/vms/provisioning/iac/README.md` under "Validation", the same. The mock reclaim's booleans need no destination beyond D2's |
 | S6 the e2e image's SSH client | None beyond `e2e-tests/Dockerfile`'s own comment: which system packages an image carries is its Dockerfile's to state |
 | S7 the mandate's part-owned lifecycle | `openspec/specs/settlement-servicing/spec.md` ("The payments mandate is derived exactly from the Agreement", by the archive) |
 | S7 the contract's source and vector provenance | `kit/arkhai-payments/schema/SOURCE.md`, written with the contract (14.22): the extracted artifact's hash and extraction, its one defect, the previous publication kept as framing evidence, and the synthetic current-wire fixture that is not producer provenance; `docs/development/TESTING.md` under "Payment Receipts in Tests", whose sentence on the published vectors says which wire they pin and that current-wire producer vectors were not supplied with this schema snapshot, so the kit retains the previous publication for canonical framing and uses an explicit SCM synthetic current-wire fixture; `docs/development/ROADMAP.md` "Payment qualification boundaries": that current-wire producer vectors were not supplied with the schema snapshot |

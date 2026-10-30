@@ -12,9 +12,10 @@
 
 # A .dockerignore beside a Dockerfile replaces the root one, so none of the root's
 # exclusions apply here. The IaC trees admitted whole above leave out what a
-# checkout generates or holds locally, by the repository's own ignore rules for
-# them: environments and caches, Ansible logs and retry files, and an operator's
-# keys, credentials, inventories, and variable files.
+# checkout generates or holds locally: environments and caches, Ansible logs and
+# retry files, and what the VM IaC tree's own .gitignore ignores, an operator's
+# keys, credentials, inventories, and variable files, and Terraform's variables,
+# state, plans, and working directories.
 **/.venv
 **/__pycache__
 **/*.py[cod]
@@ -34,3 +35,8 @@ domains/vms/provisioning/iac/ansible/inventory/provisioning-hosts*
 domains/vms/provisioning/iac/ansible/inventory/management-vars.yaml
 domains/vms/provisioning/iac/ansible/build-vars*.yaml
 domains/vms/provisioning/iac/ansible/playbooks/frp-server-credentials*
+domains/vms/provisioning/iac/terraform/*/*.tfvars
+domains/vms/provisioning/iac/terraform/*/*.tfstate
+domains/vms/provisioning/iac/terraform/*/*.tfstate.backup
+domains/vms/provisioning/iac/terraform/*/.terraform*
+domains/vms/provisioning/iac/terraform/*/*.plan

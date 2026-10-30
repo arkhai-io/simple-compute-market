@@ -19,7 +19,9 @@ permissions:
 # a one-shot container on its compose network. Far heavier than the per-push
 # Tests workflow, so it runs nightly / on demand.
 #
-# - e2e-vm: the VM market (`make -C e2e-tests test-e2e-vm`).
+# - e2e-vm: the VM market (`make -C e2e-tests test-e2e-vm`), then the VM IaC's
+#   native Ansible gate in the provisioning image it built
+#   (`make test-provisioning-iac-native`).
 # - e2e-bare-metal: one site, the bare-metal storefront, its registry
 #   (`make -C e2e-tests test-e2e-bare-metal`).
 # - e2e-apicredits: the API-credit market and a compute registry of its own
@@ -51,6 +53,13 @@ jobs:
           version: v1.5.1   # matches FOUNDRY_VERSION in the Makefile
       - name: Build VM stack + run VM e2e scenarios
         run: make -C e2e-tests test-e2e-vm
+      # The VM IaC's syntax checks and native Ansible tests, with the Ansible the
+      # provisioning image this lane just built installs. It runs whatever the
+      # scenarios' result, so its evidence stands alone, and it fails rather than
+      # skips when the image lacks that Ansible or its callback.
+      - name: VM IaC native Ansible gate
+        if: success() || failure()
+        run: make test-provisioning-iac-native
       - name: Collect compose logs
         if: always()
         # `tee` rather than a plain redirect so the output lands in the job log
