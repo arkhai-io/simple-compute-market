@@ -36,6 +36,8 @@ This distinction makes accepted work observable while avoiding false recovery pr
 
 The job record is also where delivered credentials live. A job's executor reports the credentials it generated as `CredentialEnvelope`s, and the job authority stores them with the transition that reports them. The fulfillment aggregate, its provider metadata, and the fulfillment result hold none: a result query for an active fulfillment reads its create job's credentials from the job record each time. Keeping them there is a necessity, not a cache — the create job generates VM tenant credentials on the host, and nothing can read them back from it afterwards.
 
+A job's result is read from the fact its role prints, and one reader in the shared Ansible kit, `compute_provisioning_ansible.read_fact`, reads it for every compute domain. Under the packaged configuration's YAML callback format a role's `debug: var:` fact prints as YAML, which the kit does not parse, beside the JSON document its `debug: msg:` task prints as a literal block; under the JSON format the `var:` form is JSON. The reader takes either, reads each `msg:` block alone so it never runs into a later task's output, and keeps only a document naming the action the job expects. Judging that document belongs to the domain's codec, which owns what a result means: it yields delivery evidence only when the fact names the job's own action, target, tenant account (and, for bare metal, machine), and success. That guards against adopting the wrong document from one run's output, not against provenance across runs. A bare-metal reclaim's fact is checked the same way but decides nothing: a fact that does not match is recorded as a mismatch for an operator, and the reclaim job's status alone decides its teardown.
+
 Two limits follow. An operator's VM password reset runs as its own job, whose new credentials are stored against that job; the fulfillment result still reads the create job's, so after a reset it delivers the superseded password. And the envelopes are stored as plain JSON, unlike a relay's admission token, which is encrypted with the deployment's key, and nothing deletes job rows; anyone who can read the provisioning database can read every credential a job has reported, including those of workloads since torn down.
 
 ## Selected-resource execution
@@ -90,7 +92,9 @@ this is not live hardware access/revocation qualification.
 
 ## Proof-driven release
 
-Release is proof-driven and split across two cooperating owners. Lease lifecycle decides when a reservation should release and owns the final capacity-return decision; it never dispatches a second teardown operation. Fulfillment convergence (see `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker`) owns teardown dispatch, provider polling, and recovery through `torn_down`/`teardown_failed`. A kind-routed `ReleaseJobPort` connects the two: VM-backed reservations resolve release status by reading the fulfillment aggregate's teardown state; other offering modes continue reading the shared job queue. The site authority releases capacity only after the fulfillment aggregate reaches `torn_down`, or an operator explicitly force-releases. Failure retains the reservation and records a retryable release state (`teardown_failed`), which convergence requeues on its own without an operator prompting it. An explicit force release is an operator override with distinct audit meaning, not fabricated proof of executor success.
+Release is proof-driven and split across two cooperating owners. Lease lifecycle decides when a reservation should release and owns the final capacity-return decision; it never dispatches a second teardown operation. Fulfillment convergence (see `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker`) owns teardown dispatch, provider polling, and recovery through `torn_down`/`teardown_failed`. A kind-routed `ReleaseJobPort` connects the two: VM-backed reservations resolve release status by reading the fulfillment aggregate's teardown state; other offering modes continue reading the shared job queue. The site authority releases capacity only after the fulfillment aggregate reaches `torn_down`, or an operator explicitly force-releases. Failure retains the reservation and records a retryable release state (`teardown_failed`), which convergence requeues without an operator prompting it. A requeue re-observes the teardown's job, whose identity is fixed per reservation; it does not run a job whose own retries are exhausted again, so such a teardown stays failed and its capacity held until an operator verifies the host and force-releases it. An explicit force release is an operator override with distinct audit meaning, not fabricated proof of executor success.
+
+A create that was dispatched and then failed has host effects nothing proved removed, so it is not left to an operator by default. When its provider reported the failure and its job metadata names its create job, release compensates it: it begins the domain's ordinary teardown from the `failed` aggregate, marked `create_compensation`, and capacity returns only when that teardown reaches `torn_down`. Each domain's teardown is safe after a partial create: bare metal's reclaim reports an account its grant never created as absent rather than failing, and a VM teardown removes only what its own guest created, finding each artifact by the guest's name when its cleanup script is missing and failing on one it cannot attribute. Compute provisioning alone decides eligibility, through one predicate the release decision, status, and teardown ports share; a failed row it cannot compensate — quarantined, with unreadable metadata, or with its create job missing — still waits for an operator.
 
 Readiness checks use local service dependencies. Slower outbound provider or storefront diagnostics belong to operator surfaces so an external failure does not unnecessarily make a healthy API/worker process unready.
 
@@ -283,6 +287,20 @@ the host registry, because a rendered inventory must be reproducible from the
 registry alone. Splitting any part into service configuration would make the
 connection unreproducible and would express one value for every host, which is
 wrong as soon as two hosts sit behind different tunnels.
+
+Beside the provisioner's route, a connection may name the route a buyer takes:
+a tenant-facing `public_host` and `public_port`, each falling back to the
+connection's own address and port. A bare-metal buyer's endpoint is that route.
+A VM guest is reached at its own forwarded or relayed port, never the host's
+`public_port`.
+
+The `ssh` connection is served at version 2 alone, and a submission stating no
+version, or another, is refused. A host stored at version 1 is refused before
+any inventory is written, and runs nothing until it is submitted again at
+version 2 by an update or an inventory import. An update restates every stored
+public field. A protected key it neither resubmits nor replaces with a key file
+is carried forward from the stored row as ciphertext, never read or decrypted.
+Nothing rewrites a stored row on its own.
 
 The port renders explicitly even at its default, so an inventory line states
 what the registry holds rather than leaving the default implied by an absent

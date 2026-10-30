@@ -311,6 +311,9 @@ them before it starts.
    ```
 
    Without `public_host`, the connection details fall back to `ansible_host`.
+   The port a VM's buyer is given is always that guest's own forwarded or relay
+   port, never the host's: a host line's `public_port=` is a bare-metal tenant's
+   route, and a VM create ignores it.
 
    `provisioning-hosts.ini` seeds the host registry when the provisioning service starts with
    no hosts registered. Work then runs only against registered hosts, never
@@ -339,6 +342,13 @@ them before it starts.
    (`sudo -n true && echo ok`), is in the `libvirt` group, and
    `libvirtd` is running. The playbook handles cloud-init, virt-install,
    and SSH port-forward NAT.
+
+   The host is x86-64 with hardware virtualization (`vmx` or `svm` in its CPU
+   flags) and outbound network access. A scratch create uses one pinned, dated
+   release of the Ubuntu Noble x86-64 cloud image and checks its SHA-256 before it
+   backs any disk, so it refuses another architecture before touching the host, and
+   refuses an image file at the pinned path whose digest differs until you remove
+   it. The VM IaC README's "Prerequisites" says how to move the pin.
 
 ## 5. Bring it up
 

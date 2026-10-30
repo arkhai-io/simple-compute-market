@@ -160,6 +160,25 @@ deeper than the `msg:` key. The reader parses each block on its own, as one JSON
 document after removing the common indentation. It never scans past a block's end
 into a later task's output.
 
+**What the callback was observed to print.** A local playbook repeated the roles'
+printing pattern on `localhost` with synthetic values, under the packaged
+`ansible.cfg`, on ansible-core 2.17.14, 2.18.19, and 2.19.14:
+- the steps were `set_fact` of the mapping, `set_fact` of its `to_nice_json`,
+  `debug: var:` of the mapping, `debug: msg:` of the JSON, and the play's prose
+  summary;
+- every version printed both facts' `msg:` as a `|-` literal block, indented four
+  spaces, and the prose summary as `|-` too;
+- `extract_fact` read nothing under the YAML format.
+
+Two consequences shape the reader and its callers:
+- a templated port prints as a string before 2.19 and may print as an integer on 2.19,
+  so no codec compares the grant fact's `port`, which is detail only (D3), as text;
+- a block nested too deeply for `json.loads` raises `RecursionError`, which the reader
+  counts as `not_json` like any other unparseable block.
+
+This was a local playbook's output, not the deployed roles on a host; their structured
+results are the live lanes' evidence.
+
 **What the reader takes and ignores.** For each block:
 
 - A block that is not JSON is ignored. The playbook's human-readable summary block
@@ -228,6 +247,13 @@ the release follows the fulfillment aggregate, which follows the teardown job. N
 production code reads a reclaim's result value. A mismatch therefore records what
 the run printed for an operator. It does not prove the cleanup was safe, and it does
 not stop one.
+
+Two VM limits follow from the roles:
+- only an enabled relay's port replaces the forwarded one, since the provided-key fact
+  prints its relay block disabled, with `remote_port: 'N/A'`, on the direct path;
+- the monitor and check roles print no `action`, so only their JSON `var:` form is
+  read, and their `msg:` form, which the replaced fallback could not read either, stays
+  unread.
 
 A VM create's fact yields delivery evidence only when:
 - its `action` is `create`;
@@ -309,6 +335,13 @@ One integration case drives such output through the job authority and the job-ba
 fulfillment provider, and observes an active fulfillment through the typed client. A
 mismatched or absent fact leaves the fulfillment `failed`.
 
+Each domain's mock prints the form the shipped configuration prints, rendered for the
+job: the YAML `var:` display, then the `msg: |-` JSON document the reader reads. One
+known difference is kept. For a grant naming no tenant account, the role fails the job,
+while the mock succeeds it with a fact naming a placeholder account that matches nothing,
+so the codec yields no evidence. The fulfillment fails either way, and a real
+fulfillment always derives a tenant account, so no real grant names none.
+
 ### D3. The tenant-facing endpoint has an address and a port, each falling back to the connection's
 
 An `ssh` connection gains an optional `public_port` beside `public_host`: the port
@@ -377,6 +410,9 @@ to be kept:
     no `pool_id` leaves the host's pool as it is.
   - Startup seeding from an inventory file applies the same upsert, but only on a
     service whose registry is empty, so it upgrades nothing that is already stored.
+  - The service's migration that first wrote connection envelopes from older host
+    columns wrote them at version 1 and is not edited: a host it migrated is moved
+    forward the same way.
 - **When.** A retained development or test host is moved forward in the same rollout
   that deploys the service serving version 2, after that service is running and before
   any work is dispatched to the host. The service serving version 2 refuses a
@@ -478,6 +514,21 @@ Inside one write transaction, mirroring `begin_fulfillment_teardown`:
 `begin_fulfillment_teardown` is unchanged: it still begins only from `active`, adopts
 an already-begun teardown, and refuses `failed`.
 
+As built:
+- **The first statement takes the writer slot.** It reserves SQLite's writer slot
+  before reading the row, so `authorize`, preparation, and the write judge one state,
+  and a second compensation fails at the slot before `authorize` runs.
+- **`authorize` cannot reach the record.** It receives a deep copy of the metadata,
+  read-only at its top level.
+- **The ordinary teardown takes no slot.** It judges the last committed state, so it
+  refuses `failed` while a compensation is uncommitted and adopts the compensation
+  once it commits. Two ordinary requests on one `active` row are not serialized that
+  way, as before.
+- **The write records two things.** It records the prepared operation and
+  `failure_reason` only, keeping `failure_message`.
+- **Preparation is shared.** Both entrypoints share one preparation helper, which
+  reuses a teardown already on the row and otherwise asks the provider.
+
 #### The compensation marker
 
 `create_compensation` is the kit's constant for the reason a compensating teardown
@@ -531,7 +582,11 @@ keep it.
   treats only `failed` as a failed delivery, and waits otherwise. A VM storefront that
   first reads the aggregate after compensation began would wait forever. It is changed
   to treat a reason of `create_compensation`, in any state, as a failed delivery, as
-  it treats `failed`.
+  it treats `failed`. Its foreground poll (`_poll_fulfillment_until_terminal`) still
+  stops only at `active` or `failed`: a compensation begins only on a lease's release,
+  so it meets a teardown state only when a release lands between two polls after the
+  create failed, and then times out after `provisioning.timeout`, a bounded wait,
+  leaving the resume reader to read the delivery as failed. It is left as it is.
 - *VM failure actions* (`domains/vms/storefront/src/market_storefront/failure_actions.py`)
   run on a failed delivery. Their capacity release still asks the guarded site
   release, which refuses a `failed` aggregate and frees a compensated one only once it
@@ -661,7 +716,11 @@ and never on the fulfillment state alone.
 - *Bare-metal reclaim.* The reclaim removes the lease's key, or locks or deletes the
   account. When the tenant account does not exist it reports the account absent
   (`account_present: false`), rather than failing on the key-removal module's user
-  lookup. An existing account is handled as today.
+  lookup. An existing account is handled as today. The reclaim first runs `getent
+  passwd` for the account on the target, an argv command with no shell or `become`
+  that changes nothing and fails the reclaim on any exit but 0 or 2, and gates the
+  four tasks that touch the account on its answer; the lock's `user: state: present`
+  is the one that would otherwise have created it.
 - *VM remove.* Covered by D9.
 
 Alternatives rejected:
@@ -771,6 +830,35 @@ artifacts only this teardown can attribute:
     artifact. The teardown then ends `teardown_failed` and the lease waits for an
     operator. An example is a rule with no comment on a host where the guest's address
     is unknown.
+
+As built:
+- **The marker.** It is `arkhai-vm:<guest>`, defined once in the role's `vars/main.yml`.
+  A direct-path create marks its DNAT rule, its per-guest masquerade, both FORWARD
+  rules, the fallback INPUT rule, and its `ufw allow`. A relay-backed create adds no
+  rule, and firewalld's `--add-port` takes no comment.
+- **One implementation.** `roles/vm-management/files/guest_teardown.sh` is included with
+  `lookup('file')` by the cleanup script the create writes, by `vm_remove`'s
+  missing-script branch, and by three `vm_undefine` tasks. It holds no Jinja delimiter.
+- **What is a guest's.** A rule belongs to a guest when it carries the guest's marker,
+  or when it carries no comment and has one of a create's shapes naming exactly the
+  guest's `/32` address or, on INPUT, its forwarded port. A rule with another comment
+  is not the guest's.
+- **How it deletes.** It reads `iptables -S` and deletes each rule by its exact
+  specification. It deletes outside `$(...)`, so a deletion the host refuses fails
+  the script.
+- **The relay proxy block.** It is removed only between its exact BEGIN and END lines.
+  The earlier `sed` range also matched every guest whose name began with this one's.
+  A BEGIN without an END is refused. The file is rewritten in place through an
+  owner-only temporary copy, and the client is reloaded, never restarted.
+- **The missing-script branch.** It fails before anything is removed when the network
+  cannot be read, or when, with the address unknown, an unmarked create-shaped rule
+  is not reserved to another guest. It reports `GUEST_PRESENT`, and `vm_remove_data`
+  gains `cleanup_record` and `guest_present`.
+- **What the repair does not reach.** Guests created before the repair keep cleanup
+  scripts with the old substring matches, which run as written. Three behaviours are
+  unchanged and outside D9: the subnet masquerade a direct create appends each time,
+  a non-fatal (`partial`) relay-client reload failure, and the cleanup script's
+  unconditional `iptables-save`.
 
 ### D10. One physical host is never sold twice
 
@@ -928,6 +1016,22 @@ The scratch image a VM create uses is one dated release of the Ubuntu Noble x86-
 Golden images, which an operator supplies from a bucket path, are unchanged and not
 pinned here. Nothing else about the guest — machine type, firmware, cloud-init — changes.
 
+As built:
+- **The pin.** It is release `20261017`, in the role's `vars/main.yml`, with its digest
+  and the one pinned architecture. When the digest was taken, that release's
+  `SHA256SUMS` was checked against `SHA256SUMS.gpg` with `gpgv` and the Ubuntu cloud
+  image keyring, a good signature from the image signing key. Role variables outrank
+  inventory and play variables, so only extra variables, as a pool's operator-owned
+  `extra_vars` are, can move it.
+- **The download.** `get_url` runs only when the pinned path is absent. It checks a
+  download's digest before moving it into place, and it would re-download over an
+  existing file whose digest differs.
+- **Verification.** A shell step directly before `qemu-img create` runs `sha256sum`
+  on both paths and fails naming both digests. A file at the pinned path with another
+  digest therefore fails every scratch create until an operator removes it.
+- **The architecture check.** It is in `prerequisites.yml`, which runs before the
+  create's own tasks, since only there can it precede "Ensure libvirtd is running".
+
 Alternatives rejected:
 - *Keep `current`.* A create could then boot a guest no one verified, and two creates on
   one host could boot different images.
@@ -982,6 +1086,24 @@ passthrough, and restoring both afterwards — is an operator procedure, reviewe
 any physical work. This change neither performs nor documents a host's particular
 procedure.
 
+As built, one library, `roles/vm-management/files/gpu_eligibility.sh`, is included with
+`lookup('file')` by every task that chooses a GPU:
+- **What it reads.** `gpu_is_boot_gpu` reads the device's `boot_vga`, and `gpu_driver`
+  its driver link. `gpus_attached_to_guests` reads every defined guest's hostdev
+  `<source>` addresses, normalized from libvirt's `0x` hex. The earlier scan read the
+  lines after a hostdev, so a device's address inside its guest also counted as a host
+  device.
+- **What uses it.** The tasks are the attached-GPU listing, the least-used selector, the
+  retry count, the two alternative selectors in the scratch and golden rescues and the
+  one in `gpu-virt-install-retry.yml`, and the multi-GPU selection.
+- **Failing closed.** Defined guests that cannot be read fail the selection, and an
+  empty eligible set prints `NO_AVAILABLE_GPU`, which stops the create before any
+  domain is defined.
+- **What it does not do.** No role file binds or unbinds a device.
+- **Out of reach.** `gpu-virt-install-multi-retry.yml`, which nothing includes, is
+  unchanged. A storefront-supplied `vm_gpu_devices` list fails at templating before any
+  `virt-install`, since the requirements model types its entries as strings.
+
 Alternatives rejected:
 - *Honour any supplied device.* That widens who can choose a GPU and is not needed: the
   opt-in makes the boot GPU eligible, and the existing selection picks it.
@@ -1012,6 +1134,17 @@ Defaults reproduce today's behaviour exactly, so a pool that sets none of these 
 guests as before. Both are subsystem behaviour, stated as a requirement in the
 `physical-provisioning` delta, "A GPU guest's readiness wait and autostart are set by
 its pool's operator", not only operator documentation.
+
+As built:
+- **The defaults** are in the role's new `defaults/main.yml`: the opt-in false, 10, 30,
+  and autostart true.
+- **The type checks.** Two `assert` tasks in `prerequisites.yml`, on the controller
+  before any task that touches the host, require each wait setting to be `is integer`
+  and `> 0`, and the opt-in and `vm_autostart` to be `is boolean`. A quoted `"40"`
+  therefore fails. A pool's `extra_vars` reach the playbook as JSON, so their types
+  survive.
+- **The wait.** It prints the bound and both setting names when it runs out.
+- **Autostart.** It runs only when `vm_autostart | bool`.
 
 ### D14. The real-host bare-metal scenario drives the buyer commands as they ship
 
@@ -1045,6 +1178,13 @@ corrected, as test code only, before that lane runs:
   "Permission denied" for the public key. Any other failure — a refused or timed-out
   connection, an unreachable host, or a host-key mismatch — fails the scenario, never
   counted as revocation.
+- **As built.** The SSH attempt also sets `ConnectTimeout=10`,
+  `GlobalKnownHostsFile=/dev/null`, so no system-wide known host is trusted, and
+  `UpdateHostKeys=no`, so an attempt never rewrites the pin.
+- **The purchase's own events.** The scenario expected `buy`'s run log to hold another
+  command's events. A real `buy` records `run_started`, `agreement_accepted`,
+  `payment_approved`, and `run_ended`, ending `agreed`; the scenario checks that
+  sequence, and the buyer's own run-log test pins it on the producer's side.
 - **No new framework.** The scenario keeps the installed `market` command, the
   harness's buyer CLI, and the run log, and adds only what these corrections need.
 
@@ -1086,6 +1226,22 @@ Section 14). The wait parses the body itself, whatever its label, and still requ
 the exact proxy `vm-<guest>` reported `running`. A failed request, another status, or
 an empty body is retried within its bound; a body that is not the client's status
 document ends the create as an error; nothing else is ready. No networking changes.
+
+The role's task files are parsed by the repository's own check. The `vm-management` role
+reaches every task file through `include_tasks`, which `ansible-playbook --syntax-check`
+does not follow. The parse-only `vm-management-task-files.yaml` imports them through
+`import_role`, behind a first task that refuses to run, and `make validate-playbooks`
+checks it (the Round 2 implementation review's F1). This is where some errors only show:
+Ansible splits a free-form `shell: |` string as module arguments, so one unbalanced
+quote, an apostrophe in a bash comment included, fails the whole task file as it loads,
+though bash would run the script. The new check failed on three tasks Sections 13 and 14
+had commented with apostrophes, which would have failed every real create and undefine.
+It also failed on `vm-check.yml`'s capacity count, which predates this change and which
+a host's capacity read runs (S2). All four comments were reworded. A test of the relay
+wait that runs the shipped task through a real `ansible-playbook` needs the
+`ansible.posix` collection's `json` callback, which ansible-core only redirects to, so
+the test names that callback and is skipped, saying so, where it is absent (S4). S11 and
+S13 later made both checks a gate that cannot skip.
 
 ## Live qualification
 
@@ -1337,6 +1493,14 @@ through it, and none builds a mandate of its own, so no domain changes.
   - It keeps the producer's OpenAPI rendering as published: a one-value `enum` where the
     previous publication said `const`, nullable fields as an `allOf` with a type list,
     and no safe-integer maxima.
+  - Two consequences reached code. The generator made a one-value `enum` an `Enum`
+    class, so a receipt issuer's scheme no longer equalled its wire string and every
+    receipt failed verification; the generator types a one-value `enum` as a literal
+    (`--enum-field-as-literal one`), as `const` produced, and the schema is not edited.
+    `DealCommitment` is its own string pattern rather than a reference to `Sha256Hex`,
+    so the client and receipt verification read `deal.root`, and the VM storefront's
+    payment evidence reads the deal from the receipt's wire form rather than the
+    generated nesting.
   - It keeps one defect: `HttpUrl`'s pattern ends in a leaked regular-expression flag
     (`$/i`), so it matches no URL. Only cash, top-up, onboarding, and billing-portal
     types use it, and SCM calls none of them.
@@ -1936,8 +2100,9 @@ live read-backs, not open design.
 
 ## Design promotion record
 
-Spec deltas are merged by the archive. Every other destination is written at
-closeout, under the heading named.
+Spec deltas are merged by the archive. Every other destination was written at
+closeout (`tasks.md` 15.9), under the heading named, and describes the current system.
+No destination here was already written by `prove-real-vm-provisioning`'s own promotion.
 
 | Accepted decision | Permanent location |
 |---|---|
@@ -1965,10 +2130,10 @@ closeout, under the heading named.
 | S7 the contract's source and vector provenance | `kit/arkhai-payments/schema/SOURCE.md`, written with the contract (14.22): the extracted artifact's hash and extraction, its one defect, the previous publication kept as framing evidence, and the synthetic current-wire fixture that is not producer provenance; `docs/development/TESTING.md` under "Payment Receipts in Tests", whose sentence on the published vectors says which wire they pin and that current-wire producer vectors were not supplied with this schema snapshot, so the kit retains the previous publication for canonical framing and uses an explicit SCM synthetic current-wire fixture; `docs/development/ROADMAP.md` "Payment qualification boundaries": that current-wire producer vectors were not supplied with the schema snapshot |
 | S7 the required nullable maximum hold extension and the one wire serializer | `kit/arkhai-payments/schema/SOURCE.md` ("Required nullable durations"), written with the fix (14.26): the published form, the generation normalization of exactly two properties, the unnormalized `ConnectStatus`, and `wire_json` as the one wire form; `kit/arkhai-payments/README.md`; the code is its own record (`kit/arkhai-payments/scripts/generate_models.py`, `market_arkhai_payments.canonical`). No permanent specification changes: the derived mandate still states `P0D` |
 | Coordination with `prove-real-vm-provisioning` | None: change history. That change promoted its own decisions and archived its own deltas at its closeout, at `openspec/changes/archive/2026-10-30-prove-real-vm-provisioning/` |
-| S10 a healthy pending poll is not spaced by failure backoff | `openspec/specs/fulfillment/spec.md` ("Fulfillment convergence worker" and the recovery-lease paragraph, by the archive); `docs/development/ARCHITECTURE.md`, the paragraph on `FulfillmentConvergenceWatchdog`, whose "per-row exponential backoff and jitter between attempts" becomes backoff between consecutive failed attempts, with a healthy pending poll spaced by the initial interval |
+| S10 a healthy pending poll is not spaced by failure backoff | `openspec/specs/fulfillment/spec.md` ("Fulfillment convergence worker" and the recovery-lease paragraph, by the archive); `docs/development/ARCHITECTURE.md`, the paragraph on `FulfillmentConvergenceWatchdog`, whose "per-row exponential backoff and jitter between attempts" becomes backoff between consecutive failed attempts, with a healthy pending poll spaced by the initial interval; `openspec/specs/fulfillment/architecture.md` under "Durable persistence and recovery": a claim spaced by the run of consecutive unproductive claims |
 | S9 a bare-metal purchase pays its option's exact total | `openspec/specs/negotiation-protocol/spec.md` ("An exact selection of a time-priced option settled from the Agreement is accepted only at its total") and `openspec/specs/buyer-orchestration/spec.md` ("A bare-metal purchase pays the selected option's total for its duration"), both by the archive |
-| S12 the merge of `prove-real-vm-provisioning` as archived | None: change history. The runbook's version 2 paragraph and placeholders are written in the merge itself; that change promoted and archived its own work |
+| S12 the merge of `prove-real-vm-provisioning` as archived | None: change history. The runbook's section 24 paragraph on the scenario's `ssh` version 2 registration, and its GCP sections' operator variables, were written in the merge itself; that change promoted and archived its own work |
 | S8 the merge of `prove-real-vm-provisioning` through its Section 7C | None: change history. Each resolution follows a decision whose destination is recorded above (D1, D2, D3); that change promotes and archives its own |
-| Live qualification of both lanes | None: external evidence, recorded at closeout as live evidence or named blockers (`tasks.md`, the closeout's end-to-end part) |
+| Live qualification of both lanes | External evidence, recorded in `tasks.md` 15.8 as live evidence, apart from the pipeline; its public summary and the gaps it leaves are in `docs/development/ROADMAP.md` "Payment qualification boundaries". Raw operational evidence stays outside the repository |
 | Roadmap currency | `docs/development/ROADMAP.md` "Goal 1 — Consolidate physical-resource authority in the provisioning service" (the real runner's evidence row) and "Payment qualification boundaries". Goal 2 is unchanged: this change no longer sells VM shapes without GPUs |
-| Campaign index currency | `openspec/changes/README.md`: this change's row. The dependency line to `gpu-optional-compute-shapes` and that change's `Depends on` entry were removed with D7's withdrawal |
+| Campaign index currency | `openspec/changes/README.md`: this change's row, `in closeout`, its notes rewritten to the state at closeout, the Round 2 sentence review 19 F1 named among what was dropped. No dependency line or `Depends on` entry names this change: those to `gpu-optional-compute-shapes` were removed with D7's withdrawal |

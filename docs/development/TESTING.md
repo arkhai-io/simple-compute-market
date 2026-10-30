@@ -498,6 +498,17 @@ adapter mounts its rules and job dry run under its own prefix, VM's at
 `/test/bare-metal/mock-rules` and `/test/bare-metal/evaluate-job`, beside the
 shared `/test/jobs/*` routes. None of them is mounted outside the mock profile.
 
+A mock's default output is what the shipped configuration prints for the job:
+the role's `debug: var:` fact in the YAML result format, then the `debug: msg:`
+JSON copy the shared fact reader reads, rendered from the job's own parameters
+— its guest or host, its tenant account, its action, and booleans where the
+role prints booleans. So a mock lane exercises the same reader and the same
+linkage between a fact and its job as a real run, and a fact naming another
+guest or tenant yields no delivery evidence there too. The VM scenarios arm no
+create output of their own; every create reads that default. A test that needs
+an output the role would not print for its job states it in a rule and keeps
+to the codec's or provider's level.
+
 `make -C e2e-tests test-e2e` runs the three in turn, taking each stack down
 before the next, because every stack names its chain container `anvil` and
 publishes fixed host ports. A lane provides its own configuration, so a
@@ -908,13 +919,22 @@ signature = service.sign(_frame(("arkhai.payments.receipt.v1", jcs_sha256(receip
 ```
 
 The fixture is trustworthy because it uses the same framing function as the
-kit's verifier, and the kit's unit suite proves it reproduces the published
-vector exactly:
+kit's verifier. The published vectors pin the previous wire: the current models
+refuse their receipt's parts. The framing and the signature cover a receipt's
+JSON whatever its parts say, so the kit's unit suite reproduces the vector's
+message and signature from the raw published body, byte for byte, and then
+signs and verifies a current-wire receipt through the same framing:
 
 ```python
 assert receipt_message(vector_body).hex() == vectors["receipt"]["message"]
-assert sign_receipt(Ed25519Signer(vector_seed), vector_body) == vector_receipt
+assert signer.sign(receipt_message(vector_body)) == vector_signature
+assert sign_receipt(SERVICE, current_wire_body) == build_signed_receipt(signer=SERVICE, mandate=mandate)
 ```
+
+Current-wire producer vectors were not supplied with the vendored schema, so the
+current wire is pinned by an explicit synthetic fixture that is not producer
+provenance; `kit/arkhai-payments/schema/SOURCE.md` says how to replace both when
+the service publishes them.
 
 The fixture takes its signer as an argument and ships no key material.
 Integration tests replace `PaymentsClient`, the code that wraps the payments
@@ -968,6 +988,38 @@ exactly when it passes under `make test`; `scripts/tests/test_tests_workflow.py`
 holds the matrix to `make test`'s targets. The jobs set
 `_TYPER_FORCE_DISABLE_TERMINAL`, because Typer forces Rich's terminal styling
 whenever `GITHUB_ACTIONS` is set, which a local run never sees.
+
+## Ansible Syntax and Native Checks
+
+The roles reach most of their task files through `include_tasks`, which
+`ansible-playbook --syntax-check` does not follow, so checking a role's own
+playbook leaves those files unparsed. Each such role has a parse-only playbook
+that imports its task files through `import_role` instead, in the role's
+context: `vm-management-task-files.yaml` and `vm-setup-task-files.yaml` in the
+VM IaC tree. Parsing is where some errors only show: Ansible splits a free-form
+`shell: |` string as module arguments, so an unbalanced quote, an apostrophe in a
+bash comment included, fails the whole task file as it loads, though bash would
+run the script. A syntax check templates nothing and executes nothing.
+
+A parse-only playbook's first task refuses to run and is tagged `always`, since
+the tasks it imports keep their own tags and some carry `always`: under any
+`--tags` selection the refusal still runs first. An operator's explicit
+`--skip-tags always` or `--start-at-task` passes over it, which nothing in a play
+can refuse.
+
+`domains/vms/provisioning/iac/scripts/validate_playbooks.sh` syntax-checks every playbook the VM IaC tree
+ships from one list, which a structure test holds equal to the playbooks
+present; `make validate-playbooks` runs it. Tests that run a shipped task through
+a real `ansible-playbook`, such as the relay-wait test against a loopback HTTP
+peer, are integration tests in this document's sense, and skip in the default
+suite without ansible-core 2.17 to 2.19 and the `ansible.posix` collection's
+`json` callback. `make test-provisioning-iac-native` runs both in the built
+provisioning image, whose Ansible and collections are the ones that run these
+roles, with the checkout's IaC tree mounted read-only and no network but
+loopback. It fails rather than skips: a skipped test, no test, or a missing
+Ansible or callback fails it. A structure test holds the gate's list of native
+test modules to every module that defines their skip guard. The VM end-to-end
+lane runs the gate as its own step once it has built the image.
 
 ## Chart Render Tests
 
@@ -1126,7 +1178,7 @@ only the named payments table, not domain configuration or payer selection.
 See [shared payment-scenario configuration](../../e2e-tests/README.md#shared-payment-scenario-configuration)
 for environment and runner setup.
 
-**Current example:** complete deals settled through the Arkhai payments service are qualified by that service's own suite. Here, `kit/arkhai-payments` checks conformance against the service's published vectors, vendored and identified by content hash in `kit/arkhai-payments/schema/SOURCE.md`.
+**Current example:** complete deals settled through the Arkhai payments service are qualified by that service's own suite. Here, `kit/arkhai-payments` generates its models from the service's published schema and checks the published vectors' canonical framing, both vendored and identified by content hash in `kit/arkhai-payments/schema/SOURCE.md`. The vectors are of the previous wire, so the current wire is pinned by a synthetic fixture, as "Payment Receipts in Tests" describes.
 
 ## Offline Review Validation
 

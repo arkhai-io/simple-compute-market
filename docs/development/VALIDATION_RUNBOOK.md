@@ -1050,3 +1050,64 @@ rm -f /tmp/kvm-hosts.ini
 rm -f e2e-tests/config/config-real-vm-target.yml
 ```
 
+
+## 27. Running Live Lanes
+
+A live lane is a test-mode purchase through the buyer commands on a physical host,
+from a validated candidate: a whole bare-metal machine, or a guest on a VM host.
+
+**Lanes on separate machines run in parallel.** Their capacity cannot overlap. What
+they share is this repository's source, its wheelhouse and environments, and the
+images built from them, so changes to those stay serialized: no lane's run rebuilds or
+reinstalls what another lane is running on.
+
+**Lanes sharing a machine run in sequence.** A whole-host bare-metal deal and a VM on
+the same machine are admitted by different provisioning services, and cross-mode
+accounting does not span them. Two lanes whose sources are one machine therefore run
+one at a time. The idle lane's listings are held by each listing's durable pause
+(`pause_listing`, `POST /api/v1/listings/{id}/pause`), which keeps them open and
+published and survives a restart that keeps the storefront's database, though not a
+database reset. A pause refuses only a new opening on its listing. A counter or accept
+on a thread opened before it, settlement, fulfillment, and teardown all proceed, so a
+pause drains nothing.
+
+It relies on one precondition that no permanent requirement states: a publication
+refresh or reopen under the same listing identity keeps its pause. A listing bound
+under a new derivation key — a corrected declaration or shape, a new member, a changed
+hint or override, a new site — is created unpaused.
+
+Before each lane's purchase, and after any restart or redeploy of the idle side,
+re-check from fresh read-backs:
+
+1. **Freeze.** Make no change to the idle side's capacity declarations, pools, hints,
+   overrides, or sites until the switch completes, so no unpaused listing is bound.
+2. **Pause.** Pause every idle-lane listing on the shared machine, and read each back
+   open and paused, and open at its registry.
+3. **No unpaused listing.** No open listing for the machine on the idle storefront is
+   unpaused.
+4. **No open negotiation.** No thread on those listings is still open; the negotiation
+   watchdog abandons a stale one after its timeout.
+5. **Every accepted deal drained.** For every accepted deal on those listings:
+   - its settlement and fulfillment are terminal;
+   - its site reservation is `released`, or force-released after verification;
+   - every provider job for it is terminal;
+   - its host-side effects are verified removed: the tenant key and account for bare
+     metal, the guest and its artifacts for VM;
+   - no approved receipt or recorded materialization remains that could still start a
+     delivery.
+
+   Check a refund or expired approval as the financial disposition too, but never take
+   either as proof of a drain.
+6. **Site drained.** At the idle lane's site, no reservation for the machine is in a
+   state the site counts as holding capacity: `reserved`, `leased`, `releasing`,
+   `release_failed`, or `unmanaged` (`HELD_RESERVATION_STATES` in
+   `kit/site/src/market_site/db.py`). In the site's resource-pool projection, every
+   member on the machine has an `available` mapping equal to its declared `capacity`
+   mapping, dimension by dimension. Neither the lease list, which omits a hold with no
+   lease window, nor the scalar `available_units`, which reads only the mirror
+   dimension, is enough.
+7. **Then the active lane.** Only then may the active lane's listing trade.
+
+If a condition cannot be met — a reset database, an unpaused successor listing, work
+that cannot be drained, or a deployment without the pause — stop the lane switch at
+that boundary. Take no shortcut.

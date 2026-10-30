@@ -2693,11 +2693,23 @@ defaults MUST NOT refuse startup; a pool that resolves no lease bound its domain
 any tier MUST be held and reported per site, and a candidate whose pool resolves no settlement
 clause from any tier MUST be refused as "A compute candidate with no settlement option yields no
 listing" requires.
+A bare-metal storefront MUST also refuse to start when a registry pin or a `[registry.auth]`
+token names no configured registry, or when two `[registry.auth]` entries name one registry
+after URL normalization; the refusal names that registry's URL and the table, and never
+echoes a token.
 
 #### Scenario: A bare-metal storefront has no registry
 
 - **WHEN** a bare-metal storefront starts with no `[registry].urls`
 - **THEN** it refuses to start, naming the missing registry, and starts no loop
+
+#### Scenario: A bare-metal registry pin or token names no configured registry
+
+- **WHEN** a bare-metal storefront starts with a `[registry.authorities]` pin or a
+  `[registry.auth]` token naming a URL that is not one of its `[registry].urls`, or with two
+  `[registry.auth]` entries that name one registry once normalized
+- **THEN** it refuses to start, naming the table and the registry's URL, and the refusal
+  carries no token
 
 #### Scenario: A site's authority URL is not an origin
 

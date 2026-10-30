@@ -33,6 +33,22 @@ A comprehensive Terraform and Ansible-based Infrastructure as Code solution for 
 - **FRP server** (optional, for remote SSH access)
 - **Terraform 1.14+** with updated GCP Provider version
 
+A host that creates scratch VMs must be **x86-64**: a scratch create reads the
+target's machine architecture before any host effect and refuses any other. It
+creates every guest from one pinned, dated release of the Ubuntu Noble x86-64 cloud
+image, named in the `vm-management` role's `vars/main.yml` with its SHA-256 and
+stored under a name carrying the release. The image is downloaded only when absent,
+and its SHA-256 is checked before it backs any disk, whether it was just downloaded
+or already on the host; a file at the pinned path with another digest fails every
+scratch create until it is removed. To move the pin, verify the new release's
+`SHA256SUMS` against its `SHA256SUMS.gpg` with the Ubuntu cloud image keyring, then
+change the release and its digest in `vars/main.yml` together. Golden images are not
+pinned.
+
+`playbooks/host-kit/vm-setup.yaml` is never run on a host whose management access
+must be preserved: it enables a default-deny firewall, adds bans, edits SSH
+configuration and the boot loader, and reboots unconditionally.
+
 ## Installation
 
 ### 1. Clone the Repository
@@ -224,14 +240,39 @@ make validate-tests
 These targets currently cover:
 
 - inventory parsing via `ansible-inventory -i ansible/inventory/ --list`
-- syntax checks for:
+- syntax checks of every playbook in `ansible/playbooks/`, from the one list in
+  `scripts/validate_playbooks.sh`, which a structure test holds equal to the
+  playbooks present:
   - `playbooks/frp/frp-server-setup.yaml`
   - `playbooks/frp/docker-app-setup.yaml`
   - `playbooks/host-kit/vm-setup.yaml`
+  - `playbooks/host-kit/vm-setup-task-files.yaml`
+  - `playbooks/host-kit/passthrough-audit.yaml`
   - `playbooks/single-tenant/vm-operations.yaml`
+  - `playbooks/single-tenant/vm-management-task-files.yaml`
 - VM lifecycle contract tests in `tests/test_vm_management_contracts.py`, which
   verify the checked-in task contracts for `vm-create`, `vm-destroy`,
   `vm-undefine`, prerequisite fail-fast behavior, and JSON output formatting
+
+A syntax check parses a playbook and what it imports statically; it does not follow
+`include_tasks`, through which both roles reach their task files. The two parse-only
+playbooks, `vm-setup-task-files.yaml` and `vm-management-task-files.yaml`, import
+those files through `import_role` so the check parses them in their role's context.
+Each refuses to run with a first task tagged `always`, so a `--tags` selection still
+stops there; an explicit `--skip-tags always` or `--start-at-task` passes over it.
+Parsing catches what bash would not: Ansible splits a free-form `shell: |` string as
+module arguments, so an unbalanced quote, an apostrophe in a bash comment included,
+fails the whole task file as it loads. A syntax check templates nothing and runs
+nothing.
+
+`tests/test_frp_proxy_wait.py` runs the relay proxy wait through a real
+`ansible-playbook` against a loopback HTTP peer, an integration test. It is skipped,
+saying which is missing, without ansible-core 2.17 to 2.19 and the `ansible.posix`
+collection's `json` callback, which the default `make test` does not install.
+`make native-ansible-gate` here, or `make test-provisioning-iac-native` from the
+repository root, which runs it in the built provisioning image with this tree mounted
+read-only, runs every syntax check and that test, and fails rather than skips when
+Ansible or the callback is missing. The VM end-to-end lane runs the root target.
 
 `ansible-lint` is not part of the default validation path in this repo yet.
 
@@ -1241,6 +1282,46 @@ ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
 - `frp_server_addr`: IP address of FRP server (e.g., `192.168.100.61`)
 - `frp_dashboard_password`: FRP dashboard API password for proxy registration
 - `vm_lease_end`: Lease expiration datetime in UTC format `YYYY-MM-DD HH:MM` (e.g., `2026-02-23 10:45`) - use JSON format in command: `-e '{"vm_lease_end":"2026-02-23 10:45"}'`
+
+#### GPU guests, readiness, and autostart
+
+Four settings come only from a pool's operator-owned provider configuration, its
+`extra_vars`, which reach the playbook as extra variables. No job parameter or
+fulfillment requirement carries them, and a request naming one is refused.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `vm_passthrough_boot_gpu` | `false` | Whether the host's boot GPU may be passed through |
+| `vm_setup_wait_attempts` | `10` | How many times a create checks that the guest finished setting up |
+| `vm_setup_wait_interval_seconds` | `30` | How long it waits between those checks |
+| `vm_autostart` | `true` | Whether the created guest starts on host boot |
+
+Each is checked on the controller before any host effect: the two wait settings must
+be positive integers, and the other two booleans, so a quoted `"40"` fails, naming the
+setting.
+
+- **The boot GPU.** It is the GPU whose sysfs `boot_vga` flag is set, read per device.
+  Without the opt-in it is never selected, whatever the GPU inventory lists. With the
+  opt-in it is eligible only when the inventory lists it available, its sysfs driver
+  link names `vfio-pci` now, and no defined guest has it attached; another driver, or
+  none, makes it ineligible.
+- **Every way a create chooses a GPU** applies the same eligibility: the first choice,
+  each retry's alternative, and the multi-GPU selection. Attachment is read from defined
+  guests' hostdev source addresses, and guests that cannot be read fail the selection.
+- **No eligible GPU** fails the create before any domain is defined. The role never
+  binds or unbinds a device: preparing a GPU for passthrough, and returning it to its
+  host driver afterwards, is the operator's procedure.
+- **Readiness.** A create that runs out of attempts fails, naming the bound and both
+  settings.
+- **Autostart.** A host passing through its only GPU sets `vm_autostart: false`, so a
+  guest a teardown has not yet removed cannot reclaim the GPU when the host reboots.
+
+On the relay path, a create waits for the host's tunnel client to report the guest's
+proxy. Its status API answers JSON labelled `text/plain`, so the wait parses the body
+itself, whatever its label. Only a `tcp` proxy named exactly `vm-<guest>` with status
+exactly `running` is ready. A failed request, another status, or an empty body is
+retried within the wait's bound, and a body that is not the client's status document
+ends the create as an error at once.
 
 #### Guest names
 

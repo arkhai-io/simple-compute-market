@@ -48,8 +48,10 @@ Create an operator-owned inventory file outside the repository:
 
 ```ini
 [bare_metal_nodes]
-host-ca-h200-01 ansible_host=10.0.0.25 public_host=203.0.113.25 ansible_user=ubuntu pool_id=whole-host-california
+host-ca-h200-01 ansible_host=10.0.0.25 public_host=203.0.113.25 public_port=22 ansible_user=ubuntu pool_id=whole-host-california
 ```
+
+The addresses are documentation values; use your own.
 
 The provisioning service registers every host entry in this file as a host; the
 section name is yours to choose and means nothing to it. List only execution
@@ -100,8 +102,12 @@ prepared afterwards.
 The mounted inventory seeds the host registry when the provisioning service
 starts with no hosts registered; it is not read at execution. A host added to it
 later must be imported (`POST /api/v1/hosts/import`) before work can be
-dispatched to it. A host's `public_host` is passed to the access playbook as a
-host variable.
+dispatched to it. A host's `public_host` and `public_port` are the endpoint a buyer
+is given: the route a tenant takes to the machine, each falling back to the
+connection's own address and port when the entry states none. The provisioning
+service's own route stays `ansible_host` and `ansible_port`. Every host is stored as
+an `ssh` connection at version 2; a host stored at version 1 runs nothing until it is
+imported again or updated at version 2.
 
 The pool declaration is authoritative. Do not add `vm` merely to make a
 request pass; add it only if the same pool and executor can actually deliver
@@ -511,12 +517,22 @@ role inputs and run:
 uv run pytest -m e2e_bare_metal_deal -v
 ```
 
-The scenario drives the installed `market bare-metal` command. It checks the
-public lifecycle in order, performs real SSH with the returned access
-descriptor, requests teardown through the buyer command, waits for the
-accepted terminal teardown status, and proves that the same SSH access is
-revoked. A mock job, unit result, Compose render, health response, or
-provisioning database row is not substitute evidence.
+The scenario drives the installed `market bare-metal` command as it ships. Its
+role inputs are the buyer's marketplace credential
+(`ARKHAI_E2E_BARE_METAL_MARKETPLACE_CREDENTIAL`), the tenant's SSH private key
+(`ARKHAI_E2E_BARE_METAL_SSH_PRIVATE_KEY_FILE`), a known-hosts file pinning the
+delivered host's key (`ARKHAI_E2E_BARE_METAL_KNOWN_HOSTS_FILE`), and the registry and
+purchase settings under `BARE_METAL`; without any of them it skips, naming it.
+
+It buys through `buy`, then reads the run back with `result`, `access`, and
+`teardown`, each given `--run-id` and the id `buy` printed. Every access attempt is
+a fresh SSH process that reads no configuration and checks the host's key strictly
+against the pinned file. Teardown repeats `teardown --run-id` until the lease is
+`released`, failing at once on `teardown_failed` and at its bound with the last
+state. Revocation is proven only by that pinned host refusing the same key for its
+public key afterwards; a refused or timed-out connection, an unreachable host, or a
+host-key mismatch fails the scenario instead. A mock job, unit result, Compose
+render, health response, or provisioning database row is not substitute evidence.
 
 ## Operational rules
 
