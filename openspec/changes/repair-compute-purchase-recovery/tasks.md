@@ -4085,6 +4085,29 @@ moves.
       claim API; the method is additive. Also not run: the root `make test`, CI, Helm,
       the images, and the live lanes, all owed on the frozen candidate.
 
+- [x] 14.36 The S10 implementation review's two minor findings, accepted under the
+      owner's standing instruction to make the necessary repairs:
+      - **F1, a real-database test under `unit/`:** `test_ledger_lease_lifecycle.py`,
+        which builds its own SQLite schema and drives the ledger, repository, lease
+        lifecycle, and convergence worker, moves byte for byte from
+        `provisioning/compute/service/tests/unit/services/` to
+        `provisioning/compute/service/tests/integration/`, as `docs/development/TESTING.md`'s
+        "Test File Layout" asks of such a module when it is next touched. The integration
+        conftest adds no autouse fixture, hook, or plugin, and the module's own
+        `session_factory` takes precedence over the conftest's, so no fixture or import
+        changes. The physical-provisioning specification's evidence list now cites it at
+        its new path. 14.34's note names its old path, as it then was;
+      - **F2, the diagnostics' maximum attempt count:** the `fulfillment` delta's
+        diagnostics sentence and the design's S10 decision now say it reports the
+        longest current run of consecutive unproductive claims. No counting or wire
+        change.
+
+      Verification, each exiting 0: the relocated module, 14 passed; the service still
+      collects 609 tests across `unit/` and `integration/`; `make check-packaging`,
+      `make check-change`, `make check-change-index`, and `make check-comment-hygiene`
+      passed. The tracked source, locks, and `pyproject.toml` files are unchanged, and so
+      are the rebuilt fulfillment-kit and service wheels, so 14.35's suites stand.
+
 ## 15. Closeout
 
 The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.

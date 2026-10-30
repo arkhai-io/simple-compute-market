@@ -1599,7 +1599,10 @@ Decisions:
 - **`attempt_count` counts consecutive unproductive claims.** An applied outcome, or a
   provider answering that its operation is still pending, starts it again, so a phase
   never inherits the backoff of an earlier one, and only consecutive failures grow the
-  lease. There is still no ceiling, and failures still back off exactly as before.
+  lease. There is still no ceiling, and failures still back off exactly as before. The
+  recovery diagnostics' maximum attempt count therefore reports the longest current run
+  of consecutive unproductive claims in each state, not the most claims a row has ever
+  had; its field and wire shape are unchanged.
 - **A pending read keeps its claim for the initial poll interval.** The claim still
   spaces polls, so a burst of cycles still does not re-poll and `advance_cycle` keeps
   its purpose. The spacing is the initial interval, and a job that finishes in seconds
