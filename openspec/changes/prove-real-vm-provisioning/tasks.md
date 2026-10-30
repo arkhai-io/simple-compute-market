@@ -1180,7 +1180,7 @@ the owner supplies the output, free of addresses, project, cluster, namespace, h
 names, and private paths, and it is checked against the acceptance here. Record the
 public revision of this branch the run used.
 
-- [ ] 8.1 **[log]** Host preparation with the default image setup and `gpu_passthrough`
+- [x] 8.1 **[log]** Host preparation with the default image setup and `gpu_passthrough`
       left `auto`, on a GPU-less host. Supplied: the play recap; `/proc/cmdline` before
       and after; `/sys/module/kvm_intel/parameters/nested` (or `kvm_amd`); `ls -l
       /dev/kvm`; whether `gpu-detection.service` exists. Acceptance: preparation
@@ -1234,7 +1234,11 @@ public revision of this branch the run used.
       by `vm-create.yml`, which already tries `ssh` then `sshd` — so the owner left it
       out of scope with the golden image (D10), noted on `fix-golden-image-config`'s
       row. The Impact list now names the handler.
-- [ ] 8.2 **[log]** The scenario: `make -C e2e-tests test-module
+      Checked with the section at `3dee66930`. Host preparation's code there differs
+      from `8638567c8`'s only by 7A's handler and its test (`git diff --stat 8638567c8
+      3dee66930 -- domains/vms/provisioning/iac`), which 8.4 shows, so 8.1's acceptance
+      still stands for the head.
+- [x] 8.2 **[log]** The scenario: `make -C e2e-tests test-module
       MODULE=e2e_vm_real_provisioning ACTIVE_PROFILES=local,real-vm-target` against the
       provided stack. Supplied: pytest's summary and per-stage results; the VM-execution
       check's reported executor; the create and teardown jobs' terminal statuses; the
@@ -1367,7 +1371,32 @@ public revision of this branch the run used.
       fix's revision, so both runs are at the final revision.
       Planned: 8.2 is met by the first of 8.3's two runs at a revision that includes
       7D (8.3, "Planned").
-- [ ] 8.3 **[log]** A second run of the scenario against the same stack. Acceptance: it
+      Run 4, owner-supplied and sanitized: the scenario from a clean checkout of
+      `3dee66930` (sections 1–7D) against a freshly deployed, unmocked stack of
+      `f52f07973`'s published images and chart, an empty host registry, and a GPU-less
+      nested-KVM host freshly created and prepared at `f52f07973` (`failed=0 ignored=0`,
+      the SSH restart handler `changed`). Outside `openspec/` and `e2e-tests/` the two
+      revisions are identical (`git diff --stat f52f07973 3dee66930` over the rest of
+      the tree is empty), so the deployed code is the head's. 37 passed, none skipped
+      or failed (553 deselected). Against the acceptance:
+      - 00e1 reported `offering_mode='vm' mocked=False`; 00f2 the host registered as
+        the target; 02b created its listing paused on the fresh stack;
+      - 08b recorded the fulfillment `dispatching`; 08b3's create job `succeeded` on
+        the target host and reported the guest; 09a converged the fulfillment to
+        `active`;
+      - 09d connected as the delivered user at the host's address and forwarded port,
+        logged the guest's host-key fingerprint (`SHA256:…`), and probed `vcpu_count=7,
+        memory_gib=27.41, root_disk_gib=160.0` against the sold `7 / 28 / 160` (vCPUs
+        and disk equal, memory 2.1% short, within the 5% tolerance);
+      - 09e: the unrelated key refused with `Permission denied (publickey,password)`;
+      - 11a3's teardown job `succeeded` on the target host; 11b passed, the released
+        capacity reserved again under 7C's claim;
+      - 11c: the guest gone from the host, which lists `[]`;
+      - 11d: the delivered access timed out after teardown (`Connection timed out`).
+      Every stage passes and none skips, and the values match "A real deal is
+      delivered", "An unrelated key is refused", and "Teardown removes the VM and its
+      access": acceptance met at `3dee66930`, the head this section is committed on.
+- [x] 8.3 **[log]** A second run of the scenario against the same stack. Acceptance: it
       passes, the host's registration being reconciled rather than duplicated. (D2)
       Run 1, owner-supplied and sanitized: the same revision, stack, and host as
       8.2's run 2, straight after it. 11 passed, 1 failed, 25 skipped. 00f1 and 00f2
@@ -1443,7 +1472,33 @@ public revision of this branch the run used.
       within `e2e-tests/`, so 8.2 and 8.3 are met by two runs, straight after one
       another, from a checkout of a public revision that includes 7D against a fresh
       stack of `f52f07973`'s published images and chart and a freshly prepared host.
-- [ ] 8.4 **[log]** Host preparation re-run, as in 8.1, at a public revision of this
+      Run 3, owner-supplied and sanitized: `3dee66930`, straight after 8.2's run 4,
+      against the same stack and host. 37 passed, none skipped or failed. Against the
+      acceptance:
+      - 00f1 declared the supply and refreshed the storefront's projection, and 00f2
+        found the host registered as the target; after both runs the provisioning
+        service holds one host and one capacity bucket, so the registration was
+        reconciled, not duplicated (D2);
+      - 02b logged run 4's listing, by its id, as "an earlier run's, adopted paused"
+        (D2a);
+      - 08b passed on the adopted listing, where run 2 at `cb05d625f` failed, recording
+        this run's own fulfillment `dispatching` (D4, 7D); the evidence logs no event
+        id, so that the wait passes over the earlier deal's `job_submitted` rests on
+        7D.3(a)'s unit test;
+      - every later stage passed as in run 4: 08b3's create and 11a3's teardown jobs
+        `succeeded`, 09a `active`, 09d the same `7 / 27.41 / 160` probe against `7 / 28
+        / 160` with a different host-key fingerprint (a new guest), 09e the unrelated
+        key refused, 11b, 11c's host listing `[]`, and 11d's access no longer
+        connecting.
+      After both runs the service's records: four reservations, all `released` (the two
+      deals and their two 11b re-reservations); jobs `create` ×2, `vm_remove` ×2, and
+      `list` ×2, all `succeeded`; nothing running or leased. Neither run left a guest or
+      a reservation behind, and each caused exactly the three jobs it asserts.
+      Acceptance met at `3dee66930`. Not shown by these runs, since neither failed: the
+      module's failure recovery (6.8, and 7D's accepted-settlement path), which rests on
+      its unit tests. 03b's registry read is vacuous on the adopted listing, as run 2's
+      note says; its resume answering `published` holds.
+- [x] 8.4 **[log]** Host preparation re-run, as in 8.1, at a public revision of this
       branch that includes section 7A, on the same kind of host. Supplied: the play
       recap and the handler's result from the log. Acceptance: the recap shows
       `failed=0` and `ignored=0`; the handler restarts the OS family's SSH unit without
@@ -1471,6 +1526,22 @@ public revision of this branch the run used.
       returns to planning before it is committed (8.2); checked when the section is.
       When the fix 8.2 found is implemented, the infra side re-prepares a fresh host
       at that revision, which gives the handler another run; 8.4 does not need it.
+      That run came: the host of 8.2's run 4 and 8.3's run 3, freshly created, was
+      prepared at `f52f07973` with `failed=0 ignored=0` and the handler `changed`
+      (owner-supplied). Host preparation's code is the same at `fa27649fe`, `f52f07973`,
+      and `3dee66930` (`git diff --stat` over `domains/vms/provisioning/iac` is empty
+      from `fa27649fe` to each of the other two), so 8.4 holds for the head.
+      Section 8, at its commit: every item meets its acceptance on owner-supplied,
+      sanitized evidence, each run's revision recorded above; the earlier, failing runs
+      stay recorded as they led to 7A–7D. The section changes no code. End-to-end
+      markers: `e2e_vm_real_provisioning`, run by hand against a real host, is the
+      section's evidence; no pipeline lane selects it, so the pipeline's result is no
+      evidence for this section. No CI workflow is owed.
+      Handoff: implementation's sections are all complete. Section 9, the closeout,
+      comes after this round's validation, review, and triage, then the pre-closeout
+      review and its triage and the merge of the branch the change lands on
+      (`docs/agents/change-workflow.md`). 9.8's pipeline run is the mock lanes'; the
+      real lane's evidence is this section's.
 
 ## 9. Closeout
 
