@@ -909,14 +909,17 @@ Files: `e2e-tests/tests/e2e/roles/scenarios/vms/real_compute_deal_driver.py`;
 `e2e-tests/tests/e2e/roles/scenarios/vms/test_real_provisioning_deal.py`;
 `e2e-tests/tests/unit/test_real_vm_lane.py`.
 
-- [ ] 7C.1 `RealVmComputeDealDriver.reserve_released_capacity` claims
+- [x] 7C.1 `RealVmComputeDealDriver.reserve_released_capacity` claims
       `required_attributes={"resource_id": REAL_RESOURCE_ID, "dimensions":
       dict(self.capacity)}`: the resource as its one attribute, everything the host
       sells as dimensions, so a reservation coming back still shows all of it was
       released. The comment says why the quantities go under `dimensions` (the site
       matches attributes exactly and reads quantities only from `dimensions`). (D2a,
       "The re-reservation's claim")
-- [ ] 7C.2 The driver gains the listing reconciliation D2a describes, as a method 02b
+      As planned. That the site reads a claim's `dimensions` as its quantity request
+      and matches every other key against the resource was read from
+      `kit/site/src/market_site/ledger.py`, not run here; 8.2 is its first live use.
+- [x] 7C.2 The driver gains the listing reconciliation D2a describes, as a method 02b
       calls (for example `listing_for_run`): it lists the storefront's listings
       (`list_listings`, paging until every listing is read) and selects those whose
       `listing_resource` names `REAL_RESOURCE_ID`. None: returns nothing, and 02b
@@ -929,7 +932,20 @@ Files: `e2e-tests/tests/e2e/roles/scenarios/vms/real_compute_deal_driver.py`;
       as `seller_listing_id` and logs which it did; 03b is unchanged. Nothing before 02b
       writes a listing, so a refused adoption leaves the stack as the previous run left
       it. (D2a)
-- [ ] 7C.3 Unit, `test_real_vm_lane.py`, against a fake storefront client in the
+      `listing_for_run` on the driver, over `storefront_admin_client`: pages of 200
+      (the storefront's largest; a short page ends the read), selecting listings whose
+      `listing_resource.resource_id` is `REAL_RESOURCE_ID`; adoption requires one
+      listing, `status` `open`, whose `vcpu_count`, `ram_gb`, and `disk_gb` equal the
+      target's capacity. Any other status fails as `closed` does. The failure names
+      each listing's id, status, paused flag, and stated shape, and the capacity, and
+      says closing a listing does not free its source: rerun with the target the
+      listing was made for, or against a fresh stack. 02b adopts or creates and logs
+      which. Correction to "a refused adoption leaves the stack as the previous run
+      left it": that holds of listings; 00f1, before 02b, still reconciles the host's
+      connection and the declaration's capacity (D2), so a target whose capacity
+      changed between runs has its declaration rewritten and its old listing refused,
+      and only the old target or a fresh stack recovers it.
+- [x] 7C.3 Unit, `test_real_vm_lane.py`, against a fake storefront client in the
       file's existing fakes' style: (a) the re-reservation's claim is `resource_id`
       plus `dimensions` equal to the target's capacity, with no quantity among its
       attributes; (b) no listing on the resource → nothing returned, no pause; (c)
@@ -940,13 +956,43 @@ Files: `e2e-tests/tests/e2e/roles/scenarios/vms/real_compute_deal_driver.py`;
       a later page is still found. Mutation checks: restoring the attributes-only claim
       fails (a); dropping the shape comparison fails (g); dropping the status check
       fails (e). (D2a)
-- [ ] 7C.4 Verification: `make -C e2e-tests test-unit` (unit); `make test`; `make
+      Unit, `test_real_vm_lane.py` (10 new cases): (a) the claim is exactly
+      `resource_id` and `dimensions` equal to the target's capacity; (b)–(i) as
+      listed, over `FakeStorefront` (paged `list_listings`, `pause_listing`,
+      `get_listing` over `storefront_client.models.ListingSummary` rows), (e)–(g)
+      asserting the message names the capacity and each listing's id, status,
+      paused flag, and shape, and that nothing was paused; (i) puts the listing at
+      201st behind 200 on another resource and asserts the reads `(200, 0)`,
+      `(200, 200)`. Beyond the plan: 02b's body, called with the fakes, records an
+      adopted listing and calls no `create_listing`; 02b's create path is not
+      unit-tested. Mutation checks, each run and reverted: the attributes-only claim
+      restored fails (a); the shape comparison dropped fails (g); the status check
+      dropped fails (e). That the storefront's stored `listing_resource` keeps the
+      `resource_id` and the three counts the listing was created with is read from
+      the create path, not tested; 8.3 is its first live use.
+- [x] 7C.4 Verification: `make -C e2e-tests test-unit` (unit); `make test`; `make
       check-change CHANGE=prove-real-vm-provisioning`. No dependency or lock changes, so
       no packaging check is owed beyond `make test`'s.
       End-to-end: `e2e_vm_real_provisioning`, in no lane, through 8.2 and 8.3 against a
       real host; no pipeline lane runs it, and the mock lanes' drivers and stages are
       untouched, so their results are no evidence for this section. No CI workflow is
       owed.
+      `make -C e2e-tests test-unit` (unit): 303 passed, before and after the
+      fresh-context fixes. `make test`: passed (before those fixes, which touched only
+      the driver's failure message and comments, 02b's docstring, and the unit test,
+      rerun above). `make check-change`: passed. End-to-end markers confirmed: only
+      `e2e_vm_real_provisioning`, which runs in no lane. No CI workflow is owed.
+      Fresh-context check: no layering, import, packaging, test-level, or comment
+      break; the paging, the shape comparison, and the message correct. Fixed: the
+      message assertion passed without naming the capacity in two of three cases (it
+      now matches the capacity and each listing's id, status, paused flag, and shape);
+      a redundant claim assertion and a duplicated capacity literal; 02b's docstring
+      stated the refusal too narrowly; the message names how an operator recovers;
+      the page constant's comment; the 7C.2 correction above.
+      Handoff for 8.2 and 8.3: the fix stays within `e2e-tests/`, so the runs need a
+      checkout of a public revision including this section against a fresh stack of
+      `f52f07973`'s published images and chart. A fresh stack's 02b creates its
+      listing; the rerun's 02b should log the earlier run's listing adopted.
 
 ## 8. Live verification [log]
 

@@ -2,8 +2,9 @@
 
 The lane's registration of its host, the jobs it finds and waits for, the VM
 list it reads the guest's absence from, its checks of the service's execution,
-the delivered access, and the settlement preview, and the lease view's reading
-of a GPU-less declaration. The scenario module is imported by name, never its
+the delivered access, and the settlement preview; a rerun's adoption of its
+listing and the re-reservation's claim; and the lease view's reading of a
+GPU-less declaration. The scenario module is imported by name, never its
 stage classes, so pytest does not collect them here.
 """
 
@@ -23,12 +24,14 @@ from compute_provisioning_contracts import (
     JobStatusResponse,
     ResultEnvelope,
 )
+from storefront_client.models import ListingListResponse, ListingSummary
 
 from e2e_harness.real_vm_target import RealVmTarget
 from tests.e2e.roles.helpers.compute_deal import DealLease
 from tests.e2e.roles.scenarios.vms.host_registry import register_e2e_host
 from tests.e2e.roles.scenarios.vms.real_compute_deal_driver import (
     REAL_POOL_ID,
+    REAL_RESOURCE_ID,
     JobWatch,
     RealVmComputeDealDriver,
     RealVmDealState,
@@ -391,6 +394,133 @@ def test_the_preflight_fails_and_settlement_stays_blocked_when_another_host_was_
             TARGET, state
         )
     assert state._settle_preflight_passed is False
+
+
+# ---------------------------------------------------------------------------
+# A rerun's listing, and the re-reservation's claim
+# ---------------------------------------------------------------------------
+
+CAPACITY = TARGET.host.capacity.model_dump()
+
+
+def _listing(
+    listing_id: str, *, status: str = "open", paused: bool = False,
+    resource_id: str = REAL_RESOURCE_ID, **shape,
+) -> ListingSummary:
+    return ListingSummary.from_dict({
+        "listing_id": listing_id, "status": status, "paused": paused,
+        "listing_resource": {
+            "offering_mode": "vm", "resource_id": resource_id, **CAPACITY, **shape,
+        },
+    })
+
+
+class FakeStorefront:
+    """The storefront's listing reads and pause, as 02b's adoption makes them."""
+
+    def __init__(self, *listings: ListingSummary) -> None:
+        self.listings = {listing.listing_id: listing for listing in listings}
+        self.read: list[tuple[int, int]] = []
+        self.paused: list[str] = []
+
+    def list_listings(self, *, limit: int, offset: int) -> ListingListResponse:
+        self.read.append((limit, offset))
+        page = list(self.listings.values())[offset:offset + limit]
+        return ListingListResponse(listings=page, count=len(page), limit=limit, offset=offset)
+
+    def pause_listing(self, listing_id: str) -> None:
+        self.paused.append(listing_id)
+        self.listings[listing_id].paused = True
+
+    def get_listing(self, listing_id: str) -> ListingSummary:
+        return self.listings[listing_id]
+
+
+def _driver(*, storefront_admin_client=None) -> RealVmComputeDealDriver:
+    return RealVmComputeDealDriver(
+        provisioning_client=None, storefront_client=None,
+        storefront_admin_client=storefront_admin_client, storefront_service_client=None,
+        site_capacity_admin_client=None, site_capacity=None, site_id="site",
+        vm_operator_client=None, target=TARGET, buyer_public_key="k",
+        listing_shape={}, jobs=JobWatch(None),
+    )
+
+
+def test_the_re_reservation_claims_the_resource_and_the_sold_capacity_as_dimensions():
+    admin = MagicMock()
+    _driver().reserve_released_capacity(admin, listing_id="listing-1", escrow_uid="0xescrow")
+    admin.admin_reserve_capacity.assert_called_once_with(
+        required_attributes={"resource_id": REAL_RESOURCE_ID, "dimensions": CAPACITY},
+        listing_id="listing-1",
+        escrow_uid="0xescrow",
+    )
+
+
+def test_no_listing_on_the_resource_leaves_the_run_to_create_one():
+    storefront = FakeStorefront()
+    assert _driver(storefront_admin_client=storefront).listing_for_run() is None
+    assert storefront.paused == []
+
+
+def test_an_open_listing_of_the_targets_shape_is_paused_and_adopted():
+    storefront = FakeStorefront(_listing("listing-1"))
+    adopted = _driver(storefront_admin_client=storefront).listing_for_run()
+    assert (adopted.listing_id, adopted.status, adopted.paused) == ("listing-1", "open", True)
+    assert storefront.paused == ["listing-1"]
+
+
+def test_a_listing_already_paused_is_adopted_without_another_pause():
+    storefront = FakeStorefront(_listing("listing-1", paused=True))
+    assert _driver(storefront_admin_client=storefront).listing_for_run().listing_id == "listing-1"
+    assert storefront.paused == []
+
+
+@pytest.mark.parametrize(
+    "listings",
+    [
+        (_listing("listing-1", status="closed"),),
+        (_listing("listing-1"), _listing("listing-2", paused=True)),
+        (_listing("listing-1", disk_gb=100),),
+    ],
+    ids=["closed", "two", "another shape"],
+)
+def test_a_listing_this_run_cannot_adopt_fails_naming_the_listings_and_the_capacity(listings):
+    storefront = FakeStorefront(*listings)
+    with pytest.raises(AssertionError) as failure:
+        _driver(storefront_admin_client=storefront).listing_for_run()
+    message = str(failure.value)
+    assert f"the target's capacity {CAPACITY}" in message, message
+    for listing in listings:
+        shape = {name: listing.listing_resource[name] for name in CAPACITY}
+        assert f"{listing.listing_id} {listing.status!r} paused={listing.paused} {shape}" in message, message
+    assert storefront.paused == []
+
+
+def test_listings_on_other_resources_are_ignored():
+    storefront = FakeStorefront(
+        _listing("other-closed", status="closed", resource_id="compute-e2e-001"),
+        _listing("other-shape", resource_id="compute-e2e-002", disk_gb=10),
+    )
+    assert _driver(storefront_admin_client=storefront).listing_for_run() is None
+    assert storefront.paused == []
+
+
+def test_02b_records_an_adopted_listing_and_creates_none():
+    storefront = FakeStorefront(_listing("listing-1"))
+    seller = MagicMock()
+    state = RealVmDealState(_registry_reachable=True, _target_host_confirmed=True)
+    real_lane.TestStage02b_ListingCreated().test_02b_create_the_listing_paused(
+        _driver(storefront_admin_client=storefront), seller, storefront, {}, state
+    )
+    assert state.seller_listing_id == "listing-1"
+    seller.create_listing.assert_not_called()
+
+
+def test_a_listing_on_a_later_page_is_found():
+    others = [_listing(f"other-{n}", resource_id="compute-e2e-001") for n in range(200)]
+    storefront = FakeStorefront(*others, _listing("listing-1"))
+    assert _driver(storefront_admin_client=storefront).listing_for_run().listing_id == "listing-1"
+    assert storefront.read == [(200, 0), (200, 200)]
 
 
 # ---------------------------------------------------------------------------

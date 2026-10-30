@@ -25,7 +25,7 @@ stages:
 
   00e1 The service executes VM jobs for real (in place of the mock lanes' 00e)
   00f2 The registered host is the target's, connection and all
-  02b  Create the GPU-less listing, paused
+  02b  Create the GPU-less listing paused, or adopt the one an earlier run left
   03b  Resume it into publication at the registry
   08a2 The settlement preview chose the target host, so 08b may settle
   08b3 The create job ran on the target host and succeeded; its guest recorded
@@ -322,16 +322,25 @@ class TestStage00h_ProvisioningStorefrontLink(Stage00h_ProvisioningStorefrontLin
 
 class TestStage02b_ListingCreated:
     def test_02b_create_the_listing_paused(
-        self, storefront_seller_client, storefront_admin_client, offer_resource,
-        deal_state: RealVmDealState,
+        self, deal_driver: RealVmComputeDealDriver, storefront_seller_client,
+        storefront_admin_client, offer_resource, deal_state: RealVmDealState,
     ):
-        """Create the listing for everything the host sells, paused.
+        """Create the listing for everything the host sells, paused, or adopt
+        the one an earlier run against this stack left.
 
         Its capacity source states the GPU-less shape the pool states, derived
         from the same resource, so the storefront finds the listing's shape and
-        its source's in agreement.
+        its source's in agreement. That source backs one listing for good, so a
+        rerun takes over the open listing on it, paused, and fails naming the
+        listings where there is not exactly one open listing of the target's
+        shape.
         """
         require_state(deal_state, "_registry_reachable", "_target_host_confirmed")
+        adopted = deal_driver.listing_for_run()
+        if adopted is not None:
+            deal_state.seller_listing_id = adopted.listing_id
+            log.info("[02b] Listing %s, an earlier run's, adopted paused", adopted.listing_id)
+            return
         resp = storefront_seller_client.create_listing(
             listing_resource=offer_resource,
             capacity_source=capacity_source_for(offer_resource),
