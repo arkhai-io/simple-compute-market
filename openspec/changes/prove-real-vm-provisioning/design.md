@@ -295,6 +295,32 @@ Rejected: generalising the gate hooks into semantic ones (`hold_create`,
 would then report a gate stage as passed when nothing was held, and a shared stage's
 assertion would hold under one driver and be vacuous under another.
 
+### D4b. A direct-access create reports the port it forwarded
+
+Settled by the owner after live verification 8.2's first run; another design review
+waived. The VM adapter's result codec (`build_result_payload` in
+`domains/vms/provisioning/adapter/src/vm_provisioning_adapter/codec.py`) replaced the
+port it parsed from the playbook's output with the relay block's `remote_port` whenever
+that value was truthy. `vm-create.yml` reports the relay block on every create, and with
+no relay it reports `enabled: false` and `remote_port: "N/A"`, so a direct-access
+create's forwarded port became `"N/A"`, `create_evidence` could not read it as a port,
+and the create reported no delivery evidence: the fulfillment failed though the guest
+was running and reachable. The mock lanes never interpret playbook output, and the
+codec's unit fixtures were hand-built payloads without the relay block the playbook
+emits, so nothing caught it.
+
+The relay's `remote_port` replaces the access port only when the playbook reports the
+relay enabled — the same rule `create_evidence` already applies to a relayed guest — and
+the value is a port number; otherwise the port parsed from the output stands. The codec
+is tested against the fact shape `vm-create.yml` actually emits, through the executor,
+with the relay disabled.
+
+Rejected: removing the replacement (the relay branch of the evidence already reads the
+relay's port, but what a relayed create reports as its `ssh_port` would change on a path
+no lane runs live); changing the playbook to omit the relay block or report nulls when
+there is no relay (two fact blocks change, and the codec would still mis-read any
+`"N/A"` placeholder).
+
 ### D5. Placement and invocation
 
 A marker, `e2e_vm_real_provisioning`, registered in `e2e-tests/pyproject.toml` and in
@@ -442,7 +468,8 @@ Two rounds, one session each.
 - **Round 2 — the real lane:** the real driver and scenario module (D2, D4, D5, D7),
   marker registration, and the D11 documentation; then, added after 8.1's run, the
   D9d handler fix, ahead of the remaining live verification and a re-run of host
-  preparation that shows it. Its validation is a run against a
+  preparation that shows it; then, added after 8.2's first run, the D4b codec fix,
+  ahead of the scenario's runs. Its validation is a run against a
   real host; the evidence recorded here is the scenario's result, the access checks'
   output, and the teardown checks, with no environment identifiers.
 

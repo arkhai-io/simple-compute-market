@@ -789,6 +789,41 @@ Files: `domains/vms/provisioning/iac/ansible/roles/vm-setup/handlers/main.yml`;
       run needs an image built from a revision containing this section, as 8.1 used
       one built from `8638567c8`.
 
+## 7B. A direct-access create reports the port it forwarded
+
+Delivers D4b: a create without a relay reports delivery evidence at the port the
+playbook forwarded, so the requirement's scenario "A real deal is delivered" can hold
+on the direct path. Planned after 8.2's first run found the defect.
+
+Files: `domains/vms/provisioning/adapter/src/vm_provisioning_adapter/codec.py`;
+`domains/vms/provisioning/adapter/tests/unit/test_vm_codec.py`.
+
+- [ ] 7B.1 In `build_result_payload`, the relay block's `remote_port` replaces the
+      payload's `ssh_port` only when the relay is reported enabled — the rule
+      `_relay_reported` already applies — and the value is a port number; otherwise
+      the port parsed from the playbook's output stands. The relay block itself is
+      still carried into the payload as before. A comment says why: the playbook
+      reports the block on every create, with `"N/A"` placeholders when there is no
+      relay. (D4b)
+- [ ] 7B.2 Unit, `test_vm_codec.py`: (a) `build_result_payload` with the playbook's
+      disabled relay block (`enabled` false, `relay_addr`, `remote_port`, and
+      `ssh_access` all `"N/A"`) keeps the parsed port; (b) an enabled block with a
+      port-valued `remote_port` still replaces it (the existing
+      `test_relay_remote_port_overrides_ssh_port`, whose block gains `enabled`); (c) an
+      enabled block whose `remote_port` is not a port keeps the parsed port; (d) through
+      the executor, as `test_a_run_reports_the_vm_result_and_credentials` runs, a
+      direct create whose fact has the shape `vm-create.yml`'s create fact actually
+      reports — its `network` block with `direct_port_forwarding`, its disabled relay
+      block, and a `timestamp` — yields a `CreateJobResult` whose evidence names the
+      host's address, the forwarded port, and the tenant user; (e) the same with the
+      relay enabled and leased (`relay_id`, `vm_remote_port`) yields the relay's address
+      and the leased port. Mutation checks: restoring the unconditional replacement fails
+      (a) and (d); dropping the port-number test fails (c). (D4b)
+- [ ] 7B.3 Verification: `make test-provisioning-adapter` (the adapter's suite, unit);
+      `make test`; `make check-packaging`.
+      End-to-end: none in the pipeline — the mock lanes never interpret playbook
+      output. 8.2's and 8.3's runs exercise it against a real host.
+
 ## 8. Live verification [log]
 
 Requires a prepared, GPU-less, nested-virtualization KVM host and a deployed stack the
@@ -897,6 +932,11 @@ public revision of this branch the run used.
       Nothing of the fix is implemented. After it is pushed, the infra side
       republishes, deploys a fresh stack, re-prepares a fresh host, and runs the
       scenario twice for 8.2 and 8.3.
+      Planned: the fix is section 7B (D4b), the owner choosing that the relay's port
+      replaces the access port only when the relay is enabled and the value is a port,
+      and waiving another design review. No spec delta: "A real deal is delivered"
+      already requires delivery. The Impact list now names the codec. 8.2 is met by a
+      run at a public revision that includes 7B.
 - [ ] 8.3 **[log]** A second run of the scenario against the same stack. Acceptance: it
       passes, the host's registration being reconciled rather than duplicated. (D2)
 - [ ] 8.4 **[log]** Host preparation re-run, as in 8.1, at a public revision of this
@@ -981,6 +1021,10 @@ The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
       Amended at the D9d replanning: D9d has no permanent destination; it repairs a
       handler to do what it already claimed, and the reason the unit name follows the OS
       family is the handler's own comment (7A.1). The design-promotion record says so.
+      Amended at the D4b replanning: D4b has no permanent destination either; it repairs
+      the codec to deliver what a direct create already promised, and why the relay's
+      port is gated is the codec's own comment (7B.1). The design-promotion record says
+      so.
 - [ ] 9.10 **Documentation citations.** `make check-doc-citations
       CHANGE=prove-real-vm-provisioning`; `openspec validate prove-real-vm-provisioning
       --strict`.
