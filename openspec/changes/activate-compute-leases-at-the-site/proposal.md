@@ -17,7 +17,7 @@ unactivated lease expires at and depends on the pool-authority port.
 
 ## What Changes
 
-- Add nullable `renewal_phase` and `renew_by_utc` to the site's lease row, with a
+- Add nullable `renewal_phase`, `renew_by_utc` and `activated_at_utc` to the site's lease row, with a
   service-owned migration that leaves every existing row null. `lease_end_utc` keeps
   meaning the agreed end and moves only through truncation. The phase takes the
   values `awaiting_activation` and `active`; this change sets only `active`, and
@@ -30,7 +30,8 @@ unactivated lease expires at and depends on the pool-authority port.
   refuses without a write. Activation never changes the reservation's end, and a
   verified earlier truncation is adopted, never extended.
 - Expose activation and lease inspection — the phase, the nullable due instant and
-  the existing active instant — through the site's typed authority, HTTP models,
+  `activated_at_utc`, the instant the transition writes once and never moves — through
+  the site's typed authority, HTTP models,
   router and client, and through the shared compute contract and client, offering-mode
   neutral, under the existing authenticated service boundary with exact response
   verification.

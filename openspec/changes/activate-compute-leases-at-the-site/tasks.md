@@ -6,7 +6,7 @@ deadline, the pool tag, the expiry claim and the lapse cause are
 
 ## 1. Schema and migration
 
-- [ ] 1.1 Add nullable `renew_by_utc` and `renewal_phase` to
+- [ ] 1.1 Add nullable `renew_by_utc`, `renewal_phase` and `activated_at_utc` to
   `kit/site/src/market_site/db.py`. Add a service-owned ordered migration in
   `provisioning/compute/service/src/compute_provisioning_service/db/migrations.py`
   leaving existing rows null; coordinate its order with
@@ -21,7 +21,8 @@ Verification point: `make -C provisioning/compute/service test-integration`.
 
 - [ ] 2.1 Extend `kit/site/src/market_site/ledger.py` with activation from `leased`, in
   phase `awaiting_activation` or null, to `active`, setting the due instant to the
-  current agreed end without a caller-supplied time; `active` retries return the lease
+  current agreed end without a caller-supplied time and writing `activated_at_utc` from
+  the site's clock once in the same transaction; `active` retries return the lease
   unchanged; `releasing`, terminal, failed-release and operator-owned states refuse
   without a write; a truncation before activation or between a lost acknowledgement
   and its retry is adopted, never extended. Admission accounting is untouched.
@@ -30,8 +31,9 @@ Verification point: `make -C provisioning/compute/service test-integration`.
   after truncation, the lost-acknowledgement retry, refusal from each non-admissible
   state, no resurrection after release, a null-phase lease (migrated, and newly
   committed with deadlines off) activated to active with its agreed end, and
-  full-window admission before and after activation. Deterministic two-session
-  controls, not sleeps.
+  full-window admission before and after activation; and that one `activated_at_utc`
+  survives a lost acknowledgement, a restart and a truncation unchanged, with the same
+  reference. Deterministic two-session controls, not sleeps.
 
 Verification point: `make -C kit/site test`.
 
@@ -46,7 +48,7 @@ Verification point: `make -C kit/site test`.
 - [ ] 3.2 Extend `provisioning/compute/contracts/src/compute_provisioning_contracts/contracts.py`,
   `provisioning/compute/client/src/compute_provisioning_client/client.py` and the
   compute service's lease controller and composition with the same, typed and
-  offering-mode neutral, exposing null compatibility and the active instant.
+  offering-mode neutral, exposing null compatibility and `activated_at_utc`.
 - [ ] 3.3 Run `make -C kit/site-client test`, the compute contracts and client `make test`
   targets and `make -C provisioning/compute/service test-integration`; verify the
   contract delta's scenarios separately — migration, explicit activation of a null-phase

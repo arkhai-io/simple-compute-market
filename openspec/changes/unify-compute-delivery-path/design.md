@@ -49,7 +49,9 @@ adapter's authorization and effect protocols and the evidence envelopes;
 `kit/deal-servicing` supplies the neutral delivery authorization phases and
 decisions. The foundation's `ActivatedDeliveryRef` carries the negotiation,
 commitment, reservation and fulfillment identities, the verified site activation
-record reference and active instant, and the ready-evidence digest and envelope
+reference and `activated_at_utc` — the instant the site's transition wrote once
+(`activate-compute-leases-at-the-site` D1), never a retry's request time, the row's
+update time or the lease start — and the ready-evidence digest and envelope
 (kind, version and an opaque domain payload). Generic servicing does not interpret
 the payload; the composition injects compute validation, so no upward family import
 is needed. One foundation-owned phase enum — reserve, commit, dispatch, activate,

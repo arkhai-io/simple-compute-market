@@ -30,8 +30,8 @@ extension, payment or refund operations, and delivery-caller wiring.
 
 ### D1. An activation phase beside the agreed end, and one transition into it
 
-Two nullable columns join the lease row: `renewal_phase` and `renew_by_utc`. The
-names do not imply an active renewal operation; they are the columns the deadline
+Three nullable columns join the lease row: `renewal_phase`, `renew_by_utc` and
+`activated_at_utc`. The first two names do not imply an active renewal operation; they are the columns the deadline
 change and, later, any renewal design write, created once here so that the schema
 changes once. `lease_end_utc` keeps meaning the agreed end and moves only through
 truncation. Migration leaves both null on every existing row; an existing active
@@ -53,14 +53,24 @@ lease must not become awaiting activation during upgrade.
   refused without a write: activation cannot resurrect a lease, and an expiry that
   claimed the row first wins. A truncation before activation, or between a lost
   acknowledgement and its retry, is adopted: the retry returns the shorter current end
-  and the original active instant, and no call extends the lease toward its original
+  and the original activation instant, and no call extends the lease toward its original
   commit end. Activation never changes the reservation's end.
+- **The instant is the transition's own.** `activated_at_utc` is written once, in the
+  same transaction as the phase change, from the site's clock, and never updated; the
+  activation's stable reference is the reservation identity with that instant. Nothing
+  else the row holds can stand in for it: the lease start is the agreed window, the
+  row's update time moves with every write, provider readiness is a different checkpoint
+  and a retry's request time is later than the fact. A repeat activation, a retry after a
+  lost acknowledgement and a truncation all return the same instant; a migrated or
+  not-yet-activated row shows null, an honest unknown rather than a guess. Delivery's
+  `ActivatedDeliveryRef` carries exactly this pair, so billing start and every later
+  dispute rest on an instant the seller's storefront could not have moved.
 - **Admission** is untouched: it accounts the full agreed window before and after
   activation.
 
 The phase is not a reservation state. `awaiting_activation` avoids reviving the
-retired `provisioning` state. Fulfillment's active instant remains the site fact
-recorded when the resource becomes usable; activation does not move it on retry.
+retired `provisioning` state. Provider readiness is fulfillment's checkpoint;
+activation is the site's, and `activated_at_utc` is its instant.
 Whether a late activation means the deal was delivered is not the site's question:
 the lifecycle judges delivery by the storefront's durable `available` record against
 the accepted deadline (`openspec/changes/agreed-evidence-and-early-termination/design.md`,
@@ -70,7 +80,7 @@ D8), and the site's phase is a capacity fact.
 
 The site's typed authority, HTTP models, router and client gain activation by
 reservation identity and lease inspection carrying `renewal_phase`, `renew_by_utc`
-and the existing active instant, all nullable where the lease predates them. The
+and `activated_at_utc`, all nullable where the lease predates them. The
 shared compute contract and client expose the same, offering-mode neutral: a VM or
 bare-metal caller activates without importing a VM-specific model and receives the
 site's recorded lease through every client layer. Requests carry no billing kind, no
@@ -95,8 +105,8 @@ change makes them expressible.
 
 - Reusing the retired `provisioning` reservation state as the phase — the phase is
   orthogonal to reservation state and must not revive a state the lifecycle removed.
-- A caller-supplied activation instant or target deadline — the site's active instant
-  is the site's fact, and a target deadline is the deadline change's to compute.
+- A caller-supplied activation instant or target deadline — the activation instant
+  is the site's fact, written by the transition, and a target deadline is the deadline change's to compute.
 - Shipping the columns with the deadline change — unify needs the phase and the
   transition before the deadline exists; adding the columns here changes the schema
   once and leaves the deadline change writing into them.
