@@ -24,6 +24,11 @@ gates are settled.
       attributed to an operation or resource.
 - [ ] 1.6 Decide the restated `marketplace-identity` exact-reuse requirement, so that
       re-running an idempotent route and refusing an expired outcome both conform.
+      Consume/generalize unify-compute-delivery-path's route retry declaration, preserving
+      all retained marketplace-identity clauses/scenarios (reservation, first-use skew,
+      changed reuse, request/response signing, credential re-run/live admission/no-body,
+      same-operation mutation retry and credential purge). Archive unify first; re-diff
+      as supersets against current specs if order changes.
 - [ ] 1.7 Decide the disposition of `retain-authenticated-request-outcomes`:
       superseded, narrowed, or folded in. Update its status and the campaign index
       accordingly.
