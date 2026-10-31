@@ -1,13 +1,13 @@
-"""When a VM's relay binding may change, and when it may not.
+"""When a delivery's relay binding may change, and when it may not.
 
-A VM's relay is recorded on its port lease at allocation and is that VM's relay
-for the whole of its life. Nothing moves an existing VM between relays, and the
-reason is not tidiness: the buyer was given ``ssh -p <port> <user>@<relay>``,
-both halves of which are delivered artifacts of a paid rental. A remote port is
-not portable either — 6142 on one rendezvous says nothing about 6142 on
-another, which may already be leased to a different host. Repointing a host's
-client does not migrate its VMs; it strands every buyer on that host and asks
-the new relay for ports that may not be free.
+A delivery's relay is recorded on its port lease at allocation and is that
+delivery's relay for the whole of its life. Nothing moves an existing delivery
+between relays, and the reason is not tidiness: the buyer was given
+``ssh -p <port> <user>@<relay>``, both halves of which are delivered artifacts
+of a paid rental. A remote port is not portable either — 6142 on one rendezvous
+says nothing about 6142 on another, which may already be leased to a different
+host. Repointing a host's client does not migrate its deliveries; it strands
+every buyer on that host and asks the new relay for ports that may not be free.
 
 So there is one rule, applied at three write paths:
 
@@ -26,26 +26,22 @@ from __future__ import annotations
 
 from typing import Sequence
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from vm_provisioning_adapter.db import (
-    AnsiblePoolConfig,
-    Relay,
-    RelayPortLease,
-)
-from vm_provisioning_adapter.services.relay_port_allocator import (
-    RelayPortAllocator,
-)
+from ..hosts.service import PoolChangeRefusedError
+from .allocator import RelayPortAllocator
+from .db import Relay, RelayPortLease
 
 
 class RelayRebindingRefused(ValueError):
-    """A relay binding cannot change while VMs are still reachable through it."""
+    """A relay binding cannot change while deliveries are still reachable through it."""
 
 
 # How an operator gets past this. Carried in the message rather than left to
 # documentation, because the operator who hits the rule is the one who needs it.
 _DRAIN_HINT = (
-    "Disable the pool to stop new scheduling without disturbing running VMs, "
+    "Disable the pool to stop new scheduling without disturbing running deliveries, "
     "wait for these leases to be released, then make the change and re-enable."
 )
 
@@ -63,11 +59,26 @@ def _describe(leases: Sequence[RelayPortLease], limit: int = 5) -> str:
 
 def _refuse(what: str, leases: Sequence[RelayPortLease]) -> RelayRebindingRefused:
     return RelayRebindingRefused(
-        f"{what} while {len(leases)} VM tunnel(s) are still bound through it "
+        f"{what} while {len(leases)} tunnel(s) are still bound through it "
         f"({_describe(leases)}). Each one corresponds to a connection string a "
         f"buyer already holds, and a remote port does not carry across relays. "
         f"{_DRAIN_HINT}"
     )
+
+
+def pool_relay_id(db: Session, pool_id: str | None) -> str | None:
+    """The relay a pool references, or None.
+
+    The one read of a pool's relay reference every rebinding rule uses. The
+    reference is the VM pool configuration's ``relay_id`` column, read by name
+    because the family imports no domain.
+    """
+    if not pool_id:
+        return None
+    return db.execute(
+        text("SELECT relay_id FROM ansible_pool_configs WHERE pool_id = :pool_id"),
+        {"pool_id": pool_id},
+    ).scalar_one_or_none()
 
 
 def check_relay_endpoint_change(
@@ -148,12 +159,12 @@ def check_host_pool_change(
     """Refuse moving a host between pools that dial different relays.
 
     A move between pools referencing the same relay is unconditional, including
-    while VMs are running: the host keeps dialling the same rendezvous, its
-    proxies keep their ports, and nothing a buyer holds changes.
+    while deliveries are running: the host keeps dialling the same rendezvous,
+    its proxies keep their ports, and nothing a buyer holds changes.
     """
     if current_pool_id == new_pool_id:
         return
-    if _relay_of_pool(db, current_pool_id) == _relay_of_pool(db, new_pool_id):
+    if pool_relay_id(db, current_pool_id) == pool_relay_id(db, new_pool_id):
         return
     held = RelayPortAllocator.active_leases_for_host(db, host_id)
     if held:
@@ -165,12 +176,38 @@ def check_host_pool_change(
         )
 
 
-def _relay_of_pool(db: Session, pool_id: str | None) -> str | None:
-    if not pool_id:
-        return None
-    row = (
-        db.query(AnsiblePoolConfig)
-        .filter(AnsiblePoolConfig.pool_id == pool_id)
-        .one_or_none()
-    )
-    return None if row is None else row.relay_id
+def relay_host_pool_change(
+    db: Session, host_id: str, current_pool_id: str | None, new_pool_id: str | None
+) -> None:
+    """The host authority's pool-change hook for relays.
+
+    A host moving to a pool on a different relay while it holds leases would
+    strand its buyers on the old address; the move is refused in the host
+    authority's own refusal, so every host route answers it alike.
+    """
+    try:
+        check_host_pool_change(
+            db,
+            host_id=host_id,
+            current_pool_id=current_pool_id,
+            new_pool_id=new_pool_id,
+        )
+    except RelayRebindingRefused as exc:
+        raise PoolChangeRefusedError(str(exc)) from exc
+
+
+#: The host pool-change checks the relays contribute to the one host authority
+#: the composition root builds, which exists before any runtime does.
+RELAY_HOST_POOL_CHANGE_HOOKS = (relay_host_pool_change,)
+
+
+__all__ = [
+    "RELAY_HOST_POOL_CHANGE_HOOKS",
+    "RelayRebindingRefused",
+    "check_host_pool_change",
+    "check_pool_relay_change",
+    "check_relay_endpoint_change",
+    "check_relay_token_rotation",
+    "pool_relay_id",
+    "relay_host_pool_change",
+]

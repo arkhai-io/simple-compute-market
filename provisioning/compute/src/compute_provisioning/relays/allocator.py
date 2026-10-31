@@ -5,8 +5,7 @@ namespace belongs to the relay rather than to a host or a pool. Two hosts
 dialing one relay are not independent: if one holds ``R:6100`` the other cannot
 also hold it. The relay would refuse the second registration, and the refusal
 arrives asynchronously in a tunnel client's log rather than as a failed
-allocation — the coordination failure that taking the relay's dashboard out of
-this path set out to remove.
+allocation.
 
 Allocation happens before the job is dispatched. Allocating afterwards would
 mean a crash between the two leaves a port bound on the relay that no record
@@ -14,23 +13,28 @@ claims. The cost of allocating first is that a lease outlives any path that
 fails before a teardown would run, which is why the lease is returned with its
 reservation's capacity, whatever path releases it, and why reconciliation
 exists beneath that.
+
+One allocator serves every domain: pools on one relay draw from its one window,
+whatever their provider, so two allocators over that namespace would issue one
+port twice.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
+from market_fulfillment.settlement_repository import begin_sqlite_write_transaction
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from compute_provisioning import reservation_is_released
-from market_fulfillment.settlement_repository import begin_sqlite_write_transaction
-from vm_provisioning_adapter.db import Relay, RelayPortLease
+from ..release_effects import reservation_is_released
+from .db import Relay, RelayPortLease
 
 logger = logging.getLogger(__name__)
 
@@ -166,8 +170,8 @@ class RelayPortAllocator:
         per-lease history, at the cost of a constraint whose meaning depends on
         a column and which the lease tests could no longer state simply. The
         table is then bounded by relays multiplied by window size rather than
-        growing with VM churn, which is the better trade for a record whose
-        purpose is answering "what is bound on this relay right now".
+        growing with delivery churn, which is the better trade for a record
+        whose purpose is answering "what is bound on this relay right now".
         """
         existing = (
             db.query(RelayPortLease)
@@ -321,8 +325,6 @@ class RelayPortAllocator:
         enumerated path is working; a noisy one names a path that needs
         finding.
         """
-        import asyncio
-
         while True:
             try:
                 self.reconcile(is_owner_released=is_owner_released, grace=grace)
@@ -428,13 +430,12 @@ FULFILLMENT_OWNER_KIND = "fulfillment"
 
 
 def release_reservation_ports(db: Session, capacity_reservation_id: str, state: str) -> None:
-    """VM's release effect: the reservation's relay port goes back to its relay.
+    """The relays' release effect: the reservation's port goes back to its relay.
 
     Runs in the site ledger's transaction that releases the reservation's
     capacity. A fulfillment's state alone never returns a port: a ``failed``
-    create may have left a guest running with its tunnel bound, so the port is
-    held, with the capacity, until an operator verifies the host and forces
-    the release.
+    create may have left a proxy registered, so the port is held, with the
+    capacity, until an operator verifies the host and forces the release.
     """
     released = RelayPortAllocator.release_in_session(
         db, owner_kind=FULFILLMENT_OWNER_KIND, owner_id=capacity_reservation_id
@@ -464,3 +465,13 @@ def fulfillment_lease_owner_is_released(session_factory) -> Any:
             return reservation_is_released(db, owner_id)
 
     return is_owner_released
+
+
+__all__ = [
+    "FULFILLMENT_OWNER_KIND",
+    "PortLease",
+    "RelayPortAllocator",
+    "RelayWindowExhaustedError",
+    "fulfillment_lease_owner_is_released",
+    "release_reservation_ports",
+]

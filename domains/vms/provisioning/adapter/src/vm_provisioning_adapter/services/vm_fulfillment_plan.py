@@ -281,7 +281,7 @@ class VmFulfillmentPlan:
             vm_gpu_partition_size=requirements.vm_gpu_partition_size,
             # The reference and the leased port, never the endpoint or the
             # token: this becomes a persisted, readable snapshot. Resolution
-            # happens at execution — see services/relay_execution.py.
+            # happens at execution, through the family's relay resolver.
             relay_id=config.relay_id if uses_relay else None,
             vm_remote_port=remote_port,
             escrow_uid=capacity_reservation_id,

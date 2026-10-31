@@ -29,10 +29,8 @@ from sqlalchemy.orm import sessionmaker
 
 from compute_provisioning_service import app_runtime
 from compute_provisioning_service import container as _container_module
+from compute_provisioning.relays import Relay, RelayService
 from compute_provisioning_service.db.database import run_migrations
-from vm_provisioning_adapter.db import Relay
-from vm_provisioning_adapter.runtime import VmProvisioningRuntime
-from vm_provisioning_adapter.services.relay_service import RelayService
 
 # Development-only Fernet key, generated per run and never used on a network.
 _KEY = Fernet.generate_key().decode()
@@ -97,11 +95,11 @@ class _Deployment:
             _container_module, "resolved_relay_service", relay_service, raising=False
         )
         monkeypatch.setattr(app_runtime, "settings", self.settings, raising=False)
-        # The relay document exactly as VM's runtime contributes it, over this
-        # deployment's configuration and relay service.
-        relays = VmProvisioningRuntime.relay_definitions(
-            SimpleNamespace(config=self.settings, relay_service=relay_service)
-        )
+        # The relay document exactly as the composition root contributes it,
+        # over this deployment's configuration and relay service.
+        (relays,) = _container_module._relay_bundle(
+            self.session_factory, self.settings, relay_service, None
+        ).definition_documents
         monkeypatch.setattr(
             _container_module, "resolved_definition_documents", (relays,), raising=False
         )
@@ -256,7 +254,7 @@ class TestAnUnmountedDocument:
         deployment.write_document(_relay_document())
         deployment.restart(monkeypatch)
 
-        deployment.settings.resolved_relay_definitions_path = None
+        deployment.settings.relay_definitions_path = ""
         relays = deployment.restart(monkeypatch)
 
         assert relays.get_relay("site-a").relay_addr == "10.0.0.9"

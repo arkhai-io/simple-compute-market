@@ -77,10 +77,8 @@ from market_fulfillment.fulfillment_persistence import (
     SqlAlchemyFulfillmentUnitOfWork,
 )
 from market_core import VersionedEnvelope
-from vm_provisioning_adapter.db import RelayPortLease
+from compute_provisioning.relays import RelayPortAllocator, RelayPortLease, RelayService
 from vm_provisioning_adapter.guest_names import fulfillment_guest_name
-from vm_provisioning_adapter.services.relay_service import RelayService
-from vm_provisioning_adapter.services.relay_port_allocator import RelayPortAllocator
 from vm_provisioning_adapter.codec import VM_RESULT_FACTS
 from vm_provisioning_adapter.services.mock_output import shipped_output
 from market_resource_pools_contracts import PoolCreate, PoolUpdate
@@ -962,8 +960,6 @@ class TestRelayPortLifecycleOverTheApi:
         the relay afterwards rather than creating it first — two creations of
         one pool is a conflict, not a race.
         """
-        from compute_provisioning_service import container as _container_module
-
         relays: RelayService = _container_module.resolved_relay_service
         # The container outlives a single test in this module, and relays live
         # in a table the pool fixture does not reset.

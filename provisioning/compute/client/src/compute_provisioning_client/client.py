@@ -48,6 +48,11 @@ from compute_provisioning_contracts import (
     LeaseView,
     PrincipalRotationResponse,
     ProvisioningRouteContract,
+    RelayCreate,
+    RelayListResponse,
+    RelayResponse,
+    RelayTokenRotate,
+    RelayUpdate,
     SystemStatusResponse,
     VersionResponse,
     WorkerPauseResponse,
@@ -228,6 +233,38 @@ def _set_host_enabled(host_id: str, enabled: bool) -> _Call:
 
 def _connectivity(host_id: str) -> _Call:
     return _Call("GET", f"/api/v1/hosts/{host_id}/connectivity", parse=_model(ConnectivityResult))
+
+
+# Relays.
+
+
+def _list_relays() -> _Call:
+    return _Call("GET", "/api/v1/relays/", parse=_model(RelayListResponse))
+
+
+def _create_relay(body: RelayCreate) -> _Call:
+    return _Call("POST", "/api/v1/relays/", body, parse=_model(RelayResponse))
+
+
+def _get_relay(relay_id: str) -> _Call:
+    return _Call("GET", f"/api/v1/relays/{relay_id}", parse=_model(RelayResponse))
+
+
+def _update_relay(relay_id: str, body: RelayUpdate) -> _Call:
+    # An update sends exactly the fields its caller set: an explicit
+    # ``label=None`` clears the label, so it must reach the service as
+    # ``null``, where the shared serialization drops every null as unset.
+    payload = body.model_dump(mode="json", exclude_unset=True)
+    return _Call("PATCH", f"/api/v1/relays/{relay_id}", payload, parse=_model(RelayResponse))
+
+
+def _rotate_relay_token(relay_id: str, body: RelayTokenRotate) -> _Call:
+    return _Call("POST", f"/api/v1/relays/{relay_id}/token", body, parse=_model(RelayResponse))
+
+
+def _set_relay_enabled(relay_id: str, enabled: bool) -> _Call:
+    action = "enable" if enabled else "disable"
+    return _Call("POST", f"/api/v1/relays/{relay_id}/{action}", {}, parse=_model(RelayResponse))
 
 
 # The service's system and identity routes.
@@ -584,6 +621,33 @@ class ComputeProvisioningClient(SigningBase):
         """Whether the host's connection is reachable; an unreachable host is a result, not an error."""
         return await self._run(_connectivity(host_id), request_id)
 
+    # Relays.
+
+    async def list_relays(self, *, request_id: str | None = None) -> RelayListResponse:
+        return await self._run(_list_relays(), request_id)
+
+    async def create_relay(self, body: RelayCreate, *, request_id: str | None = None) -> RelayResponse:
+        return await self._run(_create_relay(body), request_id)
+
+    async def get_relay(self, relay_id: str, *, request_id: str | None = None) -> RelayResponse:
+        return await self._run(_get_relay(relay_id), request_id)
+
+    async def update_relay(
+        self, relay_id: str, body: RelayUpdate, *, request_id: str | None = None
+    ) -> RelayResponse:
+        return await self._run(_update_relay(relay_id, body), request_id)
+
+    async def rotate_relay_token(
+        self, relay_id: str, body: RelayTokenRotate, *, request_id: str | None = None
+    ) -> RelayResponse:
+        """Replace a relay's admission token; separate from ``update_relay`` deliberately."""
+        return await self._run(_rotate_relay_token(relay_id, body), request_id)
+
+    async def set_relay_enabled(
+        self, relay_id: str, enabled: bool, *, request_id: str | None = None
+    ) -> RelayResponse:
+        return await self._run(_set_relay_enabled(relay_id, enabled), request_id)
+
     # The service's system and identity routes.
 
     async def get_health(self) -> HealthResponse:
@@ -857,6 +921,33 @@ class SyncComputeProvisioningClient(SigningBase):
     def check_connectivity(self, host_id: str, *, request_id: str | None = None) -> ConnectivityResult:
         """See ``ComputeProvisioningClient.check_connectivity``."""
         return self._run(_connectivity(host_id), request_id)
+
+    # Relays.
+
+    def list_relays(self, *, request_id: str | None = None) -> RelayListResponse:
+        return self._run(_list_relays(), request_id)
+
+    def create_relay(self, body: RelayCreate, *, request_id: str | None = None) -> RelayResponse:
+        return self._run(_create_relay(body), request_id)
+
+    def get_relay(self, relay_id: str, *, request_id: str | None = None) -> RelayResponse:
+        return self._run(_get_relay(relay_id), request_id)
+
+    def update_relay(
+        self, relay_id: str, body: RelayUpdate, *, request_id: str | None = None
+    ) -> RelayResponse:
+        return self._run(_update_relay(relay_id, body), request_id)
+
+    def rotate_relay_token(
+        self, relay_id: str, body: RelayTokenRotate, *, request_id: str | None = None
+    ) -> RelayResponse:
+        """See ``ComputeProvisioningClient.rotate_relay_token``."""
+        return self._run(_rotate_relay_token(relay_id, body), request_id)
+
+    def set_relay_enabled(
+        self, relay_id: str, enabled: bool, *, request_id: str | None = None
+    ) -> RelayResponse:
+        return self._run(_set_relay_enabled(relay_id, enabled), request_id)
 
     # The service's system and identity routes.
 

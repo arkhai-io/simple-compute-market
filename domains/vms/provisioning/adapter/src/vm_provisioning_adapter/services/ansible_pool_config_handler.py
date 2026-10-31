@@ -6,12 +6,10 @@ from typing import Any, Mapping
 
 from sqlalchemy.orm import Session
 
+from compute_provisioning.relays import Relay, check_pool_relay_change
 from market_resource_pools import PoolConfigValidationProblem
 from market_config import decrypt_secret
-from vm_provisioning_adapter.db import AnsiblePoolConfig, Relay
-from vm_provisioning_adapter.services.relay_rebinding import (
-    check_pool_relay_change,
-)
+from vm_provisioning_adapter.db import AnsiblePoolConfig
 from vm_provisioning_adapter.requirement_delegates import (
     DEFAULT_REQUIREMENT_DELEGATE,
     registered_requirement_delegate_names,
@@ -248,8 +246,8 @@ class AnsiblePoolConfigHandler:
         row.default_vm_disk_size = normalized["default_vm_disk_size"]
         # A pool repoint changes which rendezvous its future VMs reach. Existing
         # VMs keep the relay recorded on their leases, so the repoint is refused
-        # while any of them are still bound — see relay_rebinding for why a
-        # remote port cannot follow a VM to a different relay.
+        # while any of them are still bound — see the family's relay rebinding
+        # rules for why a remote port cannot follow a VM to a different relay.
         check_pool_relay_change(
             db,
             pool_id=pool_id,

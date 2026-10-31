@@ -5,38 +5,17 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
-from datetime import timedelta
-from pathlib import Path
 from typing import Any, Callable
 
-from compute_provisioning import (
-    ComputeProvisioningBackgroundTask,
-    DefinitionDocumentContribution,
-)
-
-from compute_provisioning.hosts.service import HostAuthority, PoolChangeRefusedError
+from compute_provisioning.hosts.service import HostAuthority
 from compute_provisioning.job_fulfillment import JobFulfillmentProvider
 from compute_provisioning.jobs.engine import JobEngine
 from compute_provisioning.jobs.submission import JobSubmissionService
+from compute_provisioning.relays import RelayExecutionResolver, RelayPortAllocator
 from compute_provisioning_ansible import AnsibleJobExecutor, MockAnsibleRunner
 from compute_provisioning_ansible.runner import AnsibleRunner
-from vm_provisioning_adapter.services.relay_rebinding import (
-    RelayRebindingRefused,
-    check_host_pool_change,
-)
 from vm_provisioning_adapter.bundle import HOST_REQUIREMENT, build_vm_adapter_bundle
 from vm_provisioning_adapter.codec import GoldenImageCredentials, VmAnsibleCodec
-from vm_provisioning_adapter.services.relay_definitions import (
-    relay_definitions_document,
-)
-from vm_provisioning_adapter.services.relay_port_allocator import (
-    RelayPortAllocator,
-    fulfillment_lease_owner_is_released,
-)
-from vm_provisioning_adapter.services.relay_service import RelayService
-from vm_provisioning_adapter.services.relay_execution import (
-    RelayExecutionResolver,
-)
 from vm_provisioning_adapter.services.mock_output import vm_mock_output
 from vm_provisioning_adapter.services.vm_fulfillment_plan import VmFulfillmentPlan
 from vm_provisioning_adapter.services.ansible_pool_config_handler import (
@@ -65,9 +44,9 @@ class VmProvisioningRuntime:
     job_submission: JobSubmissionService
     vm_operations_service: VmOperationsService
     host_operations_service: HostOperationsService
-    # One allocator for every relay port VM leases, releases, and reconciles.
+    # The family's one allocator, which every domain's relay ports lease from;
+    # VM's plan leases through it when a create is accepted.
     relay_port_allocator: RelayPortAllocator
-    relay_service: RelayService
 
     def job_executor(self) -> AnsibleJobExecutor:
         """What runs every VM job action: this runtime's runner, codec, and playbook."""
@@ -93,74 +72,12 @@ class VmProvisioningRuntime:
             jobs=self.job_engine,
         )
 
-    def relay_definitions(self) -> DefinitionDocumentContribution:
-        """The relay definitions document, if the deployment mounts one."""
-        raw = str(getattr(self.config, "relay_definitions_path", "") or "").strip()
-        return relay_definitions_document(
-            relay_service=self.relay_service,
-            settings=self.config,
-            path=Path(raw).resolve() if raw else None,
-        )
-
-    def relay_reconciliation(self) -> tuple[ComputeProvisioningBackgroundTask, ...]:
-        """The backstop beneath the release effect: a periodic sweep returning
-        leases whose reservation was released by a path that bypassed it.
-        Enabled unless the deployment turns it off."""
-        if not bool(getattr(self.config, "relay_port_reconciliation_enabled", True)):
-            logger.info(
-                "Relay port reconciliation disabled "
-                "(relay_port_reconciliation_enabled=false)"
-            )
-            return ()
-        poll = float(
-            getattr(self.config, "relay_port_reconciliation_poll_interval_seconds", 300)
-        )
-        grace = float(getattr(self.config, "relay_port_reconciliation_grace_seconds", 3600))
-        is_owner_released = fulfillment_lease_owner_is_released(self.session_factory)
-        return (
-            ComputeProvisioningBackgroundTask(
-                "relay-port-reconciliation",
-                lambda: self.relay_port_allocator.run_reconciliation(
-                    is_owner_released=is_owner_released,
-                    poll_interval_seconds=poll,
-                    grace=timedelta(seconds=grace),
-                ),
-                "Relay port reconciliation started (interval=%ds grace=%ds)",
-                (int(poll), int(grace)),
-            ),
-        )
-
     def adapter_bundle(self):
         return build_vm_adapter_bundle(
             fulfillment_provider=self.fulfillment_provider(),
             pool_config_handler=self.pool_config_handler,
             job_executor=self.job_executor(),
-            definition_documents=(self.relay_definitions(),),
-            background_tasks=self.relay_reconciliation(),
         )
-
-
-def _relay_pool_change(
-    db, host_id: str, current_pool_id: str | None, new_pool_id: str | None
-) -> None:
-    # A host moving to a pool on a different relay while it holds leases would
-    # strand its VMs' buyers on the old address; the move is refused, in the
-    # host authority's own refusal so every host route answers it alike.
-    try:
-        check_host_pool_change(
-            db,
-            host_id=host_id,
-            current_pool_id=current_pool_id,
-            new_pool_id=new_pool_id,
-        )
-    except RelayRebindingRefused as exc:
-        raise PoolChangeRefusedError(str(exc)) from exc
-
-
-#: The host pool-change checks VM contributes to the one host authority the
-#: composition root builds, which exists before any runtime does; the root
-#: merges each adapter's declaration as it merges ``HOST_REQUIREMENT``.
-HOST_POOL_CHANGE_HOOKS = (_relay_pool_change,)
 
 
 def build_vm_runtime(
@@ -171,6 +88,8 @@ def build_vm_runtime(
     host_authority: HostAuthority,
     job_engine: JobEngine,
     job_submission: JobSubmissionService,
+    relay_port_allocator: RelayPortAllocator,
+    relay_resolver: RelayExecutionResolver,
 ) -> VmProvisioningRuntime:
     active = [
         profile.strip()
@@ -191,9 +110,7 @@ def build_vm_runtime(
         # Fills a referenced relay's address and token into a VM job's
         # parameters immediately before it runs; a job naming no relay passes
         # through untouched.
-        relay_resolver=RelayExecutionResolver(
-            session_factory=session_factory, settings=config
-        ),
+        relay_resolver=relay_resolver,
     )
     return VmProvisioningRuntime(
         config=config,
@@ -207,6 +124,8 @@ def build_vm_runtime(
         job_submission=job_submission,
         vm_operations_service=VmOperationsService(submission=job_submission),
         host_operations_service=HostOperationsService(submission=job_submission),
-        relay_port_allocator=RelayPortAllocator(session_factory),
-        relay_service=RelayService(session_factory=session_factory, settings=config),
+        relay_port_allocator=relay_port_allocator,
     )
+
+
+__all__ = ["HOST_REQUIREMENT", "VmProvisioningRuntime", "build_vm_runtime"]

@@ -122,11 +122,50 @@ def test_family_routes_name_their_roles():
 
 
 def test_the_family_table_declares_no_route_another_owner_owns():
-    """Site capacity, pools, capacity definitions, host import, and relays are
+    """Site capacity, pools, capacity definitions, and host import are
     declared by their owners and assembled by the service."""
     patterns = [contract.pattern.pattern for contract in PROVISIONING_ROUTE_CONTRACTS]
-    for prefix in ("/api/v1/capacity", "/api/v1/pools", "/api/v1/relays", "/api/v1/hosts/import"):
+    for prefix in ("/api/v1/capacity", "/api/v1/pools", "/api/v1/hosts/import"):
         assert not [pattern for pattern in patterns if pattern.startswith(prefix)], prefix
+
+
+def test_every_relay_route_is_the_administrators_alone():
+    """Relays are the family's operator infrastructure; no storefront
+    administers them, so every relay route admits only the administrator."""
+    relay_routes = [
+        contract
+        for contract in PROVISIONING_ROUTE_CONTRACTS
+        if contract.pattern.pattern.startswith("/api/v1/relays")
+    ]
+
+    assert {contract.operation for contract in relay_routes} == {
+        "provisioning_relays_list",
+        "provisioning_relay_create",
+        "provisioning_relay_get",
+        "provisioning_relay_update",
+        "provisioning_relay_rotate_token",
+        "provisioning_relay_enable",
+        "provisioning_relay_disable",
+    }
+    assert all(contract.allowed_roles == ("admin",) for contract in relay_routes)
+
+
+@pytest.mark.parametrize(
+    "method, path, operation",
+    [
+        ("GET", "/api/v1/relays/", "provisioning_relays_list"),
+        ("GET", "/api/v1/relays/site-a", "provisioning_relay_get"),
+        ("POST", "/api/v1/relays/site-a/token", "provisioning_relay_rotate_token"),
+        ("POST", "/api/v1/relays/site-a/enable", "provisioning_relay_enable"),
+        ("POST", "/api/v1/relays/site-a/disable", "provisioning_relay_disable"),
+    ],
+)
+def test_a_relay_id_never_matches_an_action_path(method, path, operation):
+    """A capture takes no slash, so a bare relay id never matches the token,
+    enable, or disable path, and each resolves to its own operation."""
+    resolved, _ = resolve_provisioning_route(method, path, {})
+
+    assert resolved == operation
 
 
 def test_every_fulfillment_route_is_a_family_route():

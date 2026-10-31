@@ -549,7 +549,7 @@ def provisioning_client():
 
 @pytest.fixture(scope="module")
 def vm_operator_client(provisioning_client) -> SyncVmOperatorClient:
-    """VM's operations, relays, and lease routes over the family client's transport."""
+    """VM's operations and host capacity routes over the family client's transport."""
     return SyncVmOperatorClient(provisioning_client)
 
 

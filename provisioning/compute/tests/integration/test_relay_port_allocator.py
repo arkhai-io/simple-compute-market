@@ -22,9 +22,10 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from vm_provisioning_adapter.db import Relay, RelayPortLease
-from vm_provisioning_adapter.services.relay_port_allocator import (
+from compute_provisioning.relays import (
+    Relay,
     RelayPortAllocator,
+    RelayPortLease,
     RelayWindowExhaustedError,
 )
 
@@ -213,12 +214,9 @@ class TestAllocation:
 class TestTheReleasePrimitive:
     """What `release` does when something calls it — nothing more.
 
-    An earlier version of this class was named for terminal lifecycle paths and
-    parametrized their names as `owner_id` strings before calling `release`
-    itself. It passed against an allocator that nothing in production called,
-    which is worse than having no test: the name told a reviewer the wiring was
-    covered. Whether the lifecycle calls this is asserted in the orchestration
-    tests, against the orchestration.
+    Whether a release path calls it is asserted where that path is composed,
+    against the orchestration; a test here named for a lifecycle path would
+    claim wiring it does not exercise.
     """
 
     def test_releasing_a_held_lease_frees_its_port(self, allocator, session_factory):

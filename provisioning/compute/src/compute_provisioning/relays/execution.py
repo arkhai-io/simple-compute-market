@@ -11,7 +11,7 @@ and returned by the job endpoints. A token placed among them is neither
 protected at rest nor withheld from a read, which is the whole of what this
 system claims about relay credentials.
 
-And a token rotated through the relay controller has to take effect on the next
+And a token rotated through the relay routes has to take effect on the next
 execution, including a retry of a job accepted before the rotation. A snapshot
 pins the value that was correct at acceptance, which after a rotation is
 precisely the value that no longer works.
@@ -20,6 +20,9 @@ This is a deliberate exception to the rule that an accepted operation snapshots
 its resolved provider variables. The rule exists so an operator editing pool
 configuration cannot change what a running job does; a credential is the one
 input where the newest value is the correct one.
+
+The resolver works on any domain's job parameters: a dataclass with
+``relay_id``, ``relay_addr``, ``relay_port``, and ``relay_token`` fields.
 """
 
 from __future__ import annotations
@@ -29,7 +32,7 @@ from typing import Any
 
 from market_config import decrypt_secret
 
-from vm_provisioning_adapter.db import Relay
+from .db import Relay
 
 
 class RelayUnusableAtExecutionError(RuntimeError):
@@ -49,8 +52,8 @@ class RelayExecutionResolver:
     def resolve_into(self, params: Any) -> Any:
         """Return *params* with the relay's address and token filled in.
 
-        A job with no relay reference is the direct-NAT path and passes
-        through untouched.
+        A job with no relay reference reaches its buyer without a relay and
+        passes through untouched.
         """
         relay_id = getattr(params, "relay_id", None)
         if not relay_id:
@@ -61,7 +64,7 @@ class RelayExecutionResolver:
             if relay is None:
                 raise RelayUnusableAtExecutionError(
                     f"job references relay '{relay_id}', which no longer exists; "
-                    "the VM would be created with no external route"
+                    "the delivery would have no external route"
                 )
             if not relay.enabled:
                 raise RelayUnusableAtExecutionError(
@@ -83,3 +86,6 @@ class RelayExecutionResolver:
                 relay_port=relay.relay_port,
                 relay_token=token,
             )
+
+
+__all__ = ["RelayExecutionResolver", "RelayUnusableAtExecutionError"]

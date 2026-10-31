@@ -10,18 +10,19 @@ credential, so it needs no Secret and can be an ordinary mounted file.
 
 The named key is read only when a relay is created. A relay that already exists
 keeps whatever token it holds, so a rotation performed through the relay
-controller is not reverted by a later reconciliation of a document that still
+routes is not reverted by a later reconciliation of a document that still
 names the key holding the old value. That is the one field a reconciliation
 must never touch; everything else the document declares, it may correct.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Mapping
+from dataclasses import dataclass
+from typing import Any
 
 import yaml
-from compute_provisioning import DefinitionDocumentContribution
+
+from ..definition_documents import DefinitionDocumentContribution
 
 
 class RelayDefinitionError(ValueError):
@@ -56,8 +57,8 @@ def parse_relay_definitions(yaml_text: str) -> tuple[RelayDefinition, ...]:
 
     Rejecting unknown fields matters more here than it looks: a misspelled
     ``token_secret_key`` would otherwise produce a relay with no token, which
-    fails at admission rather than at configuration — the asynchronous,
-    hard-to-diagnose failure this whole change exists to eliminate.
+    fails at admission rather than at configuration, as a relay refusing a
+    proxy in a tunnel client's log.
     """
     try:
         document = yaml.safe_load(yaml_text) or {}
@@ -271,3 +272,15 @@ def relay_definitions_document(
         path=path,
         apply=apply,
     )
+
+
+__all__ = [
+    "RELAY_DOCUMENT_KIND",
+    "RelayDefinition",
+    "RelayDefinitionDiff",
+    "RelayDefinitionError",
+    "import_relay_definitions",
+    "import_relay_definitions_in_session",
+    "parse_relay_definitions",
+    "relay_definitions_document",
+]

@@ -14,7 +14,7 @@ Delivers D2(a) and "Relay machinery belongs to the compute family": the relay
 implementation leaves the VM adapter for `compute_provisioning.relays`, with no change
 to behaviour, tables, route paths, or operation names.
 
-- [ ] 1.1 Move the `Relay` and `RelayPortLease` models from
+- [x] 1.1 Move the `Relay` and `RelayPortLease` models from
       `domains/vms/provisioning/adapter/src/vm_provisioning_adapter/db.py` into
       `provisioning/compute/src/compute_provisioning/relays/db.py`, keeping table
       names, constraints, and indexes; `AnsiblePoolConfig` stays VM's. Point the
@@ -22,14 +22,27 @@ to behaviour, tables, route paths, or operation names.
       (`provisioning/compute/service/src/compute_provisioning_service/db/database.py`,
       `db/migrations.py`) at the family models, and update the service's import
       boundary test (`tests/unit/test_import_boundaries.py`). (D2a)
-- [ ] 1.2 Move the allocator, release effect, and reconciliation
+      Done: the family tables have their own declarative base (as hosts and jobs
+      do); schema creation creates it between the pool and VM metadata, since
+      `ansible_pool_configs.relay_id` now references `Relay.__table__.c.id` across
+      metadata. The `20261023` rebuild takes `Relay.__table__` for its FK render.
+      The import boundary test's allow-list is unchanged (database and migrations
+      still read VM's `AnsiblePoolConfig`); its comment now names only VM's table.
+- [x] 1.2 Move the allocator, release effect, and reconciliation
       (`relay_port_allocator.py`), relay administration (`relay_service.py`), the
       definitions importer (`relay_definitions.py`), the rebinding refusals
       (`relay_rebinding.py`), and execution-time resolution (`relay_execution.py`)
       from `vm_provisioning_adapter/services/` into `compute_provisioning/relays/`.
       The rebinding checks read pool references through one family function that
       section 2 backs; until then it reads VM's column. (D2a)
-- [ ] 1.3 Move the relay wire models and route contracts from
+      Done as `relays/allocator.py`, `service.py`, `definitions.py`,
+      `rebinding.py`, `execution.py`. The one read is `pool_relay_id`, which in
+      this section selects `ansible_pool_configs.relay_id` by name (the family
+      imports no domain). The host pool-change hook moved with the rules as
+      `RELAY_HOST_POOL_CHANGE_HOOKS`. The reconciliation loop's function-local
+      `import asyncio` moved to module level. Docstrings speak of deliveries, not
+      VMs, where the rule is the family's.
+- [x] 1.3 Move the relay wire models and route contracts from
       `domains/vms/provisioning/client/src/vm_provisioning_operator/relays.py` and
       `routes.py` into `provisioning/compute/contracts/src/compute_provisioning_contracts/`,
       and the relay methods into `compute_provisioning_client` (sync and async);
@@ -37,20 +50,39 @@ to behaviour, tables, route paths, or operation names.
       harness's included (`e2e-tests/src/e2e_harness/provisioning_test_client.py`,
       `e2e-tests/tests/e2e/roles/scenarios/vms/conftest.py`). (D2a, the five-piece
       route pattern in `docs/development/ARCHITECTURE.md`)
-- [ ] 1.4 Put the framework-free relay route service in the family kit and bind it in
+      Done: `compute_provisioning_contracts/relays.py`; the seven relay contracts
+      join `PROVISIONING_ROUTE_CONTRACTS` and `ADMIN_PROVISIONING_OPERATIONS`.
+      The family client's `update_relay` sends exactly the fields set (as
+      `update_host` does), so an explicit `label=None` clears. The e2e harness
+      called no relay method; only the VM conftest's docstring named relays.
+      Contracts unit test: relay routes are admin-only and an id never matches
+      an action path (`make test-compute-provisioning-contracts`, unit, 122 passed).
+- [x] 1.4 Put the framework-free relay route service in the family kit and bind it in
       the provisioning service (`compute_provisioning_service/controllers/`,
       `route_table.py`), administrator only, replacing
       `vm_provisioning_adapter/controllers/relays_controller.py` and its mount in
       `vm_provisioning_adapter/routers.py`. Every relay route resolves to exactly one
       contract. ("Relay administration admits only the administrator")
-- [ ] 1.5 Register the release effect, the reconciliation worker, and the relay
+      Done: `relays/route_service.py` (`RelayRouteService`) and
+      `controllers/relays_controller.py`, mounted in `main.py`; `route_table.py`
+      needed no change, since the relay contracts are now the family's own. One
+      behaviour differs from the VM controller: a token rotation refused by the
+      drain rule answers 409, where it fell through to a 500 before.
+- [x] 1.5 Register the release effect, the reconciliation worker, and the relay
       definitions document once in the service's composition
       (`compute_provisioning_service/container.py`, `app_runtime.py`), and the
       host-pool-change check as a family hook rather than VM's
       `HOST_POOL_CHANGE_HOOKS`; remove them from `build_vm_adapter_bundle` and
       `VmProvisioningRuntime`. VM's plan keeps its allocation call and its codec its
       relay endpoint, now through the family package. (D2a)
-- [ ] 1.6 Move the relay tests with the code: VM adapter's
+      Done through `compute_provisioning.relays.relay_contribution`, an
+      `ExecutorAdapterBundle` named `relays` with no executor or provider,
+      composed first beside VM's and bare metal's so the existing duplicate-kind
+      and duplicate-task refusals cover it. The container owns one
+      `RelayPortAllocator`, `RelayService`, and `RelayExecutionResolver` and
+      injects the allocator and resolver into `build_vm_runtime`. `app_runtime.py`
+      needed no change (it already resolved `container.relay_service()`).
+- [x] 1.6 Move the relay tests with the code: VM adapter's
       `tests/integration/test_relay_administration.py`,
       `test_relay_port_allocator.py`, and `test_relay_port_leases.py` into
       `provisioning/compute/tests/integration/`, and the service's
@@ -58,7 +90,24 @@ to behaviour, tables, route paths, or operation names.
       Update each moved package's `pyproject.toml` dependencies and locks, and
       remove a dependency nothing imports any longer. (D2a; `AGENTS.md` "Package and
       dependency discipline")
-- [ ] 1.7 Verify. Library integration: `make test-compute-provisioning`. Application
+      Done, with a split: the parts of `test_relay_administration.py` that
+      exercise VM's code (the pool configuration's reader split and repoint
+      refusal, and a rotated token reaching `VmAnsibleCodec`'s variables) stay in
+      VM as `tests/integration/test_relay_pool_configuration.py`, as does the
+      lease-file test of two pools on one relay, which wrote `AnsiblePoolConfig`
+      rows; the lease-file test that a pool with no relay stores none was dropped,
+      `test_a_pool_with_no_relay_resolves_to_no_relay_fields` covering it. The
+      family's resolution tests use a stand-in dataclass. A family
+      `tests/integration/conftest.py` builds the relay schema. Versions: family kit
+      0.24.0 (gains `arkhai-kit-config`, `pyyaml`; `cryptography` in dev), contracts
+      0.13.0, client 0.10.0, VM adapter 0.17.0 (drops `pyyaml`; `cryptography`,
+      which only its tests import, moves to dev), VM operator client 0.11.0;
+      dependents' bounds raised; `make lock` run.
+      `docs/development/RELEASING.md`'s row for the family kit gains
+      `arkhai-kit-config` (`make test-release-tooling` holds it). The permanent
+      `physical-provisioning` spec's Evidence line naming the moved test files
+      now names their new paths.
+- [x] 1.7 Verify. Library integration: `make test-compute-provisioning`. Application
       integration through the typed client: `make test-provisioning`, including the
       relay API, the relay migrations, and a fulfillment against a relay-backed VM
       pool. Unit and integration: `make test-provisioning-adapter`,
@@ -69,6 +118,46 @@ to behaviour, tables, route paths, or operation names.
       `e2e_compute_dynamic_listings`, `e2e_vm_introduction`) and the bare-metal lane
       (`e2e_bare_metal_mock_deal`) exercise the recomposed service on pools with no
       relay; no pipeline scenario runs a relay-backed pool, which section 11 owes.
+      Results: `make test-compute-provisioning` (unit and library integration,
+      350 passed); `make test-provisioning` (service unit 596 passed; application
+      integration through the typed clients 501 passed, including
+      `test_relays_api.py`, `test_relay_migrations.py`, and
+      `test_fulfillment_api.py::TestRelayPortLifecycleOverTheApi`, a fulfillment
+      on a relay-backed VM pool); `make test-provisioning-adapter` (218 passed);
+      contracts 122 passed; client 74 passed; `make test-e2e-unit` 352 passed;
+      `make check-architecture` and `make check-packaging` OK; `make test` passed.
+      Composition unit test: `test_authority_composition.py` holds one allocator
+      and one execution resolver shared with VM's runtime and the relay effect,
+      document, and worker each registered once. The host-move rule, which now
+      reads `pool_relay_id`, is exercised through the typed client by
+      `test_host_pool_moves_api.py` (application integration, in the 501).
+      End-to-end scenarios confirmed as listed; none added.
+
+  Section 1 handoff:
+  - `relay_contribution` takes its configuration as values: the container's
+    `_relay_bundle` reads `relay_definitions_path` and the
+    `relay_port_reconciliation_*` settings and passes a path and a
+    `RelayReconciliationSchedule` (or None). The integration harness and the
+    restart-safety test call `_relay_bundle` itself, so they compose exactly as
+    production does. The restart-safety test's unmounted-document case set a
+    setting nothing read; it now clears `relay_definitions_path`.
+  - `pool_relay_id` (`relays/rebinding.py`) reads `ansible_pool_configs.relay_id`
+    by table name: a family read of a VM table that section 2 removes by backing
+    the function with `pool_relays`.
+  - Section 2 must protect the migration chain: `_migrate_vm_pool_playbook_optional`
+    (`20261023`) rebuilds `ansible_pool_configs` from the current model, copying
+    only columns the model has. Once the model drops `relay_id`, a database
+    older than `20261023` would lose its references there, before the new
+    `pool_relays` migration copies them. On a fresh database `create_all` makes
+    the table without `relay_id` and `20260901` adds it back, so the new
+    migration must drop it on every database.
+  - The fresh-context check's finding that a family kit reading a domain table
+    by name is a hidden edge was accepted as temporary (section 2); its findings
+    on configuration ownership, comment history, local imports in touched
+    tests, `cryptography`'s placement, the restart-safety no-op, and the 1.6
+    note were fixed; two stale permanent documents were added to closeout
+    (17.5, 17.9). Declined: a floor on `arkhai-kit-config` (no package in the
+    repository states one).
 
 ## 2. One relay reference for every pool
 
@@ -515,7 +604,10 @@ implementation. `frp-grant-admission` must be archived first.
       admission by signed grants; remove the gap row "No end-to-end lane runs a
       relay-backed pool"; add unowned gap rows for `host_key_checking = False` in the
       provisioning service's Ansible configuration (D4) and for admission at login on a
-      shared relay, with its trigger (D21). Name the update in the promotion record.
+      shared relay, with its trigger (D21). The concurrent-allocation gap row, which
+      names VM's provisioning owner as the allocator's, names the compute family's
+      relays instead (found by section 1's fresh-context check). Name the update in
+      the promotion record.
 - [ ] 17.6 **Campaign index currency.** This change's row in
       `openspec/changes/README.md` ("Reach hosts and VMs that have no inbound route"),
       its campaign graph, and its `Depends on` once `frp-grant-admission` is archived;
@@ -530,7 +622,10 @@ implementation. `frp-grant-admission` must be archived first.
       - D2, D3: `docs/development/ARCHITECTURE.md` "Family kits" (the compute family
         kit's relays and the family IaC roles); `openspec/specs/physical-provisioning/architecture.md`
         "Buyer access to rented VMs", renamed for both domains, with the host-level
-        client configuration belonging to the host.
+        client configuration belonging to the host;
+        `openspec/specs/resource-pool-management/architecture.md`, whose account of a
+        relay-changing host move names the VM adapter as refusing it, where the
+        family's relay pool-change hook now does.
       - D1, D15b: `physical-provisioning/architecture.md` "The host registry owns the
         connection".
       - D4: `physical-provisioning/architecture.md`, the token's boundary on a host.

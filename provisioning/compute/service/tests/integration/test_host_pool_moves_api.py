@@ -21,10 +21,10 @@ import pytest
 from compute_provisioning_client import ComputeProvisioningError
 from compute_provisioning_contracts import HostUpdate
 from market_resource_pools_contracts import PoolCreate
-from vm_provisioning_operator.relays import RelayCreate
+from compute_provisioning_contracts import RelayCreate
 
 from compute_provisioning_service import container as _container_module
-from vm_provisioning_adapter.db import RelayPortLease
+from compute_provisioning.relays import RelayPortLease
 
 _RELAY_POOL = "relay-pool"
 _PLAIN_POOL = "plain-pool"
@@ -39,7 +39,7 @@ def _inventory(pool_id: str, address: str = "10.0.0.1") -> str:
 
 
 async def _relay_and_pools(clients) -> None:
-    await clients.vm.create_relay(
+    await clients.family.create_relay(
         RelayCreate(
             id="site-a",
             relay_addr="203.0.113.9",

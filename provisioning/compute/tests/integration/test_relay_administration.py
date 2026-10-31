@@ -10,51 +10,41 @@ Two properties are pinned here:
   does.
 
 That reconciling a relay definition document follows a change to the document,
-not a process start, is the service importer's, and its suite tests it.
+not a process start, is the service importer's, and its suite tests it. How a
+domain's pool configuration reads and writes its relay reference is that
+domain's, and its suite tests it.
 
 External boundary: SQLAlchemy against file-backed SQLite, over a schema built
-from VM's own models. The database is deterministic and does no network I/O, so
-the real engine is used rather than a mock.
+from the family's own models. The database is deterministic and does no network
+I/O, so the real engine is used rather than a mock.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
 import yaml
-from compute_provisioning_ansible import render_extra_vars
 from cryptography.fernet import Fernet
-from market_resource_pools import ResourcePool
 from sqlalchemy.orm import Session
 
-from vm_provisioning_adapter.codec import VmAnsibleCodec
-from vm_provisioning_adapter.db import Relay, RelayPortLease
-from vm_provisioning_adapter.models.jobs_model import VmJobParams
-from vm_provisioning_adapter.services.relay_definitions import (
+from compute_provisioning.relays import (
+    Relay,
     RelayDefinitionError,
+    RelayEndpointConflictError,
+    RelayExecutionResolver,
+    RelayNotFoundError,
+    RelayPortLease,
+    RelayRebindingRefused,
+    RelayService,
+    RelayUnusableAtExecutionError,
+    RelayValidationError,
     import_relay_definitions,
     parse_relay_definitions,
 )
-from vm_provisioning_adapter.services.relay_rebinding import (
-    RelayRebindingRefused,
-)
-from vm_provisioning_adapter.services.relay_service import (
-    RelayEndpointConflictError,
-    RelayNotFoundError,
-    RelayService,
-    RelayValidationError,
-)
-from vm_provisioning_adapter.services.ansible_pool_config_handler import (
-    AnsiblePoolConfigHandler,
-)
-from vm_provisioning_adapter.services.relay_execution import (
-    RelayExecutionResolver,
-    RelayUnusableAtExecutionError,
-)
 
-_PLAYBOOK_PATH = "/configured/playbook.yaml"
 # A development-only Fernet key. Generated for this fixture, never used on any
 # network, and safe to read here precisely because it protects nothing.
 _KEY = Fernet.generate_key().decode()
@@ -185,83 +175,11 @@ class TestTokenConfidentiality:
         assert Fernet(_KEY.encode()).decrypt(stored.encode()).decode() == "second"
 
     def test_a_token_cannot_be_cleared_by_rotation(self, relays):
-        """Clearing one disables every VM path on that relay, so it is not
+        """Clearing one disables every buyer path on that relay, so it is not
         something an empty value should be able to express."""
         _make_relay(relays, token="first")
         with pytest.raises(RelayValidationError):
             relays.rotate_token("site-a", "")
-
-
-class TestTheReaderSplit:
-    """The redacted read has the unqualified name; only execution resolves."""
-
-    def _pool_with_relay(self, session_factory, relays, handler):
-        _make_relay(relays, token="admission-secret")
-        with session_factory() as db, db.begin():
-            db.add(ResourcePool(id="gpu-pool", label="GPU", provider="vm.ansible", enabled=True))
-            handler.replace_config(
-                db,
-                "gpu-pool",
-                {"playbook_path": _PLAYBOOK_PATH, "relay_id": "site-a"},
-            )
-
-    def test_the_plain_read_returns_the_reference_and_no_token(
-        self, session_factory, relays, settings
-    ):
-        handler = AnsiblePoolConfigHandler(settings=settings)
-        self._pool_with_relay(session_factory, relays, handler)
-        with session_factory() as db:
-            config = handler.read_config(db, "gpu-pool")
-        assert config["relay_id"] == "site-a"
-        assert "relay_token" not in config
-        assert "relay_addr" not in config
-
-    def test_the_execution_read_resolves_the_relay_and_decrypts(
-        self, session_factory, relays, settings
-    ):
-        handler = AnsiblePoolConfigHandler(settings=settings)
-        self._pool_with_relay(session_factory, relays, handler)
-        with session_factory() as db:
-            config = handler.read_config_for_execution(db, "gpu-pool")
-        assert config["relay_addr"] == "10.0.0.9"
-        assert config["vm_port_range_start"] == 6100
-        assert config["relay_token"] == "admission-secret"
-
-    def test_a_pool_with_no_relay_resolves_to_no_relay_fields(
-        self, session_factory, settings
-    ):
-        handler = AnsiblePoolConfigHandler(settings=settings)
-        with session_factory() as db, db.begin():
-            db.add(ResourcePool(id="nat-pool", label="NAT", provider="vm.ansible", enabled=True))
-            handler.replace_config(db, "nat-pool", {"playbook_path": _PLAYBOOK_PATH})
-        with session_factory() as db:
-            config = handler.read_config_for_execution(db, "nat-pool")
-        assert config["relay_id"] is None
-        assert "relay_token" not in config
-
-    def test_a_disabled_relay_resolves_to_no_relay_fields(
-        self, session_factory, relays, settings
-    ):
-        """So the single rejection point for an unusable relay stays in
-        pre-dispatch validation rather than being split across two layers."""
-        handler = AnsiblePoolConfigHandler(settings=settings)
-        self._pool_with_relay(session_factory, relays, handler)
-        relays.set_enabled("site-a", False)
-        with session_factory() as db:
-            config = handler.read_config_for_execution(db, "gpu-pool")
-        assert "relay_token" not in config
-
-    def test_the_relay_endpoint_is_not_writable_as_pool_configuration(
-        self, session_factory, settings
-    ):
-        """The window belongs to the relay. Accepting it here is what would
-        let two pools disagree about one listening namespace."""
-        handler = AnsiblePoolConfigHandler(settings=settings)
-        normalized, problems = handler.validate_config_problems(
-            {"playbook_path": _PLAYBOOK_PATH, "vm_port_range_start": 6100}
-        )
-        assert normalized is None
-        assert any(p.code == "unknown_field" for p in problems)
 
 
 class TestRelayDefinitionDocuments:
@@ -375,14 +293,14 @@ class TestRelayDefinitionDocuments:
 
 
 class TestRebinding:
-    """A relay binding is fixed for a VM's life.
+    """A relay binding is fixed for a lease's life.
 
     The buyer holds a rendezvous address and a port. Both are delivered, and a
     remote port is not portable between relays — 6142 on one says nothing about
     6142 on another, which may already be leased. So a rebinding that moved
-    existing VMs would strand every buyer on the affected hosts, and these
-    rules refuse it rather than accept it and reissue connection strings the
-    system has no way to deliver.
+    existing deliveries would strand every buyer on the affected hosts, and
+    these rules refuse it rather than accept it and reissue connection strings
+    the system has no way to deliver.
     """
 
     def _make_lease(self, session_factory, *, relay_id="site-a",
@@ -406,16 +324,6 @@ class TestRebinding:
         self._make_lease(
             session_factory, relay_id=relay_id, pool_id=pool_id, host=host
         )
-
-    def _pool_on_relay(self, session_factory, handler, *, pool_id, relay_id):
-        """A pool already pointing at a relay. Written before any lease exists,
-        which is the real order: a lease is what a VM on that pool produced."""
-        with session_factory() as db, db.begin():
-            db.add(ResourcePool(id=pool_id, label=pool_id, provider="vm.ansible", enabled=True))
-            handler.replace_config(
-                db, pool_id,
-                {"playbook_path": _PLAYBOOK_PATH, "relay_id": relay_id},
-            )
 
     def test_a_relay_cannot_move_while_it_carries_tunnels(
         self, session_factory, relays
@@ -442,22 +350,6 @@ class TestRebinding:
         self._relay_with_lease(session_factory, relays)
         assert relays.update_relay("site-a", label="renamed").label == "renamed"
         assert relays.update_relay("site-a", vm_port_range_count=50).vm_port_range_count == 50
-
-    def test_a_pool_cannot_be_repointed_while_its_hosts_hold_leases(
-        self, session_factory, relays, settings
-    ):
-        handler = AnsiblePoolConfigHandler(settings=settings)
-        _make_relay(relays, relay_id="site-a", relay_addr="10.0.0.9")
-        _make_relay(relays, relay_id="site-b", relay_addr="10.0.0.10")
-        self._pool_on_relay(session_factory, handler, pool_id="gpu-pool", relay_id="site-a")
-        self._make_lease(session_factory, relay_id="site-a", pool_id="gpu-pool")
-
-        with session_factory() as db, db.begin():
-            with pytest.raises(RelayRebindingRefused):
-                handler.replace_config(
-                    db, "gpu-pool",
-                    {"playbook_path": _PLAYBOOK_PATH, "relay_id": "site-b"},
-                )
 
     def test_a_carrying_relay_cannot_have_its_token_rotated(
         self, session_factory, relays
@@ -492,38 +384,32 @@ class TestRebinding:
 
         assert relays.rotate_token("site-a", "rotated").token_configured is True
 
-    def test_a_pool_write_that_keeps_its_relay_is_unaffected(
-        self, session_factory, relays, settings
-    ):
-        handler = AnsiblePoolConfigHandler(settings=settings)
-        _make_relay(relays, relay_id="site-a", relay_addr="10.0.0.9")
-        self._pool_on_relay(session_factory, handler, pool_id="gpu-pool", relay_id="site-a")
-        self._make_lease(session_factory, relay_id="site-a", pool_id="gpu-pool")
-        with session_factory() as db, db.begin():
-            handler.replace_config(
-                db, "gpu-pool",
-                {"playbook_path": "/other/playbook.yaml", "relay_id": "site-a"},
-            )
-        with session_factory() as db:
-            assert handler.read_config(db, "gpu-pool")["playbook_path"] == "/other/playbook.yaml"
+
+@dataclass(frozen=True)
+class _JobParams:
+    """The relay fields a domain's job parameters carry."""
+
+    host_id: str = "kvm1"
+    relay_id: str | None = None
+    relay_addr: str | None = None
+    relay_port: int | None = None
+    relay_token: str | None = None
 
 
 class TestExecutionTimeTokenResolution:
     """The token is resolved here and nowhere earlier.
 
-    Earlier, it travelled in the accepted operation — which is persisted in a
-    JSON column and returned by the job endpoints, so the credential was
-    neither encrypted at rest nor withheld from a read. Resolving at execution
-    also means a rotation reaches a retry of a job accepted before it.
+    An accepted operation is persisted in a JSON column and returned by the job
+    endpoints, so a credential in it would be neither encrypted at rest nor
+    withheld from a read. Resolving at execution also means a rotation reaches
+    a retry of a job accepted before it.
     """
 
     def _resolver(self, session_factory, settings):
         return RelayExecutionResolver(session_factory=session_factory, settings=settings)
 
     def _params(self, **overrides):
-        fields = {"host_id": "kvm1", "vm_action": "create", "offering_mode": "vm"}
-        fields.update(overrides)
-        return VmJobParams(**fields)
+        return _JobParams(**overrides)
 
     def test_a_job_with_no_relay_passes_through(self, session_factory, settings):
         params = self._params()
@@ -532,43 +418,11 @@ class TestExecutionTimeTokenResolution:
     def test_the_address_and_token_are_filled_in(self, relays, session_factory, settings):
         _make_relay(relays, token="admission-token")
         resolved = self._resolver(session_factory, settings).resolve_into(
-            self._params(relay_id="site-a", vm_remote_port=6100)
+            self._params(relay_id="site-a")
         )
         assert resolved.relay_addr == "10.0.0.9"
         assert resolved.relay_port == 7000
         assert resolved.relay_token == "admission-token"
-
-    def test_a_rotated_token_reaches_the_rendered_job_variables(
-        self, relays, session_factory, settings
-    ):
-        """How far the service-side path carries a rotation, and no further.
-
-        Asserted through what a job runs with rather than through a successful
-        write to the relay row: a rotation that stores correctly and never
-        reaches a playbook has changed nothing an operator cares about.
-
-        This does **not** show that the host's tunnel client adopts the token.
-        That needs the client's own configuration rewritten and the client
-        restarted, which `vm-create.yml` does and `test_vm_management_contracts`
-        pins; whether the restart behaves as intended against a real relay is
-        the live gate's business. A rotation takes effect without a restart in
-        the variables, and only after one on the host.
-        """
-        _make_relay(relays, token="original")
-        params = VmJobParams(
-            host_id="kvm1",
-            vm_action="create",
-            offering_mode="vm",
-            relay_id="site-a",
-            vm_remote_port=6100,
-        )
-        relays.rotate_token("site-a", "rotated")
-
-        resolved = self._resolver(session_factory, settings).resolve_into(params)
-        rendered = render_extra_vars(VmAnsibleCodec().variables(resolved))
-
-        assert 'frp_auth_token: "rotated"' in rendered.splitlines()
-        assert "original" not in rendered
 
     def test_a_rotation_reaches_a_job_accepted_before_it(
         self, relays, session_factory, settings
@@ -577,7 +431,7 @@ class TestExecutionTimeTokenResolution:
         that was correct at acceptance, which after a rotation is exactly the
         value that no longer works."""
         _make_relay(relays, token="original")
-        params = self._params(relay_id="site-a", vm_remote_port=6100)
+        params = self._params(relay_id="site-a")
         relays.rotate_token("site-a", "rotated")
 
         resolved = self._resolver(session_factory, settings).resolve_into(params)
@@ -598,12 +452,12 @@ class TestExecutionTimeTokenResolution:
         break_it(relays)
         with pytest.raises(RelayUnusableAtExecutionError) as excinfo:
             self._resolver(session_factory, settings).resolve_into(
-                self._params(relay_id="site-a", vm_remote_port=6100)
+                self._params(relay_id="site-a")
             )
         assert expected in str(excinfo.value)
 
     def test_a_vanished_relay_fails_the_job(self, session_factory, settings):
         with pytest.raises(RelayUnusableAtExecutionError):
             self._resolver(session_factory, settings).resolve_into(
-                self._params(relay_id="never-created", vm_remote_port=6100)
+                self._params(relay_id="never-created")
             )

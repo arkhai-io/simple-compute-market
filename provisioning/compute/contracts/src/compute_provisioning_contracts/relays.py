@@ -1,8 +1,8 @@
 """Wire models for relay administration.
 
-Shared by the provisioning service's relay controller and VM's typed client,
-so the two cannot drift. A test that hand-builds a request body proves the
-server accepts that body; it proves nothing about the body the production
+Shared by the provisioning service's relay routes and the family's typed
+clients, so the two cannot drift. A test that hand-builds a request body proves
+the server accepts that body; it proves nothing about the body the production
 client actually sends, and the two can diverge while the test stays green.
 
 No model here carries an admission token on a read. ``token_configured``

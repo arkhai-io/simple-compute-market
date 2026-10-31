@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Mapping
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
@@ -23,6 +25,14 @@ from compute_provisioning_ansible import (
 )
 from compute_provisioning_ansible.runner import AnsibleRunner
 from compute_provisioning.leases import LeaseRouteService
+from compute_provisioning.relays import (
+    RELAY_HOST_POOL_CHANGE_HOOKS,
+    RelayExecutionResolver,
+    RelayPortAllocator,
+    RelayReconciliationSchedule,
+    RelayService,
+    relay_contribution,
+)
 from compute_provisioning.release import (
     FulfillmentReleaseExecutor,
     FulfillmentReleaseGuard,
@@ -38,7 +48,6 @@ from bare_metal_provisioning_adapter.runtime import (
     build_bare_metal_runtime,
 )
 from vm_provisioning_adapter.runtime import (
-    HOST_POOL_CHANGE_HOOKS as VM_HOST_POOL_CHANGE_HOOKS,
     HOST_REQUIREMENT as VM_HOST_REQUIREMENT,
     build_vm_runtime,
 )
@@ -75,6 +84,9 @@ from market_fulfillment import (
     SqlAlchemyFulfillmentUnitOfWork,
 )
 
+
+
+logger = logging.getLogger(__name__)
 
 
 def _resolved_job_queue():
@@ -229,11 +241,47 @@ def _make_release_effects():
     return ReleaseEffects()
 
 
+def _relay_bundle(session_factory, cfg, relay_service, port_allocator):
+    """The relays' release effect, definitions document, and reconciliation,
+    registered once for every domain a relay carries.
+
+    The document is read from ``relay_definitions_path`` when one is mounted;
+    the reconciliation runs unless ``relay_port_reconciliation_enabled`` turns
+    it off.
+    """
+    raw_path = str(getattr(cfg, "relay_definitions_path", "") or "").strip()
+    if bool(getattr(cfg, "relay_port_reconciliation_enabled", True)):
+        reconciliation = RelayReconciliationSchedule(
+            poll_interval_seconds=float(
+                getattr(cfg, "relay_port_reconciliation_poll_interval_seconds", 300)
+            ),
+            grace_seconds=float(getattr(cfg, "relay_port_reconciliation_grace_seconds", 3600)),
+        )
+    else:
+        logger.info(
+            "Relay port reconciliation disabled (relay_port_reconciliation_enabled=false)"
+        )
+        reconciliation = None
+    return relay_contribution(
+        session_factory=session_factory,
+        settings=cfg,
+        relay_service=relay_service,
+        port_allocator=port_allocator,
+        definitions_path=Path(raw_path).resolve() if raw_path else None,
+        reconciliation=reconciliation,
+    )
+
+
 def _compose_adapters(
-    vm_bundle, bare_metal_bundle, host_requirement, job_executors, release_effects
+    relay_bundle,
+    vm_bundle,
+    bare_metal_bundle,
+    host_requirement,
+    job_executors,
+    release_effects,
 ):
     return compose_adapter_bundles(
-        [vm_bundle, bare_metal_bundle],
+        [relay_bundle, vm_bundle, bare_metal_bundle],
         host_requirement=host_requirement,
         job_executors=job_executors,
         release_effects=release_effects,
@@ -347,7 +395,7 @@ class Container(containers.DeclarativeContainer):
     # job's executor through it.
     job_executor_table = providers.Singleton(JobExecutorTable)
 
-    host_pool_change_hooks = providers.Object(VM_HOST_POOL_CHANGE_HOOKS)
+    host_pool_change_hooks = providers.Object(RELAY_HOST_POOL_CHANGE_HOOKS)
 
     host_authority = providers.Singleton(
         _make_host_authority,
@@ -378,6 +426,19 @@ class Container(containers.DeclarativeContainer):
         job_queue_provider=providers.Object(_resolved_job_queue),
     )
 
+    # The family's relays: one allocator every domain leases relay ports
+    # through, the administration the relay routes serve, and the resolver
+    # that fills a relay's address and token into a job as it runs.
+    relay_port_allocator = providers.Singleton(
+        RelayPortAllocator, session_factory=session_factory
+    )
+    relay_service = providers.Singleton(
+        RelayService, session_factory=session_factory, settings=config
+    )
+    relay_execution_resolver = providers.Singleton(
+        RelayExecutionResolver, session_factory=session_factory, settings=config
+    )
+
     vm_runtime = providers.Singleton(
         build_vm_runtime,
         config=config,
@@ -386,6 +447,8 @@ class Container(containers.DeclarativeContainer):
         host_authority=host_authority,
         job_engine=job_engine,
         job_submission=job_submission,
+        relay_port_allocator=relay_port_allocator,
+        relay_resolver=relay_execution_resolver,
     )
 
     ansible_service = providers.Callable(
@@ -407,11 +470,6 @@ class Container(containers.DeclarativeContainer):
         _runtime_value,
         runtime=vm_runtime,
         name=providers.Object("host_operations_service"),
-    )
-    relay_service = providers.Callable(
-        _runtime_value,
-        runtime=vm_runtime,
-        name=providers.Object("relay_service"),
     )
 
     site_authority = providers.Singleton(
@@ -437,8 +495,17 @@ class Container(containers.DeclarativeContainer):
         _adapter_bundle, runtime=bare_metal_runtime
     )
 
+    relay_adapter_bundle = providers.Singleton(
+        _relay_bundle,
+        session_factory=session_factory,
+        cfg=config,
+        relay_service=relay_service,
+        port_allocator=relay_port_allocator,
+    )
+
     composed_adapters = providers.Singleton(
         _compose_adapters,
+        relay_bundle=relay_adapter_bundle,
         vm_bundle=vm_adapter_bundle,
         bare_metal_bundle=bare_metal_adapter_bundle,
         host_requirement=host_requirement,

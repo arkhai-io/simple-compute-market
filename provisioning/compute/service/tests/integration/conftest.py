@@ -57,10 +57,8 @@ from market_identity import (
 from compute_provisioning_service import container as _container_module
 from vm_provisioning_adapter.db import Base as VmBase
 from vm_provisioning_adapter.bundle import VM_JOB_ACTIONS, build_vm_adapter_bundle
-from vm_provisioning_adapter.services.relay_port_allocator import (
-    RelayPortAllocator,
-)
-from vm_provisioning_adapter.services.relay_service import RelayService
+from compute_provisioning.relays import RelayPortAllocator, RelayService
+from compute_provisioning.relays.db import Base as RelaysBase
 from compute_provisioning import JobExecutorTable, compose_adapter_bundles
 from vm_provisioning_adapter.services.vm_fulfillment_plan import VmFulfillmentPlan
 from vm_provisioning_adapter.services.vm_operations_service import VmOperationsService
@@ -470,9 +468,12 @@ FAKE_CREATE_STDOUT = fake_create_stdout("agent-vm-01")
 
 
 def _initialize_test_database(engine, *, default_pool: bool = True):
-    # resource_pools must exist before VM's ansible_pool_configs FK resolves.
+    # resource_pools and relays must exist before VM's ansible_pool_configs
+    # foreign keys resolve.
     PoolsBase.metadata.create_all(bind=engine)
-    # VM's relay and pool-configuration tables ride VM's own metadata.
+    # The relay tables ride the family's relay metadata.
+    RelaysBase.metadata.create_all(bind=engine)
+    # VM's pool-configuration table rides VM's own metadata.
     VmBase.metadata.create_all(bind=engine)
     # The host registry rides the host authority's own metadata.
     HostsBase.metadata.create_all(bind=engine)
@@ -748,10 +749,10 @@ async def client_and_queue(
     # Fresh queue per test — caller can inject on_job_started via fixture params
     job_queue = AsyncJobQueue(max_concurrent=2)
 
-    # VM's relay administration and its one port allocator, as VM's runtime
-    # builds them: the relay table is the thing under test in the relay suite,
-    # and the allocator is what fulfillment leases through and the terminal
-    # effect releases through.
+    # The family's relay administration and its one port allocator, as the
+    # container builds them: the relay table is the thing under test in the
+    # relay suite, and the allocator is what fulfillment leases through and the
+    # release effect releases through.
     relay_port_allocator = RelayPortAllocator(session_factory)
     relay_service = RelayService(session_factory=session_factory, settings=mock_settings)
 
@@ -784,6 +785,9 @@ async def client_and_queue(
     )
     composed_adapters = compose_adapter_bundles(
         [
+            _container_module._relay_bundle(
+                session_factory, mock_settings, relay_service, relay_port_allocator
+            ),
             build_vm_adapter_bundle(
                 fulfillment_provider=ansible_fulfillment_provider,
                 pool_config_handler=resource_pool_service_handlers["vm.ansible"],
@@ -848,7 +852,6 @@ async def client_and_queue(
         vm_operations_service=VmOperationsService(submission=job_submission),
         host_operations_service=HostOperationsService(submission=job_submission),
         relay_port_allocator=relay_port_allocator,
-        relay_service=relay_service,
     )
 
     fulfillment_convergence_watchdog = FulfillmentConvergenceWatchdog(

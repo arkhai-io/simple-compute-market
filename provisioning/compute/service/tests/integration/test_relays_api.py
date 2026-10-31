@@ -3,29 +3,29 @@
 Level 2, per `docs/development/TESTING.md`: the real in-process application, a
 real database, and the client production code actually uses. Not a helper built
 inside the test — a private wrapper and the shipped client drift independently,
-and the test stays green while they do. `TESTING.md` is explicit that "the
-client doesn't expose it yet" is not an exception to that; the methods these
-tests drive were added because these tests needed them.
+and the test stays green while they do.
 
-What this covers that the unit tests cannot: that the controller, its routes,
-its status codes, and the client's serialization agree. The service-level
-behaviour behind them is covered by the VM adapter's
+What this covers that the library tests cannot: that the binding, its routes,
+its status codes, and the client's serialization agree. The relay service
+behind them is covered by the family kit's
 `tests/integration/test_relay_administration.py`.
 """
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 from httpx import ASGITransport
 
+from compute_provisioning.relays import RelayPortLease
 from compute_provisioning_client import (
     ComputeProvisioningClient,
     ComputeProvisioningError,
 )
-from vm_provisioning_adapter.db import RelayPortLease
-from vm_provisioning_operator import VmOperatorClient
-from vm_provisioning_operator.relays import RelayCreate, RelayTokenRotate, RelayUpdate
+from compute_provisioning_contracts import RelayCreate, RelayTokenRotate, RelayUpdate
 
+from compute_provisioning_service import container as _container_module
 from compute_provisioning_service.main import app
 from .conftest import ADMIN_SIGNER, SERVICE_AUTHORITIES
 
@@ -60,7 +60,7 @@ async def relays(client_and_queue):
     """A client over the real app. `client_and_queue` builds the application
     and its container; this borrows that setup rather than rebuilding it."""
     async with _client(ASGITransport(app=app)) as client:
-        yield VmOperatorClient(client)
+        yield client
 
 
 class TestRelayAdministrationOverTheApi:
@@ -79,8 +79,8 @@ class TestRelayAdministrationOverTheApi:
         assert [r.id for r in listing.relays] == ["site-a"]
 
     async def test_no_response_carries_a_token(self, relays):
-        """The surface that published it before. Asserted across create, get,
-        list, and rotate, because each is a separate serialization."""
+        """Asserted across create, get, list, and rotate, because each is a
+        separate serialization."""
         await relays.create_relay(_relay(token="admission-token"))
         rotated = await relays.rotate_relay_token(
             "site-a", RelayTokenRotate(token="rotated-token")
@@ -135,8 +135,6 @@ class TestRebindingOverTheApi:
     """
 
     def _lease_on(self, relay_id: str, *, port: int = 6100, host: str = "kvm1"):
-        from compute_provisioning_service import container as _container_module
-
         session_factory = _container_module.resolved_session_factory
         with session_factory() as db, db.begin():
             db.add(
@@ -152,10 +150,6 @@ class TestRebindingOverTheApi:
             )
 
     def _release_all(self):
-        from datetime import datetime, timezone
-
-        from compute_provisioning_service import container as _container_module
-
         session_factory = _container_module.resolved_session_factory
         with session_factory() as db, db.begin():
             for lease in db.query(RelayPortLease).all():
@@ -205,4 +199,18 @@ class TestRebindingOverTheApi:
         self._lease_on("site-a")
 
         assert (await relays.set_relay_enabled("site-a", False)).enabled is False
+
+    async def test_a_carrying_relay_refuses_a_token_rotation_with_the_drain_hint(
+        self, relays
+    ):
+        """Rotation joins the drain rule; its refusal reaches the operator as a
+        conflict naming what holds the relay, not as a server error."""
+        await relays.create_relay(_relay(token="admission-token"))
+        self._lease_on("site-a")
+
+        with pytest.raises(ComputeProvisioningError) as excinfo:
+            await relays.rotate_relay_token("site-a", RelayTokenRotate(token="rotated"))
+
+        assert excinfo.value.status_code == 409
+        assert "kvm1:6100" in str(excinfo.value)
 

@@ -1,9 +1,10 @@
-"""The service's migrations create and evolve VM's relay tables.
+"""The service's migrations create and evolve the relay tables.
 
-The service's database holds VM's tables, so its migration history creates them
-on a database that predates them. VM's own suites, in the VM adapter, test the
-tables over a schema built from VM's models; these test what the service's
-migrations make of a stored database.
+The service's database holds the family's relay tables and VM's pool
+configuration, so its migration history creates them on a database that
+predates them. The family kit's suites test the tables over a schema built from
+the family's models; these test what the service's migrations make of a stored
+database.
 
 External boundary: SQLAlchemy against SQLite. The database is deterministic and
 does no network I/O, so the real engine is used rather than a mock.
@@ -20,7 +21,8 @@ from sqlalchemy.pool import StaticPool
 
 from compute_provisioning_service.db.database import create_db_engine, run_migrations
 from compute_provisioning_service.db.migrations import check_schema_version
-from vm_provisioning_adapter.db import AnsiblePoolConfig, RelayPortLease
+from compute_provisioning.relays import RelayPortLease
+from vm_provisioning_adapter.db import AnsiblePoolConfig
 
 _PLAYBOOK_PATH = "/configured/playbook.yaml"
 _ACTIVE_OWNER_INDEX = "uq_relay_port_leases_active_owner"

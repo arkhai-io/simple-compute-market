@@ -19,14 +19,11 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Iterable, Optional
 
+from market_config import encrypt_secret
 from sqlalchemy.orm import Session
 
-from market_config import encrypt_secret
-from vm_provisioning_adapter.db import Relay, RelayPortLease
-from vm_provisioning_adapter.services.relay_rebinding import (
-    check_relay_endpoint_change,
-    check_relay_token_rotation,
-)
+from .db import Relay, RelayPortLease
+from .rebinding import check_relay_endpoint_change, check_relay_token_rotation
 
 
 class _Unset:
@@ -250,12 +247,11 @@ class RelayService:
         """Replace a relay's admission token.
 
         Refused while the relay carries tunnels, under the same rule as an
-        endpoint change. An earlier version of this design allowed rotation
-        live, reasoning that it does not change the address or port a buyer
-        holds. That is true and beside the point: a host adopts a new token
-        only by restarting its tunnel client, because `auth` is not among the
-        sections a reload applies — and that restart closes the control
-        connection, so the relay tears down every proxy the client registered.
+        endpoint change: rotation does not change the address or port a buyer
+        holds, but a host adopts a new token only by restarting its tunnel
+        client, because `auth` is not among the sections a reload applies — and
+        that restart closes the control connection, so the relay tears down
+        every proxy the client registered.
 
         The relay itself makes this unavoidable rather than merely awkward.
         `frps` admits on one token, so the moment it is rotated every client
@@ -264,8 +260,8 @@ class RelayService:
         "rotate without disruption" would require.
 
         There is no way to clear a token through this interface. Clearing one
-        disables every VM path on that relay, so it is not something a partial
-        write should be able to express by omission.
+        disables every buyer path on that relay, so it is not something a
+        partial write should be able to express by omission.
         """
         if not token or not token.strip():
             raise RelayValidationError("relay token must be a non-empty string")
@@ -357,3 +353,13 @@ class RelayService:
     def _encrypt(self, token: str) -> str:
         secret = str(getattr(self._settings, "ssh_decryption_key", "") or "")
         return encrypt_secret(token, secret)
+
+
+__all__ = [
+    "UNSET",
+    "RelayEndpointConflictError",
+    "RelayNotFoundError",
+    "RelayService",
+    "RelayValidationError",
+    "RelayView",
+]

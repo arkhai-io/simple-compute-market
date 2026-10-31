@@ -32,6 +32,7 @@ from market_resource_pools_contracts.hints import (
 from market_site.db import Base as SiteBase
 from market_site.db import CapacityBucket
 
+from compute_provisioning.relays.db import Relay
 from compute_provisioning_service.db.models import (
     DEFAULT_POOL_ID,
     Host,
@@ -3414,7 +3415,7 @@ def _migrate_vm_pool_playbook_optional(engine: Engine) -> None:
     # only the rebuild itself is created.
     metadata = MetaData()
     ResourcePool.__table__.to_metadata(metadata)
-    VmBase.metadata.tables["relays"].to_metadata(metadata)
+    Relay.__table__.to_metadata(metadata)
     rebuild = model.to_metadata(metadata, name=rebuild_name)
     for index in list(rebuild.indexes):
         rebuild.indexes.discard(index)

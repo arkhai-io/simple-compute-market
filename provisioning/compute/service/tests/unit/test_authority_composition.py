@@ -19,8 +19,9 @@ from compute_provisioning.release import (
     FulfillmentReleaseStatusPort,
 )
 
+from compute_provisioning.relays import RELAY_HOST_POOL_CHANGE_HOOKS, release_reservation_ports
+
 from compute_provisioning_service.container import Container
-from vm_provisioning_adapter.runtime import HOST_POOL_CHANGE_HOOKS
 
 
 def _container() -> Container:
@@ -55,10 +56,27 @@ def test_one_engine_and_one_host_authority_reach_both_runtimes():
     assert job_engine._host_lookup == host_authority.lookup
 
 
-def test_the_host_authority_carries_every_adapter_s_pool_change_hooks():
+def test_the_host_authority_carries_the_relays_pool_change_hooks():
     host_authority = _container().host_authority()
 
-    assert set(HOST_POOL_CHANGE_HOOKS) <= set(host_authority._pool_change_hooks)
+    assert set(RELAY_HOST_POOL_CHANGE_HOOKS) <= set(host_authority._pool_change_hooks)
+
+
+def test_the_relays_are_composed_once_for_every_domain():
+    """VM's runtime holds the container's one allocator and one execution
+    resolver, and the relay release effect, definitions document, and
+    reconciliation are each registered once, by the relays rather than by a
+    domain."""
+    container = _container()
+    composed = container.composed_adapters()
+
+    assert container.vm_runtime().relay_port_allocator is container.relay_port_allocator()
+    assert container.vm_runtime().codec._relay_resolver is container.relay_execution_resolver()
+    assert container.release_effects()._effects.count(release_reservation_ports) == 1
+    assert [d.kind for d in composed.definition_documents] == ["relays"]
+    assert [t.name for t in composed.background_tasks] == ["relay-port-reconciliation"]
+    assert container.vm_adapter_bundle().release_effects == ()
+    assert container.vm_adapter_bundle().definition_documents == ()
 
 
 def test_release_is_composed_once_for_every_offering_mode():
