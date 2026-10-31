@@ -97,9 +97,11 @@ passing double evidence.
 The hosted dispute authority is qualified against the foundation's published
 description (D13), not only against its vectors: its policy on repeated and
 concurrent cases on one agreement and on closing a case nobody advances — adequate
-meaning a bounded time to dismiss or a deposit the filer forfeits on dismissal, not a
-statement that cases are reviewed — and its key-retention and origin-continuity
-commitment for the life of a deal plus its
+meaning a published dismissal procedure for ungrounded cases, exercised by the
+authority's triage, and a published response bound in days, however large, within
+which the authority reads a case; Arkhai mediation's qualified policy has the first
+and not yet the second, which is the foundation's open question — and its
+key-retention and origin-continuity commitment for the life of a deal plus its
 dispute window and open cases, must be published. An authority whose description
 lacks either blocks activation however its doubles behave: the architecture rests
 on this authority's fairness and continuity, and the code neither limits filings
