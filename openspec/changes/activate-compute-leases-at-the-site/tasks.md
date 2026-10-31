@@ -28,7 +28,8 @@ Verification point: `make -C provisioning/compute/service test-integration`.
 - [ ] 2.2 Extend `kit/site/tests/integration/test_ledger.py` — the public ledger API
   over a real embedded database — for: activation from each admissible phase, retry
   after truncation, the lost-acknowledgement retry, refusal from each non-admissible
-  state, no resurrection after release, a legacy null-phase lease activated, and
+  state, no resurrection after release, a null-phase lease (migrated, and newly
+  committed with deadlines off) activated to active with its agreed end, and
   full-window admission before and after activation. Deterministic two-session
   controls, not sleeps.
 
@@ -48,8 +49,9 @@ Verification point: `make -C kit/site test`.
   offering-mode neutral, exposing null compatibility and the active instant.
 - [ ] 3.3 Run `make -C kit/site-client test`, the compute contracts and client `make test`
   targets and `make -C provisioning/compute/service test-integration`; verify the
-  contract delta's three scenarios, including refusal of a response signed by a
-  principal other than the configured site authority. Record commands, results and
+  contract delta's scenarios separately — migration, explicit activation of a null-phase
+  lease, repeat activation, missing-route compatibility with a verified legacy view, and
+  refusal of a response signed by a principal other than the configured site authority. Record commands, results and
   any unrun checks.
 
 Verification point: the kit and compute package suites above; `make test`.

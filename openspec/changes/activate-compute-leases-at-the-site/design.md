@@ -79,11 +79,17 @@ boundary and exact response verification apply; a response signed by a principal
 other than the independently configured site authority is refused rather than taken
 as activation.
 
-A null-phase lease read or activated through the client keeps its null fields and its
-behaviour. A protected or unknown phase on a site without activation support is
-repair-required for the caller; absence of an activation route is tolerated only with
-a verified legacy view. Those caller rules are `unify-compute-delivery-path`'s to
-apply; this change makes them expressible.
+A null-phase lease means only that no deadline was written: every lease that predates
+the migration, every lease committed while `activation_deadlines_enabled` is off (the
+site's shipped setting) and every lease in a pool enforcing no deadline. Read, it shows
+its nulls; activated on a site that exposes the operation, it becomes `active` like any
+other, with its due instant left at the agreed end and its activation recorded — the
+ordinary case for all new work until the deadline change is switched on, not an edge
+case about old rows. The no-op is reserved for a site that exposes no activation
+operation at all: there a caller holding a verified legacy lease view treats the lease
+as already active without a write, and any other phase or an unverified view is
+repair-required. Those caller rules are `unify-compute-delivery-path`'s to apply; this
+change makes them expressible.
 
 ## Rejected alternatives
 

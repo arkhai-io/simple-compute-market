@@ -299,8 +299,9 @@ in explicitly enabled owned lanes, then the repository's compute-composition def
 This change leaves every caller activating through the typed contract so that
 enablement needs no caller edit. Existing null-phase leases stay null.
 
-For a verified legacy null-phase leased view, activation is a no-op; an absent
-activation route is tolerated only with that verified legacy view or capability. An
+A null-phase lease on a site that exposes activation is activated like any other and
+records it (`activate-compute-leases-at-the-site` D2); the no-op applies only where
+the site exposes no activation route and the caller holds a verified legacy lease view. An
 awaiting-activation lease with no route, an unknown phase, an unverified legacy
 assumption or an end mismatch is deferred as repair-required. An unreachable
 activation endpoint is never assumed to have succeeded. This permits rolling

@@ -34,8 +34,10 @@ unactivated lease expires at and depends on the pool-authority port.
   router and client, and through the shared compute contract and client, offering-mode
   neutral, under the existing authenticated service boundary with exact response
   verification.
-- Treat a null-phase lease as a legacy lease: inspected or activated, it keeps its
-  null fields and its current behaviour.
+- A null-phase lease — one with no deadline written, which is every lease before the
+  deadline change is switched on — reads as null and activates like any other on a site
+  that exposes the operation; the legacy no-op is only for a site that exposes none,
+  with a verified legacy view.
 
 ## Capabilities
 
@@ -79,7 +81,7 @@ models, router and client, and the shared compute contract and client. Exercised
 through the site API with a real embedded database and no storefront, payment
 authority or deadline: activation from each admissible phase, idempotent retry,
 refusal from every non-admissible state, adoption of an earlier truncation, and
-legacy null-phase leases unchanged. It does not claim that any delivery caller
+null-phase leases activating like any other on a site with the operation. It does not claim that any delivery caller
 activates; that is `unify-compute-delivery-path`'s evidence.
 
 ## Permanent documentation impact

@@ -11,8 +11,18 @@ The shared compute client and contract MUST expose offering-mode-neutral activat
 
 #### Scenario: An older lease is inspected or activated
 
-- **WHEN** a lease with null deadline and phase is read or activated through the client
-- **THEN** its null fields remain visible and its lease behavior remains unchanged
+- **WHEN** a lease with null deadline and phase is read through the client
+- **THEN** its null fields are visible as null, not defaulted
+
+#### Scenario: A null-phase lease is activated on a site with the operation
+
+- **WHEN** a lease with null deadline and phase is activated through the client on a site that exposes activation
+- **THEN** the client returns the lease as active, its due instant the agreed end, and a repeat returns the same lease
+
+#### Scenario: The site has no activation operation
+
+- **WHEN** the site exposes no activation route and the caller holds a verified legacy lease view
+- **THEN** the caller treats the lease as already active without a site write, and any other phase or an unverified view is repair-required
 
 #### Scenario: A response is signed by a different service
 
