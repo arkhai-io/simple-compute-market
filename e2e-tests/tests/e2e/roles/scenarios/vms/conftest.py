@@ -617,6 +617,7 @@ def _ensure_provisioning_host_registered(provisioning_client):
         host_id=host_name,
         connection=ConnectionSubmission(
             kind="ssh",
+            version=2,
             public={"ssh_host": "127.0.0.1", "ssh_user": "stub", "key_path": "/tmp/stub-e2e-key"},
         ),
         enabled=True,

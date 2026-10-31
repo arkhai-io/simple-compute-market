@@ -206,9 +206,11 @@ def _backed_declarations(deliverable_modes: tuple[str, ...]) -> dict[str, Any]:
 
 #: The connection a host is registered with when the scenario reaches it through
 #: the mock profile, which connects to nothing. A `key_path` connection names a
-#: key file without carrying it, so no key material is needed.
+#: key file without carrying it, so no key material is needed. The service
+#: accepts an `ssh` connection only at version 2.
 _PLACEHOLDER_CONNECTION = ConnectionSubmission(
     kind="ssh",
+    version=2,
     public={"ssh_host": "127.0.0.1", "ssh_user": "e2e", "key_path": "/dev/null"},
 )
 

@@ -44,6 +44,10 @@ One `SettlementRecord` aggregate exists per `capacity_reservation_id`, covering 
 
 Recovery from a stuck or interrupted provider operation is provisioning-owned: a periodic convergence worker claims eligible rows under SQLite's single-writer contract (a short, self-contained write-reservation transaction, not portable row locking or a distributed multi-replica protocol), performs provider I/O outside any open transaction, and applies the outcome only while it still holds the claim. See [the fulfillment spec](spec.md#fulfillment-convergence-worker) and [durable settlement persistence](spec.md#durable-settlement-persistence) for the normative contract this section summarizes.
 
+A claim spaces a row's next attempt by its run of consecutive unproductive claims: failed attempts back off exponentially, with jitter, while an applied outcome or a provider answering "still pending" starts the run again, and a pending poll keeps its claim only for the initial interval. Without that reset a healthy operation after a long one would be polled only after a backoff it never earned, longer than the lease lifecycle waits for a release.
+
+A `failed` aggregate has one way out, a compensating teardown: `failed` → `teardown_dispatch_pending`, taken only by `begin_compensating_teardown`, which judges, prepares, and writes in one transaction holding SQLite's writer slot, and writes nothing when the caller's `authorize` refuses or preparation fails. The kit hands `authorize` the record's state, reason, and provider metadata without interpreting them; the compute family decides eligibility. A compensated aggregate is one whose `failure_reason` is `create_compensation`, the kit's constant, kept through a teardown failure. A non-null reason alone marks nothing, since a delivered fulfillment whose teardown failed once and later succeeded also ends `torn_down` with a reason. The ordinary teardown still refuses `failed`.
+
 The implemented scheduling baseline remains deterministic two-level round-robin with multidimensional eligibility; more advanced fairness policy is not implied by the request or carrier abstractions.
 
 ## Related contracts

@@ -521,6 +521,43 @@ class SettlementRepository:
         record.claim_expires_at = None
         db.flush()
 
+    def record_progress(
+        self,
+        db: Session,
+        capacity_reservation_id: str,
+        *,
+        worker_id: str,
+        lease_seconds: float | None = None,
+        now: datetime | None = None,
+    ) -> bool:
+        """Record that ``worker_id``'s claim made healthy progress on the row.
+
+        ``attempt_count`` counts consecutive claims that produced nothing but a
+        failure, so the backoff it sets grows only while the row keeps failing.
+        A healthy observation, whether an applied outcome or a provider that
+        answered "still pending", starts that count again. With no
+        ``lease_seconds`` the claim is released; with one, the claim is kept
+        for that long, so the row is polled again after that interval rather
+        than after a backoff it never earned.
+
+        A no-op returning ``False`` if the row is no longer claimed by
+        ``worker_id``: a worker whose lease lapsed and was reclaimed must not
+        touch the new owner's claim, expiry, or count.
+        """
+
+        record = self.get(db, capacity_reservation_id)
+        if record is None or record.claimed_by != worker_id:
+            return False
+        record.attempt_count = 0
+        if lease_seconds is None:
+            record.claimed_by = None
+            record.claim_expires_at = None
+        else:
+            now = now or datetime.now(timezone.utc)
+            record.claim_expires_at = now + timedelta(seconds=lease_seconds)
+        db.flush()
+        return True
+
     def mark_provisioned_resources_torn_down(
         self,
         db: Session,

@@ -45,48 +45,14 @@ host.
     live and expired claims, retry age, and non-terminal lifecycle age. It must
     not contain credentials, provider metadata, or owner principals.
 
-## Optional Local Automation
+## Running The Local Pass
 
-If your local `.scm-local/` checkout contains the helper script, the manual
-steps below are mirrored by:
-
-```bash
-.scm-local/scripts/validate-local-stack.sh
-```
-
-That script assumes host prerequisites already exist; it verifies them but does
-not install Docker, ZeroTier, `uv`, or other tools.
-
-Useful toggles:
-
-```bash
-KEEP_STACK=1 .scm-local/scripts/validate-local-stack.sh          # leave compose up
-SKIP_BUILD=1 .scm-local/scripts/validate-local-stack.sh          # reuse existing images
-RUN_CODE_TESTS=0 .scm-local/scripts/validate-local-stack.sh      # stack tests only
-RUN_STACK_TESTS=0 .scm-local/scripts/validate-local-stack.sh     # code/build tests only
-RUN_HELM_RENDER=1 .scm-local/scripts/validate-local-stack.sh     # require helm render check
-RUN_IAC_VALIDATE=1 .scm-local/scripts/validate-local-stack.sh    # require Ansible IAC validation
-FIX_STOREFRONT_VOLUME_OWNERSHIP=0 .scm-local/scripts/validate-local-stack.sh  # skip volume chown workaround
-RUN_INTEGRATION_SWEEP=1 .scm-local/scripts/validate-local-stack.sh
-```
-
-Defaults:
-
-- Build is enabled.
-- Code-level tests are enabled.
-- Compose smoke/e2e tests are enabled.
-- Redis host-port publishing is disabled through `/tmp/scm-no-redis-port.yml`.
-- `domains/vms/provisioning/iac` contract tests run by default because they do not
-  require a live KVM host or Ansible inventory.
-- Bob/Alice storefront named volumes are pre-chowned to UID/GID `1000:1000`
-  before stack startup to avoid the known SQLite volume ownership failure.
-- A quiet `anvil_dumpState` check runs after Anvil is reachable.
-- Helm render validation runs automatically when `helm` is available.
-- Compute-provisioning IAC validation runs automatically when Ansible tooling
-  and the inventory directory `domains/vms/provisioning/iac/ansible/inventory/`
-  (`hosts` and `provisioning-hosts.ini`) are available.
-- The single-pass `e2e-tests make test` sweep is off by default because
-  it reruns stack-mutating e2e tests after the marker-specific runs.
+No script in this repository runs the local pass: sections 1 to 14 are the
+procedure, run by hand and in order. Section 5's Ansible validation and Helm
+render are optional and need their tools; section 8's volume ownership fix
+applies only when a storefront exits with a SQLite error; and section 13's
+single-pass sweep is optional, since it reruns stack-mutating tests after the
+marker-specific runs.
 
 ## 1. Prerequisites
 
@@ -373,7 +339,7 @@ Register mock `kvm1` if provisioning returns `{"hosts":[]}`:
 ```bash
 curl -sf -X POST http://localhost:8081/api/v1/hosts/ \
   -H 'Content-Type: application/json' \
-  -d '{"host_id":"kvm1","connection":{"kind":"ssh","public":{"ssh_host":"127.0.0.1","ssh_user":"appuser","key_path":"/home/appuser/.ssh/id_ed25519"}},"enabled":true}' | jq
+  -d '{"host_id":"kvm1","connection":{"kind":"ssh","version":2,"public":{"ssh_host":"127.0.0.1","ssh_user":"appuser","key_path":"/home/appuser/.ssh/id_ed25519"}},"enabled":true}' | jq
 ```
 
 ## 10. Failure Diagnostics
@@ -591,25 +557,53 @@ GCE VM created with nested virtualization; they need nothing GCP-specific.
 Run the commands in one shell where possible. Later GCP sections reuse the
 exported variables below.
 
-Run from this repo first:
+Run from this repo first. Every value below is the operator's own: the
+operations repository that holds the environment's Terraform, Makefile targets,
+and values, and the directory there holding its component validators, which
+this repository does not ship; the GCP project and region, the Helm release,
+and the values files that repository keeps for the application-resources chart
+and for this repository's chart. Each command stops, naming the variable, while
+one is unset. The braced group resolves the two directories to absolute paths
+and stops as a whole, naming the variable, while either is unset or is not a
+directory, so neither is exported empty.
 
 ```bash
 export APP_REPO="$(pwd)"
-export OPS_REPO="$(cd ../compute-market-internal-infra && pwd)"
+{
+  : "${OPS_REPO:?set OPS_REPO to your operations repository checkout}"
+  : "${OPS_VALIDATORS:?set OPS_VALIDATORS to the component-validator directory of the operations repository}"
+  OPS_REPO="$(cd "$OPS_REPO" && pwd)"
+  export OPS_REPO="${OPS_REPO:?set OPS_REPO to an existing directory}"
+  OPS_VALIDATORS="$(cd "$OPS_VALIDATORS" && pwd)"
+  export OPS_VALIDATORS="${OPS_VALIDATORS:?set OPS_VALIDATORS to an existing directory}"
+}
 
-export ENV=dev
-export GCP_PROJECT=compute-market-1-dev
-export REGION=us-central1
+export ENV="${ENV:-dev}"
+export GCP_PROJECT="${GCP_PROJECT:?set GCP_PROJECT to your GCP project ID}"
+export REGION="${REGION:?set REGION to your GCP region}"
 
-export RELEASE=arkhai-node-operator
+export RELEASE="${RELEASE:?set RELEASE to your Helm release name}"
+export OPS_APPS_CHART="${OPS_APPS_CHART:?set OPS_APPS_CHART to the application-resources chart of the operations repository}"
+export OPS_APPS_VALUES="${OPS_APPS_VALUES:?set OPS_APPS_VALUES to the values of that chart for this environment}"
+export OPS_APP_VALUES="${OPS_APP_VALUES:?set OPS_APP_VALUES to the application chart values for this environment}"
 ```
 
-Sanity-check the branch and sibling repo:
+Keep apostrophes out of those messages: bash reads a quote inside `${...}` as
+opening a quoted string even within double quotes. Keep each check outside a
+command substitution, too: a failure inside `$(...)` does not stop the shell,
+and `export` reports success whatever the substitution returned.
+
+Sanity-check the branch and sibling repo. The validator loop only reports, on
+standard error, each validator missing from `$OPS_VALIDATORS`; it stops nothing:
 
 ```bash
 git status --short --branch
 test -d "$OPS_REPO"
 git -C "$OPS_REPO" status --short --branch
+
+for validator in tfstate artifact-registry networking gke secrets api-gateway; do
+  test -f "$OPS_VALIDATORS/$validator.sh" || echo "missing: $OPS_VALIDATORS/$validator.sh" >&2
+done
 
 for cmd in gcloud terraform helm kubectl docker jq curl openssl ssh ssh-keygen python3; do
   command -v "$cmd"
@@ -625,7 +619,7 @@ PY
 
 This section creates or validates platform-level GCP and Kubernetes
 infrastructure. Terraform owns these resources. Apply `api-gateway` here, but
-do not run `scripts/validate/api-gateway.sh` until section 20; that validator
+do not run the `api-gateway` validator until section 20; that validator
 probes application routes that do not exist yet.
 
 Authenticate first:
@@ -645,7 +639,7 @@ create command and run the validator.
 ```bash
 make bootstrap-apis ENV="$ENV"
 make bootstrap-tfstate ENV="$ENV"
-bash scripts/validate/tfstate.sh "$ENV"
+bash "$OPS_VALIDATORS/tfstate.sh" "$ENV"
 ```
 
 Use component validators as you go. Do not use full `make validate-env` as an
@@ -654,20 +648,20 @@ early gate; it checks resources that do not exist until later in this sequence.
 ```bash
 make tf-init  ENV="$ENV" COMPONENT=artifact-registry
 make tf-apply ENV="$ENV" COMPONENT=artifact-registry
-bash scripts/validate/artifact-registry.sh "$ENV"
+bash "$OPS_VALIDATORS/artifact-registry.sh" "$ENV"
 
 make tf-init  ENV="$ENV" COMPONENT=networking
 make tf-apply ENV="$ENV" COMPONENT=networking
-bash scripts/validate/networking.sh "$ENV"
+bash "$OPS_VALIDATORS/networking.sh" "$ENV"
 
 make tf-init  ENV="$ENV" COMPONENT=gke
 make tf-apply ENV="$ENV" COMPONENT=gke
 make get-credentials ENV="$ENV"
-bash scripts/validate/gke.sh "$ENV"
+bash "$OPS_VALIDATORS/gke.sh" "$ENV"
 
 make tf-init  ENV="$ENV" COMPONENT=secret-shells
 make tf-apply ENV="$ENV" COMPONENT=secret-shells
-bash scripts/validate/secrets.sh "$ENV"
+bash "$OPS_VALIDATORS/secrets.sh" "$ENV"
 
 make tf-init  ENV="$ENV" COMPONENT=api-gateway
 make tf-apply ENV="$ENV" COMPONENT=api-gateway
@@ -719,6 +713,8 @@ values, which the chart renders into its public `storefront.json`.
   TMPDIR="$(mktemp -d)"
   trap 'rm -rf "$TMPDIR"' EXIT
 
+  # A well-known Anvil development key, for the dev chain alone; never use it
+  # on a public network.
   cat > "$TMPDIR/storefront.secrets.toml" <<'TOML'
 [wallet]
 private_key = "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
@@ -742,9 +738,9 @@ make push-dev-images AR_PROJECT="$GCP_PROJECT"
 
 ## 20. Kubernetes App Bootstrap In Mock Mode
 
-The `argocd-apps` chart owns the application-side Kubernetes resources that sit
-on top of the platform: ExternalSecrets, the Kong `Gateway`, HTTPRoutes, and the
-route ReferenceGrant. Patch the storefront ExternalSecret after install until
+The operations repository's application-resources chart (`$OPS_APPS_CHART`) owns
+the application-side Kubernetes resources that sit on top of the platform:
+ExternalSecrets, the Kong `Gateway`, HTTPRoutes, and the route ReferenceGrant. Patch the storefront ExternalSecret after install until
 the ops repo template is updated to emit `storefront.secrets.toml`.
 
 ```bash
@@ -752,8 +748,8 @@ cd "$OPS_REPO"
 
 INGRESS_IP="$(make --silent get-ingress-lb-ip ENV="$ENV")"
 
-helm upgrade --install argocd-apps helm/argocd-apps \
-  --values helm/argocd-apps/envs/dev/values.yaml \
+helm upgrade --install argocd-apps "$OPS_APPS_CHART" \
+  --values "$OPS_APPS_VALUES" \
   --set "gateway.ingressLbIp=${INGRESS_IP}" \
   --namespace default
 
@@ -785,7 +781,7 @@ for secret in \
   simple-market-service-provisioning-ssh-key \
   simple-market-service-provisioning-secrets \
   simple-market-service-storefront-arkhai \
-  arkhai-node-operator-e2e-tests-e2e-secret; do
+  "${RELEASE}-e2e-tests-e2e-secret"; do
   kubectl get secret "$secret" -n default
 done
 
@@ -804,7 +800,7 @@ Anvil chain state.
 ```bash
 helm upgrade --install "$RELEASE" "$APP_REPO/helm" \
   --values "$APP_REPO/helm/values.yaml" \
-  --values "$OPS_REPO/helm/argocd-apps/envs/dev/simple-market-service-values.yaml" \
+  --values "$OPS_APP_VALUES" \
   --namespace default \
   --wait \
   --timeout 10m
@@ -823,7 +819,7 @@ kubectl get pods -n kong
 make forward ENV="$ENV"
 curl -sf http://localhost:8081/health | jq
 curl -sf http://localhost:8081/api/v1/system/status | jq
-bash scripts/validate/api-gateway.sh "$ENV"
+bash "$OPS_VALIDATORS/api-gateway.sh" "$ENV"
 make unforward
 ```
 
@@ -965,11 +961,16 @@ failing with the executors it found before anything is held or registered.
 ## 24. Describe The Target
 
 ```bash
-cp e2e-tests/config/config-real-vm-target.yml.example \
-  e2e-tests/config/config-real-vm-target.yml
+(
+  cd e2e-tests/config || exit 1
+  example=config-real-vm-target.yml.example
+  cp "$example" "${example%.example}"
+)
 ```
 
-Fill in the copy's `REAL_VM_TARGET` section:
+The copy is the committed example's name without `.example`,
+`config-real-vm-target.yml`, which the `real-vm-target` profile loads from the
+e2e config directory. Fill in its `REAL_VM_TARGET` section:
 
 - `host_id`: the identifier the scenario registers the host under;
 - `ssh_host`, `ssh_user`, `ssh_port`: where the provisioning service connects
@@ -979,6 +980,12 @@ Fill in the copy's `REAL_VM_TARGET` section:
   forwarded guest ports;
 - `capacity`: what section 21 decided the host sells, as `vcpu_count`,
   `ram_gb`, and `disk_gb`.
+
+The scenario registers the host with an `ssh` connection at version 2, the only
+version the provisioning service serves, naming `ssh_key_path` as its `key_path`
+and `public_host` as the buyer-facing address. A run replaces the connection an
+earlier registration left, so a host stored at an older version is moved forward;
+the key itself stays in the service's filesystem and never enters the target.
 
 `access.mode` stays `direct`, the only mode version 1 admits. Git ignores the
 file; never commit it. The model in `e2e-tests/src/e2e_harness/real_vm_target.py`
@@ -1032,6 +1039,74 @@ section 21 made, wherever it was provided:
 
 ```bash
 rm -f /tmp/kvm-hosts.ini
-rm -f e2e-tests/config/config-real-vm-target.yml
+(
+  cd e2e-tests/config || exit 1
+  example=config-real-vm-target.yml.example
+  rm -f "${example%.example}"
+)
 ```
 
+
+## 27. Running Live Lanes
+
+A live lane is a test-mode purchase through the buyer commands on a physical host,
+from a validated candidate: a whole bare-metal machine, or a guest on a VM host.
+
+**Lanes on separate machines run in parallel.** Their capacity cannot overlap. What
+they share is this repository's source, its wheelhouse and environments, and the
+images built from them, so changes to those stay serialized: no lane's run rebuilds or
+reinstalls what another lane is running on.
+
+**Lanes sharing a machine run in sequence.** A whole-host bare-metal deal and a VM on
+the same machine are admitted by different provisioning services, and cross-mode
+accounting does not span them. Two lanes whose sources are one machine therefore run
+one at a time. The idle lane's listings are held by each listing's durable pause
+(`pause_listing`, `POST /api/v1/listings/{id}/pause`), which keeps them open and
+published and survives a restart that keeps the storefront's database, though not a
+database reset. A pause refuses only a new opening on its listing. A counter or accept
+on a thread opened before it, settlement, fulfillment, and teardown all proceed, so a
+pause drains nothing.
+
+It relies on one precondition that no permanent requirement states: a publication
+refresh or reopen under the same listing identity keeps its pause. A listing bound
+under a new derivation key — a corrected declaration or shape, a new member, a changed
+hint or override, a new site — is created unpaused.
+
+Before each lane's purchase, and after any restart or redeploy of the idle side,
+re-check from fresh read-backs:
+
+1. **Freeze.** Make no change to the idle side's capacity declarations, pools, hints,
+   overrides, or sites until the switch completes, so no unpaused listing is bound.
+2. **Pause.** Pause every idle-lane listing on the shared machine, and read each back
+   open and paused, and open at its registry.
+3. **No unpaused listing.** No open listing for the machine on the idle storefront is
+   unpaused.
+4. **No open negotiation.** No thread on those listings is still open; the negotiation
+   watchdog abandons a stale one after its timeout.
+5. **Every accepted deal drained.** For every accepted deal on those listings:
+   - its settlement and fulfillment are terminal;
+   - its site reservation is `released`, or force-released after verification;
+   - every provider job for it is terminal;
+   - its host-side effects are verified removed: the tenant key and account for bare
+     metal, the guest and its artifacts for VM. For VM, verify before any
+     force-release that no `frpc-vms.toml.reload-pending.<guest>` record is left beside
+     the VM tunnel client's configuration, and that the running client's status lists
+     no `vm-<guest>` proxy;
+   - no approved receipt or recorded materialization remains that could still start a
+     delivery.
+
+   Check a refund or expired approval as the financial disposition too, but never take
+   either as proof of a drain.
+6. **Site drained.** At the idle lane's site, no reservation for the machine is in a
+   state the site counts as holding capacity: `reserved`, `leased`, `releasing`,
+   `release_failed`, or `unmanaged` (`HELD_RESERVATION_STATES` in
+   `kit/site/src/market_site/db.py`). In the site's resource-pool projection, every
+   member on the machine has an `available` mapping equal to its declared `capacity`
+   mapping, dimension by dimension. Neither the lease list, which omits a hold with no
+   lease window, nor the scalar `available_units`, which reads only the mirror
+   dimension, is enough.
+7. **Then the active lane.** Only then may the active lane's listing trade.
+
+If a condition cannot be met — a reset database, an unpaused successor listing, work
+that cannot be drained, or a deployment without the pause — stop the lane switch at
+that boundary. Take no shortcut.

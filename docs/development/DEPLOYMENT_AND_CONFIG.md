@@ -359,7 +359,10 @@ naming every problem, when publishing is impossible for the whole storefront:
 `[registry].urls` is empty, or a registry lacks its `[registry.authorities]` pin; no
 `[Settlement]` mechanism is enabled, or the root does not resolve; `[capacity.sites]`
 is empty, a site is bound to no `[Identity.service_peers]` peer or to several, or a
-site's URL is not an HTTP(S) origin. The refusal runs before the storefront opens its
+site's URL is not an HTTP(S) origin. The bare-metal storefront also refuses a
+`[registry.authorities]` pin or a `[registry.auth]` token naming a URL that is not among
+`[registry].urls`, and two tokens naming one registry once normalized, naming the table
+and the URL and never the token. The refusal runs before the storefront opens its
 database or builds a signer, so it leaves no database file and starts no loop.
 Missing storefront-wide terms are not a refusal: an empty `[pricing].settlements` or
 an absent `[pricing].default_max_duration_seconds` leaves the terms to each pool's
@@ -970,6 +973,15 @@ and is not read again. Execution renders its inventory from the registered host
 record the work names, never from the file. A host added to the file after first boot is
 therefore not registered, and dispatch to it is refused until it is imported
 through `POST /api/v1/hosts/import` or registered through `POST /api/v1/hosts`.
+An entry's `public_port=` names the port a buyer reaches the host on, read with
+`ansible_port=`'s rule: a value that is not a port from 1 to 65535 rejects its entry
+with a warning, while the others are imported. Beside `public_host=`, it is the
+tenant-facing route, each falling back to the connection's own address and port.
+Every `ssh` host connection, through the API or an inventory, is stored at version 2,
+and a request stating no version or another is refused. A host stored at version 1
+runs nothing until it is moved forward explicitly: an update
+(`PUT /api/v1/hosts/{host_id}`) restating every stored public field, `key_path`
+included where the host has one, at version 2, or an import naming the same key.
 No host write, from the inventory, the import API, or the host API, places a host
 in a pool it does not name or declares any of its capacity: an INI entry's
 `pool_id=<id>` places or moves the host, an empty `pool_id=` unplaces it, and an
@@ -1670,6 +1682,8 @@ buyers; deletion and disclosure behaviour are specified in
 `arkhai-bare-metal-buyer` is an installed core buyer-domain wheel. Its TOML contains registry URLs, authority trust pins, and bounded public defaults; the XDG buyer profile service resolves the fresh or run-recorded signer. The `bare-metal` commands use authenticated discovery and the shared storefront transport.
 
 The bare-metal storefront reads its configuration as every storefront does: `$XDG_CONFIG_HOME/arkhai/storefront.toml` (an operator's own file), `storefront.json` (the document a chart renders), and the Secret overlay `storefront.secrets.toml`, a later file winning on a conflicting key, over the packaged `settings.toml`, which states every default once. Its keys are VM's for the same concepts — `[Identity]`, `[Settlement]`, `[registry]`, `[capacity]`, `[pricing]`, `[negotiation]`, `[Delivery]`, `[Wallet]`, `[Chains]`, `base_url`, `port`, `db_path`, and the interval and timeout keys — and its loader's override layer is VM's, `STOREFRONT_` with `__` between levels, an operator's escape hatch only. Section and key names read in any case; a key the storefront does not read is ignored, so an older release starts on a newer configuration, and the chart's values schema, not startup, refuses a misspelling. A setting that cannot be read refuses startup by its key, never echoing a value. The signer credential, `ARKHAI_IDENTITY_CREDENTIAL`, is the only value the storefront reads from its environment besides the configuration directory, and it never enters settings. The image sets no application setting: its database is the packaged relative `db_path`, under the image's working directory, the data volume, and its command is `bare-metal-storefront serve`, which binds the configured `port` (8000 by default) unless `--port` overrides it.
+
+A registry that gates writes behind a bearer token is given its token in the Secret overlay's `[registry.auth]`, a map from each configured `[registry].urls` entry to its token, matched by normalized URL. The storefront sends it beside its signed request, never in its place, on publication and on its status read alike. The chart's values schema refuses the table in public configuration, and an empty token is no token.
 
 `[capacity.sites]` maps each site to its authority URL, and each site is bound to exactly one `[Identity.service_peers.<peer>]`, seeded at the server's start and rotated through the identity routes (see "Storefront startup and site trust"). Health and status report each site by its ID, its service peer, and the peer's active principals, primary first, never its URL; a site's error text in status may name the URL, which is public configuration refused at startup when it carries credentials. `[capacity].poll_interval` (5 s), `[capacity].publication_interval_seconds` (30 s), and `[capacity].source_confirmation_seconds` (three poll intervals unless stated) time the projection poller, the publication loop, and the opening recheck's confirmation window. `[pricing].settlements` compile when the storefront starts, so a clause that cannot be read refuses startup naming the key; an empty list is not a refusal. `[negotiation].policies` names the seller chain.
 

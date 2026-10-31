@@ -29,7 +29,10 @@ from compute_provisioning_contracts import LeaseForceRelease
 from market_fulfillment import (
     FulfillmentBase,
     FulfillmentOrchestrator,
+    FulfillmentResult,
+    ProviderOperationState,
     ProviderRegistry,
+    ProviderStatus,
     SettlementRecord,
     SettlementRecordState,
     SettlementRepository,
@@ -50,6 +53,9 @@ from compute_provisioning_service.identity import ProvisioningIdentityContext
 from compute_provisioning_service.services.deal_event_sink import (
     StorefrontLifecycleEventSink,
     notify_storefront_capacity_released,
+)
+from compute_provisioning_service.services.fulfillment_convergence import (
+    FulfillmentConvergenceWatchdog,
 )
 
 VM_OFFERING_MODE = "vm"
@@ -224,7 +230,10 @@ def _lifecycle(session_factory, ledger, *, fulfillment_service=None, **settings_
             session_factory=session_factory,
             teardown_port=teardown_port,
         ),
-        release_status=FulfillmentReleaseStatusPort(teardown_port),
+        release_status=FulfillmentReleaseStatusPort(
+            settlement_repository=SettlementRepository(),
+            session_factory=session_factory,
+        ),
         capacity_released_notifier=(
             lambda reservation: notify_storefront_capacity_released(
                 settings, reservation, sink=event_sink
@@ -573,3 +582,129 @@ async def test_an_operator_force_release_frees_an_unmanaged_lease_and_notifies(
     )
     assert ledger.snapshot()[0]["available_units"] == 8
     sf.notify_capacity_released.assert_awaited_once()
+
+
+class _ScriptedTeardownProvider:
+    """Dispatches a teardown job and reports its status from a script.
+
+    Development stand-in for the job-backed provider; it reaches no host.
+    """
+
+    needs_host = True
+
+    def __init__(self, *statuses: ProviderOperationState) -> None:
+        self.statuses = list(statuses)
+        self.dispatched = 0
+
+    async def dispatch_teardown(self, prepared):
+        self.dispatched += 1
+        return FulfillmentResult(
+            provider_metadata={"teardown_job_id": "job-2", "operation": "teardown"}
+        )
+
+    async def get_status(self, capacity_reservation_id, resource, provider_metadata):
+        state = self.statuses.pop(0) if len(self.statuses) > 1 else self.statuses[0]
+        return ProviderStatus(state=state)
+
+
+def _convergence(session_factory, provider) -> FulfillmentConvergenceWatchdog:
+    """Convergence with the service's own backoff: 5s doubling to a 300s cap."""
+    settings = MagicMock()
+    settings.fulfillment_convergence_batch_size = 10
+    settings.fulfillment_convergence_backoff_initial_seconds = 5.0
+    settings.fulfillment_convergence_backoff_multiplier = 2.0
+    settings.fulfillment_convergence_backoff_max_seconds = 300.0
+    settings.fulfillment_convergence_backoff_jitter_fraction = 0.0
+    return FulfillmentConvergenceWatchdog(
+        session_factory=session_factory,
+        repository=SettlementRepository(),
+        provider_registry=ProviderRegistry({"ansible": provider}),
+        settings=settings,
+    )
+
+
+def _seconds_pass(session_factory, capacity_reservation_id: str, seconds: float) -> None:
+    """Move every recorded instant of the release back by ``seconds``: the
+    release's start and the convergence claim's expiry."""
+    with session_factory() as db, db.begin():
+        record = db.get(SettlementRecord, capacity_reservation_id)
+        if record.claim_expires_at is not None:
+            record.claim_expires_at -= timedelta(seconds=seconds)
+        reservation = db.get(CapacityReservation, capacity_reservation_id)
+        began = datetime.fromisoformat(reservation.release_requested_at)
+        reservation.release_requested_at = (began - timedelta(seconds=seconds)).isoformat()
+
+
+@pytest.mark.asyncio
+async def test_a_fast_teardown_after_a_long_create_is_released_within_the_grace_period(
+    session_factory, ledger
+):
+    """A create that needed nine convergence claims does not make its lease's
+    teardown wait out the failure backoff: the teardown job finishes in seconds,
+    the next convergence cycle observes it, and the lease is released with its
+    capacity, well inside the unchanged 300-second grace period."""
+    capacity_reservation_id = _leased(ledger)
+    _create_active_fulfillment(
+        session_factory,
+        capacity_reservation_id=capacity_reservation_id,
+        offering_mode=VM_OFFERING_MODE,
+    )
+    with session_factory() as db, db.begin():
+        db.get(SettlementRecord, capacity_reservation_id).attempt_count = 9
+    lifecycle = _lifecycle(session_factory, ledger)
+    provider = _ScriptedTeardownProvider(
+        ProviderOperationState.pending, ProviderOperationState.succeeded
+    )
+    convergence = _convergence(session_factory, provider)
+
+    await lifecycle.force_check_leases()
+    await convergence.dispatch_pending_teardowns()
+    await convergence.converge_teardowns()
+    assert _aggregate_state(session_factory, capacity_reservation_id) == (
+        _State.tearing_down.value
+    )
+
+    # One convergence interval later the job has long since succeeded.
+    _seconds_pass(session_factory, capacity_reservation_id, 30)
+    await convergence.converge_teardowns()
+    assert _aggregate_state(session_factory, capacity_reservation_id) == _State.torn_down.value
+
+    with patch("storefront_client.StorefrontClient", return_value=_storefront()):
+        summary = await lifecycle.force_check_leases()
+
+    assert summary["released"] == 1 and summary["release_failed"] == 0
+    assert ledger.get_reservation(capacity_reservation_id)["state"] == "released"
+    assert ledger.snapshot()[0]["available_units"] == 8
+    assert provider.dispatched == 1
+
+
+@pytest.mark.asyncio
+async def test_a_lease_timed_out_while_its_teardown_finished_is_freed_by_retry_release(
+    session_factory, ledger
+):
+    """A lease the grace period failed before convergence observed its finished
+    teardown is recovered by an operator's retry: it adopts the torn-down
+    fulfillment and frees the capacity, with no new teardown dispatched."""
+    capacity_reservation_id = _leased(ledger)
+    _create_active_fulfillment(
+        session_factory,
+        capacity_reservation_id=capacity_reservation_id,
+        offering_mode=VM_OFFERING_MODE,
+    )
+    lifecycle = _lifecycle(session_factory, ledger)
+    await lifecycle.force_check_leases()
+    _set_fulfillment_state(session_factory, capacity_reservation_id, _State.tearing_down.value)
+    _release_began(session_factory, capacity_reservation_id, timedelta(seconds=301))
+    await lifecycle.force_check_leases()
+    timed_out = ledger.get_reservation(capacity_reservation_id)
+    assert (timed_out["state"], timed_out["failure_reason"]) == (
+        "release_failed", "teardown_timeout"
+    )
+
+    _set_fulfillment_state(session_factory, capacity_reservation_id, _State.torn_down.value)
+    with patch("storefront_client.StorefrontClient", return_value=_storefront()):
+        retried = await lifecycle.retry_release(capacity_reservation_id)
+
+    assert retried["state"] == "released"
+    assert ledger.snapshot()[0]["available_units"] == 8
+    assert _aggregate_state(session_factory, capacity_reservation_id) == _State.torn_down.value

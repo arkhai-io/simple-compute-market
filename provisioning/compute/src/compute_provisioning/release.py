@@ -13,8 +13,12 @@ whatever the offering mode, and the aggregate already knows its provider:
   directly, abandoning an ``assigned`` aggregate on the way.
 - ``dispatch_pending`` or ``dispatching``: a create is in flight; the release
   waits for it to settle, then tears down what it made.
-- ``failed``: a create may have left a workload, and ``failed`` has no teardown,
-  so the lease is left for an operator to verify and force-release.
+- ``failed``, when ``compensable``: the provider reported a dispatched create
+  failed, and the job-backed metadata names the create to undo, so the domain's
+  ordinary teardown is begun as a compensating teardown; capacity returns once
+  it reaches ``torn_down``.
+- any other ``failed``: nothing durable says what the create left behind, so
+  the lease is left for an operator to verify and force-release.
 
 "Nothing dispatched" is proven by provenance: no create handle on the
 reservation and no job bound to it. The proof is checked by
@@ -35,14 +39,20 @@ from __future__ import annotations
 
 import enum
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from market_fulfillment import SettlementEntityNotFoundError, SettlementRecordState
+from market_fulfillment import (
+    CompensationCandidate,
+    CompensationRefusedError,
+    SettlementRecordState,
+)
 from market_site.db import CapacityReservation
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
+from compute_provisioning.job_fulfillment import JobFulfillmentMetadata
 from compute_provisioning.jobs.db import job_bound_to_reservation
 
 logger = logging.getLogger(__name__)
@@ -67,6 +77,56 @@ _CREATE_IN_FLIGHT_STATES = frozenset(
 )
 
 
+#: The reason convergence records when a provider reports a dispatched
+#: operation failed. Only a create that reached the provider can carry it into
+#: ``failed``, which is what makes such a create worth compensating.
+PROVIDER_REPORTED_FAILURE = "provider_reported_failure"
+
+
+def compensable(
+    state: str | None, failure_reason: str | None, provider_metadata: Any
+) -> bool:
+    """Whether a fulfillment's failed create is undone by its domain's teardown.
+
+    True only for a ``failed`` aggregate whose provider reported its dispatched
+    create failed and whose durable metadata is the job-backed provider's for
+    that create, naming its job, host, and target: the teardown is prepared
+    from exactly those. A quarantined row, a row failed for metadata that
+    cannot name its output, a create never acknowledged, and another provider's
+    metadata are not, and are left for an operator. Pure, so the release
+    decision, the release status, and the teardown's begin judge alike.
+    """
+    if state != _State.failed.value or failure_reason != PROVIDER_REPORTED_FAILURE:
+        return False
+    if not isinstance(provider_metadata, Mapping):
+        return False
+    try:
+        metadata = JobFulfillmentMetadata.model_validate(dict(provider_metadata))
+    except ValidationError:
+        return False
+    return metadata.operation == "create"
+
+
+def _authorize_compensation(candidate: CompensationCandidate) -> bool:
+    return compensable(
+        candidate.state, candidate.failure_reason, candidate.provider_metadata
+    )
+
+
+class TeardownRefused(Exception):
+    """A teardown that cannot begin for the aggregate as it stands.
+
+    Permanent until something changes the aggregate, unlike a failure to reach
+    the fulfillment service: the lease is recorded ``release_failed`` with
+    ``reason``, its capacity held, for an operator.
+    """
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+        self.message = message
+
+
 class FulfillmentTeardownPort(Protocol):
     async def begin_teardown(self, fulfillment_id: str) -> str: ...
 
@@ -74,13 +134,32 @@ class FulfillmentTeardownPort(Protocol):
 
 
 class FulfillmentServiceTeardownPort:
-    """Adapt a fulfillment-service provider to the narrow teardown port."""
+    """Adapt a fulfillment-service provider to the narrow teardown port.
+
+    ``begin_teardown`` decides from the aggregate's state when it is called,
+    never from a decision taken earlier. A ``failed`` aggregate is compensated,
+    its eligibility judged again inside the kit's write transaction; any other
+    begins, or adopts, its ordinary teardown. A state that changes between this
+    read and the kit's transaction is caught there: the compensating operation
+    answers only from ``failed`` or a begun teardown, and the ordinary one
+    refuses ``failed``.
+    """
 
     def __init__(self, service_provider: Callable[[], Any]) -> None:
         self._service_provider = service_provider
 
     async def begin_teardown(self, fulfillment_id: str) -> str:
-        accepted = await self._service_provider().begin_fulfillment_teardown(fulfillment_id)
+        service = self._service_provider()
+        status = service.get_fulfillment_status(fulfillment_id)
+        if str(status.state) != _State.failed.value:
+            accepted = await service.begin_fulfillment_teardown(fulfillment_id)
+            return accepted.fulfillment_id
+        try:
+            accepted = await service.begin_compensating_teardown(
+                fulfillment_id, authorize=_authorize_compensation
+            )
+        except CompensationRefusedError as exc:
+            raise TeardownRefused("compensation_refused", str(exc)) from exc
         return accepted.fulfillment_id
 
     def get_status(self, fulfillment_id: str) -> Any:
@@ -186,10 +265,13 @@ class FulfillmentReleaseExecutor:
             failure = None if record is None else (
                 record.failure_message or record.failure_reason
             )
+            compensate = record is not None and compensable(
+                state, record.failure_reason, record.provider_metadata
+            )
 
         if state is None or state in _UNDELIVERED_STATES or state == _State.torn_down.value:
             return ReleaseDecision(ReleaseAction.FREE, fulfillment_id=fulfillment_id)
-        if state in _TEARDOWN_STATES:
+        if state in _TEARDOWN_STATES or compensate:
             return ReleaseDecision(ReleaseAction.TEARDOWN, fulfillment_id=fulfillment_id)
         if state in _CREATE_IN_FLIGHT_STATES:
             return ReleaseDecision(
@@ -203,7 +285,11 @@ class FulfillmentReleaseExecutor:
         )
 
     async def begin_teardown(self, fulfillment_id: str) -> str:
-        """Begin the aggregate's teardown, or adopt one already begun."""
+        """Begin the aggregate's teardown, or adopt one already begun.
+
+        Raises ``TeardownRefused`` when a failed create's compensation cannot
+        begin; any other error is transient.
+        """
         return await self._teardown_port.begin_teardown(fulfillment_id)
 
 
@@ -228,27 +314,40 @@ class ReleaseStatus:
 class FulfillmentReleaseStatusPort:
     """Read a releasing lease's progress from its fulfillment aggregate.
 
-    The release handle is the durable ``fulfillment_id``. ``torn_down`` is
-    success. ``teardown_failed`` is reported as failed even though convergence
-    keeps retrying it: the lease then waits in ``release_failed``, and an
-    operator's retry-release adopts the aggregate's teardown again. ``failed``
-    has no teardown at all.
+    The release handle is the durable ``fulfillment_id``, and the record is read
+    directly, so the provider metadata ``compensable`` judges never leaves this
+    package. ``torn_down`` is success. ``teardown_failed`` is reported as failed
+    even though convergence requeues it: the lease then waits in
+    ``release_failed``, and an operator's retry-release adopts the aggregate's
+    teardown again. A compensable ``failed`` aggregate is ready for its
+    compensating teardown; any other ``failed`` one has no teardown.
     """
 
-    def __init__(self, teardown_port: FulfillmentTeardownPort) -> None:
-        self._teardown_port = teardown_port
+    def __init__(
+        self,
+        *,
+        settlement_repository: Any,
+        session_factory: Callable[[], Any],
+    ) -> None:
+        self._settlement_repository = settlement_repository
+        self._session_factory = session_factory
 
     def get_status(self, fulfillment_id: str) -> ReleaseStatus:
-        try:
-            status = self._teardown_port.get_status(fulfillment_id)
-        except SettlementEntityNotFoundError:
-            return ReleaseStatus(
-                ReleaseProgress.FAILED,
-                reason="teardown_failed",
-                error=f"no fulfillment {fulfillment_id!r}",
+        with self._session_factory() as db:
+            record = self._settlement_repository.get_by_fulfillment_id(
+                db, fulfillment_id
             )
-        state = str(status.state)
-        detail = status.failure_message or status.failure_reason
+            if record is None:
+                return ReleaseStatus(
+                    ReleaseProgress.FAILED,
+                    reason="teardown_failed",
+                    error=f"no fulfillment {fulfillment_id!r}",
+                )
+            state = str(record.state)
+            detail = record.failure_message or record.failure_reason
+            compensate = compensable(
+                state, record.failure_reason, record.provider_metadata
+            )
         if state == _State.torn_down.value:
             return ReleaseStatus(ReleaseProgress.TORN_DOWN)
         if state == _State.teardown_failed.value:
@@ -258,6 +357,8 @@ class FulfillmentReleaseStatusPort:
                 error=detail or "teardown failed",
             )
         if state == _State.failed.value:
+            if compensate:
+                return ReleaseStatus(ReleaseProgress.READY_FOR_TEARDOWN)
             return ReleaseStatus(
                 ReleaseProgress.FAILED,
                 reason="fulfillment_failed",
@@ -271,6 +372,7 @@ class FulfillmentReleaseStatusPort:
 
 
 __all__ = [
+    "PROVIDER_REPORTED_FAILURE",
     "FulfillmentReleaseExecutor",
     "FulfillmentReleaseGuard",
     "FulfillmentReleaseStatusPort",
@@ -280,4 +382,6 @@ __all__ = [
     "ReleaseDecision",
     "ReleaseProgress",
     "ReleaseStatus",
+    "TeardownRefused",
+    "compensable",
 ]

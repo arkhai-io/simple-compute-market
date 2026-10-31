@@ -148,6 +148,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 - The script is copied into builder stages only. The runtime stage copies the finished
   environment and never the wheelhouse.
 - A Dockerfile with a deny-all ignore file admits `scripts/uv_project.py` explicitly.
+- An ignore file beside a Dockerfile (`<name>.dockerignore`) replaces the root
+  `.dockerignore` for that image, so none of the root's exclusions apply there. One that
+  admits a tree whole states that tree's exclusions itself: a checkout's environments,
+  caches, logs, and retry files, and what the tree's own `.gitignore` ignores, such as
+  an operator's credentials, keys, inventories, and variable files and Terraform's state
+  and variables. The provisioning service's `Dockerfile.dockerignore` does this for both
+  IaC trees it copies.
 
 A project one level deep can use `/app` itself with the wheelhouse at `/.dist`, which
 keeps an editable install of the project valid in the runtime stage; `e2e-tests` does.

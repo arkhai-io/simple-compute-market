@@ -34,6 +34,7 @@ from .conftest import (
     STOREFRONT_SIGNER,
     _initialize_test_database,
     _install_signed_asgi_transport,
+    mount_unless_served,
 )
 from compute_provisioning_service.identity import ProvisioningIdentityContext
 from compute_provisioning_service.middleware.auth import (
@@ -212,13 +213,8 @@ async def client_and_queue(
     _container_module.resolved_ansible_service = programmable_mock
     _container_module.resolved_host_authority = host_authority
 
-    _test_prefix = "/test"
-    _already_mounted = any(
-        getattr(r, "path", "").startswith(_test_prefix) for r in app.routes
-    )
-    if not _already_mounted:
-        app.include_router(test_jobs_controller.router)
-        app.include_router(_vm_mock_router())
+    mount_unless_served(app, test_jobs_controller.router)
+    mount_unless_served(app, _vm_mock_router())
 
     _container_module.resolved_job_queue = job_queue
     _container_module.resolved_vm_operations_service = app.container.vm_operations_service()

@@ -40,8 +40,10 @@ class SettlementRecordState(str, enum.Enum):
     the reservation under a new ``capacity_reservation_id`` instead of
     mutating this one.
 
-    ``failed``, ``torn_down``, and ``abandoned`` are terminal. Any changed
-    shape after a terminal state is a new reservation's first
+    ``torn_down`` and ``abandoned`` are terminal, and so is ``failed`` but
+    for one edge: a compensating teardown may move it to
+    ``teardown_dispatch_pending`` to undo what a failed create left behind.
+    Any changed shape after a terminal state is a new reservation's first
     ``schedule_resource`` call, not a transition out of this row.
     ``teardown_failed`` is not terminal: recovery may retry teardown.
     """

@@ -3,7 +3,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from compute_provisioning_contracts import FulfillmentStatusResponse
 from market_alkahest import RELEASE_MODELS
+from market_fulfillment import CREATE_COMPENSATION
 
 from market_storefront.services.fulfillment_resume_runtime import (
     converge_delivery_once,
@@ -32,7 +34,9 @@ async def test_known_fulfillment_resumes_without_schedule_or_begin(tmp_path):
         schedule_resource=AsyncMock(),
         begin_fulfillment=AsyncMock(),
         get_fulfillment_status=AsyncMock(
-            return_value=SimpleNamespace(state="active", failure_message=None)
+            return_value=SimpleNamespace(
+                state="active", failure_reason=None, failure_message=None
+            )
         ),
         get_fulfillment_result=AsyncMock(
             return_value=vm_fulfillment_result(
@@ -69,6 +73,105 @@ async def test_known_fulfillment_resumes_without_schedule_or_begin(tmp_path):
     assert persisted["fulfillment_phase"] == "physical_result_recorded"
 
 
+async def _converge_known_fulfillment(tmp_path, status: FulfillmentStatusResponse):
+    """One resume pass over a delivery whose fulfillment is known, reading
+    ``status``, with the failure policy recorded."""
+    lifecycle = await make_vm_lifecycle_fixture(tmp_path / f"{status.state}.db")
+    await lifecycle.db.update_vm_delivery(
+        negotiation_id="neg-1",
+        capacity_reservation_id="reservation-1",
+        settlement_resource_id="resource-1",
+        fulfillment_id="fulfillment-1",
+    )
+    db = lifecycle.reopen()
+    remote = SimpleNamespace(
+        schedule_resource=AsyncMock(),
+        begin_fulfillment=AsyncMock(),
+        get_fulfillment_status=AsyncMock(return_value=status),
+        get_fulfillment_result=AsyncMock(),
+    )
+    failure_policy = AsyncMock()
+    delivery = await db.load_vm_delivery(negotiation_id="neg-1")
+    assert delivery is not None
+    progressed = await converge_delivery_once(
+        delivery,
+        evidence=lifecycle.evidence,
+        sqlite_client=db,
+        fulfillment_client=remote,
+        failure_policy=failure_policy,
+    )
+    persisted = await db.load_vm_delivery(negotiation_id="neg-1")
+    assert persisted is not None
+    return progressed, persisted, remote, failure_policy
+
+
+def _status(state: str, failure_reason: str | None) -> FulfillmentStatusResponse:
+    return FulfillmentStatusResponse(
+        fulfillment_id="fulfillment-1",
+        capacity_reservation_id="reservation-1",
+        state=state,
+        failure_reason=failure_reason,
+        failure_message="grant reported no delivery evidence",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "state",
+    ["teardown_dispatch_pending", "tearing_down", "teardown_failed", "torn_down"],
+)
+async def test_a_compensating_fulfillment_is_a_failed_delivery_in_every_state(
+    tmp_path, state
+):
+    """Compensation moves a failed create on from ``failed``; a delivery first
+    read after that has failed, as one read ``failed`` has, and is not left
+    waiting for an ``active`` it will never reach."""
+    progressed, persisted, remote, failure_policy = await _converge_known_fulfillment(
+        tmp_path, _status(state, CREATE_COMPENSATION)
+    )
+
+    assert progressed is True
+    assert persisted["status"] == "failed"
+    assert persisted["fulfillment_phase"] == "physical_failed"
+    remote.get_fulfillment_result.assert_not_awaited()
+    remote.begin_fulfillment.assert_not_awaited()
+    failure_policy.assert_awaited_once()
+    assert failure_policy.await_args.kwargs["reason"] == "provisioning_failed"
+    assert failure_policy.await_args.kwargs["capacity_reservation_id"] == (
+        "reservation-1"
+    )
+    assert failure_policy.await_args.kwargs["message"] == (
+        "grant reported no delivery evidence"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("state", "failure_reason"),
+    [
+        ("torn_down", None),
+        ("torn_down", "provider_reported_failure"),
+        ("teardown_failed", "provider_reported_failure"),
+        ("tearing_down", None),
+    ],
+)
+async def test_a_delivered_fulfillments_teardown_is_not_a_failed_delivery(
+    tmp_path, state, failure_reason
+):
+    """A teardown that began from ``active`` carries no compensation marker,
+    whatever reason a failed attempt left, so it is never read as a failed
+    delivery."""
+    progressed, persisted, remote, failure_policy = await _converge_known_fulfillment(
+        tmp_path, _status(state, failure_reason)
+    )
+
+    assert progressed is False
+    assert persisted["status"] != "failed"
+    assert persisted["fulfillment_phase"] != "physical_failed"
+    failure_policy.assert_not_awaited()
+    remote.get_fulfillment_result.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_active_result_must_match_persisted_fulfillment_identity(tmp_path):
     lifecycle = await make_vm_lifecycle_fixture(tmp_path / "mismatched-result.db")
@@ -81,7 +184,9 @@ async def test_active_result_must_match_persisted_fulfillment_identity(tmp_path)
     db = lifecycle.reopen()
     remote = SimpleNamespace(
         get_fulfillment_status=AsyncMock(
-            return_value=SimpleNamespace(state="active", failure_message=None)
+            return_value=SimpleNamespace(
+                state="active", failure_reason=None, failure_message=None
+            )
         ),
         get_fulfillment_result=AsyncMock(
             return_value=vm_fulfillment_result(
@@ -138,7 +243,9 @@ async def test_missing_identifiers_replay_exact_persisted_request(tmp_path):
             or SimpleNamespace(fulfillment_id="fulfillment-1")
         ),
         get_fulfillment_status=AsyncMock(
-            return_value=SimpleNamespace(state="dispatching", failure_message=None)
+            return_value=SimpleNamespace(
+                state="dispatching", failure_reason=None, failure_message=None
+            )
         ),
     )
     escrow = await db.load_vm_delivery(negotiation_id="neg-1")

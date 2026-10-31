@@ -946,7 +946,8 @@ def build_runtime_from_configuration(
     return BareMetalStorefrontRuntime(
         negotiation_policies=active.negotiation.policies,
         registry_configuration=BareMetalRegistryConfiguration(
-            authorities=active.registry_authorities()
+            authorities=active.registry_authorities(),
+            auth=active.registry_auth(),
         ),
         publication_clauses=publication_clauses,
         default_max_duration_seconds=active.pricing.default_max_duration_seconds,

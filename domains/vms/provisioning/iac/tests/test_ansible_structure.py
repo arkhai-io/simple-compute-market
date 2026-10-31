@@ -20,6 +20,7 @@ Semantic correctness of the shell inside those tasks is covered by
 
 from __future__ import annotations
 
+import ast
 import re
 import unittest
 from pathlib import Path
@@ -57,6 +58,81 @@ def task_files() -> list[Path]:
             continue
         files.extend(sorted(p for p in tasks.rglob("*.yml") if "backup" not in p.parts))
     return files
+
+
+def syntax_checked_playbooks() -> list[str]:
+    """The playbooks `scripts/validate_playbooks.sh` syntax-checks, as listed."""
+    script = (ROOT / "scripts/validate_playbooks.sh").read_text(encoding="utf-8")
+    match = re.search(r"^PLAYBOOKS=\(\n(.*?)^\)$", script, re.MULTILINE | re.DOTALL)
+    assert match, "validate_playbooks.sh lists no PLAYBOOKS"
+    return match.group(1).split()
+
+
+def refuses_under_every_tag(tasks: list) -> bool:
+    """Whether a parse-only play's first task is a refusal tagged ``always``.
+
+    A tag-selected run skips an untagged task but still runs the ``always`` tasks
+    its imports bring, so only a refusal tagged ``always`` comes first under every
+    ``--tags`` selection. An operator's explicit ``--skip-tags always`` or
+    ``--start-at-task`` still passes over it; no task can refuse those.
+    """
+    first = tasks[0] if tasks else {}
+    tags = first.get("tags", [])
+    tags = [tags] if isinstance(tags, str) else list(tags or [])
+    return "fail" in first and "always" in tags
+
+
+def native_gate_modules() -> list[str]:
+    """The test modules the native Ansible gate runs: its runner's ``NATIVE``.
+
+    Read from the Python the gate passes to its interpreter, as Python, so the
+    list is the one the gate runs whatever the script around it says.
+    """
+    script = (ROOT / "scripts/native_ansible_gate.sh").read_text(encoding="utf-8")
+    match = re.search(r"""<<'EOF'\n(.*?)^EOF$""", script, re.MULTILINE | re.DOTALL)
+    assert match, "native_ansible_gate.sh passes its interpreter no inline Python"
+    for node in ast.parse(match.group(1)).body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "NATIVE" for target in node.targets
+        ):
+            return ast.literal_eval(node.value)
+    raise AssertionError("the native gate's runner assigns no NATIVE list")
+
+
+def native_test_modules() -> set[str]:
+    """Every test module that runs a shipped task through a real ansible-playbook:
+    those defining the ``_ansible`` guard that skips them where no supported
+    Ansible and callback are installed."""
+    return {
+        path.name for path in sorted((ROOT / "tests").glob("test_*.py"))
+        if any(
+            isinstance(node, ast.FunctionDef) and node.name == "_ansible"
+            for node in ast.parse(path.read_text(encoding="utf-8")).body
+        )
+    }
+
+
+def included_task_files(path: Path) -> set[str]:
+    """Every task file `path` reaches through include_tasks or import_tasks, and
+    every file those reach, by file name in its tasks directory."""
+    reached: set[str] = set()
+    pending = [path]
+    while pending:
+        document = yaml.safe_load(pending.pop().read_text(encoding="utf-8")) or []
+        stack = list(document)
+        while stack:
+            task = stack.pop()
+            if not isinstance(task, dict):
+                continue
+            for section in BLOCK_KEYWORDS & set(task):
+                stack.extend(task[section] or [])
+            for key in ("include_tasks", "import_tasks"):
+                spec = task.get(key)
+                name = spec if isinstance(spec, str) else (spec or {}).get("file")
+                if name and name not in reached:
+                    reached.add(name)
+                    pending.append(path.parent / name)
+    return reached
 
 
 def walk(tasks: list, path: Path, findings: list[str], where: str = "") -> None:
@@ -157,6 +233,88 @@ class TestPlaybookStructure(unittest.TestCase):
         tasks = document[0]["tasks"]
         self.assertTrue(any("import_tasks" in task for task in tasks))
         self.assertFalse(any("include_tasks" in task for task in tasks))
+
+    def test_vm_management_task_files_are_imported_for_the_syntax_check(self) -> None:
+        """So that --syntax-check parses the task files a create, a remove, an
+        undefine, and a capacity check run, which the role reaches only through
+        include_tasks.
+
+        Each is imported statically and in the role's context, the play refuses to
+        run before any import under any tag selection, and `make
+        validate-playbooks` checks it.
+        """
+        path = ANSIBLE / "playbooks/single-tenant/vm-management-task-files.yaml"
+        tasks = yaml.safe_load(path.read_text(encoding="utf-8"))[0]["tasks"]
+        self.assertTrue(refuses_under_every_tag(tasks), tasks[0])
+        self.assertFalse(any(
+            key in task for task in tasks
+            for key in ("include_tasks", "include_role", "import_tasks")
+        ))
+        role_tasks = ANSIBLE / "roles/vm-management/tasks"
+        imported = []
+        for task in tasks[1:]:
+            role = task["import_role"]
+            self.assertEqual(role["name"], "../../roles/vm-management")
+            self.assertTrue((role_tasks / f"{role['tasks_from']}.yml").is_file())
+            imported.append(role["tasks_from"])
+        self.assertEqual(sorted(imported), sorted([
+            "prerequisites", "vm-create", "gpu-virt-install-retry",
+            "gpu-virt-install-multi-retry", "vm-remove", "vm-undefine", "vm-check",
+        ]))
+        self.assertIn(str(path.relative_to(ROOT)), syntax_checked_playbooks())
+
+    def test_vm_setup_task_files_are_imported_for_the_syntax_check(self) -> None:
+        """So that --syntax-check parses every task file that prepares a host,
+        which the vm-setup role reaches only through include_tasks.
+
+        Each file the role's main.yml includes, and each file those include, is
+        imported statically and in the role's context, exactly once; the play
+        refuses to run before any import under any tag selection; and the syntax
+        check lists it.
+        """
+        path = ANSIBLE / "playbooks/host-kit/vm-setup-task-files.yaml"
+        tasks = yaml.safe_load(path.read_text(encoding="utf-8"))[0]["tasks"]
+        self.assertTrue(refuses_under_every_tag(tasks), tasks[0])
+        self.assertFalse(any(
+            key in task for task in tasks
+            for key in ("include_tasks", "include_role", "import_tasks")
+        ))
+        imported = []
+        for task in tasks[1:]:
+            role = task["import_role"]
+            self.assertEqual(role["name"], "../../roles/vm-setup")
+            imported.append(f"{role['tasks_from']}.yml")
+        role_tasks = ANSIBLE / "roles/vm-setup/tasks"
+        self.assertEqual(len(imported), len(set(imported)))
+        self.assertEqual(set(imported), included_task_files(role_tasks / "main.yml"))
+        # Every task file but main.yml is one the role reaches.
+        self.assertEqual(
+            set(imported),
+            {p.name for p in role_tasks.glob("*.yml")} - {"main.yml"},
+        )
+        self.assertIn(str(path.relative_to(ROOT)), syntax_checked_playbooks())
+
+    def test_the_syntax_check_lists_every_playbook_and_both_targets_run_it(self) -> None:
+        """One list, in the script `make validate-playbooks` and the native
+        Ansible gate both run, names every playbook this tree ships."""
+        shipped = {
+            str(p.relative_to(ROOT)) for p in (ANSIBLE / "playbooks").rglob("*.yaml")
+        }
+        listed = syntax_checked_playbooks()
+        self.assertEqual(len(listed), len(set(listed)))
+        self.assertEqual(set(listed), shipped)
+        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+        self.assertIn("validate-playbooks:\n\tscripts/validate_playbooks.sh\n", makefile)
+        gate = (ROOT / "scripts/native_ansible_gate.sh").read_text(encoding="utf-8")
+        self.assertIn("\nbash scripts/validate_playbooks.sh\n", gate)
+
+    def test_the_native_gate_runs_every_native_test_module(self) -> None:
+        """A module that skips without a supported Ansible would otherwise skip in
+        the default suite and go unrun by the gate too, with nothing to say so."""
+        listed = native_gate_modules()
+        self.assertEqual(len(listed), len(set(listed)))
+        self.assertTrue(listed)
+        self.assertEqual(set(listed), native_test_modules())
 
     def test_audit_playbook_writes_nothing(self) -> None:
         """The audit runs against hardware nothing else has touched.

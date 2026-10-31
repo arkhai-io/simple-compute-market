@@ -27,6 +27,7 @@ from compute_provisioning.release import (
     FulfillmentReleaseExecutor,
     FulfillmentReleaseGuard,
     FulfillmentReleaseStatusPort,
+    FulfillmentServiceTeardownPort,
 )
 from market_resource_pools import ResourcePoolService
 from market_site.authority import LedgerSiteAuthority
@@ -83,10 +84,15 @@ def _resolved_job_queue():
 
 
 class DeferredFulfillmentTeardownPort:
-    """Cycle-safe narrow port bound once the fulfillment service is composed."""
+    """Cycle-safe narrow port bound once the fulfillment service is composed.
+
+    Every call goes through ``FulfillmentServiceTeardownPort``, so the bound
+    service is compensated or torn down by the one compute-owned rule.
+    """
 
     def __init__(self) -> None:
         self._service = None
+        self._port = FulfillmentServiceTeardownPort(self._require_service)
 
     def bind(self, service) -> None:
         if self._service is not None and self._service is not service:
@@ -99,11 +105,10 @@ class DeferredFulfillmentTeardownPort:
         return self._service
 
     async def begin_teardown(self, fulfillment_id: str) -> str:
-        accepted = await self._require_service().begin_fulfillment_teardown(fulfillment_id)
-        return accepted.fulfillment_id
+        return await self._port.begin_teardown(fulfillment_id)
 
     def get_status(self, fulfillment_id: str):
-        return self._require_service().get_fulfillment_status(fulfillment_id)
+        return self._port.get_status(fulfillment_id)
 
 
 def _make_engine():
@@ -508,7 +513,8 @@ class Container(containers.DeclarativeContainer):
 
     release_status = providers.Singleton(
         FulfillmentReleaseStatusPort,
-        teardown_port=fulfillment_teardown_port,
+        settlement_repository=settlement_repository,
+        session_factory=session_factory,
     )
 
     fulfillment_unit_of_work = providers.Singleton(

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import pytest
 
+from market_fulfillment import SettlementRecordState
 from market_fulfillment.transitions import InvalidSettlementTransitionError, validate_transition
+
+ALL_STATES = frozenset(state.value for state in SettlementRecordState)
 
 
 def test_legal_forward_edges_are_accepted():
@@ -25,9 +28,17 @@ def test_teardown_failed_may_retry_teardown_dispatch():
 
 
 def test_terminal_states_have_no_outgoing_edges():
-    for terminal in ("failed", "torn_down", "abandoned"):
+    for terminal in ("torn_down", "abandoned"):
+        for target in ALL_STATES:
+            with pytest.raises(InvalidSettlementTransitionError):
+                validate_transition(terminal, target)
+
+
+def test_failed_may_only_begin_a_compensating_teardown():
+    validate_transition("failed", "teardown_dispatch_pending")
+    for target in ALL_STATES - {"teardown_dispatch_pending"}:
         with pytest.raises(InvalidSettlementTransitionError):
-            validate_transition(terminal, "dispatch_pending")
+            validate_transition("failed", target)
 
 
 def test_illegal_skip_is_rejected():

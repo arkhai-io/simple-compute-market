@@ -3,14 +3,246 @@
   "$id": "urn:arkhai:payments:wire-contract",
   "title": "arkhai-payments wire contract",
   "$defs": {
+    "Health": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "ok"
+          ]
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "additionalProperties": false
+    },
+    "SignedReceipt": {
+      "type": "object",
+      "properties": {
+        "receipt": {
+          "$ref": "#/$defs/Receipt"
+        },
+        "proof": {
+          "$ref": "#/$defs/SignatureProof"
+        }
+      },
+      "required": [
+        "receipt",
+        "proof"
+      ],
+      "additionalProperties": false
+    },
+    "Receipt": {
+      "type": "object",
+      "properties": {
+        "livemode": {
+          "type": "boolean",
+          "description": "True only for real-money live payments; covered by the signature."
+        },
+        "transaction": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "deal": {
+          "$ref": "#/$defs/DealCommitment"
+        },
+        "from": {
+          "$ref": "#/$defs/AccountId"
+        },
+        "to": {
+          "$ref": "#/$defs/AccountId"
+        },
+        "ledger": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Ledger transaction id for approval."
+        },
+        "parts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ReceiptPart"
+          },
+          "minItems": 1
+        },
+        "approvedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Unix seconds."
+        },
+        "issuer": {
+          "$ref": "#/$defs/Identity"
+        }
+      },
+      "required": [
+        "livemode",
+        "transaction",
+        "deal",
+        "from",
+        "to",
+        "ledger",
+        "parts",
+        "approvedAt",
+        "issuer"
+      ],
+      "additionalProperties": false
+    },
+    "Sha256Hex": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "DealCommitment": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
     "AccountId": {
       "type": "string",
       "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
       "description": "Arkhai account UUID."
     },
+    "ReceiptPart": {
+      "type": "object",
+      "properties": {
+        "asset": {
+          "$ref": "#/$defs/Asset"
+        },
+        "gross": {
+          "$ref": "#/$defs/Amount"
+        },
+        "fee": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,37})$"
+        },
+        "net": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,37})$"
+        },
+        "hold": {
+          "$ref": "#/$defs/Hold"
+        },
+        "rate": {
+          "$ref": "#/$defs/RateReservation"
+        }
+      },
+      "required": [
+        "asset",
+        "gross",
+        "fee",
+        "net",
+        "hold"
+      ],
+      "additionalProperties": false
+    },
+    "Asset": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9]{0,16}(\\/\\d{1,6})?$"
+    },
     "Amount": {
       "type": "string",
       "pattern": "^[1-9][0-9]{0,37}$"
+    },
+    "Hold": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HoldFor"
+        },
+        {
+          "$ref": "#/$defs/HoldAfterStop"
+        }
+      ],
+      "description": "How long a part's money stays reversible and uncollectable by the payee."
+    },
+    "HoldFor": {
+      "type": "object",
+      "properties": {
+        "for": {
+          "$ref": "#/$defs/Duration"
+        }
+      },
+      "required": [
+        "for"
+      ],
+      "additionalProperties": false,
+      "description": "Collectable this long after earning: approval for once, period end or stop for rate."
+    },
+    "Duration": {
+      "type": "string",
+      "pattern": "^P(?!$)(\\d+Y)?(\\d+M)?(\\d+W)?(\\d+D)?(T(?=\\d)(\\d+H)?(\\d+M)?(\\d+S)?)?$"
+    },
+    "HoldAfterStop": {
+      "type": "object",
+      "properties": {
+        "afterStop": {
+          "$ref": "#/$defs/Duration"
+        }
+      },
+      "required": [
+        "afterStop"
+      ],
+      "additionalProperties": false,
+      "description": "Collectable this long after this part stops."
+    },
+    "RateReservation": {
+      "type": "object",
+      "properties": {
+        "period": {
+          "$ref": "#/$defs/Duration"
+        },
+        "reserveAhead": {
+          "$ref": "#/$defs/Duration"
+        },
+        "periodsReserved": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,37})$"
+        }
+      },
+      "required": [
+        "period",
+        "reserveAhead",
+        "periodsReserved"
+      ],
+      "additionalProperties": false
+    },
+    "Identity": {
+      "type": "object",
+      "properties": {
+        "scheme": {
+          "type": "string",
+          "enum": [
+            "ed25519"
+          ]
+        },
+        "identifier": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
+        }
+      },
+      "required": [
+        "scheme",
+        "identifier"
+      ],
+      "additionalProperties": false,
+      "description": "Canonical unpadded base64url of a 32-byte Ed25519 public key."
+    },
+    "SignatureProof": {
+      "type": "object",
+      "properties": {
+        "scheme": {
+          "type": "string",
+          "enum": [
+            "ed25519"
+          ]
+        },
+        "value": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{85}[AQgw]$"
+        }
+      },
+      "required": [
+        "scheme",
+        "value"
+      ],
+      "additionalProperties": false
     },
     "ApiError": {
       "type": "object",
@@ -32,16 +264,21 @@
         "caller_not_authorized",
         "account_not_found",
         "transaction_not_found",
+        "approval_pending",
         "part_not_found",
         "mandate_expired",
+        "invalid_mandate",
         "fee_mismatch",
-        "dispute_authority_missing",
+        "unsupported_asset",
         "deal_mismatch",
         "attachment_not_found",
         "invalid_event",
         "request_id_reused",
         "hold_matured",
         "hold_not_reversible",
+        "hold_not_extendable",
+        "extension_not_found",
+        "extension_closed",
         "insufficient_held_funds",
         "insufficient_funds",
         "card_debt",
@@ -80,356 +317,301 @@
       ],
       "additionalProperties": false
     },
-    "Asset": {
-      "type": "string",
-      "pattern": "^[A-Z][A-Z0-9]{0,16}(\\/\\d{1,6})?$"
-    },
-    "Authorities": {
+    "Mandate": {
       "type": "object",
       "properties": {
-        "start": {
-          "maxItems": 16,
+        "from": {
+          "$ref": "#/$defs/AccountId"
+        },
+        "to": {
+          "$ref": "#/$defs/AccountId"
+        },
+        "parts": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/AccountId"
-          }
-        },
-        "stop": {
-          "maxItems": 16,
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/AccountId"
-          }
-        },
-        "reverse": {
-          "maxItems": 16,
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/AccountId"
-          }
-        }
-      },
-      "required": [
-        "start",
-        "stop",
-        "reverse"
-      ],
-      "additionalProperties": false
-    },
-    "AutoRechargeDisabled": {
-      "type": "object",
-      "properties": {
-        "enabled": {
-          "type": "boolean",
-          "const": false
-        }
-      },
-      "required": [
-        "enabled"
-      ],
-      "additionalProperties": false
-    },
-    "AutoRechargeEnabled": {
-      "type": "object",
-      "properties": {
-        "enabled": {
-          "type": "boolean",
-          "const": true
-        },
-        "threshold": {
-          "type": "string",
-          "pattern": "^(0|[1-9]\\d*)$"
-        },
-        "amountCents": {
-          "$ref": "#/$defs/TopUpAmountCents"
-        },
-        "paymentMethod": {
-          "$ref": "#/$defs/PaymentMethodId"
-        }
-      },
-      "required": [
-        "enabled",
-        "threshold",
-        "amountCents",
-        "paymentMethod"
-      ],
-      "additionalProperties": false
-    },
-    "AutoRechargeEnabledInput": {
-      "type": "object",
-      "properties": {
-        "enabled": {
-          "type": "boolean",
-          "const": true
-        },
-        "threshold": {
-          "type": "string",
-          "pattern": "^(0|[1-9]\\d*)$"
-        },
-        "amountCents": {
-          "$ref": "#/$defs/TopUpAmountCents"
-        },
-        "paymentMethod": {
-          "$ref": "#/$defs/PaymentMethodId"
-        }
-      },
-      "required": [
-        "enabled",
-        "amountCents",
-        "paymentMethod"
-      ],
-      "additionalProperties": false
-    },
-    "AutoRechargeInput": {
-      "oneOf": [
-        {
-          "$ref": "#/$defs/AutoRechargeDisabled"
-        },
-        {
-          "$ref": "#/$defs/AutoRechargeEnabledInput"
-        }
-      ]
-    },
-    "AutoRechargeResponse": {
-      "type": "object",
-      "properties": {
-        "settings": {
-          "$ref": "#/$defs/AutoRechargeSettings"
-        },
-        "recommendedThreshold": {
-          "type": "string",
-          "pattern": "^(0|[1-9]\\d*)$"
-        }
-      },
-      "required": [
-        "settings",
-        "recommendedThreshold"
-      ],
-      "additionalProperties": false
-    },
-    "AutoRechargeSettings": {
-      "oneOf": [
-        {
-          "$ref": "#/$defs/AutoRechargeDisabled"
-        },
-        {
-          "$ref": "#/$defs/AutoRechargeEnabled"
-        }
-      ]
-    },
-    "Balance": {
-      "type": "object",
-      "properties": {
-        "available": {
-          "type": "object",
-          "propertyNames": {
-            "$ref": "#/$defs/Asset"
+            "$ref": "#/$defs/Part"
           },
-          "additionalProperties": {
-            "$ref": "#/$defs/BalanceAvailable"
-          }
+          "minItems": 1,
+          "maxItems": 64
         },
-        "held": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/BalanceHold"
-          }
-        }
-      },
-      "required": [
-        "available",
-        "held"
-      ],
-      "additionalProperties": false
-    },
-    "BalanceAmount": {
-      "type": "string",
-      "pattern": "^(0|[1-9][0-9]{0,37})$"
-    },
-    "BalanceAvailable": {
-      "type": "string",
-      "pattern": "^(0|-?[1-9][0-9]{0,37})$"
-    },
-    "BalanceHold": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/TimedBalanceHold"
+        "deal": {
+          "$ref": "#/$defs/DealCommitment"
         },
-        {
-          "$ref": "#/$defs/UntilStopBalanceHold"
-        }
-      ]
-    },
-    "CheckoutTopUpRequest": {
-      "type": "object",
-      "properties": {
-        "amountCents": {
-          "$ref": "#/$defs/TopUpAmountCents"
+        "fee": {
+          "$ref": "#/$defs/Fee"
         },
-        "successUrl": {
-          "$ref": "#/$defs/HttpUrl"
-        },
-        "cancelUrl": {
-          "$ref": "#/$defs/HttpUrl"
-        }
-      },
-      "required": [
-        "amountCents",
-        "successUrl",
-        "cancelUrl"
-      ],
-      "additionalProperties": false
-    },
-    "ConnectedAccountId": {
-      "type": "string",
-      "pattern": "^acct_[A-Za-z0-9]+$"
-    },
-    "ConnectStatus": {
-      "type": "object",
-      "properties": {
-        "connectedAccount": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ConnectedAccountId"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "payoutsEnabled": {
-          "type": "boolean"
-        },
-        "transfers": {
-          "$ref": "#/$defs/ConnectTransferStatus"
-        },
-        "detailsSubmitted": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "connectedAccount",
-        "payoutsEnabled",
-        "transfers",
-        "detailsSubmitted"
-      ],
-      "additionalProperties": false
-    },
-    "ConnectTransferStatus": {
-      "type": "string",
-      "enum": [
-        "active",
-        "inactive",
-        "pending",
-        "unrequested"
-      ]
-    },
-    "DealAttachment": {
-      "type": "object",
-      "properties": {
-        "kind": {
+        "nonce": {
           "type": "string",
-          "const": "deal"
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
         },
-        "content": {
-          "$ref": "#/$defs/DealContent"
-        },
-        "label": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "kind",
-        "content"
-      ],
-      "additionalProperties": false
-    },
-    "DealCommitment": {
-      "$ref": "#/$defs/Sha256Hex"
-    },
-    "DealContent": {},
-    "Duration": {
-      "type": "string",
-      "pattern": "^P(?!$)(\\d+Y)?(\\d+M)?(\\d+W)?(\\d+D)?(T(?=\\d)(\\d+H)?(\\d+M)?(\\d+S)?)?$"
-    },
-    "EventCommand": {
-      "type": "object",
-      "properties": {
-        "kind": {
-          "$ref": "#/$defs/LifecycleKind"
-        },
-        "part": {
+        "expires": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 9007199254740991
+          "description": "Unix seconds after which approval is refused."
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "parts",
+        "deal",
+        "fee",
+        "nonce",
+        "expires"
+      ],
+      "additionalProperties": false,
+      "description": "Explicit terms submitted for approval in an authenticated request."
+    },
+    "Part": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/OncePart"
+        },
+        {
+          "$ref": "#/$defs/RatePart"
+        }
+      ],
+      "discriminator": {
+        "propertyName": "kind",
+        "mapping": {
+          "once": "#/$defs/OncePart",
+          "rate": "#/$defs/RatePart"
+        }
+      }
+    },
+    "OncePart": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "once"
+          ]
+        },
+        "asset": {
+          "$ref": "#/$defs/Asset"
         },
         "amount": {
           "$ref": "#/$defs/Amount"
         },
-        "payload": {
-          "description": "Opaque JSON, recorded and never interpreted."
+        "hold": {
+          "$ref": "#/$defs/Hold"
+        },
+        "authorities": {
+          "$ref": "#/$defs/OnceAuthorities"
+        },
+        "maxHoldExtension": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          ]
+        },
+        "end": {
+          "$ref": "#/$defs/PartEnd"
         }
       },
       "required": [
-        "kind"
+        "kind",
+        "asset",
+        "amount",
+        "hold",
+        "authorities",
+        "maxHoldExtension"
+      ],
+      "additionalProperties": false,
+      "description": "A fixed amount, debited and credited (held) at approval."
+    },
+    "OnceAuthorities": {
+      "type": "object",
+      "properties": {
+        "stop": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StopAuthority"
+          },
+          "maxItems": 16
+        },
+        "reverse": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AccountId"
+          },
+          "maxItems": 16
+        },
+        "extend": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AccountId"
+          },
+          "maxItems": 16
+        }
+      },
+      "required": [
+        "stop",
+        "reverse",
+        "extend"
       ],
       "additionalProperties": false
     },
-    "EventRequest": {
+    "StopAuthority": {
       "type": "object",
       "properties": {
         "account": {
           "$ref": "#/$defs/AccountId"
         },
-        "requestId": {
-          "$ref": "#/$defs/RequestId"
+        "notice": {
+          "$ref": "#/$defs/Duration"
         },
-        "event": {
-          "$ref": "#/$defs/LifecycleEvent"
+        "partialPeriod": {
+          "$ref": "#/$defs/StopPartialPeriod"
         }
       },
       "required": [
         "account",
-        "requestId",
-        "event"
+        "notice",
+        "partialPeriod"
       ],
       "additionalProperties": false
     },
-    "FaucetAmountCents": {
-      "type": "string",
-      "maxLength": 16,
-      "pattern": "^[1-9][0-9]*$"
-    },
-    "FaucetCredit": {
-      "type": "object",
-      "properties": {
-        "account": {
-          "$ref": "#/$defs/AccountId"
+    "StopPartialPeriod": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PartialPeriod"
         },
-        "amountCents": {
-          "$ref": "#/$defs/FaucetAmountCents"
-        },
-        "ledger": {
+        {
           "type": "string",
-          "minLength": 1
+          "enum": [
+            "chosen"
+          ]
+        }
+      ]
+    },
+    "PartialPeriod": {
+      "type": "string",
+      "enum": [
+        "charged",
+        "returned",
+        "prorated"
+      ]
+    },
+    "PartEnd": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "partialPeriod": {
+          "$ref": "#/$defs/PartialPeriod"
         }
       },
       "required": [
-        "account",
-        "amountCents",
-        "ledger"
+        "at",
+        "partialPeriod"
       ],
       "additionalProperties": false
     },
-    "FaucetRequest": {
+    "RatePart": {
       "type": "object",
       "properties": {
-        "amountCents": {
-          "$ref": "#/$defs/FaucetAmountCents"
+        "kind": {
+          "type": "string",
+          "enum": [
+            "rate"
+          ]
+        },
+        "asset": {
+          "$ref": "#/$defs/Asset"
+        },
+        "amount": {
+          "$ref": "#/$defs/Amount"
+        },
+        "period": {
+          "$ref": "#/$defs/Duration"
+        },
+        "reserveAhead": {
+          "$ref": "#/$defs/Duration"
+        },
+        "hold": {
+          "$ref": "#/$defs/Hold"
+        },
+        "authorities": {
+          "$ref": "#/$defs/RateAuthorities"
+        },
+        "maxHoldExtension": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          ]
+        },
+        "end": {
+          "$ref": "#/$defs/PartEnd"
         }
       },
       "required": [
-        "amountCents"
+        "kind",
+        "asset",
+        "amount",
+        "period",
+        "reserveAhead",
+        "hold",
+        "authorities",
+        "maxHoldExtension"
+      ],
+      "additionalProperties": false,
+      "description": "A per-period amount reserved ahead and earned at each period end or the part's stop."
+    },
+    "RateAuthorities": {
+      "type": "object",
+      "properties": {
+        "stop": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StopAuthority"
+          },
+          "maxItems": 16
+        },
+        "reverse": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AccountId"
+          },
+          "maxItems": 16
+        },
+        "extend": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AccountId"
+          },
+          "maxItems": 16
+        },
+        "start": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AccountId"
+          },
+          "maxItems": 16
+        }
+      },
+      "required": [
+        "stop",
+        "reverse",
+        "extend",
+        "start"
       ],
       "additionalProperties": false
     },
@@ -448,79 +630,123 @@
       "additionalProperties": false,
       "description": "Service fee in basis points, pinned in the mandate; must equal current policy."
     },
-    "Health": {
+    "DealAttachment": {
       "type": "object",
       "properties": {
-        "status": {
+        "kind": {
           "type": "string",
-          "const": "ok"
+          "enum": [
+            "deal"
+          ]
+        },
+        "content": {
+          "$ref": "#/$defs/DealContent"
+        },
+        "label": {
+          "type": "string"
         }
       },
       "required": [
-        "status"
+        "kind",
+        "content"
       ],
       "additionalProperties": false
     },
-    "Hold": {
+    "DealContent": {},
+    "StoredDealAttachment": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "deal"
+          ]
+        },
+        "content": {
+          "$ref": "#/$defs/DealContent"
+        },
+        "label": {
+          "type": "string"
+        },
+        "sha256": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "name": {
+          "type": "string",
+          "enum": [
+            "deal.json"
+          ]
+        },
+        "mediaType": {
+          "type": "string",
+          "enum": [
+            "application/json"
+          ]
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "UTF-8 byte length of the JCS content."
+        },
+        "uploader": {
+          "$ref": "#/$defs/AccountId"
+        }
+      },
+      "required": [
+        "kind",
+        "content",
+        "sha256",
+        "name",
+        "mediaType",
+        "size",
+        "uploader"
+      ],
+      "additionalProperties": false
+    },
+    "TransactionEvent": {
       "anyOf": [
         {
-          "$ref": "#/$defs/HoldFor"
+          "$ref": "#/$defs/StoredEvent"
         },
         {
-          "$ref": "#/$defs/HoldUntilStop"
+          "$ref": "#/$defs/TermsStopEvent"
         }
-      ],
-      "description": "How long a part's money stays reversible and uncollectable by the payee."
+      ]
     },
-    "HoldFor": {
+    "StoredEvent": {
       "type": "object",
       "properties": {
-        "for": {
-          "$ref": "#/$defs/Duration"
-        }
-      },
-      "required": [
-        "for"
-      ],
-      "additionalProperties": false,
-      "description": "Collectable once this long has passed since approval."
-    },
-    "HoldUntilStop": {
-      "type": "object",
-      "properties": {
-        "until": {
-          "type": "string",
-          "const": "stop"
-        }
-      },
-      "required": [
-        "until"
-      ],
-      "additionalProperties": false,
-      "description": "Collectable once the transaction is stopped."
-    },
-    "HttpUrl": {
-      "type": "string",
-      "pattern": "^https?:\\/\\/[^\\s]+$"
-    },
-    "Identity": {
-      "type": "object",
-      "properties": {
-        "scheme": {
-          "type": "string",
-          "const": "ed25519"
+        "account": {
+          "$ref": "#/$defs/AccountId"
         },
-        "identifier": {
-          "type": "string",
-          "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
+        "requestId": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "event": {
+          "$ref": "#/$defs/LifecycleEvent"
+        },
+        "receivedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Unix seconds when the service durably received the event."
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Causal order within the transaction; absent on legacy events."
         }
       },
       "required": [
-        "scheme",
-        "identifier"
+        "account",
+        "requestId",
+        "event",
+        "receivedAt"
       ],
-      "additionalProperties": false,
-      "description": "Canonical unpadded base64url of a 32-byte Ed25519 public key."
+      "additionalProperties": false
+    },
+    "RequestId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
     },
     "LifecycleEvent": {
       "type": "object",
@@ -530,11 +756,28 @@
         },
         "part": {
           "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
+          "minimum": 0
         },
         "amount": {
           "$ref": "#/$defs/Amount"
+        },
+        "until": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Extension deadline in Unix seconds, strictly after receipt; absent freezes until lift or the cap."
+        },
+        "ref": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Sequence of the extend event to lift on this part."
+        },
+        "at": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Requested stop time in Unix seconds; the sender’s notice may move it later."
+        },
+        "partialPeriod": {
+          "$ref": "#/$defs/PartialPeriod"
         },
         "payload": {
           "description": "Opaque JSON, recorded and never interpreted."
@@ -550,142 +793,183 @@
       "enum": [
         "start",
         "stop",
-        "reverse"
+        "reverse",
+        "extend",
+        "lift"
       ]
     },
-    "Mandate": {
+    "TermsStopEvent": {
       "type": "object",
       "properties": {
-        "from": {
-          "$ref": "#/$defs/AccountId"
-        },
-        "to": {
-          "$ref": "#/$defs/AccountId"
-        },
-        "parts": {
-          "minItems": 1,
-          "maxItems": 64,
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/Part"
-          }
-        },
-        "deal": {
-          "$ref": "#/$defs/DealCommitment"
-        },
-        "fee": {
-          "$ref": "#/$defs/Fee"
-        },
-        "authorities": {
-          "$ref": "#/$defs/Authorities"
-        },
-        "nonce": {
+        "issuer": {
           "type": "string",
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          "enum": [
+            "terms"
+          ]
         },
-        "expires": {
+        "requestId": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "event": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "stop"
+              ]
+            },
+            "part": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        "receivedAt": {
           "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991,
-          "description": "Unix seconds after which approval is refused."
+          "minimum": 0
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
         }
       },
       "required": [
-        "from",
-        "to",
-        "parts",
-        "deal",
-        "fee",
-        "authorities",
-        "nonce",
-        "expires"
-      ],
-      "additionalProperties": false,
-      "description": "Explicit terms submitted for approval in an authenticated request."
-    },
-    "MinorUnits": {
-      "type": "string",
-      "pattern": "^(0|[1-9][0-9]{0,37})$"
-    },
-    "OnboardingLink": {
-      "type": "object",
-      "properties": {
-        "connectedAccount": {
-          "$ref": "#/$defs/ConnectedAccountId"
-        },
-        "url": {
-          "$ref": "#/$defs/HttpUrl"
-        },
-        "expiresAt": {
-          "$ref": "#/$defs/UnixSeconds"
-        }
-      },
-      "required": [
-        "connectedAccount",
-        "url",
-        "expiresAt"
+        "issuer",
+        "requestId",
+        "event",
+        "receivedAt",
+        "sequence"
       ],
       "additionalProperties": false
     },
-    "OnboardingRequest": {
-      "type": "object",
-      "properties": {
-        "refreshUrl": {
-          "$ref": "#/$defs/HttpUrl"
-        },
-        "returnUrl": {
-          "$ref": "#/$defs/HttpUrl"
-        }
-      },
-      "required": [
-        "refreshUrl",
-        "returnUrl"
-      ],
-      "additionalProperties": false
-    },
-    "OncePart": {
+    "EventCommand": {
       "type": "object",
       "properties": {
         "kind": {
-          "type": "string",
-          "const": "once"
+          "$ref": "#/$defs/LifecycleKind"
         },
-        "asset": {
-          "$ref": "#/$defs/Asset"
+        "part": {
+          "type": "integer",
+          "minimum": 0
         },
         "amount": {
           "$ref": "#/$defs/Amount"
         },
-        "hold": {
-          "$ref": "#/$defs/Hold"
+        "until": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Extension deadline in Unix seconds, strictly after receipt; absent freezes until lift or the cap."
+        },
+        "ref": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Sequence of the extend event to lift on this part."
+        },
+        "at": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Requested stop time in Unix seconds; the sender’s notice may move it later."
+        },
+        "partialPeriod": {
+          "$ref": "#/$defs/PartialPeriod"
+        },
+        "payload": {
+          "description": "Opaque JSON, recorded and never interpreted."
         }
       },
       "required": [
-        "kind",
-        "asset",
-        "amount",
-        "hold"
+        "kind"
       ],
-      "additionalProperties": false,
-      "description": "A fixed amount, debited and credited (held) at approval."
+      "additionalProperties": false
     },
-    "Part": {
-      "oneOf": [
-        {
-          "$ref": "#/$defs/OncePart"
+    "SignedTransactionSnapshot": {
+      "type": "object",
+      "properties": {
+        "snapshot": {
+          "$ref": "#/$defs/TransactionSnapshot"
         },
-        {
-          "$ref": "#/$defs/RatePart"
+        "proof": {
+          "$ref": "#/$defs/SignatureProof"
         }
-      ]
+      },
+      "required": [
+        "snapshot",
+        "proof"
+      ],
+      "additionalProperties": false
+    },
+    "TransactionSnapshot": {
+      "type": "object",
+      "properties": {
+        "livemode": {
+          "type": "boolean",
+          "description": "True only for real-money live payments; covered by the signature."
+        },
+        "transaction": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "receipt": {
+          "$ref": "#/$defs/SignedReceipt"
+        },
+        "observedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Unix seconds at which this state was assembled."
+        },
+        "parts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PartSnapshot"
+          },
+          "minItems": 1
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TransactionEvent"
+          }
+        },
+        "latestEventSequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fundedThrough": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StoredDealAttachment"
+          }
+        },
+        "issuer": {
+          "$ref": "#/$defs/Identity"
+        }
+      },
+      "required": [
+        "livemode",
+        "transaction",
+        "receipt",
+        "observedAt",
+        "parts",
+        "events",
+        "attachments",
+        "issuer"
+      ],
+      "additionalProperties": false
     },
     "PartSnapshot": {
       "type": "object",
       "properties": {
         "part": {
           "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
+          "minimum": 0
         },
         "asset": {
           "$ref": "#/$defs/Asset"
@@ -711,15 +995,32 @@
         "rate": {
           "$ref": "#/$defs/RateProgress"
         },
+        "started": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The rate part’s first start, in Unix seconds."
+        },
+        "stop": {
+          "$ref": "#/$defs/PartStop"
+        },
+        "pendingStop": {
+          "$ref": "#/$defs/PendingStop"
+        },
         "feePaid": {
           "$ref": "#/$defs/MinorUnits"
         },
         "hold": {
           "$ref": "#/$defs/Hold"
         },
+        "extensions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HoldExtension"
+          }
+        },
         "releaseAt": {
-          "description": "UTC instant when a timed hold becomes releasable.",
-          "type": "string"
+          "type": "string",
+          "description": "Effective UTC maturity, including open extensions and the cap; absent while unbounded or awaiting stop."
         },
         "status": {
           "$ref": "#/$defs/PartState"
@@ -734,86 +1035,14 @@
         "reversed",
         "feePaid",
         "hold",
+        "extensions",
         "status"
       ],
       "additionalProperties": false
     },
-    "PartState": {
-      "type": "string",
-      "enum": [
-        "held",
-        "released",
-        "reversed",
-        "settled"
-      ]
-    },
-    "PaymentMethodId": {
-      "type": "string",
-      "pattern": "^pm_[A-Za-z0-9]+$"
-    },
-    "PayoutAmount": {
+    "MinorUnits": {
       "type": "string",
       "pattern": "^(0|[1-9][0-9]{0,37})$"
-    },
-    "PayoutBalance": {
-      "type": "object",
-      "properties": {
-        "asset": {
-          "type": "string",
-          "const": "USD/6"
-        },
-        "available": {
-          "$ref": "#/$defs/BalanceAvailable"
-        },
-        "withdrawable": {
-          "$ref": "#/$defs/PayoutAmount"
-        }
-      },
-      "required": [
-        "asset",
-        "available",
-        "withdrawable"
-      ],
-      "additionalProperties": false
-    },
-    "ProviderObjectId": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 255
-    },
-    "RatePart": {
-      "type": "object",
-      "properties": {
-        "kind": {
-          "type": "string",
-          "const": "rate"
-        },
-        "asset": {
-          "$ref": "#/$defs/Asset"
-        },
-        "amount": {
-          "$ref": "#/$defs/Amount"
-        },
-        "period": {
-          "$ref": "#/$defs/Duration"
-        },
-        "reserveAhead": {
-          "$ref": "#/$defs/Duration"
-        },
-        "hold": {
-          "$ref": "#/$defs/Hold"
-        }
-      },
-      "required": [
-        "kind",
-        "asset",
-        "amount",
-        "period",
-        "reserveAhead",
-        "hold"
-      ],
-      "additionalProperties": false,
-      "description": "A per-period amount reserved ahead and charged for each started period."
     },
     "RateProgress": {
       "type": "object",
@@ -828,8 +1057,7 @@
         },
         "reservedThrough": {
           "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
+          "minimum": 0
         }
       },
       "required": [
@@ -838,181 +1066,51 @@
       ],
       "additionalProperties": false
     },
-    "RateReservation": {
+    "PartStop": {
       "type": "object",
       "properties": {
-        "period": {
-          "$ref": "#/$defs/Duration"
-        },
-        "reserveAhead": {
-          "$ref": "#/$defs/Duration"
-        },
-        "periodsReserved": {
-          "type": "string",
-          "pattern": "^(0|[1-9][0-9]{0,37})$"
-        }
-      },
-      "required": [
-        "period",
-        "reserveAhead",
-        "periodsReserved"
-      ],
-      "additionalProperties": false
-    },
-    "Receipt": {
-      "type": "object",
-      "properties": {
-        "livemode": {
-          "type": "boolean",
-          "description": "True only for real-money live payments; covered by the signature."
-        },
-        "transaction": {
-          "$ref": "#/$defs/Sha256Hex"
-        },
-        "deal": {
-          "$ref": "#/$defs/DealCommitment"
-        },
-        "from": {
-          "$ref": "#/$defs/AccountId"
-        },
-        "to": {
-          "$ref": "#/$defs/AccountId"
-        },
-        "ledger": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Ledger transaction id for approval."
-        },
-        "parts": {
-          "minItems": 1,
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/ReceiptPart"
-          }
-        },
-        "approvedAt": {
+        "effectiveAt": {
           "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991,
-          "description": "Unix seconds."
+          "minimum": 0
         },
-        "issuer": {
-          "$ref": "#/$defs/Identity"
+        "cause": {
+          "$ref": "#/$defs/StopCause"
+        },
+        "partialPeriod": {
+          "$ref": "#/$defs/PartialPeriod"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "settled": {
+          "$ref": "#/$defs/SettledPart"
         }
       },
       "required": [
-        "livemode",
-        "transaction",
-        "deal",
-        "from",
-        "to",
-        "ledger",
-        "parts",
-        "approvedAt",
-        "issuer"
+        "effectiveAt",
+        "cause",
+        "partialPeriod",
+        "sequence",
+        "settled"
       ],
       "additionalProperties": false
     },
-    "ReceiptPart": {
-      "type": "object",
-      "properties": {
-        "asset": {
-          "$ref": "#/$defs/Asset"
-        },
-        "gross": {
-          "$ref": "#/$defs/Amount"
-        },
-        "fee": {
-          "type": "string",
-          "pattern": "^(0|[1-9][0-9]{0,37})$"
-        },
-        "net": {
-          "type": "string",
-          "pattern": "^(0|[1-9][0-9]{0,37})$"
-        },
-        "hold": {
-          "$ref": "#/$defs/Hold"
-        },
-        "rate": {
-          "$ref": "#/$defs/RateReservation"
-        }
-      },
-      "required": [
-        "asset",
-        "gross",
-        "fee",
-        "net",
-        "hold"
-      ],
-      "additionalProperties": false
-    },
-    "RequestId": {
+    "StopCause": {
       "type": "string",
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
-    },
-    "SavedCard": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "$ref": "#/$defs/PaymentMethodId"
-        },
-        "brand": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 50
-        },
-        "last4": {
-          "type": "string",
-          "pattern": "^\\d{4}$"
-        },
-        "expMonth": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 12
-        },
-        "expYear": {
-          "type": "integer",
-          "minimum": 2000,
-          "maximum": 9999
-        }
-      },
-      "required": [
-        "id",
-        "brand",
-        "last4",
-        "expMonth",
-        "expYear"
-      ],
-      "additionalProperties": false
-    },
-    "SavedCards": {
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/SavedCard"
-      }
-    },
-    "SavedCardTopUpRequest": {
-      "type": "object",
-      "properties": {
-        "amountCents": {
-          "$ref": "#/$defs/TopUpAmountCents"
-        },
-        "paymentMethod": {
-          "$ref": "#/$defs/PaymentMethodId"
-        }
-      },
-      "required": [
-        "amountCents"
-      ],
-      "additionalProperties": false
+      "enum": [
+        "payer",
+        "payee",
+        "authority",
+        "terms"
+      ]
     },
     "SettledPart": {
       "type": "object",
       "properties": {
         "part": {
           "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
+          "minimum": 0
         },
         "asset": {
           "$ref": "#/$defs/Asset"
@@ -1039,185 +1137,99 @@
       ],
       "additionalProperties": false
     },
-    "Sha256Hex": {
-      "type": "string",
-      "pattern": "^[0-9a-f]{64}$"
-    },
-    "SignatureProof": {
+    "PendingStop": {
       "type": "object",
       "properties": {
-        "scheme": {
-          "type": "string",
-          "const": "ed25519"
-        },
-        "value": {
-          "type": "string",
-          "pattern": "^[A-Za-z0-9_-]{85}[AQgw]$"
-        }
-      },
-      "required": [
-        "scheme",
-        "value"
-      ],
-      "additionalProperties": false
-    },
-    "SignedReceipt": {
-      "type": "object",
-      "properties": {
-        "receipt": {
-          "$ref": "#/$defs/Receipt"
-        },
-        "proof": {
-          "$ref": "#/$defs/SignatureProof"
-        }
-      },
-      "required": [
-        "receipt",
-        "proof"
-      ],
-      "additionalProperties": false
-    },
-    "SignedTransactionSnapshot": {
-      "type": "object",
-      "properties": {
-        "snapshot": {
-          "$ref": "#/$defs/TransactionSnapshot"
-        },
-        "proof": {
-          "$ref": "#/$defs/SignatureProof"
-        }
-      },
-      "required": [
-        "snapshot",
-        "proof"
-      ],
-      "additionalProperties": false
-    },
-    "StoredDealAttachment": {
-      "type": "object",
-      "properties": {
-        "kind": {
-          "type": "string",
-          "const": "deal"
-        },
-        "content": {
-          "$ref": "#/$defs/DealContent"
-        },
-        "label": {
-          "type": "string"
-        },
-        "sha256": {
-          "$ref": "#/$defs/Sha256Hex"
-        },
-        "name": {
-          "type": "string",
-          "const": "deal.json"
-        },
-        "mediaType": {
-          "type": "string",
-          "const": "application/json"
-        },
-        "size": {
+        "at": {
           "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991,
-          "description": "UTF-8 byte length of the JCS content."
+          "minimum": 0
         },
-        "uploader": {
-          "$ref": "#/$defs/AccountId"
-        }
-      },
-      "required": [
-        "kind",
-        "content",
-        "sha256",
-        "name",
-        "mediaType",
-        "size",
-        "uploader"
-      ],
-      "additionalProperties": false
-    },
-    "StoredEvent": {
-      "type": "object",
-      "properties": {
-        "account": {
-          "$ref": "#/$defs/AccountId"
+        "cause": {
+          "$ref": "#/$defs/StopCause"
         },
-        "requestId": {
-          "$ref": "#/$defs/RequestId"
-        },
-        "event": {
-          "$ref": "#/$defs/LifecycleEvent"
-        },
-        "receivedAt": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991,
-          "description": "Unix seconds when the service durably received the event."
-        },
-        "sequence": {
-          "description": "Causal order within the transaction; absent on legacy events.",
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 9007199254740991
-        }
-      },
-      "required": [
-        "account",
-        "requestId",
-        "event",
-        "receivedAt"
-      ],
-      "additionalProperties": false
-    },
-    "StripeObjectId": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 255
-    },
-    "TermsStopEvent": {
-      "type": "object",
-      "properties": {
-        "issuer": {
-          "type": "string",
-          "const": "terms"
-        },
-        "requestId": {
-          "$ref": "#/$defs/RequestId"
-        },
-        "event": {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "type": "string",
-              "const": "stop"
-            }
-          },
-          "required": [
-            "kind"
-          ],
-          "additionalProperties": false
-        },
-        "receivedAt": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
+        "partialPeriod": {
+          "$ref": "#/$defs/PartialPeriod"
         },
         "sequence": {
           "type": "integer",
-          "minimum": 1,
-          "maximum": 9007199254740991
+          "minimum": 1
         }
       },
       "required": [
-        "issuer",
-        "requestId",
-        "event",
-        "receivedAt",
+        "at",
+        "cause",
+        "partialPeriod",
         "sequence"
       ],
       "additionalProperties": false
+    },
+    "HoldExtension": {
+      "type": "object",
+      "properties": {
+        "ref": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "until": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "additionalProperties": false
+    },
+    "PartState": {
+      "type": "string",
+      "enum": [
+        "held",
+        "released",
+        "reversed",
+        "settled"
+      ]
+    },
+    "Balance": {
+      "type": "object",
+      "properties": {
+        "available": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/BalanceAvailable"
+          },
+          "description": "Spendable balances by asset; outgoing escrow has already left available."
+        },
+        "held": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BalanceHold"
+          },
+          "description": "Unreleased incoming holds where this account is the payee. Outgoing payer escrow is excluded and appears only in that transaction's signed snapshot."
+        }
+      },
+      "required": [
+        "available",
+        "held"
+      ],
+      "additionalProperties": false
+    },
+    "BalanceAvailable": {
+      "type": "string",
+      "pattern": "^(0|-?[1-9][0-9]{0,37})$"
+    },
+    "BalanceHold": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TimedBalanceHold"
+        },
+        {
+          "$ref": "#/$defs/UntilStopBalanceHold"
+        },
+        {
+          "$ref": "#/$defs/UntilLiftBalanceHold"
+        }
+      ],
+      "description": "Incoming money held for the payee until release."
     },
     "TimedBalanceHold": {
       "type": "object",
@@ -1231,8 +1243,7 @@
         },
         "part": {
           "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
+          "minimum": 0
         },
         "from": {
           "$ref": "#/$defs/AccountId"
@@ -1266,202 +1277,9 @@
       ],
       "additionalProperties": false
     },
-    "TopUp": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 255
-        },
-        "account": {
-          "$ref": "#/$defs/AccountId"
-        },
-        "requestId": {
-          "$ref": "#/$defs/RequestId"
-        },
-        "kind": {
-          "$ref": "#/$defs/TopUpKind"
-        },
-        "amountCents": {
-          "$ref": "#/$defs/TopUpAmountCents"
-        },
-        "state": {
-          "$ref": "#/$defs/TopUpState"
-        },
-        "checkoutSession": {
-          "$ref": "#/$defs/ProviderObjectId"
-        },
-        "checkoutUrl": {
-          "$ref": "#/$defs/HttpUrl"
-        },
-        "paymentIntent": {
-          "$ref": "#/$defs/ProviderObjectId"
-        },
-        "paymentMethod": {
-          "$ref": "#/$defs/PaymentMethodId"
-        },
-        "succeededAt": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "failure": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 300
-        }
-      },
-      "required": [
-        "id",
-        "account",
-        "requestId",
-        "kind",
-        "amountCents",
-        "state"
-      ],
-      "additionalProperties": false
-    },
-    "TopUpAmountCents": {
+    "BalanceAmount": {
       "type": "string",
-      "pattern": "^[1-9]\\d*$"
-    },
-    "TopUpKind": {
-      "type": "string",
-      "enum": [
-        "checkout",
-        "saved_card",
-        "auto_recharge"
-      ]
-    },
-    "TopUpState": {
-      "type": "string",
-      "enum": [
-        "planned",
-        "pending",
-        "succeeded",
-        "failed",
-        "canceled"
-      ]
-    },
-    "TransactionEvent": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/StoredEvent"
-        },
-        {
-          "$ref": "#/$defs/TermsStopEvent"
-        }
-      ]
-    },
-    "TransactionSnapshot": {
-      "type": "object",
-      "properties": {
-        "livemode": {
-          "type": "boolean",
-          "description": "True only for real-money live payments; covered by the signature."
-        },
-        "transaction": {
-          "$ref": "#/$defs/Sha256Hex"
-        },
-        "receipt": {
-          "$ref": "#/$defs/SignedReceipt"
-        },
-        "observedAt": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991,
-          "description": "Unix seconds at which this state was assembled."
-        },
-        "parts": {
-          "minItems": 1,
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/PartSnapshot"
-          }
-        },
-        "events": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/TransactionEvent"
-          }
-        },
-        "latestEventSequence": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "fundedThrough": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "stop": {
-          "$ref": "#/$defs/TransactionStop"
-        },
-        "attachments": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/StoredDealAttachment"
-          }
-        },
-        "issuer": {
-          "$ref": "#/$defs/Identity"
-        }
-      },
-      "required": [
-        "livemode",
-        "transaction",
-        "receipt",
-        "observedAt",
-        "parts",
-        "events",
-        "attachments",
-        "issuer"
-      ],
-      "additionalProperties": false
-    },
-    "TransactionStop": {
-      "type": "object",
-      "properties": {
-        "effectiveAt": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "cause": {
-          "type": "string",
-          "enum": [
-            "payer",
-            "payee",
-            "authority",
-            "terms"
-          ]
-        },
-        "sequence": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 9007199254740991
-        },
-        "settled": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/SettledPart"
-          }
-        }
-      },
-      "required": [
-        "effectiveAt",
-        "cause",
-        "sequence",
-        "settled"
-      ],
-      "additionalProperties": false
-    },
-    "UnixSeconds": {
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 9007199254740991
+      "pattern": "^(0|[1-9][0-9]{0,37})$"
     },
     "UntilStopBalanceHold": {
       "type": "object",
@@ -1475,8 +1293,7 @@
         },
         "part": {
           "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
+          "minimum": 0
         },
         "from": {
           "$ref": "#/$defs/AccountId"
@@ -1495,7 +1312,9 @@
         },
         "until": {
           "type": "string",
-          "const": "stop"
+          "enum": [
+            "stop"
+          ]
         }
       },
       "required": [
@@ -1510,6 +1329,173 @@
         "until"
       ],
       "additionalProperties": false
+    },
+    "UntilLiftBalanceHold": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": "string",
+          "minLength": 1
+        },
+        "transaction": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "part": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "from": {
+          "$ref": "#/$defs/AccountId"
+        },
+        "to": {
+          "$ref": "#/$defs/AccountId"
+        },
+        "asset": {
+          "$ref": "#/$defs/Asset"
+        },
+        "balance": {
+          "$ref": "#/$defs/BalanceAmount"
+        },
+        "fee": {
+          "$ref": "#/$defs/Fee"
+        },
+        "until": {
+          "type": "string",
+          "enum": [
+            "lift"
+          ]
+        }
+      },
+      "required": [
+        "address",
+        "transaction",
+        "part",
+        "from",
+        "to",
+        "asset",
+        "balance",
+        "fee",
+        "until"
+      ],
+      "additionalProperties": false
+    },
+    "OnboardingLink": {
+      "type": "object",
+      "properties": {
+        "connectedAccount": {
+          "$ref": "#/$defs/ConnectedAccountId"
+        },
+        "url": {
+          "$ref": "#/$defs/HttpUrl"
+        },
+        "expiresAt": {
+          "$ref": "#/$defs/UnixSeconds"
+        }
+      },
+      "required": [
+        "connectedAccount",
+        "url",
+        "expiresAt"
+      ],
+      "additionalProperties": false
+    },
+    "ConnectedAccountId": {
+      "type": "string",
+      "pattern": "^acct_[A-Za-z0-9]+$"
+    },
+    "HttpUrl": {
+      "type": "string",
+      "pattern": "^https?:\\/\\/[^\\s]+$/i"
+    },
+    "UnixSeconds": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "OnboardingRequest": {
+      "type": "object",
+      "properties": {
+        "refreshUrl": {
+          "$ref": "#/$defs/HttpUrl"
+        },
+        "returnUrl": {
+          "$ref": "#/$defs/HttpUrl"
+        }
+      },
+      "required": [
+        "refreshUrl",
+        "returnUrl"
+      ],
+      "additionalProperties": false
+    },
+    "ConnectStatus": {
+      "type": "object",
+      "properties": {
+        "connectedAccount": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/ConnectedAccountId"
+            },
+            {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          ]
+        },
+        "payoutsEnabled": {
+          "type": "boolean"
+        },
+        "transfers": {
+          "$ref": "#/$defs/ConnectTransferStatus"
+        },
+        "detailsSubmitted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "connectedAccount",
+        "payoutsEnabled",
+        "transfers",
+        "detailsSubmitted"
+      ],
+      "additionalProperties": false
+    },
+    "ConnectTransferStatus": {
+      "type": "string",
+      "enum": [
+        "active",
+        "inactive",
+        "pending",
+        "unrequested"
+      ]
+    },
+    "PayoutBalance": {
+      "type": "object",
+      "properties": {
+        "asset": {
+          "type": "string",
+          "enum": [
+            "USD/6"
+          ]
+        },
+        "available": {
+          "$ref": "#/$defs/BalanceAvailable"
+        },
+        "withdrawable": {
+          "$ref": "#/$defs/PayoutAmount"
+        }
+      },
+      "required": [
+        "asset",
+        "available",
+        "withdrawable"
+      ],
+      "additionalProperties": false
+    },
+    "PayoutAmount": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,37})$"
     },
     "Withdrawal": {
       "type": "object",
@@ -1571,6 +1557,23 @@
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     },
+    "WithdrawalState": {
+      "type": "string",
+      "enum": [
+        "planned",
+        "reserved",
+        "transferred",
+        "payout_pending",
+        "paid",
+        "compensating",
+        "failed"
+      ]
+    },
+    "StripeObjectId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
     "WithdrawalRequest": {
       "type": "object",
       "properties": {
@@ -1583,17 +1586,346 @@
       ],
       "additionalProperties": false
     },
-    "WithdrawalState": {
+    "BillingPortalSession": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "$ref": "#/$defs/HttpUrl"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "additionalProperties": false
+    },
+    "BillingPortalRequest": {
+      "type": "object",
+      "properties": {
+        "returnUrl": {
+          "$ref": "#/$defs/HttpUrl"
+        }
+      },
+      "required": [
+        "returnUrl"
+      ],
+      "additionalProperties": false
+    },
+    "SavedCards": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/SavedCard"
+      }
+    },
+    "SavedCard": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/PaymentMethodId"
+        },
+        "brand": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 50
+        },
+        "last4": {
+          "type": "string",
+          "pattern": "^\\d{4}$"
+        },
+        "expMonth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 12
+        },
+        "expYear": {
+          "type": "integer",
+          "minimum": 2000,
+          "maximum": 9999
+        },
+        "isDefault": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "brand",
+        "last4",
+        "expMonth",
+        "expYear",
+        "isDefault"
+      ],
+      "additionalProperties": false
+    },
+    "PaymentMethodId": {
+      "type": "string",
+      "pattern": "^pm_[A-Za-z0-9]+$"
+    },
+    "TopUp": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "account": {
+          "$ref": "#/$defs/AccountId"
+        },
+        "requestId": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "kind": {
+          "$ref": "#/$defs/TopUpKind"
+        },
+        "amountCents": {
+          "$ref": "#/$defs/TopUpAmountCents"
+        },
+        "state": {
+          "$ref": "#/$defs/TopUpState"
+        },
+        "checkoutSession": {
+          "$ref": "#/$defs/ProviderObjectId"
+        },
+        "checkoutUrl": {
+          "$ref": "#/$defs/HttpUrl"
+        },
+        "paymentIntent": {
+          "$ref": "#/$defs/ProviderObjectId"
+        },
+        "paymentMethod": {
+          "$ref": "#/$defs/PaymentMethodId"
+        },
+        "succeededAt": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failure": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        }
+      },
+      "required": [
+        "id",
+        "account",
+        "requestId",
+        "kind",
+        "amountCents",
+        "state"
+      ],
+      "additionalProperties": false
+    },
+    "TopUpKind": {
+      "type": "string",
+      "enum": [
+        "checkout",
+        "saved_card",
+        "auto_recharge"
+      ]
+    },
+    "TopUpAmountCents": {
+      "type": "string",
+      "pattern": "^[1-9]\\d*$"
+    },
+    "TopUpState": {
       "type": "string",
       "enum": [
         "planned",
-        "reserved",
-        "transferred",
-        "payout_pending",
-        "paid",
-        "compensating",
-        "failed"
+        "pending",
+        "succeeded",
+        "failed",
+        "canceled"
       ]
+    },
+    "ProviderObjectId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "CheckoutTopUpRequest": {
+      "type": "object",
+      "properties": {
+        "amountCents": {
+          "$ref": "#/$defs/TopUpAmountCents"
+        },
+        "successUrl": {
+          "$ref": "#/$defs/HttpUrl"
+        },
+        "cancelUrl": {
+          "$ref": "#/$defs/HttpUrl"
+        }
+      },
+      "required": [
+        "amountCents",
+        "successUrl",
+        "cancelUrl"
+      ],
+      "additionalProperties": false
+    },
+    "SavedCardTopUpRequest": {
+      "type": "object",
+      "properties": {
+        "amountCents": {
+          "$ref": "#/$defs/TopUpAmountCents"
+        },
+        "paymentMethod": {
+          "$ref": "#/$defs/PaymentMethodId"
+        }
+      },
+      "required": [
+        "amountCents"
+      ],
+      "additionalProperties": false
+    },
+    "AutoRechargeResponse": {
+      "type": "object",
+      "properties": {
+        "settings": {
+          "$ref": "#/$defs/AutoRechargeSettings"
+        },
+        "recommendedThreshold": {
+          "type": "string",
+          "pattern": "^(0|[1-9]\\d*)$"
+        }
+      },
+      "required": [
+        "settings",
+        "recommendedThreshold"
+      ],
+      "additionalProperties": false
+    },
+    "AutoRechargeSettings": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/AutoRechargeDisabled"
+        },
+        {
+          "$ref": "#/$defs/AutoRechargeEnabled"
+        }
+      ],
+      "discriminator": {
+        "propertyName": "enabled",
+        "mapping": {}
+      }
+    },
+    "AutoRechargeDisabled": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "enum": [
+            false
+          ]
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "additionalProperties": false
+    },
+    "AutoRechargeEnabled": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "enum": [
+            true
+          ]
+        },
+        "threshold": {
+          "type": "string",
+          "pattern": "^(0|[1-9]\\d*)$"
+        },
+        "amountCents": {
+          "$ref": "#/$defs/TopUpAmountCents"
+        },
+        "paymentMethod": {
+          "$ref": "#/$defs/PaymentMethodId"
+        }
+      },
+      "required": [
+        "enabled",
+        "threshold",
+        "amountCents"
+      ],
+      "additionalProperties": false
+    },
+    "AutoRechargeInput": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/AutoRechargeDisabled"
+        },
+        {
+          "$ref": "#/$defs/AutoRechargeEnabledInput"
+        }
+      ],
+      "discriminator": {
+        "propertyName": "enabled",
+        "mapping": {}
+      }
+    },
+    "AutoRechargeEnabledInput": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "enum": [
+            true
+          ]
+        },
+        "threshold": {
+          "type": "string",
+          "pattern": "^(0|[1-9]\\d*)$"
+        },
+        "amountCents": {
+          "$ref": "#/$defs/TopUpAmountCents"
+        },
+        "paymentMethod": {
+          "$ref": "#/$defs/PaymentMethodId"
+        }
+      },
+      "required": [
+        "enabled",
+        "amountCents"
+      ],
+      "additionalProperties": false
+    },
+    "FaucetCredit": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "$ref": "#/$defs/AccountId"
+        },
+        "amountCents": {
+          "$ref": "#/$defs/FaucetAmountCents"
+        },
+        "ledger": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "account",
+        "amountCents",
+        "ledger"
+      ],
+      "additionalProperties": false
+    },
+    "FaucetAmountCents": {
+      "type": "string",
+      "maxLength": 16,
+      "pattern": "^[1-9][0-9]*$"
+    },
+    "FaucetRequest": {
+      "type": "object",
+      "properties": {
+        "amountCents": {
+          "$ref": "#/$defs/FaucetAmountCents"
+        }
+      },
+      "required": [
+        "amountCents"
+      ],
+      "additionalProperties": false
     }
   }
 }

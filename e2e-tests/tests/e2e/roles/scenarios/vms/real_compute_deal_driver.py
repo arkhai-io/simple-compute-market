@@ -115,11 +115,14 @@ def target_connection(target: RealVmTarget) -> ConnectionSubmission:
     """The connection the provisioning service reaches the target's host by.
 
     The key is named by where the service reads it; the target never carries
-    key material.
+    key material. The service accepts an `ssh` connection only at version 2. A
+    guest is reached at its own forwarded or relayed port, never the host's
+    tenant-facing port, so none is stated.
     """
     host = target.host
     return ConnectionSubmission(
         kind="ssh",
+        version=2,
         public={
             "ssh_host": host.ssh_host,
             "ssh_port": host.ssh_port,
@@ -140,9 +143,9 @@ def assert_registered_as_target(registered: Any, target: RealVmTarget) -> None:
     assert registered.pool_id == REAL_POOL_ID, (
         f"host {registered.host_id!r} is in pool {registered.pool_id!r}, not {REAL_POOL_ID!r}"
     )
-    assert connection.kind == wanted.kind and stated == wanted.public, (
-        f"host {registered.host_id!r} is registered with {connection.kind!r} "
-        f"connection {stated!r}, not the target's {wanted.public!r}"
+    assert (connection.kind, connection.version) == (wanted.kind, wanted.version) and stated == wanted.public, (
+        f"host {registered.host_id!r} is registered with {connection.kind!r} version "
+        f"{connection.version!r} connection {stated!r}, not the target's {wanted.public!r}"
     )
 
 

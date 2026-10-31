@@ -114,7 +114,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-apicredits-buyer"
-version = "0.7.0"
+version = "0.8.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "alkahest-py" },
@@ -132,12 +132,12 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_apicredits_buyer-0.7.0-py3-none-any.whl" },
+    { path = "arkhai_apicredits_buyer-0.8.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-apicredits-domain"
-version = "0.8.0"
+version = "0.9.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -150,12 +150,12 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_apicredits_domain-0.8.0-py3-none-any.whl" },
+    { path = "arkhai_apicredits_domain-0.9.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-apicredits-storefront"
-version = "0.17.0"
+version = "0.18.0"
 source = { editable = "." }
 dependencies = [
     { name = "alkahest-py" },
@@ -201,7 +201,7 @@ requires-dist = [
     { name = "arkhai-core-storefront", specifier = ">=0.17.0" },
     { name = "arkhai-core-storefront-client", specifier = ">=0.27.0" },
     { name = "arkhai-kit-alkahest", specifier = ">=0.11.0" },
-    { name = "arkhai-kit-arkhai-payments", specifier = ">=0.3.0" },
+    { name = "arkhai-kit-arkhai-payments", specifier = ">=0.4.0" },
     { name = "arkhai-kit-capacity-publication", specifier = "==0.11.0" },
     { name = "arkhai-kit-config", specifier = ">=0.5.0" },
     { name = "arkhai-kit-identity", specifier = "==0.4.0" },
@@ -318,7 +318,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-arkhai-payments"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -329,7 +329,7 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_kit_arkhai_payments-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_kit_arkhai_payments-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]

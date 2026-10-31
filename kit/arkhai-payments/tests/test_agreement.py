@@ -60,7 +60,7 @@ def test_accepted_data_survives_later_policy_changes():
 def test_extra_reverse_authorities_are_refused():
     stored = PaymentSettlementData.for_agreement(agreement(), config())
     wire = stored.to_wire()
-    wire["mandate"]["authorities"]["reverse"].append(OTHER)
+    wire["mandate"]["parts"][0]["authorities"]["reverse"].append(OTHER)
     from market_arkhai_payments import transaction_id
 
     tampered = PaymentSettlementData.parse(

@@ -37,6 +37,11 @@ from shell_harness import (
 
 ROOT = Path(__file__).resolve().parents[1]
 VM_CREATE = ROOT / "ansible/roles/vm-management/tasks/vm-create.yml"
+# The functions the script includes ahead of this block, as the role includes
+# them into it.
+LIBRARY = (ROOT / "ansible/roles/vm-management/files/guest_teardown.sh").read_text(
+    encoding="utf-8"
+)
 
 # The relay-teardown block inside the generated cleanup script. Anchored on
 # the log line that opens it and the one that opens the next section, so a
@@ -80,9 +85,9 @@ class CleanupScriptRelayTeardownTests(unittest.TestCase):
     def test_the_block_parses(self) -> None:
         """A cheap first pass. The behavioural checks below are the real ones:
         a command that does not exist parses fine."""
-        assert_bash_syntax_valid(_PRELUDE + self.block)
+        assert_bash_syntax_valid(_PRELUDE + LIBRARY + self.block)
 
-    def _run(self, *, config_exists: bool, reload_ok: bool = True):
+    def _run(self, *, config_exists: bool, reload_ok: bool = True, neighbour: bool = False):
         curl = (
             "#!/bin/bash\necho \"CURL $@\" >> \"$RECORD\"\nexit 0\n"
             if reload_ok
@@ -111,6 +116,13 @@ class CleanupScriptRelayTeardownTests(unittest.TestCase):
                 "[[proxies]]\nname = \"vm-agent-vm-01\"\nremotePort = 6142\n"
                 "# END ANSIBLE MANAGED BLOCK FOR VM agent-vm-01\n"
             )
+            if neighbour:
+                # Another guest, whose name begins with this guest's.
+                stanza += (
+                    "# BEGIN ANSIBLE MANAGED BLOCK FOR VM agent-vm-012\n"
+                    "[[proxies]]\nname = \"vm-agent-vm-012\"\nremotePort = 6143\n"
+                    "# END ANSIBLE MANAGED BLOCK FOR VM agent-vm-012\n"
+                )
             if config_exists:
                 Path(vms_conf).write_text(stanza, encoding="utf-8")
             # The management tunnel's file always exists, and must be untouched.
@@ -118,6 +130,7 @@ class CleanupScriptRelayTeardownTests(unittest.TestCase):
 
             script = (
                 _PRELUDE
+                + LIBRARY
                 + f'RECORD="{record}"\nexport RECORD\n'
                 + self.block.replace("/etc/frp/", f"{etc}/")
             )
@@ -136,6 +149,18 @@ class CleanupScriptRelayTeardownTests(unittest.TestCase):
         # managed block is this script's business.
         self.assertIn('serverAddr = "203.0.113.9"', remaining)
 
+    def test_a_guest_whose_name_begins_with_this_ones_keeps_its_block(self) -> None:
+        """Each block is matched by its exact BEGIN and END lines. A pattern
+        this guest's name satisfies also matches every name it begins."""
+        result, _, vms_conf, _ = self._run(config_exists=True, neighbour=True)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        remaining = Path(vms_conf).read_text(encoding="utf-8")
+        self.assertNotIn('name = "vm-agent-vm-01"\n', remaining)
+        self.assertIn('name = "vm-agent-vm-012"', remaining)
+        self.assertIn("# BEGIN ANSIBLE MANAGED BLOCK FOR VM agent-vm-012\n", remaining)
+        self.assertIn("# END ANSIBLE MANAGED BLOCK FOR VM agent-vm-012\n", remaining)
+
     def test_the_management_tunnel_configuration_is_untouched(self) -> None:
         """The property that matters most, and the one YAML cannot show."""
         _, calls, _, mgmt_conf = self._run(config_exists=True)
@@ -149,10 +174,14 @@ class CleanupScriptRelayTeardownTests(unittest.TestCase):
         self.assertIn("/api/reload", calls)
         self.assertNotIn("SYSTEMCTL", calls)
 
-    def test_a_failed_reload_is_reported_rather_than_ignored(self) -> None:
+    def test_a_failed_reload_fails_the_cleanup(self) -> None:
+        """The running client may still hold the proxy and its relay port, so
+        the teardown fails and its capacity stays held for a retry."""
         result, _, _, _ = self._run(config_exists=True, reload_ok=False)
 
-        self.assertIn("STEP|remove_relay_proxy|partial", result.stdout)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("STEP|remove_relay_proxy|failed", result.stdout)
+        self.assertNotIn("STEP|remove_relay_proxy|success", result.stdout)
 
     def test_an_absent_configuration_is_skipped_not_failed(self) -> None:
         """A direct-NAT host has no VM tunnel client. Cleanup must not fail

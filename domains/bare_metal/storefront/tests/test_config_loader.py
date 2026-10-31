@@ -21,6 +21,7 @@ from arkhai_bare_metal_storefront.settlement_composition import (
 )
 from storefront_configuration import (
     ADMIN,
+    REGISTRY_URL,
     SELLER,
     SELLER_CREDENTIAL,
     publishable_configuration,
@@ -123,6 +124,72 @@ def test_the_secret_overlay_wins_on_a_conflicting_key(monkeypatch, tmp_path):
     assert settings.wallet.private_key == WALLET_KEY
     # The key is a secret: it is never part of the settings' representation.
     assert WALLET_KEY not in repr(settings)
+
+
+#: Development-only registry token; it authorizes nothing anywhere.
+REGISTRY_TOKEN = "dev-only-registry-token-not-a-secret"
+
+
+def test_a_registry_token_is_read_from_the_secret_overlay_by_its_normalized_url(
+    monkeypatch, tmp_path
+):
+    write_configuration(
+        monkeypatch,
+        tmp_path,
+        publishable_configuration(tmp_path / "storefront.db"),
+        secrets=f'[registry.auth]\n"HTTP://Registry.Test:8080/" = "{REGISTRY_TOKEN}"\n',
+    )
+
+    settings = load_storefront_settings()
+
+    assert settings.registry_auth() == {REGISTRY_URL: REGISTRY_TOKEN}
+    # The overlay adds the token and keeps the public pins it does not state.
+    assert list(settings.registry_authorities()) == [REGISTRY_URL]
+    assert REGISTRY_TOKEN not in repr(settings)
+
+
+@pytest.mark.parametrize(
+    ("auth", "expected"),
+    [
+        pytest.param({}, {}, id="no token"),
+        pytest.param({REGISTRY_URL: ""}, {}, id="an empty token is none"),
+    ],
+)
+def test_a_registry_without_a_token_has_none(monkeypatch, tmp_path, auth, expected):
+    document = publishable_configuration(tmp_path / "storefront.db")
+    document["registry"]["auth"] = auth
+    write_configuration(monkeypatch, tmp_path, document)
+
+    assert load_storefront_settings().registry_auth() == expected
+
+
+@pytest.mark.parametrize(
+    ("auth", "named"),
+    [
+        pytest.param(
+            {"http://elsewhere.test:8080": REGISTRY_TOKEN},
+            "'http://elsewhere.test:8080', which is not one of",
+            id="no such registry",
+        ),
+        pytest.param(
+            {REGISTRY_URL: REGISTRY_TOKEN, REGISTRY_URL + "/": REGISTRY_TOKEN},
+            "names 'http://registry.test:8080' twice",
+            id="one registry twice",
+        ),
+    ],
+)
+def test_a_registry_token_is_refused_by_its_url_never_its_value(
+    monkeypatch, tmp_path, auth, named
+):
+    document = publishable_configuration(tmp_path / "storefront.db")
+    document["registry"]["auth"] = auth
+    write_configuration(monkeypatch, tmp_path, document)
+
+    with pytest.raises(BareMetalConfigurationError) as refused:
+        load_storefront_settings().registry_auth()
+
+    assert named in str(refused.value)
+    assert REGISTRY_TOKEN not in str(refused.value)
 
 
 def test_the_environment_override_layer_applies_over_every_file(monkeypatch, tmp_path):

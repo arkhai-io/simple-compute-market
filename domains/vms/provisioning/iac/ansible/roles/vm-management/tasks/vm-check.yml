@@ -27,8 +27,8 @@
     # driver and cannot be attached to a VM, so counting it would publish
     # capacity that no create job can satisfy.
     #
-    # Only .0 functions are counted, matching the allocation logic below: a
-    # card's audio and USB functions are bound alongside it but are not
+    # Only .0 functions are counted, matching the allocation logic below: the
+    # audio and USB functions of a card are bound alongside it but are not
     # separately allocatable.
     SYSFS="${SYSFS_ROOT:-/sys}"
     GPU_COUNT=0

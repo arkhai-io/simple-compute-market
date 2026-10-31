@@ -41,7 +41,7 @@ async def test_a_probe_pings_the_registered_host_and_leaves_nothing_behind():
         pool_id="default",
         connection=ConnectionEnvelope(
             kind="ssh",
-            version=1,
+            version=2,
             public={"ssh_host": "10.0.0.1", "ssh_port": 22, "ssh_user": "ops", "key_path": None},
             protected={"private_key": ProtectedValue("fernet-v1", encrypt_secret("PEM", key))},
         ),

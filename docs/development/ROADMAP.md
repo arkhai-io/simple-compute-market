@@ -66,7 +66,7 @@ service and the storefronts calling it upgrade together.
 | Host inventory seeds the host registry only when it is empty and is never reconciled against its file, so editing a running deployment's inventory changes nothing | [`bring-host-inventory-under-definition-documents`](../../openspec/changes/bring-host-inventory-under-definition-documents/) |
 | One SSH key reaches every host in an environment, so a host prepared by another party cannot be registered with its own credential | [`contain-embedded-host-key-material`](../../openspec/changes/contain-embedded-host-key-material/) |
 | An embedded host credential crosses the operator-to-provisioning hop in plaintext, protected only by the authenticated transport, and `fernet-v1` is one service-held symmetric key. Sealed submission to the service's public key, references to a secret authority, or managed envelope encryption each need only a new protected-value scheme and its codec | Unowned — needs a new change; background in [`bare-metal-mock-provisioned-deal`](../../openspec/changes/archive/2026-10-09-bare-metal-mock-provisioned-deal/) |
-| The real runner reports no structured terminal-failure evidence, so the transport, codec, and operator failure patterns classify only mocked failures | Unowned — needs a new change |
+| The real runner reports no structured terminal-failure evidence, so the transport, codec, and operator failure patterns classify only mocked failures. A successful result is read in either callback form and linked to its job; a failure is still not classified | Unowned — needs a new change |
 | VM guests attach to libvirt's `default` NAT network, one bridge per host with no isolation rule, so guests on one host, including different buyers', share a layer-2 segment | Unowned — needs a new change, with VM's provisioning owner |
 | Site admission and scheduling never read a host record's enabled flag, so a create can be admitted and placed on a disabled host and its dispatch retries until an operator re-enables it | Unowned — needs a new change |
 | No end-to-end lane runs a relay-backed pool, which is why a relay-backed VM's wrong delivered address went unnoticed. The real-provisioning scenario takes the access mode as a parameter, so a relay-backed run is additive | Unowned — needs a new change, beside [`relay-vm-access-without-a-dashboard`](../../openspec/changes/relay-vm-access-without-a-dashboard/) |
@@ -336,6 +336,23 @@ verification tasks; it does not restore legacy identity precedence.
 Local focused suites exercise Agreement retention, mandate validation, signed receipts, retryable pending, and idempotent physical/grant progress. The controlled VM smoke reaches pending → provisioning → ready with one delivery; it is not live-ledger or hardware acceptance. Bare-metal and API-credit package tests likewise do not establish external payments or delivery qualification.
 
 A qualified payment run needs the intended owned payments target, owner-scoped credentials, observed readiness, and the actual domain delivery authority. VM delivery, API-key use and top-up, and bare-metal authenticated access, revocation, teardown, and capacity release remain separate outcomes. Unavailable service or hardware prerequisites remain named evidence gaps, not permission to claim a simulated result.
+
+Two compute purchases have been qualified that way, each on its own host in test mode, through the buyer commands as they ship: a whole bare-metal GPU machine, and a GPU guest on an x86-64 host. Each was:
+- bought, recovered from its run log, and reached over SSH with a pinned host key;
+- checked by a bounded computation on the GPU, with no CPU fallback;
+- released normally, the guest at its natural lease expiry with no operator retry;
+- refused after teardown;
+- returned to its full capacity, with its test payment reconciled.
+
+Funds a contract holds after release are recorded as held, not as a refund. Pipeline lanes do not replace this evidence: none configures a payments target or runs a real host.
+
+What this qualification leaves open:
+- A teardown job that exhausts its retries is not re-run: the lease waits for an operator to verify the host and force-release it.
+- Where two live lanes share a machine, they run in sequence, each pausing the other's listings. That relies on a precondition no permanent requirement states: a refresh or reopen under the same identity keeps a listing's pause. Its limits are untested:
+  - successor listings are created unpaused;
+  - no test closes a paused listing by reconciliation and reopens it;
+  - bare metal has no test of a paused listing refusing an opening.
+- Current-wire producer vectors were not supplied with the payments schema snapshot. The payments kit keeps the previous publication's vectors for canonical framing alone, and pins the current wire with an explicit synthetic fixture that is not producer provenance.
 
 ---
 

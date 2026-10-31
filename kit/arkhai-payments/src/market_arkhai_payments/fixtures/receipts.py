@@ -8,6 +8,7 @@ from typing import Any
 
 from market_identity import Signer
 
+from market_arkhai_payments.canonical import wire_json
 from market_arkhai_payments.models import Mandate, SignedReceipt
 from market_arkhai_payments.receipts import receipt_message, transaction_id
 
@@ -30,7 +31,7 @@ def sign_receipt(signer: Signer, receipt: Mapping[str, Any]) -> SignedReceipt:
 def receipt_parts(mandate: Mandate | Mapping[str, Any]) -> list[dict[str, Any]]:
     """Return receipt parts for a mandate with the fee rounded down per part."""
 
-    wire = Mandate.model_validate(mandate).model_dump(mode="json", by_alias=True, exclude_none=True)
+    wire = wire_json(Mandate.model_validate(mandate))
     bps = int(wire["fee"]["bps"])
     parts = []
     for part in wire["parts"]:
@@ -59,7 +60,7 @@ def build_signed_receipt(
     """A receipt for exactly this mandate, as the payments service would sign it."""
 
     parsed = Mandate.model_validate(mandate)
-    wire = parsed.model_dump(mode="json", by_alias=True, exclude_none=True)
+    wire = wire_json(parsed)
     return sign_receipt(
         signer,
         {

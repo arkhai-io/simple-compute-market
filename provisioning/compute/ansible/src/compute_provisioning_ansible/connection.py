@@ -6,8 +6,15 @@ a file on the provisioning service's own filesystem and not secret, or
 ``private_key``, key material submitted with the connection, which this codec
 protects with the service's Fernet key (scheme ``fernet-v1``) before anything is
 stored, and decrypts only to materialize the connection for one execution.
-``public_host`` is the address tenants use to reach what the host delivers when
-they reach it on a different network than the provisioner does.
+``public_host`` and ``public_port`` are the address and port tenants use to reach
+what the host delivers when they reach it on a different route than the
+provisioner does; each, when absent, is the connection's own.
+
+The kind is served at version 2 alone, the version that carries
+``public_port``. A connection at any other version, submitted or stored, is
+refused rather than read under version 2's fields: version 1 has no
+``public_port``, and a host stored at version 1 runs again once it is
+re-registered at version 2, which keeps its protected key.
 
 The codec is SSH's, not Ansible's: an executor consumes the materialized
 connection and holds no cryptography of its own.
@@ -24,7 +31,7 @@ from market_config import decrypt_secret, encrypt_secret
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 SSH_CONNECTION_KIND = "ssh"
-SSH_CONNECTION_VERSION = 1
+SSH_CONNECTION_VERSION = 2
 FERNET_SCHEME = "fernet-v1"
 PRIVATE_KEY = "private_key"
 
@@ -34,11 +41,27 @@ class SshConnection(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    #: The address the provisioner connects to. Required; nothing falls back.
     ssh_host: str = Field(min_length=1)
+    #: The address tenants reach the host on; absent, it is ``ssh_host``.
     public_host: str | None = None
+    #: The port the provisioner connects to; absent, 22.
     ssh_port: int = Field(default=22, ge=1, le=65535)
+    #: The port tenants reach the host on; absent, it is ``ssh_port``.
+    public_port: int | None = Field(default=None, ge=1, le=65535)
+    #: The account the provisioner connects as; absent, ``root``.
     ssh_user: str = Field(default="root", min_length=1)
+    #: The key file on the service's filesystem; absent, the connection's
+    #: protected ``private_key`` names the key instead.
     key_path: str | None = None
+
+    def public_fields(self) -> dict[str, Any]:
+        """The fields an envelope stores; a connection stating no
+        ``public_port`` is stored without the key, never with a null."""
+        fields = self.model_dump()
+        if fields["public_port"] is None:
+            del fields["public_port"]
+        return fields
 
     @field_validator("ssh_host", "ssh_user")
     @classmethod
@@ -88,6 +111,10 @@ class SshConnectionCodec:
                 ciphertext=encrypt_secret(material, self._encryption_key),
             )
         elif connection.key_path is None and previous is not None:
+            # The previous connection may be stored at a version this codec no
+            # longer serves: its protected key is carried as the opaque value it
+            # is, never read or decrypted, which is what lets an older host be
+            # re-registered at this version without resubmitting its key.
             kept = previous.protected.get(PRIVATE_KEY)
             if kept is not None:
                 protected[PRIVATE_KEY] = kept
@@ -95,7 +122,7 @@ class SshConnectionCodec:
             ConnectionEnvelope(
                 kind=self.kind,
                 version=self.version,
-                public=connection.model_dump(),
+                public=connection.public_fields(),
                 protected=protected,
             )
         )
@@ -124,7 +151,7 @@ class SshConnectionCodec:
         return ConnectionEnvelope(
             kind=self.kind,
             version=self.version,
-            public=connection.model_dump(),
+            public=connection.public_fields(),
             protected=dict(envelope.protected),
         )
 
@@ -139,8 +166,19 @@ class SshConnectionCodec:
 
     @staticmethod
     def parse(envelope: ConnectionEnvelope) -> SshConnection:
-        """The typed public fields an executor reads from a validated envelope."""
-        return SshConnection.model_validate(dict(envelope.public))
+        """The typed public fields an executor reads from a stored envelope.
+
+        The kind and version are checked before any field, so a host stored at
+        another version is refused before any playbook runs rather than read
+        under this version's fields.
+        """
+        if envelope.kind != SSH_CONNECTION_KIND or envelope.version != SSH_CONNECTION_VERSION:
+            raise ValueError(
+                f"not an ssh connection at version {SSH_CONNECTION_VERSION}: "
+                f"{envelope.kind!r} at {envelope.version}; re-register the host "
+                f"at version {SSH_CONNECTION_VERSION}"
+            )
+        return SshConnectionCodec._public(envelope.public)
 
     @staticmethod
     def _public(public: Mapping[str, Any]) -> SshConnection:
@@ -156,10 +194,11 @@ def ssh_connection(
     ssh_user: str = "root",
     ssh_port: int = 22,
     public_host: str | None = None,
+    public_port: int | None = None,
     key_path: str | None = None,
     private_key: str | None = None,
 ) -> ConnectionSubmission:
-    """An ``ssh`` connection as an operator submits it.
+    """An ``ssh`` connection as an operator submits it, at the version served.
 
     Raises ``ValueError`` for a malformed public field, so a typed caller cannot
     send one.
@@ -169,8 +208,9 @@ def ssh_connection(
         ssh_user=ssh_user,
         ssh_port=ssh_port,
         public_host=public_host,
+        public_port=public_port,
         key_path=key_path,
-    ).model_dump()
+    ).public_fields()
     secrets = {PRIVATE_KEY: private_key} if private_key is not None else {}
     return ConnectionSubmission(
         kind=SSH_CONNECTION_KIND,

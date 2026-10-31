@@ -153,7 +153,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal-buyer"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-bare-metal" },
@@ -181,7 +181,7 @@ requires-dist = [
     { name = "arkhai-core-buyer", specifier = "==0.6.0" },
     { name = "arkhai-core-registry-client", specifier = "==0.12.3" },
     { name = "arkhai-kit-alkahest", specifier = ">=0.9.0" },
-    { name = "arkhai-kit-arkhai-payments", specifier = "==0.3.0" },
+    { name = "arkhai-kit-arkhai-payments", specifier = "==0.4.0" },
     { name = "arkhai-kit-contact-exchange", specifier = "==0.4.0" },
     { name = "arkhai-kit-identity", specifier = "==0.4.0" },
     { name = "arkhai-kit-settlement-runtime", specifier = "==0.6.0" },
@@ -263,7 +263,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-arkhai-payments"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -274,7 +274,7 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_kit_arkhai_payments-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_kit_arkhai_payments-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]

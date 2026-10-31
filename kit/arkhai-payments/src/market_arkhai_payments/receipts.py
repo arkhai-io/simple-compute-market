@@ -18,7 +18,7 @@ from market_identity import (
 )
 from pydantic import BaseModel, ValidationError
 
-from market_arkhai_payments.canonical import agreement_hash, jcs_sha256
+from market_arkhai_payments.canonical import agreement_hash, jcs_sha256, wire_json
 from market_arkhai_payments.models import Mandate, SignedReceipt
 
 RECEIPT_PROTOCOL = "arkhai.payments.receipt.v1"
@@ -35,7 +35,7 @@ def receipt_message(receipt: Mapping[str, Any] | BaseModel) -> bytes:
     """Return the exact bytes the payments service signs for one receipt."""
 
     receipt_json = (
-        receipt.model_dump(mode="json", by_alias=True, exclude_none=True)
+        wire_json(receipt)
         if isinstance(receipt, BaseModel)
         else dict(receipt)
     )
@@ -63,7 +63,7 @@ def verify_receipt_signature(
             return False
         message = receipt_message(signed.receipt)
         proof = MarketplaceSignatureProof.model_validate(
-            signed.proof.model_dump(mode="json", by_alias=True, exclude_none=True)
+            wire_json(signed.proof)
         )
         verifier = get_identity_verifier(trusted.scheme)
         return verifier.verify_signature(trusted, message, proof.to_bytes())
@@ -94,15 +94,13 @@ def verify_receipt(
         return False
 
     receipt = signed.receipt
-    mandate_values = expected_mandate.model_dump(
-        mode="json", by_alias=True, exclude_none=True
-    )
+    mandate_values = wire_json(expected_mandate)
     return (
         verify_receipt_signature(signed, trusted_service_identity)
         and receipt.livemode is livemode
         and receipt.transaction.root == expected_transaction
-        and receipt.deal.root.root == expected_deal
-        and receipt.deal.root.root == mandate_values["deal"]
+        and receipt.deal.root == expected_deal
+        and receipt.deal.root == mandate_values["deal"]
         and receipt.from_.root == mandate_values["from"]
         and receipt.to.root == mandate_values["to"]
     )

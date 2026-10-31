@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from core_storefront.multi_registry_client import (
@@ -25,6 +25,7 @@ from market_capacity_publication import (
     PublicationCandidate,
     PublicationRuntime,
 )
+from market_config.registry_url import lookup_registry_auth
 from market_identity import Signer
 from registry_client import (
     ListingRequest,
@@ -105,9 +106,14 @@ class BareMetalRegistryConfiguration:
 
     ``authorities`` maps each configured registry URL, normalized and in
     configured order, to the authority and principals its responses must carry.
+    ``auth`` maps a URL to the bearer token that registry requires, sent beside
+    the signature; a registry without one gets no ``Authorization`` header.
+    Publication and status both look a token up by normalized URL, so they agree
+    however its key is spelled. Tokens are kept out of the repr.
     """
 
     authorities: Mapping[str, RegistryAuthorityTrust]
+    auth: Mapping[str, str] = field(default_factory=dict, repr=False)
 
     @property
     def urls(self) -> tuple[str, ...]:
@@ -122,6 +128,7 @@ class BareMetalRegistryConfiguration:
                 signer=signer,
                 caller_role="seller",
                 expected_registries=dict(self.authorities),
+                auth=dict(self.auth),
             )
 
         return factory
@@ -150,6 +157,7 @@ class BareMetalRegistryConfiguration:
                     registry_authority=trust.authority,
                     timeout=timeout,
                     transport=transport,
+                    api_key=lookup_registry_auth(self.auth, url),
                 ) as client:
                     await client.get_health()
             except RegistryClientError as exc:

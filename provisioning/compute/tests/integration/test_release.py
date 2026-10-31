@@ -3,16 +3,31 @@
 The site ledger, the job rows, and the fulfillment aggregate share one
 database, as they do in the provisioning service, so the release guard reads
 all three inside the ledger's own transaction. A fake teardown port stands in
-for the fulfillment service's teardown entry point.
+for the fulfillment service's teardown entry point in the executor's tests; the
+teardown port's own tests drive the real fulfillment orchestrator, with only
+the provider faked.
 """
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
-from market_fulfillment import SettlementEntityNotFoundError, SettlementRecordState
+from market_core import VersionedEnvelope
+from market_fulfillment import (
+    CREATE_COMPENSATION,
+    FulfillmentConflictError,
+    FulfillmentOrchestrator,
+    ProviderConfigInvalidError,
+    ProviderRegistry,
+    SettlementEntityNotFoundError,
+    SettlementRecordState,
+    SqlAlchemyFulfillmentUnitOfWork,
+)
 from market_fulfillment.db import Base as FulfillmentBase
 from market_fulfillment.db import SettlementRecord
 from market_fulfillment.settlement_repository import SettlementRepository
+from market_resource_pools import ResourcePoolService
 from market_resource_pools.db import DEFAULT_POOL_ID, ResourcePool
 from market_resource_pools.db import Base as PoolsBase
 from market_site.db import Base as SiteBase
@@ -28,11 +43,26 @@ from compute_provisioning.release import (
     FulfillmentReleaseExecutor,
     FulfillmentReleaseGuard,
     FulfillmentReleaseStatusPort,
+    FulfillmentServiceTeardownPort,
     ReleaseAction,
     ReleaseProgress,
+    TeardownRefused,
 )
 
 _State = SettlementRecordState
+
+# A job-backed create's metadata, as its dispatch acknowledgement records it.
+# Synthetic development values.
+_CREATE_METADATA = {
+    "create_job_id": "job-1",
+    "current_job_id": "job-1",
+    "operation": "create",
+    "host_id": "host-1",
+    "executor_target": "target-1",
+}
+_TEARDOWN = VersionedEnvelope(
+    kind="test.teardown", schema_version=1, payload={"undo": "job-1"}
+)
 
 
 class _TeardownPort:
@@ -97,19 +127,43 @@ def _leased(ledger) -> str:
     return reservation_id
 
 
-def _aggregate(factory, reservation_id: str, state: str, *, fulfillment_id: str | None = "f-1"):
+def _aggregate(
+    factory,
+    reservation_id: str,
+    state: str,
+    *,
+    fulfillment_id: str | None = "f-1",
+    failure_reason: str | None = None,
+    provider_metadata: dict | None = None,
+):
     with factory() as db, db.begin():
         db.add(
             SettlementRecord(
                 capacity_reservation_id=reservation_id,
                 fulfillment_id=fulfillment_id,
                 market="vms",
-                scheduling_requirements={},
-                provider_metadata={},
+                scheduling_requirements={"offering_mode": "vm", "resource_kind": "vm"},
+                settlement_resource_id="r1",
+                pool_id=DEFAULT_POOL_ID,
+                provider="test",
+                resource_host_id="host-1",
+                provider_metadata=provider_metadata or {},
                 state=state,
+                failure_reason=failure_reason,
                 failure_message="create failed" if state == _State.failed.value else None,
             )
         )
+
+
+def _compensable_failed(factory, reservation_id: str, **fields):
+    _aggregate(
+        factory,
+        reservation_id,
+        _State.failed.value,
+        failure_reason="provider_reported_failure",
+        provider_metadata=_CREATE_METADATA,
+        **fields,
+    )
 
 
 def _job_for(factory, reservation_id: str) -> None:
@@ -338,6 +392,7 @@ def test_a_dispatch_that_wins_the_race_with_the_guard_keeps_the_capacity(tmp_pat
         (_State.tearing_down, ReleaseAction.TEARDOWN),
         (_State.teardown_failed, ReleaseAction.TEARDOWN),
         (_State.failed, ReleaseAction.UNRELEASABLE),
+        ("compensable", ReleaseAction.TEARDOWN),
     ],
 )
 async def test_the_release_decision_follows_the_aggregate_state_and_writes_nothing(
@@ -345,7 +400,9 @@ async def test_the_release_decision_follows_the_aggregate_state_and_writes_nothi
 ):
     factory, ledger, executor, port = world
     reservation_id = _leased(ledger)
-    if state is not None:
+    if state == "compensable":
+        _compensable_failed(factory, reservation_id)
+    elif state is not None:
         assigned = state is _State.assigned
         _aggregate(factory, reservation_id, state.value, fulfillment_id=None if assigned else "f-1")
 
@@ -366,32 +423,264 @@ async def test_the_release_decision_follows_the_aggregate_state_and_writes_nothi
 # ----------------------------------------------------------------------
 
 
+def _status_port(factory):
+    return FulfillmentReleaseStatusPort(
+        settlement_repository=SettlementRepository(), session_factory=factory
+    )
+
+
 @pytest.mark.parametrize(
-    ("state", "progress"),
+    ("state", "progress", "reason"),
     [
-        (_State.torn_down, ReleaseProgress.TORN_DOWN),
-        (_State.teardown_failed, ReleaseProgress.FAILED),
-        (_State.failed, ReleaseProgress.FAILED),
-        (_State.active, ReleaseProgress.READY_FOR_TEARDOWN),
-        (_State.dispatch_pending, ReleaseProgress.CREATE_IN_FLIGHT),
-        (_State.dispatching, ReleaseProgress.CREATE_IN_FLIGHT),
-        (_State.tearing_down, ReleaseProgress.TEARING_DOWN),
-        (_State.teardown_dispatch_pending, ReleaseProgress.TEARING_DOWN),
+        (_State.torn_down, ReleaseProgress.TORN_DOWN, None),
+        (_State.teardown_failed, ReleaseProgress.FAILED, "teardown_failed"),
+        (_State.teardown_dispatch_pending, ReleaseProgress.TEARING_DOWN, None),
+        (_State.tearing_down, ReleaseProgress.TEARING_DOWN, None),
+        (_State.active, ReleaseProgress.READY_FOR_TEARDOWN, None),
+        (_State.dispatch_pending, ReleaseProgress.CREATE_IN_FLIGHT, None),
+        (_State.dispatching, ReleaseProgress.CREATE_IN_FLIGHT, None),
+        ("compensable", ReleaseProgress.READY_FOR_TEARDOWN, None),
+        (_State.failed, ReleaseProgress.FAILED, "fulfillment_failed"),
+        (_State.assigned, ReleaseProgress.TEARING_DOWN, None),
+        (_State.abandoned, ReleaseProgress.TEARING_DOWN, None),
     ],
 )
-def test_release_progress_is_read_from_the_aggregate(world, state, progress):
-    factory, ledger, _, port = world
+def test_release_progress_is_read_from_the_aggregate(world, state, progress, reason):
+    factory, ledger, _, _ = world
     reservation_id = _leased(ledger)
-    _aggregate(factory, reservation_id, state.value)
+    if state == "compensable":
+        _compensable_failed(factory, reservation_id)
+    else:
+        _aggregate(factory, reservation_id, state.value)
 
-    status = FulfillmentReleaseStatusPort(port).get_status("f-1")
+    status = _status_port(factory).get_status("f-1")
 
-    assert status.progress is progress
+    assert (status.progress, status.reason) == (progress, reason)
 
 
 def test_a_release_handle_naming_no_fulfillment_reads_as_failed(world):
-    _, _, _, port = world
+    factory, _, _, _ = world
 
-    status = FulfillmentReleaseStatusPort(port).get_status("missing")
+    status = _status_port(factory).get_status("missing")
 
     assert (status.progress, status.reason) == (ReleaseProgress.FAILED, "teardown_failed")
+
+
+# ----------------------------------------------------------------------
+# The teardown port: begins what the aggregate's state calls for when asked
+# ----------------------------------------------------------------------
+
+
+class _ProviderMock(MagicMock):
+    needs_host = True
+
+
+class _PoolHandler:
+    provider = "test"
+
+    def read_config(self, db, pool_id):
+        return {}
+
+    def read_config_for_execution(self, db, pool_id):
+        return {}
+
+
+def _orchestrator(factory, provider):
+    return FulfillmentOrchestrator(
+        provider_registry=ProviderRegistry({"test": provider}),
+        unit_of_work=SqlAlchemyFulfillmentUnitOfWork(
+            factory,
+            ResourcePoolService(factory, {"test": _PoolHandler()}),
+            repository=SettlementRepository(),
+        ),
+    )
+
+
+def _teardown_world(world, *, prepare_error: Exception | None = None):
+    factory, ledger, _, _ = world
+    provider = _ProviderMock()
+    provider.prepare_teardown.return_value = _TEARDOWN
+    provider.prepare_teardown.side_effect = prepare_error
+    service = _orchestrator(factory, provider)
+    return factory, ledger, provider, service
+
+
+def _record(factory, reservation_id: str) -> SettlementRecord:
+    with factory() as db:
+        record = SettlementRepository().get(db, reservation_id)
+        db.expunge(record)
+        return record
+
+
+@pytest.mark.asyncio
+async def test_the_teardown_port_begins_an_active_fulfillment_s_ordinary_teardown(world):
+    factory, ledger, provider, service = _teardown_world(world)
+    reservation_id = _leased(ledger)
+    _aggregate(factory, reservation_id, _State.active.value, provider_metadata=_CREATE_METADATA)
+
+    assert await FulfillmentServiceTeardownPort(lambda: service).begin_teardown("f-1") == "f-1"
+
+    record = _record(factory, reservation_id)
+    assert record.state == _State.teardown_dispatch_pending.value
+    assert record.failure_reason is None
+
+
+@pytest.mark.asyncio
+async def test_the_teardown_port_adopts_a_begun_teardown(world):
+    factory, ledger, provider, service = _teardown_world(world)
+    reservation_id = _leased(ledger)
+    _aggregate(factory, reservation_id, _State.tearing_down.value)
+
+    await FulfillmentServiceTeardownPort(lambda: service).begin_teardown("f-1")
+
+    assert _record(factory, reservation_id).state == _State.tearing_down.value
+    provider.prepare_teardown.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_the_teardown_port_compensates_a_compensable_failed_create(world):
+    factory, ledger, provider, service = _teardown_world(world)
+    reservation_id = _leased(ledger)
+    _compensable_failed(factory, reservation_id)
+    port = FulfillmentServiceTeardownPort(lambda: service)
+
+    await port.begin_teardown("f-1")
+    await port.begin_teardown("f-1")
+
+    record = _record(factory, reservation_id)
+    assert record.state == _State.teardown_dispatch_pending.value
+    assert record.failure_reason == CREATE_COMPENSATION
+    assert record.failure_message == "create failed"
+    assert record.prepared_teardown_operation == _TEARDOWN.model_dump(mode="json")
+    assert provider.prepare_teardown.call_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure_reason", "provider_metadata", "prepare_error"),
+    [
+        ("legacy_executor_identity_quarantined", _CREATE_METADATA, None),
+        ("provider_reported_failure", {}, None),
+        (
+            "provider_reported_failure",
+            _CREATE_METADATA,
+            ProviderConfigInvalidError("create job job-1 was not found"),
+        ),
+    ],
+    ids=["ineligible", "no-metadata", "unpreparable"],
+)
+async def test_the_teardown_port_refuses_a_compensation_that_cannot_begin(
+    world, failure_reason, provider_metadata, prepare_error
+):
+    factory, ledger, _, service = _teardown_world(world, prepare_error=prepare_error)
+    reservation_id = _leased(ledger)
+    _aggregate(
+        factory,
+        reservation_id,
+        _State.failed.value,
+        failure_reason=failure_reason,
+        provider_metadata=provider_metadata,
+    )
+
+    with pytest.raises(TeardownRefused) as refused:
+        await FulfillmentServiceTeardownPort(lambda: service).begin_teardown("f-1")
+
+    assert refused.value.reason == "compensation_refused"
+    record = _record(factory, reservation_id)
+    assert (record.state, record.failure_reason) == (_State.failed.value, failure_reason)
+    assert record.prepared_teardown_operation is None
+
+
+@pytest.mark.asyncio
+async def test_a_preparation_error_that_may_pass_is_not_a_refusal(world):
+    factory, ledger, _, service = _teardown_world(
+        world, prepare_error=ConnectionError("job store unreachable")
+    )
+    reservation_id = _leased(ledger)
+    _compensable_failed(factory, reservation_id)
+
+    with pytest.raises(ConnectionError):
+        await FulfillmentServiceTeardownPort(lambda: service).begin_teardown("f-1")
+
+    assert _record(factory, reservation_id).state == _State.failed.value
+
+
+class _MovesAfterRead:
+    """A fulfillment service whose aggregate another actor moves just after the
+    port reads its state, before the kit's write transaction."""
+
+    def __init__(self, service, move):
+        self._service = service
+        self._move = move
+
+    def get_fulfillment_status(self, fulfillment_id):
+        status = self._service.get_fulfillment_status(fulfillment_id)
+        self._move()
+        return status
+
+    def __getattr__(self, name):
+        return getattr(self._service, name)
+
+
+@pytest.mark.asyncio
+async def test_a_compensation_begun_by_another_release_after_the_read_is_adopted(world):
+    factory, ledger, provider, service = _teardown_world(world)
+    reservation_id = _leased(ledger)
+    _compensable_failed(factory, reservation_id)
+    uow = SqlAlchemyFulfillmentUnitOfWork(
+        factory,
+        ResourcePoolService(factory, {"test": _PoolHandler()}),
+        repository=SettlementRepository(),
+    )
+
+    def compensate_elsewhere():
+        with uow.transaction() as tx:
+            tx.get_by_fulfillment_id_for_write("f-1")
+            tx.begin_compensating_teardown("f-1", _TEARDOWN)
+
+    moving = _MovesAfterRead(service, compensate_elsewhere)
+
+    assert await FulfillmentServiceTeardownPort(lambda: moving).begin_teardown("f-1") == "f-1"
+
+    record = _record(factory, reservation_id)
+    assert (record.state, record.failure_reason) == (
+        _State.teardown_dispatch_pending.value,
+        CREATE_COMPENSATION,
+    )
+    provider.prepare_teardown.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_create_that_fails_after_the_read_is_left_for_the_next_cycle(world):
+    """The port read ``dispatching`` and asked for an ordinary teardown, which
+    refuses the ``failed`` row the create has since become: a conflict, not a
+    refusal, so the lease stays releasing and its next cycle compensates."""
+    factory, ledger, _, service = _teardown_world(world)
+    reservation_id = _leased(ledger)
+    _aggregate(
+        factory,
+        reservation_id,
+        _State.dispatching.value,
+        provider_metadata=_CREATE_METADATA,
+    )
+
+    def create_fails():
+        with factory() as db, db.begin():
+            SettlementRepository().transition(
+                db,
+                reservation_id,
+                _State.failed.value,
+                failure_reason="provider_reported_failure",
+                failure_message="create failed",
+            )
+
+    moving = _MovesAfterRead(service, create_fails)
+
+    with pytest.raises(FulfillmentConflictError) as raised:
+        await FulfillmentServiceTeardownPort(lambda: moving).begin_teardown("f-1")
+
+    assert not isinstance(raised.value, TeardownRefused)
+    assert _record(factory, reservation_id).state == _State.failed.value
+    assert _status_port(factory).get_status("f-1").progress is (
+        ReleaseProgress.READY_FOR_TEARDOWN
+    )

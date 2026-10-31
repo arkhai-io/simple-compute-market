@@ -501,7 +501,7 @@ class VmPaymentsSellerStage:
         facts["payload"]["receipt_identity"] = {
             "transaction_id": data.transaction_id,
             "approved_at": receipt.receipt.approvedAt,
-            "deal": receipt.receipt.deal.root.root,
+            "deal": wire["receipt"]["deal"],
         }
         return vm_evidence(
             raw=raw,

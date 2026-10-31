@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import time
 import uuid
 from dataclasses import dataclass
@@ -390,47 +391,77 @@ from compute_provisioning_service.services.job_retry import retry_policy_from
 from compute_provisioning_ansible import MockAnsibleRunner
 from vm_provisioning_adapter.services.mock_output import vm_mock_output
 from compute_provisioning_service.services.system_status import SystemStatusService
+from fastapi import APIRouter, FastAPI
+from starlette.routing import Match
+
+
+def mount_unless_served(app: FastAPI, router: APIRouter) -> None:
+    """Include ``router`` in ``app`` unless the app already serves every route it declares.
+
+    The suite's fixtures share one module-level app, and ``main.py`` mounts the
+    test routers itself when the mock profile is active at import. Whether a
+    route is served is asked of the app's own routing, by matching a request for
+    each path and method the router declares: an included router is not listed
+    by its routes' paths in ``app.routes``, and every inclusion wraps the app's
+    lifespan once more, so a check by path would include the router again for
+    every test until entering the lifespan exhausts the stack.
+    """
+    for route in router.routes:
+        path = re.sub(r"\{[^}]+\}", "x", route.path)
+        for method in sorted(route.methods):
+            scope = {"type": "http", "path": path, "method": method, "root_path": ""}
+            if not any(served.matches(scope)[0] is Match.FULL for served in app.routes):
+                app.include_router(router)
+                return
 
 
 # ---------------------------------------------------------------------------
-# Representative playbook stdout for a successful vm_create job.
-# Contains a vm_creation_data JSON block that the VM codec
+# Representative playbook stdout for a successful vm_create job, in the JSON
+# result format. Contains a vm_creation_data JSON block that the VM codec
 # will extract into the job result.  Credentials are embedded so the credential
-# storage path is exercised.
+# storage path is exercised. The codec takes evidence only from a fact naming
+# the job's own guest and reporting success, so a test whose job names another
+# guest renders the output for it.
 # ---------------------------------------------------------------------------
 
-FAKE_CREATE_STDOUT = """\
+
+def fake_create_stdout(vm_name: str) -> str:
+    """The stdout of a successful create of ``vm_name``."""
+    return """\
 PLAY [Provision VM] ***********************************************************
 
 TASK [debug] ******************************************************************
-ok: [kvm1] => {
-    "vm_creation_data": {
+ok: [kvm1] => {{
+    "vm_creation_data": {{
         "action": "create",
-        "vm_name": "agent-vm-01",
-        "status": "running",
+        "vm_name": "{vm_name}",
+        "status": "success",
         "host": "kvm1",
         "timestamp": "2025-01-01T00:00:00Z",
         "tenant_user": "agentvm01",
         "external_ssh_port": "54321",
         "vm_ip_internal": "192.168.122.50",
-        "authentication": {
-            "tenant": {
+        "authentication": {{
+            "tenant": {{
                 "password": "tenantpw",
                 "key_type": "generated",
-                "ssh_commands": {
+                "ssh_commands": {{
                     "internal": "ssh -i key agentvm01@192.168.122.50",
                     "external": "ssh -i key -p 54321 agentvm01@10.0.0.1"
-                }
-            },
-            "root": {
+                }}
+            }},
+            "root": {{
                 "password": "rootpw",
-                "ssh_commands": {"internal": "ssh root@192.168.122.50"},
+                "ssh_commands": {{"internal": "ssh root@192.168.122.50"}},
                 "ssh_key_path_host": "/root/.ssh/agent-vm-01_root_ed25519"
-            }
-        }
-    }
-}
-"""
+            }}
+        }}
+    }}
+}}
+""".format(vm_name=vm_name)
+
+
+FAKE_CREATE_STDOUT = fake_create_stdout("agent-vm-01")
 
 
 # ---------------------------------------------------------------------------
@@ -793,7 +824,10 @@ async def client_and_queue(
             session_factory=session_factory,
             teardown_port=teardown_port,
         ),
-        release_status=FulfillmentReleaseStatusPort(teardown_port),
+        release_status=FulfillmentReleaseStatusPort(
+            settlement_repository=SettlementRepository(),
+            session_factory=session_factory,
+        ),
         capacity_released_notifier=AsyncMock(return_value=True),
         capacity_release_outbox=capacity_release_outbox,
     )
@@ -908,10 +942,8 @@ async def client_and_queue(
     # Mount each adapter's test routes unless ``main.py`` already did: it
     # mounts them only when the mock profile is active at import, and the suite
     # must behave the same however pytest is invoked.
-    _mounted_paths = {getattr(route, "path", "") for route in app.routes}
     for _test_router in (_vm_mock_router(), _bare_metal_mock_router()):
-        if not {route.path for route in _test_router.routes} <= _mounted_paths:
-            app.include_router(_test_router)
+        mount_unless_served(app, _test_router)
 
     clients = provisioning_clients(transport)
     try:

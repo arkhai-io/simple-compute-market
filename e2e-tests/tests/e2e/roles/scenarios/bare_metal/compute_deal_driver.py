@@ -121,6 +121,7 @@ class BareMetalComputeDealDriver:
                 host_id=self.host_id,
                 connection=ConnectionSubmission(
                     kind="ssh",
+                    version=2,
                     public={
                         "ssh_host": MACHINE_ADDRESS,
                         "ssh_user": "stub",

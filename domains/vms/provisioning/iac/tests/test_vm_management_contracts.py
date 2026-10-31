@@ -185,12 +185,13 @@ class VmManagementContractTests(unittest.TestCase):
 
         for token in (
             "virsh domifaddr {{ vm_name }}",
-            "path: /etc/frp/frpc-vms.toml",
+            "remove_guest_proxy /etc/frp/frpc-vms.toml",
             "/api/reload",
             "Fail if VM is running",
             "Cannot undefine VM '{{ vm_name }}' - VM is currently running",
-            "iptables -t nat -L PREROUTING -n --line-numbers",
-            "iptables -D FORWARD $line",
+            "{{ lookup('file', 'guest_teardown.sh') }}",
+            'remove_guest_rules "{{ vm_guest_rule_marker }}"',
+            'remove_guest_ufw_rules "{{ vm_guest_rule_marker }}"',
             "iptables-save > /etc/iptables/rules.v4",
             "iptables-save > /etc/sysconfig/iptables",
             "iptables-save > /etc/iptables.rules",

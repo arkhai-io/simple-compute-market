@@ -110,16 +110,19 @@ make -C e2e-tests test-buyer-machine NETWORK=simple-market-service_default \
 The release-qualified bare-metal scenario (`e2e_bare_metal_deal`) is in no lane.
 It additionally requires the installed `market.buyer_domains/bare-metal` wheel,
 its registry and seller/site authorities, a canonical Ed25519 credential in the
-configured environment reference, exact public `BARE_METAL.BUY_ARGS`, and
-`ARKHAI_E2E_BARE_METAL_SSH_PRIVATE_KEY_FILE`, against a stack whose site
-provisions a real host (`PROVISIONING_MODE=real`).
-
-The bare-metal scenario performs real SSH, requests teardown through
-`market bare-metal`, waits for the accepted terminal teardown status, and
-requires the same access attempt to fail afterward. If the buyer contribution,
-authority endpoint, selected site, credential, or real access target is absent,
-the scenario names that prerequisite and remains unavailable; static Compose or
-unit results are not substituted.
+configured environment reference, exact public `BARE_METAL.BUY_ARGS`,
+`ARKHAI_E2E_BARE_METAL_SSH_PRIVATE_KEY_FILE`, and
+`ARKHAI_E2E_BARE_METAL_KNOWN_HOSTS_FILE`, the delivered host's pinned key,
+against a stack whose site provisions a real host (`PROVISIONING_MODE=real`). It
+recovers the purchase with `market bare-metal result`, `access`, and `teardown
+--run-id <id>`, repeats the one idempotent `teardown` until the lifecycle's
+`state` is `released` within `BARE_METAL.TEARDOWN_TIMEOUT_SECONDS`, and fails at
+once on `teardown_failed`. Each SSH attempt is a fresh process that shares no
+connection and trusts only the pinned key; access counts as revoked only when that
+host refuses the public key, and any other SSH failure fails the scenario. If the
+buyer contribution, authority endpoint, selected site, credential, or real access
+target is absent, the scenario names that prerequisite and remains unavailable;
+static Compose or unit results are not substituted.
 
 ## Alkahest deal scenario
 

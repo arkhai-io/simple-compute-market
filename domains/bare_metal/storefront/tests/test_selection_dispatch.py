@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import sqlite3
 from collections.abc import Mapping
 from typing import Any
 
@@ -319,8 +320,8 @@ def test_composition_dispatch_exposes_only_priority_builders() -> None:
 PAYMENT_MECHANISM = "demo.payment.v1"
 
 
-def _payment_option() -> dict[str, Any]:
-    rates = [RateValue(field="amount", per="hour", value=100)]
+def _payment_option(hourly: int = 100) -> dict[str, Any]:
+    rates = [RateValue(field="amount", per="hour", value=hourly)]
     return SettlementOption(
         option_id=derive_settlement_option_id(
             mechanism=PAYMENT_MECHANISM, asset="usd", rates=rates, params={}
@@ -347,11 +348,13 @@ def _payment_stages():
     )
 
 
-async def _payment_service(tmp_path, settlement_data_calls: list) -> tuple[_Opening, dict[str, Any]]:
+async def _payment_service(
+    tmp_path, settlement_data_calls: list, *, hourly: int = 100
+) -> tuple[_Opening, dict[str, Any]]:
     """A listing offering one mechanism that settles from the Agreement alone."""
     domain = get_market_domain_contract()
     db = SQLiteClient(str(tmp_path / "storefront.db"), domain=domain)
-    option = _payment_option()
+    option = _payment_option(hourly)
     await db.upsert_bare_metal_listing(
         listing_id="intro-listing",
         status="open",
@@ -445,3 +448,67 @@ async def test_a_provisioning_selection_is_held_to_the_listing_admission_rules(t
     service, option = await _payment_service(tmp_path, [])
     with pytest.raises(BareMetalNegotiationRefusal, match="bare_metal_access_method"):
         await service.open(request=_request(option), buyer_principal=BUYER_SIGNER.identity)
+
+
+def _ssh_purchase(duration_seconds: int) -> dict[str, Any]:
+    return {
+        "duration_seconds": duration_seconds,
+        "access_method": "ssh",
+        "ssh_public_key": "ssh-ed25519 buyer",
+    }
+
+
+async def _nothing_accepted(service: _Opening, settlement_data_calls: list) -> None:
+    """No negotiation, Agreement, settlement data, or settlement record was kept."""
+    assert await service.db.list_negotiations_for_listing(listing_id="intro-listing") == []
+    assert settlement_data_calls == []
+    with sqlite3.connect(service.db.db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM bare_metal_settlement_records").fetchone()[0] == 0
+
+
+# The synthetic option charges 1000000 base units an hour; half an hour is 500000.
+@pytest.mark.parametrize("proposed", ["250000", "1000000"], ids=["undercharge", "overcharge"])
+async def test_an_amount_off_the_options_total_is_refused_and_nothing_is_kept(
+    tmp_path, proposed: str
+) -> None:
+    calls: list = []
+    service, option = await _payment_service(tmp_path, calls, hourly=1_000_000)
+    request = _request(option, fields={"amount": proposed}, payload=_ssh_purchase(1800))
+    with pytest.raises(BareMetalNegotiationRefusal, match="differs from the trusted accepted amount"):
+        await service.open(request=request, buyer_principal=BUYER_SIGNER.identity)
+    await _nothing_accepted(service, calls)
+
+
+@pytest.mark.parametrize(
+    ("duration_seconds", "fields", "total"),
+    [
+        (1800, {"amount": "500000"}, "500000"),
+        (1800, {}, "500000"),
+        (1801, {}, "500277"),
+        (7200, {"amount": "2000000"}, "2000000"),
+    ],
+    ids=["exact-amount", "no-amount", "truncated", "two-hours"],
+)
+async def test_a_selection_is_accepted_at_the_options_total_for_its_duration(
+    tmp_path, duration_seconds: int, fields: dict[str, str], total: str
+) -> None:
+    calls: list = []
+    service, option = await _payment_service(tmp_path, calls, hourly=1_000_000)
+    request = _request(option, fields=fields, payload=_ssh_purchase(duration_seconds))
+    response = await service.open(request=request, buyer_principal=BUYER_SIGNER.identity)
+
+    assert response.action == "accept"
+    assert response.proposal["fields"] == {"amount": total}
+    agreement = json.loads(base64.b64decode(response.agreement_bytes))
+    assert (agreement["amount"], agreement["duration_seconds"]) == (total, duration_seconds)
+    assert response.settlement_data["amount"] == total
+
+
+async def test_a_duration_the_option_prices_at_zero_is_refused_and_nothing_is_kept(tmp_path) -> None:
+    calls: list = []
+    service, option = await _payment_service(tmp_path, calls, hourly=1)
+    for fields in ({}, {"amount": "1"}):
+        request = _request(option, fields=fields, payload=_ssh_purchase(60))
+        with pytest.raises(BareMetalNegotiationRefusal, match="at zero"):
+            await service.open(request=request, buyer_principal=BUYER_SIGNER.identity)
+    await _nothing_accepted(service, calls)

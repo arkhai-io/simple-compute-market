@@ -1,0 +1,74 @@
+---
+# Parse-only: `make validate-playbooks` syntax-checks this playbook, and nothing
+# runs it.
+#
+# The vm-management role reaches each of its task files through include_tasks,
+# which `ansible-playbook --syntax-check` does not follow, so checking
+# vm-operations.yaml leaves the files a create, a remove, an undefine, and a
+# capacity check run unparsed. This play imports those files statically instead:
+# a static import is parsed when the playbook is, so the syntax check reads every
+# task, keyword, and block in them. It imports through import_role, so each file
+# is parsed as part of the role, with the role's defaults, vars, and files, as it
+# is when the role runs.
+#
+# Parsing is where some errors only show: Ansible splits a free-form `shell: |`
+# string as module arguments, so one unbalanced quote in it, an apostrophe in a
+# bash comment included, fails the whole task file as it loads, though bash would
+# run the script.
+#
+# A syntax check templates nothing and executes nothing: it shows that these files
+# parse, not that their Jinja renders or that they do what they should on a host.
+# The shell they run is tested through tests/shell_harness.py.
+- name: VM Management / parse the role's task files
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  tasks:
+    # The imports below act on a KVM host when run. Refusing first keeps a run of
+    # this playbook from reaching any of them. The refusal is tagged `always`
+    # because the imported tasks keep their own tags, some of them `always`: a
+    # `--tags` selection skips an untagged task and still runs those. An
+    # operator's explicit `--skip-tags always` or `--start-at-task` passes over
+    # the refusal; nothing in a play can refuse those.
+    - name: Refuse to run
+      fail:
+        msg: >-
+          vm-management-task-files.yaml exists only to be syntax-checked; run the
+          role through vm-operations.yaml.
+      tags:
+        - always
+
+    - name: Parse the prerequisites
+      import_role:
+        name: ../../roles/vm-management
+        tasks_from: prerequisites
+
+    - name: Parse the create tasks
+      import_role:
+        name: ../../roles/vm-management
+        tasks_from: vm-create
+
+    - name: Parse the GPU attach retry
+      import_role:
+        name: ../../roles/vm-management
+        tasks_from: gpu-virt-install-retry
+
+    - name: Parse the multi-GPU attach retry
+      import_role:
+        name: ../../roles/vm-management
+        tasks_from: gpu-virt-install-multi-retry
+
+    - name: Parse the remove tasks
+      import_role:
+        name: ../../roles/vm-management
+        tasks_from: vm-remove
+
+    - name: Parse the undefine tasks
+      import_role:
+        name: ../../roles/vm-management
+        tasks_from: vm-undefine
+
+    - name: Parse the capacity check tasks
+      import_role:
+        name: ../../roles/vm-management
+        tasks_from: vm-check

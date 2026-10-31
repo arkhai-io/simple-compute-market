@@ -14,6 +14,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from market_fulfillment import (
+    CREATE_COMPENSATION,
     Backoff,
     FulfillmentProvider,
     FulfillmentResult,
@@ -426,6 +427,126 @@ def _active_row_ready_for_teardown(repo, session_factory, cr_id="cr-1"):
             ).model_dump(mode="json"),
         )
         db.commit()
+
+
+def _watchdog_reporting(session_factory, repo, state, detail=None, **provider):
+    return FulfillmentConvergenceWatchdog(
+        session_factory=session_factory,
+        repository=repo,
+        provider_registry=ProviderRegistry(
+            {"vm.ansible": _StubProvider(status=ProviderStatus(state=state, detail=detail), **provider)}
+        ),
+        settings=_settings(),
+    )
+
+
+def _tearing_down_after_failed_create(repo, session_factory):
+    """A create convergence failed, compensated: the row's teardown has been
+    dispatched, carrying ``create_compensation`` and the create's message."""
+    _accepted_row(repo, session_factory)
+    with session_factory() as db:
+        repo.transition(
+            db, "cr-1", SettlementRecordState.dispatching.value, provider_metadata={"job": "1"}
+        )
+        repo.transition(
+            db,
+            "cr-1",
+            SettlementRecordState.failed.value,
+            failure_reason="provider_reported_failure",
+            failure_message="create reported no delivery evidence",
+        )
+        repo.transition(
+            db,
+            "cr-1",
+            SettlementRecordState.teardown_dispatch_pending.value,
+            prepared_teardown_operation=VersionedEnvelope(
+                kind="ansible.teardown", schema_version=1, payload={}
+            ).model_dump(mode="json"),
+            failure_reason=CREATE_COMPENSATION,
+        )
+        repo.transition(
+            db,
+            "cr-1",
+            SettlementRecordState.tearing_down.value,
+            teardown_provider_metadata={"teardown_job": "1"},
+        )
+        db.commit()
+
+
+def _reason_and_message(repo, session_factory):
+    with session_factory() as db:
+        record = repo.get(db, "cr-1")
+        return record.state, record.failure_reason, record.failure_message
+
+
+async def _requeue_and_redispatch(session_factory, repo):
+    """Convergence's requeue of ``teardown_failed``, then its redispatch."""
+    await _watchdog_reporting(
+        session_factory, repo, ProviderOperationState.pending
+    ).requeue_teardown_failures()
+    await _watchdog_reporting(
+        session_factory,
+        repo,
+        ProviderOperationState.pending,
+        dispatch_teardown_result=FulfillmentResult(provider_metadata={"teardown_job": "1"}),
+    ).dispatch_pending_teardowns()
+
+
+async def test_a_compensating_teardown_that_fails_keeps_its_marker(session_factory, repo):
+    _tearing_down_after_failed_create(repo, session_factory)
+
+    await _watchdog_reporting(
+        session_factory, repo, ProviderOperationState.failed, "reclaim job failed"
+    ).converge_teardowns()
+
+    assert _reason_and_message(repo, session_factory) == (
+        SettlementRecordState.teardown_failed.value,
+        CREATE_COMPENSATION,
+        "reclaim job failed",
+    )
+
+    await _requeue_and_redispatch(session_factory, repo)
+    await _watchdog_reporting(
+        session_factory, repo, ProviderOperationState.succeeded
+    ).converge_teardowns()
+
+    assert _reason_and_message(repo, session_factory) == (
+        SettlementRecordState.torn_down.value,
+        CREATE_COMPENSATION,
+        "reclaim job failed",
+    )
+
+
+async def test_a_delivered_teardown_that_fails_then_succeeds_never_carries_the_marker(
+    session_factory, repo
+):
+    _active_row_ready_for_teardown(repo, session_factory)
+    with session_factory() as db:
+        repo.transition(
+            db,
+            "cr-1",
+            SettlementRecordState.tearing_down.value,
+            teardown_provider_metadata={"teardown_job": "1"},
+        )
+        db.commit()
+
+    await _watchdog_reporting(
+        session_factory, repo, ProviderOperationState.failed, "teardown job failed"
+    ).converge_teardowns()
+    assert _reason_and_message(repo, session_factory) == (
+        SettlementRecordState.teardown_failed.value,
+        "provider_reported_failure",
+        "teardown job failed",
+    )
+
+    await _requeue_and_redispatch(session_factory, repo)
+    await _watchdog_reporting(
+        session_factory, repo, ProviderOperationState.succeeded
+    ).converge_teardowns()
+
+    state, reason, _ = _reason_and_message(repo, session_factory)
+    assert state == SettlementRecordState.torn_down.value
+    assert reason != CREATE_COMPENSATION
 
 
 async def test_dispatch_pending_teardowns_success_transitions_to_tearing_down(
@@ -1398,12 +1519,12 @@ def _held(session_factory) -> list[int]:
         )
 
 
-def _watchdog(session_factory, repo, provider):
+def _watchdog(session_factory, repo, provider, **settings):
     return FulfillmentConvergenceWatchdog(
         session_factory=session_factory,
         repository=repo,
         provider_registry=ProviderRegistry({"vm.ansible": provider}),
-        settings=_settings(),
+        settings=_settings(**settings),
     )
 
 
@@ -1526,3 +1647,223 @@ def test_a_lease_of_another_kind_is_left_alone(session_factory):
     """This predicate only speaks for reservations' fulfillments. Reporting
     released for an owner kind it cannot inspect would release live tunnels."""
     assert _released(session_factory)("something-else", "x") is False
+
+
+# ----------------------------------------------------------------------
+# Polling a healthy pending operation is spaced by the initial interval,
+# not by the failure backoff earlier claims of the row accumulated
+# ----------------------------------------------------------------------
+
+# The service's own backoff settings: 5s doubling to a 300s cap, no jitter.
+_PRODUCTION_BACKOFF = dict(
+    fulfillment_convergence_backoff_initial_seconds=5.0,
+    fulfillment_convergence_backoff_multiplier=2.0,
+    fulfillment_convergence_backoff_max_seconds=300.0,
+    fulfillment_convergence_backoff_jitter_fraction=0.0,
+)
+
+
+class _ScriptedStatusProvider(_StubProvider):
+    """Answers each status read from a script; an exception in it is raised."""
+
+    def __init__(self, *statuses, on_read=None, **kwargs):
+        super().__init__(**kwargs)
+        self.statuses = list(statuses)
+        self.reads = 0
+        self._on_read = on_read
+
+    async def get_status(self, capacity_reservation_id, resource, provider_metadata):
+        self.reads += 1
+        if self._on_read is not None:
+            self._on_read()
+        answer = self.statuses.pop(0) if len(self.statuses) > 1 else self.statuses[0]
+        if isinstance(answer, Exception):
+            raise answer
+        return ProviderStatus(state=answer)
+
+
+def _row_after_a_long_create(repo, session_factory, state, *, attempts=9):
+    """A row in ``state`` whose create took ``attempts`` claims so far.
+
+    For ``dispatching`` the create is still running; for ``tearing_down`` it
+    finished and a teardown job was dispatched.
+    """
+    if state == SettlementRecordState.dispatching.value:
+        _accepted_row(repo, session_factory)
+        with session_factory() as db:
+            repo.transition(
+                db, "cr-1", SettlementRecordState.dispatching.value,
+                provider_metadata={"create_job_id": "job-1", "operation": "create"},
+            )
+            repo.get(db, "cr-1").attempt_count = attempts
+            db.commit()
+        return
+    _active_row_ready_for_teardown(repo, session_factory)
+    with session_factory() as db:
+        repo.transition(
+            db, "cr-1", SettlementRecordState.tearing_down.value,
+            teardown_provider_metadata={"teardown_job_id": "job-2", "operation": "teardown"},
+        )
+        repo.get(db, "cr-1").attempt_count = attempts
+        db.commit()
+
+
+def _time_passes(session_factory, seconds: float) -> None:
+    """Move the row's claim expiry back by ``seconds``, as if that much time passed."""
+    with session_factory() as db:
+        record = db.get(SettlementRecord, "cr-1")
+        if record.claim_expires_at is not None:
+            record.claim_expires_at -= timedelta(seconds=seconds)
+        db.commit()
+
+
+def _claim(session_factory, repo):
+    with session_factory() as db:
+        record = repo.get(db, "cr-1")
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        held = (
+            None if record.claim_expires_at is None
+            else (record.claim_expires_at - now).total_seconds()
+        )
+        return record.state, record.claimed_by, record.attempt_count, held
+
+
+@pytest.mark.parametrize(
+    ("state", "converge", "done"),
+    [
+        (SettlementRecordState.tearing_down.value, "converge_teardowns",
+         SettlementRecordState.torn_down.value),
+        (SettlementRecordState.dispatching.value, "converge_creates",
+         SettlementRecordState.active.value),
+    ],
+    ids=["teardown", "create"],
+)
+async def test_a_healthy_pending_poll_after_a_long_create_is_repeated_within_one_cycle(
+    session_factory, repo, state, converge, done
+):
+    """Nine earlier claims must not space the next poll of a healthy operation.
+
+    The pending poll keeps its claim, so a cycle inside it still does not
+    poll again, but for the initial interval and with the count of
+    consecutive unproductive attempts cleared: one 30-second cycle later the
+    finished operation converges, long before a 300-second grace period.
+    """
+    _row_after_a_long_create(repo, session_factory, state)
+    provider = _ScriptedStatusProvider(
+        ProviderOperationState.pending, ProviderOperationState.succeeded,
+        resolve_result=("vm-42",),
+    )
+    watchdog = _watchdog(session_factory, repo, provider, **_PRODUCTION_BACKOFF)
+
+    await getattr(watchdog, converge)()
+
+    current, owner, attempts, held = _claim(session_factory, repo)
+    assert (current, owner, attempts) == (state, watchdog._worker_id, 0)
+    assert 0 < held <= 5.0, f"a healthy pending poll held the row for {held}s"
+
+    await getattr(watchdog, converge)()
+    assert provider.reads == 1, "a cycle inside the poll interval polled again"
+
+    _time_passes(session_factory, 30)
+    await getattr(watchdog, converge)()
+
+    current, owner, attempts, _ = _claim(session_factory, repo)
+    assert (current, owner, attempts) == (done, None, 0)
+    assert provider.reads == 2
+
+
+async def test_an_operation_still_pending_stays_pending_and_is_polled_each_interval(
+    session_factory, repo
+):
+    _row_after_a_long_create(repo, session_factory, SettlementRecordState.tearing_down.value)
+    provider = _ScriptedStatusProvider(ProviderOperationState.pending)
+    watchdog = _watchdog(session_factory, repo, provider, **_PRODUCTION_BACKOFF)
+
+    for _ in range(4):
+        await watchdog.converge_teardowns()
+        current, _, attempts, held = _claim(session_factory, repo)
+        assert current == SettlementRecordState.tearing_down.value
+        assert attempts == 0 and 0 < held <= 5.0
+        _time_passes(session_factory, 30)
+
+    assert provider.reads == 4
+
+
+async def test_failed_status_reads_still_back_off_until_a_healthy_read(session_factory, repo):
+    """Consecutive failures grow the lease; the first healthy read clears the count."""
+    _row_after_a_long_create(
+        repo, session_factory, SettlementRecordState.tearing_down.value, attempts=0
+    )
+    provider = _ScriptedStatusProvider(
+        RuntimeError("job store unreachable"), RuntimeError("job store unreachable"),
+        ProviderOperationState.pending,
+    )
+    watchdog = _watchdog(session_factory, repo, provider, **_PRODUCTION_BACKOFF)
+
+    leases = []
+    for _ in range(2):
+        await watchdog.converge_teardowns()
+        _, owner, attempts, held = _claim(session_factory, repo)
+        assert owner == watchdog._worker_id
+        leases.append((attempts, round(held)))
+        _time_passes(session_factory, 3600)
+    assert leases == [(1, 5), (2, 10)]
+
+    await watchdog.converge_teardowns()
+    _, _, attempts, held = _claim(session_factory, repo)
+    assert attempts == 0 and 0 < held <= 5.0
+
+
+async def test_a_pending_read_never_touches_a_claim_another_worker_took_meanwhile(
+    session_factory, repo
+):
+    """A worker whose lease lapsed during its status read leaves the new owner's
+    claim, expiry, and attempt count exactly as that owner set them."""
+    _row_after_a_long_create(repo, session_factory, SettlementRecordState.tearing_down.value)
+    taken_until = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1)
+
+    def reclaimed_by_another_worker():
+        with session_factory() as db:
+            record = repo.get(db, "cr-1")
+            record.claimed_by = "worker-b"
+            record.claim_expires_at = taken_until
+            record.attempt_count = 42
+            db.commit()
+
+    provider = _ScriptedStatusProvider(
+        ProviderOperationState.pending, on_read=reclaimed_by_another_worker
+    )
+    watchdog = _watchdog(session_factory, repo, provider, **_PRODUCTION_BACKOFF)
+
+    await watchdog.converge_teardowns()
+
+    with session_factory() as db:
+        record = repo.get(db, "cr-1")
+        assert (record.claimed_by, record.claim_expires_at, record.attempt_count) == (
+            "worker-b", taken_until, 42
+        )
+        assert record.state == SettlementRecordState.tearing_down.value
+
+
+async def test_a_dispatched_teardown_starts_its_attempts_afresh(session_factory, repo):
+    """A phase's outcome clears the count, so a teardown's first status read is
+    not leased for the backoff its create accumulated."""
+    _active_row_ready_for_teardown(repo, session_factory)
+    with session_factory() as db:
+        repo.get(db, "cr-1").attempt_count = 9
+        db.commit()
+    provider = _ScriptedStatusProvider(
+        RuntimeError("job store unreachable"),
+        dispatch_teardown_result=FulfillmentResult(
+            provider_metadata={"teardown_job_id": "job-2", "operation": "teardown"}
+        ),
+    )
+    watchdog = _watchdog(session_factory, repo, provider, **_PRODUCTION_BACKOFF)
+
+    await watchdog.dispatch_pending_teardowns()
+    current, owner, attempts, _ = _claim(session_factory, repo)
+    assert (current, owner, attempts) == (SettlementRecordState.tearing_down.value, None, 0)
+
+    await watchdog.converge_teardowns()
+    _, _, attempts, held = _claim(session_factory, repo)
+    assert attempts == 1 and 0 < held <= 5.0

@@ -11,7 +11,7 @@ from typing import Any, TypeVar
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from market_arkhai_payments.canonical import agreement_hash
+from market_arkhai_payments.canonical import agreement_hash, wire_json
 from market_arkhai_payments.errors import (
     PaymentsAPIError,
     PaymentsPollTimeout,
@@ -109,7 +109,7 @@ class PaymentsClient:
         parsed = Mandate.model_validate(mandate)
         attachments = None
         if agreement is not None:
-            if agreement_hash(agreement) != parsed.deal.root.root:
+            if agreement_hash(agreement) != parsed.deal.root:
                 raise ValueError("agreement hash does not match mandate.deal")
             attachments = [DealAttachment.model_validate({"kind": "deal", "content": agreement})]
         body = ApprovalRequest(mandate=parsed, attachments=attachments)
@@ -177,7 +177,7 @@ class PaymentsClient:
         identifier = _transaction_id(transaction)
         expected_deal = agreement_hash(agreement_json)
         snapshot = self.get_transaction(identifier).snapshot
-        if snapshot.transaction.root != identifier or snapshot.receipt.receipt.deal.root.root != expected_deal:
+        if snapshot.transaction.root != identifier or snapshot.receipt.receipt.deal.root != expected_deal:
             raise PaymentsProtocolError("transaction does not commit to the supplied Agreement")
         # Every attachment is a deal attachment the service checked against the
         # deal hash, so any other hash means the service broke its contract.
@@ -231,7 +231,8 @@ def _validated(model: type[_ModelT], value: Any) -> _ModelT:
 
 
 def _json(model: BaseModel) -> dict[str, Any]:
-    return model.model_dump(mode="json", by_alias=True, exclude_none=True)
+    wire: dict[str, Any] = wire_json(model)
+    return wire
 
 
 def _transaction_id(value: str) -> str:
