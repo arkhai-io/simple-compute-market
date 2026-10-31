@@ -1478,3 +1478,30 @@ change to implementation.
       exactly each delta's set, every merged body equals the delta's text, no title
       repeats, and nothing outside the requirements changed. The index row links the
       archive and stays `in closeout`. `make check-change` passed on the archived change.
+
+      After the archive, S14 (`design.md`), accepted by the supervising session under
+      the owner's standing instruction from an automatic pull-request review:
+      - **The fix.** A VM teardown whose relay-client reload fails now fails and is
+        retried until a reload succeeds, including after the proxy's block is gone. Made
+        in `roles/vm-management/files/guest_teardown.sh` (`remove_guest_proxy` and its
+        pending record), its two callers (the cleanup script in `vm-create.yml` and
+        the missing-script branch in `vm-remove.yml`), and the permanent
+        `physical-provisioning` requirement "A VM teardown removes only what its guest
+        created".
+      - **The tests,** in `domains/vms/provisioning/iac/tests`.
+        - `test_guest_teardown.py` runs both teardown paths as their real shell against
+          `host_fakes`, whose `curl` now takes queued exit statuses. A refused reload,
+          and an unreachable client followed by a refused one, each fail, keep
+          `guest-12`'s block, and succeed only on a reloading retry. Hosts with no VM
+          tunnel client still need no reload.
+        - `test_cleanup_script_relay_teardown.py` expects a failed reload to fail the
+          cleanup.
+      - **Red:** six of those failed before the fix, each because a failed reload
+        exited 0.
+      - **Green:**
+        - the IaC suite: 158 passed, 7 native cases skipped there;
+        - the native gate in the provisioning image: 7 playbooks syntax-checked and 7
+          tests, none skipped;
+        - the VM adapter's unit suite: 173 passed.
+      - **Checks:** `make check-packaging`, `make check-architecture`,
+        `make check-comment-hygiene`, and `make check-change` passed.

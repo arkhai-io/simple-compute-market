@@ -11,7 +11,8 @@ as the real commands answer:
   arguments, or fails as iptables does when none is;
 - `virsh` keeps domains with their state, address, MAC, and storage, and the
   `default` network's DHCP reservations in `net-dumpxml` form;
-- `ufw` keeps numbered rules with their comments.
+- `ufw` keeps numbered rules with their comments;
+- `curl` exits with each status a test queued, in order, then succeeds.
 
 Every call is appended to `calls`, so a test can assert what was never run.
 Addresses are RFC 5737 documentation addresses and names are synthetic.
@@ -166,7 +167,16 @@ else:
     sys.exit(2)
 '''
 
-_CURL = _PREAMBLE + "sys.exit(int(os.environ.get('FAKE_CURL_EXIT', '0')))\n"
+# Each call takes the next exit status `set_curl_exits` queued, and succeeds
+# once the queue is empty: 7 is curl's exit when nothing listens, 22 its exit
+# under `-f` when the server answers with an error status.
+_CURL = _PREAMBLE + r'''
+path = STATE / "curl.exits"
+exits = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+code = exits.pop(0) if exits else 0
+path.write_text(json.dumps(exits), encoding="utf-8")
+sys.exit(code)
+'''
 
 # A host with neither firewalld nor a service manager the teardown can ask.
 _ABSENT = _PREAMBLE + "sys.exit(3)\n"
@@ -224,6 +234,10 @@ class FakeHost:
         (self.state / "ufw.json").write_text(
             json.dumps({"active": active, "rules": rules}), encoding="utf-8"
         )
+
+    def set_curl_exits(self, exits: list[int]) -> None:
+        """The exit statuses the next `curl` calls return, in order."""
+        (self.state / "curl.exits").write_text(json.dumps(exits), encoding="utf-8")
 
     def ufw_rules(self) -> list[dict]:
         return json.loads((self.state / "ufw.json").read_text(encoding="utf-8"))["rules"]

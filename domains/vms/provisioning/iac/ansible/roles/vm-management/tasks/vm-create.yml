@@ -2672,15 +2672,18 @@
       # unattended on the host itself.
       # The block is matched by its exact BEGIN and END lines, so another
       # guest's block, even one whose name begins with this one's, stays.
-      remove_guest_proxy /etc/frp/frpc-vms.toml "$VM_NAME" "http://127.0.0.1:{{ frp_admin_port | default(7400) }}/api/reload"
+      # Until the client reloads without the proxy it may still hold the relay
+      # port, so the script stops here and stays in place: the teardown fails,
+      # the capacity stays held, and a retry runs this script again.
+      if ! remove_guest_proxy /etc/frp/frpc-vms.toml "$VM_NAME" "http://127.0.0.1:{{ frp_admin_port | default(7400) }}/api/reload"; then
+        log_error "This VM's proxy is not removed from the running VM tunnel client"
+        track_step "remove_relay_proxy" "failed"
+        exit 1
+      fi
       case "$GUEST_PROXY" in
         removed)
           log "Proxy stanza removed; VM tunnel client reloaded"
           track_step "remove_relay_proxy" "success"
-          ;;
-        reload_failed)
-          log_error "Proxy stanza removed, but the VM tunnel client did not reload"
-          track_step "remove_relay_proxy" "partial"
           ;;
         *)
           log "No proxy stanza for this VM"

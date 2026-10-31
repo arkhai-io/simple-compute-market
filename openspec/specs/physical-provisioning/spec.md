@@ -2451,6 +2451,13 @@ each one it finds, and report the guest absent only when it finds none. An artif
 cannot attribute to the guest MUST fail the teardown, naming the artifact, so the
 fulfillment's teardown fails visibly and its capacity stays held.
 
+A guest's relay proxy is removed only once the host's running VM tunnel client has
+reloaded without it: until then the client may still hold the proxy's relay port. A
+teardown whose reload fails MUST fail, so the reservation's capacity and its relay port
+lease stay held, and a later teardown of the same guest MUST reload the client before it
+succeeds or reports the guest absent, even when the proxy's configuration entry is
+already gone.
+
 #### Scenario: Two guests' addresses share a prefix
 
 - **GIVEN** two guests on one host whose addresses are `192.0.2.1` and `192.0.2.12`
@@ -2471,6 +2478,12 @@ fulfillment's teardown fails visibly and its capacity stays held.
 
 - **WHEN** a VM teardown with no cleanup record finds a rule it cannot attribute to the guest
 - **THEN** the teardown fails naming that rule, and the reservation's capacity stays held
+
+#### Scenario: The tunnel client does not apply a proxy's removal
+
+- **WHEN** a VM teardown removes its guest's proxy from the VM tunnel client's configuration and the client's reload fails
+- **THEN** the teardown fails, and the reservation's capacity and relay port lease stay held
+- **AND** a retry reloads the client before it succeeds, though the configuration no longer names the guest
 
 ### Requirement: A VM guest is created from a pinned, verified image
 

@@ -1957,6 +1957,52 @@ Alternatives rejected:
   task, where the gate only parses; the refusal is proved once by hand, inside the
   provisioning image with the IaC tree read-only and no network.
 
+## S14: a relay proxy is removed only once the tunnel client reloads without it
+
+An automatic review of the branch's pull request, after this change was archived,
+found the reload failure D9 left non-fatal to be a false teardown proof. The
+supervising session accepted it under the owner's standing instruction; no
+individual owner answer is recorded.
+
+`remove_guest_proxy` in `roles/vm-management/files/guest_teardown.sh` deleted the
+guest's block and, when the VM tunnel client's reload failed, reported
+`reload_failed` and returned 0. The generated cleanup script logged a `partial` step,
+exited 0, and removed itself; `vm_remove`'s branch for a guest with no cleanup
+script counted the block as found. Either way the teardown succeeded, so the
+reservation's capacity and its relay port lease were released while the running
+client could still hold the proxy and its port. A retry then found no block and
+reported the guest absent without reloading.
+
+- **The helper owns the proof.** Before rewriting the configuration it writes a
+  pending record beside it, `<configuration>.reload-pending.<guest>`, and removes the
+  record only after a reload succeeds. When the reload fails it keeps the record and
+  returns 1. A call that finds the block gone but the record present reloads first,
+  so a missing block is never taken as proof while an earlier reload is unresolved.
+  Each step is checked in the helper, since bash ignores `set -e` in a function
+  called as a condition.
+- **Both callers fail the teardown.** The cleanup script stops before any other step
+  with a `failed` relay step and stays in place for the retry; the missing-script
+  branch stops under `set -e`. The job fails, so lease release holds the capacity and
+  the port lease, as `openspec/specs/physical-provisioning/spec.md` "Relay port
+  leases are unique per relay" requires of a failed teardown. A retry that reloads
+  reports the proxy removed, and the guest present.
+- **Unchanged.** The client is reloaded, never restarted; another guest's block, the
+  management tunnel, a host with no VM tunnel client, and the success path are as
+  before, beyond the record written and removed around a successful reload. The
+  client's reload API reports a configuration or apply failure as an error status,
+  which `curl -f` fails on.
+
+Alternatives rejected:
+- *Reload whenever the VM tunnel client's configuration exists.* Every teardown on a
+  relay host would then depend on that client answering, even for a guest it never
+  carried.
+- *Read the client's status for the guest's proxy.* That is runtime proof without a
+  record, but it adds a JSON parse to unattended host shell, and the status API's
+  shape is already a source of one defect (S3).
+
+`vm_undefine`, an operator action no lease release dispatches, still removes the
+block and ignores a failed reload; it does not read or write the pending record.
+
 ## Compatibility, migration, and rollback
 
 - **No schema migration.** `public_port` lives in the connection envelope's public
@@ -2137,4 +2183,5 @@ No destination here was already written by `prove-real-vm-provisioning`'s own pr
 | Live qualification of both lanes | External evidence, recorded in `tasks.md` 15.8 as live evidence, apart from the pipeline; its public summary and the gaps it leaves are in `docs/development/ROADMAP.md` "Payment qualification boundaries". Raw operational evidence stays outside the repository |
 | Roadmap currency | `docs/development/ROADMAP.md` "Goal 1 — Consolidate physical-resource authority in the provisioning service" (the real runner's evidence row) and "Payment qualification boundaries". Goal 2 is unchanged: this change no longer sells VM shapes without GPUs |
 | Campaign index currency | `openspec/changes/README.md`: this change's row, `in closeout`, its notes rewritten to the state at closeout, the Round 2 sentence review 19 F1 named among what was dropped. No dependency line or `Depends on` entry names this change: those to `gpu-optional-compute-shapes` were removed with D7's withdrawal. After the closeout review, review 20 F2: the preface sentence on the tenant-address item says this change delivered it, linking the archive |
+| S14 a relay proxy is removed only once the tunnel client reloads without it | `openspec/specs/physical-provisioning/spec.md` ("A VM teardown removes only what its guest created": the reload rule and the scenario "The tunnel client does not apply a proxy's removal"), written directly after the archive |
 | Closeout review 20 F1, the runbook's unshipped references | `docs/development/VALIDATION_RUNBOOK.md`: "Running The Local Pass" replaces the section that pointed at a helper this repository does not ship; sections 17, 18, and 20 call the operations repository's component validators through the operator's `OPS_VALIDATORS`, checked once in section 17; sections 24 and 26 derive the rendered target's name from the committed example. A documentation correction, not a decision of this change |

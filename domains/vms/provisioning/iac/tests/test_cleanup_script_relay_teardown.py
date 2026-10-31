@@ -174,10 +174,14 @@ class CleanupScriptRelayTeardownTests(unittest.TestCase):
         self.assertIn("/api/reload", calls)
         self.assertNotIn("SYSTEMCTL", calls)
 
-    def test_a_failed_reload_is_reported_rather_than_ignored(self) -> None:
+    def test_a_failed_reload_fails_the_cleanup(self) -> None:
+        """The running client may still hold the proxy and its relay port, so
+        the teardown fails and its capacity stays held for a retry."""
         result, _, _, _ = self._run(config_exists=True, reload_ok=False)
 
-        self.assertIn("STEP|remove_relay_proxy|partial", result.stdout)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("STEP|remove_relay_proxy|failed", result.stdout)
+        self.assertNotIn("STEP|remove_relay_proxy|success", result.stdout)
 
     def test_an_absent_configuration_is_skipped_not_failed(self) -> None:
         """A direct-NAT host has no VM tunnel client. Cleanup must not fail

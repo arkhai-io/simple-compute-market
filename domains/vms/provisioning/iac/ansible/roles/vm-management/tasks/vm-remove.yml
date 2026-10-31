@@ -128,11 +128,13 @@
       fi
     done
 
+    # Fails here, under `set -e`, while the VM tunnel client has not reloaded
+    # without the proxy of this guest, so the relay port stays held with the
+    # capacity of the reservation until the reload of a retry succeeds.
     remove_guest_proxy /etc/frp/frpc-vms.toml "$NAME" "$RELOAD_URL"
-    case "$GUEST_PROXY" in
-      removed) found "relay proxy block" ;;
-      reload_failed) found "relay proxy block (the VM tunnel client did not reload)" ;;
-    esac
+    if [ "$GUEST_PROXY" = "removed" ]; then
+      found "relay proxy block"
+    fi
 
     while IFS= read -r reservation; do
       [ -n "$reservation" ] || continue

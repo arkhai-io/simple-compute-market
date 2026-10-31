@@ -194,13 +194,81 @@ class _Teardown(unittest.TestCase):
         self.assertNotIn(A, [h["name"] for h in state["hosts"]])
         self.assertNotIn(f"FOR VM {A}\n", self.config.read_text(encoding="utf-8"))
 
+    def reloads(self) -> int:
+        """How many times the VM tunnel client was asked to reload."""
+        return sum(1 for call in self.host.calls()
+                   if call.startswith("curl ") and "/api/reload" in call)
 
-class TheCleanupScriptACreateWrites(_Teardown):
+    def assert_relay_settled(self) -> None:
+        """The VM tunnel client's directory holds its configuration and nothing
+        a teardown left behind."""
+        self.assertEqual(sorted(p.name for p in self.config.parent.iterdir()),
+                         [self.config.name])
+
+
+class _ReloadFailures:
+    """The VM tunnel client refusing or not answering the reload that applies a
+    guest's proxy removal, then recovering. A teardown fails while the running
+    client may still hold the proxy, and a retry reloads before it succeeds,
+    though the configuration no longer names the guest."""
+
+    def test_a_refused_reload_fails_and_a_retry_reloads_before_succeeding(self) -> None:
+        self._failing_then_recovering([22])
+
+    def test_an_unreachable_client_fails_every_retry_until_a_reload_succeeds(self) -> None:
+        self._failing_then_recovering([7, 22])
+
+
+class TheCleanupScriptACreateWrites(_ReloadFailures, _Teardown):
     """The whole script, as a create renders it for guest A."""
 
     def _script(self) -> str:
         content = _task(VM_CREATE, "Create VM cleanup script on target host")["copy"]["content"]
         return _render(content, A)
+
+    def _failing_then_recovering(self, failures: list[int]) -> None:
+        self._host(a_rules=True, a_proxy=True, a_reservation=True,
+                   a_domain={"state": "running", "address": A_IP, "mac": A_MAC,
+                             "storage": [str(self.images / f"{A}.qcow2")]})
+        (self.images / f"{A}.qcow2").write_text("guest A\n", encoding="utf-8")
+        # The script as the create installed it: a successful run removes it.
+        installed = self.root / f"usr/local/bin/cleanup_vm_{A}.sh"
+        installed.write_text(self._script(), encoding="utf-8")
+        self.host.set_curl_exits(failures)
+
+        for attempt in range(1, len(failures) + 1):
+            result = self._run(self._script())
+
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertEqual(self.reloads(), attempt)
+            self.assertIn("STEP_STATUS|remove_relay_proxy|failed", result.stdout)
+            self.assertTrue(installed.exists(), "the script is kept for the retry")
+            self.assertIn(A, self.host.virsh()["domains"])
+            self.assertIn(_proxy_block(B, 6012), self.config.read_text(encoding="utf-8"))
+            self.assertEqual(self.host.virsh()["domains"][B], self.b_domain)
+
+        result = self._run(self._script())
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.reloads(), len(failures) + 1)
+        self.assertIn("STEP_STATUS|remove_relay_proxy|success", result.stdout)
+        self.a_removed()
+        self.assert_others_untouched()
+        self.assertFalse(installed.exists())
+        self.assert_relay_settled()
+
+    def test_a_host_with_no_vm_tunnel_client_is_torn_down_without_a_reload(self) -> None:
+        """A direct-forwarding host has no VM tunnel client to reload."""
+        self._host(a_rules=True, a_proxy=False, a_reservation=True,
+                   a_domain={"state": "running", "address": A_IP, "mac": A_MAC})
+        self.config.unlink()
+
+        result = self._run(self._script())
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("STEP_STATUS|remove_relay_proxy|skipped", result.stdout)
+        self.assertEqual(self.reloads(), 0)
+        self.assertNotIn(A, self.host.virsh()["domains"])
 
     def test_it_removes_only_the_first_guests_rules_files_proxy_and_lease(self) -> None:
         self._host(a_rules=True, a_proxy=True, a_reservation=True,
@@ -229,6 +297,9 @@ class TheCleanupScriptACreateWrites(_Teardown):
              {"to": "22/tcp"}],
         )
         self.assertIn("STEP_STATUS|cleanup_iptables|success", result.stdout)
+        self.assertIn("STEP_STATUS|remove_relay_proxy|success", result.stdout)
+        self.assertEqual(self.reloads(), 1)
+        self.assert_relay_settled()
 
     def test_a_refused_rule_removal_fails_the_script(self) -> None:
         """A rule the host will not delete is not reported as removed."""
@@ -245,12 +316,73 @@ class TheCleanupScriptACreateWrites(_Teardown):
         self.assertIn(A, self.host.virsh()["domains"])
 
 
-class ARemoveWithNoCleanupScript(_Teardown):
+class ARemoveWithNoCleanupScript(_ReloadFailures, _Teardown):
     """vm_remove's branch for a guest whose create wrote no cleanup script."""
 
     def _script(self) -> str:
         task = _task(VM_REMOVE, "Remove what the guest left without a cleanup script")
         return _render(task["shell"], A)
+
+    def _failing_then_recovering(self, failures: list[int]) -> None:
+        self._host(a_rules=True, a_proxy=True, a_reservation=True,
+                   a_domain={"state": "shut off", "mac": A_MAC,
+                             "storage": [str(self.images / f"{A}.qcow2")]})
+        self.host.set_curl_exits(failures)
+
+        for attempt in range(1, len(failures) + 1):
+            result = self._run(self._script())
+
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertEqual(self.reloads(), attempt)
+            self.assertNotIn("GUEST_PRESENT=", result.stdout)
+            self.assertIn(_proxy_block(B, 6012), self.config.read_text(encoding="utf-8"))
+            self.assertEqual(self.host.virsh()["domains"][B], self.b_domain)
+
+        result = self._run(self._script())
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.reloads(), len(failures) + 1)
+        self.assertIn("GUEST_PRESENT=true", result.stdout)
+        self.a_removed()
+        self.assert_others_untouched()
+        self.assert_relay_settled()
+
+        # Once the reload has applied the removal, nothing of the guest is left.
+        result = self._run(self._script())
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("GUEST_PRESENT=false", result.stdout)
+        self.assertEqual(self.reloads(), len(failures) + 1)
+
+    def test_a_proxy_whose_removal_was_not_applied_is_still_the_guests(self) -> None:
+        """A create that failed after writing only its proxy block: the block is
+        gone after the first attempt, and the guest is present until a reload
+        applies its removal."""
+        self._host(a_rules=False, a_proxy=True, a_reservation=False, a_domain=None)
+        self.host.set_curl_exits([22])
+
+        failed = self._run(self._script())
+        result = self._run(self._script())
+
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("GUEST_PRESENT=true", result.stdout)
+        self.assertIn("Removed: relay proxy block", result.stdout)
+        self.assertEqual(self.reloads(), 2)
+        self.assert_others_untouched()
+        self.assert_relay_settled()
+
+    def test_a_host_with_no_vm_tunnel_client_is_torn_down_without_a_reload(self) -> None:
+        self._host(a_rules=True, a_proxy=False, a_reservation=True,
+                   a_domain={"state": "shut off", "mac": A_MAC})
+        self.config.unlink()
+
+        result = self._run(self._script())
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("GUEST_PRESENT=true", result.stdout)
+        self.assertEqual(self.reloads(), 0)
+        self.assertNotIn(A, self.host.virsh()["domains"])
 
     def test_a_partial_create_is_removed_by_the_guests_name_and_marker(self) -> None:
         self._host(a_rules=True, a_proxy=True, a_reservation=True,
@@ -277,6 +409,8 @@ class ARemoveWithNoCleanupScript(_Teardown):
             self.assertFalse(path.exists(), path)
         self.assertTrue(b_cloudinit.exists())
         self.assertIn(f"Guest address: {A_IP}", result.stdout)
+        self.assertEqual(self.reloads(), 1)
+        self.assert_relay_settled()
 
     def test_a_domain_and_disk_left_by_a_create_are_removed_and_it_succeeds(self) -> None:
         self._host(a_rules=False, a_proxy=False, a_reservation=False,
@@ -304,6 +438,7 @@ class ARemoveWithNoCleanupScript(_Teardown):
                    if " -D " in c or c.startswith(("virsh undefine", "virsh destroy",
                                                    "virsh net-update", "ufw --force"))]
         self.assertEqual(changes, [])
+        self.assertEqual(self.reloads(), 0)
 
     def test_only_marked_rules_left_with_no_address_known_are_still_the_guests(self) -> None:
         """A create that failed after adding its marked rules and before any
