@@ -52,6 +52,19 @@ same listing must each get their own reservation.
 Worth stating because the obvious near-miss is keying on `listing_id`, which is present
 in `deal_ref` today and would silently collapse two buyers' holds into one.
 
+### Unresolved reserve replay is not a fresh placement
+
+The reservation-idempotency slice used by compute delivery compares the normalized
+request: dimensions/attributes, selected pool/site, offering mode and lease window.
+Same-key changed reuse refuses. Exact replay recovers the recorded identity and
+state across held, committed and released reservations, including a lost first
+acknowledgement; it never silently allocates replacement capacity. An unresolved
+expired/released result enters repair-required or classified end. Ordinary known
+expired-hold replacement is a distinct explicit placement, with a fresh logical
+identity, not resolution of an unresolved effect. This slice precedes unify's
+reserve recovery and renewable's acknowledgement-gap qualification, independently
+of expiry indexing/retention; coordinate the lease/hold indexes separately.
+
 ### Expiry moves from string comparison in Python to a range query
 
 The current form cannot use an index and cannot filter in the database, which is why the
