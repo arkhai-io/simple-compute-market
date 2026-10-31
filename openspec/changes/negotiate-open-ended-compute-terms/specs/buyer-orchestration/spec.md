@@ -45,7 +45,7 @@ The buyer's acceptance policy MUST by default refuse an option whose payee entit
 
 ### Requirement: Default acceptance requires an on-demand seller penalty
 
-Buyer acceptance policy SHOULD refuse an on-demand option without positive early_termination.premature_stop_penalty and a compute option without `delivery_deadline_seconds`, and SHOULD expose explicit buyer opt-out for each. It MUST display the selected value as a ceiling and explain that an unentitled seller end forfeits at most earned amounts still held after unearned-money refunds — at the start of a deal the setup charge, and nothing when nothing is earned and held; it MUST NOT present the penalty as an assured amount; an entitled notice stop pays none. In a buyer case a person applies the remedy.
+Buyer acceptance policy SHOULD refuse an on-demand option without positive early_termination.premature_stop_penalty and a compute option whose mechanism has a lifecycle adapter without `delivery_deadline_seconds`, and SHOULD expose explicit buyer opt-out for each; an option without a lifecycle adapter MUST be shown as making no delivery promise rather than refused for lacking one. It MUST display the selected value as a ceiling and explain that an unentitled seller end forfeits at most earned amounts still held after unearned-money refunds — at the start of a deal the setup charge, and nothing when nothing is earned and held; it MUST NOT present the penalty as an assured amount; an entitled notice stop pays none. In a buyer case a person applies the remedy.
 
 #### Scenario: An on-demand option has no penalty
 

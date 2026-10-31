@@ -13,9 +13,12 @@ added by this reconciliation.
   2.1a's accepted rate-structure carrier before recovery/mandate reads; retain its bound evidence,
   never substitute a current listing after restart or repricing.
 - [ ] 1.2 With `agreed-evidence-and-early-termination`, once `kit/deal-lifecycle` exists,
-  add a regression test that both objects round-trip through hosted and `kit/alkahest`
-  option params, splitter service terms and both buyer commitment checks by the same
-  codec (D4). Do not implement a mechanism-specific term codec. Start from `placement-probe.md`.
+  add a regression test that the option's top-level `lifecycle` round-trips through
+  hosted publication, the registry carrier and both buyer commitment checks by the same
+  codec (D4), and that an Alkahest option carries none and is refused if it does (the
+  binding rule). Do not implement a mechanism-specific term codec. `placement-probe.md`
+  records the rejected in-params placement; the nested-shape check there is the
+  regression, not a decision gate.
 - [ ] 1.3 With the reconciled rate change (`spot-deals-through-arkhai-payments`),
   freeze the injected preset-helper interface (D3), `period`, `reserve_ahead_seconds`, separate setup pricing, accessor unit and
   servicing-declaration contracts. The option carries no maximum term: the horizon
@@ -80,6 +83,11 @@ added by this reconciliation.
   Deployed recurring offers remain disabled until the consuming gates pass.
 
 ## 4. Buyer first use and focused validation
+
+First use includes one mixed listing per domain with a hosted on-demand option carrying
+`delivery_deadline_seconds` and an Alkahest reserved option carrying no `lifecycle`,
+selected by a default buyer: the hosted option is checked for the term and the Alkahest
+option is shown as making no delivery promise, not refused for lacking one (D3).
 
 - [ ] 4.1 Update both buyer CLIs and policies: optional recurring horizon, required
   reserved duration and D7's display of class/price unit/setup/reserve/terms, including

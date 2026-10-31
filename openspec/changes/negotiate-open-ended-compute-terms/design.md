@@ -80,13 +80,18 @@ Keep the foundation's exact shapes and names:
 - `bond` stays reserved where the mechanism cannot hold a seller-funded stake.
 - `delivery_deadline_seconds` is the pool's effective `delivery_deadline_seconds` tag
   (`renewable-compute-lease-deadlines` D3), read from the pool at derivation like the
-  bound hints and published under the same name on every compute option, recurring or
-  once; the site enforces exactly that value from the deal's commitment instant
-  (foundation D5, "Delivery has a deadline"). A pool that enforces no deadline
-  yields an option without the term, and the default buyer refuses a compute option
-  without it — the buyer benefits and enforces it, with an explicit opt-out — so the
-  derivation log and listing diagnostics name it like the penalty: "a default buyer
-  refuses this option: no delivery deadline". Changing the pool's value changes
+  bound hints and published under the same name on every compute option whose
+  mechanism has a lifecycle adapter, recurring or once; the site enforces exactly that
+  value from the deal's commitment instant (foundation D5, "Delivery has a deadline").
+  A pool that enforces no deadline yields an option without the term, and the default
+  buyer refuses such an option without it — the buyer benefits and enforces it, with an
+  explicit opt-out — so the derivation log and listing diagnostics name it like the
+  penalty: "a default buyer refuses this option: no delivery deadline". An Alkahest
+  compute option carries no `lifecycle` and so no deadline term (the binding rule,
+  foundation D5): the runway check does not apply to it, its lease takes the pool's
+  policy as the site's own safeguard, and the display says the option makes no delivery
+  promise; a mixed hosted/Alkahest listing under default selection is a first-use
+  fixture (tasks, section 4). Changing the pool's value changes
   future options' IDs, never a committed deal's deadline; a deal accepted before the
   change commits with its accepted value, which the site enforces where the pool still
   grants that much and refuses where it does not (renewable D1), so publication
