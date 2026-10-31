@@ -1453,6 +1453,14 @@ change to implementation.
         failing case, without reaching the next command. Valid absolute, relative, and
         symlinked paths were exported resolved as before. `bash -n` passed on the block.
 
+      Closeout triage, review 21 F1 (accepted by the supervising session under the
+      owner's standing instruction): sections 24 and 26 now run
+      `cd e2e-tests/config || exit 1` in their subshells. Run from the wrong directory,
+      each subshell now exits 1 before its `cp` or `rm`, leaving a same-named file
+      there untouched. From the repository root, the copy is still the shipped
+      template under `config-real-vm-target.yml`, and the removal deletes only that
+      file. Proven in temporary directories only.
+
 - [x] 15.11 **Archival.** Run `openspec archive repair-compute-purchase-recovery -y`,
       which merges the `physical-provisioning`, `fulfillment`,
       `storefront-publication`, `settlement-servicing`, `negotiation-protocol`, and

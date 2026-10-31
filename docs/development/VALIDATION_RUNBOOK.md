@@ -962,7 +962,7 @@ failing with the executors it found before anything is held or registered.
 
 ```bash
 (
-  cd e2e-tests/config
+  cd e2e-tests/config || exit 1
   example=config-real-vm-target.yml.example
   cp "$example" "${example%.example}"
 )
@@ -1040,7 +1040,7 @@ section 21 made, wherever it was provided:
 ```bash
 rm -f /tmp/kvm-hosts.ini
 (
-  cd e2e-tests/config
+  cd e2e-tests/config || exit 1
   example=config-real-vm-target.yml.example
   rm -f "${example%.example}"
 )
