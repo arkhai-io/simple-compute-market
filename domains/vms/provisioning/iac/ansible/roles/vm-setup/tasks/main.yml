@@ -3,14 +3,55 @@
 # This file coordinates all the sub-tasks for Host Kit installation and VM operations
 #
 # Task Flow:
+# 0. Preconditions - the passthrough override is valid and the CPU offers
+#    hardware virtualization, both checked before anything on the host changes
 # 1. System Packages - Install basic tools and packages
-# 2. GPU Passthrough - Configure GPU passthrough (if available)
+# 2. GPU Passthrough - Configure GPU passthrough (when a GPU is present, or the
+#    operator enables it)
 # 3. KVM Setup - Configure KVM virtualization
 # 4. KVM Network - Setup KVM networking
 # 5. Security Hardening - Apply security configurations
 # 6. Golden Image Build - Build golden images (if vm_image_type == "golden")
-# 7. GPU Detection Service - Setup GPU detection service
+# 7. GPU Detection Service - Setup GPU detection service (with passthrough)
 # 8. Verification - Verify installation
+
+# ============================================
+# Preconditions — read-only, before any change to the host
+# ============================================
+
+# Tagged `always`, as everything after them may be selected by tag: a run
+# limited to one part of the role still refuses a host it cannot prepare.
+- name: Validate the GPU passthrough override
+  assert:
+    that:
+      - gpu_passthrough in ['auto', 'enabled', 'disabled']
+    fail_msg: >-
+      gpu_passthrough is '{{ gpu_passthrough }}'; it must be auto (configure
+      passthrough only when a GPU is present), enabled, or disabled. Nothing on
+      the host has been changed.
+    quiet: true
+  tags:
+    - always
+
+# A host without KVM would otherwise complete preparation and fail every VM
+# later with an unrelated error, or run it under software emulation.
+- name: Read the CPU's hardware virtualization extensions
+  shell: grep -qwE '(vmx|svm)' /proc/cpuinfo
+  register: cpu_virt_support
+  changed_when: false
+  failed_when: false
+  tags:
+    - always
+
+- name: Refuse a host without hardware virtualization
+  fail:
+    msg: >-
+      Hardware virtualization is unavailable: the CPU exposes neither vmx nor
+      svm, so this host cannot run KVM guests. On a cloud instance, create it
+      with nested virtualization enabled. Nothing on the host has been changed.
+  when: cpu_virt_support.rc != 0
+  tags:
+    - always
 
 # ============================================
 # Host Kit Installation Tasks
@@ -42,6 +83,19 @@
     - gpu_passthrough
     - host_setup
 
+# Read-only, and tagged `always` because every passthrough include below is
+# conditioned on the decision it makes.
+- name: Include GPU presence detection
+  include_tasks:
+    file: gpu-presence.yml
+    apply:
+      tags:
+        - always
+  tags:
+    - always
+
+# Passthrough boot configuration changes what a machine reachable only over its
+# network boots into, so a host with no GPU present keeps its boot as it was.
 - name: Include GPU passthrough configuration
   include_tasks:
     file: gpu-passthrough.yml
@@ -49,6 +103,7 @@
       tags:
         - gpu_passthrough
         - host_setup
+  when: gpu_passthrough_configured | bool
   tags:
     - gpu_passthrough
     - host_setup
@@ -61,6 +116,7 @@
         - rescue_boot
         - gpu_passthrough
         - host_setup
+  when: gpu_passthrough_configured | bool
   tags:
     - rescue_boot
     - gpu_passthrough
@@ -156,6 +212,7 @@
         - gpu_detection
         - vm_operations
         - build_completion
+  when: gpu_passthrough_configured | bool
   tags:
     - gpu_detection
     - vm_operations
@@ -169,16 +226,15 @@
   debug:
     msg:
       - "=== KVM Installation & Security Hardening Complete ==="
-      - "0. GPU passthrough was audited; only GPUs whose entire IOMMU group"
-      - "   belongs to the card were bound. See the audit report above."
+      - "0. GPU passthrough: {{ 'configured; only GPUs whose entire IOMMU group belongs to the card are bound after the reboot. See the audit report above.' if gpu_passthrough_configured | bool else 'not configured; the boot configuration was left as it was.' }}"
       - "1. Users have been added to libvirt and kvm groups"
-      - "2. Nested virtualization has been enabled (if supported)"
+      - "2. Hardware virtualization confirmed, /dev/kvm present, nested virtualization enabled"
       - "3. Default libvirt network has been configured"
       - "4. A bridge network setup script has been created at /tmp/setup_bridge.sh"
       - "5. Security hardening applied - VMs blocked from accessing host SSH"
       - "6. Network isolation rules configured and persistent"
       - "7. Fail2ban intrusion prevention system installed and configured"
-      - "8. GPU detection service configured and enabled"
+      - "8. GPU detection service {{ 'configured and enabled' if gpu_passthrough_configured | bool else 'not installed' }}"
       - "9. FRP client installed and configured for remote access"
       - ""
       - "SECURITY FEATURES ACTIVE:"
@@ -228,15 +284,17 @@
 # Reboot System
 # ============================================
 
-# This reboot exists for the IOMMU kernel parameter and the initramfs rebuild,
-# neither of which binds a device, so it cannot remove the host's network path.
-# Device binding happens after it, in gpu-bind.yml, with this connection live.
+# Every prepared host reboots, so each starts from the configuration preparation
+# wrote. On a host with passthrough configured, this reboot applies the IOMMU
+# kernel parameter and the initramfs rebuild, neither of which binds a device, so
+# it cannot remove the host's network path. Device binding happens after it, in
+# gpu-bind.yml, with this connection live.
 # vfio-bind.service is installed but disabled until a bind has been applied and
 # verified here, so no boot replays an unverified bind list. See
 # openspec/specs/physical-provisioning/architecture.md.
 - name: Reboot the system to apply all changes
   reboot:
-    msg: "Rebooting to apply KVM and IOMMU configuration changes"
+    msg: "Rebooting to apply host preparation's configuration changes"
     connect_timeout: 5
     reboot_timeout: 600
     pre_reboot_delay: 0
@@ -255,6 +313,13 @@
 # earlier; and binding is applied while this connection is live, so a wrong
 # bind list fails a task on a reachable host instead of taking the network away
 # during a boot nobody is watching.
+#
+# Only where passthrough is configured this run: binding writes its list into
+# the directory gpu-passthrough.yml creates and applies it through the
+# vfio-bind unit installed there. Where it is configured, what is bound is still
+# exactly what the audit after the reboot finds bindable. Skipping configuration
+# does not undo an earlier one: a unit an earlier preparation enabled stays
+# enabled.
 - name: Include GPU passthrough binding
   include_tasks:
     file: gpu-bind.yml
@@ -263,6 +328,7 @@
         - gpu_bind
         - gpu_passthrough
         - host_setup
+  when: gpu_passthrough_configured | bool
   tags:
     - gpu_bind
     - gpu_passthrough

@@ -1,9 +1,16 @@
 ---
 - name: restart sshd
+  # Applies the hardening security-hardening.yml writes to sshd_config. It
+  # usually runs at the play's end, after preparation's reboot has already
+  # started the daemon on the new configuration; it is what applies the
+  # hardening on a run that skips the reboot (`--skip-tags reboot`) or stops
+  # before it. The daemon's unit is `ssh` on the Debian family (a default
+  # Ubuntu 24.04 install has no `sshd` unit) and `sshd` elsewhere, and a failed
+  # restart fails preparation rather than leaving the hardening silently
+  # unapplied.
   systemd:
-    name: sshd
+    name: "{{ 'ssh' if ansible_os_family == 'Debian' else 'sshd' }}"
     state: restarted
-  ignore_errors: yes
 
 - name: restart libvirtd
   shell: |

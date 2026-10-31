@@ -31,17 +31,18 @@ Three further defects stand in the way of doing so:
 
 The e2e helpers also cannot describe a GPU-less shape (`capacity_source_for` reads
 `gpu_model` unconditionally), and the repository carries a live-environment workflow
-under `e2e-tests/.github/workflows/` that GitHub never runs.
+nested inside the e2e package's own directory, which GitHub never runs.
 
 ## What Changes
 
 - A real-provisioning VM scenario, `e2e_vm_real_provisioning`, in no default lane. It
-  reads a target description — the host to provision on, its capacity, and the
+  reads a target description — the one host to provision on, its capacity, and the
   access mode to expect — from a typed settings section an environment owner renders
   into an ignored profile file, registers the pool, host, and GPU-less capacity
   declaration itself, runs the canonical compute deal through to an active lease,
-  proves the buyer's SSH access, expires the lease, and proves the VM is gone and
-  access has ended.
+  proves the buyer's SSH access with the negotiated key and the refusal of an
+  unrelated one, expires the lease, and proves the VM is gone from the host's VM list
+  and access has ended. A failed run truncates its lease so the guest is torn down.
 - The canonical deal's shared stages split at their mock gates, so the real lane
   subclasses every stage it can and the mock lanes' stage lists name their mock-only
   stages explicitly. The mock gates move off the shared driver protocol onto one only
@@ -49,9 +50,10 @@ under `e2e-tests/.github/workflows/` that GitHub never runs.
 - A domain-neutral SSH access helper for scenarios, and GPU-less shape support in
   the VM e2e helpers.
 - Host preparation refuses a host without hardware virtualization, and VM creation
-  pins KVM. GPU-passthrough boot configuration is applied only when the passthrough
-  audit finds a candidate, with an explicit operator override. Host preparation
-  defaults to the scratch image.
+  pins KVM. GPU-passthrough boot configuration is applied only to a host with a GPU
+  from a vendor whose GPUs are passed through, whether or not its IOMMU is enabled
+  yet, with an explicit operator override; binding still follows the passthrough
+  audit. Host preparation defaults to the scratch image.
 - The dead nested workflow and the README's nonexistent targets are removed; the
   manual live-validation runbook is rewritten as the scenario's manual counterpart.
 
@@ -67,8 +69,8 @@ None.
   real-provisioning lane; a real-provisioning VM scenario and its target
   description.
 - `physical-provisioning`: hardware virtualization is required by host preparation
-  and VM creation; passthrough boot configuration follows the audit; host
-  preparation's default image.
+  and VM creation; passthrough boot configuration follows GPU presence and binding
+  follows the audit; host preparation's default image.
 
 ## Non-Goals
 
@@ -92,8 +94,13 @@ None.
   scenario module, the target settings model, the `.example` profile and its ignore
   rule, the SSH helper, GPU-less helper support, marker registration, README.
 - `domains/vms/provisioning/iac/ansible/`: `vm-setup.yaml` default,
-  `roles/vm-setup/tasks/{kvm-setup,main,gpu-passthrough,rescue-boot-entry,gpu-detection-service}.yml`,
-  `roles/vm-management/tasks/vm-create.yml`, and their IaC tests.
+  `roles/vm-setup/defaults/main.yml`, `roles/vm-setup/tasks/{main,kvm-setup}.yml`
+  and a new `gpu-presence.yml` (the passthrough includes, binding's among them, are
+  conditioned in `main.yml`; the audit's report wording), the `restart sshd` handler
+  in `roles/vm-setup/handlers/main.yml`, the `vm-management` role's `vm-create.yml`
+  and `gpu-virt-install-*.yml`, and their IaC tests.
+- `domains/vms/provisioning/adapter/`: the result codec's choice of a direct-access
+  create's port (`codec.py`, `build_result_payload`) and its unit tests.
 - `docs/development/TESTING.md`, `docs/development/VALIDATION_RUNBOOK.md`, host-kit
   and seller documentation that states the preparation default.
 - No wire, persistence, chart, or image change. Existing mock lanes keep their
@@ -103,8 +110,8 @@ None.
 
 - `never-strand-the-host-on-passthrough` (blocked in closeout) wrote the audit and
   the passthrough tasks this change gates. Its GPU path is unchanged, so its live
-  verification remains valid; its gated tasks now run only when the audit finds a
-  candidate.
+  verification remains valid; its gated tasks now run only on a host with an NVIDIA
+  or AMD GPU present, and binding still follows its audit.
 - `relay-vm-access-without-a-dashboard` (blocked in closeout) needs a prepared host
   and a deployed relay for its live verification. The relay-backed follow-up to this
   change is how that evidence is produced.
@@ -125,8 +132,8 @@ None.
   proves → `docs/development/TESTING.md` and `openspec/specs/test-compatibility/spec.md`.
 - Shared stages split at mock gates; mock gates are a separate driver part →
   `openspec/specs/test-compatibility/spec.md`.
-- Hardware virtualization required; passthrough boot configuration follows the
-  audit; scratch default → `openspec/specs/physical-provisioning/spec.md`, with the
+- Hardware virtualization required; passthrough boot configuration follows GPU
+  presence and binding follows the audit; scratch default → `openspec/specs/physical-provisioning/spec.md`, with the
   operator procedure in `docs/development/VALIDATION_RUNBOOK.md`.
 - Goal 1 gap "no end-to-end lane provisions for real" closes →
   `docs/development/ROADMAP.md`.

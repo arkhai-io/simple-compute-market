@@ -483,8 +483,14 @@ def build_result_payload(result: VmPlaybookOutput) -> dict:
     frp = ar.get("frp")
     if frp:
         payload["frp"] = frp
-        if frp.get("remote_port"):
-            payload["ssh_port"] = frp["remote_port"]
+        # The create playbook's fact for a buyer-provided key reports this block
+        # whether or not a relay was configured, and without one it reports the
+        # relay disabled with "N/A" placeholders. Only an enabled relay's port
+        # is where a buyer connects; otherwise the port the playbook forwarded
+        # on the host stands.
+        relay = _relay_reported(payload)
+        if relay is not None and _is_port(relay.get("remote_port")):
+            payload["ssh_port"] = relay["remote_port"]
 
     for key in ("gpu", "network", "vm_ip_internal", "vm_state",
                 "result_message", "note", "operation_initiated"):
@@ -541,6 +547,15 @@ def _relay_reported(payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
     if enabled is True or str(enabled).lower() == "true":
         return frp
     return None
+
+
+def _is_port(value: Any) -> bool:
+    """Whether ``value`` is a TCP port number, as an integer or its decimal text."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, str) and re.fullmatch(r"[0-9]{1,5}", value.strip()):
+        value = int(value.strip())
+    return isinstance(value, int) and 0 < value <= 65535
 
 
 def create_evidence(payload: Mapping[str, Any], params: VmJobParams) -> DeliveryEvidence | None:

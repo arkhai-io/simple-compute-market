@@ -1,5 +1,8 @@
 """Shared capacity setup for the VM scenarios: pools, executor hosts, declarations.
 
+It also holds which GPUs a VM resource carries (`resource_gpus`), the one rule
+a scenario's listing shape and its claims on that supply both follow.
+
 Three separate records must exist before a VM deal can be negotiated, and they live
 in three different stores:
 
@@ -75,6 +78,30 @@ E2E_MULTI_REGISTRY_POOL_ID = "compute-e2e-multi-pool"
 E2E_NON_ERC20_POOL_ID = "compute-e2e-non-erc20-pool"
 E2E_LISTING_SHAPES_POOL_ID = "compute-e2e-listing-shapes-pool"
 E2E_LISTING_SHAPES_CPU_POOL_ID = "compute-e2e-listing-shapes-cpu-pool"
+
+
+def resource_gpus(resource: dict[str, Any]) -> tuple[int, str] | None:
+    """The GPU count and model a VM resource carries, or ``None`` for none.
+
+    A resource carries GPUs only when it states a positive `gpu_count` and a
+    `gpu_model`. A shape that declares no GPUs is sold and claimed without the
+    GPU family at all: a zero count or a model alone would publish, and claim,
+    a GPU dimension the machine does not have.
+    """
+    count = resource.get("gpu_count")
+    model = resource.get("gpu_model")
+    if isinstance(count, int) and count > 0 and model:
+        return count, str(model)
+    return None
+
+
+def claim_attributes(resource: dict[str, Any], *, resource_id: str) -> dict[str, Any]:
+    """What a claim pinned to `resource_id` requires of a resource of this shape.
+
+    The GPU count is required only of a shape that carries GPUs.
+    """
+    gpus = resource_gpus(resource)
+    return {"resource_id": resource_id, **({"gpu_count": gpus[0]} if gpus else {})}
 
 
 def _pools(provisioning_client: Any) -> SyncResourcePoolClient:
@@ -177,21 +204,45 @@ def _backed_declarations(deliverable_modes: tuple[str, ...]) -> dict[str, Any]:
     }
 
 
+#: The connection a host is registered with when the scenario reaches it through
+#: the mock profile, which connects to nothing. A `key_path` connection names a
+#: key file without carrying it, so no key material is needed.
+_PLACEHOLDER_CONNECTION = ConnectionSubmission(
+    kind="ssh",
+    public={"ssh_host": "127.0.0.1", "ssh_user": "e2e", "key_path": "/dev/null"},
+)
+
+
+def _connection_differs(stored: Any, wanted: ConnectionSubmission) -> bool:
+    """Whether a stored connection is not the one ``wanted`` describes.
+
+    Compared on the fields ``wanted`` states: a stored connection also carries
+    the defaults its kind filled in, which a submission need not repeat.
+    """
+    if stored.kind != wanted.kind or stored.version != wanted.version:
+        return True
+    return any(stored.public.get(name) != value for name, value in wanted.public.items())
+
+
 def register_e2e_host(
     provisioning_client: Any,
     *,
     name: str,
     pool_id: str,
+    connection: ConnectionSubmission | None = None,
 ) -> Any:
     """Register one executor host into `pool_id`, idempotently.
 
-    A `key_path` connection names a key file without carrying it, so no key
-    material is needed: nothing here SSHes anywhere — provisioning runs in mock
-    mode — and the host exists to be an executor identity, not to be reached.
+    `connection` is how the provisioning service reaches the host. Omitted, the
+    host gets a placeholder that nothing connects to: under the mock profile the
+    host exists to be an executor identity, not to be reached.
 
     Reconciles rather than accepting what is there. A host may survive an earlier
     run against the same stack in a different pool, and the contract is that it
-    exists *in the pool this scenario needs*. What the machine sells is its
+    exists *in the pool this scenario needs*. A host registered with a
+    connection has that connection replaced when it differs, so a create is
+    never sent to the address an earlier run left behind; without one, an
+    existing host's connection is left as it is. What the machine sells is its
     declaration's, never the host's.
     """
     try:
@@ -202,14 +253,16 @@ def register_e2e_host(
     if existing is None:
         provisioning_client.register_host(HostCreate(
             host_id=name,
-            connection=ConnectionSubmission(
-                kind="ssh",
-                public={"ssh_host": "127.0.0.1", "ssh_user": "e2e", "key_path": "/dev/null"},
-            ),
+            connection=connection or _PLACEHOLDER_CONNECTION,
             pool_id=pool_id,
         ))
-    elif existing.pool_id != pool_id:
-        provisioning_client.update_host(name, HostUpdate(pool_id=pool_id))
+    else:
+        replace = connection is not None and _connection_differs(existing.connection, connection)
+        if replace or existing.pool_id != pool_id:
+            provisioning_client.update_host(name, HostUpdate(
+                pool_id=pool_id,
+                **({"connection": connection} if replace else {}),
+            ))
 
     host = provisioning_client.get_host(name)
     assert host is not None, f"host {name!r} absent after registration"
@@ -303,11 +356,13 @@ def provision_e2e_executor(
     capacity: dict[str, int] | None = None,
     pricing: dict[str, Any] | None = None,
     region: str | None = None,
+    connection: ConnectionSubmission | None = None,
 ) -> Any:
     """Pool, executor host, and its one capacity declaration, in dependency order.
 
     `listing_shapes`, `pricing`, `region`, and `capacity` are passed to the pool
     and the declaration; see `register_e2e_pool` and `declare_e2e_capacity`.
+    `connection` is the host's; see `register_e2e_host`.
 
     `sellable_units` is what the declaration offers and must match the scenario's
     seeded resource: declaring more than its listing sells leaves units
@@ -327,7 +382,9 @@ def provision_e2e_executor(
         pricing=pricing,
         region=region,
     )
-    host_row = register_e2e_host(provisioning_client, name=host, pool_id=pool_id)
+    host_row = register_e2e_host(
+        provisioning_client, name=host, pool_id=pool_id, connection=connection
+    )
     declare_e2e_capacity(
         site_admin_client,
         resource_id=resource_id,
