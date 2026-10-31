@@ -668,6 +668,14 @@ class AnUndefine(_Teardown):
 
     PROXY_TASK = "Remove this VM's proxy from the VM tunnel client and apply the removal"
 
+    def test_a_running_guest_is_refused_before_its_proxy_or_rules_are_removed(self) -> None:
+        """An undefine refuses a running guest and changes nothing of it: the
+        proxy and rule removals run only after that refusal."""
+        names = [task["name"] for task in yaml.safe_load(VM_UNDEFINE.read_text(encoding="utf-8"))]
+        refusal = names.index("Fail if VM is running")
+        for removal in (self.PROXY_TASK, "Clean up iptables port forwarding rules"):
+            self.assertGreater(names.index(removal), refusal, removal)
+
     def test_its_proxy_removal_reloads_the_client_and_keeps_the_other_guests(self) -> None:
         self._host(a_rules=False, a_proxy=True, a_reservation=False,
                    a_domain={"state": "shut off", "mac": A_MAC})

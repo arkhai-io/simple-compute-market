@@ -63,43 +63,6 @@
   when: vm_action == "undefine"
   delegate_to: "{{ target_host }}"
 
-- name: Remove this VM's proxy from the VM tunnel client and apply the removal
-  # Through the shared helper every teardown path uses: the block goes by its
-  # exact BEGIN and END lines, and the client is reloaded, never restarted, since
-  # a restart ends every other buyer's sessions on this host. A failed reload
-  # fails the undefine before the guest's rules or domain are touched, and leaves
-  # the reload owed to whichever teardown of this guest runs next, which reloads
-  # before it reports the proxy gone.
-  #
-  # The port this proxy held is reclaimed by the provisioning service, which
-  # allocated it. Nothing here needs to know which port it was.
-  shell: |
-    set -e
-    {{ lookup('file', 'guest_teardown.sh') }}
-
-    remove_guest_proxy /etc/frp/frpc-vms.toml "{{ vm_name }}" "http://127.0.0.1:{{ frp_admin_port | default(7400) }}/api/reload"
-    echo "Relay proxy: $GUEST_PROXY"
-  args:
-    executable: /bin/bash
-  when: vm_action == "undefine"
-  delegate_to: "{{ target_host }}"
-
-- name: Clean up iptables port forwarding rules
-  # By this guest's marker, and, for a rule without one, by its exact address
-  # or forwarded port, never a prefix of either. The subnet-wide masquerade is
-  # shared by every guest and stays.
-  shell: |
-    set -e
-    {{ lookup('file', 'guest_teardown.sh') }}
-
-    echo "=== Cleaning up port forwarding rules for VM {{ vm_name }} ==="
-    remove_guest_rules "{{ vm_guest_rule_marker }}" "{{ vm_ip_for_cleanup.stdout | default('') | trim }}" "{{ vm_external_port_for_cleanup.stdout | default('') | trim }}"
-    echo "Removed $GUEST_RULES_REMOVED iptables rules"
-    echo "=== Port forwarding cleanup completed ==="
-  args:
-    executable: /bin/bash
-  delegate_to: "{{ target_host }}"
-
 - name: Check if VM has attached GPU before undefine
   shell: |
     # Check if VM has any GPU (hostdev) attached
@@ -146,6 +109,43 @@
     - vm_action == "undefine"
     - vm_state_check is defined
     - vm_state_check.stdout == "running"
+
+- name: Remove this VM's proxy from the VM tunnel client and apply the removal
+  # Through the shared helper every teardown path uses: the block goes by its
+  # exact BEGIN and END lines, and the client is reloaded, never restarted, since
+  # a restart ends every other buyer's sessions on this host. A failed reload
+  # fails the undefine before the guest's rules or domain are touched, and leaves
+  # the reload owed to whichever teardown of this guest runs next, which reloads
+  # before it reports the proxy gone.
+  #
+  # The port this proxy held is reclaimed by the provisioning service, which
+  # allocated it. Nothing here needs to know which port it was.
+  shell: |
+    set -e
+    {{ lookup('file', 'guest_teardown.sh') }}
+
+    remove_guest_proxy /etc/frp/frpc-vms.toml "{{ vm_name }}" "http://127.0.0.1:{{ frp_admin_port | default(7400) }}/api/reload"
+    echo "Relay proxy: $GUEST_PROXY"
+  args:
+    executable: /bin/bash
+  when: vm_action == "undefine"
+  delegate_to: "{{ target_host }}"
+
+- name: Clean up iptables port forwarding rules
+  # By this guest's marker, and, for a rule without one, by its exact address
+  # or forwarded port, never a prefix of either. The subnet-wide masquerade is
+  # shared by every guest and stays.
+  shell: |
+    set -e
+    {{ lookup('file', 'guest_teardown.sh') }}
+
+    echo "=== Cleaning up port forwarding rules for VM {{ vm_name }} ==="
+    remove_guest_rules "{{ vm_guest_rule_marker }}" "{{ vm_ip_for_cleanup.stdout | default('') | trim }}" "{{ vm_external_port_for_cleanup.stdout | default('') | trim }}"
+    echo "Removed $GUEST_RULES_REMOVED iptables rules"
+    echo "=== Port forwarding cleanup completed ==="
+  args:
+    executable: /bin/bash
+  delegate_to: "{{ target_host }}"
 
 - name: Detach GPU from VM before undefine (if attached)
   shell: |

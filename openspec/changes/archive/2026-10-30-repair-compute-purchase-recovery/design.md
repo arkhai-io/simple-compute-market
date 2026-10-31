@@ -2078,6 +2078,18 @@ accepted under the owner's standing instruction.
 - **F2, held.** F2 asked to move `vm_undefine`'s proxy task after its running-guest
   refusal. It is held, because the iptables rule removal also runs before that
   refusal and would then precede the proxy task, contrary to its comment.
+- **F2, fixed** (the supervising session chose to move both tasks). The proxy task
+  and the iptables rule removal now run immediately after "Fail if VM is running",
+  unchanged and in their former order, so every task before the refusal only reads.
+  An `AnUndefine` test holds both after the refusal.
+- **F3, closed.** The review noted that the full new cleanup had not run on a real
+  host. The supervising session then ran the cleanup script, as a create writes it,
+  on a real host against a stopped, never-booted guest without a GPU. It removed the
+  guest's domain, disk, firmware variables, DHCP reservation, keys, temporary files,
+  and the script itself, and left the host's other state unchanged. The changed relay
+  helper was also run there against a synthetic loopback endpoint: a failed reload
+  kept its record, the retry cleared it, and a repeat found nothing. Neither run
+  rented a GPU or injected a failure into a real tunnel client.
 
 ## Compatibility, migration, and rollback
 
