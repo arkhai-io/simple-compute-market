@@ -469,12 +469,17 @@ End service MUST classify evidence as lawful (entitled buyer/payee stop, terms/e
 #### Scenario: The site activates in time but the buyer cannot use the resource by the deadline
 
 - **WHEN** the site activates the lease at 12:29 against a 12:30 deadline and the storefront records `available` only after 12:30, or never
-- **THEN** the deal is seller non-delivery at 12:30 and the seller half files `exceptional_end(at = 12:30)`; a `begin_billing` not yet sent is refused and no new rate part starts; the site's activation is a capacity fact the lifecycle does not treat as delivery
+- **THEN** the deal is seller non-delivery, established at 12:30, and the seller half files `exceptional_end(at = 12:00, delivered: false)` — the Agreement start, the never-delivered basis; a `begin_billing` not yet sent is refused and no new rate part starts; the site's activation is a capacity fact the lifecycle does not treat as delivery
 
 #### Scenario: Billing started seconds before the deadline and availability failed
 
 - **WHEN** the payment authority accepts the payee's `start` at 12:29:58 against a 12:30 deadline and the storefront crashes before recording `available`, recovering at 12:40
-- **THEN** the accepted start stands as history and is not refused after the fact; the deal is seller non-delivery at 12:30, access is never granted, the resource is ended through end service, and the seller half files `exceptional_end(at = 12:30)`, whose standard ruling stops the rate part returned and reverses what it earned since `at`
+- **THEN** the accepted start stands as history and is not refused after the fact; the deal is seller non-delivery, established at 12:30, access is never granted, the resource is ended through end service, and the seller half files `exceptional_end(at = 12:00, delivered: false)`, whose standard ruling stops the rate part returned and reverses everything it earned since the Agreement start
+
+#### Scenario: Billing ran for many periods before the deadline and availability failed
+
+- **WHEN** a spot deal with a one-minute period, no setup charge and no penalty is approved at 12:00 with a 12:30 deadline, billing starts at 12:01, the storefront crashes before `available` and recovers at 12:40
+- **THEN** the filing is `exceptional_end(at = 12:00, delivered: false)`, the ruling reverses all thirty-nine completed periods, and the buyer's net charge for the deal is zero
 
 ### Requirement: Pending correction resolves in the same journal
 
