@@ -602,8 +602,18 @@ unrelated key is refused; connectivity over the management tunnel; after release
 string is refused and the holdings read shows the lease released. The finaliser cuts
 the lease short so reclaim runs. The host key is pinned from the target's
 `ssh_host_public_key`, following `e2e_bare_metal_deal`, since the operator knows a
-bare-metal host's key. How a rerun adopts an earlier listing is settled in planning
-against bare-metal publication. `e2e_bare_metal_deal` is unchanged.
+bare-metal host's key. `e2e_bare_metal_deal` is unchanged.
+
+A rerun adopts the listing publication already holds (settled in planning, as this
+decision delegated). A bare-metal listing is derived by the publication loop, never
+created, and its derivation identity is its Physical Resource and its shape's digest:
+a rerun against the same declaration derives the same candidate, which publication
+refreshes or reopens rather than publishing anew, while a corrected declaration
+closes the old listing and publishes a successor. So the lane's publication stages
+accept, for its resource, either a `publish` action or no new listing beside one
+already open, and record the one open listing on its resource; several open
+listings on it, or none after the step, fail naming them, before any deal stage
+writes. Nothing pauses or creates a listing, unlike the VM lane's adoption.
 
 Rejected: extending `e2e_bare_metal_deal` (rebuilding it into what the shared stages
 already provide, and losing its payment qualification).
@@ -633,29 +643,40 @@ inconsistent.
 
 ### D13. Implementation cadence
 
-Implementation waits for `frp-grant-admission` to be archived. Three rounds, two
-sessions each, each round ending in its own review:
+On the owner's direction after the design review (workflow log seq 39), the work
+that does not need the admission plugin comes first, and `frp-grant-admission` gates
+only the work that does and this change's closeout. Nothing in SCM imports the
+plugin: the signer is built to the grant format D16 states, which the prerequisite
+carries as its requirement, and the family roles take the plugin's image and
+configuration as inputs. What needs the plugin itself is a fourth round: installing
+it on a relay, checking the signer against the plugin's published test vector, the
+operator documentation of admission, and the live run. So rounds 1–3 below start
+now, round 4 waits for `frp-grant-admission` to be archived, and the operator
+documentation the third round first carried moves to round 4, since it describes
+the plugin's configuration. Four rounds, each ending in its own review:
 
 - **Round 1 — the service core.** Session 1: the relay machinery's move into the
   family kit, contracts, client, and routes; the `pool_relays` migration; the
   holdings read; bare metal's pool configuration accepting `relay_id`. Session 2:
-  the grant signer conforming to the plugin's specification and vector; keys per
-  relay with staged rotation; the port quarantine; preparation refusing a relay with
-  no active key; the management-address check.
+  the grant signer built to D16's format; keys per relay with staged rotation; the
+  port quarantine; preparation refusing a relay with no active key; the
+  management-address check.
 - **Round 2 — hosts and playbooks.** Session 1: the family IaC project;
   `relay-client` and `relay-proxy` with the admin API locked down; `relay-server`
-  installing the plugin's image; VM's tasks onto the roles; the relay block rename.
+  moved from `frp-setup`; VM's tasks onto the roles; the relay block rename.
   Session 2: bare-metal relay access (allocation, the codec's endpoint, grant and
   reclaim through `relay-proxy`); bare-metal host preparation; reclaim ending the
   tenant's activity.
-- **Round 3 — the lanes and documentation.** Session 1: target version 2 and the VM
-  lane over a relay, with the second-deal sequence and its evidence stages. Session
-  2: the real bare-metal lane; the SSH helper convergence; the runbook (including
-  onboarding a site to a shared relay) and seller documentation.
-
-Round 3 ends with a live-verification section in the `[log]` form
-`prove-real-vm-provisioning` used: the owner supplies the run's output, free of
-environment identifiers, and the change is `blocked in implementation` until then.
+- **Round 3 — the lanes.** Session 1: target version 2 and the VM lane over a relay,
+  with the second-deal sequence and its evidence stages. Session 2: the real
+  bare-metal lane; the SSH helper convergence.
+- **Round 4 — admission end to end, once `frp-grant-admission` is archived.**
+  Session 1: `relay-server` installing the plugin with its configuration; the
+  signer's check against the plugin's published vector; the runbook (including the
+  admission check and onboarding a site to a shared relay) and seller documentation.
+  Session 2: a live-verification section in the `[log]` form
+  `prove-real-vm-provisioning` used: the owner supplies the run's output, free of
+  environment identifiers, and the change is `blocked in implementation` until then.
 
 ## Risks and trade-offs
 
