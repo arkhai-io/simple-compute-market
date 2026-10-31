@@ -380,12 +380,17 @@ Filing a case MUST NOT itself change delivery; only a verified ruling's delivery
 
 ### Requirement: A seller's exceptional end is a dispute filing
 
-The seller half MUST journal exceptional_end(at) with a delivery end and file it only with the agreement's dispute authority through the dispute adapter. It MUST NOT send a stop or reverse of its own for it, and the payments vocabulary MUST NOT contain an exceptional-end event kind or field. Future at MUST refuse, and unknown filing results MUST resolve by the stable key before retry.
+The seller half MUST journal exceptional_end(at, delivered) with a delivery end and file it only with the agreement's dispute authority through the dispute adapter; `delivered` MUST state whether the resource was ever available to the buyer, false for the never-delivered and past-deadline bases, and the standard self-penalty MUST return a setup part — a `once` part the service clamped to zero length at approval — in full when it is false and not at all when it is true, since a zero-length term has no unserved share of time. It MUST NOT send a stop or reverse of its own for it, and the payments vocabulary MUST NOT contain an exceptional-end event kind or field. Future at MUST refuse, and unknown filing results MUST resolve by the stable key before retry.
 
 #### Scenario: An administrator ends a once-only deal
 
 - **WHEN** the seller administrator issues exceptional_end(now) for a hosted once-only deal
 - **THEN** end service records the attributed delivery end and the dispute adapter files exceptional_end(now) with a stable key; the seller sends no reverse, and delivery does not await the ruling
+
+#### Scenario: Setup returns by delivery, not by time
+
+- **WHEN** a setup part clamped to approval is in a deal the seller files exceptional_end on with `delivered: false`, and in another with `delivered: true`
+- **THEN** the first ruling returns the setup part in full and the second leaves it whole, whatever share of any term has passed
 
 #### Scenario: Hardware fails on a spot deal
 

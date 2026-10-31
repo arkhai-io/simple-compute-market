@@ -247,9 +247,11 @@ No-dispatch proof permits end service's release without teardown; dispatched wor
 is adopted and ended, not replaced. The site report is end intent and evidence,
 not proof of hardware release; proven release is a separate completion fact.
 Physical recovery does not wait for authorities. The seller half files
-`exceptional_end(at)` with the Agreement's dispute authority through the dispute
-adapter, journaled with the end, and sends no stop or reverse of its own, so the
-authority never reconciles seller-side effects.
+`exceptional_end(at, delivered)` with the Agreement's dispute authority through the
+dispute adapter, journaled with the end, and sends no stop or reverse of its own, so the
+authority never reconciles seller-side effects; delivery supplies the `delivered` fact
+from its own durable `available` record, false on every never-delivered and
+past-deadline basis.
 
 Arkhai mediation's only mechanical ruling is the standard self-penalty
 (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`): dispute-authority rules the foundation and mediation own, never amounts or

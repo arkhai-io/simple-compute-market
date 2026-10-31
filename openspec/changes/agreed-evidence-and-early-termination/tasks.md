@@ -12,7 +12,7 @@ double.
 Sections follow the design's implementation cadence. Sections 1–7 are round 1 (foundation,
 wire and buyer side), except 7.5's explicitly round-2 end verification; section 8 joins round 1 once its schema and vectors are vendored
 into `kit/arkhai-payments/schema/`. The per-part lifecycle revision is published;
-including `partialPeriod`; the setup part is an ordinary once part and needs no further contract confirmation. The exact producer revision is recorded only in schema/SOURCE.md at 8.1.
+including `partialPeriod`; the setup part is an ordinary once part the service clamps to zero length at approval and needs no further payments-contract confirmation; its return for non-delivery is mediation's, by the filing's `delivered` flag (12.3), not the payments contract's. The exact producer revision is recorded only in schema/SOURCE.md at 8.1.
 Unsupported terms fail closed; once-only work does not wait for unsupported rate terms.
 Sections 9–15 are round 2 (seller servicing and domain wiring); section 16 is the closeout.
 
@@ -575,7 +575,7 @@ paid-out money" (client side) and "Dispute writes are idempotent". Files: new
       "A late case ends delivery" (filing half), "A filing's response is lost", "The case closes
       during the append" and "The claimant adds evidence".
 
-- [ ] 12.3 Map `buyer_end(at)` (buyer-filed) and `exceptional_end(at)` (payee-filed) through the
+- [ ] 12.3 Map `buyer_end(at)` (buyer-filed) and `exceptional_end(at, delivered)` (payee-filed) through the
       mediation adapter's published request vocabulary, preserving the signed buyer request and
       seller acknowledgement as evidence. Files:
       `kit/arkhai-mediation` adapter and contract. Gate: section 2.4 and the confirmed
@@ -585,7 +585,8 @@ paid-out money" (client side) and "Dispute writes are idempotent". Files: new
       Confirm payer notice/partialPeriod and netting recorded stops (including unknown-but-landed
       stop) in the published mapping. The only mechanical ruling is the standard self-penalty for a
       payee-filed exceptional_end at least as strong: stop rate parts now returned through mediation's
-      own `chosen` entry, reverse earnings since at and unserved once shares (setup all if undelivered),
+      own `chosen` entry, reverse earnings since at and unserved prepaid once shares, return setup by the filing's
+      `delivered` flag (all when false, none when true),
       then reverse min(premature_stop_penalty, earned amounts still held) across parts in mandate order;
       bond award is reserved for hosted bonds; weaker requests enter triage. Verify the standard and weaker requests. Bind the semantic filing identity and same-intent
       discovery/adoption across online/operator callers without a concurrent-writer duplicate.

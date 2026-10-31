@@ -240,11 +240,12 @@ authority identity. Knowing a transaction or case ref grants no permission.
   unknown agreement or unauthorized reader receives the pinned contract's refusal,
   not a fabricated empty record. Sign with the Agreement's `record_key` through the
   shared kit fixture (02 F12).
-- The only mechanical ruling is a payee-filed exceptional_end(at) request at least
-  as strong as the standard self-penalty, which the mediation double applies exactly as
+- The only mechanical ruling is a payee-filed exceptional_end(at, delivered) request at
+  least as strong as the standard self-penalty, which the mediation double applies exactly as
   `openspec/changes/agreed-evidence-and-early-termination/design.md#the-standard-self-penalty` states, step by step, from the kit's contract vectors; the double does not
   restate or vary the rule, invents no bond support and reports no unsupported effect
-  complete. A person applies the same cap in a buyer's unentitled-seller-end case, and
+  complete; the setup part returns by the filing's `delivered` flag, and the vectors carry
+  both values. A person applies the same cap in a buyer's unentitled-seller-end case, and
   non-payee or weaker requests do not receive the mechanical ruling.
 - Buyer_end(at) and every other nonqualifying claim enter visible triage. A signed
   storefront acknowledgement at filing or later append is evidence for a person,
