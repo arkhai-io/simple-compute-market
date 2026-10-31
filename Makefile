@@ -969,9 +969,9 @@ orchestrate: ## Open the orchestrating Claude Code session for one OpenSpec chan
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
 	@claude --model claude-opus-5-5 --effort medium "/change-orchestrate $(CHANGE)"
 
-plan: ## Open a Claude Code planning session for an OpenSpec change; unattended, it resumes the design session (CHANGE=<change> [UNATTENDED=1 [FRESH=1] [ALLOW='<rule>;<rule>']])
+plan: ## Open a Claude Code planning session for an OpenSpec change; unattended, it resumes the design session, and ARGUMENTS follows the change in the skill's invocation, as the owner's direction to the plan (CHANGE=<change> [UNATTENDED=1 [FRESH=1] [ARGUMENTS=<text>] [ALLOW='<rule>;<rule>']])
 	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
-	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) plan "$(CHANGE)"$(if $(filter 1,$(FRESH)), --fresh)$(STEP_GRANTS),claude "/change-plan $(CHANGE)")
+	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) plan "$(CHANGE)"$(if $(filter 1,$(FRESH)), --fresh)$(if $(strip $(ARGUMENTS)), --arguments '$(subst ','\'',$(ARGUMENTS))')$(STEP_GRANTS),claude "/change-plan $(CHANGE)")
 
 implement: round-view-closed ## Open a fresh Claude Code session implementing an OpenSpec change; unattended, ARGUMENTS follows the change in the skill's invocation, as a merge's conflicts to resolve, and SESSION_ID continues that implementation session instead (CHANGE=<change> [SECTION=<n>] [SECTIONS=<n-m>] [UNATTENDED=1 [ARGUMENTS=<text>] [SESSION_ID=<id>] [ALLOW='<rule>;<rule>']])
 	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
