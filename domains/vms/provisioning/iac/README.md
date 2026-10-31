@@ -1323,6 +1323,11 @@ exactly `running` is ready. A failed request, another status, or an empty body i
 retried within the wait's bound, and a body that is not the client's status document
 ends the create as an error at once.
 
+A teardown removes the guest's proxy block and then reloads the client. A
+`frpc-vms.toml.reload-pending.<guest>` record beside the configuration stays until a
+reload succeeds. While it remains, the teardown fails and capacity stays held, and a
+retry reloads before it reports the proxy gone, so retrying is safe.
+
 #### Guest names
 
 The playbooks use `vm_target` four ways, and a name must satisfy all of them:

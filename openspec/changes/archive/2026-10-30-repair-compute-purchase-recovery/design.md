@@ -2068,6 +2068,17 @@ Done as planned. The successful teardown changes in two ways:
 - **New removals by name:** it removes a reservation or storage left under the
   guest's name, which it previously left behind.
 
+A combined review of S14 and S15 raised minor points, which the supervising session
+accepted under the owner's standing instruction.
+- **F1, the operator's verification.** `docs/development/VALIDATION_RUNBOOK.md`
+  "27. Running Live Lanes", step 5, now has a VM drain verify, before any
+  force-release, that no `frpc-vms.toml.reload-pending.<guest>` record remains and
+  that the running client lists no `vm-<guest>` proxy. The host kit's README describes
+  the record beside the relay wait.
+- **F2, held.** F2 asked to move `vm_undefine`'s proxy task after its running-guest
+  refusal. It is held, because the iptables rule removal also runs before that
+  refusal and would then precede the proxy task, contrary to its comment.
+
 ## Compatibility, migration, and rollback
 
 - **No schema migration.** `public_port` lives in the connection envelope's public

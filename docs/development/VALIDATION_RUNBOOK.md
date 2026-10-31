@@ -1088,7 +1088,10 @@ re-check from fresh read-backs:
    - its site reservation is `released`, or force-released after verification;
    - every provider job for it is terminal;
    - its host-side effects are verified removed: the tenant key and account for bare
-     metal, the guest and its artifacts for VM;
+     metal, the guest and its artifacts for VM. For VM, verify before any
+     force-release that no `frpc-vms.toml.reload-pending.<guest>` record is left beside
+     the VM tunnel client's configuration, and that the running client's status lists
+     no `vm-<guest>` proxy;
    - no approved receipt or recorded materialization remains that could still start a
      delivery.
 
