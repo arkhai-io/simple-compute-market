@@ -93,8 +93,9 @@ option is shown as making no delivery promise, not refused for lacking one (D3).
   reserved duration and D7's display of class/price unit/setup/reserve/terms, including
   per-stopper and term-end `settles_through`, premature-stop penalty amount/asset/cap,
   the delivery deadline as seconds after approval, recommended default acceptance refusal of
-  on-demand without positive penalty and of any compute option without a delivery deadline
-  (explicit buyer opt-out), unrounded effective horizon and
+  on-demand without positive penalty and of a compute option whose mechanism has a lifecycle
+  adapter without a delivery deadline (explicit buyer opt-out; an option without an adapter
+  is shown as making no delivery promise), unrounded effective horizon and
   stop-then-hint semantics. Use
   accepted codec values; never promise a reserve-ahead loss cap. Unit targets:
   `domains/vms/buyer/tests/test_buy_resume_cli.py`, `test_explain_cli.py` and
