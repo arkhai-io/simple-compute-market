@@ -92,7 +92,9 @@ the port.
 Why: the relay design names a GPU pool and a bare-metal pool sharing one
 rendezvous as the ordinary case, and only an application-accounted port can share
 a relay with VM leases without colliding; a leased port also closes at reclaim,
-which a fixed route does not.
+which a fixed route does not. Selling bare metal over a relay rests on that relay
+enforcing admission, which is the operator's installation, proven by the runbook's
+admission check before its pools serve buyers (D19).
 
 Rejected:
 
@@ -135,9 +137,14 @@ resource_pools, relay_id → relays)`, holds every pool's reference. Both provid
 accept `provider_config.relay_id` on the wire and read and write it through one
 family function, which runs the rebinding check. One migration creates
 `pool_relays`, copies any reference from `ansible_pool_configs.relay_id`, and drops
-that column. It departs from the additive-by-default schema rule because no
-relay-backed pool exists in any deployment; nothing reads the column during a
-rollout.
+that column. It departs from the additive-by-default schema rule, and the upgrade is
+fail-forward (28 F4): an older provisioner maps the column on every VM pool read and
+cannot read the table once it is dropped, so rolling back past the migration means
+restoring a database backup taken before the upgrade, or rolling forward. The
+deployment guide records it beside the `hosts.gpu_count` drop, with the same
+pre-upgrade backup. No rollout runs two provisioner versions over one database (the
+chart's `strategy: Recreate` over one ReadWriteOnce volume), and no relay-backed
+pool exists in any deployment, so there is nothing for expand/contract to protect.
 
 Why: which relay a pool's hosts dial is a fact about where they are, not provider
 configuration; one table answers "which relay does this pool use" and "which pools
@@ -166,6 +173,25 @@ VM's `vm-setup`, create, and teardown tasks call them; `bare-metal-access` calls
 `domains/bare_metal/provisioning/iac/ansible/playbooks/host-kit/` applies
 `relay-client`. The service image copies the family tree, and the IaC tests move
 with the tasks.
+
+Playbooks and roles name the family roles bare (`relay-proxy`), found through
+Ansible's role search path (28 F5): the service image copies the family tree beside
+the domain trees and sets `ANSIBLE_ROLES_PATH` to its roles, as it sets the
+collections path; each domain's own `ansible.cfg` adds the family tree's
+repository-relative path to its `roles_path` for manual runs (VM's gains the entry;
+bare metal gains an `ansible.cfg`). The shared service `ansible.cfg` stays free of
+any domain's paths. Both domains' playbooks pass `ansible-playbook --syntax-check`
+under their own configuration and under the image's environment. Rejected: an Ansible
+collection (a namespace, metadata, and an install step for three roles in one
+repository); relative paths into the family tree (they resolve in the repository or
+in the image, not both).
+
+Every task that renders, writes, sends, or reads the grant, the relay token, or the
+client's admin password sets `no_log` (28 F3), and the relay family supplies one set
+of those variables' names that every codec whose jobs carry them includes in its
+secret fields, so the executor's redaction covers them in VM and bare-metal jobs
+alike. Bare metal's codec, which names no secret field today, gains them because its
+grant and reclaim jobs now carry the token and the grant.
 
 Why: a domain's tooling never depends on a sibling's, and one behaviour is chosen
 for both domains where nothing requires a difference. The live run then proves
@@ -257,7 +283,9 @@ Lifecycle:
 1. Allocation records `grant_expires_at` on the lease: the reservation's lease end
    plus a grace covering teardown.
 2. Execution signs the grant from the lease, immediately before the job's variables
-   are written, as the relay token is resolved; it never enters job parameters.
+   are written, as the relay token is resolved, on every attempt of the job; it never
+   enters job parameters, and never a job's logs, error, or result (D3's `no_log` and
+   redaction, 28 F3).
 3. A released port is not reissued until its `grant_expires_at` has passed, so a
    copied grant cannot claim a port another host now holds.
 4. Teardown is the revocation: it removes the proxy and the access (the guest, or
@@ -292,8 +320,26 @@ key holding it (`grant_key_secret_key`), read once at creation, as
 key, and each retired key with the time its grants stay valid until — never a
 private key. Rotation is two controller operations: *stage* generates a key pair in
 the service and returns its public half, the operator adds it to the plugin, and
-*activate* starts signing with it. Each lease records the key id that signed its
-grant, which is how a read knows when a retired key may leave the plugin.
+*activate* starts signing with it.
+
+A retired key's grants stay valid until the latest `grant_expires_at` among the
+unreleased leases allocated before it was retired (28 F2). A grant is signed on
+every attempt of a job, so one lease may have grants from more than one key on its
+host — an attempt that installed a grant signed by key A, failed, and was retried
+after key B was activated — and a record of one key per lease could report A
+removable while a host still holds its grant. The bound is never short: every grant
+a key signed was signed before its retirement, for a lease allocated before it, and
+a lease's grant expiry is fixed at allocation. Released leases are left out, since
+teardown is the revocation (D16), and refusing a reconnect from a host teardown
+could not reach is wanted. Each lease still records the key id that signed its
+latest grant, as a diagnostic the holdings read reports. The bound can keep a key in
+the plugin longer than strictly needed; an emergency rotation removes the old key at
+once and accepts that sessions on it fail at their next reconnect, as the runbook
+says.
+
+Rejected: recording every key that signed a lease's grants (exact, but state every
+signing writes, for a bound time gives free); keeping a lease's key stable across
+retries (retired private keys kept for signing).
 
 Why: it treats the key exactly as the relay token is treated — a relay is
 establishable by applying the chart alone, and no private key passes through a
@@ -327,7 +373,7 @@ does not have, for code largely rewritten); our own plugin in Go (a second
 implementation of the grant format); placing it in `domains/compute/` with the
 grant format as an SCM contract (backwards: the plugin owns its specification).
 
-### D19. Every relay enforces admission, and management ports use another relay
+### D19. Every relay is configured for admission, and management ports use another relay
 
 Every relay holds an active grant key and every proxy carries a grant: fulfillment
 preparation refuses a pool whose relay has no active key, naming the relay and what
@@ -339,9 +385,23 @@ placed in a relay-backed pool is refused when its connection address is that rel
 address, and so is the reverse. The check compares normalized addresses and catches
 the obvious case only, which is how it is documented.
 
+What the service guarantees is that every proxy it configures carries a grant and
+that it refuses a relay with no active key. That a relay enforces admission is the
+operator's installation (28 F1): `physical-provisioning`'s specification and the
+operator documentation state what a relay must run — frps with the admission plugin
+configured with the relay's issuer keys — and the runbook's admission check proves it
+on the deployed relay, an ungranted proxy refused with the plugin's refusal in its
+log, before a relay-backed pool first serves buyers and after any change to the
+relay's plugin configuration. A relay deployed without it accepts any port; that is
+the operator's fault, and the service does not verify it.
+
 Why: the service cannot verify a relay runs the plugin — nothing on the relay calls
 SCM, and nothing in this design calls the relay — so one mode for every relay leaves
-no domain with admission accidentally off. Management proxies carry no grant, and a
+no domain with admission accidentally off. A readiness probe from the service
+(registering an ungranted proxy with the relay token and expecting refusal) was
+declined (28 F1): it needs an frp client in the service image and a path from the
+service to every relay, and proves admission only at the moment of the probe, which
+the runbook check already does. Management proxies carry no grant, and a
 static allow-list for them would bring back the attack on a dropped host's
 management port. No relay is live, so nothing migrates.
 
@@ -603,7 +663,10 @@ environment identifiers, and the change is `blocked in implementation` until the
   domain's relay access, and two lanes. The cadence orders it so each round rests on
   a reviewed one.
 - **A relay without the plugin accepts any proxy**, and the service cannot tell
-  (D19). The runbook's admission step and the lanes are the only proof.
+  (D19). Running it is the operator's responsibility; the runbook's admission check
+  is the proof.
+- **A retired grant key may stay in the plugin longer than needed** (D17): until the
+  longest unreleased lease allocated before its retirement ends.
 - **Port quarantine after a lease is cut short** holds a port until the lease's
   original end; a window can run short under heavy early termination.
 - **Lease extension would drop the session** of the extended lease (D16).

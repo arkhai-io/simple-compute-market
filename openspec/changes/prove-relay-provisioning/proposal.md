@@ -35,7 +35,12 @@ holds a relay's token can register any free port the relay allows.
 - **Relay admission by signed grants.** The provisioning service signs a grant per
   lease with a key the relay row holds; the proxy carries it; a plugin on the relay
   admits a proxy only for the port its grant names, within its key's range. Every
-  relay enforces admission; management ports use another relay; a relay may be shared
+  relay is configured for admission: every proxy carries a grant, and a relay with no
+  active key is refused. That a relay enforces it is the operator's installation,
+  stated as the relay's requirements and proven by the runbook's admission check
+  before its pools serve buyers; the service does not verify it. A retired key stays
+  valid while a lease allocated before its retirement is unreleased and its grant
+  unexpired. Management ports use another relay; a relay may be shared
   by several provisioning services, each bound to its own range. A released port is
   not reissued until its grant expires. The plugin itself is the prerequisite change
   `frp-grant-admission`'s.
@@ -90,7 +95,8 @@ None. The plugin's capability is `frp-grant-admission`'s.
 ## Impact
 
 - `provisioning/compute/` (`compute_provisioning`, its contracts and client, the
-  service): the relay package, `pool_relays` and its migration, grant signing, relay
+  service): the relay package, `pool_relays` and its fail-forward migration, grant
+  signing and the relay secret fields every relay-carrying codec redacts, relay
   keys and their rotation, the holdings read, preparation's admission checks.
 - `domains/vms/provisioning/adapter/` and its operator client: the relay machinery
   leaves; the plan, codec, and mock output keep VM's share.
@@ -101,7 +107,9 @@ None. The plugin's capability is `frp-grant-admission`'s.
   moves out; the create facts' relay block.
 - `domains/bare_metal/provisioning/iac/`: the access role's relay proxy and reclaim
   policy; a host-preparation playbook.
-- `provisioning/compute/service` image: copies the family IaC tree.
+- `provisioning/compute/service` image: copies the family IaC tree and sets
+  `ANSIBLE_ROLES_PATH` to its roles; each domain's `ansible.cfg` (bare metal gaining
+  one) adds the family roles to its `roles_path`.
 - `e2e-tests/`: the target model and example, both real lanes, the SSH helper, and
   their unit tests.
 - Documentation: the validation runbook, the seller relay and bare-metal guides.
@@ -147,8 +155,17 @@ None. The plugin's capability is `frp-grant-admission`'s.
   by default, the management client's admin API).
 - Signed-grant admission, the grant's lifecycle, relay keys, admission on every relay,
   shared relays (D14, D16, D17, D19, D20) → `physical-provisioning` spec and
-  architecture; `docs/development/VALIDATION_RUNBOOK.md` (plugin configuration, key
-  rotation, site onboarding, a host teardown cannot reach).
+  architecture; `docs/development/VALIDATION_RUNBOOK.md` (plugin configuration, the
+  admission check as a precondition before a relay-backed pool serves buyers, key
+  rotation and a retired key's retention, an emergency rotation, site onboarding, a
+  host teardown cannot reach); `docs/seller-frp-setup.md` (what a relay must run).
+- The fail-forward drop of `ansible_pool_configs.relay_id`, with its pre-upgrade
+  backup (D2) → `docs/development/DEPLOYMENT_AND_CONFIG.md`, beside the
+  `hosts.gpu_count` drop.
+- The family roles found through the role search path (D3) → `physical-provisioning`
+  architecture.
+- Secrets kept out of job logs by `no_log` and the family's relay secret fields (D3,
+  D16) → `physical-provisioning` spec and architecture.
 - Relay infrastructure never calls an SCM service (D14) → `ARCHITECTURE.md`
   "Authority boundaries".
 - SCM does not own generic infrastructure that is not specific to it; having to build

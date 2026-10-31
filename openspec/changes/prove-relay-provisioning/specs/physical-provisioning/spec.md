@@ -190,7 +190,7 @@ A bare-metal grant on a pool referencing a relay MUST lease a port from the rela
 
 ### Requirement: Every relay proxy carries a signed grant
 
-Every proxy the buyer-facing tunnel client registers MUST carry, in its own metadata, a grant the provisioning service signed with the relay's active grant-signing key: an EdDSA JWT naming the relay as its audience, the leased port, an expiry no earlier than the lease's scheduled end plus a grace period, the host, the lease, and the signing key's identifier, conforming to the grant specification the relay admission plugin publishes. The grant MUST be signed immediately before the job's variables are written, MUST NOT be written into an accepted operation's persisted parameters, and MUST NOT appear in a job read. The lease MUST record the grant's expiry and the signing key's identifier.
+Every proxy the buyer-facing tunnel client registers MUST carry, in its own metadata, a grant the provisioning service signed with the relay's active grant-signing key: an EdDSA JWT naming the relay as its audience, the leased port, an expiry no earlier than the lease's scheduled end plus a grace period, the host, the lease, and the signing key's identifier, conforming to the grant specification the relay admission plugin publishes. The grant MUST be signed immediately before the job's variables are written, on every attempt of the job, and MUST NOT be written into an accepted operation's persisted parameters. Neither the grant, the relay's admission token, nor the buyer-facing client's admin password MUST appear in a job read, its logs, its error, or its result: every playbook task that renders, writes, sends, or reads one of them MUST set `no_log`, and every codec whose jobs carry them MUST name their variables among the secret fields the executor redacts. The lease MUST record the grant's expiry and the identifier of the key that signed its latest grant.
 
 #### Scenario: A relayed create is executed
 
@@ -202,9 +202,19 @@ Every proxy the buyer-facing tunnel client registers MUST carry, in its own meta
 - **WHEN** a relay's grant key is activated after a job is accepted and before it executes
 - **THEN** the job's grant is signed with the newly active key
 
+#### Scenario: A relayed job succeeds
+
+- **WHEN** a relayed create or grant job succeeds and its job is read
+- **THEN** the read's logs and result contain neither the grant, the relay token, nor the host's admin password
+
+#### Scenario: A relayed job fails after writing its proxy
+
+- **WHEN** a relayed create or grant job fails after its proxy block is written, and its job is read
+- **THEN** the read's logs and error contain neither the grant, the relay token, nor the host's admin password
+
 ### Requirement: Each relay holds its own grant-signing key
 
-Each relay MUST hold its own Ed25519 grant-signing private key, encrypted at rest under the deployment's configured encryption key. A relay definition entry MUST name the secrets-profile key holding it, read only when the relay is created; a relay created through the API with no key MUST be given one the service generates. No read path MUST return a private key: relay reads MUST return the active key's identifier and public half, any staged key's, and each retired key's identifier with the time its grants remain valid until. Rotation MUST be two explicit operations: staging generates a key and returns its public half without signing with it, and activating makes the staged key sign every later grant.
+Each relay MUST hold its own Ed25519 grant-signing private key, encrypted at rest under the deployment's configured encryption key. A relay definition entry MUST name the secrets-profile key holding it, read only when the relay is created; a relay created through the API with no key MUST be given one the service generates. No read path MUST return a private key: relay reads MUST return the active key's identifier and public half, any staged key's, and each retired key's identifier with the time its grants remain valid until. Rotation MUST be two explicit operations: staging generates a key and returns its public half without signing with it, and activating makes the staged key sign every later grant. A retired key's grants MUST be reported valid until the latest grant expiry among the relay's unreleased leases allocated before the key was retired, since a lease whose job was retried across a rotation may hold grants signed by more than one key.
 
 #### Scenario: A relay is read
 
@@ -216,6 +226,11 @@ Each relay MUST hold its own Ed25519 grant-signing private key, encrypted at res
 - **WHEN** an operator stages a new grant key for a relay
 - **THEN** the service returns the new public key, and grants continue to be signed with the active key until the staged one is activated
 
+#### Scenario: A job is retried across a rotation
+
+- **WHEN** a job's attempt installs a grant signed with key A, key B is then activated, and a retry of the job signs its grant with B
+- **THEN** the relay read reports A's grants valid until that lease is released or its grant expires, whichever is first
+
 #### Scenario: A definition entry names no grant key
 
 - **WHEN** a relay definition entry names no grant-key profile key
@@ -223,7 +238,7 @@ Each relay MUST hold its own Ed25519 grant-signing private key, encrypted at res
 
 ### Requirement: A relay without an active grant key is refused before dispatch
 
-Fulfillment preparation MUST refuse a pool whose referenced relay holds no active grant-signing key, naming the relay and what is missing, as it refuses a relay with no admission token. Every relay serving buyer access is expected to enforce admission; the service cannot observe whether it does.
+Fulfillment preparation MUST refuse a pool whose referenced relay holds no active grant-signing key, naming the relay and what is missing, as it refuses a relay with no admission token. A relay serving buyer access MUST run the admission plugin configured with the relay's issuer keys; that is the operator's installation, which the service does not observe or verify. The operator's runbook check, an ungranted proxy refused by the deployed relay, is the evidence that a relay enforces admission, run before a relay-backed pool first serves buyers and after any change to the relay's plugin configuration.
 
 #### Scenario: A relay has no active key
 
