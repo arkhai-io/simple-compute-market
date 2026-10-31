@@ -10,113 +10,119 @@ consequence as an unowned gap: no end-to-end lane runs a relay-backed pool, whic
 a relay-backed VM's wrong delivered address once went unnoticed.
 
 The real-provisioning lane `prove-real-vm-provisioning` built proves direct access only.
-Its target description (version 1) names one KVM host reached at its own address, and it
-refuses `access.mode: relay`. It also deals on the host's whole sellable capacity, so it
-cannot hold two guests at once, which section 8's "a second VM leaves the first session
-alive" needs.
+Its target description (version 1) names one KVM host and refuses
+`access.mode: relay`, and its listing takes the host's whole capacity, so it cannot hold
+two guests at once.
 
-Bare metal has no relay path at all. A bare-metal grant installs the buyer's key for a
-tenant account on the whole host and delivers the host's own address; a host that has no
-inbound route cannot be sold as bare metal. The relay tables (`relays`,
-`relay_port_leases`, the pool's relay reference) are already the provisioning family's,
-and the relay design names a GPU pool and a bare-metal pool sharing one rendezvous as the
-ordinary case, but the relay services, the port allocator, the terminal-transition port
-release, and the buyer-client role live in the VM domain, where
-`bare-metal-mock-provisioned-deal` moved them.
+Bare metal cannot be sold over a relay with a leased port. Its pools accept no relay
+reference, the relay machinery is the VM domain's, and a tunnel-reached bare-metal host
+is delivered at whatever route its connection names. And no relay may be sold over as
+it stands: the buyer-facing client's admin API is unauthenticated on loopback, which
+gives any account on a host other than root the relay token and local root, and whoever
+holds a relay's token can register any free port the relay allows.
 
 ## What Changes
 
-- **Relay access for bare metal.** A bare-metal pool may reference a relay, as a VM pool
-  does. A grant on a relay-backed pool allocates a port from the relay's window, adds one
-  buyer proxy from the host's `127.0.0.1:22` to that port in the host's buyer-facing
-  tunnel client, and delivers `ssh -p <port> <tenant>@<relay address>`. A reclaim removes
-  the proxy and releases the port for reuse. Neither touches the host's management
-  tunnel client, which the operator configures when preparing the host and the
-  application never reads, writes, or reloads. Bare-metal host preparation gains the
-  buyer-facing client, as VM host preparation has it. Where the relay services live once
-  two domains use them, and whether bare metal reuses the VM domain's buyer-client role,
-  are this change's design questions; the VM and bare-metal access paths differ in more
-  places than this (where the buyer's key enters, the roles, the delivered endpoint),
-  and the design should say which of those it unifies and which it leaves.
-- **Real-provisioning target, version 2.** The target describes several hosts, each with
-  its domain (VM or bare metal), the address and port the provisioning service reaches it
-  at (which, for a relay-reached host, is its management tunnel, not its own address),
-  the provisioning user, and the capacity it sells; and, for relay access, the relay's
-  address, control port, and window. The relay token is never in the target: the stack
-  supplies it through the provisioning profile. Version 1 stays readable or is retired;
-  the design decides.
-- **The real VM lane over a relay.** The lane runs with relay access, deals on a small
-  shape so the host holds two guests at once, and produces the evidence for
-  `relay-vm-access-without-a-dashboard`'s section 6 and section 8: a live buyer session
-  held across a second VM's creation, a proxy inside the window accepted and one outside
-  refused, the management tunnel unaffected by VM churn, the delivered string connecting
-  from outside the cluster, and teardown releasing a port that a later VM reuses.
-- **A real bare-metal lane over a relay.** A grant on a relay-backed bare-metal host
-  delivers a string that connects; an unrelated key is refused; after reclaim the string
-  is refused and the port is released and reused by a later grant; the management tunnel
-  is unchanged across grant and reclaim. Whether this extends the release-qualified
-  `e2e_bare_metal_deal` scenario or follows the real VM lane's shape (registering its own
-  supply from the target) is a design question.
-- **Live verification** against operator-provided hosts and relays, supplied by the owner
-  as `prove-real-vm-provisioning`'s was. A bare-metal host for the live run may be a
-  virtual machine: the bare-metal domain grants and reclaims access on a running host over
-  SSH and touches no hardware, so the run proves the access flow, not anything about
-  hardware.
+- **The relay machinery becomes the compute family's.** Relays, port leases, the
+  allocator, relay administration, the definitions importer, the rebinding refusals,
+  execution-time resolution, reconciliation, and the release effect move from the VM
+  adapter into `compute_provisioning`, with their contracts and client in the family's
+  thin distributions. Every pool's relay reference is stored once, in `pool_relays`.
+- **Bare-metal relay access.** A bare-metal pool may reference a relay. A grant leases
+  a port, adds one buyer proxy from the host's `127.0.0.1:22`, and delivers
+  `ssh -p <port> <tenant>@<relay address>`; a reclaim removes the proxy and releases
+  the port. Bare-metal host preparation installs the buyer-facing client.
+- **Relay admission by signed grants.** The provisioning service signs a grant per
+  lease with a key the relay row holds; the proxy carries it; a plugin on the relay
+  admits a proxy only for the port its grant names, within its key's range. Every
+  relay enforces admission; management ports use another relay; a relay may be shared
+  by several provisioning services, each bound to its own range. A released port is
+  not reissued until its grant expires. The plugin itself is the prerequisite change
+  `frp-grant-admission`'s.
+- **Hardened hosts.** The buyer-facing tunnel tasks become shared family roles; the
+  client's admin API is authenticated on a privileged loopback port; every reclaim
+  policy ends the tenant's sessions, processes, and scheduled jobs.
+- **Relay holdings are readable** through an administrator-only leases route.
+- **Real-provisioning target, version 2.** One section describes a host per domain,
+  each with its connection, its access (a relay by id, or direct with a buyer
+  address), its capacity, and, for VM, the listing shape the lane publishes. Version 1
+  is retired.
+- **The real VM lane over a relay** holds a live session across a second deal's
+  create and teardown, and produces the evidence for the relay change's sections 6
+  and 8.
+- **A real bare-metal lane over a relay**: delivery, an unrelated key refused, access
+  ended and the port released after reclaim, the management tunnel unchanged.
+- **Live verification** against operator-provided hosts and relays. A bare-metal host
+  for the live run may be a virtual machine: the bare-metal domain grants and reclaims
+  access on a running host over SSH and touches no hardware.
 
 ## Capabilities
 
 ### Modified Capabilities
 
-- `physical-provisioning`: relay access for bare-metal pools; where the relay services
-  and the buyer-facing client belong once two domains use them.
-- `test-compatibility`: the real-provisioning target's version 2; the real VM lane over a
-  relay; a real bare-metal lane over a relay.
+- `physical-provisioning`: relay ownership by the compute family; bare-metal relay
+  access; signed grants, relay keys, admission on every relay, port quarantine, the
+  holdings read, and the management-address check; the hardened buyer-facing client;
+  reclaim ending the tenant's activity.
+- `test-compatibility`: the real-provisioning target's version 2; the real VM lane
+  over a relay; a real bare-metal lane over a relay.
 
 ### New Capabilities
 
-None expected; the design confirms.
+None. The plugin's capability is `frp-grant-admission`'s.
 
 ## Non-Goals
 
-- Several sites or storefronts admitted to one shared relay. A token admits its holder to
-  every port the relay allows, so per-site admission on a shared relay is its own change.
-- Configuring a host's management tunnel client. It stays the operator's, outside the
-  application, as the relay design decided.
+- Admission at login on a shared relay: a shared token still lets every site's hosts
+  log in. Deferred, with its trigger in `design.md`.
+- Revoking a grant before it expires; teardown removes the proxy and the access.
+- Configuring a host's management tunnel client. It stays the operator's.
 - A recovery path to a host that does not depend on its SSH daemon.
 - Per-lease buyer keys. Reusing a buyer's key across leases is acceptable.
 - A DNS name or certificate for a relay; the delivered string may name its address.
-- Running the real lanes in the end-to-end pipeline; like the direct real lane, they run
-  outside every lane.
+- Running the real lanes in the end-to-end pipeline; like the direct real lane, they
+  run outside every lane.
+- Extending a lease without dropping its session.
 - Relay deletion semantics (`relay-vm-access-without-a-dashboard` decision gate 1A.7)
-  and the concurrent-allocation retry gap `ROADMAP.md` records, unless the design finds
-  this change cannot avoid them.
+  and the concurrent-allocation retry gap `ROADMAP.md` records.
+- Moving the admission plugin to its own repository, which is a later change.
 
 ## Impact
 
-- `domains/bare_metal/provisioning/`: the adapter's grant and reclaim, its codec's
-  delivered endpoint, the pool configuration handler, and the `bare-metal-access` role and
-  a host-preparation step for the buyer-facing client.
-- `domains/vms/provisioning/adapter/` and possibly `provisioning/compute/`: the relay
-  services, port allocator, and terminal-transition release, wherever the design places
-  them.
-- `domains/vms/provisioning/iac/ansible/`: the buyer-client role if it becomes shared.
-- `e2e-tests/`: the target model and its `.example`, the real VM lane's driver and stages,
-  the bare-metal real lane, and their unit tests.
-- Chart: none expected; the relay definitions document already carries relays.
+- `provisioning/compute/` (`compute_provisioning`, its contracts and client, the
+  service): the relay package, `pool_relays` and its migration, grant signing, relay
+  keys and their rotation, the holdings read, preparation's admission checks.
+- `domains/vms/provisioning/adapter/` and its operator client: the relay machinery
+  leaves; the plan, codec, and mock output keep VM's share.
+- `domains/bare_metal/provisioning/adapter/`: pool configuration, the plan's
+  allocation, the codec's relay endpoint.
+- `provisioning/compute/iac/` (new): `relay-client`, `relay-proxy`, `relay-server`.
+- `domains/vms/provisioning/iac/`: VM's tasks onto the family roles; `frp-setup`
+  moves out; the create facts' relay block.
+- `domains/bare_metal/provisioning/iac/`: the access role's relay proxy and reclaim
+  policy; a host-preparation playbook.
+- `provisioning/compute/service` image: copies the family IaC tree.
+- `e2e-tests/`: the target model and example, both real lanes, the SSH helper, and
+  their unit tests.
+- Documentation: the validation runbook, the seller relay and bare-metal guides.
 
 ## Dependencies and Related Changes
 
+- `frp-grant-admission` (prerequisite, gating implementation): builds the relay
+  admission plugin and owns the grant specification and test vector this change's
+  signer conforms to.
 - `relay-vm-access-without-a-dashboard` (blocked in closeout): its implemented relay
-  resource, allocator, and split clients are what this change exercises, and its sections
-  6 and 8 are closed with evidence this change's live run produces. It does not gate this
-  change; this change unblocks it.
-- `prove-real-vm-provisioning` (archived): the real lane, target description, and shared
-  stage split this change extends.
-- `repair-compute-purchase-recovery` (archived): the release-qualified bare-metal deal
-  scenario and its recovery commands.
+  resource, allocator, and split clients are what this change moves and exercises, and
+  its sections 6 and 8 are closed with evidence this change's live run produces. It
+  does not gate this change.
+- `prove-real-vm-provisioning` (archived): the real lane, target description, and
+  shared stage split this change extends.
+- `repair-compute-purchase-recovery` (archived): `e2e_bare_metal_deal` and its
+  recovery commands, which move onto the shared SSH helper unchanged.
 - `contain-embedded-host-key-material` (ready for design): independent; hosts here are
   reached with the deployment's shared key.
-- Takes ownership of the `ROADMAP.md` gap "No end-to-end lane runs a relay-backed pool".
+- Takes ownership of the `ROADMAP.md` gap "No end-to-end lane runs a relay-backed
+  pool".
 
 ## Permanent documentation impact
 
@@ -128,8 +134,30 @@ None expected; the design confirms.
 
 ### Knowledge to promote
 
-To be determined at design completion. Expected: relay access for bare metal and where
-relay machinery lives → `physical-provisioning`; the target's version 2 and the relay
-lanes → `test-compatibility` and `docs/development/TESTING.md`; the operator procedure →
-`docs/development/VALIDATION_RUNBOOK.md` and the bare-metal seller quickstart; the closed
-gap → `docs/development/ROADMAP.md`.
+- The relay machinery and the pool's relay reference are the compute family's (D2) →
+  `ARCHITECTURE.md` "Family kits"; `openspec/specs/physical-provisioning/spec.md` and
+  `architecture.md` "Buyer access to rented VMs", renamed for both domains.
+- Bare-metal relay access, and a tunnel-reached bare-metal host's buyer route (D1,
+  D15b) → `physical-provisioning` spec; its architecture "The host registry owns the
+  connection"; the bare-metal seller guide.
+- Shared buyer-facing tunnel roles, and host-level client configuration belonging to
+  the host (D3) → `physical-provisioning` architecture; `docs/seller-frp-setup.md`.
+- The admin API's lockdown and the token's boundary on a host (D4) →
+  `physical-provisioning` spec and architecture; the seller guides (a buyer-only relay
+  by default, the management client's admin API).
+- Signed-grant admission, the grant's lifecycle, relay keys, admission on every relay,
+  shared relays (D14, D16, D17, D19, D20) → `physical-provisioning` spec and
+  architecture; `docs/development/VALIDATION_RUNBOOK.md` (plugin configuration, key
+  rotation, site onboarding, a host teardown cannot reach).
+- Relay infrastructure never calls an SCM service (D14) → `ARCHITECTURE.md`
+  "Authority boundaries".
+- SCM does not own generic infrastructure that is not specific to it; having to build
+  it is a warning sign to weigh (D18) → `ARCHITECTURE.md` "Package and dependency
+  layers".
+- Reclaim ends the tenant's activity (D15) → `physical-provisioning` spec.
+- The holdings read (D9) → `physical-provisioning` spec.
+- The target's version 2, both real lanes, and the evidence split (D5–D11) →
+  `openspec/specs/test-compatibility/spec.md`; `docs/development/TESTING.md` "The
+  real-provisioning lane"; `e2e-tests/README.md`; the runbook.
+- The closed relay-lane gap; the unowned gaps for `host_key_checking = False` and for
+  admission at login on a shared relay (D4, D21) → `docs/development/ROADMAP.md` Goal 1.
