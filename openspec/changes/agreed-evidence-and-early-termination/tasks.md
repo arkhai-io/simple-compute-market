@@ -41,8 +41,12 @@ while convergence owns consuming servicing scenarios and activation owns hosted 
 Dependency gates for the folded end work: sections 2 and 10's final-request and site-report
 contracts precede section 13's peer/read routes; sections 7 and 13 precede both domain CLI
 paths. `unify-compute-delivery-path` consumes section 10's admission interface and must preserve
-these early-end scenarios. Archive this foundation first, renewable before unify, and unify before redesign-authenticated-requests;
-their later MODIFIED requirements must preserve every foundation clause and scenario
+these early-end scenarios. Archive this foundation and `activate-compute-leases-at-the-site` first, then unify, then
+`renewable-compute-lease-deadlines`, and unify before redesign-authenticated-requests; the
+overlapping deltas that must be rebased in that order are `physical-provisioning` (this
+foundation's event and outbox, unify's lifecycle adoption, then renewable's watchdog cause) and
+`site-capacity` (this foundation's end report, the activation change's phase and transition,
+then renewable's deadline); their later MODIFIED requirements must preserve every foundation clause and scenario
 (including option-owned authority, reverse part/amount, normative holds and exclusive
 end-service lease writes). `renewable-compute-lease-deadlines`
 adds deadline-specific causes/phases later, not a gate on this report. Reuse
