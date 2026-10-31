@@ -239,13 +239,18 @@ second preemption endpoint or a local payment-stop scheduler.
       buyer-orchestration's “The buyer's end is backed by its own stop or a case”
       for immediate surrender and outage handling; do not implement those paths here.
       Coordinate rate notice display.
-- [ ] 4.5a Add the buyer's watchdog to `kit/deal-lifecycle-buyer` per D6a: an opt-in,
-      per-deal probe of the disclosed access from `available`, with a configured interval
-      and consecutive-failure threshold, that journals its observations and sends the
-      buyer's ordinary entitled stop and hint through 4.5's flow. Verify in the kit's unit
-      suite with a clock-injected probe fake (threshold, no stop below it, one stop and
-      one journal entry at it, idempotent on restart), and in convergence's rows 1 and 2
-      as the buyer's stop landing with the storefront absent.
+- [ ] 4.5a Add the buyer's watchdog per D6a: the probe loop in `kit/deal-lifecycle-buyer`
+      with a per-domain injected probe; the opt-in flag on both domains' `buy` commands,
+      which then stay in the foreground from `available` until the stop is sent, the deal
+      ends or the buyer stops them; the opt-in, interval and threshold persisted per deal
+      in the buyer's profile and re-entered by `buy --resume`; `monitored` / `stopped` /
+      `unmonitored` in the deal read; the budget `interval × threshold + probe timeout`
+      in the display. Verify in the kit's unit suite with a clock-injected probe fake
+      (threshold, no stop below it, one stop and one journal entry at it, idempotent on
+      restart); in one application-level test per domain that starts the real `buy
+      --watch`, loses access with the storefront stopped, restarts into `buy --resume`
+      and observes a single buyer stop; and in convergence's rows 1 and 2 as the buyer's
+      stop landing with the storefront absent.
 - [ ] 4.6 Verify the foundation-owned VM admin route delegates notice for a lawful
       entitled stop and files exceptional_end for seller-caused emergency failure,
       including spot hardware failure; request a foundation fix rather than add a

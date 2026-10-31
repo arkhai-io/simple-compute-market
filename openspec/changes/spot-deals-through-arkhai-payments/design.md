@@ -425,20 +425,31 @@ an immediate surrender, and of billing that continues while a stop is pending.
 
 **The buyer's watchdog.** The honest-crash exposure — the resource lost while the
 seller's storefront is down, the buyer charged until its own stop lands (foundation
-D12) — is bounded from the buyer's side by this change's watchdog in
-`kit/deal-lifecycle-buyer`: once delivery is `available`, the buyer half probes the
-disclosed access on a buyer-configured interval and, when the resource stops
-answering for a configured number of consecutive probes, sends the buyer's ordinary
-entitled stop and `hint` through the flow above, journaling the probe evidence it
-acted on. It sends nothing the buyer could not send by hand, asks nothing new of the
-authority, and turns "until the buyer notices" into one probe interval without seller
-cooperation. What "stops answering" means is the access the storefront disclosed —
-the VM's or bare-metal host's reachability on the disclosed address and credential
-kind — not the buyer's workload; a probe failure is the buyer's observation (foundation
-D9), kept with its instants, and the stop it triggers is reversible by nothing, so the
-default interval and threshold are conservative and the watchdog is opt-in per deal.
-The display names it as the buyer's lever and states that billing runs until the
-stop lands.
+D12) — is bounded from the buyer's side by this change's watchdog: a probe loop in
+`kit/deal-lifecycle-buyer` that the buyer's own `buy` command runs in the foreground.
+There is no buyer daemon: the buyer used to run a persistent service and that design
+was retired; what runs the watchdog is the process the buyer already has. With the
+opt-in flag, the `buy` command does not return after delivery: once `available`, it
+probes the disclosed access on the configured interval and, when the resource fails a
+configured number of consecutive probes, sends the buyer's ordinary entitled stop and
+`hint` through the flow above, journals the probe evidence it acted on, and exits. It
+exits also when the deal ends by any other path, or when the buyer stops it. The
+opt-in, interval and threshold are persisted per deal in the buyer's profile, so
+`buy --resume` re-enters the loop after a restart where the deal is still running; the
+deal read shows `monitored`, `stopped` or `unmonitored`, and a deal whose monitor is
+not running is shown as unmonitored, never as protected. The probe is injected per
+domain — the VM's or bare-metal host's reachability on the disclosed address and
+credential kind — so the kit learns no credential format; what "stops answering"
+means is that access, not the buyer's workload.
+
+The bound is conditional and stated as one, wherever the watchdog is described:
+detection takes at most `interval × threshold + probe timeout` after the loss, and
+only while the monitor runs; the stop's acknowledgement at the authority and any
+priced notice come after that, and billing runs until the stop lands. A probe failure
+is the buyer's observation (foundation D9), kept with its instants, and the stop it
+triggers is reversible by nothing, so the default interval and threshold are
+conservative. The watchdog sends nothing the buyer could not send by hand and asks
+nothing new of the authority.
 
 ### D7. Servicing declarations and identity rotation
 
@@ -526,6 +537,7 @@ satisfy none of them and enable no published production servicing.
 ## Rejected alternatives
 
 - A payee-advanced horizon or vouch: a dishonest seller can advance it; the buyer's own stop and a case over held money are the guarantee.
+- A background buyer service to run the watchdog: the buyer's persistent service and agent were retired as a design direction; the `buy` command stays in the foreground instead, and the bound is stated as conditional on its running.
 - Renewable site deadlines as buyer payment protection: the site and the storefront are both the seller; activation and renewal policy is a seller-value decision elsewhere.
 - A required minimum spend, or a service request for one: churn is priced by setup or refused through seller policy.
 - An extra `once` fee labelled a minimum: setup is additive, not usage drawdown.
