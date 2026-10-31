@@ -12,7 +12,9 @@ as the real commands answer:
 - `virsh` keeps domains with their state, address, MAC, and storage, and the
   `default` network's DHCP reservations in `net-dumpxml` form;
 - `ufw` keeps numbered rules with their comments;
-- `curl` exits with each status a test queued, in order, then succeeds.
+- `curl` exits with each status a test queued, in order, then succeeds;
+- a `virsh` subcommand, or `rm` of one path, fails as many times as a test asked
+  (`FakeHost.refuse`), then behaves as before.
 
 Every call is appended to `calls`, so a test can assert what was never run.
 Addresses are RFC 5737 documentation addresses and names are synthetic.
@@ -38,6 +40,16 @@ from pathlib import Path
 STATE = Path(os.environ["FAKE_HOST_STATE"])
 with open(STATE / "calls", "a", encoding="utf-8") as calls:
     calls.write(" ".join([Path(sys.argv[0]).name] + [shlex.quote(a) for a in sys.argv[1:]]) + "\\n")
+
+def refused(key):
+    # Whether `FakeHost.refuse` queued a refusal of KEY, using one up if so.
+    path = STATE / "refusals.json"
+    refusals = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {{}}
+    if refusals.get(key, 0) < 1:
+        return False
+    refusals[key] -= 1
+    path.write_text(json.dumps(refusals), encoding="utf-8")
+    return True
 """
 
 _IPTABLES = _PREAMBLE + r'''
@@ -83,6 +95,9 @@ state = json.loads(state_path.read_text(encoding="utf-8"))
 domains, hosts = state["domains"], state["hosts"]
 args = sys.argv[1:]
 command = args[0]
+if refused(f"virsh {command}"):
+    print(f"error: Failed to {command} domain '{args[-1]}'", file=sys.stderr)
+    sys.exit(1)
 
 def save():
     state_path.write_text(json.dumps(state), encoding="utf-8")
@@ -178,6 +193,17 @@ path.write_text(json.dumps(exits), encoding="utf-8")
 sys.exit(code)
 '''
 
+_RM = _PREAMBLE + r'''
+import shutil
+for target in sys.argv[1:]:
+    if target.startswith("-"):
+        continue
+    if refused(f"rm {target}"):
+        print(f"rm: cannot remove '{target}': Operation not permitted", file=sys.stderr)
+        sys.exit(1)
+os.execv(shutil.which("rm", path=os.defpath), ["rm"] + sys.argv[1:])
+'''
+
 # A host with neither firewalld nor a service manager the teardown can ask.
 _ABSENT = _PREAMBLE + "sys.exit(3)\n"
 
@@ -234,6 +260,19 @@ class FakeHost:
         (self.state / "ufw.json").write_text(
             json.dumps({"active": active, "rules": rules}), encoding="utf-8"
         )
+
+    def refuse(self, key: str, times: int = 1) -> None:
+        """Make the next TIMES calls of KEY fail as the host would refuse them:
+        `virsh <subcommand>`, or `rm <path>` with `refusing_rm` installed."""
+        path = self.state / "refusals.json"
+        refusals = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        refusals[key] = refusals.get(key, 0) + times
+        path.write_text(json.dumps(refusals), encoding="utf-8")
+
+    def refusing_rm(self) -> dict[str, str]:
+        """The host's commands with `rm` failing for each path `refuse` names as
+        `rm <path>`, and removing everything else as the real `rm` does."""
+        return {**self.binaries(), "rm": _RM}
 
     def set_curl_exits(self, exits: list[int]) -> None:
         """The exit statuses the next `curl` calls return, in order."""

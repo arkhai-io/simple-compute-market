@@ -185,7 +185,7 @@ class VmManagementContractTests(unittest.TestCase):
 
         for token in (
             "virsh domifaddr {{ vm_name }}",
-            "path: /etc/frp/frpc-vms.toml",
+            "remove_guest_proxy /etc/frp/frpc-vms.toml",
             "/api/reload",
             "Fail if VM is running",
             "Cannot undefine VM '{{ vm_name }}' - VM is currently running",

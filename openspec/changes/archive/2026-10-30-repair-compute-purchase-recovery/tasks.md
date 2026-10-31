@@ -1505,3 +1505,27 @@ change to implementation.
         - the VM adapter's unit suite: 173 passed.
       - **Checks:** `make check-packaging`, `make check-architecture`,
         `make check-comment-hygiene`, and `make check-change` passed.
+
+      Then S15 (`design.md`), accepted the same way, after the supervising session
+      reproduced a refused `virsh undefine` the cleanup script reported as success:
+      - **The fix.** The cleanup script in `vm-create.yml` now fails, keeping itself, on
+        a refused destroy, undefine, DHCP removal, or key or image removal, and on a
+        network or domain list it cannot read. An absent domain is skipped, and a
+        retry removes storage and reservations left under the guest's name.
+        `vm_undefine` removes the proxy through `remove_guest_proxy`, in one task
+        without `ignore_errors`.
+      - **The tests,** in `domains/vms/provisioning/iac/tests`. `host_fakes` gained
+        one-shot refusals (`FakeHost.refuse`, and a refusing `rm`).
+        `test_guest_teardown.py` covers each refused removal failing and its retry
+        completing, an unreadable network, a refused domain listing, storage left
+        without a domain, the missing-script branch's refused undefine, and
+        `vm_undefine`'s failed reload followed by a reloading `vm_remove`.
+      - **Red:** ten of them failed before the fix.
+        - Seven cleanup-script cases exited 0 where the removal had not happened.
+        - Three `vm_undefine` cases failed for want of the task.
+        - The missing-script branch's refused-undefine case passed, since that
+          branch already fails under `set -e`.
+      - **Green:**
+        - the IaC suite: 168 passed, 7 native cases skipped there;
+        - the native gate: 7 playbooks syntax-checked and 7 tests, none skipped;
+        - the VM adapter's unit suite: 173 passed.

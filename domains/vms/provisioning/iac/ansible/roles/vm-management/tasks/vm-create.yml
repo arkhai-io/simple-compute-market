@@ -2753,76 +2753,115 @@
       # Clean up VM-related files
       log "=== Cleaning up VM-related files ==="
       FILES_REMOVED=0
+      # The guest's keys and cloud-init image stop the script when they cannot be
+      # removed. A removal on the left of `&&` would not: `set -e` ignores it.
+      remove_guest_file() {
+        if [ -f "$1" ]; then
+          if ! rm -f "$1"; then
+            log_error "Cannot remove $1"
+            track_step "cleanup_files" "failed"
+            exit 1
+          fi
+          FILES_REMOVED=$((FILES_REMOVED + 1))
+        fi
+      }
       if [ "$VM_IMAGE_TYPE" == "scratch" ]; then
         for f in ~/.ssh/{{ vm_root_ssh_filename }} ~/.ssh/{{ vm_root_ssh_filename }}.pub; do
-          if [ -f "$f" ]; then
-            rm -f "$f" && FILES_REMOVED=$((FILES_REMOVED + 1))
-          fi
+          remove_guest_file "$f"
         done
       fi
       for f in ~/.ssh/${VM_NAME}_tenant_ed25519 ~/.ssh/${VM_NAME}_tenant_ed25519.pub; do
-        if [ -f "$f" ]; then
-          rm -f "$f" && FILES_REMOVED=$((FILES_REMOVED + 1))
-        fi
+        remove_guest_file "$f"
       done
       FILES_REMOVED=$((FILES_REMOVED + $(find /tmp -name "${VM_NAME}_*_ed25519*" -type f -delete -print 2>/dev/null | wc -l)))
       FILES_REMOVED=$((FILES_REMOVED + $(find /tmp -maxdepth 1 -name "cloudinit_${VM_NAME}_*" -type d -exec rm -rf {} + 2>/dev/null -print | wc -l)))
-      if [ -f /var/lib/libvirt/images/${VM_NAME}-init.iso ]; then
-        rm -f /var/lib/libvirt/images/${VM_NAME}-init.iso && FILES_REMOVED=$((FILES_REMOVED + 1))
-      fi
+      remove_guest_file /var/lib/libvirt/images/${VM_NAME}-init.iso
       log "Removed $FILES_REMOVED VM-related files"
       track_step "cleanup_files" "success"
       
       # Get VM MAC address for DHCP lease removal
       log "=== Removing static DHCP lease ==="
+      # A network that cannot be read cannot show the reservation gone, so the
+      # assignment stops the script under `set -e`.
+      NETWORK_XML="$(virsh net-dumpxml default)"
       VM_MAC=$(virsh domiflist $VM_NAME 2>/dev/null | grep -oE '([0-9a-f]{2}:){5}[0-9a-f]{2}' | head -1)
-      if [ -n "$VM_MAC" ]; then
-        if virsh net-dumpxml default | grep -q "$VM_MAC"; then
-          if virsh net-update default delete ip-dhcp-host \
-            "<host mac='$VM_MAC'/>" \
-            --live --config 2>/dev/null; then
-            log "Static DHCP lease removed for MAC $VM_MAC"
-            track_step "remove_dhcp_lease" "success"
-          else
-            log_error "DHCP lease removal failed"
-            track_step "remove_dhcp_lease" "failed"
-          fi
-        else
-          log "No static DHCP lease found for MAC $VM_MAC"
-          track_step "remove_dhcp_lease" "skipped"
+      DHCP_REMOVED=0
+      if [ -n "$VM_MAC" ] && grep -q "$VM_MAC" <<< "$NETWORK_XML"; then
+        if ! virsh net-update default delete ip-dhcp-host \
+          "<host mac='$VM_MAC'/>" \
+          --live --config 2>/dev/null; then
+          log_error "DHCP lease removal failed"
+          track_step "remove_dhcp_lease" "failed"
+          exit 1
         fi
+        log "Static DHCP lease removed for MAC $VM_MAC"
+        DHCP_REMOVED=1
+      fi
+      # A reservation under this guest's exact name outlives its domain, whose
+      # MAC is then unknown.
+      while IFS= read -r reservation; do
+        [ -n "$reservation" ] || continue
+        if ! virsh net-update default delete ip-dhcp-host "$reservation" --live --config; then
+          log_error "DHCP lease removal failed: $reservation"
+          track_step "remove_dhcp_lease" "failed"
+          exit 1
+        fi
+        log "Static DHCP lease removed: $reservation"
+        DHCP_REMOVED=1
+      done <<< "$(guest_dhcp_reservations "$VM_NAME")"
+      if [ "$DHCP_REMOVED" -eq 1 ]; then
+        track_step "remove_dhcp_lease" "success"
       else
-        log "No MAC address found for VM"
+        log "No static DHCP lease for this VM"
         track_step "remove_dhcp_lease" "skipped"
       fi
-      
+
       # Stop the VM before undefining — undefine --remove-all-storage
       # cannot remove disks still in use by a running domain, so a missing
       # destroy leaves the VM running and its storage behind.
       log "=== Stopping VM before undefine ==="
       if virsh domstate $VM_NAME 2>/dev/null | grep -q running; then
-        if virsh destroy $VM_NAME 2>&1; then
-          log "VM $VM_NAME stopped"
-          track_step "destroy_vm" "success"
-        else
-          log_error "virsh destroy failed; undefine may not remove storage"
-          track_step "destroy_vm" "partial"
+        if ! virsh destroy $VM_NAME 2>&1; then
+          log_error "virsh destroy failed; the VM is still running"
+          track_step "destroy_vm" "failed"
+          exit 1
         fi
+        log "VM $VM_NAME stopped"
+        track_step "destroy_vm" "success"
       else
         log "VM $VM_NAME is not running"
         track_step "destroy_vm" "skipped"
       fi
 
-      # Remove VM definition and storage
+      # Remove VM definition and storage. A domain libvirt does not list is
+      # already gone, as after an earlier attempt, and is not a failure; a
+      # listing libvirt refuses stops the script under `set -e`.
       log "=== Undefining VM and removing storage ==="
-      if virsh undefine $VM_NAME --remove-all-storage --nvram 2>&1; then
+      DEFINED_DOMAINS="$(virsh list --all --name)"
+      if grep -qxF "$VM_NAME" <<< "$DEFINED_DOMAINS"; then
+        if ! virsh undefine $VM_NAME --remove-all-storage --nvram 2>&1; then
+          log_error "VM undefine failed; its definition or storage remains"
+          track_step "undefine_vm" "failed"
+          exit 1
+        fi
         log "VM $VM_NAME undefined and storage removed successfully"
         track_step "undefine_vm" "success"
       else
-        log_error "VM undefine completed with warnings or errors"
-        track_step "undefine_vm" "partial"
+        log "No domain $VM_NAME is defined"
+        track_step "undefine_vm" "skipped"
       fi
-      
+      # Storage the create made under this guest's name, left when an earlier
+      # undefine removed the definition but not all of its storage.
+      for path in \
+        /var/lib/libvirt/images/${VM_NAME}.qcow2 \
+        /var/lib/libvirt/images/${VM_NAME}-init.iso \
+        /var/lib/libvirt/qemu/nvram/${VM_NAME}_VARS.fd; do
+        if [ -e "$path" ]; then
+          rm -f "$path"
+          log "Removed $path"
+        fi
+      done
+
       log "=== VM Cleanup Completed for $VM_NAME ==="
       log "Cleanup finished at: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
       track_step "cleanup_end" "completed"

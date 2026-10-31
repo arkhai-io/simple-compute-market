@@ -63,30 +63,26 @@
   when: vm_action == "undefine"
   delegate_to: "{{ target_host }}"
 
-- name: Remove this VM's proxy from the VM tunnel client configuration
-  blockinfile:
-    path: /etc/frp/frpc-vms.toml
-    marker: "# {mark} ANSIBLE MANAGED BLOCK FOR VM {{ vm_name }}"
-    state: absent
-  when: vm_action == "undefine"
-  delegate_to: "{{ target_host }}"
-  ignore_errors: yes
-
-- name: Apply the removal by reloading the VM tunnel client
-  # Reload, not restart. A restart closes the control connection and the relay
-  # tears down every proxy this client registered, so tearing down one buyer's
-  # VM would end the established SSH sessions of every other buyer on this
-  # host. A reload applies the diff and leaves unchanged proxies alone.
+- name: Remove this VM's proxy from the VM tunnel client and apply the removal
+  # Through the shared helper every teardown path uses: the block goes by its
+  # exact BEGIN and END lines, and the client is reloaded, never restarted, since
+  # a restart ends every other buyer's sessions on this host. A failed reload
+  # fails the undefine before the guest's rules or domain are touched, and leaves
+  # the reload owed to whichever teardown of this guest runs next, which reloads
+  # before it reports the proxy gone.
   #
   # The port this proxy held is reclaimed by the provisioning service, which
   # allocated it. Nothing here needs to know which port it was.
-  uri:
-    url: "http://127.0.0.1:{{ frp_admin_port | default(7400) }}/api/reload"
-    method: GET
-    status_code: 200
+  shell: |
+    set -e
+    {{ lookup('file', 'guest_teardown.sh') }}
+
+    remove_guest_proxy /etc/frp/frpc-vms.toml "{{ vm_name }}" "http://127.0.0.1:{{ frp_admin_port | default(7400) }}/api/reload"
+    echo "Relay proxy: $GUEST_PROXY"
+  args:
+    executable: /bin/bash
   when: vm_action == "undefine"
   delegate_to: "{{ target_host }}"
-  ignore_errors: yes
 
 - name: Clean up iptables port forwarding rules
   # By this guest's marker, and, for a rule without one, by its exact address

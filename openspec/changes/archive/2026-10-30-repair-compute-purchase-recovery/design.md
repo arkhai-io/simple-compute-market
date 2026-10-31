@@ -2002,6 +2002,71 @@ Alternatives rejected:
 
 `vm_undefine`, an operator action no lease release dispatches, still removes the
 block and ignores a failed reload; it does not read or write the pending record.
+S15 below changes that.
+
+## S15: a refused removal fails the cleanup script, and `vm_undefine` keeps a reload owed
+
+The supervising session reproduced D9's other non-fatal step at the cleanup
+script's test seam: with `virsh undefine` refused, the script exited 0 and removed
+itself, while the guest's domain and disk remained; it reported
+`STEP_STATUS|undefine_vm|partial`. The teardown succeeded, so the lease released
+capacity the guest still occupied. Accepted under the owner's standing instruction,
+as a breach of task 4's rule that a teardown which cannot prove its removal fails
+visibly and keeps capacity held.
+
+The script's other required removals fail the same way:
+- a refused `virsh destroy` is logged `partial`;
+- a refused DHCP removal is logged `failed` and passed over, and an unreadable
+  network reads as no lease;
+- a key or cloud-init image whose `rm -f` is refused is ignored, being the left side
+  of an `&&` list;
+- a retry after an undefine that removed the definition but not all its storage finds
+  no domain and reports nothing left.
+
+`vm_undefine` removes the proxy block and ignores a failed reload, writing no pending
+record (S14), so a `vm_remove` that follows finds no block and no record, and reports
+the proxy absent.
+
+The plan, kept to the guest's required removals; the diagnostics are unchanged (the
+address, port, and MAC lookups and the GPU check):
+- **The cleanup script fails on a refused required removal,** before it removes
+  itself, so the retry runs it again.
+  - A running domain that `virsh destroy` does not stop fails it.
+  - A defined domain that `virsh undefine` does not remove fails it. A domain absent
+    from `virsh list --all --name` is skipped, so a retry is idempotent; a listing
+    libvirt refuses fails the script.
+  - Storage the create made under the guest's name (`<name>.qcow2`,
+    `<name>-init.iso`, `<name>_VARS.fd`), left by an earlier attempt, is removed by
+    that name, as the missing-script branch removes it.
+  - The DHCP step reads the `default` network first, failing when it cannot. It
+    removes the reservation for the domain's MAC, then any left under the guest's
+    exact name, failing on a refused removal.
+  - A refused key or image removal fails it.
+- **`vm_undefine` removes the proxy through `remove_guest_proxy`,** in one task
+  without `ignore_errors`. A failed reload stops the action before the guest's rules
+  or domain go, and leaves the pending record for the next teardown.
+- **The permanent requirement** "A VM teardown removes only what its guest created"
+  states that a refused required removal fails the teardown, and an artifact already
+  absent does not.
+- **Tests** at the existing seams, with one-shot refusals in the stateful
+  `host_fakes`:
+  - the cleanup script's destroy, undefine, DHCP, and file removals, each failing
+    and then completing on a retry;
+  - an unreadable network;
+  - storage left after an undefine;
+  - the missing-script branch's refused undefine;
+  - `vm_undefine`'s proxy task, failing and then followed by a reloading
+    `vm_remove`.
+
+Not changed: the cleanup script's removal of temporary `/tmp` key and cloud-init
+files, which the create's own cleanup also removes and the requirement does not
+list; `vm_undefine`'s other tolerated steps, an operator action no lease release
+dispatches; and cleanup scripts already written by earlier creates.
+
+Done as planned. The successful teardown changes in two ways:
+- **New reads:** the cleanup script reads the network and the domain list.
+- **New removals by name:** it removes a reservation or storage left under the
+  guest's name, which it previously left behind.
 
 ## Compatibility, migration, and rollback
 
@@ -2184,4 +2249,5 @@ No destination here was already written by `prove-real-vm-provisioning`'s own pr
 | Roadmap currency | `docs/development/ROADMAP.md` "Goal 1 — Consolidate physical-resource authority in the provisioning service" (the real runner's evidence row) and "Payment qualification boundaries". Goal 2 is unchanged: this change no longer sells VM shapes without GPUs |
 | Campaign index currency | `openspec/changes/README.md`: this change's row, `in closeout`, its notes rewritten to the state at closeout, the Round 2 sentence review 19 F1 named among what was dropped. No dependency line or `Depends on` entry names this change: those to `gpu-optional-compute-shapes` were removed with D7's withdrawal. After the closeout review, review 20 F2: the preface sentence on the tenant-address item says this change delivered it, linking the archive |
 | S14 a relay proxy is removed only once the tunnel client reloads without it | `openspec/specs/physical-provisioning/spec.md` ("A VM teardown removes only what its guest created": the reload rule and the scenario "The tunnel client does not apply a proxy's removal"), written directly after the archive |
+| S15 a refused removal fails the cleanup script, and `vm_undefine` keeps a reload owed | `openspec/specs/physical-provisioning/spec.md` ("A VM teardown removes only what its guest created": the refused-removal paragraph, the operator-undefine sentence, and the scenario "The host refuses a removal"), written directly after the archive |
 | Closeout review 20 F1, the runbook's unshipped references | `docs/development/VALIDATION_RUNBOOK.md`: "Running The Local Pass" replaces the section that pointed at a helper this repository does not ship; sections 17, 18, and 20 call the operations repository's component validators through the operator's `OPS_VALIDATORS`, checked once in section 17; sections 24 and 26 derive the rendered target's name from the committed example. A documentation correction, not a decision of this change |

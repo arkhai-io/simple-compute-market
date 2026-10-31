@@ -2456,7 +2456,14 @@ reloaded without it: until then the client may still hold the proxy's relay port
 teardown whose reload fails MUST fail, so the reservation's capacity and its relay port
 lease stay held, and a later teardown of the same guest MUST reload the client before it
 succeeds or reports the guest absent, even when the proxy's configuration entry is
-already gone.
+already gone. Every action that removes a guest's relay proxy, an operator's undefine
+included, MUST fail when that reload fails, and MUST leave the reload owed to the
+guest's next teardown.
+
+A teardown MUST fail, keeping its cleanup record for a retry, when the host refuses the
+removal of one of its guest's artifacts, a running domain's stop included, or when the
+state that would show an artifact gone cannot be read. An artifact already absent MUST
+NOT fail it, so a retry after a partial teardown removes what remains and succeeds.
 
 #### Scenario: Two guests' addresses share a prefix
 
@@ -2484,6 +2491,12 @@ already gone.
 - **WHEN** a VM teardown removes its guest's proxy from the VM tunnel client's configuration and the client's reload fails
 - **THEN** the teardown fails, and the reservation's capacity and relay port lease stay held
 - **AND** a retry reloads the client before it succeeds, though the configuration no longer names the guest
+
+#### Scenario: The host refuses a removal
+
+- **WHEN** a VM teardown with a cleanup record finds its guest's domain defined and the host refuses to undefine it
+- **THEN** the teardown fails, the cleanup record stays, and the reservation's capacity stays held
+- **AND** a retry undefines the domain, removes its storage, and succeeds
 
 ### Requirement: A VM guest is created from a pinned, verified image
 

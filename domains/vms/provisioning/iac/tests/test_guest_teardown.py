@@ -257,6 +257,114 @@ class TheCleanupScriptACreateWrites(_ReloadFailures, _Teardown):
         self.assertFalse(installed.exists())
         self.assert_relay_settled()
 
+    def _a_fully_present(self) -> Path:
+        """Guest A as its create left it, with the cleanup script it installed."""
+        self._host(a_rules=True, a_proxy=True, a_reservation=True,
+                   a_domain={"state": "running", "address": A_IP, "mac": A_MAC,
+                             "storage": [str(self.images / f"{A}.qcow2")]})
+        for path in (self.images / f"{A}.qcow2", self.images / f"{A}-init.iso",
+                     self.root / f"home/.ssh/{A}_tenant_ed25519"):
+            path.write_text("guest A\n", encoding="utf-8")
+        installed = self.root / f"usr/local/bin/cleanup_vm_{A}.sh"
+        installed.write_text(self._script(), encoding="utf-8")
+        return installed
+
+    def _refused_then_retried(self, refusal: str, step: str,
+                              binaries: dict[str, str] | None = None):
+        """One removal the host refuses once: the script fails naming its step,
+        keeps itself and the guest's domain and disk, and a retry completes."""
+        installed = self._a_fully_present()
+        self.host.refuse(refusal)
+
+        failed = self._run(self._script(), binaries)
+
+        self.assertNotEqual(failed.returncode, 0, failed.stdout)
+        self.assertIn(f"STEP_STATUS|{step}|failed", failed.stdout)
+        self.assertNotIn("STEP_STATUS|cleanup_end|completed", failed.stdout)
+        self.assertTrue(installed.exists(), "the script is kept for the retry")
+        self.assertIn(A, self.host.virsh()["domains"])
+        self.assertTrue((self.images / f"{A}.qcow2").exists())
+        self.assertIn(_proxy_block(B, 6012), self.config.read_text(encoding="utf-8"))
+        self.assertEqual(self.host.virsh()["domains"][B], self.b_domain)
+
+        result = self._run(self._script(), binaries)
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.a_removed()
+        self.assert_others_untouched()
+        for path in (self.images / f"{A}.qcow2", self.images / f"{A}-init.iso",
+                     self.root / f"home/.ssh/{A}_tenant_ed25519", installed):
+            self.assertFalse(path.exists(), path)
+        return failed
+
+    def test_a_refused_undefine_fails_and_a_retry_removes_the_domain_and_disk(self) -> None:
+        self._refused_then_retried("virsh undefine", "undefine_vm")
+
+    def test_a_refused_destroy_fails_before_the_domain_is_undefined(self) -> None:
+        self._refused_then_retried("virsh destroy", "destroy_vm")
+        undefines = [c for c in self.host.calls() if c.startswith("virsh undefine")]
+        self.assertEqual(len(undefines), 1, "only the retry undefines the domain")
+
+    def test_a_refused_dhcp_removal_fails_and_keeps_the_reservation_for_the_retry(self) -> None:
+        installed = self._a_fully_present()
+        self.host.refuse("virsh net-update")
+
+        failed = self._run(self._script())
+
+        self.assertNotEqual(failed.returncode, 0, failed.stdout)
+        self.assertIn("STEP_STATUS|remove_dhcp_lease|failed", failed.stdout)
+        self.assertIn(A, [h["name"] for h in self.host.virsh()["hosts"]])
+        self.assertTrue(installed.exists())
+        result = self._run(self._script())
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.a_removed()
+        self.assert_others_untouched()
+
+    def test_a_refused_key_removal_fails_and_a_retry_removes_it(self) -> None:
+        key = self.root / f"home/.ssh/{A}_tenant_ed25519"
+        self._refused_then_retried(f"rm {key}", "cleanup_files", self.host.refusing_rm())
+
+    def test_an_unreadable_network_fails_before_the_domain_is_undefined(self) -> None:
+        installed = self._a_fully_present()
+        state = self.host.virsh()
+        self.host.set_virsh(domains=state["domains"], hosts=state["hosts"],
+                            network_unreadable=True)
+
+        result = self._run(self._script())
+
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("STEP_STATUS|remove_dhcp_lease|skipped", result.stdout)
+        self.assertIn(A, self.host.virsh()["domains"])
+        self.assertTrue(installed.exists())
+
+    def test_storage_and_a_reservation_left_without_a_domain_are_removed_by_name(self) -> None:
+        """A retry after an undefine that removed the definition and not all its
+        storage: no domain, so no MAC, but the guest's name still finds them."""
+        self._host(a_rules=True, a_proxy=False, a_reservation=True, a_domain=None)
+        left = [self.images / f"{A}.qcow2", self.images / f"{A}-init.iso",
+                self.nvram / f"{A}_VARS.fd"]
+        for path in left:
+            path.write_text("guest A\n", encoding="utf-8")
+
+        result = self._run(self._script())
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("STEP_STATUS|undefine_vm|skipped", result.stdout)
+        for path in left:
+            self.assertFalse(path.exists(), path)
+        self.a_removed()
+        self.assert_others_untouched()
+
+    def test_a_domain_listing_libvirt_refuses_fails_the_script(self) -> None:
+        self._host(a_rules=False, a_proxy=False, a_reservation=False, a_domain=None)
+        (self.images / f"{A}.qcow2").write_text("guest A\n", encoding="utf-8")
+        self.host.refuse("virsh list")
+
+        result = self._run(self._script())
+
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertTrue((self.images / f"{A}.qcow2").exists())
+
     def test_a_host_with_no_vm_tunnel_client_is_torn_down_without_a_reload(self) -> None:
         """A direct-forwarding host has no VM tunnel client to reload."""
         self._host(a_rules=True, a_proxy=False, a_reservation=True,
@@ -371,6 +479,26 @@ class ARemoveWithNoCleanupScript(_ReloadFailures, _Teardown):
         self.assertEqual(self.reloads(), 2)
         self.assert_others_untouched()
         self.assert_relay_settled()
+
+    def test_a_refused_undefine_fails_and_a_retry_removes_the_domain_and_disk(self) -> None:
+        self._host(a_rules=True, a_proxy=False, a_reservation=True,
+                   a_domain={"state": "shut off", "mac": A_MAC,
+                             "storage": [str(self.images / f"{A}.qcow2")]})
+        (self.images / f"{A}.qcow2").write_text("guest A\n", encoding="utf-8")
+        self.host.refuse("virsh undefine")
+
+        failed = self._run(self._script())
+
+        self.assertNotEqual(failed.returncode, 0, failed.stdout)
+        self.assertNotIn("GUEST_PRESENT=", failed.stdout)
+        self.assertIn(A, self.host.virsh()["domains"])
+        self.assertTrue((self.images / f"{A}.qcow2").exists())
+        result = self._run(self._script())
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("GUEST_PRESENT=true", result.stdout)
+        self.a_removed()
+        self.assertFalse((self.images / f"{A}.qcow2").exists())
+        self.assert_others_untouched()
 
     def test_a_host_with_no_vm_tunnel_client_is_torn_down_without_a_reload(self) -> None:
         self._host(a_rules=True, a_proxy=False, a_reservation=True,
@@ -538,6 +666,41 @@ class AnUndefine(_Teardown):
         self.assertEqual(self.host.rules("nat"), others["nat"])
         self.assertEqual(self.host.rules("filter"), others["filter"])
 
+    PROXY_TASK = "Remove this VM's proxy from the VM tunnel client and apply the removal"
+
+    def test_its_proxy_removal_reloads_the_client_and_keeps_the_other_guests(self) -> None:
+        self._host(a_rules=False, a_proxy=True, a_reservation=False,
+                   a_domain={"state": "shut off", "mac": A_MAC})
+
+        result = self._run(_render(_task(VM_UNDEFINE, self.PROXY_TASK)["shell"], A))
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn(f"FOR VM {A}\n", self.config.read_text(encoding="utf-8"))
+        self.assertIn(_proxy_block(B, 6012), self.config.read_text(encoding="utf-8"))
+        self.assertEqual(self.reloads(), 1)
+        self.assert_relay_settled()
+
+    def test_a_failed_reload_stops_the_undefine_and_the_next_remove_reloads(self) -> None:
+        """The block is gone after the undefine's attempt, so only the pending
+        record tells the authoritative teardown that a reload is still owed."""
+        self._host(a_rules=True, a_proxy=True, a_reservation=True,
+                   a_domain={"state": "shut off", "mac": A_MAC})
+        self.host.set_curl_exits([22])
+        task = _task(VM_UNDEFINE, self.PROXY_TASK)
+        self.assertNotIn("ignore_errors", task)
+
+        failed = self._run(_render(task["shell"], A))
+        removal = self._run(_render(
+            _task(VM_REMOVE, "Remove what the guest left without a cleanup script")["shell"], A))
+
+        self.assertNotEqual(failed.returncode, 0, failed.stdout)
+        self.assertEqual(removal.returncode, 0, removal.stdout + removal.stderr)
+        self.assertEqual(self.reloads(), 2)
+        self.assertIn("Removed: relay proxy block", removal.stdout)
+        self.a_removed()
+        self.assert_others_untouched()
+        self.assert_relay_settled()
+
 
 class TheRulesACreateAdds(unittest.TestCase):
     def setUp(self) -> None:
@@ -581,6 +744,7 @@ class EveryTeardownPathSharesOneImplementation(unittest.TestCase):
         (VM_CREATE, "Create VM cleanup script on target host"),
         (VM_REMOVE, "Remove what the guest left without a cleanup script"),
         (VM_UNDEFINE, "Get external port before cleanup (for firewall rule removal)"),
+        (VM_UNDEFINE, "Remove this VM's proxy from the VM tunnel client and apply the removal"),
         (VM_UNDEFINE, "Clean up iptables port forwarding rules"),
         (VM_UNDEFINE, "Clean up firewall rules for external ports"),
     )
