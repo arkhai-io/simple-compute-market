@@ -17,6 +17,7 @@ from __future__ import annotations
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Iterable, Optional
 
 from market_config import encrypt_secret
@@ -93,6 +94,33 @@ class RelayView:
         )
 
 
+@dataclass(frozen=True)
+class RelayLeaseRecord:
+    """One lease row a relay holds or held, as an administrator may see it."""
+
+    lease_id: str
+    remote_port: int
+    host_id: str | None
+    pool_id: str | None
+    owner_kind: str
+    owner_id: str
+    allocated_at: datetime
+    released_at: datetime | None
+
+    @classmethod
+    def of(cls, row: RelayPortLease) -> "RelayLeaseRecord":
+        return cls(
+            lease_id=row.id,
+            remote_port=row.remote_port,
+            host_id=row.host_id,
+            pool_id=row.pool_id,
+            owner_kind=row.owner_kind,
+            owner_id=row.owner_id,
+            allocated_at=row.created_at,
+            released_at=row.released_at,
+        )
+
+
 class RelayService:
     def __init__(self, session_factory: Any, settings: Any | None = None) -> None:
         self._session_factory = session_factory
@@ -155,6 +183,22 @@ class RelayService:
     def get_relay(self, relay_id: str) -> RelayView:
         with self._read() as session:
             return RelayView.of(self._require(session, relay_id))
+
+    def list_leases(self, relay_id: str) -> list[RelayLeaseRecord]:
+        """Every lease row the relay has, held or released, by remote port.
+
+        Released rows are included: they are how an operator sees that a
+        delivery's port went back, and the record of that release.
+        """
+        with self._read() as session:
+            self._require(session, relay_id)
+            rows = (
+                session.query(RelayPortLease)
+                .filter(RelayPortLease.relay_id == relay_id)
+                .order_by(RelayPortLease.remote_port)
+                .all()
+            )
+            return [RelayLeaseRecord.of(row) for row in rows]
 
     # ------------------------------------------------------------------
     # Writes
@@ -358,6 +402,7 @@ class RelayService:
 __all__ = [
     "UNSET",
     "RelayEndpointConflictError",
+    "RelayLeaseRecord",
     "RelayNotFoundError",
     "RelayService",
     "RelayValidationError",

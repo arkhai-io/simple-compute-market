@@ -79,6 +79,16 @@ def test_the_relays_are_composed_once_for_every_domain():
     assert container.vm_adapter_bundle().definition_documents == ()
 
 
+def test_both_pool_configuration_handlers_hold_the_services_settings():
+    """Each provider's execution read decrypts a relay's token with the
+    service's key, so each handler is built over the service's settings."""
+    container = _container()
+    config = container.config()
+
+    assert container.vm_runtime().pool_config_handler._settings is config
+    assert container.bare_metal_runtime().pool_config_handler._settings is config
+
+
 def test_release_is_composed_once_for_every_offering_mode():
     """The ledger is held to the fulfillment release guard, and the one lease
     lifecycle releases every mode through the fulfillment executor and status

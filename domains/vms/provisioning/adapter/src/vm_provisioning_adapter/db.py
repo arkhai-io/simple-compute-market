@@ -8,7 +8,6 @@ metadata, and its migration history reads this model to create and evolve it.
 from sqlalchemy import JSON, Column, ForeignKey, Integer, String
 from sqlalchemy.orm import declarative_base
 
-from compute_provisioning.relays import Relay
 from market_resource_pools import ResourcePool
 
 Base = declarative_base()
@@ -46,12 +45,3 @@ class AnsiblePoolConfig(Base):
     default_vm_ram = Column(Integer, nullable=True)
     default_vm_vcpus = Column(Integer, nullable=True)
     default_vm_disk_size = Column(String, nullable=True)
-
-    # Which relay this pool's hosts dial for buyer tunnels. A reference, not
-    # the endpoint itself: the rendezvous address, its port window, and its
-    # token are shared by every pool pointing at the same relay, so they
-    # belong to the relay row. Holding the window here would let two pools
-    # allocate from one listening namespace under disagreeing bounds.
-    #
-    # Nullable: a pool with no relay configured serves VMs by direct NAT.
-    relay_id = Column(String, ForeignKey(Relay.__table__.c.id), nullable=True, index=True)

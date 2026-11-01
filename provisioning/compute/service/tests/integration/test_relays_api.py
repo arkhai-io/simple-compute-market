@@ -7,7 +7,7 @@ and the test stays green while they do.
 
 What this covers that the library tests cannot: that the binding, its routes,
 its status codes, and the client's serialization agree. The relay service
-behind them is covered by the family kit's
+behind them, the holdings read included, is covered by the family kit's
 `tests/integration/test_relay_administration.py`.
 """
 
@@ -20,6 +20,7 @@ from httpx import ASGITransport
 
 from compute_provisioning.relays import RelayPortLease
 from compute_provisioning_client import (
+    ComputeProvisioningAuthenticationError,
     ComputeProvisioningClient,
     ComputeProvisioningError,
 )
@@ -27,7 +28,7 @@ from compute_provisioning_contracts import RelayCreate, RelayTokenRotate, RelayU
 
 from compute_provisioning_service import container as _container_module
 from compute_provisioning_service.main import app
-from .conftest import ADMIN_SIGNER, SERVICE_AUTHORITIES
+from .conftest import ADMIN_SIGNER, SERVICE_AUTHORITIES, STOREFRONT_SIGNER
 
 pytestmark = pytest.mark.anyio
 
@@ -123,6 +124,63 @@ class TestRelayAdministrationOverTheApi:
     async def test_an_unusable_window_is_refused(self, relays):
         with pytest.raises(ComputeProvisioningError):
             await relays.create_relay(_relay(vm_port_range_count=0))
+
+
+class TestHoldingsOverTheApi:
+    """The administrator reads what a relay holds; nobody else may."""
+
+    def _lease(self, port: int, owner_id: str, *, released: bool = False) -> None:
+        with _container_module.resolved_session_factory() as db, db.begin():
+            db.add(
+                RelayPortLease(
+                    id=f"lease-{owner_id}",
+                    relay_id="site-a",
+                    remote_port=port,
+                    host_id="kvm1",
+                    pool_id="gpu-pool",
+                    owner_kind="fulfillment",
+                    owner_id=owner_id,
+                    released_at=datetime.now(timezone.utc) if released else None,
+                )
+            )
+
+    async def test_held_and_released_leases_are_read_by_port(self, relays):
+        await relays.create_relay(_relay())
+        self._lease(6101, "cr-held")
+        self._lease(6100, "cr-done", released=True)
+
+        holdings = await relays.list_relay_leases("site-a")
+
+        assert holdings.relay_id == "site-a"
+        assert [(lease.remote_port, lease.owner_id) for lease in holdings.leases] == [
+            (6100, "cr-done"),
+            (6101, "cr-held"),
+        ]
+        assert holdings.leases[0].released_at is not None
+        assert holdings.leases[1].released_at is None
+        assert (holdings.leases[1].host_id, holdings.leases[1].pool_id) == ("kvm1", "gpu-pool")
+
+    async def test_an_unknown_relay_has_no_holdings(self, relays):
+        with pytest.raises(ComputeProvisioningError) as refused:
+            await relays.list_relay_leases("never-created")
+        assert refused.value.status_code == 404
+
+    async def test_a_seller_may_not_read_holdings(self, relays):
+        """The route admits only the administrator, so the canonical client
+        refuses to sign it as the seller."""
+        await relays.create_relay(_relay())
+        async with ComputeProvisioningClient(
+            "http://testserver",
+            signer=STOREFRONT_SIGNER,
+            caller_role="seller",
+            expected_authorities=SERVICE_AUTHORITIES,
+            transport=ASGITransport(app=app),
+        ) as seller:
+            with pytest.raises(
+                ComputeProvisioningAuthenticationError, match="permits caller roles"
+            ) as refused:
+                await seller.list_relay_leases("site-a")
+            assert refused.value.status_code is None
 
 
 class TestRebindingOverTheApi:

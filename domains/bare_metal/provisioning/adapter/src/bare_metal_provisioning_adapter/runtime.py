@@ -84,7 +84,7 @@ def build_bare_metal_runtime(
             submission=job_submission,
             jobs=job_engine,
         ),
-        pool_config_handler=BareMetalPoolConfigHandler(),
+        pool_config_handler=BareMetalPoolConfigHandler(settings=config),
         ansible_service=ansible_service,
         playbook_path=config.resolved_bare_metal_playbook_path,
         settings=config,

@@ -58,10 +58,10 @@ def run_migrations(engine: Engine) -> None:
     :func:`compute_provisioning_service.db.migrations.check_schema_version` instead and fails fast if
     migrations haven't been applied.
     """
-    # Resource-pool and relay tables must be created before VM's:
-    # ansible_pool_configs has foreign keys to resource_pools and relays, and
-    # SQLAlchemy's cross-metadata FK resolution during create_all needs the
-    # referenced tables to exist.
+    # Resource-pool tables must be created before the relays' and VM's:
+    # pool_relays and ansible_pool_configs have foreign keys to resource_pools,
+    # and SQLAlchemy's cross-metadata FK resolution during create_all needs the
+    # referenced table to exist.
     PoolsBase.metadata.create_all(bind=engine)
     RelaysBase.metadata.create_all(bind=engine)
     VmBase.metadata.create_all(bind=engine)

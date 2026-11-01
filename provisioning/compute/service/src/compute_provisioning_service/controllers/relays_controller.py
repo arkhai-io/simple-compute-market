@@ -11,6 +11,7 @@ from compute_provisioning.relays import RelayRouteService
 from compute_provisioning.route_errors import require_composed
 from compute_provisioning_contracts import (
     RelayCreate,
+    RelayLeaseListResponse,
     RelayListResponse,
     RelayResponse,
     RelayTokenRotate,
@@ -73,3 +74,14 @@ def enable_relay(relay_id: str, service: RelayRouteService = Depends(_service)) 
 @router.post("/{relay_id}/disable", response_model=RelayResponse, summary="Disable a relay")
 def disable_relay(relay_id: str, service: RelayRouteService = Depends(_service)) -> RelayResponse:
     return routed(lambda: service.set_enabled(relay_id, False))
+
+
+@router.get(
+    "/{relay_id}/leases",
+    response_model=RelayLeaseListResponse,
+    summary="Read the ports a relay holds and has released",
+)
+def list_relay_leases(
+    relay_id: str, service: RelayRouteService = Depends(_service)
+) -> RelayLeaseListResponse:
+    return routed(lambda: service.list_leases(relay_id))

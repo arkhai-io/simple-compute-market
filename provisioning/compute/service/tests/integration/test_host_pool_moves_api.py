@@ -2,9 +2,10 @@
 
 A host's pool changes through an update or through an imported inventory, and
 both go through the pool-change hooks the composition contributes, unplacing a
-host included. VM's hook refuses moving a host to a pool that dials another
-relay, or to no pool, while a VM tunnel is bound through the host, because the
-buyer holds that relay's address and port.
+host included. The relays' hook refuses moving a host to a pool that dials
+another relay, or to no pool, while a tunnel is bound through the host, because
+the buyer holds that relay's address and port; a move between pools on one
+relay is free, whichever provider each uses.
 These tests prove the refusal survives each route as a 409 that leaves the host
 where it was, and that the move goes through once the host is drained.
 
@@ -120,8 +121,9 @@ async def test_an_update_moving_a_tunnelled_host_to_another_relay_is_refused(
 
 
 async def test_an_inventory_unplacing_a_tunnelled_host_is_refused_whole(client_and_queue):
-    """Unplacing is a move: the host would stop dialling its relay, so the VM
-    hook refuses it, and the import's other entries are not applied either."""
+    """Unplacing is a move: the host would stop dialling its relay, so the
+    relays' hook refuses it, and the import's other entries are not applied
+    either."""
     clients, _ = client_and_queue
     await _relay_and_pools(clients)
     await clients.host_import.import_hosts_from_text(_inventory(_RELAY_POOL))
@@ -169,3 +171,25 @@ async def test_a_drained_host_moves_by_inventory(client_and_queue):
     imported = await clients.host_import.import_hosts_from_text(_inventory(_PLAIN_POOL))
 
     assert [host.pool_id for host in imported.hosts] == [_PLAIN_POOL]
+
+
+async def test_a_tunnelled_host_moves_to_a_bare_metal_pool_on_its_relay(client_and_queue):
+    """The pools' providers differ and the relay is the same, so no delivered
+    connection string moves and the move is accepted while the tunnel is bound."""
+    clients, _ = client_and_queue
+    await _relay_and_pools(clients)
+    await clients.pools.create_pool(
+        PoolCreate(
+            id="bare-metal-relay-pool",
+            label="bare-metal-relay-pool",
+            provider="bare_metal.ansible",
+            policy_tags={"advertisable_modes": [], "capacity_backing": "backed"},
+            provider_config={"relay_id": "site-a"},
+        )
+    )
+    await clients.host_import.import_hosts_from_text(_inventory(_RELAY_POOL))
+    _bind_tunnel()
+
+    moved = await clients.family.update_host("kvm1", HostUpdate(pool_id="bare-metal-relay-pool"))
+
+    assert moved.pool_id == "bare-metal-relay-pool"

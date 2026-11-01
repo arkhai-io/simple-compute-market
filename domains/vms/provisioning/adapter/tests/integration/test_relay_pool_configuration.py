@@ -19,6 +19,7 @@ from types import SimpleNamespace
 
 import pytest
 from compute_provisioning.relays import (
+    PoolRelay,
     RelayExecutionResolver,
     RelayPortLease,
     RelayRebindingRefused,
@@ -27,10 +28,8 @@ from compute_provisioning.relays import (
 from compute_provisioning_ansible import render_extra_vars
 from cryptography.fernet import Fernet
 from market_resource_pools import ResourcePool
-from sqlalchemy.orm import Session
 
 from vm_provisioning_adapter.codec import VmAnsibleCodec
-from vm_provisioning_adapter.db import AnsiblePoolConfig
 from vm_provisioning_adapter.models.jobs_model import VmJobParams
 from vm_provisioning_adapter.services.ansible_pool_config_handler import (
     AnsiblePoolConfigHandler,
@@ -181,16 +180,16 @@ class TestPoolRebinding:
         with session_factory() as db:
             assert handler.read_config(db, "gpu-pool")["playbook_path"] == "/other/playbook.yaml"
 
-    def test_two_pools_may_reference_one_relay(self, vm_engine, session_factory, relays, handler):
-        """The ordinary case: two pools, one rendezvous."""
+    def test_the_reference_is_stored_where_every_providers_is(
+        self, session_factory, relays, handler
+    ):
+        """A VM pool's relay is the family's pool relay reference."""
         _make_relay(relays, relay_id="shared")
         _pool_on_relay(session_factory, handler, pool_id="gpu-pool", relay_id="shared")
         _pool_on_relay(session_factory, handler, pool_id="cpu-pool", relay_id="shared")
-        with Session(vm_engine) as session:
-            configs = session.query(AnsiblePoolConfig).filter(
-                AnsiblePoolConfig.relay_id == "shared"
-            ).all()
-        assert {c.pool_id for c in configs} == {"gpu-pool", "cpu-pool"}
+        with session_factory() as db:
+            held = db.query(PoolRelay).filter(PoolRelay.relay_id == "shared").all()
+        assert {row.pool_id for row in held} == {"gpu-pool", "cpu-pool"}
 
 
 class TestRelayInputsReachTheJob:

@@ -330,7 +330,8 @@ PROVISIONING_ROUTE_CONTRACTS = (
     ProvisioningRouteContract("GET", re.compile(r"/api/v1/hosts/(?P<host>[^/]+)/connectivity"), "provisioning_host_connectivity", path_resource="host"),
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/fulfillment/validate"), "provisioning_fulfillment_validate", body_resource="capacity_reservation_id"),
     # Relay administration. A pattern matches the whole path and a capture no
-    # slash, so the bare relay id never matches a token, enable, or disable path.
+    # slash, so the bare relay id never matches a token, enable, disable, or
+    # leases path.
     ProvisioningRouteContract("GET", re.compile(r"/api/v1/relays/?"), "provisioning_relays_list"),
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/relays/?"), "provisioning_relay_create"),
     ProvisioningRouteContract("GET", re.compile(r"/api/v1/relays/(?P<relay_id>[^/]+)"), "provisioning_relay_get", path_resource="relay_id"),
@@ -338,6 +339,7 @@ PROVISIONING_ROUTE_CONTRACTS = (
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/relays/(?P<relay_id>[^/]+)/token"), "provisioning_relay_rotate_token", path_resource="relay_id"),
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/relays/(?P<relay_id>[^/]+)/enable"), "provisioning_relay_enable", path_resource="relay_id"),
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/relays/(?P<relay_id>[^/]+)/disable"), "provisioning_relay_disable", path_resource="relay_id"),
+    ProvisioningRouteContract("GET", re.compile(r"/api/v1/relays/(?P<relay_id>[^/]+)/leases"), "provisioning_relay_leases", path_resource="relay_id"),
     # Shared mock-profile job controls remain authenticated when mounted.
     ProvisioningRouteContract("GET", re.compile(r"/test/jobs/summary"), "provisioning_test_jobs_summary"),
     ProvisioningRouteContract("GET", re.compile(r"/test/jobs/drain"), "provisioning_test_jobs_drain"),
@@ -387,6 +389,7 @@ ADMIN_PROVISIONING_OPERATIONS = frozenset(
         "provisioning_relay_rotate_token",
         "provisioning_relay_enable",
         "provisioning_relay_disable",
+        "provisioning_relay_leases",
         "provisioning_test_jobs_summary",
         "provisioning_test_jobs_drain",
         "provisioning_test_job_wait",

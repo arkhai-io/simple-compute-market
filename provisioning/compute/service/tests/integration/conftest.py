@@ -696,7 +696,7 @@ async def client_and_queue(
     from vm_provisioning_adapter.services.ansible_pool_config_handler import AnsiblePoolConfigHandler
     resource_pool_service_handlers = {
         "vm.ansible": AnsiblePoolConfigHandler(settings=mock_settings),
-        "bare_metal.ansible": BareMetalPoolConfigHandler(),
+        "bare_metal.ansible": BareMetalPoolConfigHandler(settings=mock_settings),
     }
     resource_pool_service = ResourcePoolService(
         session_factory=session_factory,

@@ -20,7 +20,7 @@ from .composition import (
     RelayReconciliationSchedule,
     relay_contribution,
 )
-from .db import Relay, RelayPortLease
+from .db import PoolRelay, Relay, RelayPortLease
 from .definitions import (
     RELAY_DOCUMENT_KIND,
     RelayDefinitionError,
@@ -39,6 +39,12 @@ from .rebinding import (
     check_relay_token_rotation,
     pool_relay_id,
 )
+from .pool_relays import (
+    RELAY_ID_FIELD,
+    relay_execution_fields,
+    set_pool_relay,
+    validate_relay_reference,
+)
 from .route_service import RelayRouteService
 from .service import (
     UNSET,
@@ -51,7 +57,9 @@ from .service import (
 
 __all__ = [
     "FULFILLMENT_OWNER_KIND",
+    "PoolRelay",
     "PortLease",
+    "RELAY_ID_FIELD",
     "RELAY_CONTRIBUTION",
     "RELAY_DOCUMENT_KIND",
     "RELAY_HOST_POOL_CHANGE_HOOKS",
@@ -82,5 +90,8 @@ __all__ = [
     "pool_relay_id",
     "relay_contribution",
     "relay_definitions_document",
+    "relay_execution_fields",
     "release_reservation_ports",
+    "set_pool_relay",
+    "validate_relay_reference",
 ]
