@@ -37,8 +37,7 @@ asyncio_mode = "auto"
 
 [dependency-groups]
 dev = [
-    # The relay pool-configuration suite reads a stored token back with a
-    # development key.
+    # The tests generate throwaway Fernet keys.
     "cryptography>=42.0",
     "pytest>=9.0.2",
     "pytest-asyncio>=0.23",

@@ -113,6 +113,16 @@ to behaviour, tables, route paths, or operation names.
       `arkhai-kit-config` (`make test-release-tooling` holds it). The permanent
       `physical-provisioning` spec's Evidence line naming the moved test files
       now names their new paths.
+      Correction (the owner's review of round 1): a wheel's version is bumped
+      once per branch, and each package above was bumped once from `dev`; a
+      later section does not bump any of them again. The bare-metal adapter's
+      floor on the family kit rose from `>=0.20.0` to `>=0.24.0`. That is a raised
+      floor, not four bumps: 0.24.0 is the first version with
+      `compute_provisioning.relays`, which its pool configuration handler
+      imports. The `pyproject.toml` comments that described behaviour were taken
+      out (the family kit's `arkhai-kit-config` and `pyyaml` need none). The
+      comment on each `cryptography` dev dependency now says what the tests
+      import it for.
 - [x] 1.7 Verify. Library integration: `make test-compute-provisioning`. Application
       integration through the typed client: `make test-provisioning`, including the
       relay API, the relay migrations, and a fulfillment against a relay-backed VM
