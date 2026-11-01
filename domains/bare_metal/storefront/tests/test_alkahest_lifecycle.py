@@ -33,6 +33,7 @@ from settlement_compositions import (
 from loopback import serving
 from storefront_client import StorefrontClient, SyncStorefrontClient
 from arkhai_bare_metal import BareMetalLeaseReadyEvidenceDocument, bare_metal_digest
+from arkhai_bare_metal.evidence import canonical_bare_metal_json
 from arkhai_bare_metal.evidence_routes import (
     BareMetalEvidenceClient,
     SyncBareMetalEvidenceClient,
@@ -713,3 +714,42 @@ async def test_both_clients_resolve_retained_json_and_its_original_signature(tmp
             response.proof + "=" * (-len(response.proof) % 4)
         )
         assert proof == SELLER_SIGNER.sign(document.canonical_bytes)
+
+
+@pytest.mark.parametrize("access_ready", [1, 1.0])
+async def test_typed_http_refuses_numeric_readiness_with_matching_digests(
+    tmp_path, access_ready
+):
+    runtime, app, _obligation_ref = await _settled(
+        tmp_path,
+        site=_Site("active"),
+        chain=_UnavailablePublisher(),
+        escrow=EscrowOnChain(),
+    )
+    document = _historical_document(runtime)
+    wire = document.to_wire()
+    wire["result"]["access_ready"] = access_ready
+    wire["result_digest"] = bare_metal_digest(wire["result"])
+    digest = bare_metal_digest(wire)
+    with sqlite3.connect(runtime.db.db_path) as conn:
+        conn.execute(
+            "UPDATE bare_metal_fulfillment_lifecycle SET "
+            "lease_ready_evidence_json=?, lease_ready_evidence_digest=?",
+            (canonical_bare_metal_json(wire), digest),
+        )
+    original = _stored_evidence(runtime)
+    async with app.router.lifespan_context(app):
+        async with StorefrontClient(
+            "http://seller",
+            signer=BUYER_SIGNER,
+            caller_role="buyer",
+            expected_publishers=TrustedIdentitySet(
+                identities=(SELLER_SIGNER.identity,)
+            ),
+            transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+        ) as client:
+            with pytest.raises(StorefrontClientError):
+                await BareMetalEvidenceClient(
+                    client, role="buyer"
+                ).lease_ready_evidence(digest)
+    assert _stored_evidence(runtime) == original

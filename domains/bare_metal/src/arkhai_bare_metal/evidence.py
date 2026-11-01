@@ -345,6 +345,10 @@ class BareMetalLeaseReadyResultDocument:
 
     def __post_init__(self) -> None:
         wire = _verified_json(self.canonical_bytes, self.result_digest)
+        # Literal validation normalizes numeric 1 to True; the retained v1 wire
+        # permits only JSON true, or omission of its defaulted field.
+        if "access_ready" in wire and wire["access_ready"] is not True:
+            raise ValueError("lease-ready access_ready must be JSON true")
         value = BareMetalLeaseReadyResult.model_validate_json(json.dumps(wire))
         object.__setattr__(self, "value", value)
 

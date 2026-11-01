@@ -230,14 +230,18 @@ field-style usability and repository packaging/testing obligations).
 Files: actual affected consumer tests and existing buyer/storefront regression
 tests if their assertions require adaptation. Package metadata/locks are already
 refreshed in 1.5; this section verifies their consumers rather than deferring an
-API-required refresh to final cleanup.
+API-required refresh to final cleanup. Validation-discovered corrections also
+touch `domains/bare_metal/src/arkhai_bare_metal/evidence.py`, its evidence/route
+unit tests, `domains/bare_metal/storefront/tests/test_alkahest_lifecycle.py`, and
+ `domains/bare_metal/storefront/tests/integration/test_payment_settlement_client.py`;
+these enforce the settled strict-v1 grammar and deterministic test ordering.
 
-- [ ] 3.1 Verify the installed consumers from 1.5 against the completed document
+- [x] 3.1 Verify the installed consumers from 1.5 against the completed document
   path (D3): imports, public exports, matching client signatures, wheel contents,
   and `make check-packaging`. Record the precise consumer set exercised and
   confirm no old nested Pydantic-type assumption survives in a changed caller.
   Do not repeat lock refresh unless dependencies, locks, or wheel metadata changed.
-- [ ] 3.2 Run the existing buyer payment-run producer/consumer regression
+- [x] 3.2 Run the existing buyer payment-run producer/consumer regression
   `domains/bare_metal/buyer/tests/test_run_log_recovery.py` and
   `make -C domains/bare_metal/buyer test` (D2–D4). Run affected consumer suites
   from the metadata inventory, plus existing payment settlement, identity, and
@@ -245,7 +249,7 @@ API-required refresh to final cleanup.
   boundaries. Verify exact Agreement bytes, mandate/transaction identity,
   reader privileges, previous-wire refusal, and existing deletion contracts are
   not changed; do not add cross-domain conversion or a live purchase.
-- [ ] 3.3 Complete local validation (D5; `AGENTS.md` and
+- [x] 3.3 Complete local validation (D5; `AGENTS.md` and
   `openspec/README.md#implementation-completion-checklist`): run root `make test`,
   `make check-comment-hygiene`, `make check-architecture`,
   `make check-packaging`, and `make check-change CHANGE=version-accepted-artifacts`.
@@ -256,12 +260,153 @@ API-required refresh to final cleanup.
   are composition regressions. Ordinary pre-review validation must report its
   local, Helm, pipeline, and supported CI results against the committed source;
   no additional workflow-only job is owed by this bounded change.
-- [ ] 3.4 Maintain a design-promotion record in this task file mapping D1–D4 to
+- [x] 3.4 Maintain a design-promotion record in this task file mapping D1–D4 to
   the exact permanent destinations in 4.9, and D5 to the validation evidence
   (repository documentation ownership obligations). Classify the cross-domain
   inventory and hypothetical retirement machinery as deferred, not implemented.
   Verify every design decision and delta requirement is covered before requesting
   pre-closeout review; permanent document edits remain with closeout.
+
+### Section 3 evidence and impact binding
+
+- Validation discovered that Pydantic's strict `Literal[True]` accepts JSON `1`
+  and `1.0`. A prior installed codec accepted both under matching original
+  nested and outer digests. The concrete result-document decoder now requires
+  a present `access_ready` to be exactly JSON `true`, before model conversion;
+  omission retains its existing default, and Python model construction is
+  unchanged. No wire kind, valid v1 bytes, signature/hash algorithm, public
+  method signature, schema column, or dependency changed.
+- The corrected domain wheel was rebuilt with `make -C domains/bare_metal build`
+  and installed with `make -C domains/bare_metal/storefront reinit`.
+  `make -C domains/bare_metal test` — **224 passed** (including **44** focused
+  evidence/route cases). Matching-digest numeric readiness is refused by the
+  document and both typed parsers; string, collection and false readiness are
+  refused too. Golden valid v1 bytes/digests remain pinned.
+- Corrected installed-wheel library/application coverage:
+  `domains/bare_metal/storefront/.venv/bin/python -m pytest
+  domains/bare_metal/storefront/tests/integration/test_evidence_persistence.py
+  domains/bare_metal/storefront/tests/test_alkahest_lifecycle.py -q`
+  — **33 passed**, including actual typed-HTTP refusal of numeric readiness
+  under matching digests and unchanged stored content. The corrected installed
+  evidence module equals SHA-256
+  `3412e331f95affbe00358766dabf9c06ad454012ad4e39a586a90f83ad45cc9b`.
+- The full corrected storefront rerun is recorded separately from section 2's
+  historical 555-pass result. It finished with **556 passed, 1 failed**, two existing dependency
+  deprecation warnings (1519.94 s). Its only failure was the original compiled
+  refund fixture described next; the final fixture correction is covered by
+  the exact original test and five neighboring cases below, without restarting
+  the other 556 unchanged tests. No result over the corrected codec
+  is inferred from the earlier 555 execution.
+- The unchanged refund-ordering test's 50 ms sleep failed to establish that
+  settlement reached its guarded lifecycle write. The exact failing command,
+  `domains/bare_metal/storefront/.venv/bin/python -m pytest
+  domains/bare_metal/storefront/tests/integration/test_payment_settlement_client.py::test_a_refund_recorded_before_delivery_start_stops_delivery
+  -x -vv`, reported **DID NOT RAISE StorefrontClientError**. Debugger inspection
+  showed a successful `refunded` response, zero provisioning calls, a refunded
+  settlement row and no lifecycle row: the existing already-refunded fast path,
+  with no delivery or swallowed error. A temporary one-variable probe replacing
+  the sleep with a gate-entry event passed; the authorized permanent test-only
+  correction now awaits that event with a bound and always releases/cancels/awaits
+  its task on exit. No production payment code changed.
+- The exact original command after that fixture correction — **1 passed**.
+  Neighboring before/after-delivery, interrupted-refund and post-refund-read cases
+  (`domains/bare_metal/storefront/.venv/bin/python -m pytest
+  domains/bare_metal/storefront/tests/integration/test_payment_settlement_client.py -k
+  'refund_recorded_before_delivery_start or refund_after_delivery_start or refund_before_delivery_blocks or delivered_deal_stays_readable_after_its_refund or interrupted_refund' -q`)
+  — **5 passed**, 11 deselected. No assertion was weakened. The temporary
+  diagnostic plugin/instrumentation was removed; only these minimal receipts
+  and the causal finding are retained here.
+- The remaining root aggregate runs as `make test -o test-bare-metal`: its
+  bare-metal aggregate target is **omitted**, not freshly executed. Baseline
+  component evidence is section 2's domain 214/storefront 555 and section 3's
+  `make -C domains/bare_metal/buyer test` (**30 passed**), focused
+  `domains/bare_metal/buyer/tests/test_run_log_recovery.py` (**1 passed**), and
+  `make -C domains/bare_metal/provisioning/adapter test` (**90 passed**).
+  The new strict decoder's affected domain/storefront coverage is rerun above;
+  buyer and adapter source and their non-portable-evidence paths are unchanged.
+  All preceding root targets passed, including compute Ansible **134**,
+  provisioning service **595 unit / 500 integration**, provisioning IaC
+  **169 passed / 7 skipped / 2 subtests passed**, VM storefront **1198 unit
+  passed / 1 skipped / 501 integration passed**, and e2e unit **352 passed**.
+  The aggregate exited **2** in release tooling: **1815 passed, 1 failed**
+  (49.07 s). The exact isolated squash-merge cleanup test reproduced the failure
+  on local Git **2.34.1**: its `merge-tree --write-tree` command is unsupported
+  (`fatal: unknown rev --write-tree`). Both the implementation and its tests are
+  unchanged from the exact implementation base. The same isolated test passed
+  on verified Git **2.56.0** (**1 passed**, 0.37 s); the full failed leaf is
+  revalidated by `make test-release-tooling` on Git **2.56.0**:
+  **1816 passed** (47.17 s). Only this local synthetic-repository target
+  used the newer Git executable; no remote fetch or push used that override. This is a local tool prerequisite,
+  not an ignored test or an artifact-code fix. The normal aggregate stopped
+  before Helm rendering, so `make -C helm test-render` ran separately with
+  Helm **v3.21.0**: **passed**, all structural identity assertions.
+  The original aggregate remains recorded as failed, not reclassified as a
+  successful fresh full run.
+- Impact/binding: section 2's 18-file fingerprint
+  `bcc6210a92e8541bf0487be3035cb1ee1b663517269d75b2f32b076148db385a`
+  identifies the historical full component baseline. The strict-wire delta was
+  fingerprinted as
+  `a6ed44eee11e979011ff4eb57e0e197e4dcb39a229f9e8174bb53f39c1ad1ad3`;
+  the sole subsequent source change is the refund test's synchronization/cleanup.
+  The final **19-file** fingerprint, using section 2's same path/NUL/bytes/NUL
+  algorithm, is
+  `00da40abb066d0c18cd91c8622843c5180059113e91725d39a1cb52c4c733134`.
+  Runtime evidence.py remains the corrected hash above. Other aggregate
+  components retain unchanged source and normal valid-v1 behavior; no prior
+  broad run is described as a fresh full run of the final corrected candidate.
+- `make check-packaging -o dist` — **passed**, reusing unchanged built wheels
+  after rebuilding the changed domain wheel. No further lock refresh was needed.
+  `make check-comment-hygiene`, `make check-architecture`,
+  `make check-change CHANGE=version-accepted-artifacts`, and `git diff --check`
+  — **passed**. The affected projects have no dedicated
+  static typing target; runtime exports/annotations/signatures/schema and wheel
+  checks do not claim a static typing pass.
+- Final installed consumer verification covers `domains/bare_metal`, its
+  storefront, buyer and provisioning adapter, `domains/vms/storefront`,
+  `provisioning/compute/service`, and `e2e-tests`. All seven import the public
+  document exports, retain matching async/sync client signatures and signed-model
+  annotation identity, generate validation and serialization JSON schemas, and
+  contain byte-identical corrected evidence/route modules from the rebuilt
+  0.15.0 wheel. Wheel module bytes also match source. Completed buyer/adapter,
+  provisioning-service, VM-storefront and e2e environments were refreshed for
+  this final installed check; their prior unchanged behavioral executions remain
+  baseline evidence rather than fresh corrected-wheel full-suite claims.
+- End-to-end remains `e2e_bare_metal_mock_deal` (publication, authenticated
+  resolution and collection); pipeline, supported CI and Helm deployment
+  validation remain unrun here and are required against committed source by
+  ordinary pre-review validation. No live purchase or real-host qualification is
+  claimed. Independent review/addenda remain a separate pending workflow step.
+- Owed by validation: none beyond the ordinary committed-source local, Helm,
+  pipeline and supported CI validation; no additional workflow-only job is owed.
+
+### Design-promotion record (section 3)
+
+All permanent promotion below is scheduled for 4.9 after review; the destination
+files are not changed in this implementation round. Archival merges the two
+normative deltas rather than duplicating them by hand.
+
+| Decision and classification | Exact permanent destination / evidence |
+|---|---|
+| D1 — permanent: accepted representation versus application view; protocol-owned canonical proof input | `docs/development/ARCHITECTURE.md#build-packaging-and-initialization`; `openspec/specs/storefront-publication/spec.md`, **Bare-metal evidence retains its proof representation**; new `openspec/specs/storefront-publication/architecture.md#retained-bare-metal-evidence` |
+| D2 — permanent: verified stored winner, retained-digest publication, original-body resolution and client matching | `openspec/specs/storefront-publication/spec.md`, **Evidence persistence verifies and preserves the first document** and **Resolution preserves the existing signed evidence wire contract**; new companion section `openspec/specs/storefront-publication/architecture.md#retained-bare-metal-evidence` |
+| D3 — permanent: explicit field-style facade, unchanged signed wire and deliberate nominal type release | `openspec/specs/storefront-publication/spec.md`, **Evidence clients retain field-style Python usability**, and the same new companion section; domain 0.15.0 release and consumer/lock evidence in sections 1–3 |
+| D4 — permanent: preservation while retained, owning deletion/support floors, and reader-removal obligations | `docs/development/ARCHITECTURE.md#build-packaging-and-initialization`; `openspec/specs/deployment-state/spec.md`, **Evolution preserves retained accepted representations** and **Preservation respects explicit support and retention boundaries**; `openspec/specs/deployment-state/architecture.md#compatibility-posture` |
+| D4 — permanent current-state scope | `docs/development/ROADMAP.md#goal-1--consolidate-physical-resource-authority-in-the-provisioning-service` and the campaign row in `openspec/changes/README.md`, through 4.5–4.6; no existing accepted-artifact gap row is removed and no cross-domain completion is claimed |
+| D5 — temporary cadence and validation record | Sections 1–3 evidence records and the forthcoming committed-source pre-review validation; one frozen implementation round, with intermediate commits used only for staging. Existing testing guidance remains authoritative. |
+
+The accepted representation, persistence/restart, signed route, typed-client and
+facade scenarios have unit and integration evidence in sections 1–2. D4's existing
+payment/deletion boundaries are regression obligations in section 3, not a new
+cross-domain implementation. Permanent specification text remains in the two
+deltas until closeout archive synchronization. Existing capability/companion index
+entries already cover these destinations; no new capability is introduced.
+
+Cross-domain artifact inventory/conversion, API-credit and generated-payment
+codec repair, decoder retirement measurements, a generic registry, and fleet/count
+endpoints are **deferred**, not implemented. Hidden Pydantic snapshots, a new wire
+wrapper, and a new artifact kind remain **rejected** alternatives from the settled
+design. Pipeline, supported CI and Helm deployment results remain ordinary
+pre-review validation evidence; this round makes no live-purchase claim.
 
 ## 4. Closeout
 

@@ -228,3 +228,27 @@ def test_signed_carrier_schema_describes_existing_wire_in_both_modes():
         assert schema["properties"]["evidence"]["properties"]["result"][
             "$ref"
         ].endswith("BareMetalLeaseReadyResult")
+
+
+@pytest.mark.parametrize("client_kind", ["sync", "async"])
+@pytest.mark.parametrize("access_ready", [1, 1.0])
+def test_clients_refuse_numeric_readiness_with_matching_requested_digest(
+    client_kind, access_ready
+):
+    payload = _service(_alkahest()).respond(_alkahest()).model_dump(mode="json")
+    payload["evidence"]["result"]["access_ready"] = access_ready
+    payload["evidence"]["result_digest"] = bare_metal_digest(
+        payload["evidence"]["result"]
+    )
+    digest = bare_metal_digest(payload["evidence"])
+    with pytest.raises(ValueError, match="access_ready must be JSON true"):
+        if client_kind == "sync":
+            SyncBareMetalEvidenceClient(
+                _Recording(payload), role="buyer"
+            ).lease_ready_evidence(digest)
+        else:
+            asyncio.run(
+                BareMetalEvidenceClient(
+                    _AsyncRecording(payload), role="buyer"
+                ).lease_ready_evidence(digest)
+            )

@@ -325,3 +325,16 @@ def test_v1_snapshot_keeps_the_existing_datetime_wire_codec(offset):
             BareMetalLeaseReadyEvidence.model_validate(evidence.value.model_dump())
             == evidence.value
         )
+
+
+@pytest.mark.parametrize(
+    "access_ready", [1, 1.0, "true", [True], {"ready": True}, False]
+)
+def test_retained_wire_refuses_non_literal_true_even_with_matching_digests(
+    access_ready,
+):
+    wire = json.loads(GOLDEN_EVIDENCE)
+    wire["result"]["access_ready"] = access_ready
+    wire["result_digest"] = bare_metal_digest(wire["result"])
+    with pytest.raises(ValueError, match="access_ready must be JSON true"):
+        BareMetalLeaseReadyEvidenceDocument.from_wire(wire)
