@@ -22,16 +22,28 @@ false. Each section needs only the sections before it. No dependency gates
 implementation. The permanent specification, architecture companions,
 `ARCHITECTURE.md`, and the roadmap are written at closeout.
 
-## 1. Host definitions contracts
+## 1. Host definitions models, versions, and the relock
 
-Delivers the wire models and route contracts of the host definitions document,
-its import, and its export, with no behaviour behind them yet (D2, D9, D12, D14;
-deltas "A host definitions entry declares the whole host", "A host definitions
-document is validated whole and carries no credential", "The host registry
-exports a canonical host definitions document").
+*Replanned after the first implementation run returned to planning (workflow log
+seq 38–40, the owner's direction at seq 40).* The service suite requires every
+family route contract to have a mounted route, so the two route contracts move
+to section 3 (3.1), beside the controller binding that serves them. Their
+former task 1.2 is replaced by the version bumps, the `pyyaml` declaration, and
+the relock that no task owned. The container's uv is now 0.12.19, so `make lock`
+can run.
+
+Delivers the wire models of the host definitions document and its import (D2,
+D9, D14; deltas "A host definitions entry declares the whole host" and "A host
+definitions document is validated whole and carries no credential"), together
+with this change's package version bumps and its relock (RELEASING.md,
+"Versioning policy"; AGENTS.md, "Package and dependency discipline";
+`docs/development/BUILD_AND_PACKAGING.md`).
 
 Files: `provisioning/compute/contracts/src/compute_provisioning_contracts/{hosts.py,
-routes.py,__init__.py}`; `provisioning/compute/contracts/tests/`.
+routes.py,__init__.py}`; `provisioning/compute/contracts/tests/unit/
+test_host_definitions.py`; the `pyproject.toml` of `provisioning/compute/contracts`,
+`provisioning/compute`, `provisioning/compute/client`, and
+`provisioning/compute/service`; every lock `make lock` rewrites.
 
 - [ ] 1.1 Add the import's request and response models beside `HostCreate` in
   `hosts.py` (D14), following `market_site`'s
@@ -58,34 +70,48 @@ routes.py,__init__.py}`; `provisioning/compute/contracts/tests/`.
   models round-trip; validation without any caller flag refuses a null or quoted
   value and any undefined field at its location; a refused response with two
   problems parses; an unknown code parses — passed.
-- [ ] 1.2 Add the two route contracts to `routes.py` (D12, D14):
-  `GET /api/v1/hosts/definitions/export` (`provisioning_host_definitions_export`)
-  and `POST /api/v1/hosts/definitions/import`
-  (`provisioning_host_definitions_import`), both admitting the administrator
-  like every provisioning route, and add them wherever the module lists the host
-  operations. Confirm the existing `GET /api/v1/hosts/(?P<host>[^/]+)` pattern
-  cannot match `/api/v1/hosts/definitions/export` — it matches one segment, and
-  the path has two — and say so in a unit assertion that resolves both paths to
-  their own contracts. Unit: the route table resolves each new path and method
-  to its operation, and the host-get contract does not claim either.
-  *Implemented; its unit evidence passes, but the service suite fails on it, so
-  the section returns to planning (notes below).* Both contracts sit among the
-  host routes in
-  `PROVISIONING_ROUTE_CONTRACTS` and in `ADMIN_PROVISIONING_OPERATIONS`, so each
-  admits the administrator alone, like every host route. Unit
-  (`test_host_definitions.py`): each path and method resolves to its own
-  operation with roles `("admin",)`; neither `provisioning_host_get` nor
-  `provisioning_host_update` matches either path; `GET /api/v1/hosts/definitions`
-  still resolves to `provisioning_host_get`, so no host name is reserved — passed.
-- [ ] 1.3 **Verification checkpoint.** Unit: the contracts suite
-  (`make test-compute-provisioning-contracts`). `make check-comment-hygiene`.
-  End-to-end: none — the models carry no behaviour, and no scenario calls the
-  routes. None is owed.
-  *Not passed.* `make test-compute-provisioning-contracts`: 126 passed. `make
-  check-comment-hygiene`: OK. `make check-packaging`: OK. `make test`: failed in
-  `make test-provisioning` (2 failed, 597 passed in its unit run), and stopped
-  there, so the suites after it did not run. End-to-end: confirmed none; no
-  marker in `e2e-tests/` calls either route. None is owed.
+- [ ] 1.2 Versions, the `pyyaml` declaration, and the relock (RELEASING.md,
+  "Versioning policy"; AGENTS.md, "Package and dependency discipline").
+  - Bump each package this change changes once, minor, against its version on
+    `dev`: `arkhai-compute-provisioning-contracts` 0.12.0 → 0.13.0,
+    `arkhai-compute-provisioning` (`provisioning/compute`) 0.23.0 → 0.24.0,
+    `arkhai-compute-provisioning-client` 0.9.1 → 0.10.0, and
+    `arkhai-compute-provisioning-service` 0.21.0 → 0.22.0. First confirm each
+    `dev` version with `git show origin/dev:<project>/pyproject.toml`. The service
+    and client change in sections 3 and 4, but each package is bumped once per
+    change, so all four bumps belong here.
+  - Raise each dependent's lower bound to the version whose new API it uses:
+    the kit's and the client's bounds on the contracts to `>=0.13.0`; the
+    service's bounds on the contracts to `>=0.13.0` and on the kit to `>=0.24.0`;
+    and its dev-group bound on the client to `>=0.10.0`. The Ansible distribution
+    uses none of the new API, so its bounds stay.
+  - Declare `pyyaml` in `provisioning/compute/pyproject.toml`'s dependencies,
+    since section 2's `hosts/definitions.py` imports `yaml`. It is already in that
+    project's lock, through `arkhai-kit-site`.
+  - Run `make check-uv-version`, then `make lock`, and commit every lock it
+    rewrites.
+
+  Verify: `make check-locks` and `make check-packaging` pass.
+- [ ] 1.3 Leave the route contracts to section 3. The work-in-progress commit
+  `1164438` added `provisioning_host_definitions_export` and
+  `provisioning_host_definitions_import` to `routes.py`
+  (`PROVISIONING_ROUTE_CONTRACTS` and `ADMIN_PROVISIONING_OPERATIONS`), with their
+  assertions in `contracts/tests/unit/test_host_definitions.py`. Remove both from
+  this section's commit; task 3.1 adds them back beside the binding that serves
+  them. The service's unit test
+  `test_route_binding.py::test_every_contract_resolves_to_a_mounted_route` then
+  passes again. Verify: `make test-provisioning` passes, and `git diff origin/dev
+  -- provisioning/compute/contracts/src/compute_provisioning_contracts/routes.py`
+  is empty.
+- [ ] 1.4 **Verification checkpoint.** Unit: the contracts suite (`make
+  test-compute-provisioning-contracts`), with `test_host_definitions.py`'s model
+  cases. Run `make test`, which must pass in full; it stopped at
+  `test-provisioning` in the first run. Also run `make check-packaging`, since
+  1.2 changes dependencies and locks, and `make check-comment-hygiene`.
+  End-to-end: none — the models carry no behaviour, and no scenario calls a host
+  definitions route. None is owed.
+  Owed by validation: `tests.yml`, every `test · <target>` job — each suite
+  installs from the relocked environments, and each passes.
 
 Section 1 notes:
 
@@ -149,6 +175,10 @@ Section 1 notes:
   (the models now carry it, and the tests pass no flag). It found the models and
   routes consistent with D2, D8, D9, D12, D14 and the deltas, and nothing in
   layering, comments, or test level.
+- **Amended by the replan.** Recorded at the top of this section: the route
+  contracts move to 3.1; 1.2 carries the bumps, the `pyyaml` declaration, and the
+  relock; 1.3 takes the route contracts out of this section's commit; 1.4 is the
+  checkpoint.
 
 ## 2. The family host document
 
@@ -161,9 +191,18 @@ carries no credential", "The host registry exports a canonical host definitions
 document"; `resource-pool-management` delta "Explicit valid host membership").
 
 Files: `provisioning/compute/src/compute_provisioning/hosts/{definitions.py (new),
-service.py,route_service.py,__init__.py}`; `provisioning/compute/tests/unit/
-{test_host_definitions.py (new),test_host_route_service.py}`;
-`provisioning/compute/pyproject.toml` if a YAML dependency is not yet declared.
+service.py,connection.py,route_service.py,__init__.py}`;
+`provisioning/compute/tests/unit/{test_host_definitions.py (new),
+test_host_route_service.py}`. `pyyaml` is already declared, by 1.2.
+
+The work-in-progress commit `1164438` already carries part of 2.2 and 2.3:
+`HostAuthority.put_host_in_session` (a session-scoped write with
+codec-normalized equality), `UnknownPoolError`, `HostChange`,
+`serves_connection`, `host_ids_in_session`, `session()`, `apply_inventory` rebuilt
+on `put_host_in_session`, and `ConnectionCodecs.serves(kind, version)`. Only the
+existing suites test it (section 1 notes). Each task here reviews that code
+against its own text, completes it, and gives it the tests the task names; none
+is checked until then.
 
 - [ ] 2.1 Structural validation (D2, D7, D9). A new `hosts/definitions.py` parses
   a document's text into entries, reporting every structural problem with its
@@ -236,19 +275,27 @@ service.py,route_service.py,__init__.py}`; `provisioning/compute/tests/unit/
   `test_host_definitions.py` and `test_host_route_service.py`; the Ansible
   distribution's suite (`make test-compute-provisioning-ansible`), since
   `apply_inventory` is rebuilt on the session-scoped writes; `make test`. Run
-  `make check-packaging` if `provisioning/compute/pyproject.toml` gained a
-  dependency. `make check-comment-hygiene`.
+  `make check-packaging`, which also checks that the kit imports `yaml` only as
+  the `pyyaml` that 1.2 declared. `make check-comment-hygiene`.
   End-to-end: none — the document reaches no deployed surface until section 3.
   None is owed.
 
 ## 3. Host definitions routes and typed client
 
-Delivers the export and import on the running service and through the typed
-family client (D12, D14; deltas "A host definitions document is validated whole
-and carries no credential", "The host registry exports a canonical host
-definitions document").
+*Amended by the replan after the first implementation run (workflow log seq
+38–40).* The route contracts move here from section 1, as 3.1. A family route
+contract must land in the same commit as the binding that serves it, because the
+service suite requires every contract to have a mounted route. The former
+3.1–3.4 become 3.2–3.5.
 
-Files: `provisioning/compute/service/src/compute_provisioning_service/controllers/
+Delivers the export and import route contracts, the routes on the running
+service, and the typed family client (D12, D14; deltas "A host definitions
+document is validated whole and carries no credential", "The host registry
+exports a canonical host definitions document").
+
+Files: `provisioning/compute/contracts/src/compute_provisioning_contracts/routes.py`;
+`provisioning/compute/contracts/tests/unit/test_host_definitions.py`;
+`provisioning/compute/service/src/compute_provisioning_service/controllers/
 hosts_controller.py` (or a sibling controller registered beside it);
 `provisioning/compute/service/src/compute_provisioning_service/main.py` where it
 mounts host routes; `provisioning/compute/client/src/compute_provisioning_client/
@@ -258,22 +305,44 @@ client.py`; `provisioning/compute/client/tests/`;
 `provisioning/compute/service/tests/unit/{test_route_table_composition.py,
 test_provisioning_client_contract.py}` as the route table requires.
 
-- [ ] 3.1 Bind the routes (D12, D14). `GET /api/v1/hosts/definitions/export`
+- [ ] 3.1 Add the two route contracts to `routes.py` (D12, D14), in this
+  section's commit beside 3.2's binding:
+  - `GET /api/v1/hosts/definitions/export`
+    (`provisioning_host_definitions_export`);
+  - `POST /api/v1/hosts/definitions/import`
+    (`provisioning_host_definitions_import`).
+
+  Both admit the administrator alone, like every host route, and both go into
+  `PROVISIONING_ROUTE_CONTRACTS` and `ADMIN_PROVISIONING_OPERATIONS`. The existing
+  `GET /api/v1/hosts/(?P<host>[^/]+)` pattern matches one segment and the export
+  path has two, so neither path is claimed by a host route, and no host name is
+  reserved.
+  Unit (`contracts/tests/unit/test_host_definitions.py`):
+  - each path and method resolves to its own operation, with roles `("admin",)`;
+  - neither `provisioning_host_get` nor `provisioning_host_update` matches either
+    path;
+  - `GET /api/v1/hosts/definitions` still resolves to `provisioning_host_get`.
+
+  The first implementation run wrote and tested exactly these, at commit
+  `1164438`; 1.3 removes them from section 1 so that this task restores them.
+- [ ] 3.2 Bind the routes (D12, D14). `GET /api/v1/hosts/definitions/export`
   answers the document as `application/yaml`; `POST
   /api/v1/hosts/definitions/import` answers 422 with the response model for an
   applying request with any problem, and 200 otherwise, validate-only included.
   Register both before any `/{host_id}` route if the router would otherwise
-  shadow them, and add their contracts to the service's composed route table.
-  The single-host `PUT` keeps answering a hook refusal with 409. Unit: route
-  table composition holds the two contracts once each.
-- [ ] 3.2 Typed client methods (D12, D14). `compute_provisioning_client`'s async
+  shadow them. The single-host `PUT` keeps answering a hook refusal with 409.
+  Unit:
+  - route table composition holds the two contracts once each;
+  - `test_route_binding.py::test_every_contract_resolves_to_a_mounted_route`
+    passes with them.
+- [ ] 3.3 Typed client methods (D12, D14). `compute_provisioning_client`'s async
   and sync clients gain `export_hosts()`, returning the document's text, and
   `import_host_definitions(yaml_text, *, validate_only=False)`, returning the
   response model for 200 and for 422 alike, so a caller reads `applied` and
   `problems` rather than catching an error. Client unit tests cover both
   methods' requests and their 200 and 422 parsing; the endpoint-coverage test
   names both routes.
-- [ ] 3.3 Application integration through the typed client
+- [ ] 3.4 Application integration through the typed client
   (`test_host_definitions_api.py`, D12, D14): a document registering two hosts
   applies and reports them created; re-importing it reports them unchanged;
   "An operator explicitly imports an unchanged document" (reconciled, and no
@@ -283,8 +352,9 @@ test_provisioning_client_contract.py}` as the route table requires.
   stored-state problem" (422, both reported); "An operator validates a document"
   (200, planned diff, nothing applied); export then unedited import reporting
   every host unchanged; an unauthenticated request to either route refused.
-- [ ] 3.4 **Verification checkpoint.** Unit: the client's suite (`make
-  test-compute-provisioning-client`) and the service's route unit tests.
+- [ ] 3.5 **Verification checkpoint.** Unit: the contracts suite (`make
+  test-compute-provisioning-contracts`) for 3.1, the client's suite (`make
+  test-compute-provisioning-client`), and the service's route unit tests.
   Application integration: `test_host_definitions_api.py` and the endpoint
   coverage test, in the service's suite (`make test-provisioning`). `make test`.
   `make check-comment-hygiene`.
