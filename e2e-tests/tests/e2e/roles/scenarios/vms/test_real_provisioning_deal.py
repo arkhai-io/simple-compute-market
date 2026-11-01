@@ -11,9 +11,9 @@ a VM list job on the host no longer names the guest and the delivered access no
 longer connects. It claims nothing about the guest's other credentials, which a
 batch-mode client never tries.
 
-The target is the ``REAL_VM_TARGET`` settings section
-(``e2e_harness.real_vm_target``), loaded from ``config-real-vm-target.yml`` when
-the run selects the ``real-vm-target`` profile. Without it every stage skips,
+The target is the ``REAL_PROVISIONING_TARGET`` settings section
+(``e2e_harness.real_provisioning_target``), loaded from ``config-real-provisioning-target.yml`` when
+the run selects the ``real-provisioning-target`` profile. Without it every stage skips,
 naming the profile and file, and nothing is written to the stack: the target is
 validated, and the service's VM execution found real, before the module's holds
 are taken or anything is registered. The module is in no lane.
@@ -57,7 +57,7 @@ from market_alkahest.alkahest import (
 )
 from market_alkahest.dev_chain import anvil_address_book_path
 
-from e2e_harness.real_vm_target import TargetNotConfigured, load_real_vm_target
+from e2e_harness.real_provisioning_target import TargetNotConfigured, load_real_provisioning_target
 from e2e_harness.settings import settings
 from tests.e2e.roles.helpers.compute_deal_stages import (
     DEAL_TOKEN,
@@ -148,10 +148,16 @@ def real_vm_target():
 
     A section that is present and invalid fails here, naming the field.
     """
-    target = load_real_vm_target(settings)
+    target = load_real_provisioning_target(settings)
     if isinstance(target, TargetNotConfigured):
         pytest.skip(target.reason)
-    return target
+    host = target.host_for("vm")
+    if host is None:
+        pytest.skip("REAL_PROVISIONING_TARGET.hosts holds no vm host")
+    assert host.access.mode == "direct", (
+        "the current VM scenario requires REAL_PROVISIONING_TARGET.hosts.vm.access.mode=direct"
+    )
+    return host
 
 
 @pytest.fixture(scope="module")
@@ -195,7 +201,7 @@ def offer_resource(real_vm_target) -> dict:
         "offering_mode": "vm",
         "interruptible": True,
         "resource_id": REAL_RESOURCE_ID,
-        **real_vm_target.host.capacity.model_dump(),
+        **real_vm_target.capacity.model_dump(),
         "sla": 90.0,
         "region": REAL_REGION,
     }
@@ -306,7 +312,7 @@ class TestStage00f2_RegisteredHostIsTheTarget:
         require_state(deal_state, "_supply_seeded")
         assert_registered_as_target(deal_driver.registered_host(), real_vm_target)
         deal_state._target_host_confirmed = True
-        log.info("[00f2] Host %s registered as the target", real_vm_target.host.host_id)
+        log.info("[00f2] Host %s registered as the target", real_vm_target.host_id)
 
 
 class TestStage00g_AlkahestConfigured(Stage00g_AlkahestConfigured):
@@ -420,9 +426,9 @@ class TestStage08a2_SettlementPreviewChoseTheTarget:
         """
         require_state(deal_state, "_evaluate_settle_passed")
         chosen = deal_state._evaluate_settle_host_id
-        assert chosen == real_vm_target.host.host_id, (
+        assert chosen == real_vm_target.host_id, (
             f"the settlement preview chose host {chosen!r}, not the target "
-            f"{real_vm_target.host.host_id!r}; settlement is not submitted"
+            f"{real_vm_target.host_id!r}; settlement is not submitted"
         )
         deal_state._settle_preflight_passed = True
         log.info("[08a2] Settlement preview chose the target host %s", chosen)
@@ -511,7 +517,7 @@ class TestStage09d_BuyerReachesTheNegotiatedShape:
         require_state(deal_state, "settlement_status", "create_job_id")
         endpoint = deal_driver.delivered_access(deal_state)
         shape = ssh.probe(endpoint, buyer_key)
-        capacity = real_vm_target.host.capacity
+        capacity = real_vm_target.capacity
         log.info(
             "[09d] %s@%s:%s (host key %s) shows %s against %s",
             endpoint.user, endpoint.host, endpoint.port,

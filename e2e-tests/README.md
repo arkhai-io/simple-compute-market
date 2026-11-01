@@ -199,16 +199,20 @@ virtualization; it needs no GPU.
    host, or render that file from your environment's own records:
 
    ```bash
-   cp config/config-real-vm-target.yml.example config/config-real-vm-target.yml
+   cp config/config-real-provisioning-target.yml.example config/config-real-provisioning-target.yml
    ```
 
-   `config-real-vm-target.yml` is ignored and never committed. Its
-   `REAL_VM_TARGET` section names the host's identifier, the address, user,
-   and port the provisioning service connects to, where the service reads its
-   key, the address buyers reach the host's guests at, and the capacity the host
-   sells (`vcpu_count`, `ram_gb`, `disk_gb`): its hardware less what is kept for
-   the host itself. The scenario registers the host and deals on all of that
-   capacity in one VM. A missing or misspelled field fails the run naming it.
+   `config-real-provisioning-target.yml` is ignored and never committed. Its
+   `REAL_PROVISIONING_TARGET` version 2 section holds at most one host per
+   domain. A VM host names its identifier, `connection` (service address, user,
+   port and key path), `access`, sellable `capacity`, and a `listing_shape` that
+   fits twice within capacity. Direct access states `public_host`; relay access
+   states only `relay_id`. Bare-metal hosts additionally state `physical_host_id`
+   and their verified `ssh_host_public_key`, and have no VM listing shape.
+   The current VM scenario requires direct access before making any changes;
+   relay references are part of the shared target format. The target carries no
+   private key or relay credential. Version 1 is refused
+   with conversion instructions; a missing or misspelled field fails by name.
 2. Forward the stack's services to the ports the `local` profile names
    (`config/config-local.yml`): the storefront, the registry, the provisioning
    service, and the chain. The stack must trust the `local` profile's
@@ -216,10 +220,10 @@ virtualization; it needs no GPU.
 3. Run the module with both profiles:
 
    ```bash
-   make test-module MODULE=e2e_vm_real_provisioning ACTIVE_PROFILES=local,real-vm-target
+   make test-module MODULE=e2e_vm_real_provisioning ACTIVE_PROFILES=local,real-provisioning-target
    ```
 
-Without the `real-vm-target` profile, or with its file missing, every stage
+Without the `real-provisioning-target` profile, or with its file missing, every stage
 skips naming the profile and file, and nothing is written to the stack. A run
 that fails after settlement expires its own deal's lease so the provisioning
 service tears the VM down, and fails naming the fulfillment, jobs, VM, and host

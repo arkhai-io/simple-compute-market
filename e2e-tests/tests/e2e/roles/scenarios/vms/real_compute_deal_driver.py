@@ -1,7 +1,7 @@
 """VM's part of the canonical compute deal against a real KVM host.
 
 The real-provisioning lane deals on one host an environment owner describes in
-the run's target (``e2e_harness.real_vm_target``): this driver registers that
+the run's target (``e2e_harness.real_provisioning_target``): this driver registers that
 host's supply, negotiates a key generated for the run, reads the access the
 storefront delivered, and finds the real jobs the deal runs. It implements
 ``ComputeDealDriver`` alone. A real lane has no mock gate to hold a job at, so
@@ -29,7 +29,7 @@ import pytest
 from compute_provisioning_contracts import ConnectionSubmission
 from storefront_client import StorefrontClientError
 
-from e2e_harness.real_vm_target import RealVmTarget
+from e2e_harness.real_provisioning_target import VmHost
 from tests.e2e.roles.helpers.compute_deal import advance_fulfillment_to
 from tests.e2e.roles.helpers.compute_deal_stages import (
     DURATION_HOURS,
@@ -111,7 +111,7 @@ def vm_executor_is_real(execution: Any) -> Any:
     return entries[0]
 
 
-def target_connection(target: RealVmTarget) -> ConnectionSubmission:
+def target_connection(target: VmHost) -> ConnectionSubmission:
     """The connection the provisioning service reaches the target's host by.
 
     The key is named by where the service reads it; the target never carries
@@ -119,26 +119,26 @@ def target_connection(target: RealVmTarget) -> ConnectionSubmission:
     guest is reached at its own forwarded or relayed port, never the host's
     tenant-facing port, so none is stated.
     """
-    host = target.host
+    host = target
     return ConnectionSubmission(
         kind="ssh",
         version=2,
         public={
-            "ssh_host": host.ssh_host,
-            "ssh_port": host.ssh_port,
-            "ssh_user": host.ssh_user,
-            "key_path": host.ssh_key_path,
-            "public_host": host.public_host,
+            "ssh_host": host.connection.ssh_host,
+            "ssh_port": host.connection.ssh_port,
+            "ssh_user": host.connection.ssh_user,
+            "key_path": host.connection.ssh_key_path,
+            **({"public_host": host.access.public_host} if host.access.mode == "direct" else {}),
         },
     )
 
 
-def assert_registered_as_target(registered: Any, target: RealVmTarget) -> None:
+def assert_registered_as_target(registered: Any, target: VmHost) -> None:
     """The registered host is the target's: its pool and its whole connection."""
     wanted = target_connection(target)
     connection = registered.connection
     stated = {name: connection.public.get(name) for name in wanted.public}
-    assert registered.host_id == target.host.host_id, registered
+    assert registered.host_id == target.host_id, registered
     assert registered.enabled, f"host {registered.host_id!r} is disabled: {registered!r}"
     assert registered.pool_id == REAL_POOL_ID, (
         f"host {registered.host_id!r} is in pool {registered.pool_id!r}, not {REAL_POOL_ID!r}"
@@ -292,7 +292,7 @@ class RealVmComputeDealDriver(VmDealDriverBase):
     """VM's ``ComputeDealDriver`` for a real host: no mock gate, by construction."""
 
     vm_operator_client: Any
-    target: RealVmTarget
+    target: VmHost
     #: The OpenSSH public line of the key generated for this run.
     buyer_public_key: str
     #: The listing's shape, as the scenario's listing states it; the pool states
@@ -305,7 +305,7 @@ class RealVmComputeDealDriver(VmDealDriverBase):
     @property
     def capacity(self) -> dict[str, int]:
         """What the host sells, in the VM capacity dimensions."""
-        return self.target.host.capacity.model_dump()
+        return self.target.capacity.model_dump()
 
     def seed_supply(self) -> None:
         """Register the target's pool, host, and capacity, and load the projection.
@@ -317,7 +317,7 @@ class RealVmComputeDealDriver(VmDealDriverBase):
         host = provision_e2e_executor(
             self.provisioning_client,
             self.site_capacity_admin_client,
-            host=self.target.host.host_id,
+            host=self.target.host_id,
             pool_id=REAL_POOL_ID,
             resource_id=REAL_RESOURCE_ID,
             sellable_units=None,
@@ -326,11 +326,11 @@ class RealVmComputeDealDriver(VmDealDriverBase):
             listing_shapes={"vm": [self.listing_shape]},
             connection=target_connection(self.target),
         )
-        assert host.host_id == self.target.host.host_id
+        assert host.host_id == self.target.host_id
         refresh_storefront_projections(self.storefront_admin_client)
 
     def registered_host(self) -> Any:
-        return self.provisioning_client.get_host(self.target.host.host_id)
+        return self.provisioning_client.get_host(self.target.host_id)
 
     def listing_for_run(self) -> Optional[Any]:
         """The listing an earlier run left on the lane's resource, adopted paused.
@@ -426,7 +426,7 @@ class RealVmComputeDealDriver(VmDealDriverBase):
     def _buyer_address(self) -> str:
         """The address a buyer reaches the guest at under the target's access mode."""
         if self.target.access.mode == "direct":
-            return self.target.host.public_host
+            return self.target.access.public_host
         raise AssertionError(f"access mode {self.target.access.mode!r} is not one this driver proves")
 
     def reserve_released_capacity(
@@ -458,7 +458,7 @@ class RealVmComputeDealDriver(VmDealDriverBase):
         reservation, state = self.reservation_of(fulfillment_id)
         job = self.jobs.only_job(
             reservation,
-            host_id=self.target.host.host_id,
+            host_id=self.target.host_id,
             context=f"fulfillment {fulfillment_id} is {state!r}",
         )
         return self.jobs.until_succeeded(job.job_id, describe="create job")
@@ -468,7 +468,7 @@ class RealVmComputeDealDriver(VmDealDriverBase):
         reservation, state = self.reservation_of(fulfillment_id)
         job = self.jobs.only_job(
             reservation,
-            host_id=self.target.host.host_id,
+            host_id=self.target.host_id,
             besides=(create_job_id,),
             context=f"fulfillment {fulfillment_id} is {state!r}",
         )
@@ -476,7 +476,7 @@ class RealVmComputeDealDriver(VmDealDriverBase):
 
     def assert_guest_absent(self, vm_name: str) -> list[str]:
         return assert_guest_absent(
-            self.jobs, self.vm_operator_client, host_id=self.target.host.host_id, vm_name=vm_name
+            self.jobs, self.vm_operator_client, host_id=self.target.host_id, vm_name=vm_name
         )
 
     # -- a failed run ---------------------------------------------------
@@ -558,7 +558,7 @@ class RealVmComputeDealDriver(VmDealDriverBase):
             "create job": deal_state.create_job_id,
             "teardown job": None,
             "guest": deal_state.vm_name,
-            "host": self.target.host.host_id,
+            "host": self.target.host_id,
         }
         try:
             fulfillment_id = deal_state.fulfillment_id or self.dispatched_fulfillment(deal_state)
@@ -568,7 +568,7 @@ class RealVmComputeDealDriver(VmDealDriverBase):
             known["fulfillment"] = fulfillment_id
             reservation, state = self.reservation_of(fulfillment_id)
             known["reservation"] = reservation
-            host_id = self.target.host.host_id
+            host_id = self.target.host_id
             if not known["create job"]:
                 known["create job"] = self.jobs.only_job(
                     reservation, host_id=host_id, context=f"fulfillment {fulfillment_id} is {state!r}"

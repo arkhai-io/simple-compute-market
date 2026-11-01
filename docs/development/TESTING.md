@@ -603,18 +603,21 @@ through the host's forwarded port; no lane runs a relay-backed pool.
 
 It is in no lane, because the pipeline has no host to provision on. It runs from
 an operator's machine against a deployed stack's forwarded services, signing as
-the `local` profile's principals, with `ACTIVE_PROFILES=local,real-vm-target`:
+the `local` profile's principals, with `ACTIVE_PROFILES=local,real-provisioning-target`:
 [`e2e-tests/README.md`](../../e2e-tests/README.md#real-vm-provisioning) gives the
 steps, and [`VALIDATION_RUNBOOK.md`](VALIDATION_RUNBOOK.md#21-provide-a-kvm-host)
-the operator procedure around them. Its target is the `REAL_VM_TARGET` section
-of `config-real-vm-target.yml`, which an environment owner renders into
-`e2e-tests/config/` beside the committed example, `config-real-vm-target.yml.example`,
+the operator procedure around them. Its target is the `REAL_PROVISIONING_TARGET` section
+of `config-real-provisioning-target.yml`, which an environment owner renders into
+`e2e-tests/config/` beside the committed example, `config-real-provisioning-target.yml.example`,
 and which Git ignores.
-`e2e-tests/src/e2e_harness/real_vm_target.py` validates it before anything else.
-Version 1 describes one host — its identity, the address, user, and port the
-provisioning service connects to, where the service reads its key, the address
-buyers reach, and the capacity it sells — and admits only direct access; a
-missing or misspelled field fails naming it, and an unknown version is refused.
+`e2e-tests/src/e2e_harness/real_provisioning_target.py` validates it before anything else.
+Version 2 describes at most one host per domain, each with a connection,
+access and sellable capacity. A VM host adds a listing shape fitting twice within
+capacity; a bare-metal host adds its physical identity and verified SSH public
+host key. Direct access names a public host, while relay access names only its
+relay identifier. Unknown or foreign fields fail by name; version 1 is refused
+with conversion instructions. The current VM scenario requires direct access
+before any mutation. The target contains no private key or relay secret.
 Without the profile every stage skips naming it, and nothing is written to the
 stack.
 

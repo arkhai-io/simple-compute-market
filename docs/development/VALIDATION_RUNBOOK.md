@@ -963,34 +963,37 @@ failing with the executors it found before anything is held or registered.
 ```bash
 (
   cd e2e-tests/config || exit 1
-  example=config-real-vm-target.yml.example
+  example=config-real-provisioning-target.yml.example
   cp "$example" "${example%.example}"
 )
 ```
 
 The copy is the committed example's name without `.example`,
-`config-real-vm-target.yml`, which the `real-vm-target` profile loads from the
-e2e config directory. Fill in its `REAL_VM_TARGET` section:
+`config-real-provisioning-target.yml`, which the `real-provisioning-target` profile loads from the
+e2e config directory. Set `REAL_PROVISIONING_TARGET.version: 2` and add a
+VM entry under `hosts`:
 
-- `host_id`: the identifier the scenario registers the host under;
-- `ssh_host`, `ssh_user`, `ssh_port`: where the provisioning service connects
-  to the host;
-- `ssh_key_path`: section 23's path;
-- `public_host`: the host's address as the operator's machine reaches its
-  forwarded guest ports;
-- `capacity`: what section 21 decided the host sells, as `vcpu_count`,
-  `ram_gb`, and `disk_gb`.
+- `domain: vm` and `host_id`, the identifier the scenario registers;
+- `connection.ssh_host`, `ssh_user`, `ssh_port`, and `ssh_key_path`, where the
+  provisioning service connects and section 23's service-local key path;
+- `access: {mode: direct, public_host: <buyer-address>}` for forwarded guest
+  ports; the current VM scenario requires direct access before mutation. The
+  target schema also admits relay access naming only `relay_id`;
+- `capacity`, the sellable `vcpu_count`, `ram_gb`, and `disk_gb` from section 21;
+- `listing_shape`, an explicit guest shape fitting twice within that capacity.
 
-The scenario registers the host with an `ssh` connection at version 2, the only
-version the provisioning service serves, naming `ssh_key_path` as its `key_path`
-and `public_host` as the buyer-facing address. A run replaces the connection an
-earlier registration left, so a host stored at an older version is moved forward;
-the key itself stays in the service's filesystem and never enters the target.
+A bare-metal entry uses `domain: bare_metal`, adds `physical_host_id` and its
+operator-verified `ssh_host_public_key`, and omits `listing_shape`. At most one
+host per domain is allowed. Direct and relay access fields cannot be mixed.
+The target names no relay token or grant key and carries no private host key.
 
-`access.mode` stays `direct`, the only mode version 1 admits. Git ignores the
-file; never commit it. The model in `e2e-tests/src/e2e_harness/real_vm_target.py`
-documents every field, and the scenario refuses a missing, misspelled, or
-unknown one, naming it, before anything else runs.
+The scenario registers its host with an `ssh` connection at version 2, naming
+`connection.ssh_key_path` as the service's `key_path`. It reconciles an earlier
+registration with the target; the key itself remains in the service filesystem.
+Git ignores the real target file; never commit it. The model in
+`e2e-tests/src/e2e_harness/real_provisioning_target.py` documents the fields.
+Missing, misspelled, foreign or unknown fields fail before scenario mutation;
+version 1 fails with conversion instructions rather than being interpreted.
 
 ## 25. Run The Real-Provisioning Scenario
 
@@ -999,7 +1002,7 @@ ports the `local` profile names (8545, 8080, 8001, and 8081), then, from the
 repository root:
 
 ```bash
-make -C e2e-tests test-module MODULE=e2e_vm_real_provisioning ACTIVE_PROFILES=local,real-vm-target
+make -C e2e-tests test-module MODULE=e2e_vm_real_provisioning ACTIVE_PROFILES=local,real-provisioning-target
 ```
 
 A run takes as long as a real create and teardown; each job is polled for up to
@@ -1041,7 +1044,7 @@ section 21 made, wherever it was provided:
 rm -f /tmp/kvm-hosts.ini
 (
   cd e2e-tests/config || exit 1
-  example=config-real-vm-target.yml.example
+  example=config-real-provisioning-target.yml.example
   rm -f "${example%.example}"
 )
 ```

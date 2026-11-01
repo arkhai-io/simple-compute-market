@@ -27,7 +27,7 @@ from compute_provisioning_contracts import (
 from storefront_client import StorefrontClientError
 from storefront_client.models import ListingListResponse, ListingSummary
 
-from e2e_harness.real_vm_target import RealVmTarget
+from e2e_harness.real_provisioning_target import VmHost
 from tests.e2e.roles.helpers.compute_deal import DealLease
 from tests.e2e.roles.scenarios.vms.host_registry import register_e2e_host
 from tests.e2e.roles.scenarios.vms.real_compute_deal_driver import (
@@ -50,18 +50,18 @@ HOST = "example-kvm-1"
 RESERVATION = "reservation-1"
 #: RFC 5737 documentation addresses and a fictitious key path, as in the
 #: committed example target; they name no real host.
-TARGET = RealVmTarget.model_validate({
-    "version": 1,
-    "host": {
-        "host_id": HOST,
+TARGET = VmHost.model_validate({
+    "domain": "vm",
+    "host_id": HOST,
+    "connection": {
         "ssh_host": "192.0.2.10",
         "ssh_user": "provisioner",
         "ssh_port": 22,
         "ssh_key_path": "/run/secrets/example-host-key",
-        "public_host": "198.51.100.7",
-        "capacity": {"vcpu_count": 7, "ram_gb": 28, "disk_gb": 160},
     },
-    "access": {"mode": "direct"},
+    "capacity": {"vcpu_count": 7, "ram_gb": 28, "disk_gb": 160},
+    "listing_shape": {"vcpu_count": 2, "ram_gb": 4, "disk_gb": 30},
+    "access": {"mode": "direct", "public_host": "198.51.100.7"},
 })
 
 
@@ -416,7 +416,7 @@ def test_the_preflight_fails_and_settlement_stays_blocked_when_another_host_was_
 # A rerun's listing, and the re-reservation's claim
 # ---------------------------------------------------------------------------
 
-CAPACITY = TARGET.host.capacity.model_dump()
+CAPACITY = TARGET.capacity.model_dump()
 
 
 def _listing(
@@ -766,3 +766,13 @@ def test_a_gpu_declaration_is_still_read_from_its_mirror():
     free = _lease_over({"value": 1, "available_units": 1})
     assert held.resource_consumed(None, "res-1") is True
     assert free.resource_consumed(None, "res-1") is False
+
+
+def test_target_fixture_refuses_relay_before_any_lifecycle_holds(monkeypatch):
+    target = TARGET.model_dump()
+    target["access"] = {"mode": "relay", "relay_id": "example-vm-relay"}
+    monkeypatch.setattr(real_lane, "settings", {
+        "REAL_PROVISIONING_TARGET": {"version": 2, "hosts": [target]},
+    })
+    with pytest.raises(AssertionError, match="access.mode=direct"):
+        real_lane.real_vm_target.__wrapped__()

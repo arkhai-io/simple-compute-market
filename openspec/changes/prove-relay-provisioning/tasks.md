@@ -1487,22 +1487,53 @@ bare-metal reclaim tolerates an account its grant never created".
 Delivers D5, D6's target half, and D7: the modified "A real-provisioning target is a
 typed, versioned settings section".
 
-- [ ] 10.1 Replace `e2e-tests/src/e2e_harness/real_vm_target.py` with
-      `real_provisioning_target.py`: section `REAL_PROVISIONING_TARGET`, profile
+- [x] 10.1 Replace the VM-only target reader with
+      `e2e-tests/src/e2e_harness/real_provisioning_target.py`: section `REAL_PROVISIONING_TARGET`, profile
       `real-provisioning-target`, version 2's hosts with their domain, connection,
       access (relay by id, or direct with `public_host`), capacity, VM
       `listing_shape` fitting twice, and bare-metal `physical_host_id` and
       `ssh_host_public_key`; refuse version 1 with the conversion message, two hosts
       of one domain, and a field foreign to a host's domain or mode. (D5, D7)
-- [ ] 10.2 Replace the committed example `config-real-vm-target.yml.example` in
+- [x] 10.2 Replace the committed example `config-real-vm-target.yml.example` in
       `e2e-tests/config/` with `config-real-provisioning-target.yml.example`
       (documentation addresses and invented names, said so), and the ignore rule in
       `e2e-tests/.gitignore`. (D5)
-- [ ] 10.3 Tests. Unit (the planned `test_real_provisioning_target.py` module under `e2e-tests/tests/unit/`,
+- [x] 10.3 Tests. Unit (the planned `test_real_provisioning_target.py` module under `e2e-tests/tests/unit/`,
       replacing `test_real_vm_target.py`): every refusal names its field; a listing
       shape not fitting twice names the dimension; version 1 refused.
-- [ ] 10.4 Verify. `make test-e2e-unit`; `make test`. End-to-end: none; the real
+- [x] 10.4 Verify. `make test-e2e-unit`; `make test`. End-to-end: none; the real
       lanes read it.
+
+
+### Section 10 handoff
+
+The target reader, ignored profile and visibly fictitious example now use
+`REAL_PROVISIONING_TARGET` version 2. Typed discriminated hosts and access modes
+refuse foreign fields, duplicate domains and a VM shape exceeding half the host's
+capacity. Legacy version 1 and the old section name fail with field-mapping and
+profile instructions. Each lane selects its domain explicitly; absent configuration
+or an absent domain remains a named skip, while malformed configuration fails.
+Existing VM consumers were migrated minimally so removing the retired module does
+not break collection. The example defaults VM access to direct, and the VM fixture
+refuses relay before any mutation until the next section implements that path.
+Relay validation, listing-shape use and concurrent deals
+remain section 11. Existing operator instructions and citations now describe the
+actual target format; broader relay/operator promotion remains section 15 and
+closeout.
+
+`make test-e2e-unit` passed all 389 unit tests, including the version/domain/mode,
+profile-loading and two-shape refusal cases plus existing VM lane coverage.
+`make check-packaging` passed. The initial change check found a task citation to
+the retired target module; it was corrected to the replacement and the final
+`make check-change CHANGE=prove-relay-provisioning` passed. The lead fresh-context compliance check found the initial default example
+offered relay before its runtime was implemented; the example, early preflight
+refusal and operator prose were corrected, with an explicit refusal regression.
+No finding was declined. No dependency or lock changed. Full `make test` and combined independent implementation review remain
+frozen-round gates under the owner-authorized cadence; they were not repeated for
+this intermediate section. This is configuration/source evidence, not hardware
+or relay-traffic evidence. No end-to-end marker alone exercises the target reader;
+real lanes consume it, and live evidence remains section 16. Owed by validation:
+no additional push-only workflow beyond the normal frozen-round pipeline.
 
 ## 11. The real VM lane over a relay
 
