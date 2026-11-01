@@ -3,10 +3,10 @@
 Paths are relative to the repository root. Decisions (`D<n>`) and corrections are
 `design.md`'s; requirements are this change's delta specs under `specs/`.
 
-Sections 1–13 need nothing from `frp-grant-admission`: the signer is built to the
+Sections 1–13 need nothing from `admit-relay-proxies-by-grant`: the signer is built to the
 grant format D16 states, and the family roles take the plugin's image and
 configuration as inputs. Sections 14–16 need the plugin itself and start once
-`frp-grant-admission` is archived; closeout waits on it too (D13).
+`admit-relay-proxies-by-grant` is archived; closeout waits on it too (D13).
 
 ## 1. The relay machinery in the compute family kit
 
@@ -635,7 +635,7 @@ Delivers D11: "Real-lane SSH access goes through one helper".
 
 ## 14. The admission plugin on a relay, and the signer against its vector
 
-Starts once `frp-grant-admission` is archived. Delivers D18's installation and
+Starts once `admit-relay-proxies-by-grant` is archived. Delivers D18's installation and
 conformance, D19, and D20: "Every relay proxy carries a signed grant" (conforming to
 the plugin's specification) and "A relay without an active grant key is refused
 before dispatch" (the relay's side).
@@ -708,7 +708,7 @@ addresses, project, cluster, namespace, and host names; until then the change is
 
 Per `openspec/README.md#plan-closeout-requirements`, in that order; closeout changes
 documentation only, and a part needing a code edit returns the change to
-implementation. `frp-grant-admission` must be archived first.
+implementation. `admit-relay-proxies-by-grant` must be archived first.
 
 - [ ] 17.1 **Comment hygiene.** Run `make check-comment-hygiene` and confirm the comments
       this change added state invariants, not this change; anything to fix returns the
@@ -733,7 +733,7 @@ implementation. `frp-grant-admission` must be archived first.
       the promotion record.
 - [ ] 17.6 **Campaign index currency.** This change's row in
       `openspec/changes/README.md` ("Reach hosts and VMs that have no inbound route"),
-      its campaign graph, and its `Depends on` once `frp-grant-admission` is archived;
+      its campaign graph, and its `Depends on` once `admit-relay-proxies-by-grant` is archived;
       other rows' `Depends on` stay. Name the update in the promotion record.
 - [ ] 17.7 **Packaging.** `make check-packaging` and
       `make check-architecture-change CHANGE=prove-relay-provisioning`.

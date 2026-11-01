@@ -644,14 +644,14 @@ inconsistent.
 ### D13. Implementation cadence
 
 On the owner's direction after the design review (workflow log seq 39), the work
-that does not need the admission plugin comes first, and `frp-grant-admission` gates
+that does not need the admission plugin comes first, and `admit-relay-proxies-by-grant` gates
 only the work that does and this change's closeout. Nothing in SCM imports the
 plugin: the signer is built to the grant format D16 states, which the prerequisite
 carries as its requirement, and the family roles take the plugin's image and
 configuration as inputs. What needs the plugin itself is a fourth round: installing
 it on a relay, checking the signer against the plugin's published test vector, the
 operator documentation of admission, and the live run. So rounds 1–3 below start
-now, round 4 waits for `frp-grant-admission` to be archived, and the operator
+now, round 4 waits for `admit-relay-proxies-by-grant` to be archived, and the operator
 documentation the third round first carried moves to round 4, since it describes
 the plugin's configuration. Four rounds, each ending in its own review:
 
@@ -670,7 +670,7 @@ the plugin's configuration. Four rounds, each ending in its own review:
 - **Round 3 — the lanes.** Session 1: target version 2 and the VM lane over a relay,
   with the second-deal sequence and its evidence stages. Session 2: the real
   bare-metal lane; the SSH helper convergence.
-- **Round 4 — admission end to end, once `frp-grant-admission` is archived.**
+- **Round 4 — admission end to end, once `admit-relay-proxies-by-grant` is archived.**
   Session 1: `relay-server` installing the plugin with its configuration; the
   signer's check against the plugin's published vector; the runbook (including the
   admission check and onboarding a site to a shared relay) and seller documentation.

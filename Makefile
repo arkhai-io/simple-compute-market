@@ -1099,3 +1099,19 @@ fetch-e2e-logs: ## Wait for an E2E run, fetch its logs, and zip the resulting di
 
 prune-tombstones: ## Delete every file whose contents are a tombstone comment
 	@python3 scripts/prune_tombstones.py
+
+.PHONY: test-bare-metal-iac
+test-bare-metal-iac:
+	$(MAKE) -C domains test-bare-metal-iac
+
+.PHONY: test-bare-metal-iac-native
+test-bare-metal-iac-native: ## Native helper account/IPC/mount checks in a disposable private container
+	@docker image inspect $(PROVISIONING_IMAGE) >/dev/null 2>&1 || { \
+		echo "no $(PROVISIONING_IMAGE) image: build it first, with make build-provisioning" >&2; exit 1; }
+	docker run --rm --user 0 --network none --pid="" --ipc private \
+		--cap-add SYS_ADMIN --security-opt apparmor=unconfined \
+		--tmpfs /work:rw,nosuid,nodev,mode=0755 \
+		-v "$(CURDIR)/domains/bare_metal/provisioning/iac:/iac:ro" -w /iac \
+		-e BARE_METAL_DISPOSABLE_NATIVE=private-container-v1 \
+		-e PYTHON=/home/appuser/ansible-venv/bin/python \
+		$(PROVISIONING_IMAGE) bash scripts/native_cleanup_gate.sh
