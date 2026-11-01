@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import ctypes
 import fcntl
 import grp
 import hashlib
@@ -60,7 +61,7 @@ def json_load(data):
 
 def normalized(path):
     text(path)
-    require(path.startswith("/") and str(Path(path)) == path and ".." not in Path(path).parts and path != "/", "unsafe path")
+    require(path.startswith("/") and not path.startswith("//") and str(Path(path)) == path and ".." not in Path(path).parts and path != "/", "unsafe path")
     return path
 
 
@@ -103,7 +104,7 @@ def protection(info, owner, *, directory=False):
 
 
 @contextlib.contextmanager
-def directory(path, *, owner=0, protected=True):
+def directory(path, *, owner=0, protected=True, shared=False):
     """Pin each ancestor without following links; only root's sticky /tmp is exempt."""
     normalized(path)
     fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
@@ -115,11 +116,15 @@ def directory(path, *, owner=0, protected=True):
             fd = next_fd
             if protected:
                 info = os.fstat(fd)
-                sticky_tmp = i == 0 and part == "tmp" and info.st_uid == 0 and info.st_mode & stat.S_ISVTX
+                sticky_tmp = ((i == 0 and part == "tmp") or (shared and i == len(parts) - 1)) and info.st_uid == 0 and info.st_mode & stat.S_ISVTX
                 if not sticky_tmp:
                     require(info.st_uid in (0, owner) and not info.st_mode & 0o022, "unsafe ancestor")
         if protected:
-            protection(os.fstat(fd), owner, directory=True)
+            info = os.fstat(fd)
+            if shared and info.st_uid == owner and info.st_mode & stat.S_ISVTX:
+                require(stat.S_ISDIR(info.st_mode), "unexpected root type")
+            else:
+                protection(info, owner, directory=True)
         yield fd
     finally:
         os.close(fd)
@@ -157,8 +162,9 @@ class Host:
 
 
 class Store:
-    def __init__(self, policy_path, *, host=None, owner=0, fsync=os.fsync, replace=os.replace):
-        self.owner, self.host = owner, host or Host()
+    def __init__(self, policy_path, *, host=None, owner=0, fsync=os.fsync, replace=os.replace, mounts=None, before_remove=None):
+        self.owner, self.host = owner, host or LinuxHost()
+        self.mounts, self.before_remove = mounts or mount_id, before_remove
         self.fsync, self.replace = fsync, replace
         policy_path = Path(policy_path)
         with directory(str(policy_path.parent), owner=owner) as fd:
@@ -198,26 +204,41 @@ class Store:
 
     def load(self, fd):
         value = read_protected(fd, "ledger.json", self.owner)
-        exact(value, ("version", "policy_digest", "consumed", "receipts"))
+        exact(value, ("version", "policy_digest", "roots", "consumed", "receipts"))
         require(type(value["version"]) is int and value["version"] == 1 and value["policy_digest"] == self.digest, "ledger/policy mismatch")
+        require(value["roots"] == self.validate_roots(), "policy-root identity drift")
         require(isinstance(value["consumed"], list) and isinstance(value["receipts"], dict), "invalid ledger")
         consumed = value["consumed"]
         require(len(consumed) == len(set(integer(uid) for uid in consumed)), "duplicate consumption")
         seen = set()
         for reservation, receipt in value["receipts"].items():
             text(reservation)
-            exact(receipt, ("reservation_id", "account", "uid", "gid", "home", "state", "policy_digest"))
+            exact(receipt, ("reservation_id", "account", "uid", "gid", "home", "state", "policy_digest", "observations"))
             require(receipt["reservation_id"] == reservation and receipt["policy_digest"] == self.digest, "receipt mismatch")
             self.account(receipt["account"])
             uid = integer(receipt["uid"])
             require(uid in consumed and uid not in seen and receipt["gid"] == uid, "invalid receipt identity")
             require(self.policy["uid_min"] <= uid <= self.policy["uid_max"] and uid not in self.policy["exclude_ids"], "receipt outside policy")
             require(receipt["home"] == self.home(receipt["account"]) and receipt["state"] in ("reserved", "cleaned", "complete"), "invalid receipt")
+            require(isinstance(receipt["observations"], dict) and set(receipt["observations"]).issubset({"scratch_removed", "ipc_removed", "home_removed"}), "invalid observations")
+            for count in receipt["observations"].values():
+                integer(count)
             seen.add(uid)
         require(seen == set(consumed), "missing consumption history")
         return value
 
+    def validate_roots(self):
+        roots = {}
+        for path in [self.policy["home_parent"], *self.policy["scratch_roots"], *self.policy["ipc_roots"]]:
+            with directory(path, owner=self.owner, shared=path != self.policy["home_parent"]) as fd:
+                identity = self.mounts(fd)
+                require(identity in self.policy["mount_ids"], "unapproved policy-root mount")
+                info = os.fstat(fd)
+                roots[path] = {"device": info.st_dev, "inode": info.st_ino, "mount_id": identity}
+        return roots
+
     def initialize(self):
+        roots = self.validate_roots()
         with self.locked(initialize=True) as fd:
             # The stable lock remains even after a failed initialization; it is never
             # removed or replaced, and normal calls cannot initialize a missing ledger.
@@ -225,7 +246,7 @@ class Store:
                 os.stat("ledger.json", dir_fd=fd, follow_symlinks=False)
             except FileNotFoundError:
                 require(not os.listdir(fd) or set(os.listdir(fd)) == {"lock"}, "nonempty initial state")
-                self.write(fd, {"version": 1, "policy_digest": self.digest, "consumed": [], "receipts": {}})
+                self.write(fd, {"version": 1, "policy_digest": self.digest, "roots": roots, "consumed": [], "receipts": {}})
             else:
                 raise Refusal("ledger already initialized")
         return {"version": 1, "operation": "init", "state": "initialized"}
@@ -237,10 +258,12 @@ class Store:
     def home(self, account):
         return self.policy["home_parent"] + "/" + account
 
-    def identity(self, receipt, *, absent=False):
+    def identity(self, receipt, *, absent=False, present=False):
         users, groups = list(self.host.users()), list(self.host.groups())
         users += [row for key in (receipt["account"], receipt["uid"]) if (row := self.host.user(key)) is not None]
         groups += [row for key in (receipt["account"], receipt["gid"]) if (row := self.host.group(key)) is not None]
+        if present:
+            require(any(user.pw_name == receipt["account"] for user in users) and any(group.gr_name == receipt["account"] for group in groups), "expected account/private group absent")
         for user in users:
             if user.pw_uid == receipt["uid"] or user.pw_name == receipt["account"]:
                 require(not absent and (user.pw_name, user.pw_uid, user.pw_gid, user.pw_dir) == (receipt["account"], receipt["uid"], receipt["gid"], receipt["home"]), "account identity conflict")
@@ -258,19 +281,23 @@ class Store:
         reservation = text(request["reservation_id"])
         account = self.account(request["account"])
         require(request["policy_id"] == self.policy["policy_id"], "policy identity mismatch")
+        self.validate_roots()
         with self.locked() as fd:
             ledger = self.load(fd)
             receipt = ledger["receipts"].get(reservation)
             if receipt is None:
                 require(operation == "reserve", "missing receipt")
-                require(not any(r["account"] == account for r in ledger["receipts"].values()), "account already consumed")
+                for previous in ledger["receipts"].values():
+                    if previous["account"] == account:
+                        require(previous["state"] == "complete", "account already consumed by incomplete reservation")
+                        self.cleanup("verify-complete", previous)
                 users, groups = self.host.users(), self.host.groups()
                 require(self.host.user(account) is None and self.host.group(account) is None and not any(u.pw_name == account for u in users) and not any(g.gr_name == account for g in groups), "unreceipted account/group")
                 require(not os.path.lexists(self.home(account)), "unreceipted home")
                 unavailable = set(ledger["consumed"]) | set(self.policy["exclude_ids"]) | {u.pw_uid for u in users} | {g.gr_gid for g in groups} | {u.pw_gid for u in users}
                 uid = next((n for n in range(self.policy["uid_min"], self.policy["uid_max"] + 1) if n not in unavailable and self.host.user(n) is None and self.host.group(n) is None), None)
                 require(uid is not None, "UID range exhausted")
-                receipt = {"reservation_id": reservation, "account": account, "uid": uid, "gid": uid, "home": self.home(account), "state": "reserved", "policy_digest": self.digest}
+                receipt = {"reservation_id": reservation, "account": account, "uid": uid, "gid": uid, "home": self.home(account), "state": "reserved", "policy_digest": self.digest, "observations": {}}
                 ledger["consumed"].append(uid)
                 ledger["receipts"][reservation] = receipt
                 self.write(fd, ledger)
@@ -278,16 +305,245 @@ class Store:
             self.fsync(fd)
             if operation in ("reserve", "verify-identity"):
                 require(receipt["state"] != "complete", "completed reservation cannot grant")
-                self.identity(receipt)
+                self.identity(receipt, present=operation == "verify-identity")
             else:
-                self.cleanup(operation, receipt)
+                receipt["observations"] = self.cleanup(operation, receipt)
                 if operation in ("clean", "verify-complete"):
-                    receipt["state"] = "complete" if operation == "verify-complete" else "cleaned"
+                    receipt["state"] = "complete" if operation == "verify-complete" or receipt["state"] == "complete" else "cleaned"
                     self.write(fd, ledger)
             return {"version": 1, "operation": operation, **receipt}
 
     def cleanup(self, operation, receipt):
-        raise Refusal("cleanup capability unavailable")
+        uid = receipt["uid"]
+        self.identity(receipt, absent=operation == "verify-complete" or receipt["state"] == "complete")
+        self.host.quiescent(uid)
+        if operation == "remove-home":
+            require(self.host.user(receipt["account"]) is None and self.host.user(uid) is None, "account must be removed before home")
+        ipc = attributable(self.host.ipc(), uid)
+        counts = {"scratch_removed": 0, "ipc_removed": 0, "home_removed": 0}
+        with contextlib.ExitStack() as stack:
+            roots = []
+            for path in [self.policy["home_parent"], *self.policy["scratch_roots"], *self.policy["ipc_roots"]]:
+                fd = stack.enter_context(directory(path, owner=self.owner, shared=path != self.policy["home_parent"]))
+                tree = Tree(fd, uid, self.policy["mount_ids"], mounts=self.mounts, before_remove=self.before_remove)
+                names = [receipt["account"]] if path == self.policy["home_parent"] else os.listdir(fd)
+                plans = {}
+                for name in names:
+                    try:
+                        plans[name] = tree.inspect(fd, name, selected=path == self.policy["home_parent"])
+                    except FileNotFoundError:
+                        require(path == self.policy["home_parent"], "entry disappeared during inventory")
+                roots.append((path, fd, tree, plans))
+            # Every candidate, including the dedicated home and IPC inventory, is
+            # inspected before the first deletion. Foreign children cannot be
+            # discovered only after their siblings have already been removed.
+            if operation == "verify-complete":
+                require(not ipc, "tenant IPC remains")
+                for path, fd, tree, plans in roots:
+                    require(not any(tree.has_owned(plan) for plan in plans.values()), "covered data remains")
+                    require(path != self.policy["home_parent"] or not plans, "home remains")
+            else:
+                for path, fd, tree, plans in roots:
+                    home = path == self.policy["home_parent"]
+                    if (operation == "clean" and not home) or (operation == "remove-home" and home):
+                        for name, plan in plans.items():
+                            counts["home_removed" if home else "scratch_removed"] += tree.remove(fd, name, plan)
+                if operation == "clean":
+                    for record in ipc:
+                        current = [item for item in attributable(self.host.ipc(), uid) if (item["kind"], item["id"]) == (record["kind"], record["id"])]
+                        require(current == [record], "IPC identity drift")
+                        self.host.remove_ipc(record)
+                        counts["ipc_removed"] += 1
+                remaining = attributable(self.host.ipc(), uid)
+                require(not remaining, "tenant IPC remains")
+                for path, fd, tree, plans in roots:
+                    if (operation == "clean" and path != self.policy["home_parent"]) or (operation == "remove-home" and path == self.policy["home_parent"]):
+                        names = [receipt["account"]] if path == self.policy["home_parent"] else os.listdir(fd)
+                        for name in names:
+                            try:
+                                plan = tree.inspect(fd, name, selected=path == self.policy["home_parent"])
+                            except FileNotFoundError:
+                                require(path == self.policy["home_parent"], "entry disappeared during verification")
+                                continue
+                            require(not tree.has_owned(plan), "covered data remains")
+            for path, fd, tree, plans in roots:
+                with directory(path, owner=self.owner, shared=path != self.policy["home_parent"]) as current:
+                    require(signature(os.fstat(fd)) == signature(os.fstat(current)) and self.mounts(current) == tree.mount, "policy root replaced")
+        self.host.quiescent(uid)
+        if operation == "verify-complete":
+            self.identity(receipt, absent=True)
+        return counts
+
+
+
+def mount_id(fd):
+    """Linux fdinfo reports the mount, including a same-device bind mount."""
+    fields = Path(f"/proc/self/fdinfo/{fd}").read_text().splitlines()
+    values = [line.split(":", 1)[1].strip() for line in fields if line.startswith("mnt_id:")]
+    require(len(values) == 1, "mount identity unavailable")
+    return int(values[0])
+
+
+def signature(info):
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid)
+
+
+class Tree:
+    """Descriptor-relative inventory and removal inside one pinned root mount."""
+    def __init__(self, root_fd, uid, allowed_mounts, *, mounts=mount_id, before_remove=None):
+        self.root_fd, self.uid = root_fd, uid
+        self.mounts, self.before_remove = mounts, before_remove
+        self.mount = mounts(root_fd)
+        require(self.mount in allowed_mounts, "unapproved root mount")
+
+    @contextlib.contextmanager
+    def opened(self, parent, name, *, listing=False):
+        flags = os.O_RDONLY | os.O_DIRECTORY if listing else os.O_PATH
+        fd = os.open(name, flags | os.O_NOFOLLOW, dir_fd=parent)
+        try:
+            require(self.mounts(fd) == self.mount, "unexpected mount boundary")
+            require(signature(os.fstat(fd)) == signature(os.stat(name, dir_fd=parent, follow_symlinks=False)), "entry replaced")
+            yield fd
+        finally:
+            os.close(fd)
+
+    def authority(self, fd):
+        info = os.fstat(fd)
+        require(info.st_uid in (0, self.uid), "foreign directory mutation authority")
+        # Linux exposes the POSIX ACL class mask in the group mode bits. A
+        # nonsticky group/other-write directory therefore admits foreign rename
+        # authority, including named ACL writers, even when its owning UID is quiet.
+        require(not info.st_mode & 0o022 or info.st_mode & stat.S_ISVTX, "unsafe directory mutation authority")
+
+    def inspect(self, parent, name, *, selected=False):
+        with self.opened(parent, name) as fd:
+            info = os.fstat(fd)
+        owned = info.st_uid == self.uid
+        require(not selected or owned, "foreign descendant")
+        children = {}
+        if stat.S_ISDIR(info.st_mode):
+            with self.opened(parent, name, listing=True) as child:
+                require(signature(os.fstat(child)) == signature(info), "directory replaced")
+                for entry in os.listdir(child):
+                    children[entry] = self.inspect(child, entry, selected=selected or owned)
+                require(signature(os.stat(name, dir_fd=parent, follow_symlinks=False)) == signature(info), "directory replaced")
+        plan = (signature(info), owned, children)
+        if self.has_owned(plan):
+            self.authority(parent)
+            if stat.S_ISDIR(info.st_mode):
+                with self.opened(parent, name, listing=True) as child:
+                    self.authority(child)
+        return plan
+
+    def remove(self, parent, name, plan):
+        expected, owned, children = plan
+        if self.before_remove is not None:
+            self.before_remove(parent, name)
+        if self.has_owned(plan):
+            self.authority(parent)
+        count = 0
+        try:
+            with self.opened(parent, name) as entry:
+                require(signature(os.fstat(entry)) == expected, "entry identity drift")
+                if stat.S_ISDIR(expected[2]):
+                    with self.opened(parent, name, listing=True) as child:
+                        require(signature(os.fstat(child)) == expected, "directory identity drift")
+                        if self.has_owned(plan):
+                            self.authority(child)
+                        require(set(os.listdir(child)) == set(children), "directory contents drift")
+                        for child_name, child_plan in children.items():
+                            count += self.remove(child, child_name, child_plan)
+                        require(signature(os.stat(name, dir_fd=parent, follow_symlinks=False)) == expected, "directory replaced")
+                        if owned:
+                            self.authority(parent)
+                            os.rmdir(name, dir_fd=parent)
+                            count += 1
+                elif owned:
+                    self.authority(parent)
+                    require(signature(os.stat(name, dir_fd=parent, follow_symlinks=False)) == expected, "entry replaced")
+                    os.unlink(name, dir_fd=parent)
+                    count += 1
+        except FileNotFoundError:
+            raise Refusal("entry disappeared during cleanup") from None
+        return count
+
+    def has_owned(self, plan):
+        return plan[1] or any(self.has_owned(child) for child in plan[2].values())
+
+
+class LinuxHost(Host):
+    def __init__(self, *, proc_root="/proc"):
+        self.proc_root = Path(proc_root)
+
+    def quiescent(self, uid):
+        require(sys.platform == "linux", "unsupported process observer")
+        for entry in self.proc_root.iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                tasks = list((entry / "task").iterdir())
+            except FileNotFoundError:
+                require(not entry.exists(), "process tasks unavailable")
+                continue
+            for task in tasks:
+                if not task.name.isdigit():
+                    continue
+                try:
+                    status = (task / "status").read_text()
+                except FileNotFoundError:
+                    require(not task.exists(), "thread UID observation unavailable")
+                    continue
+                lines = [line for line in status.splitlines() if line.startswith("Uid:")]
+                require(len(lines) == 1, "process UID observation unavailable")
+                values = lines[0].split()[1:]
+                require(len(values) == 4 and all(value.isdecimal() for value in values), "invalid process UID fields")
+                require(uid not in map(int, values), "tenant process remains")
+
+    def ipc(self):
+        require(sys.platform == "linux", "unsupported System V IPC")
+        records = []
+        for kind, id_column in (("shm", "shmid"), ("sem", "semid"), ("msg", "msqid")):
+            lines = (self.proc_root / "sysvipc" / kind).read_text().splitlines()
+            require(bool(lines), "IPC inventory unavailable")
+            header = lines[0].split()
+            require(all(key in header for key in (id_column, "uid", "cuid", "ctime")), "unsupported IPC inventory")
+            for line in lines[1:]:
+                values = line.split()
+                require(len(values) == len(header), "invalid IPC inventory")
+                row = dict(zip(header, values))
+                records.append({"kind": kind, "id": int(row[id_column]), "uid": int(row["uid"]), "cuid": int(row["cuid"]), "fingerprint": row})
+        return records
+
+    def remove_ipc(self, record):
+        # Numeric identifiers contain kernel sequence bits. The full inventory
+        # fingerprint is checked immediately before IPC_RMID to refuse reuse.
+        current = [item for item in self.ipc() if (item["kind"], item["id"]) == (record["kind"], record["id"])]
+        require(current == [record], "IPC identity drift")
+        libc = ctypes.CDLL(None, use_errno=True)
+        if record["kind"] == "sem":
+            fn = libc.semctl
+            fn.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int]
+            result = fn(record["id"], 0, 0)
+        else:
+            fn = libc.shmctl if record["kind"] == "shm" else libc.msgctl
+            fn.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_void_p]
+            result = fn(record["id"], 0, None)
+        require(result == 0, "IPC removal failed: " + str(ctypes.get_errno()))
+
+
+def attributable(records, uid):
+    selected = []
+    seen = set()
+    for record in records:
+        require(record["kind"] in ("shm", "sem", "msg"), "unknown IPC kind")
+        key = (record["kind"], integer(record["id"]))
+        require(key not in seen, "duplicate IPC identity")
+        seen.add(key)
+        owner, creator = integer(record["uid"]), integer(record["cuid"])
+        require((owner == uid) == (creator == uid), "ambiguous IPC attribution")
+        if owner == uid:
+            selected.append(record)
+    return selected
 
 
 def main():
@@ -301,7 +557,9 @@ def main():
         if args.init:
             result = store.initialize()
         else:
-            result = store.execute(json_load(sys.stdin.buffer.read(16385)))
+            data = sys.stdin.buffer.read(16385)
+            require(len(data) <= 16384, "request too large")
+            result = store.execute(json_load(data))
         print(json.dumps(result, sort_keys=True))
         return 0
     except (Refusal, OSError, ValueError, TypeError, KeyError) as error:

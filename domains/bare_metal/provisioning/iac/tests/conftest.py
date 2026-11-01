@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tenant_working_data import Store
+from tenant_working_data import Store, mount_id
 
 
 class FakeHost:
@@ -36,6 +36,11 @@ def installation(tmp_path):
     for name in ("state", "homes", "scratch", "ipc"):
         (tmp_path / name).mkdir(mode=0o700)
     policy = {"version": 1, "policy_id": "fixture-v1", "state_dir": str(tmp_path / "state"), "home_parent": str(tmp_path / "homes"), "scratch_roots": [str(tmp_path / "scratch")], "ipc_roots": [str(tmp_path / "ipc")], "uid_min": 41000, "uid_max": 41010, "exclude_ids": [], "mount_ids": [1]}
+    fd = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        policy["mount_ids"] = [mount_id(fd)]
+    finally:
+        os.close(fd)
     path = tmp_path / "policy.json"
     path.write_text(json.dumps(policy))
     path.chmod(0o600)
@@ -52,3 +57,9 @@ def request(reservation="fixture-a", account="tenant_a", operation="reserve"):
 @pytest.fixture
 def policy_fixture():
     return {"version": 1, "policy_id": "fixture-v1", "state_dir": "/srv/fixture-state", "home_parent": "/srv/fixture-homes", "scratch_roots": ["/var/lib/BrlAPI"], "ipc_roots": ["/dev/shm", "/dev/mqueue"], "uid_min": 41000, "uid_max": 41010, "exclude_ids": [], "mount_ids": [123]}
+
+
+def pytest_collection_modifyitems(items):
+    for item in items:
+        if item.path.name == "test_native_cleanup.py":
+            item.add_marker(pytest.mark.native)

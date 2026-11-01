@@ -6,7 +6,7 @@ import pytest
 from tenant_working_data import Refusal, json_load, policy_value
 
 
-@pytest.mark.parametrize("key,value", [("version", 2), ("version", True), ("uid_min", 0), ("uid_max", 2**32), ("uid_min", True), ("policy_id", ""), ("mount_ids", []), ("mount_ids", [True]), ("state_dir", "/"), ("home_parent", "/root/homes"), ("home_parent", "/tmp/../home"), ("scratch_roots", ["/var/log/data"]), ("scratch_roots", ["/var"]), ("scratch_roots", ["/home"]), ("scratch_roots", "oops"), ("exclude_ids", ["41000"])])
+@pytest.mark.parametrize("key,value", [("version", 2), ("version", True), ("uid_min", 0), ("uid_max", 2**32), ("uid_min", True), ("policy_id", ""), ("mount_ids", []), ("mount_ids", [True]), ("state_dir", "/"), ("scratch_roots", ["//tmp"]), ("scratch_roots", ["//root"]), ("state_dir", "//"), ("home_parent", "/root/homes"), ("home_parent", "/tmp/../home"), ("scratch_roots", ["/var/log/data"]), ("scratch_roots", ["/var"]), ("scratch_roots", ["/home"]), ("scratch_roots", "oops"), ("exclude_ids", ["41000"])])
 def test_rejects_unsafe_policy(policy_fixture, key, value):
     policy = copy.deepcopy(policy_fixture)
     policy[key] = value

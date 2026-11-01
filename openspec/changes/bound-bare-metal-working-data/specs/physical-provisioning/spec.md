@@ -80,6 +80,12 @@ Bounded cleanup SHALL derive targets from protected host policy and reservation 
 - **WHEN** traversal encounters a mount not authorized by protected policy
 - **THEN** cleanup refuses rather than traversing it
 
+#### Scenario: A containing directory permits foreign replacement
+
+- **WHEN** a selected entry lies beneath a foreign-owned directory, even one currently read-only, or beneath a nonsticky directory with effective group/other write authority including an ACL mask
+- **THEN** cleanup refuses the entire candidate preflight before deleting any candidate and does not record completion
+- **AND** root-owned sticky shared roots remain supported when foreign UIDs cannot replace the selected root/tenant-owned entries
+
 ### Requirement: Tenant IPC cleanup requires unambiguous ownership
 
 Bounded cleanup SHALL remove attributable path-backed IPC within protected roots and System V shared memory, semaphores and message queues whose owner and creator both match the recorded UID. An object with only one matching identity SHALL cause refusal. Unavailable inventories or unsupported kernel interfaces SHALL fail cleanup; completion SHALL require verified absence of covered tenant IPC.
