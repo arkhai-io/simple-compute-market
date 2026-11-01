@@ -208,6 +208,27 @@ surface before the host is publishable.
 
 ## ADDED Requirements
 
+### Requirement: Provider variables preserve relay role authority
+
+Provider extra variables MUST NOT replace the accepted proxy action, exact proxy
+identity, local or remote target, or runtime client and helper selection. VM
+preparation and execution MUST reject these names even when a direct job emits
+no relay input, and execution MUST recheck stored provider variables. Bare-metal
+preparation and execution MUST continue refusing undeclared provider variables.
+Operator inventory and host-preparation configuration remain available outside
+provider extras; raw operator Ansible invocation retains Ansible's precedence.
+
+#### Scenario: A provider attempts to redirect a proxy
+
+- **WHEN** provider extras name a proxy operation, identity, endpoint, or runtime client control
+- **THEN** preparation rejects acceptance and stored malicious extras are refused before Ansible execution
+
+#### Scenario: A direct job receives relay inputs through provider extras
+
+- **WHEN** provider extras attempt to introduce a relay target or cleanup operation into a direct job
+- **THEN** the extras are refused rather than changing the accepted access mode
+
+
 ### Requirement: Relay machinery belongs to the compute family
 
 Relays, their port leases, allocation, release, reconciliation, administration, definition import, rebinding refusals, grant signing, and execution-time resolution MUST be owned by the compute family kit, not by any one domain, and every domain whose deliveries a relay carries MUST use that one implementation. A pool's relay reference MUST be stored once for every provider. Every provider whose deliveries may use a relay MUST accept the reference as `provider_config.relay_id` and write it through the family's reference, so that the rebinding rule applies to every pool alike. The provisioning service MUST register the release effect, the reconciliation worker, and the relay definitions document once, for every domain.

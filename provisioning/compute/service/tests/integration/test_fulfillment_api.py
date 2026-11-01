@@ -1104,8 +1104,9 @@ class TestRelayPortLifecycleOverTheApi:
         assert first["fulfillment_id"] == second["fulfillment_id"]
         assert len(self._held_ports()) == 1
 
+    @pytest.mark.parametrize("key", ["vm_target", "relay_proxy_action", "relay_proxy_name", "relay_client_config", "relay_proxy_remote_port"])
     async def test_rejected_preparation_rolls_back_its_port_and_acceptance(
-        self, fulfillment: FulfillmentApi
+        self, fulfillment: FulfillmentApi, key
     ):
         pool_id = f"relay-pool-{uuid.uuid4().hex[:8]}"
         capacity_reservation_id = await self._relay_backed_reservation(pool_id)
@@ -1115,7 +1116,7 @@ class TestRelayPortLifecycleOverTheApi:
             PoolUpdate(provider_config={
                 **_PROVIDER_CONFIG,
                 "relay_id": "site-a",
-                "extra_vars": {"vm_target": "override"},
+                "extra_vars": {key: "override"},
             }),
         )
 

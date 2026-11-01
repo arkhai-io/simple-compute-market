@@ -1459,6 +1459,29 @@ bare-metal reclaim tolerates an account its grant never created".
     run and pass; the VM pipeline's native gate must additionally check its built
     image. The controlled local results are not deployed or pipeline evidence.
 
+### Role-input authority correction
+
+- [x] Reserve family proxy action/identity/targets and runtime client controls in
+  `provisioning/compute/src/compute_provisioning/relays/variables.py`; apply them
+  to VM preparation and shared execution rendering, including stored extras.
+- [x] Test VM create/teardown preparation, stored VM execution, bare-metal strict
+  preparation/parameters, typed application refusal, and harmless native Ansible
+  role-call precedence. Preserve unrelated provider options and inventory/host
+  preparation settings; do not change Ansible's operator CLI authority.
+- [x] Focused checks: VM codec/plan 208 passed; bare-metal codec/plan 99 passed;
+  shared renderer 36 passed, including four harmless native Ansible add/remove
+  probes for both domain identities; typed application rollback five passed.
+  The native probes use newly rendered variables against Ansible 2.19 from the
+  existing controlled image; they assert role inputs only and execute no real
+  proxy operation. Comment hygiene and `make check-packaging` passed. The initial
+  native-test signature collection error and reinit argument error were corrected
+  before these results. The repository-wide citation scan finds three unrelated
+  missing paths in other active changes; scoped citations are checked separately.
+  Full suite, corrected CI, and integration into the validation head belong to
+  the coordinator's frozen-source round, not these focused checks. Promote
+  the authority clarification to the permanent physical-provisioning contract
+  during closeout; completed sections above remain historical evidence.
+
 ## 10. The real-provisioning target, version 2
 
 Delivers D5, D6's target half, and D7: the modified "A real-provisioning target is a

@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 import pydantic
 import pytest
 from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTION
-from compute_provisioning_ansible import AnsibleJobExecutor, MockAnsibleRunner
+from compute_provisioning_ansible import AnsibleJobExecutor, MockAnsibleRunner, render_extra_vars
 from compute_provisioning_ansible.runner import AnsibleResult, inventory_target
 from compute_provisioning_contracts import CREATE_JOB_RESULT_KIND
 from compute_provisioning.relays import RELAY_SECRET_VARIABLES
@@ -513,3 +513,20 @@ async def test_the_executor_redacts_bare_metal_relay_secrets_from_logs():
     assert "fixture-grant" not in outcome.logs
     assert "fixture-password" not in outcome.logs
     assert outcome.logs.count("[REDACTED]") == 3
+
+
+@pytest.mark.parametrize("key", [
+    "relay_proxy_action", "relay_proxy_name", "relay_proxy_local_ip",
+    "relay_proxy_local_port", "relay_proxy_remote_port", "relay_client_config",
+])
+@pytest.mark.parametrize("action", [NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTION])
+def test_stored_bare_metal_job_refuses_undeclared_role_controls(key, action):
+    run = job_run(_grant(action=action))
+    plan = BareMetalAnsibleCodec().prepare(run)
+    with pytest.raises(ValueError, match=key):
+        render_extra_vars(plan.variables, {key: "synthetic-other"})
+    for injected in ({key: "synthetic-other"}, {"provider_extra_vars": {key: "synthetic-other"}}):
+        with pytest.raises(pydantic.ValidationError):
+            BareMetalAnsibleCodec().prepare(dataclasses.replace(
+                run, parameters={**run.parameters, **injected}
+            ))

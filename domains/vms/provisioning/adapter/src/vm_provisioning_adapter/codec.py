@@ -46,6 +46,7 @@ from pydantic import ValidationError
 from compute_provisioning.jobs import JobRun
 from compute_provisioning.relays import (
     RELAY_GRANT_VARIABLE,
+    RELAY_JOB_RESERVED_VARIABLES,
     RELAY_SECRET_VARIABLES,
     RELAY_TOKEN_VARIABLE,
 )
@@ -234,6 +235,13 @@ class VmAnsibleCodec:
 
     def prepare(self, run: JobRun) -> AnsibleJobPlan:
         params = vm_job_params(run.parameters, host_id=run.host.host_id)
+        collisions = sorted(
+            self.reserved_var_keys(params).intersection(params.provider_extra_vars)
+        )
+        if collisions:
+            raise ValueError(
+                "provider extra_vars override reserved job variables: " + ", ".join(collisions)
+            )
         if self._relay_resolver is not None:
             # A create carries its leased port, and so adds a proxy, which
             # carries a grant for the lease its reservation holds; a removal
@@ -294,7 +302,11 @@ class VmAnsibleCodec:
         refused when a fulfillment is prepared rather than only when the job
         runs.
         """
-        return frozenset(self.variables(params))
+        # These aliases and optional inputs control the domain role even when
+        # the codec emits no relay fields for a direct job.
+        return frozenset(self.variables(params)) | RELAY_JOB_RESERVED_VARIABLES | frozenset({
+            "target_host", "vm_name", "vm_ip", "vm_remote_port", "relay_id",
+        })
 
     def variables(self, params: VmJobParams) -> dict[str, Any]:
         """The VM-operations playbook's variables for a job, extra ones aside."""

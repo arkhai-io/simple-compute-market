@@ -373,7 +373,7 @@ class TestPrepare:
     def test_reserved_keys_are_the_jobs_own_variables(self):
         codec = VmAnsibleCodec()
         params = _params(provider_extra_vars={"region": "eu"})
-        assert codec.reserved_var_keys(params) == frozenset(codec.variables(params))
+        assert frozenset(codec.variables(params)) <= codec.reserved_var_keys(params)
         assert "region" not in codec.reserved_var_keys(params)
 
 
@@ -943,3 +943,18 @@ def test_cleanup_mode_is_accepted_job_state_and_cannot_be_overridden(relay_id, p
     assert "vm_relay_required" in codec.reserved_var_keys(params)
     with pytest.raises(ValueError, match="vm_relay_required"):
         render_extra_vars(variables, {"vm_relay_required": not required})
+
+
+@pytest.mark.parametrize("action", ["create", "vm_remove", "undefine"])
+@pytest.mark.parametrize("key", [
+    "relay_proxy_action", "relay_proxy_name", "relay_proxy_local_ip",
+    "relay_proxy_local_port", "relay_proxy_remote_port", "relay_client_config",
+    "relay_proxy_teardown_library", "relay_admin_credentials", "frp_binary_path",
+    "frp_server_addr", "vm_remote_port", "vm_name", "vm_ip", "target_host",
+])
+def test_stored_provider_options_cannot_redirect_proxy_execution(action, key):
+    with pytest.raises(ValueError, match=key):
+        VmAnsibleCodec().prepare(_run({
+            "host_id": "kvm1", "vm_action": action, "offering_mode": "vm",
+            "vm_target": "guest-example", "provider_extra_vars": {key: "synthetic-other"},
+        }))

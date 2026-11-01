@@ -403,3 +403,16 @@ class TestTeardown:
     def test_a_released_lease_or_a_direct_vm_names_no_relay(self):
         assert _teardown(_plan(_Allocator(leased=False))).parameters["relay_id"] is None
         assert _teardown(_plan(None)).parameters["relay_id"] is None
+
+
+@pytest.mark.parametrize("key", [
+    "relay_proxy_action", "relay_proxy_name", "relay_proxy_local_ip",
+    "relay_proxy_local_port", "relay_proxy_remote_port", "relay_client_config",
+    "relay_proxy_library_path", "relay_proxy_teardown_library", "relay_proxy_status",
+    "relay_admin_credentials", "frp_binary_name", "frp_binary_path", "frp_server_addr",
+    "vm_remote_port", "vm_name", "vm_ip", "target_host",
+])
+def test_provider_options_cannot_select_proxy_identity_action_or_runtime_client(key):
+    for operation in (_create, _teardown):
+        with pytest.raises(ProviderConfigInvalidError, match=key):
+            operation(_plan(), pool_config=_pool_config(extra_vars={key: "synthetic-other"}))

@@ -396,3 +396,16 @@ def test_reclaim_uses_the_held_lease_rather_than_either_pool_or_grant_reference(
     assert reclaim.parameters["relay_id"] == "held-relay"
     assert reclaim.parameters["remote_port"] is None
     allocator.find_active_lease.assert_called_once_with(owner_kind="fulfillment", owner_id="reservation-1")
+
+
+@pytest.mark.parametrize("key", [
+    "relay_proxy_action", "relay_proxy_name", "relay_proxy_local_ip",
+    "relay_proxy_local_port", "relay_proxy_remote_port", "relay_client_config",
+])
+def test_bare_metal_pool_refuses_provider_role_controls(key):
+    with pytest.raises(ProviderConfigInvalidError, match="pool-local"):
+        _plan().prepare_create(
+            capacity_reservation_id="reservation-1", request=_request(),
+            resource=_resource(), pool_config={"extra_vars": {key: "synthetic-other"}},
+            allocate=False,
+        )

@@ -1,9 +1,8 @@
-"""The names of the playbook variables that carry a relay's secrets.
+"""The relay playbook variables owned by the compute family.
 
-Each domain's codec names these among the secret fields the Ansible executor
-redacts from a job's logged output, so the redaction covers every domain's
-relayed jobs alike; a domain naming its own subset would leave the others'
-secrets in a job read.
+Each domain's codec includes the secret subset in the fields the executor
+redacts from logged output. The reserved set also covers role inputs and
+control results that provider options must never override.
 """
 
 from __future__ import annotations
@@ -20,7 +19,23 @@ RELAY_SECRET_VARIABLES = frozenset(
     {RELAY_TOKEN_VARIABLE, RELAY_GRANT_VARIABLE, RELAY_ADMIN_PASSWORD_VARIABLE}
 )
 
+# Global extra-vars outrank include_role vars and registered task results.
+# Provider options therefore cannot select another proxy or runtime client,
+# even when a direct job emits none of the relay inputs itself. Operators may
+# still configure host preparation and inventory outside provider extra-vars.
+RELAY_JOB_RESERVED_VARIABLES = RELAY_SECRET_VARIABLES | frozenset({
+    "relay_proxy_action", "relay_proxy_name", "relay_proxy_local_ip",
+    "relay_proxy_local_port", "relay_proxy_remote_port", "relay_client_config",
+    "relay_proxy_library_path", "relay_proxy_teardown_library",
+    "relay_admin_credentials", "relay_proxy_status", "relay_proxy_removal",
+    "relay_client_baseline", "relay_privileged_port_start",
+    "frp_server_addr", "frp_server_port", "frp_admin_port",
+    "frp_binary_name", "frp_binary_path", "frp_install_root", "frp_version",
+    "frp_platform", "frp_archives", "frp_installed", "frp_workspace",
+})
+
 __all__ = [
+    "RELAY_JOB_RESERVED_VARIABLES",
     "RELAY_ADMIN_PASSWORD_VARIABLE",
     "RELAY_GRANT_VARIABLE",
     "RELAY_SECRET_VARIABLES",

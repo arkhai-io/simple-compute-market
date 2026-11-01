@@ -267,6 +267,28 @@ and the playbook applies); moving `frp-setup` with only its dashboard and subdom
 settings removed (a relay token in plaintext output and on the operator's disk,
 against this decision's own `no_log` rule).
 
+The provider-variable boundary also covers role-local inputs: global Ansible
+extra variables outrank `include_role.vars` and task results. A shared family
+reserved-name set therefore excludes proxy action, exact proxy identity, local
+and remote targets, helper paths, runtime client configuration, binary selection,
+and task control results from provider extras even when absent from the codec's
+emitted variables. VM preparation rejects these names and its role aliases;
+execution rechecks stored extras, and the shared renderer retains its collision
+check after credential resolution. Direct jobs cannot acquire a relay target
+through extras. Bare metal continues accepting no provider extras and forbidding
+undeclared job fields. Unrelated VM provider options remain supported.
+
+`relay_client_config` is host configuration, not a per-job provider option:
+operator inventory and host-preparation playbooks may configure it, but a pool's
+provider extras cannot redirect runtime edits to another client. An operator
+invoking raw Ansible `-e` outside the codec remains authoritative; the adapter
+does not change Ansible precedence. Rejected: only validating emitted keys
+(leaves role-local authority exposed), and a blanket `relay_` prefix ban
+(refuses unrelated options without identifying ownership).
+
+Permanent destination: `openspec/specs/physical-provisioning/spec.md`, Ansible
+fulfillment adapter/provider-variable authority, and the family IaC README.
+
 ### D4. The buyer-facing client's admin API is locked down on every host
 
 `relay-client` generates a per-host admin password at preparation and writes it

@@ -70,6 +70,7 @@ from .service import (
 )
 from .variables import (
     RELAY_ADMIN_PASSWORD_VARIABLE,
+    RELAY_JOB_RESERVED_VARIABLES,
     RELAY_GRANT_VARIABLE,
     RELAY_SECRET_VARIABLES,
     RELAY_TOKEN_VARIABLE,
@@ -88,6 +89,7 @@ __all__ = [
     "PoolRelay",
     "PortLease",
     "RELAY_ADMIN_PASSWORD_VARIABLE",
+    "RELAY_JOB_RESERVED_VARIABLES",
     "RELAY_GRANT_VARIABLE",
     "RELAY_ID_FIELD",
     "RELAY_CONTRIBUTION",

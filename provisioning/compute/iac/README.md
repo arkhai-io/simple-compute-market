@@ -23,7 +23,14 @@ baseline changes after draining its leases. Proxy diffs reload it.
 `relay_proxy_name`. An add also takes `relay_proxy_local_ip`,
 `relay_proxy_local_port` (default 22), `relay_proxy_remote_port`, `relay_grant`,
 and the relay-client inputs. Names contain only letters, numbers, dots, dashes,
-and underscores, starting with a letter or number. Every proxy uses exact
+and underscores, starting with a letter or number. Provider extra variables cannot set the proxy action, identity, local or remote
+targets, or runtime client and helper controls. The family reserves these names
+at preparation and execution, including jobs with no relay. `relay_client_config`
+is host configuration: configure it through operator inventory or host
+preparation, rather than a pool's provider extras. Unrelated provider options
+remain allowed. Raw operator Ansible `-e` remains Ansible's own authority.
+
+Every proxy uses exact
 `# BEGIN/END ANSIBLE MANAGED RELAY PROXY <name>` markers.
 
 Every add and remove attempt installs the root-owned, owner-only helper
