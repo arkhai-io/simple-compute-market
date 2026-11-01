@@ -959,9 +959,9 @@ ALLOW ?=
 STEP_RUN = python3 scripts/run_change_step.py run
 STEP_GRANTS = $(if $(strip $(ALLOW)), --allow '$(subst ;,' --allow ',$(subst ','\'',$(ALLOW)))')
 
-design: ## Open a Claude Code design session for an OpenSpec change (CHANGE=<change> [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
+design: ## Open a Claude Code design session for an OpenSpec change; unattended, ARGUMENTS follows the change in the skill's invocation, as the owner's direction to the design (CHANGE=<change> [UNATTENDED=1 [ARGUMENTS=<text>] [ALLOW='<rule>;<rule>']])
 	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
-	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) design "$(CHANGE)"$(STEP_GRANTS),claude "/change-design $(CHANGE)")
+	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) design "$(CHANGE)"$(if $(strip $(ARGUMENTS)), --arguments '$(subst ','\'',$(ARGUMENTS))')$(STEP_GRANTS),claude "/change-design $(CHANGE)")
 
 # The orchestrating session relays and routes rather than judging, so it needs a
 # large context for a change's relayed turns, not a high effort.
