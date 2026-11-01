@@ -22,6 +22,7 @@ from tests.rfc8032 import TEST_1, TEST_2
 GATE = os.environ.get("FRP_GATE") == "1"
 
 _skipped = 0
+_provenance: str | None = None
 
 
 def pytest_collectreport(report: pytest.CollectReport) -> None:
@@ -42,8 +43,16 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
         session.exitstatus = 1
 
 
+def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
+    # A gate run on FRPS_BIN and FRPC_BIN passes as one on the pinned archive does, so
+    # the output says which binaries it ran; pytest captures a fixture's own output.
+    if _provenance is not None:
+        terminalreporter.write_line(f"frp binaries: {_provenance}")
+
+
 @pytest.fixture(scope="session")
 def frp_binaries() -> Binaries:
+    global _provenance
     try:
         binaries = resolve(fetching=GATE)
     except NoBinaries as missing:
@@ -52,6 +61,7 @@ def frp_binaries() -> Binaries:
         pytest.skip(str(missing))
     except FetchError as error:
         pytest.fail(str(error))
+    _provenance = binaries.provenance
     pinned = load_pins().version
     for binary in (binaries.frps, binaries.frpc):
         reported = binary_version(binary)

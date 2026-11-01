@@ -403,6 +403,24 @@
         "exp": 1798765200
       },
       "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJwb3J0Ijo2MTAxfQ.mNXGi5Fsp_ZsnjxZDW9f15yUEBleUBvqCHB0tEy4fYZkkPZyi0d-dY4lLvrMmP06QrPEIoh8TfD4RwkYlkoJDg"
+    },
+    {
+      "name": "non-ASCII and control characters",
+      "key": "RFC 8032 TEST 1",
+      "header": {
+        "alg": "EdDSA",
+        "kid": "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k",
+        "typ": "frp-grant+jwt"
+      },
+      "claims": {
+        "aud": "relay-1",
+        "port": 6101,
+        "exp": 1798765200,
+        "iat": 1798761540,
+        "sub": "hôte-€-1",
+        "jti": "grant-😀-\u000f-0001"
+      },
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE1NDAsImp0aSI6ImdyYW50LfCfmIAtXHUwMDBmLTAwMDEiLCJwb3J0Ijo2MTAxLCJzdWIiOiJow7R0ZS3igqwtMSJ9.mxA-6qtiiUnm8iGPpM88ZiRG4P31ZShUkLAMROhhgQim6qChzfK0iCD34g7kUn6rsEV0E-47IfbSyWeQ69XWDA"
     }
   ],
   "thumbprint": {

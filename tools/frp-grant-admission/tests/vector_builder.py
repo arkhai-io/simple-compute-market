@@ -60,11 +60,15 @@ keys = [
 def jcs(value: Any) -> bytes:
     """RFC 8785 (JCS) serialization of the values the vector uses.
 
-    For ASCII member names and strings, booleans, null, integers whose magnitude is at
-    most 2^53, and non-integral floats whose shortest form has no exponent, JCS is JSON
-    with sorted members and no whitespace, which `json.dumps` writes. Anything else is
-    refused rather than serialized in a form JCS would write differently — such as
-    `5.0`, which JCS writes as `5`.
+    For ASCII member names, strings with no lone surrogate, booleans, null, integers
+    whose magnitude is at most 2^53, and non-integral floats whose shortest form has no
+    exponent, JCS is JSON with sorted members and no whitespace, which `json.dumps`
+    writes. With `ensure_ascii=False` it writes strings as JCS does: every character
+    literally as UTF-8 but `"`, `\\`, and the control characters, those as `\\b \\t \\n
+    \\f \\r` or else lowercase `\\u00xx`. Member names stay ASCII because JCS sorts them
+    by UTF-16 code units and `json.dumps` by code points, which order differently
+    beyond the Basic Multilingual Plane. Anything else is refused rather than serialized
+    in a form JCS would write differently — such as `5.0`, which JCS writes as `5`.
     """
     _check_jcs_subset(value)
     return json.dumps(
@@ -84,7 +88,7 @@ def _check_jcs_subset(value: Any) -> None:
     elif isinstance(value, bool) or value is None:
         return
     elif isinstance(value, str):
-        if not value.isascii():
+        if any(0xD800 <= ord(character) <= 0xDFFF for character in value):
             raise ValueError(f"string {value!r} is outside the subset jcs() writes")
     elif isinstance(value, int):
         if abs(value) > 2**53:
@@ -258,6 +262,10 @@ def sign_raw_claims(header_members: dict[str, Any], raw_claims: bytes) -> str:
 def signing_cases() -> list[dict[str, Any]]:
     every_claim = claims(nbf=IAT)
     required_only = claims(iat=None, sub=None, jti=None)
+    # JCS writes `ô` and `€` literally, a character beyond the Basic Multilingual Plane
+    # as its four UTF-8 bytes rather than a surrogate pair of escapes, and U+000F as
+    # `\u000f` in lowercase; a serializer that escapes any of them otherwise fails here.
+    beyond_ascii = claims(sub="hôte-€-1", jti="grant-\U0001f600-\x0f-0001")
     return [
         {
             "name": "every claim",
@@ -272,6 +280,13 @@ def signing_cases() -> list[dict[str, Any]]:
             "header": header(),
             "claims": required_only,
             "token": sign(header(), required_only),
+        },
+        {
+            "name": "non-ASCII and control characters",
+            "key": TEST_1.name,
+            "header": header(),
+            "claims": beyond_ascii,
+            "token": sign(header(), beyond_ascii),
         },
     ]
 

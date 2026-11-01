@@ -69,8 +69,12 @@ class Pins:
 
 @dataclass(frozen=True)
 class Binaries:
+    """The binaries, and where they came from: the gate prints `provenance`, since a
+    run on overrides passes exactly as a run on a verified archive does."""
+
     frps: Path
     frpc: Path
+    provenance: str
 
 
 def load_pins(path: Path = PINS_PATH) -> Pins:
@@ -151,7 +155,11 @@ def extract(archive_path: Path, expected: str, destination: Path) -> Binaries:
                 written = Path(target.name)
                 written.chmod(written.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
                 written.replace(destination / name)
-    return Binaries(destination / "frps", destination / "frpc")
+    return Binaries(
+        destination / "frps",
+        destination / "frpc",
+        f"{archive_path.name}, verified against its pin: SHA-256 {expected}",
+    )
 
 
 def _member(archive: tarfile.TarFile, name: str, archive_path: Path) -> tarfile.TarInfo:
@@ -236,7 +244,9 @@ def resolve(
     if frps or frpc:
         if not (frps and frpc):
             raise FetchError("FRPS_BIN and FRPC_BIN must be set together")
-        return Binaries(Path(frps), Path(frpc))
+        return Binaries(
+            Path(frps), Path(frpc), "FRPS_BIN and FRPC_BIN, not verified against frp-pins.toml"
+        )
     if not fetching:
         raise NoBinaries("the real-frp tests run under `make test-frp`, or with FRPS_BIN and FRPC_BIN")
     pins = load_pins(pins_path)

@@ -55,17 +55,36 @@ docker build --build-arg VERSION=<version in pyproject.toml> -t <image> .
 ```
 
 The image runs `frp-grant-admission serve --config
-/etc/frp-grant-admission/config.toml` as an unprivileged user. Run it in frps's network
-namespace, so that frps reaches it on loopback: as a sidecar in frps's pod, with
-Compose's `network_mode: service:frps`, or with host networking. Mount the configuration
-read-only:
+/etc/frp-grant-admission/config.toml` as an unprivileged user, as the container's PID 1
+with no shell in front of it, so a signal sent to the container reaches the plugin:
+SIGHUP changes keys and ranges without restarting the frps beside it. Run it in frps's
+network namespace, so that frps reaches it on loopback: as a sidecar in frps's pod, with
+Compose's `network_mode: service:frps`, or with host networking.
+
+Mount the directory holding `config.toml` at `/etc/frp-grant-admission`, read-only —
+never the file alone, and never with a Kubernetes `subPath`. A single-file mount keeps
+the file it first saw: once the file is replaced rather than rewritten in place, as many
+editors and `sed -i` do, a reload still reads the old configuration, and its
+`config_loaded` line lists the old keys. A `subPath` mount never receives a ConfigMap's
+updates at all.
 
 ```sh
 docker run -d --name frp-grant-admission --network container:frps \
-  -v /etc/frp-grant-admission/config.toml:/etc/frp-grant-admission/config.toml:ro \
+  -v /etc/frp-grant-admission:/etc/frp-grant-admission:ro \
   <image>
 docker kill -s HUP frp-grant-admission    # reload the configuration
 ```
+
+As a sidecar in Kubernetes, put the configuration in a ConfigMap under the key
+`config.toml`, mount the ConfigMap as a volume at `/etc/frp-grant-admission`, and reload
+with `kubectl exec <pod> -c <container> -- sh -c 'kill -HUP 1'`. The kubelet updates a
+mounted ConfigMap only after its sync delay, which can be a minute or more, so signal
+once the mounted file shows the change, and confirm it by the keys in the
+`config_loaded` line. In a pod with `shareProcessNamespace: true`, PID 1 is the pod's
+pause process, not the plugin, so signal the plugin's own process instead. The kubelet's
+TCP and HTTP probes cannot reach a loopback listener, and the plugin has no probe
+command: a sidecar relies on its restart policy, and frps refuses every new proxy while
+the plugin is down.
 
 The image's arguments replace `serve` and its configuration path, so `docker run --rm
 <image> check <path>` checks a file mounted at `<path>`. The image also carries the

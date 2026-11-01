@@ -252,8 +252,9 @@ Files: `src/frp_grant_admission/grant.py`, `src/frp_grant_admission/reasons.py`,
       `site-a`, 6100–6199; TEST 3 in `site-b`, 6200–6249), each with seed, raw public
       key, SPKI base64, and `kid`; the forged cases are signed with TEST 2 while naming
       TEST 1's `kid`. Every case replays at 2027-01-01T00:00:00Z unless it states
-      another time. The builder's JCS is the subset the vector uses (ASCII member names
-      and strings, integers up to 2^53, non-integral floats with no exponent) and refuses
+      another time. The builder's JCS is the subset the vector uses (ASCII member names,
+      strings with no lone surrogate — non-ASCII strings since 41 F1, see 2.5 — integers
+      up to 2^53, non-integral floats with no exponent) and refuses
       anything else rather than serializing it as JCS would not. The builder is regenerated with `uv run python -m
       tests.vector_builder` from the tool's directory; when the committed file differs,
       `test_vector.py` writes the builder's output to its temporary directory and names
@@ -319,6 +320,19 @@ Files: `src/frp_grant_admission/grant.py`, `src/frp_grant_admission/reasons.py`,
       and `make … test*` targets. A changed vector is placed by copying the file
       `test_vector.py` names on failure, which is why the cap's long cases are unit
       tests.
+      Round-1 triage fix (41 F1): the signing cases were all ASCII, so a signer escaping
+      non-ASCII as `\uXXXX`, or writing control characters in uppercase hex, passed the
+      vector without writing JCS. The builder's subset now admits any string with no lone
+      surrogate (member names stay ASCII: JCS sorts them by UTF-16 code units); a third
+      signing case, "non-ASCII and control characters", has `sub` `hôte-€-1` and a `jti`
+      holding U+1F600 and U+000F; `test_vector.py`'s own JCS writes with
+      `ensure_ascii=False`; a new unit test holds the builder's `jcs()` to RFC 8785
+      §3.2.2.2's string example, an oracle outside this code; and another fails if the
+      signing cases lose a BMP non-ASCII, a non-BMP, or a control character. The vector
+      was placed by inserting the builder's case, as named by the failing test, into the
+      file; the equality test then passed. Evidence: unit (`uv run pytest tests`) — 203
+      passed, 15 skipped (the real-frp tests); `make test-floor` — PyJWT 2.8.0,
+      `cryptography` 42.0.0, 189 passed; `make test` and `make check-packaging` — pass.
 
 ## 3. The server: requests, decisions, logging, and reload
 
@@ -728,6 +742,15 @@ pins file's format).
       `integration/`; the TESTING.md promotion may say so beside the
       registration-and-traffic principle. The pin is trust on first use until the owner
       compares it with the release's checksums file (5.1).
+      Round-1 triage fix (42 observation): validation could only infer the archive's
+      verification from 15 passes with no skip, and a gate run on `FRPS_BIN` and
+      `FRPC_BIN` passes the same way while proving nothing about the pin. `Binaries`
+      now carries its `provenance` — the archive verified and its SHA-256, or the
+      overrides, unverified — and `conftest.py`'s `pytest_terminal_summary` prints it
+      as `frp binaries: …`. Unit (`test_frp_fetch.py`) asserts both forms. `make
+      test-frp` — integration (real frp), 15 passed, none skipped, and printed `frp
+      binaries: frp_0.61.1_linux_amd64.tar.gz, verified against its pin: SHA-256
+      bff260b6…2c40`.
 
 ## 6. Repository integration, CI, the floor run, and the `tools/` boundary
 
@@ -961,6 +984,34 @@ Files: `tools/frp-grant-admission/Dockerfile` and its ignore file, if one is nee
       licence from the project would need another build argument for a value that does
       not change. The resumed run's one fix, dropping `useradd --system`, is a one-line
       change no second fresh-context check was run for.
+      Round-1 triage fix (45 O1, 45 O2, 45 O3): the README's container section mounted
+      the configuration file alone, which keeps the inode it first saw, so a reload
+      after the file is replaced — by an editor, `sed -i`, or a ConfigMap update — reads
+      the old configuration and logs the old keys. It now mounts the directory at
+      `/etc/frp-grant-admission`, never the file or a `subPath`, and says why; says the
+      plugin is the container's PID 1, so a signal to the container reloads it without
+      restarting frps; adds the Kubernetes sidecar — a ConfigMap under `config.toml`
+      mounted as a volume, reload by `kubectl exec … -- sh -c 'kill -HUP 1'`, the
+      kubelet's sync delay, and `shareProcessNamespace` making the pause process PID 1;
+      and says the plugin has no probe command, so a sidecar relies on its restart
+      policy (45 O3, recorded in `design.md` D11). The Dockerfile's comment names the
+      directory mount and PID 1. No test: these are instructions for runtimes the
+      repository does not run, and the image is unchanged; 7.5's untested `serve` and
+      SIGHUP in the image remain untested. `make test` and `make check-packaging` — pass.
+      Handoff for the round-1 triage fixes (41 F1, 42 observation, 45 O1–O3): `make
+      check-comment-hygiene` — passes; `make check-change` — 5 of 6 pass, citations
+      reporting only the capability's `spec.md` and `architecture.md`, which 8.9 and 8.11
+      create. The fresh-context check of the diff against `1ebfa481f` found no blocking
+      or should defect. Fixed: the RFC 8785 example's comment misquoted the RFC's input
+      (now described in words), the builder's comment named `é` for the case's `ô`, and
+      the README overstated which editors replace a file and now says a `subPath` never
+      receives a ConfigMap's updates. Declined: a way to find the plugin's process under
+      `shareProcessNamespace` (any `/proc` one-liner the slim image can run also matches
+      itself); the override provenance naming its paths (the observation asked only
+      that it say the binaries are unverified). Noted: the builder and the replay test
+      both serialize with `json.dumps`, so the RFC 8785 example is the one oracle
+      outside this code; it holds no character beyond the Basic Multilingual Plane, and
+      the new case's U+1F600 was checked by decoding the committed token by hand.
 
 ## 8. Closeout
 

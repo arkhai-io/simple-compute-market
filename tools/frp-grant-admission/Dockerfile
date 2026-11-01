@@ -40,9 +40,12 @@ COPY examples/config.toml ./examples/config.toml
 ENV PATH="/app/.venv/bin:$PATH"
 USER plugin
 
-# The configuration is mounted read-only at this path; SIGHUP (`docker kill -s HUP`)
-# reloads it. PID 1 ignores a signal it has no handler for, so the stop signal is
-# SIGINT, which the plugin handles by closing its socket and exiting.
+# The configuration's directory is mounted read-only at /etc/frp-grant-admission: a
+# mount of the file alone keeps the file it first saw, so a reload after the file is
+# replaced would read the old one. The exec form makes the plugin PID 1, so SIGHUP sent
+# to the container (`docker kill -s HUP`) reloads it. PID 1 ignores a signal it has no
+# handler for, so the stop signal is SIGINT, which the plugin handles by closing its
+# socket and exiting.
 STOPSIGNAL SIGINT
 ENTRYPOINT ["frp-grant-admission"]
 CMD ["serve", "--config", "/etc/frp-grant-admission/config.toml"]

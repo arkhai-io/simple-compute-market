@@ -1,8 +1,9 @@
 """The published vector, replayed through the plugin's own verifier.
 
 These tests read `vector/frp-grant-1.json` as any signer or verifier elsewhere reads
-it: from its own data, not from the builder's helpers, apart from the one test that
-holds the committed file equal to the builder's output.
+it: from its own data, not from the builder's helpers, apart from the two tests of
+the builder itself — that the committed file equals its output, and that its JCS
+writes RFC 8785's own example.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from frp_grant_admission.config import parse_config, parse_public_key, thumbprin
 from frp_grant_admission.grant import check_grant
 from frp_grant_admission.reasons import Reason
 from tests.rfc8032 import TEST_1_THUMBPRINT
-from tests.vector_builder import VECTOR, render
+from tests.vector_builder import VECTOR, jcs, render
 
 # The refusals the grant check itself returns; the rest are decided from the request
 # before a grant is read.
@@ -49,9 +50,12 @@ def _b64url(data: bytes) -> str:
 
 
 def _jcs(value: Any) -> bytes:
-    # The vector's values are ASCII strings, integers, and lists, for which RFC 8785
-    # is JSON with sorted members and no whitespace.
-    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    # The vector's members have ASCII names and hold strings, integers, and lists, for
+    # which RFC 8785 is JSON with sorted members and no whitespace, every character of
+    # a string written as UTF-8 but `"`, `\`, and the control characters.
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
 
 
 def test_the_committed_vector_is_the_builders_output(tmp_path: Path) -> None:
@@ -119,6 +123,29 @@ def test_the_signing_cases_hold_every_claim_and_only_the_required_ones() -> None
 
     assert {"aud", "port", "exp", "nbf", "iat", "sub", "jti"} in claim_sets
     assert {"aud", "port", "exp"} in claim_sets
+
+
+def test_a_signing_case_holds_strings_jcs_writes_unlike_ascii_json() -> None:
+    strings = [
+        value
+        for case in VECTOR_DATA["signing"]
+        for value in case["claims"].values()
+        if isinstance(value, str)
+    ]
+
+    assert any(any(0x80 <= ord(c) <= 0xFFFF for c in value) for value in strings)
+    assert any(any(ord(c) > 0xFFFF for c in value) for value in strings)
+    assert any(any(ord(c) < 0x20 for c in value) for value in strings)
+
+
+def test_the_builders_jcs_writes_rfc_8785s_string_example() -> None:
+    # RFC 8785's own example of string serialization, an oracle outside this code: the
+    # euro sign, `$`, U+000F, a line feed, `A'B`, a quotation mark, two backslashes, a
+    # quotation mark, and `/` serialize as the bytes below — the euro sign literally,
+    # U+000F in lowercase hex, `/` unescaped.
+    parsed = "€$\x0f\nA'B\"\\\\\"/"
+
+    assert jcs(parsed) == r'''"€$\u000f\nA'B\"\\\\\"/"'''.encode("utf-8")
 
 
 def test_the_thumbprint_case_matches_the_derivation() -> None:

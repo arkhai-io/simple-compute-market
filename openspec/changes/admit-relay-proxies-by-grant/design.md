@@ -353,13 +353,24 @@ and `frp-grant-admission serve --config <path>` as its entrypoint. The tool keep
 semantic version, separate from SCM's packages and from the specification's version.
 Publishing the wheel, and a public image, belong with the move to its own repository.
 
+The image runs the plugin as PID 1, so SIGHUP sent to the container reloads it without
+restarting frps; the README has the configuration's directory mounted, never the file or
+a Kubernetes `subPath`, since a single-file mount keeps the file it first saw (45 O2). The
+plugin has no probe command (45 O3): the kubelet's TCP and HTTP probes cannot reach a
+loopback listener, and a sidecar relies on its restart policy.
+
 Why: the wheel comes free of a Python project; the image is what a relay hosted in
 containers needs; a relay on a VPS runs frps under systemd and can run the plugin beside
 it without a container runtime. Which one `relay-server` installs is
 `prove-relay-provisioning`'s choice.
 
 Rejected: the image only (a container runtime and registry access on a VPS relay for one
-small process); the plain program only (a containerised relay builds its own image).
+small process); the plain program only (a containerised relay builds its own image); a
+`probe` command that connects to `listen` for an exec liveness probe (45 O3: the socket
+lives exactly as long as the process and the kernel completes a handshake from the
+backlog, so it detects nothing the restart policy misses); a `probe` command that sends
+an HTTP request and accepts any answer (45 O3: it would detect a hung accept loop, but no
+one can describe such a hang, and it adds a command to the interface).
 
 ### D12. The admission rule, in full
 
@@ -704,3 +715,6 @@ Deferred beyond this change:
   control joins an Arkhai relay; likely a per-site credential signed by the site's key in
   client-wide metadata and checked on `Login`, so removing an issuer refuses its hosts'
   next logins.
+- **A liveness probe for the sidecar** (45 O3). Revisit, as a `probe` command that sends
+  an HTTP request and accepts any answer, if a deployment sees the plugin go quiet without
+  exiting, or a cluster requires liveness probes.

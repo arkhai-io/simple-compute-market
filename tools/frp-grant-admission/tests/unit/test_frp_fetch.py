@@ -159,6 +159,9 @@ def test_resolve_fetches_from_the_pins_only_when_fetching(tmp_path: Path) -> Non
         fetching=True, environ={}, pins_path=pins, cache_dir=cache, platform_name=PLATFORM
     )
     assert binaries.frps.read_bytes() == CONTENTS["frps"]
+    assert binaries.provenance == (
+        f"{source.name}, verified against its pin: SHA-256 {digest(source)}"
+    )
 
 
 def test_resolve_has_no_binaries_for_a_platform_with_no_pin_and_no_override(
@@ -176,6 +179,7 @@ def test_overrides_replace_the_fetch_whether_or_not_fetching(tmp_path: Path) -> 
             fetching=fetching, environ=environ, cache_dir=tmp_path, platform_name="none"
         )
         assert (binaries.frps, binaries.frpc) == (Path("/opt/frp/frps"), Path("/opt/frp/frpc"))
+        assert "not verified" in binaries.provenance
     with pytest.raises(FetchError, match="together"):
         resolve(fetching=True, environ={"FRPS_BIN": "/opt/frp/frps"}, cache_dir=tmp_path)
 
