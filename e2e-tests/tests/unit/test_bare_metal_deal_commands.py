@@ -8,6 +8,7 @@ parser reads every argument list the scenario builds, without running a command.
 
 from __future__ import annotations
 
+from importlib import import_module
 from importlib.metadata import entry_points
 from pathlib import Path
 
@@ -17,14 +18,10 @@ import typer
 
 from tests.e2e.roles.buyer_cli import MarketRun, run_id_from_args
 from tests.e2e.roles.helpers.bare_metal_access import (
-    ACCESS_PROBE_OUTPUT,
     BUY_EVENTS,
     RECOVERY_COMMANDS,
-    SshOutcome,
     assert_purchase_recorded,
-    classify_ssh,
     recovery_command,
-    ssh_command,
     wait_for_release,
 )
 
@@ -211,74 +208,14 @@ def test_a_teardown_that_never_releases_fails_at_its_bound_naming_the_last_state
 _ACCESS = {"host": "192.0.2.10", "port": 22, "username": "tenant0000"}
 
 
-def test_each_ssh_attempt_is_fresh_and_trusts_only_the_pinned_host_key() -> None:
-    command = ssh_command(
-        _ACCESS,
-        private_key_file=Path("/keys/tenant"),
-        known_hosts_file=Path("/pins/known_hosts"),
-    )
-
-    assert command[:3] == ["ssh", "-F", "none"]
-    options = {command[i + 1] for i, part in enumerate(command) if part == "-o"}
-    assert {
-        "BatchMode=yes",
-        "ControlMaster=no",
-        "ControlPath=none",
-        "IdentitiesOnly=yes",
-        "IdentityAgent=none",
-        "PreferredAuthentications=publickey",
-        "PasswordAuthentication=no",
-        "KbdInteractiveAuthentication=no",
-        "StrictHostKeyChecking=yes",
-        "UserKnownHostsFile=/pins/known_hosts",
-        "GlobalKnownHostsFile=/dev/null",
-        "UpdateHostKeys=no",
-    } <= options
-    assert not any("accept-new" in option for option in options)
-    assert command[command.index("-i") + 1] == "/keys/tenant"
-    assert command[command.index("-p") + 1] == "22"
-    assert command[-2:] == ["tenant0000@192.0.2.10", f"printf {ACCESS_PROBE_OUTPUT}"]
-
-
 def test_an_access_view_without_its_route_is_refused() -> None:
+    scenario = import_module("tests.e2e.roles.scenarios.bare_metal.test_bare_metal_deal")
     with pytest.raises(AssertionError, match="omitted host or username"):
-        ssh_command(
+        scenario._ssh(
             {"port": 22},
             private_key_file=Path("/keys/tenant"),
             known_hosts_file=Path("/pins/known_hosts"),
         )
-
-
-def test_access_is_accepted_only_with_the_probe_output() -> None:
-    assert classify_ssh(0, ACCESS_PROBE_OUTPUT, "") is SshOutcome.ACCEPTED
-    with pytest.raises(AssertionError):
-        classify_ssh(0, "", "")
-
-
-def test_only_the_hosts_refusal_of_the_key_is_revocation() -> None:
-    refused = "tenant0000@192.0.2.10: Permission denied (publickey).\r\n"
-
-    assert classify_ssh(255, "", refused) is SshOutcome.REFUSED
-
-
-@pytest.mark.parametrize(
-    "stderr",
-    [
-        "ssh: connect to host 192.0.2.10 port 22: Connection refused\r\n",
-        "ssh: connect to host 192.0.2.10 port 22: Connection timed out\r\n",
-        "ssh: connect to host 192.0.2.10 port 22: No route to host\r\n",
-        "No ED25519 host key is known for 192.0.2.10 and you have requested strict "
-        "checking.\r\nHost key verification failed.\r\n",
-        "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\r\n"
-        "@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\r\n"
-        "Host key verification failed.\r\n",
-        "ssh: Could not resolve hostname tenant-host: Name or service not known\r\n",
-    ],
-    ids=["refused", "timed out", "unreachable", "unknown key", "changed key", "unresolved"],
-)
-def test_no_other_ssh_failure_counts_as_revocation(stderr) -> None:
-    with pytest.raises(AssertionError, match="neither access nor revocation"):
-        classify_ssh(255, "", stderr)
 
 
 def _run(*names: str, status: str = "agreed") -> list[dict]:

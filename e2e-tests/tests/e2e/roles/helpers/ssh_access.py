@@ -23,6 +23,7 @@ until its first boot and cloud-init's reboot are done.
 from __future__ import annotations
 
 import base64
+import enum
 import hashlib
 import logging
 import math
@@ -90,13 +91,42 @@ class SshAccessError(AssertionError):
     """What a scenario expected of an SSH connection did not happen."""
 
 
+ACCESS_PROBE_OUTPUT = "arkhai-bare-metal-access-ok"
+
+
+class SshOutcome(enum.Enum):
+    """What one SSH attempt proved about the tenant's access."""
+
+    ACCEPTED = "accepted"
+    REFUSED = "refused"
+
+
+def classify_ssh(returncode: int, stdout: str, stderr: str) -> SshOutcome:
+    """Read one attempt as access accepted or refused by authentication.
+
+    SSH exits 255 for its own failures, a refused connection, a timeout, and a
+    host-key mismatch among them, so the exit status alone cannot tell a revoked
+    key from a host that could not be reached. Only the server's refusal of the
+    public key proves revocation; every other failure is raised, never counted
+    as revoked.
+    """
+    if returncode == 0 and stdout == ACCESS_PROBE_OUTPUT:
+        return SshOutcome.ACCEPTED
+    if returncode == 255 and "Permission denied" in stderr and "publickey" in stderr:
+        return SshOutcome.REFUSED
+    raise SshAccessError(
+        f"SSH attempt proved neither access nor revocation: exit {returncode}, "
+        f"stderr {stderr.strip()[-300:]!r}"
+    )
+
+
 class HostKeyChanged(SshAccessError):
     """A host presented another key than the one first seen in this run."""
 
 
 @dataclass(frozen=True)
 class SshKey:
-    """A key pair generated for this run."""
+    """A key offered during a run, generated there or supplied by its owner."""
 
     private_key: Path
     #: The OpenSSH public line, as a buyer negotiates it.
@@ -546,6 +576,17 @@ class SshSession:
                     f"{self._connect_retry_seconds}s: {_failure(result)}"
                 )
             self._pause(deadline)
+
+    def access_outcome(self, endpoint: SshEndpoint, key: SshKey) -> SshOutcome:
+        """One pinned-key access probe; only authenticated key refusal is revocation.
+
+        This performs no reconnect or retry: a transport failure remains a failed
+        observation, preserving an installed buyer scenario's strict judgment.
+        """
+        result = self._attempt(endpoint, key, f"printf {ACCESS_PROBE_OUTPUT}", timeout=30)
+        if result is None:
+            raise SshAccessError("SSH attempt proved neither access nor revocation: timed out")
+        return classify_ssh(result.returncode, result.stdout, result.stderr)
 
     def probe(self, endpoint: SshEndpoint, key: SshKey) -> GuestShape:
         """The user, vCPU count, memory, and root disk a connection shows."""

@@ -549,7 +549,10 @@ A mock-provisioned deal proves the services compose into a working deal, not
 that a real resource was delivered. Bare metal's release-qualified deal
 (`e2e_bare_metal_deal`) needs a real whole host to grant and revoke access on,
 which the pipeline never has, so no lane selects it: real access and its
-revocation remain a separate protected lane's evidence. VM's real delivery is
+revocation remain a separate protected lane's evidence. It uses the shared
+SSH helper with the operator's read-only known-hosts file; each access probe is
+one fresh process, and only public-key authentication refusal proves revocation.
+Transport failure is an unsuccessful observation. VM's real delivery is
 proven the same way, outside every lane, by
 [the real-provisioning lane](#the-real-provisioning-lane).
 

@@ -212,6 +212,13 @@ Failure recovery truncates only the run's lease and names unconfirmed cleanup.
 Without a bare-metal target the module skips before mutation. These checks are
 source capabilities; a passing mock pipeline does not qualify real hardware.
 
+The installed buyer scenario `e2e_bare_metal_deal` keeps its separate
+`BARE_METAL` configuration and operator-supplied buyer key and known-hosts file.
+It uses the same SSH helper in strict pinned mode, with one fresh attempt per
+access observation. Only public-key authentication refusal proves revocation; a
+transport or host-key failure fails the observation. It remains outside default
+lanes and skips when its configuration is absent.
+
 ### Real VM provisioning
 
 `e2e_vm_real_provisioning` runs the canonical compute deal against a real KVM

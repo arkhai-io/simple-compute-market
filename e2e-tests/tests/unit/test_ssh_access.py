@@ -13,6 +13,7 @@ test waits on it.
 
 from __future__ import annotations
 
+import ast
 import base64
 import json
 import os
@@ -31,6 +32,10 @@ from cryptography.hazmat.primitives.serialization import (
 )
 
 from tests.e2e.roles.helpers.ssh_access import (
+    ACCESS_PROBE_OUTPUT,
+    SshKey,
+    SshOutcome,
+    classify_ssh,
     _PROBE,
     CONNECT_TIMEOUT_SECONDS,
     MEMORY_SHORTFALL_TOLERANCE,
@@ -579,3 +584,152 @@ def test_external_known_hosts_is_read_only_and_not_removed_by_session_cleanup(tm
 def test_invalid_pinned_key_is_refused_before_ssh(tmp_path, key):
     with pytest.raises(ValueError, match="ssh_host_public_key"):
         SshSession(tmp_path, host_key=key)
+
+
+def test_each_ssh_attempt_is_fresh_and_trusts_only_the_pinned_host_key(tmp_path) -> None:
+    known = tmp_path / "known_hosts"
+    known.write_text(f"192.0.2.10 ssh-ed25519 {HOST_KEY}\n")
+    with ssh_session(known_hosts_file=known) as session:
+        command = session.argv(SshEndpoint("192.0.2.10", 22, "tenant0000"),
+                               SshKey(Path("/keys/tenant"), ""), f"printf {ACCESS_PROBE_OUTPUT}")
+
+    assert command[:3] == ["ssh", "-F", "/dev/null"]
+    options = {command[i + 1] for i, part in enumerate(command) if part == "-o"}
+    assert {
+        "BatchMode=yes",
+        "ControlMaster=no",
+        "ControlPath=none",
+        "IdentitiesOnly=yes",
+        "IdentityAgent=none",
+        "PreferredAuthentications=publickey",
+        "PasswordAuthentication=no",
+        "KbdInteractiveAuthentication=no",
+        "StrictHostKeyChecking=yes",
+        f"UserKnownHostsFile={known}",
+        "GlobalKnownHostsFile=/dev/null",
+        "UpdateHostKeys=no",
+    } <= options
+    assert not any("accept-new" in option for option in options)
+    assert command[command.index("-i") + 1] == "/keys/tenant"
+    assert command[command.index("-p") + 1] == "22"
+    assert command[-2:] == ["tenant0000@192.0.2.10", f"printf {ACCESS_PROBE_OUTPUT}"]
+
+
+def test_access_is_accepted_only_with_the_probe_output() -> None:
+    assert classify_ssh(0, ACCESS_PROBE_OUTPUT, "") is SshOutcome.ACCEPTED
+    with pytest.raises(AssertionError):
+        classify_ssh(0, "", "")
+
+
+def test_only_the_hosts_refusal_of_the_key_is_revocation() -> None:
+    refused = "tenant0000@192.0.2.10: Permission denied (publickey).\r\n"
+
+    assert classify_ssh(255, "", refused) is SshOutcome.REFUSED
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "ssh: connect to host 192.0.2.10 port 22: Connection refused\r\n",
+        "ssh: connect to host 192.0.2.10 port 22: Connection timed out\r\n",
+        "ssh: connect to host 192.0.2.10 port 22: No route to host\r\n",
+        "No ED25519 host key is known for 192.0.2.10 and you have requested strict "
+        "checking.\r\nHost key verification failed.\r\n",
+        "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\r\n"
+        "@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\r\n"
+        "Host key verification failed.\r\n",
+        "ssh: Could not resolve hostname tenant-host: Name or service not known\r\n",
+    ],
+    ids=["refused", "timed out", "unreachable", "unknown key", "changed key", "unresolved"],
+)
+def test_no_other_ssh_failure_counts_as_revocation(stderr) -> None:
+    with pytest.raises(AssertionError, match="neither access nor revocation"):
+        classify_ssh(255, "", stderr)
+
+
+
+@pytest.mark.parametrize("answer, expected", [
+    ({"stdout": ACCESS_PROBE_OUTPUT}, SshOutcome.ACCEPTED),
+    ({"rc": 255, "stderr": "Permission denied (publickey)."}, SshOutcome.REFUSED),
+])
+def test_single_access_probe_uses_shared_execution_once(session, fake_ssh, clock, answer, expected):
+    fake_ssh.plan(answer)
+    assert session.access_outcome(ENDPOINT, session.new_key("buyer")) is expected
+    assert len(fake_ssh.calls()) == 1
+    assert clock.sleeps == []
+
+
+def test_single_access_probe_does_not_retry_transport_failure(session, fake_ssh, clock):
+    fake_ssh.plan({"rc": 255, "stderr": "Connection refused"})
+    with pytest.raises(SshAccessError, match="neither access nor revocation"):
+        session.access_outcome(ENDPOINT, session.new_key("buyer"))
+    assert len(fake_ssh.calls()) == 1
+    assert clock.sleeps == []
+
+
+def _own_ssh_commands(source: str) -> list[int]:
+    """Find literal SSH builders, including builders passed to execution wrappers.
+
+    This deliberately checks source structure, not arbitrary runtime values. A
+    one-element access-method declaration is data, whereas a command with flags,
+    a returned command, or an executable passed to a call belongs in the helper.
+    """
+    tree = ast.parse(source)
+    parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+    found = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.List, ast.Tuple)) or not node.elts:
+            continue
+        head = node.elts[0]
+        if not isinstance(head, ast.Constant) or head.value != "ssh":
+            continue
+        parent = parents.get(node)
+        if len(node.elts) > 1 or isinstance(parent, (ast.Return, ast.Call, ast.BinOp)):
+            found.append(node.lineno)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and node.args:
+            value = node.args[0]
+            if isinstance(value, ast.Constant) and isinstance(value.value, str) and value.value.startswith("ssh "):
+                found.append(node.lineno)
+    return sorted(set(found))
+
+
+@pytest.mark.parametrize("source", [
+    'subprocess.run(["ssh", "host", "true"])',
+    'def command(): return ["ssh", "host"]',
+    'argv = ["ssh"] + options; execute(argv)',
+    'run("ssh host true")',
+])
+def test_ssh_source_guard_rejects_scenario_owned_commands(source):
+    assert _own_ssh_commands(source)
+
+
+def test_ssh_source_guard_accepts_access_declarations_and_shared_helper_calls():
+    assert not _own_ssh_commands('publication["access_methods"] = ["ssh"]; session.run(endpoint, key, "true")')
+
+
+def test_scenarios_and_other_helpers_do_not_build_their_own_ssh_commands():
+    roles = Path(__file__).resolve().parents[1] / "e2e" / "roles"
+    forbidden = {}
+    for directory in (roles / "scenarios", roles / "helpers"):
+        for path in directory.rglob("*.py"):
+            if path == roles / "helpers" / "ssh_access.py":
+                continue
+            lines = _own_ssh_commands(path.read_text())
+            if lines:
+                forbidden[str(path.relative_to(roles))] = lines
+    assert not forbidden, f"SSH commands must use helpers/ssh_access.py: {forbidden}"
+
+
+def test_single_access_probe_timeout_is_not_revocation(session, clock, monkeypatch):
+    attempts = []
+
+    def timed_out(argv, **options):
+        attempts.append(argv)
+        raise subprocess.TimeoutExpired(argv, options["timeout"])
+
+    monkeypatch.setattr(subprocess, "run", timed_out)
+    with pytest.raises(SshAccessError, match="neither access nor revocation: timed out"):
+        session.access_outcome(ENDPOINT, session.new_key("buyer"))
+    assert len(attempts) == 1
+    assert clock.sleeps == []

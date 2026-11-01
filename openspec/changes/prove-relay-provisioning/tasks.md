@@ -1720,16 +1720,48 @@ additional push-only workflow beyond that frozen-round pipeline.
 
 Delivers D11: "Real-lane SSH access goes through one helper".
 
-- [ ] 13.1 Move `e2e_bare_metal_deal`
+- [x] 13.1 Move `e2e_bare_metal_deal`
       (`e2e-tests/tests/e2e/roles/scenarios/bare_metal/test_bare_metal_deal.py`) onto
       `ssh_access.py`'s pinned mode and its refused classification, keeping its
       behaviour; reduce `e2e-tests/tests/e2e/roles/helpers/bare_metal_access.py` to its
       purchase helpers. (D11)
-- [ ] 13.2 Tests. Unit: `test_ssh_access.py` covers the classification
+- [x] 13.2 Tests. Unit: `test_ssh_access.py` covers the classification
       `bare_metal_access.py` had; a source check refuses an e2e scenario building its
       own `ssh` command.
-- [ ] 13.3 Verify. `make test-e2e-unit`; `make test`. End-to-end: `e2e_bare_metal_deal`, in no lane,
+- [x] 13.3 Verify. `make test-e2e-unit`; `make test`. End-to-end: `e2e_bare_metal_deal`, in no lane,
       keeps its configuration and skips without it.
+
+### Handoff — section 13
+
+The installed bare-metal buyer scenario now maps its authenticated access view to
+`SshEndpoint` and delegates execution and judgment to `ssh_access.py`. Its supplied
+known-hosts file remains read-only and strict, and its supplied buyer key and
+`BARE_METAL` configuration are unchanged. Each observation uses one fresh process
+with no retry; only public-key authentication refusal establishes revocation.
+The shared helper owns the probe marker and classification. The purchase helper
+contains purchase/recovery behavior alone. Source tests reject literal SSH
+builders in scenarios and other helpers, including builders passed to execution
+wrappers, while allowing publication access-method data. This is a structural
+regression check, not general analysis of arbitrary runtime command values.
+
+Focused evidence: `make test-e2e-unit` passed all 462 tests (11.19s), including
+both real-lane callers, pinned invocation, prior classification cases, one-shot
+accepted/refused/transport/timeout behavior, and planted source-guard failures.
+The initial run passed 460 and failed one newly added refused-result fixture
+because it supplied the fake executable's exit code under the wrong field;
+correcting that fixture and adding timeout coverage produced the passing run.
+The first installed-marker smoke invocation skipped because its executable was
+not on PATH. With the prepared executable on PATH, `e2e_bare_metal_deal` explicitly
+skipped for absent `BARE_METAL.REGISTRY_URL`: one skipped / 310 deselected (2.45s).
+No machine was contacted or purchase attempted. Packaging passed; final
+comment-hygiene, citation, task/index and OpenSpec checks accompany the commit.
+
+The owner-authorized frozen sections 10–13 round still owes the independent
+implementation review, full `make test` and pipeline validation. Earlier 6–9
+formal joins/personal reading remain pending. No new broad section review or
+physical qualification is claimed. Owed by validation: the normal pipeline must
+collect the installed marker as opt-in/skipped without configuration; configured
+real purchase/access/release proof remains in section 16.
 
 ## 14. The admission plugin on a relay, and the signer against its vector
 
