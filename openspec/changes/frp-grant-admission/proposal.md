@@ -25,9 +25,9 @@ plugin, as generic infrastructure that names nothing about SCM.
   grant: a JWT of type `frp-grant+jwt`, signed with EdDSA (Ed25519) by a configured key
   named by its thumbprint, whose `aud` is that key's issuer's audience, whose `port`
   equals the requested remote port and lies in that issuer's range, and whose `exp` has
-  not passed. Anything else is refused with a stable reason code that reaches the
+  not been reached on the relay's clock, with no leeway. Anything else is refused with a stable reason code that reaches the
   client.
-- **Configuration**: a TOML file naming the listen address and the issuers, each with a
+- **Configuration**: a TOML file naming the listen address, which must be loopback, and the issuers, each with a
   name, an audience, one port range, and its public keys; overlapping ranges and repeated
   keys are refused at load. SIGHUP reloads it, validated before it replaces the running
   configuration, and a `check` command validates a file and prints each key's id.
@@ -85,7 +85,7 @@ None.
   conforms to this change's specification and test vector, and its live run deploys
   this plugin. This design's notes for it (`design.md`, "Notes for
   `prove-relay-provisioning`") change its grant type, key ids, key format, runbook
-  steps, frp version, and download verification.
+  steps, frp version, download verification, and port-reuse rule.
 
 ## Permanent documentation impact
 

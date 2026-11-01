@@ -296,7 +296,9 @@ they started with; an invalid one leaves the old configuration in place and logs
 problem. A restart refuses to start on an invalid file. `frp-grant-admission check
 <file>` validates a file without touching a running plugin and prints each issuer with
 its range and its keys' thumbprints, so an operator can match a pasted key to a signer's
-key id and to log lines.
+key id and to log lines. The `listen` address is bound once, at startup: a reload that
+changes it applies the rest of the file and logs that the new address waits for a
+restart.
 
 Why: frps fails closed when the plugin cannot answer, and frpc retries a refused proxy,
 so any reload loses nothing already registered; validate-then-swap means a typo in one
@@ -368,9 +370,11 @@ In order, refusing at the first failure:
    `grant_malformed`); `content.user.metas` is never read.
 6. The unverified header's `kid` names a configured key (`key_unknown`).
 7. `jwt.decode_complete` with `algorithms=["EdDSA"]`, the issuer's audience,
-   `options={"require": ["exp", "aud", "port"], "strict_aud": True}`, and a 60-second
-   leeway (`signature_invalid`, `claim_missing`, `audience_mismatch`, `grant_expired`,
-   `grant_not_yet_valid`, `grant_malformed`).
+   `options={"require": ["exp", "aud", "port"], "strict_aud": True}`, and no leeway
+   (`signature_invalid`, `claim_missing`, `audience_mismatch`, `grant_expired`,
+   `grant_not_yet_valid`, `grant_malformed`). On the relay's clock a grant is expired
+   from the second `now ≥ exp`, and an `nbf` or `iat` later than `now` is not yet
+   valid.
 8. The header's `typ` is `frp-grant+jwt` and it carries no `crit`
    (`grant_type_unsupported`, `grant_malformed`).
 9. `port` is a JSON integer, not a boolean, equal to `remote_port` (`port_mismatch`), and
@@ -380,15 +384,26 @@ An admission answers `{"reject": false, "unchange": true}`: the plugin never rew
 proxy. A refusal answers HTTP 200 with `reject: true` and the reason. Where PyJWT has a
 behaviour the rule adopts it unless it is less safe: padded segments are accepted (signers
 still never pad), `nbf` and `iat` are validated as PyJWT does, and `strict_aud` makes
-`aud` one string. Each rule has a vector case.
+`aud` one string. Each rule has a vector case; the expiry boundary has three — one
+second before `exp` admitted, exactly `exp` refused as `grant_expired`, and an `iat` one
+second ahead refused as `grant_not_yet_valid`.
 
 Why: the checks PyJWT cannot know — `typ`, the thumbprint lookup, the port — are the
 plugin's; the rest is the library's, as D8 chose. Refusing groups and port 0 keeps one
-grant to one port.
+grant to one port. No leeway (14 F1), because an issuer reuses a port once its grant's
+`exp` has passed, and a leeway would let a copied grant claim the port again in the
+window after; the expiry boundary is the one both contracts state, and the residual skew
+between relay and signer clocks is the issuer's reuse rule to cover (note 8 for
+`prove-relay-provisioning`). A signer whose clock runs ahead costs at most a refusal
+that frpc's own retry clears.
 
 Rejected: refusing padding and `aud` lists ourselves (checks around the library chosen
 for not writing them; `strict_aud` covers the list, and padding is harmless); allowing
-groups (a group lets a second proxy share a granted port).
+groups (a group lets a second proxy share a granted port); a 60-second leeway with every
+issuer's quarantine lengthened by it (the plugin's tolerance becomes a published
+constant every allocator must know, and a relay clock further behind reopens the
+window); leeway on `nbf` and `iat` only, with `exp` checked ourselves (a check around
+the library, buying only what frpc's retry already gives).
 
 ### D13. The configuration is TOML; keys are SPKI DER in base64
 
@@ -415,12 +430,22 @@ single-line standard base64 of its DER SubjectPublicKeyInfo, as `openssl pkey -p
 -outform DER | base64` writes it. frps is configured with `[[httpPlugins]]` naming the
 plugin's address, `path = "/"`, and `ops = ["NewProxy"]`.
 
+`listen` is a loopback address and a port: an IPv4 address in `127.0.0.0/8`, or `::1`
+written `[::1]:<port>`. Startup, reload, and `check` refuse any other address, a
+hostname such as `localhost` included, so the check never depends on a resolver (14 F2).
+The image runs in frps's network namespace — a sidecar in the same pod, Compose's
+`network_mode: service:frps`, or host networking — as the README says wherever it
+describes the image.
+
 Why: `tomllib` adds no dependency, it is the format of the `frps.toml` beside it, and its
 types are strict. The key encoding is self-describing (it carries Ed25519's OID) and
-fits on one line.
+fits on one line. Loopback only keeps the plugin a local seam of frps, which D8's bare
+server and D10's open refusal reasons assume: on a reachable port every decision could
+be probed and each slow body would hold a thread for the socket timeout.
 
 Rejected: YAML (PyYAML for familiarity alone); PEM (multi-line in a key list); the bare
-32-byte JWK `x` (not self-describing).
+32-byte JWK `x` (not self-describing); any listen address (a remote plugin needs its own
+transport security and access control, which no caller asks for).
 
 ### D14. Capability `frp-grant-admission`, and how its documents divide
 
@@ -476,6 +501,11 @@ design is settled:
    its release's metadata; at minimum, the runbook names the version.
 7. On a VPS relay, the plugin's plain program under systemd matches frps and needs no
    container runtime.
+8. The plugin verifies expiry with no leeway: on the relay's clock a grant is refused
+   from the second `now ≥ exp`. D16's reuse rule waits until `grant_expires_at` plus a
+   clock-skew margin that change chooses, and states that the relay's and the signer's
+   clocks are kept synchronised; a relay clock behind the signer's otherwise lets a
+   copied grant claim a reissued port for the difference.
 
 ## Principles for `ARCHITECTURE.md`
 

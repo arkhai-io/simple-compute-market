@@ -2,7 +2,7 @@
 
 ### Requirement: A proxy is admitted only for its granted port
 
-The plugin MUST admit a `NewProxy` only when the proxy's type is `tcp`, it names no load-balancer group, its remote port is from 1 to 65535, and its own metadata (`content.metas.grant`, never `content.user.metas`) carries a grant of type `frp-grant+jwt`, signed with EdDSA by a configured key, whose audience is that key's issuer's, whose `port` equals the remote port and lies in that issuer's range, and which has not expired. It MUST refuse every other request.
+The plugin MUST admit a `NewProxy` only when the proxy's type is `tcp`, it names no load-balancer group, its remote port is from 1 to 65535, and its own metadata (`content.metas.grant`, never `content.user.metas`) carries a grant of type `frp-grant+jwt`, signed with EdDSA by a configured key, whose audience is that key's issuer's, whose `port` equals the remote port and lies in that issuer's range, and which has not expired. Time checks MUST use the relay's clock with no leeway: a grant MUST be refused as expired from the moment the clock reaches its `exp`, and as not yet valid while its `nbf` or `iat` is later than the clock. It MUST refuse every other request.
 
 #### Scenario: A valid grant is presented
 
@@ -28,6 +28,16 @@ The plugin MUST admit a `NewProxy` only when the proxy's type is `tcp`, it names
 
 - **WHEN** a grant's expiry has passed, its signature does not verify under the key its `kid` names, or its audience is not its issuer's
 - **THEN** the plugin refuses the registration as `grant_expired`, `signature_invalid`, or `audience_mismatch`
+
+#### Scenario: A grant is presented at its expiry
+
+- **WHEN** a grant is presented one second before its `exp`, and again when the relay's clock equals its `exp`
+- **THEN** the plugin admits the first and refuses the second as `grant_expired`
+
+#### Scenario: A grant is not yet valid
+
+- **WHEN** a grant's `iat` or `nbf` is one second later than the relay's clock
+- **THEN** the plugin refuses the registration as `grant_not_yet_valid`
 
 #### Scenario: A proxy is not a plain tcp proxy
 
@@ -69,7 +79,7 @@ The plugin's configuration MUST group public keys under named issuers, each with
 
 ### Requirement: The plugin holds no state and calls nothing
 
-The plugin MUST decide each registration from the request and its configuration alone, MUST hold no state across requests, MUST make no outbound call, MUST listen only on the address its configuration names, and MUST handle `NewProxy` only, refusing any other operation.
+The plugin MUST decide each registration from the request and its configuration alone, MUST hold no state across requests, MUST make no outbound call, MUST listen only on the loopback address its configuration names, and MUST handle `NewProxy` only, refusing any other operation.
 
 #### Scenario: The issuing service is unreachable
 
@@ -83,7 +93,12 @@ The plugin MUST decide each registration from the request and its configuration 
 
 ### Requirement: Configuration reloads only when valid
 
-On SIGHUP the plugin MUST re-read its configuration, replace the running configuration only when the new one loads, and otherwise keep the running configuration and log every problem; at startup it MUST refuse to start on a configuration that does not load. A `check` command MUST validate a configuration without affecting a running plugin and print each issuer with its range and its keys' identifiers.
+On SIGHUP the plugin MUST re-read its configuration, replace the running configuration only when the new one loads, and otherwise keep the running configuration and log every problem; at startup it MUST refuse to start on a configuration that does not load. A configuration whose listen address is not an IPv4 address in `127.0.0.0/8` or the IPv6 address `::1`, a hostname included, MUST NOT load. The listen address MUST be bound only at startup: a reload that changes it MUST apply the rest of the configuration and log that the new address takes effect at restart. A `check` command MUST validate a configuration without affecting a running plugin and print each issuer with its range and its keys' identifiers.
+
+#### Scenario: A configuration names a non-loopback listen address
+
+- **WHEN** a configuration's listen address is `0.0.0.0`, a public address, or `localhost`, at startup, on SIGHUP, or under `check`
+- **THEN** it does not load: the plugin refuses to start, keeps the running configuration, or `check` reports the problem
 
 #### Scenario: A valid configuration is reloaded
 
