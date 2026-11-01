@@ -1119,3 +1119,39 @@ The fulfillment kit owns provider-neutral acceptance orchestration. It loads an 
 ### Atomic workload-lifecycle cutovers
 
 A schema cutover that transfers ownership of active workloads between persistence models must treat the workload and its known provider-operation identity as authoritative. The compute provisioner's legacy VM lease conversion validates the complete candidate population and writes fulfillment aggregates atomically before retiring the legacy table. Any unsafe ambiguity rolls back the entire conversion; unused pre-release reservation rows must not override or obscure an active lease.
+
+### Public repository content checks
+
+`make check-public-content` checks the staged index using
+`scripts/check_public_content.py`. The guarded branch push checks every outgoing
+commit, including intermediate additions and commit messages. The Public content
+CI workflow checks new commits against the event base; it runs after publication
+and therefore provides detection rather than preventing the first upload.
+
+The scanner rejects literal personal home paths and private assistant
+planning/session paths. `example-user` is the synthetic fixture username;
+`appuser` and `ubuntu` are documented runtime-image accounts, and `you` is an
+example placeholder. These names do not authorize publishing actual operator
+paths. Machine-specific names, addresses and other operational identifiers require
+a private local literal denylist; arbitrary identifiers and secrets are not
+automatically recognizable. Binary additions are refused because this text
+scanner cannot inspect them. Review remains required. Diagnostics report location
+and rule without echoing matched content.
+
+Enable the repository-owned hooks in each checkout with
+`git config --local core.hooksPath scripts/hooks` after inspecting any existing
+hooks configuration; preserve or chain existing hooks instead of overwriting them.
+The pre-commit hook checks staged additions. The pre-push hook checks the actual
+refs being sent. Hooks require Python 3.10 or newer and may be bypassed by direct
+Git options; they are local safeguards, not server enforcement. Use the guarded
+`make push-branch` path for agent pushes.
+
+Configure deployment-specific literals with
+`git config --local scm.publicContentDenyFile /absolute/path/to/private-denylist.txt`.
+Keep that file outside the repository, one literal per line; blank lines and
+lines starting with `#` are ignored. Matching is case-insensitive. Never commit
+the denylist or use real identifiers in guard tests. A configured file that cannot
+be read fails the check. A CI runner without that private file runs the generic
+rules only. Fetch the target remote before checking outgoing commits. Use
+`python3 scripts/check_public_content.py --base <commit>` to inspect a known
+committed range; this is not a complete historical secret audit.

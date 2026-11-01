@@ -1141,3 +1141,7 @@ test-bare-metal-iac-native: ## Native helper account/IPC/mount checks in a dispo
 		-e BARE_METAL_DISPOSABLE_NATIVE=private-container-v1 \
 		-e PYTHON=/home/appuser/ansible-venv/bin/python \
 		$(PROVISIONING_IMAGE) bash scripts/native_cleanup_gate.sh
+
+.PHONY: check-public-content
+check-public-content: ## Scan staged changes for recognizable private content
+	@python3 scripts/check_public_content.py --staged

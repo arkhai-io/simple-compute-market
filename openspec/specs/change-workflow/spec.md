@@ -497,7 +497,17 @@ check confirms that `HEAD` is attached, the worktree is clean, the branch is nei
 `main` nor `dev`, and the branch's upstream has the same name. The push MUST send
 exactly `HEAD` and MUST NOT be forced. A branch with no upstream MAY be pushed to
 the same name, setting that upstream. The check MUST report a refused state and
-MUST NOT repair it.
+MUST NOT repair it. Before sending commits, the check MUST reject recognizable
+personal home paths, private assistant planning/session paths and identifiers in
+a configured local denylist from added content, filenames and commit messages.
+It MUST inspect intermediate commits, not only the final tree, and MUST omit
+matched values from diagnostics. An unreadable configured denylist or unavailable
+comparison refs MUST fail closed. This mechanical check does not replace review.
+
+#### Scenario: Private content is removed in a later commit
+
+- **WHEN** an outgoing commit adds recognizable private content and a later commit removes it
+- **THEN** the guarded push refuses the history without printing the matched value
 
 #### Scenario: The worktree is dirty
 
