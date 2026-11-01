@@ -45,7 +45,7 @@ test_host_definitions.py`; the `pyproject.toml` of `provisioning/compute/contrac
 `provisioning/compute`, `provisioning/compute/client`, and
 `provisioning/compute/service`; every lock `make lock` rewrites.
 
-- [ ] 1.1 Add the import's request and response models beside `HostCreate` in
+- [x] 1.1 Add the import's request and response models beside `HostCreate` in
   `hosts.py` (D14), following `market_site`'s
   `CapacityDefinitionsImportRequest`/`CapacityDefinitionsImportResponse`: the
   request carries `yaml_text` and `validate_only`; the response carries whether
@@ -70,7 +70,17 @@ test_host_definitions.py`; the `pyproject.toml` of `provisioning/compute/contrac
   models round-trip; validation without any caller flag refuses a null or quoted
   value and any undefined field at its location; a refused response with two
   problems parses; an unknown code parses — passed.
-- [ ] 1.2 Versions, the `pyyaml` declaration, and the relock (RELEASING.md,
+  *Checked by the second run.* The fresh-context check found the first run's
+  evidence narrower than its claim; the second run added unit cases for every
+  bound (an empty `host_id`, `pool_id`, or `kind`, a version below 1, a
+  non-mapping `public` or `connection`), a missing `host_id`, `connection`, or
+  `kind`, and a refused response with a problem round-tripping. Unit, the
+  contracts suite (`make test-compute-provisioning-contracts`): 131 passed, with
+  the route assertions moved out by 1.3. The `HostDefinitionConnection`
+  docstring now says strictness covers the fields the model defines: `public`
+  holds the kind's fields, which its codec validates under its own rules (see
+  the section notes on the `ssh` codec).
+- [x] 1.2 Versions, the `pyyaml` declaration, and the relock (RELEASING.md,
   "Versioning policy"; AGENTS.md, "Package and dependency discipline").
   - Bump each package this change changes once, minor, against its version on
     `dev`: `arkhai-compute-provisioning-contracts` 0.12.0 → 0.13.0,
@@ -92,7 +102,14 @@ test_host_definitions.py`; the `pyproject.toml` of `provisioning/compute/contrac
     rewrites.
 
   Verify: `make check-locks` and `make check-packaging` pass.
-- [ ] 1.3 Leave the route contracts to section 3. The work-in-progress commit
+  *Done.* Each `dev` version confirmed with `git show origin/dev:…` as planned;
+  bumped and bounded as listed; `pyyaml>=6.0` declared in the kit, with a
+  comment naming the host definitions document. `make check-uv-version` passed
+  (uv 0.12.19), and `make lock` rewrote the locks of the four projects plus every
+  dependent that pins them: the Ansible distribution, the VM and bare-metal
+  adapters and storefronts, the VM provisioning client, and `e2e-tests`.
+  `make check-locks` and `make check-packaging` passed.
+- [x] 1.3 Leave the route contracts to section 3. The work-in-progress commit
   `1164438` added `provisioning_host_definitions_export` and
   `provisioning_host_definitions_import` to `routes.py`
   (`PROVISIONING_ROUTE_CONTRACTS` and `ADMIN_PROVISIONING_OPERATIONS`), with their
@@ -103,7 +120,12 @@ test_host_definitions.py`; the `pyproject.toml` of `provisioning/compute/contrac
   passes again. Verify: `make test-provisioning` passes, and `git diff origin/dev
   -- provisioning/compute/contracts/src/compute_provisioning_contracts/routes.py`
   is empty.
-- [ ] 1.4 **Verification checkpoint.** Unit: the contracts suite (`make
+  *Done.* Both contracts and both admin operations removed, and the two route
+  tests removed from `contracts/tests/unit/test_host_definitions.py` with their
+  imports; 3.1 restores them from `1164438`. The `routes.py` diff against
+  `origin/dev` is empty. Application integration and unit, the service's suite
+  (`make test-provisioning`): 500 passed, `test_route_binding.py` among them.
+- [x] 1.4 **Verification checkpoint.** Unit: the contracts suite (`make
   test-compute-provisioning-contracts`), with `test_host_definitions.py`'s model
   cases. Run `make test`, which must pass in full; it stopped at
   `test-provisioning` in the first run. Also run `make check-packaging`, since
@@ -112,6 +134,16 @@ test_host_definitions.py`; the `pyproject.toml` of `provisioning/compute/contrac
   definitions route. None is owed.
   Owed by validation: `tests.yml`, every `test · <target>` job — each suite
   installs from the relocked environments, and each passes.
+  *Run.* Contracts suite: 131 passed. `make test`: every target passed up to
+  its last, `test-deployment-packaging`, whose `scripts/tests` step passed (1805
+  passed, 11 skipped) and whose `make -C helm test-render` could not start
+  because this container has no `helm` binary (`make[2]: helm: No such file or
+  directory`). So `make test` did not pass in full here, and the task is checked
+  on that disclosure: the one step unrun is the chart render, which this section
+  does not touch, and the owed `tests.yml` job `test · test-deployment-packaging`
+  runs it. `make check-packaging`: passed. `make check-change`
+  (comment hygiene, skills, citations, task list, index, strict OpenSpec
+  validation): passed. End-to-end: none, as planned; none owed.
 
 Section 1 notes:
 
@@ -179,6 +211,24 @@ Section 1 notes:
   contracts move to 3.1; 1.2 carries the bumps, the `pyyaml` declaration, and the
   relock; 1.3 takes the route contracts out of this section's commit; 1.4 is the
   checkpoint.
+- **Second run: the notes above are the first run's.** Their "task 1.2" is the
+  former route-contracts task, now 3.1. The relock and the bumps they describe as
+  owed are done (1.2): `pyyaml` is declared and every lock rewritten with uv
+  0.12.19. The kit declares `pyyaml` one commit before it imports `yaml`, in
+  section 2's `hosts/definitions.py`.
+- **Second run's fresh-context check.** It found no layering, comment, test-level,
+  placement, or packaging break. Fixed: the overstated strictness docstring and
+  the narrow model evidence (1.1); a test named for applying nothing, which a
+  wire model cannot do (renamed to
+  `test_a_refused_response_parses_with_every_problem`); 1.4 checked without
+  saying `make test` was incomplete (now said); these stale notes (this entry).
+- **Open for review: the `ssh` codec coerces a quoted number in `public`.** D7
+  says a document's validation is strict, "a quoted number is an error". The
+  entry model is strict for its own fields, but `public` is the kind's mapping,
+  and `SshConnection` (`provisioning/compute/ansible/.../connection.py`) is not
+  strict, so `ssh_port: "22"` in a document is accepted as 22. Making it strict
+  would change `POST /api/v1/hosts` and the INI route too, which this change does
+  not plan. Left as it is for the round's triage to decide.
 
 ## 2. The family host document
 

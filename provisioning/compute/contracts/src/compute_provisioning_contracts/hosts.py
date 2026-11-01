@@ -134,8 +134,10 @@ class HostDefinitionConnection(BaseModel):
     document's validation reports it under its own code,
     ``HostDefinitionProblemCode.CONNECTION_SECRETS``.
 
-    Validation is strict, as for every document entry: a quoted number or
-    boolean is the wrong type, not a value to coerce.
+    Validation of the fields this model defines is strict, as for every
+    document entry: a quoted number or boolean is the wrong type, not a value
+    to coerce. ``public`` holds the kind's own fields, which this model cannot
+    type; they are validated by the kind's codec, under that codec's rules.
     """
 
     model_config = ConfigDict(extra="forbid", strict=True)

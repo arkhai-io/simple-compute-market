@@ -104,7 +104,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning"
-version = "0.23.0"
+version = "0.24.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
@@ -114,10 +114,11 @@ dependencies = [
     { name = "arkhai-kit-resource-pools-contracts" },
     { name = "arkhai-kit-site" },
     { name = "pydantic" },
+    { name = "pyyaml" },
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning-0.23.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning-0.24.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -137,7 +138,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning-contracts"
-version = "0.12.0"
+version = "0.13.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -145,7 +146,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning_contracts-0.12.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning_contracts-0.13.0-py3-none-any.whl" },
 ]
 
 [[package]]
