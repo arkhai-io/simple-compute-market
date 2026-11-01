@@ -9,7 +9,14 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    field_validator,
+    model_validator,
+)
 from pydantic_core import core_schema
 
 ResourceSelection = Literal["specific", "fungible"]
@@ -55,6 +62,7 @@ BARE_METAL_ACCEPTED_ALKAHEST_BINDING_KIND = "bare_metal.accepted-alkahest-bindin
 
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 _OPAQUE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
+_V1_TIMESTAMP = TypeAdapter(datetime)
 
 
 class BareMetalLeaseReadyResult(BaseModel):
@@ -226,6 +234,12 @@ class BareMetalLeaseReadyEvidence(BaseModel):
     def _validate_evidence(cls, data: Any) -> Any:
         if isinstance(data, dict) and "result" in data and "result_digest" in data:
             result = data["result"]
+            if isinstance(result, dict) and any(
+                isinstance(result.get(name), datetime)
+                for name in ("access_ready_at", "expires_at")
+            ):
+                result = BareMetalLeaseReadyResult.model_validate(result)
+                data = {**data, "result": result}
             if isinstance(result, BareMetalLeaseReadyResult):
                 result = _result_v1(result)
             if data["result_digest"] != bare_metal_digest(result):
@@ -254,7 +268,7 @@ def _principal_v1(value: CanonicalPrincipal) -> dict[str, str]:
 
 
 def _timestamp_v1(value: datetime) -> str:
-    return value.isoformat().replace("+00:00", "Z")
+    return _V1_TIMESTAMP.dump_python(value, mode="json")
 
 
 def _result_v1(value: BareMetalLeaseReadyResult) -> dict[str, Any]:

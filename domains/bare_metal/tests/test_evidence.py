@@ -303,3 +303,25 @@ def test_new_view_defaults_do_not_enter_v1_production_or_its_identities():
     assert binding.binding_digest == alkahest_binding().binding_digest
     assert result.result_digest == lease_ready_result().result_digest
     assert evidence.to_wire() == json.loads(GOLDEN_EVIDENCE)
+
+
+@pytest.mark.parametrize("offset", [0, 30, 3600, -18000])
+def test_v1_snapshot_keeps_the_existing_datetime_wire_codec(offset):
+    result = lease_ready_result().model_copy(
+        update={
+            "access_ready_at": (
+                NOW + timedelta(minutes=40, microseconds=123400)
+            ).astimezone(timezone(timedelta(seconds=offset))),
+        }
+    )
+    evidence = build_bare_metal_lease_ready_evidence(
+        binding=alkahest_binding(), condition_anchor="condition-a", result=result
+    )
+    assert evidence.result.to_wire() == result.model_dump(
+        mode="json", exclude_none=True
+    )
+    if offset == 0:
+        assert (
+            BareMetalLeaseReadyEvidence.model_validate(evidence.value.model_dump())
+            == evidence.value
+        )

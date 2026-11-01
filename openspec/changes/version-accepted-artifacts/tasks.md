@@ -126,21 +126,21 @@ persistence cases. Add focused real-SQLite coverage in
 `domains/bare_metal/storefront/tests/integration/test_evidence_persistence.py`
 if the existing tests cannot express the document boundary cleanly.
 
-- [ ] 2.1 Make evidence load hash the existing canonical TEXT's UTF-8 bytes
+- [x] 2.1 Make evidence load hash the existing canonical TEXT's UTF-8 bytes
   against its requested digest before returning a document; make first-write-wins
   save return the verified stored winner (D2; persistence requirement). Add real
   SQLite library-boundary integration cases for initial save, changed-candidate
   retry, absent row, process/repository restart, malformed/empty stored content,
   nested mismatch, and outer mismatch with a valid nested result. Assert original
   stored text and digest remain unchanged, including on refusal; add no migration.
-- [ ] 2.2 Carry the verified document through `_lease_ready_evidence`, intent
+- [x] 2.2 Carry the verified document through `_lease_ready_evidence`, intent
   recording, and Alkahest publication (D2; restart-publication scenario). Extend
   existing application/lifecycle integration tests with the controlled chain
   boundary to observe the same retained digest before and after restart and
   assert corrupted stored evidence causes no submission. Keep unknown-outcome
   parking, attestation reuse, first-write-wins intent, and collection regression
   cases passing without adding a parallel recovery path.
-- [ ] 2.3 Bind the document-aware signed carrier in `api.py` without allowing
+- [x] 2.3 Bind the document-aware signed carrier in `api.py` without allowing
   FastAPI/Pydantic serialization to replace retained evidence with a view dump
   (D2–D3; resolution and attribute scenarios). Exercise the real application and
   SQLite through the canonical async client and the sync client through a served
@@ -149,7 +149,7 @@ if the existing tests cannot express the document boundary cleanly.
   reads, and unchanged stranger/unsigned/malformed-request refusals. Use raw HTTP
   only for invalid requests the typed client cannot construct, per the rejection
   exception in `docs/development/TESTING.md`.
-- [ ] 2.4 Verify this storefront slice (D5): rebuild affected wheels and refresh
+- [x] 2.4 Verify this storefront slice (D5): rebuild affected wheels and refresh
   the storefront environment; run the real-SQLite evidence cases, the evidence
   resolution/publication cases in `test_alkahest_lifecycle.py`, then
   `make -C domains/bare_metal/storefront test`. Record unit versus application
@@ -161,6 +161,66 @@ if the existing tests cannot express the document boundary cleanly.
   not a local test claimed here.
   Run `make check-packaging` before commit; rerun lock/build work from 1.5 only
   if this section actually changes dependencies or exposes a stale environment.
+
+### Section 2 evidence and handoff
+
+- SQLite returns only verified documents and keeps the first stored winner in
+  the same transaction. Either populated evidence column prevents replacement;
+  empty, malformed, partially populated, outer-mismatched and nested-mismatched
+  state is refused without rewriting it. The worker uses that retained verified
+  digest for its journal and publication, including a fresh runtime/repository.
+  Schema, storage fields and submission-uncertainty transitions are unchanged.
+- The existing FastAPI `response_model` binding already consumes the named
+  carrier. Its document serializer from section 1 is the complete binding change;
+  no edit to `api.py` is necessary. Real application/SQLite tests resolve
+  historical omitted defaults and timestamp spelling through the async client
+  under buyer/claimant/admin roles and through the sync client over loopback.
+  Their portable signatures equal the seller's signature of retained bytes.
+  Existing stranger, unsigned, missing-document and client malformed-digest
+  refusals stay covered without expanding reader privileges.
+- Initial focused evidence: `domains/bare_metal/storefront/.venv/bin/python -m
+  pytest domains/bare_metal/storefront/tests/integration/test_evidence_persistence.py
+  domains/bare_metal/storefront/tests/test_alkahest_lifecycle.py -q` — **26 passed**;
+  the five added restart/publication/corruption/route cases then passed with
+  `domains/bare_metal/storefront/.venv/bin/python -m pytest
+  domains/bare_metal/storefront/tests/test_alkahest_lifecycle.py
+  -k 'restart_journals or corrupt_stored or both_clients_resolve' -q`.
+  The SQLite cases are library-boundary integration; lifecycle cases create the
+  deal through the application and drive its production worker directly; route
+  cases are application integration with controlled site/chain clients.
+- Correction to section 1: fixed v1 production now uses a scalar datetime
+  `TypeAdapter`, preserving the original Pydantic datetime wire codec for
+  fractional seconds and timezone offsets, including sub-minute offsets. A
+  handwritten `isoformat` would differ for that supported Python input. Strict
+  view validation also continues to accept Python datetime dictionaries.
+  `domains/bare_metal/.venv/bin/python -m pytest domains/bare_metal/tests -q`
+  — **214 passed**, including **34** focused evidence/route cases. Earlier
+  section-1 counts remain historical evidence, not claims over this correction.
+- Rebuilt final wheels and `make check-packaging` — **passed**;
+  `make check-change CHANGE=version-accepted-artifacts` — **passed**;
+  `git diff --check` — **passed**. No dependency or lock refresh was needed
+  after section 1. Storefront's installed evidence module equals the final
+  source (SHA-256 `cc2ef0a820cc70eeb7812da03b757c27e4fbf5e157ea287a7fe35d5f3328b8d6`).
+  `make -C domains/bare_metal/storefront test` against the final rebuilt codec
+  — **555 passed**, with two existing third-party deprecation warnings. An
+  earlier full attempt was stopped to refresh the corrected codec before this
+  final run. Domain, storefront, buyer and adapter environments were each
+  checked byte-for-byte against both final evidence codec modules.
+- Restricted execution stalled at an asynchronous thread wakeup; integration
+  suites run successfully with ordinary local sockets/threads enabled. No
+  production workaround, new sleep, or test-only production hook was added.
+- Frozen implementation fingerprint:
+  `bcc6210a92e8541bf0487be3035cb1ee1b663517269d75b2f32b076148db385a`.
+  It is SHA-256 over sorted `(repository-relative path, NUL, file bytes, NUL)`
+  for the 18 changed files under `domains/`, `provisioning/` and `e2e-tests/`
+  against `74cef7b9c4f242ee346999e88cef0f42ca3be7d0`, including the new
+  persistence test. OpenSpec notes and ignored build/run outputs are excluded.
+  No production source changed after the final component suites started.
+- End-to-end remains `e2e_bare_metal_mock_deal`: publication, authenticated
+  evidence resolution and subsequent collection, with its existing field reads
+  and hold/step discipline unchanged. No local suite is claimed as deployed or
+  real-purchase qualification. Owed by validation: none beyond ordinary local,
+  Helm, supported CI and pipeline validation; no extra workflow-only job.
 
 ## 3. Consumer and regression validation
 
