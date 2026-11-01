@@ -208,9 +208,11 @@ None. The plugin's capability is `frp-grant-admission`'s.
   stands, the lease read once it has been reused (D16) → the runbook.
 - The plugin wheel as the operator's trusted input, with its dependencies checked
   against the tool's lock (D23) → `physical-provisioning` architecture; the runbook.
-- The reuse margin and the clock-synchronisation requirement (D16) →
-  `physical-provisioning` spec; `docs/development/DEPLOYMENT_AND_CONFIG.md` (the
-  setting); the runbook (clocks).
+- The reuse margin, the grant expiry's grace, and the clock-synchronisation
+  requirement (D16) → `physical-provisioning` spec;
+  `docs/development/DEPLOYMENT_AND_CONFIG.md` "Definition documents", a subsection
+  "Relay grants and port reuse" (`relay_port_reuse_margin_seconds`,
+  `relay_grant_expiry_grace_seconds`); the runbook (clocks).
 - One verified frp pin at versioned paths (D22) → `physical-provisioning`
   architecture; `docs/seller-frp-setup.md` (the frp version).
 - How a relay runs the plugin — `relay-server` from a given wheel on a VPS, the image

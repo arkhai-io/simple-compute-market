@@ -386,7 +386,11 @@ runtime. Conformance is the vector check (D18).
 Lifecycle:
 
 1. Allocation records `grant_expires_at` on the lease: the reservation's lease end
-   plus a configured grace covering teardown, rounded up to the whole second.
+   plus a configured grace covering teardown, rounded up to the whole second. The
+   grace is a service setting named as the reuse margin's is,
+   `relay_grant_expiry_grace_seconds`, its default covering the lease watchdog's grace
+   period and a teardown job's retries; the plan passes the reservation's lease end
+   to allocation.
 2. Execution signs the grant from the lease, immediately before the job's variables
    are written, as the relay token is resolved, on every attempt of the job; it never
    enters job parameters, and never a job's logs, error, or result (D3's `no_log` and

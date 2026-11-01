@@ -3,10 +3,16 @@
 Paths are relative to the repository root. Decisions (`D<n>`) and corrections are
 `design.md`'s; requirements are this change's delta specs under `specs/`.
 
-Sections 1–13 need nothing from `frp-grant-admission`: the signer is built to the
-grant format D16 states, and the family roles take the plugin's image and
-configuration as inputs. Sections 14–16 need the plugin itself and start once
-`frp-grant-admission` is archived; closeout waits on it too (D13).
+Sections 1–13 need nothing from `admit-relay-proxies-by-grant`: the signer is built
+to the grant format D16 states, from the tool's specification as that change's
+documents on this branch give it, and `relay-server` takes the plugin's wheel, its
+hash-pinned requirements, and its configuration as inputs (D23). Sections 14–16 need
+the tool itself (`frp-grant-admission`) and start once `admit-relay-proxies-by-grant`
+is archived; closeout waits on it too (D13).
+
+Sections 4–16 were replanned against the design as reviewed in `reviews/55-design.md`
+and triaged, which carries 45-design F2's list of stale tasks and the reconciliation
+with `admit-relay-proxies-by-grant`; sections 1–3 are unchanged.
 
 ## 1. The relay machinery in the compute family kit
 
@@ -334,84 +340,190 @@ Delivers D9's holdings read and "Relay holdings are readable by the administrato
 ## 4. A grant-signing key per relay
 
 Delivers D17 and D19's key requirements: "Each relay holds its own grant-signing key".
+Replanned against the reviewed design: the profile's form and its refusal, staging a
+supplied key, and its redaction are new.
 
-- [ ] 4.1 Add the relay's Ed25519 grant-signing key columns (the active key
-      encrypted under `ssh_decryption_key` with `market_config.secret_at_rest`, its
-      id, a staged key, and retired key ids with their retirement time) in
-      `compute_provisioning/relays/db.py`, with an additive migration. (D17)
-- [ ] 4.2 The relay definitions document requires `grant_key_secret_key` on every
-      entry, read once at creation as `token_secret_key` is; an entry naming none, or
-      naming a profile key the profile lacks, fails the import naming it. A relay
-      created through the API with no key gets one the service generates. (D17, D19)
-- [ ] 4.3 Add the staging and activation operations to the relay routes, contracts,
-      and client: staging generates a key pair in the service and returns its public
-      half without signing with it; activating makes the staged key sign every later
-      grant and retires the previous one. (D17)
-- [ ] 4.4 Relay reads return the active key's id and public half, any staged key's,
-      and each retired key's id with the time its grants stay valid until — the
-      latest `grant_expires_at` among the relay's unreleased leases allocated before
-      it was retired (28 F2). No read, export, or reconciliation comparison returns a
-      private key. (D17)
-- [ ] 4.5 Tests. Library integration: a stored key is ciphertext; a definitions entry
-      without a grant key fails naming it; a reconciliation never rewrites a key.
-      Application integration through the typed client: a relay read carries public
-      halves only; staging leaves signing on the active key until activation; a
-      retired key's validity follows the leases allocated before it, including a job
-      retried across a rotation.
-- [ ] 4.6 Verify. `make test-compute-provisioning`, `make test-provisioning`,
-      `make test-compute-provisioning-contracts`,
-      `make test-compute-provisioning-client`. End-to-end: none; the real lanes read
-      the active key (sections 11 and 12).
+Files: `provisioning/compute/src/compute_provisioning/relays/` (`db.py`, `service.py`,
+`definitions.py`, `route_service.py`, a new `keys.py`),
+`provisioning/compute/service/src/compute_provisioning_service/db/migrations.py`,
+`controllers/relays_controller.py`, `settings.toml`;
+`provisioning/compute/contracts/src/compute_provisioning_contracts/relays.py`; the
+family client; `provisioning/compute/pyproject.toml` and its lock.
+
+- [ ] 4.1 `relays/keys.py`: load a private key from the profile's form — strip
+      surrounding whitespace, decode single-line standard base64, load PKCS#8 DER with
+      `cryptography`, and refuse anything that is not an Ed25519 key, the error naming
+      what was wrong and never carrying the value; generate a key; derive a key's id
+      as its RFC 7638 JWK thumbprint (base64url SHA-256 of
+      `{"crv":"Ed25519","kty":"OKP","x":"<raw public key, base64url>"}`); encode a
+      public half as single-line standard base64 of its DER SubjectPublicKeyInfo.
+      `compute_provisioning` declares `cryptography` at runtime (it is a dev
+      dependency today, 1.6). (D17)
+- [ ] 4.2 Grant-key state on the relay in `relays/db.py`, with an additive migration
+      in the service's `migrations.py`: the active key encrypted under
+      `ssh_decryption_key` as the token is, its id, and its activation time; a staged
+      key, encrypted, with its id; and a family table of retired keys, each with its
+      relay, id, and retirement time. Ids are stored for active, staged, and retired
+      keys alike. (D17)
+- [ ] 4.3 The relay definitions document accepts and requires `grant_key_secret_key`
+      on every entry, read once at creation as `token_secret_key` is and never
+      restated for an existing relay. An entry naming none fails the import naming the
+      entry; a named profile key with no value, or whose value 4.1 refuses, fails the
+      import before any relay is created, naming the relay and the profile key and not
+      the value. A relay created through the API with no key gets one the service
+      generates. `settings.toml`'s relay definitions comment names the new field.
+      (D17, D19)
+- [ ] 4.4 *Stage* and *activate*, in `RelayService`, the route service, the contracts
+      (two admin-only routes, which `PROVISIONING_ROUTE_CONTRACTS` and
+      `ADMIN_PROVISIONING_OPERATIONS` gain), the controller binding, and the family
+      client's sync and async methods. Staging takes an optional private key in the
+      request, in the profile's form under 4.1's checks and refused when it fails
+      them, or generates one when none is supplied; it returns the staged key's
+      `kid` and `public_key` and signs nothing with it. Activating makes the staged
+      key the active one, retiring the previous key with the time. A supplied private
+      key never appears in an access log, an error body, or the response: the request
+      model holds it as a secret value, and its refusals name the problem only.
+      (D17)
+- [ ] 4.5 Relay reads return `grant_keys` as D17 shows it — the active key's `kid`,
+      `public_key`, and `activated_at`; any staged key's `kid` and `public_key`; and
+      each retired key's `kid` and `retired_at`; its `grants_valid_until` reads
+      the leases' grant expiry and is section 5's (5.6). No read, export, or
+      reconciliation comparison returns a private key. (D17)
+- [ ] 4.6 Tests. Unit (`provisioning/compute/tests/unit/`): 4.1's loader accepts the
+      form with a trailing newline, and refuses a non-base64 value, a non-PKCS#8 value,
+      and a non-Ed25519 key, the refusal never containing the value; the thumbprint of
+      RFC 8037's published example public key equals its published thumbprint; the
+      public half's encoding round-trips. Library integration
+      (`provisioning/compute/tests/integration/test_relay_administration.py`): a stored
+      key is ciphertext; an entry naming no grant key, a profile key with no value, and
+      a malformed value each fail the import naming relay and profile key, creating no
+      relay; a reconciliation never rewrites a key; activation retires the previous
+      key with its time. Application integration through the typed client
+      (`provisioning/compute/service/tests/integration/test_relays_api.py`): a relay
+      read carries public halves and ids only; staging a supplied key returns its
+      public half and thumbprint, a malformed supplied key is refused without the
+      value in the error body, and the private key appears in no response or captured
+      access log; staging leaves the active key unchanged until activation; a relay
+      created through the API with no key reads an active key.
+- [ ] 4.7 Verify. `make test-compute-provisioning` (unit, library integration),
+      `make test-provisioning` (application integration through the typed client),
+      `make test-compute-provisioning-contracts`, `make test-compute-provisioning-client`;
+      `make test`; `make check-packaging` (`cryptography` at runtime).
+      End-to-end: none in the pipeline — no lane runs a relay-backed pool; the real
+      lanes read the active key (sections 11 and 12).
 
 ## 5. Grants, port quarantine, and the checks before dispatch
 
-Delivers D16, D19, and the management-route check: "Every relay proxy carries a
-signed grant", "Relay port leases are unique per relay" (the quarantine), "A relay
-without an active grant key is refused before dispatch", and "A host's management
-route does not use its pool's buyer relay".
+Delivers D16, D17's retirement bound, D19, and the management-route check: "Every
+relay proxy carries a signed grant", "Relay port leases are unique per relay" (the
+quarantine), "Each relay holds its own grant-signing key" (a retired key's validity),
+"A relay without an active grant key is refused before dispatch", and "A host's
+management route does not use its pool's buyer relay". Replanned against the reviewed
+design: no `iat`, the claims' types, `jti` the owning reservation, the expiry rounded
+up to the second, and the reuse margin.
 
-- [ ] 5.1 Allocation records `grant_expires_at` on the lease — the reservation's
-      lease end plus a configured grace — in the acceptance transaction, with an
-      additive migration adding it and the signing key id to `relay_port_leases`.
-      (D16)
-- [ ] 5.2 The allocator does not reissue a released port before its
-      `grant_expires_at`; a lease cut short leaves its port held back and allocation
-      selects another. ("Relay port leases are unique per relay", scenario "A lease is
-      cut short")
-- [ ] 5.3 Sign the grant from the lease immediately before a job's variables are
-      written, on every attempt, with the relay's active key: an EdDSA JWT with
-      header `kid` and claims `aud` (the relay id), `port`, `exp`, `sub` (the host),
-      `jti` (the lease), and `iat`, exactly D16's format. Record the signing key id on
-      the lease. The grant reaches the job through execution-time resolution and never
-      its persisted parameters. Conformance to the plugin's published vector is
-      section 14's. (D16)
-- [ ] 5.4 The relay family supplies one set of the variable names carrying the grant,
+Files: `provisioning/compute/src/compute_provisioning/relays/` (`db.py`,
+`allocator.py`, `execution.py`, `service.py`, `rebinding.py`, new `grants.py`),
+the service's `migrations.py` and `settings.toml`, the contracts' `relays.py`;
+`domains/vms/provisioning/adapter/src/vm_provisioning_adapter/` (`codec.py`,
+`models/jobs_model.py`, `services/vm_fulfillment_plan.py`);
+`provisioning/compute/pyproject.toml` and its lock.
+
+- [ ] 5.1 `relay_port_leases` gains `grant_expires_at` and the id of the key that
+      signed its latest grant, by an additive migration. Allocation records
+      `grant_expires_at` in the acceptance transaction: the reservation's lease end,
+      which the plan passes to allocation, plus the grace setting
+      `relay_grant_expiry_grace_seconds`, rounded up to the whole second and stored as
+      naive UTC like the table's other times. The setting is documented in
+      `settings.toml` beside the relay settings, its default covering the lease
+      watchdog's grace and a teardown's retries, as its comment says. A re-tenancy of a
+      released row overwrites both fields. (D16 lifecycle 1)
+- [ ] 5.2 The allocator does not reissue a released port until its `grant_expires_at`
+      plus `relay_port_reuse_margin_seconds` (default 300, documented in
+      `settings.toml` with the clock-synchronisation requirement) has passed, reading
+      the margin when it selects a port, so a raised margin covers leases already
+      released; a lease cut short leaves its port held back and allocation selects
+      another. (D16 lifecycle 3; "Relay port leases are unique per relay", scenarios
+      "A lease is cut short" and "The reuse margin is raised")
+- [ ] 5.3 `relays/grants.py`: a header-and-claims signer — RFC 8785 JSON of each
+      through `rfc8785`, unpadded base64url, joined with `.`, signed with an Ed25519
+      private key through `cryptography` — with no JWT library. `compute_provisioning`
+      declares `rfc8785` at runtime (the JCS library `kit/identity` uses).
+      (D16 "Signing")
+- [ ] 5.4 The grant builder: from a lease and the relay's active key, the header
+      exactly `{"alg":"EdDSA","kid":<thumbprint>,"typ":"frp-grant+jwt"}` and the claims
+      `aud` (the relay id), `port` (the leased port), `exp` (the stored
+      `grant_expires_at` converted as UTC to its integer epoch seconds — never through a
+      naive `timestamp()`), `sub` (the lease's host, omitted when it records none,
+      never `null`), and `jti` (the lease's `owner_id`, always present); no `iat` and
+      no `nbf`. (D16)
+- [ ] 5.5 The execution resolver (`relays/execution.py`) signs the grant immediately
+      before a job's variables are written, on every attempt, with the relay's
+      then-active key, filling a `relay_grant` field the resolver's parameter
+      contract gains beside `relay_token`, and records the signing key id on the lease;
+      a relay with no active key raises `RelayUnusableAtExecutionError`. The grant
+      never enters an accepted operation's persisted parameters. VM's job parameters
+      (`models/jobs_model.py`) gain the field, and its codec writes it as the proxy's
+      grant variable. Conformance to the tool's published vector is section 14's.
+      (D16 lifecycle 2)
+- [ ] 5.6 Relay reads report each retired key's `grants_valid_until`: the latest
+      `grant_expires_at` among the relay's unreleased leases allocated before it was
+      retired, or none when none remains; and the holdings read (`RelayLeaseRecord`,
+      `RelayLeaseView`, field for field, per section 3's handoff) gains each lease's
+      `grant_expires_at` and signing key id. (D17, 28 F2; D9)
+- [ ] 5.7 The relay family supplies one set of the variable names carrying the grant,
       the relay token, and the client's admin password, and VM's codec takes its
-      secret fields from it. (D3, 28 F3)
-- [ ] 5.5 Fulfillment preparation refuses a pool whose relay holds no active grant
+      secret fields from it (`VM_SECRET_FIELDS`). (D3, 28 F3)
+- [ ] 5.8 Fulfillment preparation refuses a pool whose relay holds no active grant
       key, naming the relay and the missing key, beside its refusals for a missing
-      token or window (`vm_fulfillment_plan.py`, through the family check). (D19)
-- [ ] 5.6 Refuse placing a host in a relay-backed pool when its connection address
+      token or window, through a family check `vm_fulfillment_plan.py` calls and
+      section 8's bare-metal plan will call. (D19)
+- [ ] 5.9 Refuse placing a host in a relay-backed pool when its connection address
       equals that relay's normalized address, and refuse setting a relay's address to
       the connection address of a host in a pool referencing it, naming the host and
-      the relay; register the check with the host authority's pool-change hooks and
-      the relay update. (D19)
-- [ ] 5.7 Tests. Unit: the grant's header and claims for a lease, and a verifier
-      written to D16 accepting it and refusing a tampered one. Library integration:
-      the quarantine; the grant signed again on a retry with the then-active key; no
-      grant in persisted parameters. Application integration through the typed
-      client: a fulfillment refused for a relay with no active key; a host placement
-      refused for its pool's relay address; a job read carrying no grant, token, or
-      admin password.
-- [ ] 5.8 Verify. `make test-compute-provisioning`, `make test-provisioning`,
-      `make test-provisioning-adapter`; `make check-packaging` (the JWT signing
-      dependency). End-to-end: none in the pipeline; the real lanes (sections 11 and
-      12) and the live run (section 16).
+      the relay; register the check with the family's host pool-change hooks
+      (`RELAY_HOST_POOL_CHANGE_HOOKS`) and the relay update. (D19)
+- [ ] 5.10 Tests. Unit (`provisioning/compute/tests/unit/`): the builder's header has
+      exactly three members; its claims for a lease with a host, and for one without
+      (no `sub`); `exp` is an integer equal to the stored expiry's UTC epoch seconds
+      with the process time zone set to one other than UTC; `jti` is the owner id;
+      a verifier written to D16 in the test — signature, `typ`, `kid` as the
+      thumbprint, integer `exp`, string `sub` and `jti`, no `iat` or `crit` — accepts
+      the grant and refuses a tampered one. Library integration
+      (`provisioning/compute/tests/integration/`): `grant_expires_at` rounded up; the
+      quarantine, including a raised margin reaching a released lease; a re-tenancy's
+      grant carrying the new reservation as `jti`; the grant signed again on a retry
+      with the then-active key and its id recorded; no grant in persisted parameters;
+      a retired key's `grants_valid_until` across a job retried over a rotation.
+      Application integration through the typed client
+      (`provisioning/compute/service/tests/integration/`): a fulfillment refused for a
+      relay with no active key; a host placement refused for its pool's relay address,
+      and a relay address change refused for a placed host's address; the holdings read
+      showing grant expiry and key id; a relayed job read, after success and after a
+      failure past writing its variables, carrying no grant, token, or admin password.
+- [ ] 5.11 Verify. `make test-compute-provisioning` (unit, library integration),
+      `make test-provisioning` (application integration through the typed client),
+      `make test-provisioning-adapter`, `make test-compute-provisioning-contracts`,
+      `make test-compute-provisioning-client`; `make test`; `make check-packaging`
+      (`rfc8785` at runtime). End-to-end: none in the pipeline — no lane runs a
+      relay-backed pool; the real lanes (sections 11 and 12) and the live run
+      (section 16).
 
-## 6. The family relay roles, with the admin API locked down
+## 6. The family relay roles: one verified frp, the admin API locked down, and a relay that discloses nothing
 
-Delivers D3 (the family project and role search path, 28 F5), D4, and the `no_log`
-half of 28 F3: "The buyer-facing tunnel client is hardened on every host".
+Delivers D3 (the family project, the role search path, 28 F5, and `relay-server`
+disclosing no secret), D4, D22, and the `no_log` half of 28 F3: "The buyer-facing
+tunnel client is hardened on every host", "Hosts and relays run frp from one verified
+pin", and the secret half of "A relay prepared by the family role runs admission and
+discloses no secret" (its plugin install is section 14's). Replanned against the
+reviewed design: `frp-binary` and `relay-server`'s secret handling are new, and the
+roles take no image (D23).
+
+Files: `provisioning/compute/iac/` (new: `pyproject.toml`, `Makefile`, `tests/`, lock,
+`ansible/roles/{frp-binary,relay-client,relay-proxy,relay-server}/`,
+`ansible/playbooks/relay-server.yaml`); `domains/vms/provisioning/iac/ansible/`
+(`roles/frp-setup/` and `playbooks/frp/` leave, `ansible.cfg`); the root `Makefile`;
+`provisioning/compute/service/Dockerfile` and `Dockerfile.dockerignore`.
 
 - [ ] 6.1 Create the IaC project `provisioning/compute/iac/` — `pyproject.toml`
       (`package = false`), `Makefile`, `tests/`, lock — following
@@ -420,53 +532,80 @@ half of 28 F3: "The buyer-facing tunnel client is hardened on every host".
       `test-provisioning-iac` job run them. (D3; `docs/development/ARCHITECTURE.md`
       "Build, packaging, and initialization": aggregate targets run every included
       subproject's tests)
-- [ ] 6.2 Add `relay-client` under `provisioning/compute/iac/ansible/roles/`, from
-      VM's `roles/vm-setup/tasks/frp-client.yml` and its templates: the client renamed
-      `frpc-buyers` (`/etc/frp/frpc-buyers.toml`, unit `frpc-buyers`), its
-      configuration root-only, its admin API on a loopback port below 1024 (a
-      variable with a privileged default) with a per-host password generated at
-      preparation, and no defaulted relay address or token. (D3, D4)
-- [ ] 6.3 Add `relay-proxy` with *add* — check the client's baseline against the
-      resolved relay and restart only when it changed, add a marked block (name, local
-      address and port, remote port, `metadatas.grant`), reload through the
-      authenticated admin API, and wait for the proxy to run — and *remove*, moving
-      `remove_guest_proxy` from VM's `roles/vm-management/files/guest_teardown.sh`.
+- [ ] 6.2 Add `frp-binary`: defaults holding `frp_version: "0.61.1"`, `frp_archives`
+      keyed by platform (`linux_amd64`, its official release URL and SHA-256), and
+      `frp_install_root: /usr/local/lib/frp`, as D22 shows them. The digest is recorded
+      from a download of the official archive, checked against the release's published
+      checksum when recorded, and never read from that checksum at run time. The role
+      refuses a version or platform with no digest, naming both; downloads the archive,
+      checks its SHA-256 before extracting anything, installs the named binary at
+      `/usr/local/lib/frp/<version>/<binary>`, skipping only when that exact path
+      exists; and returns the path. (D22)
+- [ ] 6.3 Add `relay-client` under `provisioning/compute/iac/ansible/roles/`, from VM's
+      `roles/vm-setup/tasks/frp-client.yml` and its templates: it includes `frp-binary`
+      for `frpc`, and `frpc-buyers.service` runs the versioned path, never
+      `/usr/local/bin/frpc`; the client renamed `frpc-buyers`
+      (`/etc/frp/frpc-buyers.toml`, unit `frpc-buyers`), its configuration root-only,
+      its admin API on a loopback port below 1024 (a variable with a privileged
+      default) with a per-host password generated at preparation, and the relay address
+      and token required inputs with no default, asserted. The frp version is part of
+      the client's baseline, so a change restarts it. (D3, D4, D22)
+- [ ] 6.4 Add `relay-proxy` with *add* — check the client's baseline against the
+      resolved relay and restart only when it changed, add a marked `tcp` proxy block
+      with no load-balancer group (name, local address and port, remote port,
+      `metadatas.grant`), reload through the authenticated admin API, and wait for the
+      proxy to run — and *remove*, moving `remove_guest_proxy` from VM's
+      `roles/vm-management/files/guest_teardown.sh`, which reloads and never restarts.
       Every task rendering, writing, sending, or reading the grant, the token, or the
-      admin password sets `no_log`. (D3, D4, 28 F3)
-- [ ] 6.4 Move `roles/frp-setup` from `domains/vms/provisioning/iac/ansible/` to the
-      family project as `relay-server`, installing frps without the dashboard and
-      subdomain settings; installing the plugin is section 14's. Move its playbook
-      `playbooks/frp/frp-server-setup.yaml` with it. (D3)
-- [ ] 6.5 Copy `provisioning/compute/iac` into the provisioning image and set
+      admin password sets `no_log`. (D3, D4, D16, 28 F3)
+- [ ] 6.5 Replace VM's `roles/frp-setup` and its playbook
+      `playbooks/frp/frp-server-setup.yaml` with the family's `relay-server` and
+      `playbooks/relay-server.yaml`: frps from `frp-binary` at its versioned path under
+      a systemd unit; the relay token a required input with no default, never
+      generated or printed; no debug output of credentials, no credentials file on the
+      controller, no `set_stats` return, no dashboard with its nginx and certbot, and no
+      reboot; `no_log` on every task rendering `frps.toml`; frps's `allowPorts`, its
+      ufw rule, and fail2ban's ports from one variable, which must cover every
+      issuer's range; a change to `frps.toml` or frps's version restarts frps. The
+      plugin's install is section 14's. (D3, D20, D22; correction 13)
+- [ ] 6.6 Copy `provisioning/compute/iac` into the provisioning image and set
       `ANSIBLE_ROLES_PATH` to its roles (`provisioning/compute/service/Dockerfile`,
       `Dockerfile.dockerignore`); add the family roles' repository-relative path to
       the `roles_path` of `domains/vms/provisioning/iac/ansible/ansible.cfg`; keep the
       service's shared `ansible.cfg` free of domain paths. (28 F5)
-- [ ] 6.6 Tests in the family project, at the level `domains/vms/provisioning/iac/tests`
-      holds: the role structure, every secret-bearing task's `no_log`, the admin port
-      below 1024 and the password on every admin call, removal reloading and never
-      restarting; move VM's `test_frp_proxy_wait.py`,
-      `test_cleanup_script_relay_teardown.py`, and the proxy half of
-      `test_guest_teardown.py` here.
-- [ ] 6.7 Verify. `make -C provisioning/compute/iac test`, `make test-provisioning-iac`;
-      `make check-packaging` (the new project's lock). End-to-end: none — no pipeline
-      lane prepares a host; the live run (section 16) is the evidence.
+- [ ] 6.7 Tests in the family project, at the level `domains/vms/provisioning/iac/tests`
+      holds: the role structure; `frp-binary` refusing an unknown version or platform,
+      checking the digest before extraction, installing at the versioned path and
+      skipping only when it exists, a failed digest installing nothing; every
+      secret-bearing task's `no_log`; the admin port below 1024 and the password on
+      every admin call; the proxy block `tcp` with no group; removal reloading and never
+      restarting; `relay-server` requiring a token, with no task printing, writing to
+      the controller, or returning a credential, and no dashboard, certbot, or reboot
+      task; one variable feeding `allowPorts`, ufw, and fail2ban. Move VM's
+      `test_frp_proxy_wait.py`, `test_cleanup_script_relay_teardown.py`, and the proxy
+      half of `test_guest_teardown.py` here.
+- [ ] 6.8 Verify. `make -C provisioning/compute/iac test`, `make test-provisioning-iac`;
+      `make test`; `make check-packaging` (the new project's lock). End-to-end: none —
+      no pipeline lane prepares a host or a relay; the live run (section 16) is the
+      evidence for `relay-client` and `relay-proxy`, and `relay-server`'s plugin
+      install has its tests only (D23).
       Owed by validation: `tests.yml`, job `test · test-provisioning-iac` — its log
       shows the family project's tests run and pass beside VM's.
 
 ## 7. VM's tasks on the family roles, and one relay block
 
 Delivers D3 for VM, D12, and the codec half of 28 F3: "A relayed create reports its
-relay under one block".
+relay under one block". Replanned against the reviewed design only in its references
+to section 5's tasks.
 
 - [ ] 7.1 `roles/vm-setup` includes `relay-client` in place of `frp-client.yml`;
       `vm-create.yml`, `vm-undefine.yml`, and `vm-remove.yml` call `relay-proxy` with
       the guest's proxy and the job's grant; the old frp tasks, templates, and
-      `restart frpc-vms` handler go. (D3)
+      `restart frpc-vms` handler go, and VM's download of frpc with them (D22). (D3)
 - [ ] 7.2 Both create-fact variants print their relay block as `relay`; the codec
       (`domains/vms/provisioning/adapter/src/vm_provisioning_adapter/codec.py`) reads
-      `relay`, its variables carry the grant, and its secret fields come from the
-      family set (5.4); the mock output (`services/mock_output.py`) and the codec's
+      `relay`, its variables carry the grant (5.5), and its secret fields come from the
+      family set (5.7); the mock output (`services/mock_output.py`) and the codec's
       tests (`tests/unit/test_vm_codec.py`, `test_vm_mock_output.py`) follow the
       shipped fact. (D12, 28 F3)
 - [ ] 7.3 Both domains' playbooks pass `ansible-playbook --syntax-check` under their
@@ -474,7 +613,7 @@ relay under one block".
       (28 F5)
 - [ ] 7.4 Verify. `make test-provisioning-iac`, `make test-provisioning-adapter`,
       `make test-provisioning`; `make test-provisioning-iac-native` against a built
-      provisioning image. End-to-end: the VM lane (`e2e_deal`) exercises the codec
+      provisioning image; `make test`. End-to-end: the VM lane (`e2e_deal`) exercises the codec
       through the mock profile's default output; no pipeline scenario runs a relayed
       create.
       Owed by validation: `tests.yml`, job `test · test-provisioning-iac` — the family
@@ -483,19 +622,22 @@ relay under one block".
 ## 8. Bare-metal relay access and host preparation
 
 Delivers D1 and D3 for bare metal: "A bare-metal grant on a relay-backed pool
-delivers a leased port".
+delivers a leased port". Replanned against the reviewed design only in its references
+to section 5's tasks.
 
 - [ ] 8.1 `BareMetalFulfillmentPlan.prepare_create` leases a port through the
-      acceptance session when the pool references a relay, refusing an unusable relay
-      as VM's plan does (window, token, active key); `prepare_teardown` reads the relay
-      from the lease. A pool with no relay prepares as today. (D1)
+      acceptance session when the pool references a relay, passing the reservation's
+      lease end and the host as VM's plan does (5.1), and refusing an unusable relay
+      through the family check (window, token, active key; 5.8); `prepare_teardown`
+      reads the relay from the lease. A pool with no relay prepares as today. (D1)
 - [ ] 8.2 `BareMetalAnsibleCodec` carries the relay reference and leased port in
-      `BareMetalJobParams`, resolves the relay's address, token, and grant at execution,
-      names the family's secret variable set among its secret fields, and delivers
-      `ssh -p <leased port> <tenant>@<relay address>` from the lease for a relayed
-      grant; a grant with no relay delivers the host's buyer route as today
-      (`grant_evidence`). The mock output (`services/mock_output.py`) follows. (D1,
-      28 F3)
+      `BareMetalJobParams`, which gains the resolver's relay fields, `relay_grant`
+      included, so the execution resolver fills the relay's address, token, and grant
+      at execution (5.5); it names the family's secret variable set among its secret
+      fields (5.7), and delivers `ssh -p <leased port> <tenant>@<relay address>` from
+      the lease for a relayed grant; a grant with no relay delivers the host's buyer
+      route as today (`grant_evidence`). The mock output (`services/mock_output.py`)
+      follows. (D1, 28 F3)
 - [ ] 8.3 The `bare-metal-access` role calls `relay-proxy` *add* for a relayed grant,
       proxying `127.0.0.1:22`, and *remove* on reclaim, never touching the management
       client. (D1, D3)
@@ -506,10 +648,14 @@ delivers a leased port".
       lease and its refusals; the codec's relayed and unrelayed evidence and its
       redaction. Role assets
       (`provisioning/compute/service/tests/unit/test_bare_metal_ansible_assets.py`):
-      the relay proxy on grant and reclaim. Application integration through the typed
-      client: a relayed bare-metal fulfillment leases a port and its release returns it.
+      the relay proxy on grant and reclaim, and the host-kit playbook's syntax.
+      Application integration through the typed client: a relayed bare-metal
+      fulfillment leases a port, its grant job's read carries no grant or token, and
+      its release returns the port; a fulfillment on a pool whose relay has no active
+      key is refused.
 - [ ] 8.6 Verify. `make test-bare-metal`, `make test-provisioning`,
-      `make -C provisioning/compute/iac test`; `make test-provisioning-iac-native`.
+      `make -C provisioning/compute/iac test`; `make test-provisioning-iac-native`;
+      `make test`.
       End-to-end: the bare-metal lane (`e2e_bare_metal_mock_deal`) on a pool with no
       relay; no pipeline scenario runs a relayed grant.
 
@@ -530,7 +676,7 @@ bare-metal reclaim tolerates an account its grant never created".
       the reclaim tasks, no swallowed failure, the absent-account path unchanged, the
       fact's new fields read.
 - [ ] 9.4 Verify. `make test-bare-metal`, `make test-provisioning`;
-      `make test-provisioning-iac-native`. End-to-end: `e2e_bare_metal_mock_deal` runs
+      `make test-provisioning-iac-native`; `make test`. End-to-end: `e2e_bare_metal_mock_deal` runs
       its reclaim through the mock profile's output; the live run (section 16) shows a
       real reclaim.
 
@@ -553,7 +699,8 @@ typed, versioned settings section".
 - [ ] 10.3 Tests. Unit (`e2e-tests/tests/unit/test_real_provisioning_target.py`,
       replacing `test_real_vm_target.py`): every refusal names its field; a listing
       shape not fitting twice names the dimension; version 1 refused.
-- [ ] 10.4 Verify. `make test-e2e-unit`. End-to-end: none; the real lanes read it.
+- [ ] 10.4 Verify. `make test-e2e-unit`; `make test`. End-to-end: none; the real
+      lanes read it.
 
 ## 11. The real VM lane over a relay
 
@@ -585,7 +732,7 @@ modified "A real-provisioning VM scenario proves delivery on a real host".
 - [ ] 11.6 Tests. Unit (`e2e-tests/tests/unit/test_real_vm_lane.py`,
       `test_compute_deal_stages.py`, `test_ssh_access.py`): the stage set's order and
       producers, the relay checks, the heartbeat's gap detection, recovery of two deals.
-- [ ] 11.7 Verify. `make test-e2e-unit`. End-to-end: `e2e_vm_real_provisioning`, in no
+- [ ] 11.7 Verify. `make test-e2e-unit`; `make test`. End-to-end: `e2e_vm_real_provisioning`, in no
       lane, skips without its target; the live run (section 16) runs it. The pipeline's
       lanes must still pass with the real module skipping.
 
@@ -614,7 +761,7 @@ relay access on a real host".
 - [ ] 12.4 Tests. Unit: the bare-metal real lane's stage set against the shared stages
       (`test_compute_deal_stages.py`), the driver's registration and relay checks, the
       pinned mode.
-- [ ] 12.5 Verify. `make test-e2e-unit`. End-to-end: `e2e_bare_metal_real_provisioning`,
+- [ ] 12.5 Verify. `make test-e2e-unit`; `make test`. End-to-end: `e2e_bare_metal_real_provisioning`,
       in no lane, skips without a bare-metal host in its target; the live run (section
       16) runs it.
 
@@ -630,63 +777,149 @@ Delivers D11: "Real-lane SSH access goes through one helper".
 - [ ] 13.2 Tests. Unit: `test_ssh_access.py` covers the classification
       `bare_metal_access.py` had; a source check refuses an e2e scenario building its
       own `ssh` command.
-- [ ] 13.3 Verify. `make test-e2e-unit`. End-to-end: `e2e_bare_metal_deal`, in no lane,
+- [ ] 13.3 Verify. `make test-e2e-unit`; `make test`. End-to-end: `e2e_bare_metal_deal`, in no lane,
       keeps its configuration and skips without it.
 
 ## 14. The admission plugin on a relay, and the signer against its vector
 
-Starts once `frp-grant-admission` is archived. Delivers D18's installation and
-conformance, D19, and D20: "Every relay proxy carries a signed grant" (conforming to
-the plugin's specification) and "A relay without an active grant key is refused
-before dispatch" (the relay's side).
+Starts once `admit-relay-proxies-by-grant` is archived and `dev` merged in, so the
+tool `frp-grant-admission` is on this branch. Delivers D18's conformance and pins
+checks, D23's install, and D19 and D20's relay side: "A relay prepared by the family
+role runs admission and discloses no secret", "Every relay proxy carries a signed
+grant" (scenario "The signer is checked against the plugin's vector"), and "Hosts and
+relays run frp from one verified pin" (the pin equal to the tool's). Replanned against
+the reviewed design: a wheel and hash-pinned requirements, not an image; the
+configuration taken as the plugin's own file; signing cases and the thumbprint, not
+verdicts.
 
-- [ ] 14.1 `relay-server` installs the plugin from its released image, renders its
-      configuration — the issuers with each key's id, public half, audience, and port
-      range — from inputs the operator gives, and adds frps's `[[httpPlugins]]` entry
-      for `NewProxy`. (D3, D18, D20)
-- [ ] 14.2 An SCM test signs the plugin's published vector claims with its key through
-      the family signer and requires the vector's verdicts. (D18)
-- [ ] 14.3 Tests in the family IaC project: the plugin's configuration renders the
-      issuers given, and frps names the plugin.
-- [ ] 14.4 Verify. `make test-compute-provisioning`, `make -C provisioning/compute/iac test`.
-      End-to-end: none in the pipeline; the live run (section 16).
+Files: `provisioning/compute/iac/ansible/roles/relay-server/` and the project's
+`tests/`; `provisioning/compute/tests/unit/` (the vector check);
+`provisioning/compute/iac/tests/` (the pins check).
+
+- [ ] 14.1 `relay-server` installs the plugin as a plain program from inputs it is given
+      and never builds or fetches — `frp_grant_admission_wheel`,
+      `frp_grant_admission_requirements` (hash-pinned, exported from the tool's lock),
+      and `frp_grant_admission_config` (the plugin's own TOML, D20): it requires
+      `python3` 3.11 or later on the relay, creates a virtual environment under
+      `/opt/frp-grant-admission`, installs the requirements with `--require-hashes`
+      and then the wheel with `--no-deps`, and runs the plugin as its own unprivileged
+      user under a unit templated from the tool's systemd example. (D23)
+- [ ] 14.2 `relay-server` checks the configuration with the plugin's `check` before
+      installing it, failing without replacing the running configuration when it does
+      not load; writes it root-owned and readable by the plugin's group under
+      `no_log`; and reloads the plugin on a change without restarting frps. frps
+      gains the `[[httpPlugins]]` entry — `path = "/"`, `ops = ["NewProxy"]`, the
+      plugin's loopback address — which restarts frps once. (D23; "A relay prepared
+      by the family role runs admission and discloses no secret")
+- [ ] 14.3 The vector check (`provisioning/compute/tests/unit/`): it reads the tool's
+      published vector (its `vector/frp-grant-1.json`) in place; for every signing case
+      the family's header-and-claims signer (5.3), given the case's key, header, and
+      claims, produces exactly the case's token, and the thumbprint case equals the
+      family's key-id derivation (4.1). It runs no verification case. (D18)
+- [ ] 14.4 The pins check (`provisioning/compute/iac/tests/`): `frp-binary`'s version,
+      URL, and SHA-256 for `linux_amd64` equal the tool's `frp-pins.toml`. (D18, D22)
+- [ ] 14.5 Tests in the family IaC project: the plugin's install refusing a Python
+      older than 3.11, installing with `--require-hashes` then `--no-deps`, its unit as
+      an unprivileged user; the configuration checked before it is installed, under
+      `no_log`, a change reloading the plugin and not restarting frps; frps naming the
+      plugin for `NewProxy` only; both domains' and the relay playbook's
+      `--syntax-check`.
+- [ ] 14.6 Verify. `make test-compute-provisioning` (unit), `make -C provisioning/compute/iac test`,
+      `make test-provisioning-iac`, `make test-provisioning-iac-native`; `make test`.
+      End-to-end: none in the pipeline; the live run's relay is containerised (D23),
+      so `relay-server`'s plugin install has its tests and syntax checks only, and
+      section 16 proves the image path.
+      Owed by validation: `tests.yml`, job `test · test-provisioning-iac` — its log
+      shows the family project's tests, the pins check included, run and pass.
 
 ## 15. Operator documentation
 
-Delivers the operator procedures D4, D15b, D16, D17, D19, and D20 call for, against
-the plugin as released.
+Delivers the operator procedures D4, D15b, D16, D17, D19, D20, D22, and D23 call for,
+against the tool as archived. Replanned against the reviewed design: the procedures the
+reconciliation and 55-design added.
 
 - [ ] 15.1 `docs/development/VALIDATION_RUNBOOK.md` §21–26 for target version 2 and
-      relayed hosts, and a new section for relays: preparing a relay with
-      `relay-server` and the plugin; relay definitions with `grant_key_secret_key`;
-      staging, configuring, and activating a key, and when a retired key may leave the
-      plugin; the admission check (an ungranted proxy refused, the plugin's refusal in
-      its log) before a relay-backed pool first serves buyers and after any plugin
-      change; onboarding a site to a shared relay (its public key and assigned range);
-      and the relay step for a host teardown cannot reach. (D16, D17, D19, D20)
-- [ ] 15.2 `docs/seller-frp-setup.md`: the `frpc-buyers` client and its locked-down admin
-      API; a buyer-only relay by default, management ports on another relay; the
+      relayed hosts. (D5)
+- [ ] 15.2 A new runbook section for relays, preparing them:
+      - one relay per operator as the recommended deployment, each with its own token,
+        and a shared relay's limits — one token for every client, rotation touching
+        every operator's hosts, and ending one operator's sessions restarting the relay
+        under everyone (D20);
+      - a VPS relay with `relay-server`: building the wheel with the tool's
+        `make build` and exporting its requirements with
+        `uv export --frozen --no-dev --no-emit-project` until the move-out publishes
+        them, the wheel being the operator's input, its dependencies checked against
+        the lock (D23);
+      - a containerised relay: the plugin's image pinned by revision as a sidecar in
+        frps's network namespace, its configuration mounted read-only and reloaded by
+        SIGHUP, beside the upstream frps image at the pinned version, with the same
+        `[[httpPlugins]]` entry (D23);
+      - the frp version, and drained changes to `frps.toml` or frps's version (D3, D22);
+      - relay definitions with `grant_key_secret_key`, the key generated with
+        `openssl genpkey -algorithm ed25519 -outform DER | base64 -w0` and kept in the
+        secrets profile (D17);
+      - the plugin's configuration: an issuer per relay with its audience, its range
+        containing the relay's window, and its public keys; onboarding a site to a
+        shared relay (its public key and assigned range); the drain rule for narrowing
+        a range or removing a key or an issuer (D19, D20);
+      - the relay's and the service's clocks kept synchronised, with skew under
+        `relay_port_reuse_margin_seconds` (D16);
+      - the admission check — an ungranted proxy refused, the plugin's refusal in its
+        log — before a relay-backed pool first serves buyers and after any change to
+        the relay's plugin configuration (D19).
+- [ ] 15.3 The relay section, operating them:
+      - key rotation keeping the profile current: generate, put in the profile, point
+        the entry's `grant_key_secret_key` at it, stage it, add its public half to the
+        plugin, activate; when a retired key may leave the plugin (its
+        `grants_valid_until`, matched by the thumbprint `check` prints); a key the
+        service generated surviving only with the database (D17);
+      - emergency rotation as a choice per incident: remove a compromised key at once,
+        refusing that operator's buyers at their next reconnect until their leases end,
+        or keep it until its leases end, an attacker holding it able to sign only within
+        that operator's range and on its relay; a leaked token having no path short of
+        draining every lease; the gap recorded (D17);
+      - a host teardown cannot reach: on a host the operator can still reach,
+        `systemctl disable --now frpc-buyers`; otherwise the relay-side step — the
+        leased port blocked at the relay's firewall and its established connections
+        ended with `ss -K state established '( sport = :<port> )'` (`NET_ADMIN` in the
+        relay's network namespace; on Kubernetes an ephemeral debug container; one frps
+        restart where `ss -K` is unavailable), or `allowPorts` and a restart where the
+        operator controls frps but not the firewall; the block's record (port, lease,
+        grant expiry) and its lifting only after the expiry has passed and the
+        registration has cleared; the step ending access through the relay only, full
+        revocation needing the host recovered and reclaimed; and who does what on a
+        relay run for other operators (D16, 55 F1);
+      - tracing a plugin log line's `jti`: the holdings read while the tenancy's row
+        stands, `GET /contract/leases/{jti}` once it has been reused (D16, 55 F3).
+- [ ] 15.4 `docs/seller-frp-setup.md`: the `frpc-buyers` client, its versioned frp
+      binary, and its locked-down admin API; one relay per operator, buyer-only by
+      default, management ports on another relay; a shared relay's limits; what a
+      relay must run (frps with the admission plugin, an issuer for the relay); the
       operator's management client with its admin API off or authenticated. (D3, D4,
-      D19)
-- [ ] 15.3 `docs/bare-metal-seller-quickstart.md`: relay-backed bare-metal pools and host
+      D19, D20, D22)
+- [ ] 15.5 `docs/bare-metal-seller-quickstart.md`: relay-backed bare-metal pools and host
       preparation; a tunnel-reached host in a pool with no relay must state a buyer
       route; what reclaim ends. (D1, D15, D15b)
-- [ ] 15.4 `e2e-tests/README.md`: the real VM and bare-metal lanes, their profile, and
+- [ ] 15.6 `e2e-tests/README.md`: the real VM and bare-metal lanes, their profile, and
       the target's version 2, in place of "Real VM provisioning". (D5, D10)
-- [ ] 15.5 Verify. `make check-doc-citations CHANGE=prove-relay-provisioning`, its only
-      remaining matches being files this change has yet to create.
+- [ ] 15.7 Verify. `make check-doc-citations CHANGE=prove-relay-provisioning`, its only
+      remaining matches being files this change has yet to create; every command and
+      path the new runbook steps name resolves against this branch. End-to-end: none;
+      section 16 runs the runbook's admission check and the lanes.
 
 ## 16. Live verification [log]
 
 Requires a VM host and a bare-metal host (which may be a virtual machine), prepared
-with `relay-client`, reached through a management relay, and a buyer relay running
-frps with the admission plugin. The owner supplies each item's output, free of
+with `relay-client`, reached through a management relay, and a buyer relay for each
+lane's release, each with its own token and key: frps in a container with the
+plugin's image as a sidecar (D20, D23). The owner supplies each item's output, free of
 addresses, project, cluster, namespace, and host names; until then the change is
 `blocked in implementation`. Each item is also evidence for
 `relay-vm-access-without-a-dashboard`'s sections 6 and 8, recorded here (D9).
+Unchanged by the replanning but for its relays.
 
-- [ ] 16.1 **[log]** The runbook's admission check: an ungranted proxy refused by the
-      deployed relay, the plugin's refusal in its log. (relay change 8.2, restated)
+- [ ] 16.1 **[log]** The runbook's admission check on each buyer relay: an ungranted
+      proxy refused, the plugin's refusal in its log. (relay change 8.2, restated; D19)
 - [ ] 16.2 **[log]** `e2e_vm_real_provisioning` under relay access passes: the guest
       reached at the relay and leased port; an unrelated key refused; the heartbeat
       held through the second deal's create and teardown; the second port released;
@@ -708,7 +941,7 @@ addresses, project, cluster, namespace, and host names; until then the change is
 
 Per `openspec/README.md#plan-closeout-requirements`, in that order; closeout changes
 documentation only, and a part needing a code edit returns the change to
-implementation. `frp-grant-admission` must be archived first.
+implementation. `admit-relay-proxies-by-grant` must be archived first.
 
 - [ ] 17.1 **Comment hygiene.** Run `make check-comment-hygiene` and confirm the comments
       this change added state invariants, not this change; anything to fix returns the
@@ -726,15 +959,19 @@ implementation. `frp-grant-admission` must be archived first.
       records buyer access through family-owned relays for VM and bare metal, with
       admission by signed grants; remove the gap row "No end-to-end lane runs a
       relay-backed pool"; add unowned gap rows for `host_key_checking = False` in the
-      provisioning service's Ansible configuration (D4) and for admission at login on a
-      shared relay, with its trigger (D21). The concurrent-allocation gap row, which
+      provisioning service's Ansible configuration (D4), for admission at login on a
+      shared relay, with its trigger (D21), for emergency rotation of both relay
+      credentials across live hosts — re-issuing grants under a new key and rotating
+      the token, each dropping sessions once — with its trigger (D17), and for pinning
+      the plugin wheel's digest in `relay-server` once a release is published (D23).
+      The concurrent-allocation gap row, which
       names VM's provisioning owner as the allocator's, names the compute family's
       relays instead (found by section 1's fresh-context check). Name the update in
       the promotion record.
 - [ ] 17.6 **Campaign index currency.** This change's row in
       `openspec/changes/README.md` ("Reach hosts and VMs that have no inbound route"),
-      its campaign graph, and its `Depends on` once `frp-grant-admission` is archived;
-      other rows' `Depends on` stay. Name the update in the promotion record.
+      its campaign graph, and its `Depends on` once `admit-relay-proxies-by-grant` is
+      archived; other rows' `Depends on` stay. Name the update in the promotion record.
 - [ ] 17.7 **Packaging.** `make check-packaging` and
       `make check-architecture-change CHANGE=prove-relay-provisioning`.
 - [ ] 17.8 **End-to-end pipeline.** Record the passing run the latest validation names:
@@ -744,25 +981,44 @@ implementation. `frp-grant-admission` must be archived first.
 - [ ] 17.9 **Promotion.** Write the permanent documents and the design-promotion record:
       - D2, D3: `docs/development/ARCHITECTURE.md` "Family kits" (the compute family
         kit's relays and the family IaC roles); `openspec/specs/physical-provisioning/architecture.md`
-        "Buyer access to rented VMs", renamed for both domains, with the host-level
-        client configuration belonging to the host;
+        "Buyer access to rented VMs", renamed "Buyer access through relays" for both
+        domains, with the host-level client configuration belonging to the host and
+        the family roles found through the role search path;
         `openspec/specs/resource-pool-management/architecture.md`, whose account of a
         relay-changing host move names the VM adapter as refusing it, where the
         family's relay pool-change hook now does.
       - D1, D15b: `physical-provisioning/architecture.md` "The host registry owns the
         connection".
-      - D4: `physical-provisioning/architecture.md`, the token's boundary on a host.
-      - D14, D16, D17, D19, D20: `physical-provisioning/architecture.md`, a section on
-        relay admission; the relay-never-calls-SCM principle in
+      - D3, D4, 28 F3: `physical-provisioning/architecture.md` "The relay token never
+        reaches buyer-controlled hardware", gaining the token's boundary on a host and
+        secrets kept out of job logs by `no_log` and the family's secret fields.
+      - D14, D16, D17, D19, D20, D21, D22, D23: a new
+        `physical-provisioning/architecture.md` section "Relay admission by signed
+        grants" under "Buyer access through relays" — per-lease grants and their
+        lifecycle, the grant's conformance to the tool's specification (no `iat`, JCS
+        signing, claim types, `jti` the owning reservation, thumbprint ids, public
+        keys in the plugin's format), the vector and pins checks, relay keys with the
+        profile's form and rotation keeping the profile current, admission on every
+        relay as the operator's installation, one relay per operator and a shared
+        relay's limits, the emergency choice per incident, the host- and relay-side
+        steps for a host teardown cannot reach and their limit, one verified frp pin at
+        versioned paths, how a relay runs the plugin, and the wheel as the operator's
+        input; the relay-never-calls-SCM principle in
         `docs/development/ARCHITECTURE.md` "Authority boundaries".
       - D18: the principle that SCM does not own generic infrastructure that is not
-        specific to it in `docs/development/ARCHITECTURE.md` "Package and dependency
-        layers".
+        specific to it, and conforms to a standalone component's published interface,
+        in `docs/development/ARCHITECTURE.md` "Package and dependency layers".
       - D2(b), 28 F4: `docs/development/DEPLOYMENT_AND_CONFIG.md` "Migrations at
-        startup", beside the `hosts.gpu_count` drop; D17's `grant_key_secret_key` in
-        "Definition documents".
+        startup", beside the `hosts.gpu_count` drop.
+      - D16, D17: `docs/development/DEPLOYMENT_AND_CONFIG.md` "Definition documents",
+        `grant_key_secret_key` beside `token_secret_key`; "Secrets are named, not
+        carried", the grant key's profile form; and a new subsection "Relay grants and
+        port reuse" under "Definition documents" for `relay_grant_expiry_grace_seconds`,
+        `relay_port_reuse_margin_seconds`, and the clock-synchronisation requirement.
       - D5–D11: `docs/development/TESTING.md` "The real-provisioning lane", covering
         both lanes.
+      - The operator procedures: section 15's runbook and seller documents, already
+        written; confirm they match the archived behaviour.
       - The behaviour itself: `openspec/specs/physical-provisioning/spec.md` and
         `openspec/specs/test-compatibility/spec.md`, written by the archive in 17.11.
 - [ ] 17.10 **Documentation citations.** `make check-doc-citations CHANGE=prove-relay-provisioning`,
