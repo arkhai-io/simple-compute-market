@@ -56,6 +56,10 @@ Files: `pyproject.toml`, `uv.lock`, `Makefile`, `LICENSE`, `.gitignore`,
       `Makefile` exports `UV_PYTHON` from `../../.python-version` and has `test`; it needs
       no `reinit`, since its lock installs nothing from the wheelhouse. Lock with
       `make lock PROJECTS="tools/frp-grant-admission"`. (D4, D8)
+      Note: as planned; `cryptography>=42`, `PyJWT>=2.8.0` (1.2). The console script
+      names `frp_grant_admission.cli:main`, which section 3 writes. `pyproject.toml`
+      gains `readme = "README.md"` in section 4, when the README exists. The lock
+      resolves cryptography 50.0.2 and PyJWT 2.15.1; `make check-packaging` passes.
 - [ ] 1.2 **Decision gate on PyJWT's `iat`.** Find the lowest PyJWT release whose
       `jwt.decode` refuses, with zero leeway, an `iat` later than the clock, as D12 step 7
       and the delta's "A grant is not yet valid" require of "`nbf` and `iat` validated as
@@ -63,6 +67,16 @@ Files: `pyproject.toml`, `uv.lock`, `Makefile`, `LICENSE`, `.gitignore`,
       release does, stop: the design must decide whether the plugin checks `iat` itself,
       and the change returns to design (`openspec/README.md#open-questions-and-prescribed-tasks`).
       (D8, D12)
+      Note: **2.6.0** is the lowest release refusing an `iat` later than the clock
+      (`if iat > (now + leeway): raise ImmatureSignatureError`), and the first whose
+      expiry check is `exp <= now - leeway`, refusing at exactly `exp` as D12 requires;
+      2.0.0, 2.4.0, and 2.5.0 have no future-`iat` check and refuse only `exp < now`.
+      2.2's `strict_aud` option first appears in **2.8.0** (absent in 2.6.0 and 2.7.0),
+      so the declared floor is `PyJWT>=2.8.0`. Evidence: each release locked in turn and
+      its installed `jwt/api_jwt.py` read. Every release from 2.8.0 to 2.15.1 compares
+      in `_validate_iat`, `_validate_nbf`, and `_validate_exp(payload, now, leeway)`, but
+      reads `now` itself (`datetime.now()` in `_validate_claims`) and takes no clock
+      argument — see 2.2's note for how the injected clock reaches those comparisons.
 - [ ] 1.3 `config.py` loads a TOML file with `tomllib` into an immutable configuration:
       `listen` and a list of issuers, each with `name`, `audience`, `ports.start`,
       `ports.end`, and `keys`, each key a `public_key` — single-line standard base64 of
@@ -71,6 +85,11 @@ Files: `pyproject.toml`, `uv.lock`, `Makefile`, `LICENSE`, `.gitignore`,
       `{"crv":"Ed25519","kty":"OKP","x":"<base64url raw key>"}`), and the configuration
       maps each id to its key and issuer. Types are strict: a quoted port is an error.
       (D3, D3a, D13)
+      Note: `load_config(path)` and `parse_config(text)` return a frozen `Config`
+      (`listen`, `issuers`, and a read-only `keys` map from thumbprint to `Key`, which
+      names its `Issuer`); `thumbprint()` is the derivation. A key must be canonical: its
+      base64 decodes strictly and re-encodes to the same DER, so trailing bytes are
+      refused.
 - [ ] 1.4 Loading collects every problem and refuses the file, naming each: a key listed
       twice (by thumbprint, in any issuers); two issuers with the same `name`; two
       issuers whose ranges overlap, naming both; an issuer with no keys; a range outside
@@ -78,20 +97,81 @@ Files: `pyproject.toml`, `uv.lock`, `Makefile`, `LICENSE`, `.gitignore`,
       a missing or mistyped field; and a `listen` that is not an IPv4 address in
       `127.0.0.0/8` or `[::1]` with a port from 1 to 65535 — a hostname such as
       `localhost` included, decided without a resolver. (D3, D13; 14 F2)
+      Note: beyond the plan, an unknown field at any level is refused too, so a file
+      written for a later format (D3's "a later list of ranges") fails to load rather
+      than loading with part of it ignored. The listen address is parsed with
+      `ipaddress` alone, which also refuses `127.1` and `[::ffff:127.0.0.1]`. A file that
+      cannot be read or is not TOML is one problem naming why.
 - [ ] 1.5 `examples/config.toml` is D13's example, with RFC 8032's TEST 1 public key and
       a comment saying it is a test value never to be used on any network. (D13;
       `AGENTS.md` public-repository discipline)
+      Note: D13 elides the second issuer's key; the example gives it RFC 8032's TEST 2
+      public key, labelled the same way, since a key cannot be listed twice.
 - [ ] 1.6 `.gitignore` ignores the tool's frp cache directory (section 5) and its
       environment. (D5)
+      Note: the cache directory is `.frp-cache/`, which section 5's fetch must use.
 - [ ] 1.7 Unit (`tests/unit/test_config.py`): the example loads; the TEST 1 key's derived
       id is RFC 8037 Appendix A.3's `kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k`; two keys
       in one issuer both resolve to it; each refusal in 1.4 is reported, and a file with
       several problems reports all of them; `listen` values `0.0.0.0:7300`,
       `192.0.2.1:7300`, `localhost:7300`, and `[::]:7300` are refused, and
       `127.0.0.1:7300`, `127.1.2.3:7300`, and `[::1]:7300` load.
+      Note: unit, 45 cases, all pass; they also hold the example's keys to RFC 8032's
+      TEST 1 and TEST 2 hex. The RFC 8032 keys the tests and the vector use live in
+      `tests/rfc8032.py` (TEST 1, 2, and 3).
 - [ ] 1.8 Verification: `make -C tools/frp-grant-admission test` (unit); `make
       check-packaging` (a new project and lock).
       End-to-end: none (see the preamble).
+      Note: `make -C tools/frp-grant-admission test` — unit, 45 passed (the suite at this
+      section's end); `make check-packaging` — passes. End-to-end: none, confirmed.
+      Handoff: `scripts/uv_project.py lock` needs an existing `uv.lock`, and uv refuses an
+      empty one, so the first lock was made from a stub holding `version = 1` and
+      `requires-python`; `make lock` keeps a third-party package at its locked version,
+      so moving one means relocking from that stub.
+
+**Section 1 stopped: the change returns to design.** Every task's work above is done
+and its own evidence passes (unit 45 passed; `make check-packaging` passes), but no task
+is checked, because `make check-change` cannot pass and the section cannot be committed
+as complete.
+
+What was found: `make check-comment-hygiene` (run by `make check-change`, and by 8.1 at
+closeout) refuses every `.py`, `.toml`, `.yml`, and `.yaml` line outside `openspec/`,
+`docs/`, and `.claude/` that contains the name of any OpenSpec change, active or archived
+(`scripts/check_comment_hygiene.py`, `change_name_matches`, a plain substring test). D14
+names the tool, its distribution, its console script, and its capability after this
+change, `frp-grant-admission`. The check's output on this section:
+
+```text
+./tools/frp-grant-admission/pyproject.toml:2:name = "frp-grant-admission"
+./tools/frp-grant-admission/pyproject.toml:13:frp-grant-admission = "frp_grant_admission.cli:main"
+./tools/frp-grant-admission/examples/config.toml:1:# An example frp-grant-admission configuration.
+```
+
+The comment can be reworded; the distribution and console-script names cannot without
+departing from D11 and D14. Later sections add more such lines that the plan prescribes:
+the CLI's program name and usage text in `cli.py` (3.4), the image name and root targets
+in `tests.yml` (`test-frp-grant-admission`, 6.1), and any test naming the command. The
+archived name is scanned too (date prefix dropped), so the failure outlasts the archive.
+`Makefile`, `Dockerfile`, `.service`, `.json`, and `.md` files are not scanned.
+
+The design does not settle how the tool's durable name and the hygiene rule coexist.
+Options:
+
+- **A. Rename the change, not the tool** (for example to `admit-relay-proxies-by-grant`,
+  which no planned code line contains; not `build-frp-grant-admission`, which 7.3's
+  image target is called): the change name is workflow bookkeeping, while the
+  tool's name is its public interface (D11, D14). It touches the change directory and its
+  records, the index row and campaign graph, and `prove-relay-provisioning`'s `Depends
+  on` and notes; the capability stays `frp-grant-admission`. Recommended.
+- **B. Narrow the check**: exempt a change name that is also the name of a capability
+  under `openspec/specs/` or of a project under `tools/`, so a change named after what
+  it creates may name it in code. A repository-policy edit outside this change's scope,
+  and it weakens the rule for every such change.
+- **C. Rename the tool** away from the change's name: departs from D14's reason for one
+  name across tool and capability.
+
+Nothing of sections 2–4 was started. Section 1's code, tests, lock, and these notes are
+committed as work in progress.
 
 ## 2. Grant verification and the test vector
 
