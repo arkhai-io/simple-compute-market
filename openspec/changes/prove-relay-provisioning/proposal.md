@@ -33,20 +33,32 @@ holds a relay's token can register any free port the relay allows.
   `ssh -p <port> <tenant>@<relay address>`; a reclaim removes the proxy and releases
   the port. Bare-metal host preparation installs the buyer-facing client.
 - **Relay admission by signed grants.** The provisioning service signs a grant per
-  lease with a key the relay row holds; the proxy carries it; a plugin on the relay
-  admits a proxy only for the port its grant names, within its key's range. Every
+  lease with a key the relay row holds, conforming to the plugin's grant
+  specification — type `frp-grant+jwt`, the key named by its RFC 7638 thumbprint,
+  RFC 8785 serialization, no `iat` — through `cryptography` and `rfc8785`, with no JWT
+  library; the proxy carries it; a plugin on the relay admits a proxy only for the
+  port its grant names, within its issuer's range. Every
   relay is configured for admission: every proxy carries a grant, and a relay with no
   active key is refused. That a relay enforces it is the operator's installation,
   stated as the relay's requirements and proven by the runbook's admission check
   before its pools serve buyers; the service does not verify it. A retired key stays
   valid while a lease allocated before its retirement is unreleased and its grant
   unexpired. Management ports use another relay; a relay may be shared
-  by several provisioning services, each bound to its own range. A released port is
-  not reissued until its grant expires. The plugin itself is the prerequisite change
-  `frp-grant-admission`'s.
+  by several provisioning services, each bound to its own range, the relay's window
+  lying within it. A released port is not reissued until its grant's expiry plus a
+  configured reuse margin has passed, with the relay's and the service's clocks kept
+  synchronised. The plugin itself is the prerequisite change `frp-grant-admission`'s;
+  SCM's tests check the signer against its vector and the frp pin against its pins
+  file.
+- **Relays run the plugin.** `relay-server` prepares a VPS relay — frps under systemd
+  and the plugin as a plain program from a wheel it is given — and discloses no
+  secret; a containerised relay runs the plugin's image as a sidecar beside frps, as
+  the runbook describes, which is the kind the live run uses.
 - **Hardened hosts.** The buyer-facing tunnel tasks become shared family roles; the
-  client's admin API is authenticated on a privileged loopback port; every reclaim
-  policy ends the tenant's sessions, processes, and scheduled jobs.
+  client's admin API is authenticated on a privileged loopback port; frps and frpc
+  come from one pinned frp version (0.61.1), checked against a pinned SHA-256 and
+  installed at a versioned path; every reclaim policy ends the tenant's sessions,
+  processes, and scheduled jobs.
 - **Relay holdings are readable** through an administrator-only leases route.
 - **Real-provisioning target, version 2.** One section describes a host per domain,
   each with its connection, its access (a relay by id, or direct with a buyer
@@ -68,6 +80,7 @@ holds a relay's token can register any free port the relay allows.
 - `physical-provisioning`: relay ownership by the compute family; bare-metal relay
   access; signed grants, relay keys, admission on every relay, port quarantine, the
   holdings read, and the management-address check; the hardened buyer-facing client;
+  one verified frp pin; relay preparation running admission and disclosing no secret;
   reclaim ending the tenant's activity.
 - `test-compatibility`: the real-provisioning target's version 2; the real VM lane
   over a relay; a real bare-metal lane over a relay.
@@ -90,21 +103,27 @@ None. The plugin's capability is `frp-grant-admission`'s.
 - Extending a lease without dropping its session.
 - Relay deletion semantics (`relay-vm-access-without-a-dashboard` decision gate 1A.7)
   and the concurrent-allocation retry gap `ROADMAP.md` records.
-- Moving the admission plugin to its own repository, which is a later change.
+- Moving the admission plugin to its own repository, which is a later change, and
+  publishing its wheel to PyPI or a public image, which belong with that move.
+- Live evidence for `relay-server`'s plugin install: the live run's relay is
+  containerised, and the role is proven by its tests.
 
 ## Impact
 
 - `provisioning/compute/` (`compute_provisioning`, its contracts and client, the
   service): the relay package, `pool_relays` and its fail-forward migration, grant
-  signing and the relay secret fields every relay-carrying codec redacts, relay
-  keys and their rotation, the holdings read, preparation's admission checks.
+  signing (the family kit declaring `cryptography` and `rfc8785` at runtime) and the
+  relay secret fields every relay-carrying codec redacts, relay keys and their
+  rotation, the expiry grace and reuse-margin settings, the holdings read,
+  preparation's admission checks, and the vector and pins checks.
 - `domains/vms/provisioning/adapter/` and its operator client: the relay machinery
   leaves; the plan, codec, and mock output keep VM's share.
 - `domains/bare_metal/provisioning/adapter/`: pool configuration, the plan's
   allocation, the codec's relay endpoint.
-- `provisioning/compute/iac/` (new): `relay-client`, `relay-proxy`, `relay-server`.
-- `domains/vms/provisioning/iac/`: VM's tasks onto the family roles; `frp-setup`
-  moves out; the create facts' relay block.
+- `provisioning/compute/iac/` (new): `relay-client`, `relay-proxy`, `relay-server`,
+  `frp-binary`.
+- `domains/vms/provisioning/iac/`: VM's tasks onto the family roles; `frp-setup` and
+  its playbook leave for `relay-server`; the create facts' relay block.
 - `domains/bare_metal/provisioning/iac/`: the access role's relay proxy and reclaim
   policy; a host-preparation playbook.
 - `provisioning/compute/service` image: copies the family IaC tree and sets
@@ -116,9 +135,10 @@ None. The plugin's capability is `frp-grant-admission`'s.
 
 ## Dependencies and Related Changes
 
-- `frp-grant-admission` (prerequisite, gating implementation): builds the relay
-  admission plugin and owns the grant specification and test vector this change's
-  signer conforms to.
+- `frp-grant-admission` (prerequisite, gating the plugin-dependent sections and
+  closeout): builds the relay admission plugin and owns the grant specification, test
+  vector, and frp pins this change's signer and roles conform to; its settled design's
+  notes for this change are reconciled in `design.md` (D16, D17, D18, D20, D22, D23).
 - `relay-vm-access-without-a-dashboard` (blocked in closeout): its implemented relay
   resource, allocator, and split clients are what this change moves and exercises, and
   its sections 6 and 8 are closed with evidence this change's live run produces. It
@@ -157,8 +177,22 @@ None. The plugin's capability is `frp-grant-admission`'s.
   shared relays (D14, D16, D17, D19, D20) → `physical-provisioning` spec and
   architecture; `docs/development/VALIDATION_RUNBOOK.md` (plugin configuration, the
   admission check as a precondition before a relay-backed pool serves buyers, key
-  rotation and a retired key's retention, an emergency rotation, site onboarding, a
-  host teardown cannot reach); `docs/seller-frp-setup.md` (what a relay must run).
+  rotation and a retired key's retention, an emergency rotation, site onboarding with
+  the window within its range, the drain rule, a host teardown cannot reach);
+  `docs/seller-frp-setup.md` (what a relay must run).
+- The grant's conformance to the plugin's specification (no `iat`, JCS signing,
+  thumbprint key ids, public keys in the plugin's format) and the vector and pins
+  checks (D16, D17, D18) → `physical-provisioning` architecture, the section on relay
+  admission.
+- The reuse margin and the clock-synchronisation requirement (D16) →
+  `physical-provisioning` spec; `docs/development/DEPLOYMENT_AND_CONFIG.md` (the
+  setting); the runbook (clocks).
+- One verified frp pin at versioned paths (D22) → `physical-provisioning`
+  architecture; `docs/seller-frp-setup.md` (the frp version).
+- How a relay runs the plugin — `relay-server` from a given wheel on a VPS, the image
+  as a sidecar on a containerised relay — and `relay-server` disclosing no secret (D3,
+  D23) → `physical-provisioning` spec and architecture; the runbook (relay
+  preparation, both kinds of relay, building the wheel until it is published).
 - The fail-forward drop of `ansible_pool_configs.relay_id`, with its pre-upgrade
   backup (D2) → `docs/development/DEPLOYMENT_AND_CONFIG.md`, beside the
   `hosts.gpu_count` drop.
