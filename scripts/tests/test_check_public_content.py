@@ -136,3 +136,37 @@ def test_added_text_starting_with_plus_signs_is_not_a_file_header(repo: Path) ->
 def test_home_path_variants_are_checked(repo: Path, prefix: str, name: str) -> None:
     stage(repo, prefix + name + "/work")
     assert checker.scan(repo, staged=True)
+
+
+def test_added_patch_header_lookalike_cannot_hide_private_content(repo: Path) -> None:
+    stage(repo, "++ b/notes " + personal_path())
+    assert checker.scan(repo, staged=True)
+
+
+def test_unicode_private_filename_is_checked(repo: Path, tmp_path: Path) -> None:
+    deny = tmp_path.parent / "private-identifiers.txt"
+    deny.write_text("fixture-máchine")
+    git(repo, "config", "scm.publicContentDenyFile", str(deny))
+    stage(repo, "safe", "fixture-máchine.txt")
+    findings = checker.scan(repo, staged=True)
+    assert findings and all("fixture-máchine" not in f for f in findings)
+
+
+def test_private_ref_name_is_refused(repo: Path, tmp_path: Path, monkeypatch) -> None:
+    deny = tmp_path.parent / "private-identifiers.txt"
+    deny.write_text("fixture-machine")
+    git(repo, "config", "scm.publicContentDenyFile", str(deny))
+    head = git(repo, "rev-parse", "HEAD")
+    monkeypatch.setattr("sys.stdin", io.StringIO(
+        f"refs/heads/fixture-machine {head} refs/heads/fixture-machine {head}\n"))
+    assert checker.main(["--pre-push", "public"], root=repo) == 1
+
+
+def test_annotated_tag_message_is_checked(repo: Path, monkeypatch) -> None:
+    head = git(repo, "rev-parse", "HEAD")
+    git(repo, "update-ref", "refs/remotes/public/dev", head)
+    git(repo, "tag", "-a", "fixture-tag", "-m", personal_path())
+    tag = git(repo, "rev-parse", "fixture-tag")
+    monkeypatch.setattr("sys.stdin", io.StringIO(
+        f"refs/tags/fixture-tag {tag} refs/tags/fixture-tag {'0' * 40}\n"))
+    assert checker.main(["--pre-push", "public"], root=repo) == 1

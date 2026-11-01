@@ -1142,7 +1142,7 @@ Enable the repository-owned hooks in each checkout with
 `git config --local core.hooksPath scripts/hooks` after inspecting any existing
 hooks configuration; preserve or chain existing hooks instead of overwriting them.
 The pre-commit hook checks staged additions. The pre-push hook checks the actual
-refs being sent. Hooks require Python 3.10 or newer and may be bypassed by direct
+refs being sent, including ref names and annotated tag content. Hooks require Python 3.10 or newer and may be bypassed by direct
 Git options; they are local safeguards, not server enforcement. Use the guarded
 `make push-branch` path for agent pushes.
 

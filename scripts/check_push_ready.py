@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
-from check_public_content import scan
+from check_public_content import denylist, reasons, scan
 
 ROOT = Path(__file__).resolve().parents[1]
 PROTECTED = ("main", "dev")
@@ -92,7 +92,8 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
         return 1
     assert target is not None
     try:
-        findings = scan(root, remote=target.remote)
+        findings = ["<branch name>: " + r for r in reasons(target.branch, denylist(root))]
+        findings.extend(scan(root, remote=target.remote))
     except ValueError as exc:
         findings = [str(exc)]
     if findings:

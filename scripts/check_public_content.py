@@ -65,13 +65,17 @@ def inspect_diff(diff: str, denied: tuple[str, ...]) -> list[str]:
         if line.startswith('diff --git '):
             # Filenames may themselves contain private values. Never echo a
             # suspicious header, including Git's quoted/escaped filenames.
-            decoded = re.sub(r'\\([0-7]{3})', lambda m: chr(int(m[1], 8)), line)
+            decoded = re.sub(rb'\\([0-7]{3})',
+                             lambda m: bytes((int(m[1], 8),)),
+                             line.encode('utf-8')).decode('utf-8', errors='replace')
             if reasons(decoded, denied):
                 findings.append('<filename>: private path or identifier')
             path = '<file>'
         elif line.startswith('+++ b/'):
             candidate = line[6:]
-            path = '<filename>' if reasons(candidate, denied) else candidate
+            matched = reasons(candidate, denied)
+            findings.extend('<filename>: ' + reason for reason in matched)
+            path = '<filename>' if matched else candidate
         elif line.startswith('@@ '):
             match = re.search(r'\+(\d+)', line)
             number = int(match[1]) if match else 0
@@ -129,9 +133,15 @@ def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
                 fields = line.split()
                 if len(fields) != 4:
                     raise ValueError('Malformed pre-push update')
-                _, local_oid, _, remote_oid = fields
+                local_ref, local_oid, remote_ref, remote_oid = fields
+                denied = denylist(root)
+                findings.extend('<ref name>: ' + r
+                                for r in reasons(local_ref + ' ' + remote_ref, denied))
                 if local_oid == '0' * 40:
                     continue
+                if git(root, 'cat-file', '-t', local_oid).strip() == 'tag':
+                    tag = git(root, 'cat-file', 'tag', local_oid)
+                    findings.extend('<tag annotation>: ' + r for r in reasons(tag, denied))
                 findings.extend(scan(root, tip=local_oid,
                     base=remote_oid if remote_oid != '0' * 40 else None,
                     remote=args.pre_push))
