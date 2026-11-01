@@ -1508,7 +1508,9 @@ typed, versioned settings section".
 ### Section 10 handoff
 
 The target reader, ignored profile and visibly fictitious example now use
-`REAL_PROVISIONING_TARGET` version 2. Typed discriminated hosts and access modes
+`REAL_PROVISIONING_TARGET` version 2. The retired real target filename also remains
+ignored, so an operator's unconverted private file cannot become an accidental
+Git addition; this does not retain a version-1 reader. Typed discriminated hosts and access modes
 refuse foreign fields, duplicate domains and a VM shape exceeding half the host's
 capacity. Legacy version 1 and the old section name fail with field-mapping and
 profile instructions. Each lane selects its domain explicitly; absent configuration
