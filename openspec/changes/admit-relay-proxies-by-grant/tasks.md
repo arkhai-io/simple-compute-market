@@ -181,13 +181,19 @@ Files: `src/frp_grant_admission/grant.py`, `src/frp_grant_admission/reasons.py`,
 `vector/frp-grant-1.json`, `tests/unit/test_grant.py`, `tests/unit/test_vector.py`,
 `tests/vector_builder.py`.
 
-- [ ] 2.1 `reasons.py` defines the stable reason codes of D12 — `malformed_request`,
+- [x] 2.1 `reasons.py` defines the stable reason codes of D12 — `malformed_request`,
       `operation_not_supported`, `proxy_type_not_allowed`, `group_not_allowed`,
       `port_invalid`, `grant_missing`, `grant_malformed`, `grant_type_unsupported`,
       `key_unknown`, `signature_invalid`, `claim_missing`, `audience_mismatch`,
       `grant_expired`, `grant_not_yet_valid`, `port_mismatch`, `port_outside_range` —
       each with its short text. (D10, D12)
-- [ ] 2.2 `grant.py` verifies a grant string against a configuration, a remote port, and
+      Note: `Reason` is an enum of `(code, text)`; `reason.reply` is the
+      `"<code>: <text>"` frps passes to frpc. Unit, `tests/unit/test_reasons.py` (not in
+      the plan's file list): the codes are exactly these sixteen in this order, and each
+      text is one short line — passes. The two mappings the design left open — an
+      unreadable header is `grant_malformed`, and an `alg` other than `EdDSA` is
+      `signature_invalid` — are recorded in D12 (fresh-context check).
+- [x] 2.2 `grant.py` verifies a grant string against a configuration, a remote port, and
       a clock passed in by the caller, in D12's order, refusing at the first failure:
       (a) at most 4 KiB, else `grant_malformed`; (b) the unverified header's `kid` names
       a configured key, else `key_unknown`; (c) the unverified header's `typ` is exactly
@@ -207,7 +213,27 @@ Files: `src/frp_grant_admission/grant.py`, `src/frp_grant_admission/reasons.py`,
       `jti`, and `exp` it read, with whether they were verified. Unknown claims are
       ignored. The check never reads the system clock, and no time comparison is left to
       PyJWT. (D2, D12, D18, D19, D22)
-- [ ] 2.3 `vector/frp-grant-1.json`: the specification's version (`frp-grant 1.0`); the
+      Note: `check_grant(grant, config, remote_port, now)` returns a frozen
+      `GrantResult` (`reason`, `issuer`, `kid`, `sub`, `jti`, `exp`, `verified`;
+      `admitted` is `reason is None`). The unverified header is read by the module
+      itself (`_read_unverified`), padded or unpadded, and must be canonical base64url
+      decoding to a JSON object, else `grant_malformed` before the `kid` lookup; claims
+      that cannot be read are reported as none and left to PyJWT to refuse. PyJWT's
+      `InvalidSignatureError` and `InvalidAlgorithmError` map to `signature_invalid`
+      (so `alg: none` is `signature_invalid`), `MissingRequiredClaimError` to
+      `claim_missing`, `InvalidAudienceError` to `audience_mismatch`, and any other
+      `PyJWTError` to `grant_malformed`. `verified` is true only once the signature,
+      audience, required claims, and every claim type pass; a grant refused for its time
+      or port still reports verified claims, a `port` of the wrong type included. A
+      wrong-typed `sub` or `jti` is checked after the time checks, as (f) follows (e). A
+      grant string holding an unpaired surrogate, which JSON can carry and UTF-8 cannot,
+      is `grant_malformed`; a `RecursionError` from PyJWT's parsing of deeply nested
+      claims, which some declared releases let escape, is `grant_malformed` too — a
+      defence with no test, since whether 4 KiB of nesting overflows the parser depends
+      on the Python version's recursion limit. Correction: "never reads the system clock"
+      holds for the check's own code only: PyJWT reads `datetime.now()` while decoding,
+      but every time check it would make with it is off, so no verdict depends on it.
+- [x] 2.3 `vector/frp-grant-1.json`: the specification's version (`frp-grant 1.0`); the
       TEST 1 key's seed and public key, labelled a test value never to be used on any
       network; a configuration of two issuers with adjacent ranges; verification cases
       (time, proxy type, remote port, token, verdict, reason); signing cases (key,
@@ -217,7 +243,18 @@ Files: `src/frp_grant_admission/grant.py`, `src/frp_grant_admission/reasons.py`,
       `tests/vector_builder.py` writes the file from its cases, so a case is added by
       editing the builder, and `test_vector.py` fails when the committed file differs
       from what the builder writes. (D7)
-- [ ] 2.4 The verification cases cover every grant reason in 2.1 that the grant check can
+      Note: the vector carries all three RFC 8032 test keys (TEST 1 and TEST 2 in issuer
+      `site-a`, 6100–6199; TEST 3 in `site-b`, 6200–6249), each with seed, raw public
+      key, SPKI base64, and `kid`; the forged cases are signed with TEST 2 while naming
+      TEST 1's `kid`. Every case replays at 2027-01-01T00:00:00Z unless it states
+      another time. The builder's JCS is the subset the vector uses (ASCII member names
+      and strings, integers up to 2^53, non-integral floats with no exponent) and refuses
+      anything else rather than serializing it as JCS would not. The builder is regenerated with `uv run python -m
+      tests.vector_builder` from the tool's directory; when the committed file differs,
+      `test_vector.py` writes the builder's output to its temporary directory and names
+      it, which is how this session placed the file (the unattended step may not run the
+      builder directly).
+- [x] 2.4 The verification cases cover every grant reason in 2.1 that the grant check can
       return, and these named cases: valid; a second key of the same issuer; wrong port;
       outside the issuer's range; inside the other issuer's range; wrong audience; an
       `aud` list (`strict_aud`); forged signature; unknown `kid`; `typ` `JWT`; `typ`
@@ -230,7 +267,17 @@ Files: `src/frp_grant_admission/grant.py`, `src/frp_grant_admission/reasons.py`,
       before `exp` admitted, exactly `exp` refused as `grant_expired`, and an `iat` one
       second ahead refused as `grant_not_yet_valid` — with an `nbf` one second ahead
       refused as `grant_not_yet_valid` too. (D7, D12, D18, D19, D22; 14 F1)
-- [ ] 2.5 Unit (`tests/unit/test_vector.py`): every verification case returns its
+      Note: 38 verification cases, every named case above included, plus: only the
+      required claims, `iat` and `nbf` equal to the clock (admitted), after `exp`,
+      outside every issuer's range, `alg: none`, no `kid`, no `aud`, no `port`, not a
+      JWT, and claims that are not an object. **Departure for review:** the 4 KiB cap
+      (D12 step 5) is proven in `test_grant.py`, not the vector, against D12's "each rule
+      has a vector case". Its cases are over 4,000 characters of filler each, and the
+      unattended step could not run the builder to place them (2.3's note), so copying
+      them by hand was the only way in; a signer's conformance gains nothing from them.
+      Adding them later is a builder edit and a regeneration. An unpadded segment can
+      never make some totals, so the exact-size grant carries a padded signature segment.
+- [x] 2.5 Unit (`tests/unit/test_vector.py`): every verification case returns its
       verdict and reason through `grant.py`, at the case's time; every signing case's
       token is reproduced byte for byte by serializing its header and claims as JCS and
       signing with the TEST 1 key; the thumbprint case matches `config.py`'s derivation;
@@ -240,8 +287,33 @@ Files: `src/frp_grant_admission/grant.py`, `src/frp_grant_admission/reasons.py`,
       wall clock is admitted when the passed clock is earlier than its `exp`, and one whose
       `iat` is after the wall clock is admitted when the passed clock is later, proving no
       time check is PyJWT's and the system clock is never read. (D18)
-- [ ] 2.6 Verification: `make -C tools/frp-grant-admission test` (unit).
+      Note: unit, all pass. `test_vector.py` reproduces each signing case from the file's
+      own seed with its own JCS, not the builder's, and checks each key entry's seed,
+      public key, SPKI, and `kid` against one another and the thumbprint case against
+      RFC 8037's. `test_grant.py` asserts every field of the result for an admitted,
+      forged, malformed, expired, wrong-port, and `port`-as-text grant, and the fields it
+      names for an unknown-`kid` and a wrong-typed grant; the 4 KiB cap (exactly 4096
+      bytes admitted; the shortest grant over it refused as `grant_malformed` with every
+      field empty); and the clock: a grant expiring in 2001 admitted at a passed 2001
+      clock and refused at its `exp`, and one issued in 2100 admitted at a passed 2100
+      clock and refused a second earlier. That shows no verdict depends on the wall
+      clock, not that nothing reads it (2.2's correction).
+- [x] 2.6 Verification: `make -C tools/frp-grant-admission test` (unit).
       End-to-end: none (see the preamble).
+      Note: `make -C tools/frp-grant-admission test` — unit, 116 passed. `make test` —
+      passes (the tool is not part of it until section 6). `make check-packaging` —
+      passes. `make check-change` — 5 of 6 pass; citations reports the same 8 paths as
+      1.9, every one a file the change creates. End-to-end: none, confirmed. The vector
+      has not run at the floors yet: section 6's `make test-floor` is the first run on
+      PyJWT 2.8.0 and `cryptography` 42.0.0.
+      Handoff: the fresh-context check's findings were fixed — an overclaiming module
+      docstring (D23's two tested points), the surrogate and `RecursionError` paths, the
+      builder's JCS subset (it passed `5.0`, which JCS writes `5`), the `verified`
+      docstring, and the notes above; declined, with reason in 2.4's note, a vector case
+      for the 4 KiB cap. This step cannot run `uv run python …`; only `uv run pytest`
+      and `make … test*` targets. A changed vector is placed by copying the file
+      `test_vector.py` names on failure, which is why the cap's long cases are unit
+      tests.
 
 ## 3. The server: requests, decisions, logging, and reload
 

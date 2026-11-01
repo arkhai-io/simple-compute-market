@@ -393,6 +393,9 @@ An admission answers `{"reject": false, "unchange": true}`: the plugin never rew
 proxy. A refusal answers HTTP 200 with `reject: true` and the reason. PyJWT decides the
 token's parsing, its signature, `aud`, and the presence of the required claims; padded
 segments are accepted (signers still never pad), and `strict_aud` makes `aud` one string.
+A header that is not canonical base64url of a JSON object is `grant_malformed` at step
+5, since steps 6 and 7 cannot read it; an `alg` other than `EdDSA`, `none` included, is
+`signature_invalid`, as PyJWT's refusal of an algorithm not allowed is mapped there.
 Every rule whose PyJWT behaviour is known to differ between the releases the tool
 declares — the time checks, the types of `sub` and `jti`, and `crit` — is the plugin's
 own, so none of them decides a verdict through the library; the vector holds at the lock
