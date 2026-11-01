@@ -944,14 +944,14 @@ Files: `provisioning/compute/iac/` (new: `pyproject.toml`, `Makefile`, `tests/`,
 (`roles/frp-setup/` and `playbooks/frp/` leave, `ansible.cfg`); the root `Makefile`;
 `provisioning/compute/service/Dockerfile` and `Dockerfile.dockerignore`.
 
-- [ ] 6.1 Create the IaC project `provisioning/compute/iac/` — `pyproject.toml`
+- [x] 6.1 Create the IaC project `provisioning/compute/iac/` — `pyproject.toml`
       (`package = false`), `Makefile`, `tests/`, lock — following
       `domains/vms/provisioning/iac/`, and wire its tests into the root
       `test-provisioning-iac` target, so the aggregate `make test` and CI's
       `test-provisioning-iac` job run them. (D3; `docs/development/ARCHITECTURE.md`
       "Build, packaging, and initialization": aggregate targets run every included
       subproject's tests)
-- [ ] 6.2 Add `frp-binary`: defaults holding `frp_version: "0.61.1"`, `frp_archives`
+- [x] 6.2 Add `frp-binary`: defaults holding `frp_version: "0.61.1"`, `frp_archives`
       keyed by platform (`linux_amd64`, its official release URL and SHA-256), and
       `frp_install_root: /usr/local/lib/frp`, as D22 shows them. The digest is recorded
       from a download of the official archive, checked against the release's published
@@ -960,7 +960,7 @@ Files: `provisioning/compute/iac/` (new: `pyproject.toml`, `Makefile`, `tests/`,
       checks its SHA-256 before extracting anything, installs the named binary at
       `/usr/local/lib/frp/<version>/<binary>`, skipping only when that exact path
       exists; and returns the path. (D22)
-- [ ] 6.3 Add `relay-client` under `provisioning/compute/iac/ansible/roles/`, from VM's
+- [x] 6.3 Add `relay-client` under `provisioning/compute/iac/ansible/roles/`, from VM's
       `roles/vm-setup/tasks/frp-client.yml` and its templates: it includes `frp-binary`
       for `frpc`, and `frpc-buyers.service` runs the versioned path, never
       `/usr/local/bin/frpc`; the client renamed `frpc-buyers`
@@ -969,7 +969,7 @@ Files: `provisioning/compute/iac/` (new: `pyproject.toml`, `Makefile`, `tests/`,
       default) with a per-host password generated at preparation, and the relay address
       and token required inputs with no default, asserted. The frp version is part of
       the client's baseline, so a change restarts it. (D3, D4, D22)
-- [ ] 6.4 Add `relay-proxy` with *add* — check the client's baseline against the
+- [x] 6.4 Add `relay-proxy` with *add* — check the client's baseline against the
       resolved relay and restart only when it changed, add a marked `tcp` proxy block
       with no load-balancer group (name, local address and port, remote port,
       `metadatas.grant`), reload through the authenticated admin API, and wait for the
@@ -977,7 +977,7 @@ Files: `provisioning/compute/iac/` (new: `pyproject.toml`, `Makefile`, `tests/`,
       `roles/vm-management/files/guest_teardown.sh`, which reloads and never restarts.
       Every task rendering, writing, sending, or reading the grant, the token, or the
       admin password sets `no_log`. (D3, D4, D16, 28 F3)
-- [ ] 6.5 Replace VM's `roles/frp-setup` and its playbook
+- [x] 6.5 Replace VM's `roles/frp-setup` and its playbook
       `playbooks/frp/frp-server-setup.yaml` with the family's `relay-server` and
       `playbooks/relay-server.yaml`: frps from `frp-binary` at its versioned path under
       a systemd unit; the relay token a required input with no default, never
@@ -987,12 +987,12 @@ Files: `provisioning/compute/iac/` (new: `pyproject.toml`, `Makefile`, `tests/`,
       ufw rule, and fail2ban's ports from one variable, which must cover every
       issuer's range; a change to `frps.toml` or frps's version restarts frps. The
       plugin's install is section 14's. (D3, D20, D22; correction 13)
-- [ ] 6.6 Copy `provisioning/compute/iac` into the provisioning image and set
+- [x] 6.6 Copy `provisioning/compute/iac` into the provisioning image and set
       `ANSIBLE_ROLES_PATH` to its roles (`provisioning/compute/service/Dockerfile`,
       `Dockerfile.dockerignore`); add the family roles' repository-relative path to
       the `roles_path` of `domains/vms/provisioning/iac/ansible/ansible.cfg`; keep the
       service's shared `ansible.cfg` free of domain paths. (28 F5)
-- [ ] 6.7 Tests in the family project, at the level `domains/vms/provisioning/iac/tests`
+- [x] 6.7 Tests in the family project, at the level `domains/vms/provisioning/iac/tests`
       holds: the role structure; `frp-binary` refusing an unknown version or platform,
       checking the digest before extraction, installing at the versioned path and
       skipping only when it exists, a failed digest installing nothing; every
@@ -1003,13 +1003,96 @@ Files: `provisioning/compute/iac/` (new: `pyproject.toml`, `Makefile`, `tests/`,
       task; one variable feeding `allowPorts`, ufw, and fail2ban. Move VM's
       `test_frp_proxy_wait.py`, `test_cleanup_script_relay_teardown.py`, and the proxy
       half of `test_guest_teardown.py` here.
-- [ ] 6.8 Verify. `make -C provisioning/compute/iac test`, `make test-provisioning-iac`;
+- [x] 6.8 Verify. `make -C provisioning/compute/iac test`, `make test-provisioning-iac`;
       `make test`; `make check-packaging` (the new project's lock). End-to-end: none —
       no pipeline lane prepares a host or a relay; the live run (section 16) is the
       evidence for `relay-client` and `relay-proxy`, and `relay-server`'s plugin
       install has its tests only (D23).
       Owed by validation: `tests.yml`, job `test · test-provisioning-iac` — its log
       shows the family project's tests run and pass beside VM's.
+
+  Section 6 evidence and handoff:
+  - The family IaC project is wired into root `test-provisioning-iac`, hence
+    the existing `tests.yml` matrix job. `package = false` and its own lock
+    keep it a test project rather than a distribution. The image copies the
+    family tree and supplies `ANSIBLE_ROLES_PATH`; the shared service config
+    has no domain path. VM's manual config gains the family role directory.
+  - `frp-binary` defaults to linux_amd64 and accepts an explicit platform/map
+    override. The retained official release archive bytes were hashed and
+    matched to the published checksum rows; the defaults record the checksum
+    file's digest. Runtime installation uses the pinned archive digest only.
+    Native Ansible tests use synthetic local HTTP archives to prove unknown
+    version/platform refusal before download, digest refusal before extraction
+    with no installation, exact versioned-path skips, both binaries installed,
+    and a management-path fixture left untouched. No archive is executed.
+  - `relay-client` preserves proxy blocks while updating top-level connection
+    fields, retains one generated per-host admin password, writes owner-only
+    configuration, and rejects an admin port at or above the host's effective
+    `ip_unprivileged_port_start`. The unit includes the versioned binary path;
+    baseline or unit changes notify a restart. Local file integration proves
+    password retention, distinct per-host passwords, configuration permissions,
+    and preserved proxy content. Unit/restart wiring is checked structurally;
+    no real systemd client was prepared by this section's tests.
+  - `relay-proxy` takes `relay_proxy_action`, `relay_proxy_name` (the full
+    proxy name), and, on add, `relay_proxy_local_ip`, `relay_proxy_local_port`
+    (default 22), `relay_proxy_remote_port`, `relay_grant`, and the relay-client
+    inputs. It writes a TCP proxy without a load-balancer group and authenticates
+    every reload/status request. The native wait tests execute the shipped URI
+    task against an authenticated HTTP stand-in, shortening retries and disabling
+    `no_log` only for synthetic diagnostic results; structural tests independently
+    require `no_log` in the shipped secret-bearing tasks. They prove status
+    handling and authentication, not real frpc admission or carried traffic.
+  - Every add/remove attempt installs the root-owned, owner-only helper at
+    `/usr/local/lib/arkhai-relay/remove_proxy.sh`, exposing its path through
+    `relay_proxy_teardown_library`. Generated cleanup scripts source it under
+    `set -e` and call `remove_guest_proxy(config, full_name, reload_url)` as shell
+    arguments. The helper reads the config's admin password, passes it through
+    curl's stdin with bounded connection/request timeouts, and reloads only.
+    Its exact markers are `# BEGIN/END ANSIBLE MANAGED RELAY PROXY <full_name>`;
+    retry state is `<config>.reload-pending.<full_name>`. Success sets
+    `GUEST_PROXY=absent` or `removed`; failed reload retains the record and fails.
+    Library integration executes the shell against real files and authenticated
+    loopback HTTP, proving neighbour/management preservation, missing-end refusal,
+    absent configuration, and retry after a failed reload. Helper install ownership
+    and ordering, and absence of restart commands, have structural coverage.
+  - VM call sites and their cleanup-wrapper tests remain unchanged until section 7;
+    this staging was accepted by the coordinating session under the delegated
+    implementation authority. Family wait/removal coverage is present now, while
+    the existing VM tests continue proving the old call sites. Section 7 removes
+    the old embedded proxy function and switches generated cleanup scripts and
+    ordinary teardown to the installed family helper. A missing required helper
+    must fail cleanup. This section does not claim VM runtime has switched.
+  - `relay-server` prepares native versioned frps, with a required supplied token,
+    root-only config, no controller credential return/output, and one port-window
+    variable for frps, ufw and fail2ban. Its structural checks and syntax check are
+    evidence for these assets; native systemd installation and firewall changes
+    were not run. The plugin installation remains section 14. The VM IaC README's
+    removed-role paths and credential/dashboard procedures were reconciled now
+    rather than leaving broken current references; broader promotion stays in 17.9.
+  - Verification: the family suite passed 22 tests and 15 subtests; aggregate
+    `make test-provisioning-iac` passed that suite and VM's 176 tests and 15 subtests.
+    After adding the stable helper interface, the affected baseline/removal/asset
+    suites passed 13 tests; unchanged installer/wait evidence is reused. The family
+    native gate passed 10 tests with no skips using ansible-core 2.19.14 and
+    ansible.posix 2.2.2. The added parse-only playbook separately passed syntax
+    checking and imports every dynamic family task file. The gate's first local
+    invocation used a bare interpreter without PyYAML; rerunning with the locked
+    project's interpreter passed. No dependency was installed globally.
+  - `make check-packaging` passed (including the new lock and architecture checks),
+    `make check-comment-hygiene` passed, and `make check-change` passed. No dependency
+    or lock input changed after packaging; subsequent helper and documentation edits
+    have their affected focused/parse/change checks above. The full `make test` and
+    independent fresh-context compliance/implementation review remain the single
+    frozen sections 6–9 round checks under the accepted cadence, not claimed here.
+    The image-based native aggregate is owed with section 7, when both domain call
+    sites are wired; the local native run is not image validation.
+  - End-to-end scenarios confirmed: no pipeline lane prepares a host or relay.
+    Section 16 owes real client/proxy traffic and tenant checks, including refusal
+    without the admin password and inability to bind its port as an unprivileged
+    tenant. Native relay-server plugin installation has test-only evidence under D23.
+    Owed by validation: `tests.yml`, job `test · test-provisioning-iac` — logs must
+    show the family and VM IaC projects both run and pass. The workflow/job were
+    checked against the matrix and the dispatchable workflow list.
 
 ## 7. VM's tasks on the family roles, and one relay block
 

@@ -217,6 +217,7 @@ test-provisioning:
 	cd provisioning/compute/service && make test
 
 test-provisioning-iac:
+	$(MAKE) -C provisioning/compute/iac test
 	$(MAKE) -C domains test-provisioning-iac
 
 test-registry:
@@ -522,15 +523,19 @@ build-provisioning:
 
 # The VM IaC's native Ansible gate, with the Ansible, collections, and PyYAML the
 # provisioning image installs: the image `build-provisioning` built, running the
-# checkout's VM IaC tree, mounted read-only, with no network but loopback. It
+# checkout's VM and family IaC trees, read-only, with only loopback networking. It
 # syntax-checks every playbook and runs the tests that drive a shipped task through
 # ansible-playbook, and fails where the default IaC suite would skip them.
 PROVISIONING_IMAGE ?= arkhai:compute-provisioning$(IMAGE_SUFFIX)
-test-provisioning-iac-native: ## Run the VM IaC's syntax checks and native Ansible tests in the built provisioning image
+test-provisioning-iac-native: ## Run family and VM IaC native Ansible tests in the built provisioning image
 	@docker image inspect $(PROVISIONING_IMAGE) >/dev/null 2>&1 || { \
 		echo "no $(PROVISIONING_IMAGE) image: build it first, with make build-provisioning" >&2; exit 1; }
 	docker run --rm --network none \
 		-v "$(CURDIR)/domains/vms/provisioning/iac:/iac:ro" -w /iac \
+		-e PYTHON=/home/appuser/ansible-venv/bin/python \
+		$(PROVISIONING_IMAGE) bash scripts/native_ansible_gate.sh
+	docker run --rm --network none \
+		-v "$(CURDIR)/provisioning/compute/iac:/iac:ro" -w /iac \
 		-e PYTHON=/home/appuser/ansible-venv/bin/python \
 		$(PROVISIONING_IMAGE) bash scripts/native_ansible_gate.sh
 

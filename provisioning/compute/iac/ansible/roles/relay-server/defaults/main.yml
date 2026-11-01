@@ -1,0 +1,5 @@
+---
+frp_server_port: 7000
+frp_proxy_ports:
+  - start: 7002
+    end: 8000

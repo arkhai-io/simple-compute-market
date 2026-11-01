@@ -1,17 +1,14 @@
 [Unit]
-Description=FRP Server Service for VM Hosting
-After=network.target
+Description=Buyer relay client
+After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=root
+ExecStart={{ frp_binary_path }} -c {{ relay_client_config }}
 Restart=always
 RestartSec=5s
-ExecStart=/usr/local/bin/frps -c /etc/frp/frps.toml
-LimitNOFILE=1048576
-
-# Security hardening
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

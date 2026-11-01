@@ -1,0 +1,60 @@
+---
+- name: Require a pinned frp version and platform
+  ansible.builtin.assert:
+    that:
+      - frp_binary_name in ['frpc', 'frps']
+      - frp_platform in frp_archives
+      - frp_archives[frp_platform].sha256 is match('^[a-f0-9]{64}$')
+      - ('/v' ~ frp_version ~ '/') in frp_archives[frp_platform].url
+      - ('frp_' ~ frp_version ~ '_' ~ frp_platform ~ '.tar.gz') in frp_archives[frp_platform].url
+    fail_msg: "No pinned archive for frp {{ frp_version }} platform {{ frp_platform }}"
+
+- name: Return the versioned binary path
+  ansible.builtin.set_fact:
+    frp_binary_path: "{{ frp_install_root }}/{{ frp_version }}/{{ frp_binary_name }}"
+
+- name: Check the exact versioned binary
+  ansible.builtin.stat:
+    path: "{{ frp_binary_path }}"
+  register: frp_installed
+
+- name: Install a verified frp archive
+  when: not frp_installed.stat.exists
+  block:
+    - name: Create a private archive workspace
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: frp-install-
+      register: frp_workspace
+
+    - name: Download and verify the pinned archive before extraction
+      ansible.builtin.get_url:
+        url: "{{ frp_archives[frp_platform].url }}"
+        checksum: "sha256:{{ frp_archives[frp_platform].sha256 }}"
+        dest: "{{ frp_workspace.path }}/frp.tar.gz"
+        mode: '0600'
+
+    - name: Extract the verified archive
+      ansible.builtin.unarchive:
+        src: "{{ frp_workspace.path }}/frp.tar.gz"
+        dest: "{{ frp_workspace.path }}"
+        remote_src: true
+
+    - name: Create the versioned install directory
+      ansible.builtin.file:
+        path: "{{ frp_install_root }}/{{ frp_version }}"
+        state: directory
+        mode: '0755'
+
+    - name: Install the selected binary
+      ansible.builtin.copy:
+        src: "{{ frp_workspace.path }}/frp_{{ frp_version }}_{{ frp_platform }}/{{ frp_binary_name }}"
+        dest: "{{ frp_binary_path }}"
+        remote_src: true
+        mode: '0755'
+  always:
+    - name: Remove the archive workspace
+      ansible.builtin.file:
+        path: "{{ frp_workspace.path }}"
+        state: absent
+      when: frp_workspace.path is defined
