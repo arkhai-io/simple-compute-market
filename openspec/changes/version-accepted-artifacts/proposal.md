@@ -52,8 +52,10 @@ None.
 
 ## Status
 
-Design settled for one coherent implementation round; not planned. Design review
-is next. The change remains `in design` until review triage advances it.
+Design review at `112cc32306e2d6cc6e628a8ec3eadaaa6f695c2e` found no findings;
+its triage advanced to planning. The checked plan is ready for implementation.
+The settled cadence remains one coherent implementation round; intermediate
+section commits are not independently deployable.
 
 ## Impact
 
