@@ -35,12 +35,17 @@ applies to relays.
   `enabled` enables it, through the pool-change hooks; an entry equal to the
   stored host writes nothing. A host the document stops naming is retained and
   reported. The document never carries a credential.
-- `GET /api/v1/hosts/export` returns the registry as a canonical host document,
-  and `POST /api/v1/hosts/definitions/import` reconciles a submitted document
-  regardless of the digest, with a validate-only mode.
+- `GET /api/v1/hosts/definitions/export` returns the registry as a canonical
+  host document in YAML, and `POST /api/v1/hosts/definitions/import` reconciles a
+  submitted document regardless of the digest, with a validate-only mode; like
+  the capacity-definitions import, an applying request with any problem answers
+  422 with every problem and validate-only answers 200.
 - **BREAKING** Startup reads no INI inventory: `inventory_ini` and
-  `inventory_path` are retired and refused at startup. The INI remains the
-  format of `POST /api/v1/hosts/import`.
+  `inventory_path` are retired and refused at startup whenever stated, an empty
+  value included, and every packaged statement of them is removed. The INI
+  remains the format of `POST /api/v1/hosts/import`.
+- The provisioning chart's schema also refuses `relay_definitions_path` under
+  `config`, as it refuses the pool and capacity paths.
 - `DEPLOYMENT_AND_CONFIG.md` states the method every definition document kind
   follows.
 
@@ -53,6 +58,8 @@ applies to relays.
   routes, and the retirement of startup INI seeding.
 - `deployment-state`: the provisioning chart's `definitions.hosts` value and its
   refused keys.
+- `resource-pool-management`: a host definitions entry's rule for its host's
+  pool, beside the create, update, and INI rules of explicit host membership.
 
 ### New Capabilities
 
@@ -77,14 +84,23 @@ None.
   export and import routes.
 - The provisioning service: its definition-document importer, startup steps,
   settings, retired-settings refusal, and controllers; `seed_inventory_if_empty`
-  is removed.
-- The provisioning Helm chart's `definitions` values, schema, ConfigMap,
-  deployment mounts, and render tests; the topology secrets script.
+  is removed. Every packaged statement of the retired settings goes: both keys in
+  `settings.toml`, `inventory_path` in `config-docker.yml`, the service
+  Makefile's local run target, and `config-local.yml.example`.
+- The provisioning Helm chart's `definitions` values, schema (including the
+  `relay_definitions_path` refusal), ConfigMap, deployment mounts, and render
+  tests, and the `inventory_path` in its `values.yaml`; the topology secrets
+  script stops writing `inventory_ini`.
 - The VM seller and bare-metal compose stacks, and the bare-metal end-to-end
   lane's host file.
 - Operator documentation of how hosts are added, and both seller quickstarts.
 - Deployments: an operator stating `inventory_ini` or `inventory_path` must
-  replace it with a host document before upgrading.
+  replace it with a host document before upgrading, and every Helm deployment
+  whose provisioning-secrets Secret states `inventory_ini`, even empty, must drop
+  the key before upgrading.
+- The change workflow's tooling, fixed on this branch: the design step's
+  proposal-worktree rules in `.claude/change-steps.toml`, and the review
+  wrapper's title check in `scripts/change_workflow/review.py`.
 
 ## Dependencies and Related Changes
 
@@ -102,7 +118,7 @@ None.
 
 - [x] `docs/development/ARCHITECTURE.md`
 - [x] Existing subsystem specification: `physical-provisioning`,
-      `deployment-state`
+      `deployment-state`, `resource-pool-management`
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
@@ -115,9 +131,12 @@ None.
   route (D14) → `openspec/specs/physical-provisioning/spec.md` (by the archive),
   and the operator account in `docs/development/DEPLOYMENT_AND_CONFIG.md`'s
   "Definition documents".
-- The chart's `definitions.hosts` value and refused keys (D3) →
-  `openspec/specs/deployment-state/spec.md` (by the archive) and
-  `DEPLOYMENT_AND_CONFIG.md`.
+- The chart's `definitions.hosts` value and refused keys, the relay path's
+  refusal included (D3) → `openspec/specs/deployment-state/spec.md` (by the
+  archive) and `DEPLOYMENT_AND_CONFIG.md`.
+- A host definitions entry's pool rule (D5) →
+  `openspec/specs/resource-pool-management/spec.md`, "Explicit valid host
+  membership" (by the archive).
 - Why host inventory is a reconciled declaration owned by the family kit, why
   unnamed hosts are retained, and the first-document path through the export (D4,
   D6, D8, D12) → `openspec/specs/physical-provisioning/architecture.md`, beside
@@ -129,5 +148,17 @@ None.
   reconciliation", and `docs/development/ARCHITECTURE.md`, "Resource pools".
 - The inventory file no longer seeds the registry at first boot →
   `docs/development/ARCHITECTURE.md`, `docs/development/ROADMAP.md` Goal 1's
-  current state and its gap row, `docs/seller-quickstart.md`, and
-  `docs/bare-metal-seller-quickstart.md`.
+  current state and its gap row, `docs/seller-quickstart.md`,
+  `docs/bare-metal-seller-quickstart.md`, `domains/vms/provisioning/iac/README.md`
+  (which says the service registers every entry of `provisioning-hosts.ini`),
+  `openspec/specs/site-capacity/architecture.md` (no host write declares
+  capacity, "not an INI inventory applied at startup"), and the evidence
+  paragraph of `openspec/specs/physical-provisioning/spec.md` that cites the
+  startup inventory seed.
+- Two scenarios the `physical-provisioning` delta modifies keep titles naming an
+  inventory file over bodies that describe a host definitions document, because
+  a modified requirement cannot rename its scenarios → after the archive, retitle
+  them in `openspec/specs/physical-provisioning/spec.md`: "The inventory file
+  seeds the host registry" to "A changed host definitions document registers its
+  hosts", and "Fresh selected-site inventory binds to a bare-metal pool" to "A
+  fresh site's host document binds to a bare-metal pool".

@@ -110,11 +110,24 @@ hosts:
         key_path: /home/appuser/.ssh/id_ed25519
 ```
 
+An entry's `connection.version` is required, as a capacity entry's resource type
+is: a document's meaning must not depend on a default. `pool_id: null` is the same
+as omitting `pool_id`, as `HostCreate` reads it; `enabled: null` is a value of the
+wrong type. `hosts: []` is a valid document that applies nothing and reports every
+registered host as not named.
+
 Startup reads no INI. `inventory_ini` and `inventory_path` are retired: a
 configuration stating either refuses startup naming `host_definitions_path`, as
-`playbook_path` is refused, and the packaged defaults of `inventory_path` in
-`settings.toml` and the provisioning chart's values are removed. The INI remains
-the format of `POST /api/v1/hosts/import`, the Ansible distribution's route.
+`playbook_path` is refused. Any statement refuses, an empty one included, because
+the refusal is the one existence test every retired setting shares. Every packaged
+statement of either is removed: both keys in `settings.toml`, `inventory_path` in
+the provisioning chart's `values.yaml`, in the `docker` profile
+(`config-docker.yml`), in the service Makefile's local run target, and in
+`config-local.yml.example`, and the `inventory_ini: ""` that
+`helm/scripts/topology-secrets.sh` writes into the provisioning-secrets profile. A
+deployment whose provisioning-secrets Secret states `inventory_ini`, even empty,
+must drop it before upgrading; the upgrade notes say so. The INI remains the
+format of `POST /api/v1/hosts/import`, the Ansible distribution's route.
 
 *Rationale.* The document must be a declaration. The INI cannot state `enabled`
 or a connection kind or version, always names a key path (so reconciling it
@@ -138,7 +151,9 @@ The provisioning chart renders a non-empty `definitions.hosts` into its
 ConfigMap, mounts it at `/app/config/host-definitions.yaml`, and sets
 `host_definitions_path` itself; its schema refuses `host_definitions_path`,
 `inventory_path`, and `inventory_ini` under `config`, and `host-definitions.yaml`
-as a `configFiles` name. Compose stacks mount a host document and set
+as a `configFiles` name. It also refuses `relay_definitions_path` under `config`,
+which the chart already derives from `definitions.relays` but did not refuse, so
+that every document kind's path is refused alike (D13). Compose stacks mount a host document and set
 `PROVISIONING_HOST_DEFINITIONS_PATH`: the bare-metal stack's inventory file
 becomes a host document, and the VM seller stack mounts one in place of the INI
 baked into its image.
@@ -179,9 +194,18 @@ document could not coexist. The revisit trigger is in Open Questions.
 Applying an entry registers the host or wholly replaces its non-secret state: an
 omitted `pool_id` unplaces it, an omitted `enabled` means enabled, and the
 connection is replaced through its kind's codec, which keeps the stored
-protected key when the entry names no `key_path`. A pool change runs the host
-pool-change hooks. An entry equal to the stored host, compared on the read that
-omits secrets, writes nothing, runs no hook, and leaves `updated_at` alone.
+protected key when the entry names no `key_path`. An entry naming no `key_path`
+for a host whose key is a key file is refused naming the entry: the codec carries
+forward only a protected key, and the entry states no key. A pool change runs the
+host pool-change hooks.
+
+Equality is taken after the codec: each entry is built through its kind's codec
+with the stored connection as `previous`, and the result is compared with the
+stored host on connection kind, version, canonical public fields, and
+protected-value schemes, and on `pool_id` and `enabled`. An entry that omits a
+field the codec defaults, such as `ssh_port` or `ssh_user`, therefore equals a
+host stored with the default. An equal entry writes nothing, runs no hook, and
+leaves `updated_at` alone.
 
 *Rationale.* The document then says exactly what each named host is, as capacity
 and relay entries do. The accepted cost is the capacity trade: a host disabled or
@@ -209,20 +233,33 @@ silently not apply. Applying only into an empty registry: the old rule.
 ### D7. A document that cannot be applied fails whole
 
 Validation is strict (a quoted number is an error) and runs in two stages, as
-capacity's does. Every structural problem is reported with its location: an
-unknown field, a missing `host_id` or `connection`, a duplicate `host_id`, a
-wrong type, or a `connection.secrets` (D9). Only a structurally valid document
-is checked against stored state, and every refusal found there is reported: an
-unknown pool, a codec refusal (an unknown kind, a version not served, a new host
-naming no key), and a pool-change hook refusing a move. Any problem leaves the
-whole document unapplied; at startup it fails the start and records no digest,
-so the next start retries. A configured path with no document fails startup.
+capacity's does. Every structural problem is reported with its location:
+unparseable YAML, a root that is not a mapping (an empty file included), a
+missing or non-list `hosts`, an unknown field, a missing `host_id`,
+`connection`, or `connection.version`, a duplicate `host_id`, a wrong type, or a
+`connection.secrets` (D9). Only a structurally valid document is checked against
+stored state, and every refusal found there is reported: an unknown pool, a codec
+refusal (an unknown kind, a version not served, a host left naming no key), and a
+pool-change hook refusing a move. Any problem leaves the whole document
+unapplied; at startup it fails the start and records no digest, so the next start
+retries. A configured path with no document fails startup.
+
+The apply writes into the caller's session and continues past a hook's refusal
+so that every refusal is reported, then rolls the session back on any problem.
+Whatever a refusing hook wrote is discarded with the rest, so no committed state
+depends on it; continuing past a refusal can change only which further refusals
+are reported. The hook contract is therefore unchanged, and no savepoint is
+needed.
 
 A hook refusal at startup — a move of a host holding relay leases — keeps the
 service from starting until the document is corrected, since leases cannot drain
 while it is down. This is the behaviour of a capacity document's refused move
-under a live reservation, and the remedy is to revert the edit; operator
-documentation says so.
+under a live reservation, and the remedy is to revert the edit. Operator
+documentation says so, and says to submit a changed document to the import route
+with `validate_only` before the release that mounts it: the provisioning chart
+replaces its pod with `Recreate`, so a refused document leaves nothing serving,
+and the pre-flight reports the same refusal against live state without applying
+anything.
 
 The INI import route keeps its own rules: it upserts, an absent `pool_id` leaves
 a host's pool unchanged, and a malformed entry is skipped with a warning.
@@ -284,18 +321,41 @@ One round of two sessions, then closeout:
    controllers; the typed client methods; their unit and integration tests.
 2. Wiring and retirement: the importer's `hosts` kind and startup step; removing
    `seed_inventory_if_empty`; retiring `inventory_ini` and `inventory_path` and
-   their packaged defaults; the chart's `definitions.hosts`, schema, and render
-   tests; the compose stacks and the topology secrets script; operator
-   documentation drafts.
+   every packaged statement of them (D2); the chart's `definitions.hosts`, schema
+   (with the `relay_definitions_path` refusal, D3), and render tests; the compose
+   stacks and the topology secrets script; operator documentation drafts.
+
+   Session 2 also carries three fixes to the change workflow's tooling, accepted
+   at the design review's triage so that they land with this change:
+   - the design step's proposal-worktree rule in `.claude/change-steps.toml`
+     names `origin/dev`, which a change's clone has, rather than a local `dev`,
+     which it does not;
+   - the design step's write rules reach the proposal worktree, which they do not
+     today, and cover its `docs/development/ROADMAP.md`; the fix is found by
+     testing against a real worktree, and no rule names an absolute path;
+   - the review wrapper (`scripts/change_workflow/review.py`) takes the review's
+     first title line as its start, dropping any preamble before it, and checks
+     the rest as before, with a unit test.
+
+   Steps are denied edits under `.claude/`, so the orchestrating session makes
+   the first two on the owner's word, and session 2's commit carries them; the
+   third is implemented in the session.
 
 ### D12. The host registry exports a canonical host document
 
-`GET /api/v1/hosts/export`, a family host route admitting the administrator,
-returns every registered host as a host document, without secrets: a host
-holding a protected key appears with no `key_path`. A host stored at a connection
-version its codec does not serve cannot be stated in the document, so the export
-reports it rather than emitting an entry it does not hold. Importing an unedited
-export changes nothing. The typed family client gains `export_hosts()`.
+`GET /api/v1/hosts/definitions/export`, a family host route admitting the
+administrator, returns every registered host as a host document in an
+`application/yaml` body, without secrets: a host holding a protected key appears
+with no `key_path`. The path pairs with the import route (D14) and matches no
+`/api/v1/hosts/{host}` route, so it needs no ordering in the route table or the
+router and reserves no host name. A host whose connection kind no composed codec
+serves, or whose stored connection is at a version its kind's codec does not
+serve, cannot be stated as an entry, so the export emits none for it. Such a
+host is a legacy registration that already runs no work until it is submitted
+again at the served version; a first document built from the export does not
+name it, so it is retained (D4) and reported as not named by the import. Importing
+an unedited export changes nothing. The typed family client gains
+`export_hosts()`, returning the document's text.
 
 *Rationale.* An existing site's first document must reproduce its registry —
 pools and enabled states set through the API, and hosts registered through it —
@@ -319,7 +379,12 @@ kind follows, and each kind's section states only its own rules:
   any problem leaves the document unapplied, fails startup, and records no
   digest; an entry equal to stored state writes nothing;
 - an explicit import that always reconciles, records nothing, and offers
-  validate-only;
+  validate-only, answering one response model (whether it applied, the planned
+  or applied changes, and every problem with a path and a code): an applying
+  request with any problem answers 422 and applies nothing, and validate-only
+  answers 200;
+- validating a changed document through its import route's validate-only mode
+  before the release that mounts it;
 - a stated rule for what the document does to entries it stops naming;
 - no credential: secrets are named by profile key or file path;
 - a slot in startup's dependency order;
@@ -329,12 +394,17 @@ kind follows, and each kind's section states only its own rules:
 
 `POST /api/v1/hosts/definitions/import`, a family host route admitting the
 administrator, reconciles the submitted document regardless of the digest and
-records none, answering the created, updated, and unchanged hosts and the
-registered hosts it does not name. With `validate_only` it reports the problems
-and the planned changes without applying either. A pool-change hook's refusal
-answers 409; every other problem answers 400 with its location. Its request
-model follows the capacity-definitions import's. The typed family client gains
-`import_host_definitions`.
+records none. Its request and response follow the capacity-definitions
+import's: the request carries `yaml_text` and `validate_only`, and the response
+carries whether it applied, the created, updated, and unchanged hosts, the
+registered hosts the document does not name, and every problem, each with a path
+and a code — a pool-change hook's refusal is coded `pool_change_refused`. An
+applying request with any problem answers 422 carrying that response and applies
+nothing; `validate_only` answers 200 with the problems and the planned changes,
+applying nothing. A hook refusal is one stored-state problem among the others, as
+capacity's refused move under a live obligation is, so a mixed document needs no
+precedence rule; the single-host `PUT` keeps answering a refusal with 409. The
+typed family client gains `import_host_definitions`.
 
 *Rationale.* The explicit-import half of the definition-document contract needs
 a surface in the document's own format, and it completes the export's round
@@ -350,6 +420,12 @@ trip.
   documentation states it.
 - [A refused pool move keeps the service from starting] → As for capacity
   documents; the error names the host and the remedy is reverting the edit.
+  Operator documentation prescribes a validate-only import of the changed
+  document before the release, which reports the refusal without an outage.
+- [Every Helm deployment whose provisioning-secrets Secret states
+  `inventory_ini`, even empty, refuses to start after upgrading] → The refusal
+  names the key and `host_definitions_path`; the upgrade notes say to drop the
+  key first, and the repository's topology secrets script stops writing it.
 - [Ansible operators keep two host lists] → The INI import route stays for
   operators who keep one file and import it.
 

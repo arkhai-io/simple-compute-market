@@ -40,9 +40,9 @@ The startup import MUST run after resource-pool definitions, the fresh-site pool
 
 ### Requirement: A host definitions entry declares the whole host
 
-A host definitions document MUST hold a top-level `hosts` list whose entries use the host registration contract's field names: `host_id`, an optional `pool_id`, an optional `enabled`, and a `connection` of `kind`, `version`, and `public`. Applying an entry MUST register the host it names or replace that host's whole non-secret state: an omitted `pool_id` unplaces the host, an omitted `enabled` enables it, and the connection is replaced through its kind's codec, which keeps a stored protected key when the entry names no key path. A change of pool MUST go through the host pool-change hooks.
+A host definitions document MUST hold a top-level `hosts` list whose entries use the host registration contract's field names: `host_id`, an optional `pool_id`, an optional `enabled`, and a `connection` of `kind`, a required `version`, and `public`. An explicit `null` `pool_id` MUST be read as an omitted one; an explicit `null` `enabled` is a value of the wrong type. An empty `hosts` list is a valid document that applies nothing. Applying an entry MUST register the host it names or replace that host's whole non-secret state: an omitted `pool_id` unplaces the host, an omitted `enabled` enables it, and the connection is replaced through its kind's codec, which keeps a stored protected key when the entry names no key path. An entry naming no key path for a host whose key is a key file MUST be refused naming the entry. A change of pool MUST go through the host pool-change hooks.
 
-An entry MUST be compared with the stored host on the read that omits secrets, and an entry equal to it MUST write nothing and run no hook.
+Each entry MUST be built through its kind's codec with the stored connection as the previous one, and the result compared with the stored host on connection kind, version, canonical public fields, and protected-value schemes, and on pool and enabled state. An entry equal to the stored host MUST write nothing, run no hook, and leave the host's update time unchanged.
 
 #### Scenario: An entry omits the pool of a placed host
 
@@ -58,6 +58,22 @@ An entry MUST be compared with the stored host on the read that omits secrets, a
 
 - **WHEN** a document is reconciled whose entry states exactly the stored host's pool, enabled state, and connection
 - **THEN** nothing is written for that host, no hook runs, and the host is reported unchanged
+
+#### Scenario: An entry omits a field its codec defaults
+
+- **GIVEN** a host stored with an `ssh` connection whose port is 22 and whose user is `root`
+- **WHEN** a document is reconciled whose entry for that host states its pool, enabled state, and connection but omits `ssh_port` and `ssh_user`
+- **THEN** the host is reported unchanged, nothing is written for it, and no hook runs
+
+#### Scenario: An entry names no key for a host holding a key file
+
+- **WHEN** a reconciled entry names a host whose key is a key file and its connection names no `key_path`
+- **THEN** the document is refused naming that entry, and nothing from it is applied
+
+#### Scenario: A document lists no hosts
+
+- **WHEN** a document whose `hosts` list is empty is reconciled
+- **THEN** nothing is written, and every registered host is reported as registered and not named
 
 #### Scenario: An entry names no key for a host holding a protected key
 
@@ -81,16 +97,21 @@ A reconciliation MUST leave every registered host the document does not name unc
 
 ### Requirement: A host definitions document is validated whole and carries no credential
 
-Host definitions validation MUST be strict and MUST run in two stages. It MUST report every structural problem with its location — an unknown field, a missing `host_id` or `connection`, a `host_id` named twice, or a value of the wrong type — and MUST NOT check a document with any structural problem against stored state. For a structurally valid document it MUST report every refusal stored state decides: a pool that does not exist, a connection its kind's codec refuses, and a pool move a pool-change hook refuses. Any problem MUST leave the whole document unapplied with no digest recorded.
+Host definitions validation MUST be strict and MUST run in two stages. It MUST report every structural problem with its location — unparseable YAML, a root that is not a mapping (an empty document included), a missing or non-list `hosts`, an unknown field, a missing `host_id`, `connection`, or connection `version`, a `host_id` named twice, or a value of the wrong type — and MUST NOT check a document with any structural problem against stored state. For a structurally valid document it MUST report every refusal stored state decides: a pool that does not exist, a connection its kind's codec refuses, and a pool move a pool-change hook refuses. The apply MUST continue past a refusal so that every refusal is reported. Any problem MUST leave the whole document unapplied with no digest recorded.
 
 A host definitions document MUST NOT carry a credential: an entry stating connection secrets is a structural problem. A key is named by its file path.
 
-The import API MUST offer a validate-only mode that reports the problems and the planned creations, updates, and unchanged hosts without applying them. It MUST answer a hook's refusal as a conflict (409) and any other problem as a bad request (400) naming its location.
+The import API MUST answer with one response: whether it applied, the created, updated, and unchanged hosts, the registered hosts the document does not name, and every problem, each with its location and a code; a hook's refusal is coded `pool_change_refused`. An applying import with any problem MUST answer 422 with that response and apply nothing. The import API MUST offer a validate-only mode that answers 200 with the problems and the planned creations, updates, and unchanged hosts, applying nothing.
 
 #### Scenario: A document has several structural problems
 
 - **WHEN** a document carries an unknown field, an entry with no connection, and two entries naming the same host
 - **THEN** all three are reported with their locations and nothing is applied
+
+#### Scenario: A document has no hosts list
+
+- **WHEN** a document is empty, or has no `hosts` key
+- **THEN** it is refused as structurally invalid, and nothing is applied
 
 #### Scenario: A document has structural and stored-state problems
 
@@ -106,7 +127,12 @@ The import API MUST offer a validate-only mode that reports the problems and the
 #### Scenario: A pool-change hook refuses a move on import
 
 - **WHEN** an operator imports a document whose entry makes a move a hook refuses
-- **THEN** the import answers 409 and no host the document names is created or changed
+- **THEN** the import answers 422 with the refusal among its problems, coded `pool_change_refused`, and no host the document names is created or changed
+
+#### Scenario: A document has a hook refusal and another stored-state problem
+
+- **WHEN** an operator imports a document one of whose entries names an unknown pool while another makes a move a hook refuses
+- **THEN** the import answers 422 reporting both problems, and nothing is applied
 
 #### Scenario: An entry carries key material
 
@@ -116,12 +142,12 @@ The import API MUST offer a validate-only mode that reports the problems and the
 #### Scenario: An operator validates a document
 
 - **WHEN** an operator submits a document to the import API in validate-only mode
-- **THEN** the response reports the problems and the planned creations, updates, and unchanged hosts
+- **THEN** the import answers 200, and the response reports the problems and the planned creations, updates, and unchanged hosts
 - **AND** nothing is applied
 
 ### Requirement: The host registry exports a canonical host definitions document
 
-The host routes MUST offer an export, admitting the administrator, that returns every registered host as a host definitions document without any secret: a host holding a protected key appears with no key path. A host whose stored connection is at a version its kind's codec does not serve MUST be reported by the export rather than stated as an entry. Importing an unedited export MUST change nothing.
+The host routes MUST offer an export at `GET /api/v1/hosts/definitions/export`, admitting the administrator, that returns every registered host as a host definitions document in a YAML body without any secret: a host holding a protected key appears with no key path. A host whose connection kind no composed codec serves, or whose stored connection is at a version its kind's codec does not serve, MUST NOT be stated as an entry. Importing an unedited export MUST change nothing.
 
 #### Scenario: An operator exports the registry and imports it unedited
 
@@ -136,16 +162,32 @@ The host routes MUST offer an export, admitting the administrator, that returns 
 #### Scenario: A host is stored at an unserved connection version
 
 - **WHEN** the registry holds a host stored at `ssh` version 1
-- **THEN** the export names that host as one it cannot state, and emits no entry for it
+- **THEN** the export emits no entry for that host
+- **AND** importing that export leaves the host unchanged and reports it as registered and not named
+
+#### Scenario: A host's connection kind is not served
+
+- **WHEN** the registry holds a host whose connection kind no composed codec serves
+- **THEN** the export emits no entry for that host, and states every other host
 
 ### Requirement: Startup reads no INI inventory
 
-The provisioning service MUST NOT read an INI inventory at startup. `inventory_ini` and `inventory_path` are retired settings: a configuration stating either MUST refuse startup, naming `host_definitions_path`. The INI inventory format MUST remain only the input of the Ansible implementation's host import route.
+The provisioning service MUST NOT read an INI inventory at startup. `inventory_ini` and `inventory_path` are retired settings: a configuration stating either in any layer MUST refuse startup, naming `host_definitions_path`, whatever value it states, an empty one included. No packaged configuration states either. The INI inventory format MUST remain only the input of the Ansible implementation's host import route.
 
 #### Scenario: A configuration states a retired inventory setting
 
 - **WHEN** the provisioning service starts with a configuration stating `inventory_ini` or `inventory_path`
 - **THEN** it refuses to start, naming the setting and `host_definitions_path`
+
+#### Scenario: A configuration states an empty `inventory_ini`
+
+- **WHEN** the provisioning service starts with a profile stating `inventory_ini: ""`
+- **THEN** it refuses to start, naming `inventory_ini` and `host_definitions_path`
+
+#### Scenario: The packaged configuration is started unchanged
+
+- **WHEN** the provisioning service starts with its packaged settings and any packaged profile, and no operator configuration
+- **THEN** no retired inventory setting is refused
 
 #### Scenario: An operator imports an INI inventory
 
