@@ -10,22 +10,12 @@ Host inventory follows an older rule. The inventory (`inventory_ini`, or the
 file at `inventory_path`) is read at startup only when the host registry is
 empty, and never again. An operator who edits the inventory of a running
 deployment and rolls it sees nothing happen: the new host is not registered,
-and no error says why. `POST /api/v1/hosts/import` is the only way to apply
-the edit.
-*Since 2026-10-05 (`bare-metal-mock-provisioned-deal` 5B.8 slice A):* the import keeps its
-path, but it is the Ansible distribution's operation, not the family's. Its route contract,
-`AnsibleHostImportRouteService`, and its typed client extension live in
-`provisioning/compute/ansible/src/compute_provisioning_ansible/host_import.py`, and the
-provisioning service only binds it. A pool move made by an import passes the same
-pool-change hooks as a host update, and a refused move fails the whole import. Hosts
-themselves are the family kit's (`provisioning/compute/src/compute_provisioning/hosts/`).
-
-That used to be partly hidden. Execution fell back to the inventory file when a
-host had no registered record, so a host added only to the file could still be
-dispatched to, though it was never registered, carried no capacity declaration,
-and appeared in no projection. That fallback is gone: execution renders only from
-the registered host record and refuses a host with none. So the gap between what
-the operator edited and what the service holds now surfaces as refused dispatch.
+and no error says why. Since execution renders only from the registered host
+record and refuses a host with none, the gap surfaces as refused dispatch. The
+seed also swallows its own failures: an inventory naming an unknown pool, or one
+the parser cannot read, starts the service with no hosts and only a log line.
+Under Helm the inventory sits in an operator-managed Secret whose edits do not
+roll the pod.
 
 The principle the definition documents already follow, that a process start is
 not a submission but a changed document is, applies to hosts exactly as it
@@ -33,22 +23,36 @@ applies to relays.
 
 ## What Changes
 
-- Bring host inventory under the definition-document mechanism: a startup
-  reconciles it when its digest differs from the last applied one, recording the
-  digest in the same transaction as the apply, and an explicit import still
-  reconciles regardless.
-- Define what reconciliation does to a registered host the document no longer
-  names, what an upgraded deployment's first startup does with no recorded
-  digest, and how applying hosts orders against capacity documents. These are
-  open questions in `design.md`, not decisions.
+- Hosts are declared in a YAML host definitions document with the registration
+  API's field names (`host_id`, `pool_id`, `enabled`, `connection`), configured
+  by `host_definitions_path` and, under Helm, the provisioning chart's
+  `definitions.hosts`, rendered into its ConfigMap.
+- A startup reconciles the document only when its digest differs from the last
+  applied one, recording the digest in the apply's transaction, after pools and
+  before capacity declarations. A document that cannot be applied fails startup
+  whole and records no digest.
+- An entry declares its whole host: an omitted pool unplaces it and an omitted
+  `enabled` enables it, through the pool-change hooks; an entry equal to the
+  stored host writes nothing. A host the document stops naming is retained and
+  reported. The document never carries a credential.
+- `GET /api/v1/hosts/export` returns the registry as a canonical host document,
+  and `POST /api/v1/hosts/definitions/import` reconciles a submitted document
+  regardless of the digest, with a validate-only mode.
+- **BREAKING** Startup reads no INI inventory: `inventory_ini` and
+  `inventory_path` are retired and refused at startup. The INI remains the
+  format of `POST /api/v1/hosts/import`.
+- `DEPLOYMENT_AND_CONFIG.md` states the method every definition document kind
+  follows.
 
 ## Capabilities
 
 ### Modified Capabilities
 
-- `physical-provisioning`: how host inventory enters the host registry.
-- `deployment-state`: startup reconciliation of mounted configuration, if the
-  definition-document contract is stated there.
+- `physical-provisioning`: how hosts enter the host registry — the host
+  definitions document, its startup reconciliation, its export and import
+  routes, and the retirement of startup INI seeding.
+- `deployment-state`: the provisioning chart's `definitions.hosts` value and its
+  refused keys.
 
 ### New Capabilities
 
@@ -58,41 +62,72 @@ None.
 
 - Do not change how execution resolves a host: it renders only from the
   registered host record.
-- Do not change the INI format's capacity derivation rule; a host's legacy GPU
-  count still derives a declaration once.
 - Do not decide who generates a host's key material;
-  `contain-embedded-host-key-material` owns that.
+  `contain-embedded-host-key-material` owns key material's lifetime on the
+  execution path.
+- Do not make a disabled host unsellable;
+  `keep-new-deliveries-off-disabled-hosts` owns that.
+- Do not require a capacity declaration to sit in its host's pool.
+- Do not change the INI import route's semantics.
 
 ## Impact
 
-- Provisioning service startup (`app_runtime.py`'s inventory seeding) and the
-  definition-document importer.
-- The provisioning Helm chart's `definitions` values and schema, if host
-  inventory joins them.
-- Operator documentation of how hosts are added.
+- The compute family kit's host authority (`compute_provisioning.hosts`), its
+  contracts and typed client: the host document, its session-scoped apply, the
+  export and import routes.
+- The provisioning service: its definition-document importer, startup steps,
+  settings, retired-settings refusal, and controllers; `seed_inventory_if_empty`
+  is removed.
+- The provisioning Helm chart's `definitions` values, schema, ConfigMap,
+  deployment mounts, and render tests; the topology secrets script.
+- The VM seller and bare-metal compose stacks, and the bare-metal end-to-end
+  lane's host file.
+- Operator documentation of how hosts are added, and both seller quickstarts.
+- Deployments: an operator stating `inventory_ini` or `inventory_path` must
+  replace it with a host document before upgrading.
 
 ## Dependencies and Related Changes
 
-- Follows `project-capacity-resources-without-hosts`, which removed the
-  execution fallback that masked this gap and documented the current seeding
-  rule.
-- Coordinates with `contain-embedded-host-key-material`: an inventory may name
-  embedded key material, and definition documents are defined as never carrying
-  a credential.
-- Coordinates with `pools-9-retire-local-physical-authority`, which retires the
-  storefront's CSV import. That is a different inventory path from this one.
+- Independent: nothing must land first.
+- `keep-new-deliveries-off-disabled-hosts`, opened from this design, makes
+  disabling a host keep new deliveries off it; when it lands, whether a document
+  should disable the hosts it stops naming is open to revisiting.
+- Coordinates with `contain-embedded-host-key-material`: a host document names a
+  key by file path or keeps a stored protected key, and never carries key
+  material.
+- `prove-relay-provisioning` and `admit-relay-proxies-by-grant` rework relays; the
+  open question of a declaration's pool against its host's waits on them.
 
 ## Permanent documentation impact
 
-- [ ] `docs/development/ARCHITECTURE.md`
-- [x] Existing subsystem specification: `physical-provisioning`, and possibly
+- [x] `docs/development/ARCHITECTURE.md`
+- [x] Existing subsystem specification: `physical-provisioning`,
       `deployment-state`
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
-`docs/development/DEPLOYMENT_AND_CONFIG.md`'s "Definition documents" section and
-both seller quickstarts describe host inventory today, and change with it.
-
 ### Knowledge to promote
 
-To be determined at design completion.
+- Host inventory is a digest-gated definition document (D1), its YAML format with
+  registration field names and the retirement of startup INI seeding (D2), whole
+  replacement per entry (D5), retention of unnamed hosts (D4), whole-document
+  failure (D7), no credential in the document (D9), its export (D12) and import
+  route (D14) → `openspec/specs/physical-provisioning/spec.md` (by the archive),
+  and the operator account in `docs/development/DEPLOYMENT_AND_CONFIG.md`'s
+  "Definition documents".
+- The chart's `definitions.hosts` value and refused keys (D3) →
+  `openspec/specs/deployment-state/spec.md` (by the archive) and
+  `DEPLOYMENT_AND_CONFIG.md`.
+- Why host inventory is a reconciled declaration owned by the family kit, why
+  unnamed hosts are retained, and the first-document path through the export (D4,
+  D6, D8, D12) → `openspec/specs/physical-provisioning/architecture.md`, beside
+  "Selected-resource execution" and "The host registry owns the connection".
+- The general method every definition document kind follows (D13) →
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Definition documents".
+- Startup order with host definitions in place of the inventory seed (D8) →
+  `openspec/specs/resource-pool-management/architecture.md`, "Administrative
+  reconciliation", and `docs/development/ARCHITECTURE.md`, "Resource pools".
+- The inventory file no longer seeds the registry at first boot →
+  `docs/development/ARCHITECTURE.md`, `docs/development/ROADMAP.md` Goal 1's
+  current state and its gap row, `docs/seller-quickstart.md`, and
+  `docs/bare-metal-seller-quickstart.md`.
