@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Mapping
+from datetime import timedelta
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
@@ -26,12 +27,14 @@ from compute_provisioning_ansible import (
 from compute_provisioning_ansible.runner import AnsibleRunner
 from compute_provisioning.leases import LeaseRouteService
 from compute_provisioning.relays import (
-    RELAY_HOST_POOL_CHANGE_HOOKS,
+    DEFAULT_GRANT_EXPIRY_GRACE,
+    DEFAULT_PORT_REUSE_MARGIN,
     RelayExecutionResolver,
     RelayPortAllocator,
     RelayReconciliationSchedule,
     RelayService,
     relay_contribution,
+    relay_host_pool_change_hooks,
 )
 from compute_provisioning.release import (
     FulfillmentReleaseExecutor,
@@ -178,18 +181,55 @@ def _merge_host_requirements(*requirements: Mapping[str, bool]) -> Mapping[str, 
     return MappingProxyType(merged)
 
 
-def _make_host_authority(session_factory, cfg, pool_change_hooks):
-    """The one host authority: every connection kind's codec and every hook.
+def _make_connection_codecs(cfg) -> ConnectionCodecs:
+    """Every connection kind this service reaches hosts by.
 
     The ``ssh`` codec is the Ansible implementation's, protecting a submitted
-    key with the service's decryption key; pool-change hooks are the adapters'
-    static declarations, merged here because the authority exists before any
-    runtime does.
+    key with the service's decryption key.
     """
+    return ConnectionCodecs([SshConnectionCodec(cfg.ssh_decryption_key)])
+
+
+def host_pool_change_hooks(codecs: ConnectionCodecs) -> tuple:
+    """Every check a host's pool change runs, over the host authority's codecs.
+
+    The relays' checks are the only ones; they read a host's connection
+    address through the same codecs the authority stores connections with.
+    """
+    return relay_host_pool_change_hooks(codecs)
+
+
+def _make_host_authority(session_factory, codecs):
+    """The one host authority, built before any runtime is."""
     return HostAuthority(
         session_factory,
-        codecs=ConnectionCodecs([SshConnectionCodec(cfg.ssh_decryption_key)]),
-        pool_change_hooks=tuple(pool_change_hooks),
+        codecs=codecs,
+        pool_change_hooks=host_pool_change_hooks(codecs),
+    )
+
+
+def _make_relay_port_allocator(session_factory, cfg) -> RelayPortAllocator:
+    """The one allocator, with the grant expiry grace and the port reuse margin."""
+    return RelayPortAllocator(
+        session_factory,
+        grant_expiry_grace=timedelta(
+            seconds=float(
+                getattr(
+                    cfg,
+                    "relay_grant_expiry_grace_seconds",
+                    DEFAULT_GRANT_EXPIRY_GRACE.total_seconds(),
+                )
+            )
+        ),
+        reuse_margin=timedelta(
+            seconds=float(
+                getattr(
+                    cfg,
+                    "relay_port_reuse_margin_seconds",
+                    DEFAULT_PORT_REUSE_MARGIN.total_seconds(),
+                )
+            )
+        ),
     )
 
 
@@ -395,13 +435,12 @@ class Container(containers.DeclarativeContainer):
     # job's executor through it.
     job_executor_table = providers.Singleton(JobExecutorTable)
 
-    host_pool_change_hooks = providers.Object(RELAY_HOST_POOL_CHANGE_HOOKS)
+    connection_codecs = providers.Singleton(_make_connection_codecs, cfg=config)
 
     host_authority = providers.Singleton(
         _make_host_authority,
         session_factory=session_factory,
-        cfg=config,
-        pool_change_hooks=host_pool_change_hooks,
+        codecs=connection_codecs,
     )
 
     probe_runner = providers.Singleton(_make_probe_runner, cfg=config)
@@ -430,10 +469,13 @@ class Container(containers.DeclarativeContainer):
     # through, the administration the relay routes serve, and the resolver
     # that fills a relay's address and token into a job as it runs.
     relay_port_allocator = providers.Singleton(
-        RelayPortAllocator, session_factory=session_factory
+        _make_relay_port_allocator, session_factory=session_factory, cfg=config
     )
     relay_service = providers.Singleton(
-        RelayService, session_factory=session_factory, settings=config
+        RelayService,
+        session_factory=session_factory,
+        settings=config,
+        connection_codecs=connection_codecs,
     )
     relay_execution_resolver = providers.Singleton(
         RelayExecutionResolver, session_factory=session_factory, settings=config

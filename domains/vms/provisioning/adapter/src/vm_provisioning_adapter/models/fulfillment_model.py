@@ -37,11 +37,13 @@ class VmFulfillmentRequirements(BaseModel):
 class AnsiblePoolConfig(BaseModel):
     """Validated, snapshotted Ansible provider configuration.
 
-    ``relay_id`` is the pool's own configuration. The four fields beneath it
-    are the referenced relay's, present only when this was built from an
+    ``relay_id`` is the pool's own configuration. The fields beneath it are
+    the referenced relay's, present only when this was built from an
     execution read; a redacted read carries the reference alone. They are
     accepted here rather than fetched so that what a job runs against is
     snapshotted with it, as the playbook path and extra vars already are.
+    ``grant_key_id`` is only the relay's active key's id, which preparation
+    requires; the key itself is read when a job's grant is signed.
 
     ``playbook_path`` is absent when the pool leaves the playbook to the
     service; the fulfillment plan then freezes the service's configured one.
@@ -59,3 +61,4 @@ class AnsiblePoolConfig(BaseModel):
     vm_port_range_start: int | None = None
     vm_port_range_count: int | None = None
     relay_token: str | None = None
+    grant_key_id: str | None = None

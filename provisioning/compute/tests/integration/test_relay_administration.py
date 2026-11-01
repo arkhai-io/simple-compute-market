@@ -1,13 +1,15 @@
-"""A relay is an administered resource, and its token is not readable.
+"""A relay is an administered resource, and its credentials are not readable.
 
-Two properties are pinned here:
+Three properties are pinned here:
 
-* A relay's rendezvous, window, and token are stated once, on a row that pools
-  reference. Held per pool, two pools sharing a relay could allocate from one
-  listening namespace under disagreeing windows.
+* A relay's rendezvous, window, token, and grant keys are stated once, on a row
+  that pools reference. Held per pool, two pools sharing a relay could allocate
+  from one listening namespace under disagreeing windows.
 * No read path that serves a response, an export, or a reconciliation
-  comparison yields an admission token. Only an explicitly named execution read
-  does.
+  comparison yields an admission token or a private grant key. Only an
+  explicitly named execution read yields the token.
+* A grant key belongs to one relay: it is supplied from the secrets profile or
+  generated, staged and activated, and never shared or reused.
 
 That reconciling a relay definition document follows a change to the document,
 not a process start, is the service importer's, and its suite tests it. How a
@@ -21,21 +23,34 @@ I/O, so the real engine is used rather than a mock.
 
 from __future__ import annotations
 
+import base64
+import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
 import yaml
+from cryptography.exceptions import InvalidSignature
 from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import serialization
+from market_resource_pools import ResourcePool
 from sqlalchemy.orm import Session
 
+from compute_provisioning.hosts import ConnectionCodecs, ConnectionEnvelope
+from compute_provisioning.hosts.db import Host
+from compute_provisioning.hosts.service import PoolChangeRefusedError
 from compute_provisioning.relays import (
+    GrantKey,
+    ManagementRouteRefused,
+    PoolRelay,
     Relay,
     RelayDefinitionError,
     RelayEndpointConflictError,
     RelayExecutionResolver,
+    RelayGrantKeyNotStagedError,
     RelayNotFoundError,
+    RelayPortAllocator,
     RelayPortLease,
     RelayRebindingRefused,
     RelayService,
@@ -43,21 +58,49 @@ from compute_provisioning.relays import (
     RelayValidationError,
     import_relay_definitions,
     parse_relay_definitions,
+    relay_host_pool_change_hooks,
 )
 
 # A development-only Fernet key. Generated for this fixture, never used on any
 # network, and safe to read here precisely because it protects nothing.
 _KEY = Fernet.generate_key().decode()
+# A development-only grant key, generated per run and never used on a network.
+_GRANT_KEY = GrantKey.generate()
 
 
 @pytest.fixture
 def settings():
-    return SimpleNamespace(ssh_decryption_key=_KEY, relay_token="bootstrap-token")
+    return SimpleNamespace(
+        ssh_decryption_key=_KEY,
+        relay_token="bootstrap-token",
+        relay_grant_key=_GRANT_KEY.profile_form() + "\n",
+    )
+
+
+class _AddressCodec:
+    """A connection kind whose address is its one public field."""
+
+    kind = "fake"
+    version = 1
+
+    def build(self, public, secrets, *, previous=None):
+        return ConnectionEnvelope(kind=self.kind, version=self.version, public=dict(public))
+
+    def validate(self, envelope):
+        return envelope
+
+    def address(self, envelope):
+        return envelope.public.get("address")
+
+
+_CODECS = ConnectionCodecs([_AddressCodec()])
 
 
 @pytest.fixture
 def relays(session_factory, settings):
-    return RelayService(session_factory=session_factory, settings=settings)
+    return RelayService(
+        session_factory=session_factory, settings=settings, connection_codecs=_CODECS
+    )
 
 
 def _make_relay(relays, **overrides):
@@ -244,6 +287,7 @@ class TestRelayDefinitionDocuments:
             "vm_port_range_start": 6100,
             "vm_port_range_count": 100,
             "token_secret_key": "relay_token",
+            "grant_key_secret_key": "relay_grant_key",
         }
         entry.update(overrides)
         return {"relays": [entry]}
@@ -343,6 +387,230 @@ class TestRelayDefinitionDocuments:
         with pytest.raises(RelayDefinitionError) as excinfo:
             parse_relay_definitions(yaml.safe_dump(document))
         assert "vm_port_range_count" in str(excinfo.value)
+
+    def test_the_named_profile_key_supplies_the_grant_key(self, relays, settings):
+        import_relay_definitions(self._yaml(), relay_service=relays, settings=settings)
+        active = relays.get_relay("site-a").grant_keys.active
+        assert (active.kid, active.public_key) == (_GRANT_KEY.kid, _GRANT_KEY.public_key)
+
+    def test_an_entry_naming_no_grant_key_fails_naming_the_entry(self, relays, settings):
+        document = self._document()
+        del document["relays"][0]["grant_key_secret_key"]
+        with pytest.raises(RelayDefinitionError) as excinfo:
+            import_relay_definitions(
+                yaml.safe_dump(document), relay_service=relays, settings=settings
+            )
+        assert "'site-a'" in str(excinfo.value)
+        assert "grant_key_secret_key" in str(excinfo.value)
+        assert relays.list_relays() == []
+
+    @pytest.mark.parametrize(
+        "value",
+        [None, "  \n", "bm90IGEga2V5", GrantKey.generate().profile_form()[:-8]],
+        ids=["absent", "blank", "not-a-key", "truncated"],
+    )
+    def test_an_unusable_grant_key_fails_naming_relay_and_profile_key(
+        self, relays, settings, value
+    ):
+        """Checked for every new entry before any is written: the first entry
+        here is sound, and is not created either."""
+        if value is not None:
+            settings.broken_grant_key = value
+        document = self._document()
+        sound = dict(document["relays"][0], id="site-sound", relay_addr="10.0.0.10")
+        document["relays"].insert(0, sound)
+        document["relays"][1]["grant_key_secret_key"] = "broken_grant_key"
+
+        with pytest.raises(RelayDefinitionError) as excinfo:
+            import_relay_definitions(
+                yaml.safe_dump(document), relay_service=relays, settings=settings
+            )
+
+        message = str(excinfo.value)
+        assert "'site-a'" in message
+        assert "'broken_grant_key'" in message
+        if value is not None and value.strip():
+            assert value.strip() not in message
+        assert relays.list_relays() == []
+
+    def test_two_entries_naming_one_grant_key_create_nothing(self, relays, settings):
+        document = self._document()
+        document["relays"].append(
+            dict(document["relays"][0], id="site-b", relay_addr="10.0.0.10")
+        )
+        with pytest.raises(RelayDefinitionError) as excinfo:
+            import_relay_definitions(
+                yaml.safe_dump(document), relay_service=relays, settings=settings
+            )
+        assert "'site-a'" in str(excinfo.value) and "'site-b'" in str(excinfo.value)
+        assert relays.list_relays() == []
+
+    def test_an_entry_naming_a_key_another_relay_holds_creates_nothing(
+        self, relays, settings
+    ):
+        """Refused before any entry is written, though each write of this
+        import would commit on its own."""
+        _make_relay(relays, relay_id="held", relay_addr="10.0.0.20", grant_key=_GRANT_KEY)
+        document = self._document()
+        sound = dict(
+            document["relays"][0],
+            id="site-sound",
+            relay_addr="10.0.0.10",
+            grant_key_secret_key="sound_grant_key",
+        )
+        settings.sound_grant_key = GrantKey.generate().profile_form()
+        document["relays"].insert(0, sound)
+
+        with pytest.raises(RelayDefinitionError) as excinfo:
+            import_relay_definitions(
+                yaml.safe_dump(document), relay_service=relays, settings=settings
+            )
+
+        message = str(excinfo.value)
+        assert "'site-a'" in message and "'relay_grant_key'" in message
+        assert "'held'" in message
+        assert [view.id for view in relays.list_relays()] == ["held"]
+
+    def test_a_reconciliation_never_rewrites_a_key(self, relays, settings):
+        """The document names the profile key holding the bootstrap key; an
+        operator's rotation since is what the relay signs with afterwards."""
+        import_relay_definitions(self._yaml(), relay_service=relays, settings=settings)
+        staged = relays.stage_grant_key("site-a")
+        relays.activate_grant_key("site-a")
+
+        import_relay_definitions(
+            self._yaml(vm_port_range_count=50), relay_service=relays, settings=settings
+        )
+
+        view = relays.get_relay("site-a")
+        assert view.vm_port_range_count == 50
+        assert view.grant_keys.active.kid == staged.kid
+        assert [key.kid for key in view.grant_keys.retired] == [_GRANT_KEY.kid]
+
+
+class TestGrantKeys:
+    """Each relay signs with its own key, held as ciphertext and shown only by
+    its id and public half."""
+
+    def _stored(self, session_factory, relay_id="site-a") -> Relay:
+        with Session(session_factory.kw["bind"]) as db:
+            row = db.get(Relay, relay_id)
+            db.expunge(row)
+            return row
+
+    def test_a_relay_created_with_no_key_gets_an_active_one(self, relays):
+        active = _make_relay(relays).grant_keys.active
+        assert active is not None
+        assert active.activated_at is not None
+        assert relays.get_relay("site-a").grant_keys.active.kid == active.kid
+
+    def test_a_supplied_key_is_the_active_one(self, relays):
+        key = GrantKey.generate()
+        active = _make_relay(relays, grant_key=key).grant_keys.active
+        assert (active.kid, active.public_key) == (key.kid, key.public_key)
+
+    def test_a_stored_key_is_ciphertext(self, relays, session_factory):
+        key = GrantKey.generate()
+        _make_relay(relays, grant_key=key)
+        stored = self._stored(session_factory)
+        assert key.profile_form() not in stored.grant_key_encrypted
+        recovered = Fernet(_KEY.encode()).decrypt(stored.grant_key_encrypted.encode())
+        assert GrantKey.from_profile_form(recovered.decode()).kid == key.kid
+
+    def test_no_view_carries_a_private_key(self, relays):
+        key = GrantKey.generate()
+        view = _make_relay(relays, grant_key=key)
+        staged_key = GrantKey.generate()
+        relays.stage_grant_key("site-a", staged_key.profile_form())
+        for shown in (repr(view), repr(relays.get_relay("site-a")), repr(relays.list_relays())):
+            assert key.profile_form() not in shown
+            assert staged_key.profile_form() not in shown
+
+    def test_staging_leaves_the_active_key_signing(self, relays, session_factory):
+        active = _make_relay(relays).grant_keys.active
+        supplied = GrantKey.generate()
+
+        staged = relays.stage_grant_key("site-a", supplied.profile_form())
+
+        assert (staged.kid, staged.public_key) == (supplied.kid, supplied.public_key)
+        view = relays.get_relay("site-a")
+        assert view.grant_keys.active == active
+        assert view.grant_keys.staged.kid == supplied.kid
+        assert supplied.profile_form() not in self._stored(session_factory).staged_grant_key_encrypted
+
+    def test_staging_with_no_key_generates_one(self, relays):
+        active = _make_relay(relays).grant_keys.active
+        staged = relays.stage_grant_key("site-a")
+        assert staged.kid != active.kid
+        assert relays.get_relay("site-a").grant_keys.staged.kid == staged.kid
+
+    def test_a_malformed_supplied_key_is_refused_without_the_value(self, relays):
+        _make_relay(relays)
+        value = GrantKey.generate().profile_form()[:-8]
+        with pytest.raises(RelayValidationError) as refused:
+            relays.stage_grant_key("site-a", value)
+        assert value not in str(refused.value)
+        assert relays.get_relay("site-a").grant_keys.staged is None
+
+    def test_a_key_that_has_signed_for_the_relay_is_not_staged_again(self, relays):
+        first = GrantKey.generate()
+        _make_relay(relays, grant_key=first)
+        with pytest.raises(RelayValidationError):
+            relays.stage_grant_key("site-a", first.profile_form())
+        relays.stage_grant_key("site-a")
+        relays.activate_grant_key("site-a")
+        with pytest.raises(RelayValidationError):
+            relays.stage_grant_key("site-a", first.profile_form())
+
+    def test_a_key_another_relay_holds_or_retired_is_refused(self, relays):
+        """A key signs for one relay: one leak never opens two."""
+        first = GrantKey.generate()
+        _make_relay(relays, grant_key=first)
+        _make_relay(relays, relay_id="site-b", relay_addr="10.0.0.10")
+
+        with pytest.raises(RelayValidationError) as refused:
+            relays.stage_grant_key("site-b", first.profile_form())
+        assert "'site-a'" in str(refused.value)
+        with pytest.raises(RelayValidationError):
+            _make_relay(relays, relay_id="site-c", relay_addr="10.0.0.11", grant_key=first)
+
+        staged = GrantKey.generate()
+        relays.stage_grant_key("site-a", staged.profile_form())
+        with pytest.raises(RelayValidationError) as refused:
+            relays.stage_grant_key("site-b", staged.profile_form())
+        assert "'site-a'" in str(refused.value)
+
+        relays.activate_grant_key("site-a")
+        with pytest.raises(RelayValidationError) as refused:
+            relays.stage_grant_key("site-b", first.profile_form())
+        assert "retired" in str(refused.value)
+        with pytest.raises(RelayValidationError) as refused:
+            _make_relay(relays, relay_id="site-c", relay_addr="10.0.0.11", grant_key=first)
+        assert "retired" in str(refused.value)
+
+    def test_activation_retires_the_previous_key_with_its_time(self, relays):
+        first = _make_relay(relays).grant_keys.active
+        staged = relays.stage_grant_key("site-a")
+
+        activated = relays.activate_grant_key("site-a").grant_keys
+
+        assert activated.active.kid == staged.kid
+        assert activated.active.public_key == staged.public_key
+        assert activated.staged is None
+        assert [key.kid for key in activated.retired] == [first.kid]
+        assert activated.retired[0].retired_at == activated.active.activated_at
+        assert activated.retired[0].retired_at >= first.activated_at
+        listed = relays.list_relays()[0].grant_keys
+        assert listed == activated
+
+    def test_activation_needs_a_staged_key(self, relays):
+        _make_relay(relays)
+        with pytest.raises(RelayGrantKeyNotStagedError):
+            relays.activate_grant_key("site-a")
+
+    def test_an_unknown_relay_stages_nothing(self, relays):
+        with pytest.raises(RelayNotFoundError):
+            relays.stage_grant_key("absent")
 
 
 class TestRebinding:
@@ -447,6 +715,7 @@ class _JobParams:
     relay_addr: str | None = None
     relay_port: int | None = None
     relay_token: str | None = None
+    relay_grant: str | None = None
 
 
 class TestExecutionTimeTokenResolution:
@@ -514,3 +783,250 @@ class TestExecutionTimeTokenResolution:
             self._resolver(session_factory, settings).resolve_into(
                 self._params(relay_id="never-created")
             )
+
+
+def _decoded(part: str) -> bytes:
+    return base64.urlsafe_b64decode(part + "=" * (-len(part) % 4))
+
+
+def _segments(token: str) -> tuple[dict, dict]:
+    header, claims, _ = token.split(".")
+    return json.loads(_decoded(header)), json.loads(_decoded(claims))
+
+
+def _verifies(token: str, public_key: str) -> bool:
+    signing_input, _, signature = token.rpartition(".")
+    key = serialization.load_der_public_key(base64.b64decode(public_key))
+    try:
+        key.verify(_decoded(signature), signing_input.encode("ascii"))
+    except InvalidSignature:
+        return False
+    return True
+
+
+class TestGrantsAtExecution:
+    """A job adding a proxy has its grant signed as it runs, on every attempt,
+    with the relay's then-active key, and the lease records which key."""
+
+    _LEASE_END = datetime(2031, 6, 1, 12, 0, tzinfo=timezone.utc)
+
+    def _relay_with_lease(self, relays, session_factory, *, owner="cr-1", host="kvm1"):
+        _make_relay(relays, token="admission-token")
+        return RelayPortAllocator(session_factory).allocate(
+            relay_id="site-a",
+            owner_kind="fulfillment",
+            owner_id=owner,
+            lease_ends_at=self._LEASE_END,
+            host_id=host,
+        )
+
+    def _resolve(self, session_factory, settings, port, owner="cr-1"):
+        return RelayExecutionResolver(
+            session_factory=session_factory, settings=settings
+        ).resolve_into(_JobParams(relay_id="site-a"), remote_port=port, owner_id=owner)
+
+    def _lease_row(self, session_factory) -> RelayPortLease:
+        with Session(session_factory.kw["bind"]) as db:
+            row = db.query(RelayPortLease).one()
+            db.expunge(row)
+            return row
+
+    def test_the_grant_is_signed_for_the_lease_with_the_active_key(
+        self, relays, session_factory, settings
+    ):
+        lease = self._relay_with_lease(relays, session_factory)
+        active = relays.get_relay("site-a").grant_keys.active
+
+        params = _JobParams(relay_id="site-a")
+        resolved = RelayExecutionResolver(
+            session_factory=session_factory, settings=settings
+        ).resolve_into(params, remote_port=lease.remote_port, owner_id="cr-1")
+
+        assert params.relay_grant is None
+        header, claims = _segments(resolved.relay_grant)
+        assert header == {"alg": "EdDSA", "kid": active.kid, "typ": "frp-grant+jwt"}
+        assert claims == {
+            "aud": "site-a",
+            "port": lease.remote_port,
+            "exp": int((self._LEASE_END + timedelta(hours=1)).timestamp()),
+            "sub": "kvm1",
+            "jti": "cr-1",
+        }
+        assert _verifies(resolved.relay_grant, active.public_key)
+        assert self._lease_row(session_factory).grant_key_id == active.kid
+
+    def test_a_retry_after_a_rotation_signs_with_the_new_key(
+        self, relays, session_factory, settings
+    ):
+        lease = self._relay_with_lease(relays, session_factory)
+        first = relays.get_relay("site-a").grant_keys.active
+        self._resolve(session_factory, settings, lease.remote_port)
+        staged = relays.stage_grant_key("site-a")
+        relays.activate_grant_key("site-a")
+
+        retried = self._resolve(session_factory, settings, lease.remote_port)
+
+        header, claims = _segments(retried.relay_grant)
+        assert header["kid"] == staged.kid
+        assert _verifies(retried.relay_grant, staged.public_key)
+        assert claims["jti"] == "cr-1"
+        row = self._lease_row(session_factory)
+        assert row.grant_key_id == staged.kid
+        # The retired key may still have a grant installed on the host, so it
+        # stays valid until the lease's grant expiry while the lease is held.
+        (retired,) = relays.get_relay("site-a").grant_keys.retired
+        assert retired.kid == first.kid
+        assert retired.grants_valid_until == row.grant_expires_at
+        assert relays.list_relays()[0].grant_keys.retired[0].grants_valid_until == (
+            row.grant_expires_at
+        )
+
+        RelayPortAllocator(session_factory).release(owner_kind="fulfillment", owner_id="cr-1")
+        assert relays.get_relay("site-a").grant_keys.retired[0].grants_valid_until is None
+
+    def test_a_lease_allocated_after_a_retirement_does_not_extend_it(
+        self, relays, session_factory, settings
+    ):
+        _make_relay(relays, token="admission-token")
+        relays.stage_grant_key("site-a")
+        relays.activate_grant_key("site-a")
+        RelayPortAllocator(session_factory).allocate(
+            relay_id="site-a",
+            owner_kind="fulfillment",
+            owner_id="cr-later",
+            lease_ends_at=self._LEASE_END,
+        )
+
+        (retired,) = relays.get_relay("site-a").grant_keys.retired
+        assert retired.grants_valid_until is None
+
+    def test_a_lease_with_no_host_carries_no_subject(self, relays, session_factory, settings):
+        lease = self._relay_with_lease(relays, session_factory, host=None)
+        _, claims = _segments(self._resolve(session_factory, settings, lease.remote_port).relay_grant)
+        assert "sub" not in claims
+        assert claims["jti"] == "cr-1"
+        assert isinstance(claims["exp"], int)
+
+    def test_a_retenancy_names_the_new_reservation(self, relays, session_factory, settings):
+        _make_relay(relays, token="admission-token", vm_port_range_count=1)
+        allocator = RelayPortAllocator(session_factory)
+        ended = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        allocator.allocate(
+            relay_id="site-a", owner_kind="fulfillment", owner_id="cr-old", lease_ends_at=ended
+        )
+        allocator.release(owner_kind="fulfillment", owner_id="cr-old")
+        lease = allocator.allocate(
+            relay_id="site-a",
+            owner_kind="fulfillment",
+            owner_id="cr-new",
+            lease_ends_at=self._LEASE_END,
+        )
+
+        _, claims = _segments(
+            self._resolve(session_factory, settings, lease.remote_port, owner="cr-new").relay_grant
+        )
+
+        assert claims["jti"] == "cr-new"
+
+    def test_a_relay_with_no_active_key_fails_the_job(self, relays, session_factory, settings):
+        lease = self._relay_with_lease(relays, session_factory)
+        with session_factory() as db, db.begin():
+            row = db.get(Relay, "site-a")
+            row.grant_key_encrypted = row.grant_key_id = row.grant_key_public = None
+
+        with pytest.raises(RelayUnusableAtExecutionError, match="no active grant key"):
+            self._resolve(session_factory, settings, lease.remote_port)
+
+    def test_a_port_with_no_held_lease_fails_the_job(self, relays, session_factory, settings):
+        _make_relay(relays, token="admission-token")
+        with pytest.raises(RelayUnusableAtExecutionError, match="holds no lease"):
+            self._resolve(session_factory, settings, 6150)
+
+    @pytest.mark.parametrize("owner", ["cr-another", None])
+    def test_a_port_another_reservation_holds_gets_no_grant(
+        self, relays, session_factory, settings, owner
+    ):
+        """A grant authorizes its port alone, so a job naming another
+        tenancy's port, or no reservation at all, is refused one."""
+        lease = self._relay_with_lease(relays, session_factory)
+        with pytest.raises(RelayUnusableAtExecutionError, match="for this job's reservation"):
+            self._resolve(session_factory, settings, lease.remote_port, owner=owner)
+        assert self._lease_row(session_factory).grant_key_id is None
+
+    def test_a_removal_needs_no_grant(self, relays, session_factory, settings):
+        _make_relay(relays, token="admission-token")
+        resolved = RelayExecutionResolver(
+            session_factory=session_factory, settings=settings
+        ).resolve_into(_JobParams(relay_id="site-a"))
+        assert resolved.relay_grant is None
+        assert resolved.relay_token == "admission-token"
+
+    def test_the_holdings_read_shows_the_grant_expiry_and_signing_key(
+        self, relays, session_factory, settings
+    ):
+        lease = self._relay_with_lease(relays, session_factory)
+        self._resolve(session_factory, settings, lease.remote_port)
+
+        (record,) = relays.list_leases("site-a")
+
+        assert record.grant_expires_at == datetime(2031, 6, 1, 13, 0)
+        assert record.grant_key_id == relays.get_relay("site-a").grant_keys.active.kid
+
+
+class TestManagementRoute:
+    """A host is not reached through the relay its pool sells buyers on."""
+
+    def _pool(self, session_factory, pool_id, relay_id=None):
+        with session_factory() as db, db.begin():
+            db.add(ResourcePool(id=pool_id, label=pool_id, provider="test", policy_tags={}))
+            if relay_id is not None:
+                db.add(PoolRelay(pool_id=pool_id, relay_id=relay_id))
+
+    def _host(self, session_factory, host_id, address, pool_id=None):
+        with session_factory() as db, db.begin():
+            host = Host(host_id=host_id, enabled=True, pool_id=pool_id)
+            host.set_connection(
+                ConnectionEnvelope(kind="fake", version=1, public={"address": address})
+            )
+            db.add(host)
+
+    def _move(self, session_factory, host_id, new_pool):
+        hooks = relay_host_pool_change_hooks(_CODECS)
+        with session_factory() as db, db.begin():
+            current = db.get(Host, host_id).pool_id
+            for hook in hooks:
+                hook(db, host_id, current, new_pool)
+
+    def test_a_host_reached_at_its_pools_relay_address_is_refused(
+        self, relays, session_factory
+    ):
+        _make_relay(relays, relay_addr="10.0.0.9")
+        self._pool(session_factory, "relayed", "site-a")
+        self._host(session_factory, "kvm1", " 10.0.0.9 ")
+
+        with pytest.raises(PoolChangeRefusedError) as refused:
+            self._move(session_factory, "kvm1", "relayed")
+
+        assert "kvm1" in str(refused.value) and "site-a" in str(refused.value)
+
+    def test_a_host_reached_another_way_is_placed(self, relays, session_factory):
+        _make_relay(relays, relay_addr="10.0.0.9")
+        self._pool(session_factory, "relayed", "site-a")
+        self._pool(session_factory, "direct")
+        self._host(session_factory, "kvm1", "10.0.0.50")
+        self._host(session_factory, "kvm2", "10.0.0.9")
+
+        self._move(session_factory, "kvm1", "relayed")
+        self._move(session_factory, "kvm2", "direct")
+
+    def test_a_relay_is_not_moved_onto_a_placed_hosts_address(self, relays, session_factory):
+        _make_relay(relays, relay_addr="10.0.0.9")
+        self._pool(session_factory, "relayed", "site-a")
+        self._host(session_factory, "kvm1", "10.0.0.50", pool_id="relayed")
+
+        with pytest.raises(ManagementRouteRefused) as refused:
+            relays.update_relay("site-a", relay_addr="10.0.0.50")
+
+        assert "kvm1" in str(refused.value) and "site-a" in str(refused.value)
+        assert relays.get_relay("site-a").relay_addr == "10.0.0.9"
+        assert relays.update_relay("site-a", relay_addr="10.0.0.60").relay_addr == "10.0.0.60"

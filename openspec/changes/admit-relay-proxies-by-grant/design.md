@@ -209,8 +209,8 @@ offline. The tool's `make test-frp` fetches the binaries and runs the real-frp t
 failing on a skip or on no tests. The root's `test-frp-grant-admission` joins `make test`
 and the `tests.yml` matrix, and a separate `tests.yml` job runs the gate — in `tests.yml`
 because it is the workflow validation may dispatch, so the plan can owe the job to
-validation. The gate also runs the unit tests against the lowest PyJWT release the tool
-declares (D23).
+validation. The gate also runs the unit tests with each runtime dependency at the lowest
+release the tool declares (D23).
 
 **Cases against real frp.** A valid grant admitted, and carrying traffic through the
 remote port to a local listener, since registration and traffic are different proofs;
@@ -393,9 +393,10 @@ An admission answers `{"reject": false, "unchange": true}`: the plugin never rew
 proxy. A refusal answers HTTP 200 with `reject: true` and the reason. PyJWT decides the
 token's parsing, its signature, `aud`, and the presence of the required claims; padded
 segments are accepted (signers still never pad), and `strict_aud` makes `aud` one string.
-Every rule whose PyJWT behaviour differs between the releases the tool declares — the
-time checks, the types of `sub` and `jti`, and `crit` — is the plugin's own, so a grant's
-verdict and reason do not depend on the installed release. Each rule has a vector case;
+Every rule whose PyJWT behaviour is known to differ between the releases the tool
+declares — the time checks, the types of `sub` and `jti`, and `crit` — is the plugin's
+own, so none of them decides a verdict through the library; the vector holds at the lock
+and at the dependencies' floors (D23). Each rule has a vector case;
 the expiry boundary has three — one second before `exp` admitted, exactly `exp` refused
 as `grant_expired`, and an `iat` one second ahead refused as `grant_not_yet_valid`.
 
@@ -595,7 +596,7 @@ D15 stands: one round of two sessions, then one implementation review. Session 1
 re-checks section 1's work after the rename and the merge of `dev`, then delivers grant
 verification with the plugin's own header, time, and claim-type checks (D18, D19, D22),
 the vector, the server, and the README. Session 2 delivers real frp, CI with D23's
-floor run, and shipping. The rename (D16) is the orchestrating session's work before the
+floor run over both runtime dependencies, and shipping. The rename (D16) is the orchestrating session's work before the
 design review, not an implementation round.
 
 ### D22. `typ` and `crit` are checked from the unverified header, before PyJWT
@@ -614,24 +615,41 @@ refusal is reported, and a header grants nothing.
 Rejected: keeping the order and mapping PyJWT's `crit` error to `grant_malformed` (the
 reason still depends on the release).
 
-### D23. The declared PyJWT range is proven at its floor
+### D23. The vector is proven at the lock and at every runtime dependency's floor
 
-The tool's `make test-floor` runs the unit tests, the vector included, against the
-lowest PyJWT release the tool declares, with the rest of the lock unchanged; the
-real-frp gate job runs it beside `make test-frp`, since it needs the network. The
-default suite runs on the lock and stays offline.
+The tool's `make test-floor` runs the unit tests, the vector included, with each runtime
+dependency — PyJWT and `cryptography` — resolved at the lowest release the tool declares,
+as uv's `lowest-direct` resolution does; the real-frp gate job runs it beside `make
+test-frp`, since it needs the network. The default suite runs on the lock and stays
+offline.
 
-Why: the wheel installs any release from the floor up, and the release-dependent
+What this proves, and what the specification promises, is two tested points: the floor
+and the lock. The declared range has no upper end, and PyJWT still decides parsing, the
+signature, `aud`, and the required claims, so no test proves a verdict for a release in
+between or above the lock; a later release is proven when the lock moves to it, since
+the vector runs on every lock. The specification therefore promises the structure — the
+header, time, and claim-type rules are the plugin's own, not a library's — and the
+vector at both tested points, not identical verdicts on every release the wheel permits
+(27 F2).
+
+Why: the wheel installs any release from the floors up, and the release-dependent
 behaviours D18, D19, and D22 remove were found by hand. Running the published vector at
-both ends of the declared range catches the next one.
+the floors catches the next one there; `cryptography` performs the Ed25519 verification
+and is floored with PyJWT at no extra cost.
 
-Rejected: pinning PyJWT exactly or narrowly (burdens installing the wheel beside other
-software); relying on the vector at each relock (proves only the locked release).
+Rejected: pinning exactly or narrowly (burdens installing the wheel beside other
+software); relying on the vector at each relock (proves only the locked release); an
+explicit tested set of every PyJWT minor release (a middle release is installed only
+when another package constrains PyJWT, and the list needs a hand edit each release);
+bounding the range with an upper limit (still untested across the range, and an upper
+bound burdens installation and needs a bump at every major release); promising identical
+verdicts on every declared release (no test can hold it, 27 F2).
 
 ## Notes for `prove-relay-provisioning`
 
 This design changes what that change's signer and roles conform to. To be sent once this
-design is settled:
+design is settled. The decision numbers in these notes (D16, D17) are that change's own,
+not this design's D16 and D17:
 
 1. D16's grant header carries `typ: "frp-grant+jwt"`.
 2. D17's key id is the key's RFC 7638 JWK thumbprint.

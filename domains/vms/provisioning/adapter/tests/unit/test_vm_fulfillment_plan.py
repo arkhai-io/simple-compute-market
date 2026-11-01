@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -60,9 +61,12 @@ def _relay_pool_config(**overrides) -> dict:
     relay = {
         "relay_id": "site-a", "relay_addr": "203.0.113.9", "relay_port": 7000,
         "vm_port_range_start": 6100, "vm_port_range_count": 100,
-        "relay_token": "admission-token",
+        "relay_token": "admission-token", "grant_key_id": "active-key",
     }
     return _pool_config(**{**relay, **overrides})
+
+
+_LEASE_END = datetime(2031, 6, 1, 12, 0, tzinfo=timezone.utc)
 
 
 class _Allocator:
@@ -83,11 +87,14 @@ class _Allocator:
 SERVICE_PLAYBOOK = "/opt/service/vm-operations.yaml"
 
 
-def _plan(allocator=None, *, vm_playbook_path=SERVICE_PLAYBOOK) -> VmFulfillmentPlan:
+def _plan(
+    allocator=None, *, vm_playbook_path=SERVICE_PLAYBOOK, lease_end=_LEASE_END
+) -> VmFulfillmentPlan:
     return VmFulfillmentPlan(
         reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
         vm_playbook_path=vm_playbook_path,
         port_allocator=allocator,
+        lease_end=lambda db, reservation: lease_end,
     )
 
 
@@ -262,9 +269,30 @@ class TestRelayAccessPath:
         assert prepared.parameters["vm_remote_port"] == 6100
         assert allocator.allocated == [{
             "relay_id": "site-a", "owner_kind": "fulfillment", "owner_id": "alloc-1",
-            "host_id": "kvm1", "pool_id": "pool-1",
+            "host_id": "kvm1", "pool_id": "pool-1", "lease_ends_at": _LEASE_END,
         }]
         assert "admission-token" not in json.dumps(prepared.parameters)
+        assert prepared.parameters["relay_grant"] is None
+
+    def test_a_relay_with_no_active_grant_key_is_refused_naming_it(self):
+        allocator = _Allocator()
+        with pytest.raises(ProviderConfigInvalidError) as refused:
+            _create(_plan(allocator), pool_config=_relay_pool_config(grant_key_id=None))
+        assert "'site-a'" in str(refused.value)
+        assert "no active grant key" in str(refused.value)
+        assert allocator.allocated == []
+
+    def test_a_relayed_create_whose_reservation_states_no_lease_end_is_refused(self):
+        allocator = _Allocator()
+        for allocate in (False, True):
+            with pytest.raises(ProviderConfigInvalidError, match="no lease end"):
+                _create(
+                    _plan(allocator, lease_end=None),
+                    pool_config=_relay_pool_config(),
+                    allocate=allocate,
+                )
+        assert allocator.allocated == []
+        _create(_plan(allocator, lease_end=None))  # a direct create needs none
 
     def test_validation_leases_nothing_and_still_refuses_a_partial_relay(self):
         allocator = _Allocator()

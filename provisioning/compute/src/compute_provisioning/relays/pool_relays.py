@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from market_config import decrypt_secret
+from market_fulfillment import ProviderConfigInvalidError
 from market_resource_pools import PoolConfigValidationProblem, PoolValidationError
 from sqlalchemy.orm import Session
 
@@ -77,14 +78,15 @@ def set_pool_relay(db: Session, pool_id: str, relay_id: str | None) -> None:
 def relay_execution_fields(
     db: Session, relay_id: str | None, encryption_key: str
 ) -> dict[str, Any]:
-    """The referenced relay's endpoint, window, and decrypted token, for
-    preparing provider input at dispatch.
+    """The referenced relay's endpoint, window, decrypted token, and active
+    grant key's id, for preparing provider input at dispatch.
 
     A missing or disabled relay resolves to no fields rather than to an error,
     so the single rejection point for an unusable relay stays in pre-dispatch
-    validation instead of being split across two layers that could disagree.
-    These fields describe the relay, not the pool, and no pool write accepts
-    them.
+    validation (``check_relay_usable``) instead of being split across two
+    layers that could disagree. These fields describe the relay, not the pool,
+    and no pool write accepts them. The grant key appears by id only: the
+    private key is read at execution, when a grant is signed.
     """
     if not relay_id:
         return {}
@@ -101,11 +103,45 @@ def relay_execution_fields(
             if relay.relay_token_encrypted
             else None
         ),
+        "grant_key_id": relay.grant_key_id,
     }
+
+
+#: What a relay needs before a delivery may use it, by the execution read's
+#: field, each named as a refusal reports it.
+_USABLE_RELAY_FIELDS = (
+    ("relay_addr", "relay address"),
+    ("vm_port_range_start", "port window start"),
+    ("vm_port_range_count", "port window size"),
+    ("relay_token", "admission token"),
+    ("grant_key_id", "active grant key"),
+)
+
+
+def check_relay_usable(relay_id: str, fields: Mapping[str, Any]) -> None:
+    """Refuse a relay a delivery cannot use, naming the relay and what it lacks.
+
+    ``fields`` is the pool's execution read, which ``relay_execution_fields``
+    filled. A disabled relay contributes none, so it lacks everything. A relay
+    with no active grant key is refused as one with no token is: every proxy
+    carries a grant signed with that key, and a relay enforcing admission
+    refuses a proxy without one. Answerable from configuration, so it runs in
+    preparation, before anything is written.
+    """
+    missing = [name for field, name in _USABLE_RELAY_FIELDS if not fields.get(field)]
+    if missing:
+        raise ProviderConfigInvalidError(
+            f"pool references relay {relay_id!r}, but the relay is unusable: "
+            f"no {', no '.join(missing)}. A relay that is disabled, has no "
+            "allocation window, or has no token or active grant key cannot carry "
+            "a tunnel, and a delivery made through it would have no external "
+            "route."
+        )
 
 
 __all__ = [
     "RELAY_ID_FIELD",
+    "check_relay_usable",
     "pool_relay_id",
     "relay_execution_fields",
     "set_pool_relay",

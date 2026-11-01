@@ -18,6 +18,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from compute_provisioning.hosts import ConnectionCodecs
 from compute_provisioning.relays import (
     PoolRelay,
     RelayExecutionResolver,
@@ -48,7 +49,11 @@ def settings():
 
 @pytest.fixture
 def relays(session_factory, settings):
-    return RelayService(session_factory=session_factory, settings=settings)
+    return RelayService(
+        session_factory=session_factory,
+        settings=settings,
+        connection_codecs=ConnectionCodecs([]),
+    )
 
 
 @pytest.fixture

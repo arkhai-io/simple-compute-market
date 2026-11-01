@@ -29,11 +29,14 @@ from sqlalchemy.orm import sessionmaker
 
 from compute_provisioning_service import app_runtime
 from compute_provisioning_service import container as _container_module
-from compute_provisioning.relays import Relay, RelayService
+from compute_provisioning.hosts import ConnectionCodecs
+from compute_provisioning.relays import GrantKey, Relay, RelayService
 from compute_provisioning_service.db.database import run_migrations
 
 # Development-only Fernet key, generated per run and never used on a network.
 _KEY = Fernet.generate_key().decode()
+# Development-only grant key, generated per run and never used on a network.
+_GRANT_KEY = GrantKey.generate().profile_form()
 
 
 def _relay_document(**overrides) -> str:
@@ -44,6 +47,7 @@ def _relay_document(**overrides) -> str:
         "vm_port_range_start": 6100,
         "vm_port_range_count": 100,
         "token_secret_key": "relay_token",
+        "grant_key_secret_key": "relay_grant_key",
     }
     entry.update(overrides)
     return yaml.safe_dump({"relays": [entry]})
@@ -66,6 +70,7 @@ class _Deployment:
         self.settings = SimpleNamespace(
             ssh_decryption_key=_KEY,
             relay_token="bootstrap-token",
+            relay_grant_key=_GRANT_KEY,
             relay_definitions_path=str(self.document),
             resolved_pool_definitions_path=None,
         )
@@ -85,7 +90,9 @@ class _Deployment:
     def restart(self, monkeypatch) -> RelayService:
         """Bring the service up again against the same database and document."""
         relay_service = RelayService(
-            session_factory=self.session_factory, settings=self.settings
+            session_factory=self.session_factory,
+            settings=self.settings,
+            connection_codecs=ConnectionCodecs([]),
         )
         monkeypatch.setattr(
             _container_module, "resolved_session_factory", self.session_factory,

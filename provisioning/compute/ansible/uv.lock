@@ -45,8 +45,10 @@ dependencies = [
     { name = "arkhai-kit-resource-pools" },
     { name = "arkhai-kit-resource-pools-contracts" },
     { name = "arkhai-kit-site" },
+    { name = "cryptography" },
     { name = "pydantic" },
     { name = "pyyaml" },
+    { name = "rfc8785" },
     { name = "sqlalchemy" },
 ]
 wheels = [
@@ -55,7 +57,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning-ansible"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-compute-provisioning" },

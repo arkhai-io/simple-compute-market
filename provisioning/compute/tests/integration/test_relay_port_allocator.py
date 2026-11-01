@@ -29,10 +29,143 @@ from compute_provisioning.relays import (
     RelayWindowExhaustedError,
 )
 
+# A lease end long past, so a lease's grants have expired and its port, once
+# released, is out of quarantine at once; the quarantine's own tests use ends
+# relative to now.
+_ENDED = datetime(2020, 1, 1, tzinfo=timezone.utc)
+
 
 @pytest.fixture
 def allocator(session_factory):
     return RelayPortAllocator(session_factory)
+
+
+def _stored(session_factory, owner_id: str) -> RelayPortLease:
+    with Session(session_factory.kw["bind"]) as db:
+        row = db.query(RelayPortLease).filter(RelayPortLease.owner_id == owner_id).one()
+        db.expunge(row)
+        return row
+
+
+class TestGrantExpiryAndQuarantine:
+    """A lease records when its grants expire, and a released port is held
+    until that expiry plus the reuse margin, so a grant copied from the host
+    that held it cannot register it for another host."""
+
+    def test_the_grant_expiry_is_the_lease_end_plus_the_grace_rounded_up(
+        self, session_factory
+    ):
+        _relay(session_factory)
+        allocator = RelayPortAllocator(session_factory, grant_expiry_grace=timedelta(seconds=90))
+        end = datetime(2031, 3, 4, 5, 6, 7, 250_000, tzinfo=timezone.utc)
+
+        allocator.allocate(
+            relay_id="site-a", lease_ends_at=end, owner_kind="fulfillment", owner_id="cr-1"
+        )
+
+        assert _stored(session_factory, "cr-1").grant_expires_at == datetime(
+            2031, 3, 4, 5, 7, 38
+        )
+
+    def test_a_lease_end_in_another_zone_is_stored_as_utc(self, session_factory):
+        _relay(session_factory)
+        allocator = RelayPortAllocator(session_factory, grant_expiry_grace=timedelta(0))
+        end = datetime(2031, 3, 4, 7, 0, 0, tzinfo=timezone(timedelta(hours=2)))
+
+        allocator.allocate(
+            relay_id="site-a", lease_ends_at=end, owner_kind="fulfillment", owner_id="cr-1"
+        )
+
+        assert _stored(session_factory, "cr-1").grant_expires_at == datetime(2031, 3, 4, 5)
+
+    def test_a_lease_cut_short_holds_its_port_and_another_is_issued(
+        self, allocator, session_factory
+    ):
+        _relay(session_factory, start=6100, count=3)
+        future = datetime.now(timezone.utc) + timedelta(hours=2)
+        first = allocator.allocate(
+            relay_id="site-a", lease_ends_at=future, owner_kind="fulfillment", owner_id="cr-1"
+        )
+        allocator.release(owner_kind="fulfillment", owner_id="cr-1")
+
+        second = allocator.allocate(
+            relay_id="site-a", lease_ends_at=future, owner_kind="fulfillment", owner_id="cr-2"
+        )
+
+        assert second.remote_port != first.remote_port
+        assert allocator.held_ports("site-a") == [second.remote_port]
+
+    def test_the_margin_holds_a_port_past_its_grants_expiry(self, session_factory):
+        _relay(session_factory, start=6100, count=3)
+        allocator = RelayPortAllocator(
+            session_factory,
+            grant_expiry_grace=timedelta(0),
+            reuse_margin=timedelta(seconds=300),
+        )
+        expired_a_minute_ago = datetime.now(timezone.utc) - timedelta(minutes=1)
+        first = allocator.allocate(
+            relay_id="site-a",
+            lease_ends_at=expired_a_minute_ago,
+            owner_kind="fulfillment",
+            owner_id="cr-1",
+        )
+        allocator.release(owner_kind="fulfillment", owner_id="cr-1")
+
+        second = allocator.allocate(
+            relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-2"
+        )
+
+        assert second.remote_port != first.remote_port
+
+    def test_a_raised_margin_reaches_a_lease_already_released(self, session_factory):
+        """The margin is read when a port is selected, so raising it holds back
+        a port released under the old one."""
+        _relay(session_factory, start=6100, count=3)
+        expired_ten_minutes_ago = datetime.now(timezone.utc) - timedelta(minutes=10)
+        before = RelayPortAllocator(
+            session_factory, grant_expiry_grace=timedelta(0), reuse_margin=timedelta(minutes=5)
+        )
+        first = before.allocate(
+            relay_id="site-a",
+            lease_ends_at=expired_ten_minutes_ago,
+            owner_kind="fulfillment",
+            owner_id="cr-1",
+        )
+        before.release(owner_kind="fulfillment", owner_id="cr-1")
+
+        raised = RelayPortAllocator(
+            session_factory, grant_expiry_grace=timedelta(0), reuse_margin=timedelta(minutes=30)
+        )
+        second = raised.allocate(
+            relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-2"
+        )
+        assert second.remote_port != first.remote_port
+
+        raised.release(owner_kind="fulfillment", owner_id="cr-2")
+        third = before.allocate(
+            relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-3"
+        )
+        assert third.remote_port == first.remote_port
+
+    def test_a_retenancy_replaces_the_last_tenancys_grant_fields(
+        self, allocator, session_factory
+    ):
+        _relay(session_factory, start=6100, count=1)
+        allocator.allocate(
+            relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-1"
+        )
+        with session_factory() as db, db.begin():
+            db.query(RelayPortLease).one().grant_key_id = "the-last-tenancys-key"
+        allocator.release(owner_kind="fulfillment", owner_id="cr-1")
+        later = datetime(2031, 1, 1, tzinfo=timezone.utc)
+
+        allocator.allocate(
+            relay_id="site-a", lease_ends_at=later, owner_kind="fulfillment", owner_id="cr-2"
+        )
+
+        row = _stored(session_factory, "cr-2")
+        assert row.grant_key_id is None
+        assert row.grant_expires_at == datetime(2031, 1, 1) + timedelta(hours=1)
 
 
 def _relay(session_factory, relay_id="site-a", addr="10.0.0.9", start=6100, count=100):
@@ -57,7 +190,7 @@ class TestAllocation:
             relay.label = "accepted"
             writer.flush()
             lease = allocator.allocate_in_session(
-                writer, relay_id="site-a", owner_kind="fulfillment", owner_id="cr-1"
+                writer, relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-1"
             )
             assert allocator.held_ports("site-a") == []
             writer.rollback()
@@ -69,7 +202,7 @@ class TestAllocation:
             relay.label = "accepted"
             writer.flush()
             lease = allocator.allocate_in_session(
-                writer, relay_id="site-a", owner_kind="fulfillment", owner_id="cr-1"
+                writer, relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-1"
             )
             writer.commit()
         assert allocator.held_ports("site-a") == [lease.remote_port]
@@ -81,7 +214,7 @@ class TestAllocation:
     ):
         _relay(session_factory)
         held = allocator.allocate(
-            relay_id="site-a", owner_kind="fulfillment", owner_id="cr-1"
+            relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-1"
         )
 
         class StalePortAllocator(RelayPortAllocator):
@@ -100,7 +233,7 @@ class TestAllocation:
             relay.label = "accepted"
             writer.flush()
             lease = StalePortAllocator(session_factory).allocate_in_session(
-                writer, relay_id="site-a", owner_kind="fulfillment", owner_id="cr-2"
+                writer, relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-2"
             )
             writer.commit()
 
@@ -113,7 +246,7 @@ class TestAllocation:
     def test_a_port_comes_from_the_relays_window(self, allocator, session_factory):
         _relay(session_factory, start=6100, count=10)
         lease = allocator.allocate(
-            relay_id="site-a", owner_kind="fulfillment", owner_id="cr-1"
+            relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-1"
         )
         assert 6100 <= lease.remote_port <= 6109
 
@@ -122,10 +255,10 @@ class TestAllocation:
     ):
         _relay(session_factory)
         first = allocator.allocate(
-            relay_id="site-a", owner_kind="fulfillment", owner_id="cr-1"
+            relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-1"
         )
         second = allocator.allocate(
-            relay_id="site-a", owner_kind="fulfillment", owner_id="cr-2"
+            relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-2"
         )
         assert first.remote_port != second.remote_port
 
@@ -135,11 +268,11 @@ class TestAllocation:
         """The property the whole lease model exists for."""
         _relay(session_factory)
         first = allocator.allocate(
-            relay_id="site-a", owner_kind="fulfillment", owner_id="cr-1",
+            relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-1",
             host_id="kvm1",
         )
         second = allocator.allocate(
-            relay_id="site-a", owner_kind="fulfillment", owner_id="cr-2",
+            relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-2",
             host_id="kvm2",
         )
         assert first.remote_port != second.remote_port
@@ -148,10 +281,10 @@ class TestAllocation:
         _relay(session_factory, relay_id="site-a", addr="10.0.0.9")
         _relay(session_factory, relay_id="site-b", addr="10.0.0.10")
         first = allocator.allocate(
-            relay_id="site-a", owner_kind="fulfillment", owner_id="cr-1"
+            relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-1"
         )
         second = allocator.allocate(
-            relay_id="site-b", owner_kind="fulfillment", owner_id="cr-2"
+            relay_id="site-b", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-2"
         )
         assert first.remote_port == second.remote_port
 
@@ -159,11 +292,11 @@ class TestAllocation:
         self, allocator, session_factory
     ):
         _relay(session_factory, start=6100, count=2)
-        allocator.allocate(relay_id="site-a", owner_kind="fulfillment", owner_id="cr-1")
-        allocator.allocate(relay_id="site-a", owner_kind="fulfillment", owner_id="cr-2")
+        allocator.allocate(relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-1")
+        allocator.allocate(relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-2")
         with pytest.raises(RelayWindowExhaustedError) as excinfo:
             allocator.allocate(
-                relay_id="site-a", owner_kind="fulfillment", owner_id="cr-3"
+                relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-3"
             )
         message = str(excinfo.value)
         assert "site-a" in message
@@ -172,7 +305,7 @@ class TestAllocation:
     def test_allocating_against_an_absent_relay_fails(self, allocator):
         with pytest.raises(RelayWindowExhaustedError):
             allocator.allocate(
-                relay_id="never-created", owner_kind="fulfillment", owner_id="cr-1"
+                relay_id="never-created", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-1"
             )
 
     def test_a_released_port_is_reused(self, allocator, session_factory):
@@ -180,11 +313,11 @@ class TestAllocation:
         an outage sooner than a leak warrants."""
         _relay(session_factory, start=6100, count=3)
         first = allocator.allocate(
-            relay_id="site-a", owner_kind="fulfillment", owner_id="cr-1"
+            relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-1"
         )
         allocator.release(owner_kind="fulfillment", owner_id="cr-1")
         reused = allocator.allocate(
-            relay_id="site-a", owner_kind="fulfillment", owner_id="cr-2"
+            relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-2"
         )
         assert reused.remote_port == first.remote_port
 
@@ -195,7 +328,7 @@ class TestAllocation:
         could be rewritten around it."""
         _relay(session_factory)
         lease = allocator.allocate(
-            relay_id="site-a", owner_kind="fulfillment", owner_id="cr-1"
+            relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-1"
         )
         with Session(session_factory.kw["bind"]) as db:
             db.add(
@@ -222,7 +355,7 @@ class TestTheReleasePrimitive:
     def test_releasing_a_held_lease_frees_its_port(self, allocator, session_factory):
         _relay(session_factory)
         allocator.allocate(
-            relay_id="site-a", owner_kind="fulfillment", owner_id="cr-1"
+            relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-1"
         )
         assert allocator.release(owner_kind="fulfillment", owner_id="cr-1") == 1
         assert allocator.held_ports("site-a") == []
@@ -234,7 +367,7 @@ class TestTheReleasePrimitive:
         that the port and the reservation's capacity are returned together."""
         _relay(session_factory)
         allocator.allocate(
-            relay_id="site-a", owner_kind="fulfillment", owner_id="cr-1"
+            relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-1"
         )
         with session_factory() as db:
             assert RelayPortAllocator.release_in_session(
@@ -246,15 +379,15 @@ class TestTheReleasePrimitive:
     def test_releasing_twice_is_harmless(self, allocator, session_factory):
         """Terminal paths overlap; the ones that do must not fail each other."""
         _relay(session_factory)
-        allocator.allocate(relay_id="site-a", owner_kind="fulfillment", owner_id="cr-1")
+        allocator.allocate(relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-1")
         assert allocator.release(owner_kind="fulfillment", owner_id="cr-1") == 1
         assert allocator.release(owner_kind="fulfillment", owner_id="cr-1") == 0
 
     def test_releasing_one_owner_leaves_another_alone(self, allocator, session_factory):
         _relay(session_factory)
-        allocator.allocate(relay_id="site-a", owner_kind="fulfillment", owner_id="cr-1")
+        allocator.allocate(relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-1")
         kept = allocator.allocate(
-            relay_id="site-a", owner_kind="fulfillment", owner_id="cr-2"
+            relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-2"
         )
         allocator.release(owner_kind="fulfillment", owner_id="cr-1")
         assert allocator.held_ports("site-a") == [kept.remote_port]
@@ -274,7 +407,7 @@ class TestReconciliation:
         self, allocator, session_factory
     ):
         _relay(session_factory)
-        allocator.allocate(relay_id="site-a", owner_kind="fulfillment", owner_id="cr-1")
+        allocator.allocate(relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-1")
         self._age(session_factory, "cr-1", timedelta(hours=3))
 
         released = allocator.reconcile(
@@ -289,7 +422,7 @@ class TestReconciliation:
     ):
         _relay(session_factory)
         lease = allocator.allocate(
-            relay_id="site-a", owner_kind="fulfillment", owner_id="cr-1"
+            relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-1"
         )
         self._age(session_factory, "cr-1", timedelta(hours=3))
 
@@ -306,7 +439,7 @@ class TestReconciliation:
         """The grace period is what keeps reconciliation from racing the
         ordinary release paths it exists to back up."""
         _relay(session_factory)
-        allocator.allocate(relay_id="site-a", owner_kind="fulfillment", owner_id="cr-1")
+        allocator.allocate(relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-1")
 
         released = allocator.reconcile(
             is_owner_released=lambda kind, owner: True, grace=timedelta(hours=1)
@@ -326,7 +459,7 @@ class TestReconciliation:
         """
         _relay(session_factory)
         allocator.allocate(
-            relay_id="site-a", owner_kind="fulfillment", owner_id="cr-abandoned"
+            relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-abandoned"
         )
         self._age(session_factory, "cr-abandoned", timedelta(hours=3))
 
@@ -346,7 +479,7 @@ class TestReconciliation:
         deployed predicate reports it released for that reason."""
         _relay(session_factory)
         allocator.allocate(
-            relay_id="site-a", owner_kind="fulfillment", owner_id="cr-gone"
+            relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-gone"
         )
         self._age(session_factory, "cr-gone", timedelta(hours=3))
 

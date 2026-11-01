@@ -49,9 +49,11 @@ from compute_provisioning_contracts import (
     PrincipalRotationResponse,
     ProvisioningRouteContract,
     RelayCreate,
+    RelayGrantKeyStage,
     RelayLeaseListResponse,
     RelayListResponse,
     RelayResponse,
+    RelayStagedGrantKey,
     RelayTokenRotate,
     RelayUpdate,
     SystemStatusResponse,
@@ -270,6 +272,29 @@ def _set_relay_enabled(relay_id: str, enabled: bool) -> _Call:
 
 def _relay_leases(relay_id: str) -> _Call:
     return _Call("GET", f"/api/v1/relays/{relay_id}/leases", parse=_model(RelayLeaseListResponse))
+
+
+def _stage_relay_grant_key(relay_id: str, body: RelayGrantKeyStage) -> _Call:
+    # The supplied key is a secret value, which a model serialization masks,
+    # so the body is built from the value itself.
+    payload: dict[str, Any] = {}
+    if body.private_key is not None:
+        payload["private_key"] = body.private_key.get_secret_value()
+    return _Call(
+        "POST",
+        f"/api/v1/relays/{relay_id}/grant-keys/stage",
+        payload,
+        parse=_model(RelayStagedGrantKey),
+    )
+
+
+def _activate_relay_grant_key(relay_id: str) -> _Call:
+    return _Call(
+        "POST",
+        f"/api/v1/relays/{relay_id}/grant-keys/activate",
+        {},
+        parse=_model(RelayResponse),
+    )
 
 
 # The service's system and identity routes.
@@ -659,6 +684,24 @@ class ComputeProvisioningClient(SigningBase):
         """The ports a relay holds and has released; the administrator's alone."""
         return await self._run(_relay_leases(relay_id), request_id)
 
+    async def stage_relay_grant_key(
+        self,
+        relay_id: str,
+        body: RelayGrantKeyStage | None = None,
+        *,
+        request_id: str | None = None,
+    ) -> RelayStagedGrantKey:
+        """Stage a relay's next grant key, supplied or generated; it is not yet active."""
+        return await self._run(
+            _stage_relay_grant_key(relay_id, body or RelayGrantKeyStage()), request_id
+        )
+
+    async def activate_relay_grant_key(
+        self, relay_id: str, *, request_id: str | None = None
+    ) -> RelayResponse:
+        """Make the relay's staged grant key its active one, retiring the active one."""
+        return await self._run(_activate_relay_grant_key(relay_id), request_id)
+
     # The service's system and identity routes.
 
     async def get_health(self) -> HealthResponse:
@@ -965,6 +1008,24 @@ class SyncComputeProvisioningClient(SigningBase):
     ) -> RelayLeaseListResponse:
         """See ``ComputeProvisioningClient.list_relay_leases``."""
         return self._run(_relay_leases(relay_id), request_id)
+
+    def stage_relay_grant_key(
+        self,
+        relay_id: str,
+        body: RelayGrantKeyStage | None = None,
+        *,
+        request_id: str | None = None,
+    ) -> RelayStagedGrantKey:
+        """See ``ComputeProvisioningClient.stage_relay_grant_key``."""
+        return self._run(
+            _stage_relay_grant_key(relay_id, body or RelayGrantKeyStage()), request_id
+        )
+
+    def activate_relay_grant_key(
+        self, relay_id: str, *, request_id: str | None = None
+    ) -> RelayResponse:
+        """See ``ComputeProvisioningClient.activate_relay_grant_key``."""
+        return self._run(_activate_relay_grant_key(relay_id), request_id)
 
     # The service's system and identity routes.
 

@@ -7,9 +7,11 @@ from one listening namespace, and the token would be duplicated state whose
 rotation is one write per pool with a missed one failing asynchronously in a
 tunnel client's log.
 
-The token is encrypted at rest under the deployment's ``ssh_decryption_key``,
-the same key that protects embedded host key material. Nothing here returns it:
-callers learn whether a token is configured, never what it is.
+The token and the relay's grant-signing private keys are encrypted at rest
+under the deployment's ``ssh_decryption_key``, the same key that protects
+embedded host key material. Nothing here returns either: callers learn whether
+a token is configured, never what it is, and see a key only by its id and
+public half.
 """
 
 from __future__ import annotations
@@ -17,14 +19,22 @@ from __future__ import annotations
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Iterable, Optional
 
 from market_config import encrypt_secret
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from .db import Relay, RelayPortLease
-from .rebinding import check_relay_endpoint_change, check_relay_token_rotation
+from ..hosts.connection import ConnectionCodecs
+from .allocator import RelayPortAllocator
+from .db import Relay, RelayPortLease, RelayRetiredGrantKey
+from .keys import GrantKey, GrantKeyError
+from .rebinding import (
+    check_relay_address_against_hosts,
+    check_relay_endpoint_change,
+    check_relay_token_rotation,
+)
 
 
 class _Unset:
@@ -44,6 +54,22 @@ class _Unset:
 UNSET = _Unset()
 
 
+def _utcnow() -> datetime:
+    """Now, as the relay tables store times: UTC with no zone."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _grants_valid_until(
+    key: RelayRetiredGrantKey, held: Iterable[RelayPortLease]
+) -> datetime | None:
+    expiries = [
+        lease.grant_expires_at
+        for lease in held
+        if lease.grant_expires_at is not None and lease.created_at < key.retired_at
+    ]
+    return max(expiries, default=None)
+
+
 class RelayNotFoundError(LookupError):
     """No relay with the requested identifier."""
 
@@ -61,14 +87,61 @@ class RelayValidationError(ValueError):
     """A supplied relay field is unusable."""
 
 
+class RelayGrantKeyNotStagedError(LookupError):
+    """Activation was requested for a relay with no staged grant key."""
+
+
+@dataclass(frozen=True)
+class ActiveGrantKeyView:
+    kid: str
+    public_key: str
+    activated_at: datetime
+
+
+@dataclass(frozen=True)
+class StagedGrantKeyView:
+    kid: str
+    public_key: str
+
+
+@dataclass(frozen=True)
+class RetiredGrantKeyView:
+    """A retired key, and until when grants it may have signed stay valid.
+
+    ``grants_valid_until`` is the latest grant expiry among the relay's
+    unreleased leases allocated before the key was retired, or None when none
+    remains, and the key can leave the relay's plugin. A grant is signed on
+    every attempt of a job, so a lease whose job was retried across a rotation
+    may have grants from this key and its successor on its host; a record of
+    one key per lease could call this key removable while a host still holds
+    its grant. The bound is never short: every grant the key signed was for a
+    lease allocated before its retirement, and a lease's grant expiry is fixed
+    at allocation. Released leases are left out, since teardown revokes.
+    """
+
+    kid: str
+    retired_at: datetime
+    grants_valid_until: datetime | None
+
+
+@dataclass(frozen=True)
+class GrantKeysView:
+    """A relay's grant keys by id and public half: never a private key."""
+
+    active: ActiveGrantKeyView | None
+    staged: StagedGrantKeyView | None
+    retired: tuple[RetiredGrantKeyView, ...]
+
+
 @dataclass(frozen=True)
 class RelayView:
     """What a caller may see of a relay.
 
-    Deliberately not the ORM row: ``relay_token_encrypted`` has no member here,
-    so no serializer added later can reach a credential through this type.
-    ``token_configured`` answers the question an operator actually has — is this
-    relay usable — without disclosing the value.
+    Deliberately not the ORM row: neither ``relay_token_encrypted`` nor any
+    encrypted grant key has a member here, so no serializer added later can
+    reach a credential through this type. ``token_configured`` answers the
+    question an operator actually has — is this relay usable — without
+    disclosing the value.
     """
 
     id: str
@@ -79,9 +152,29 @@ class RelayView:
     vm_port_range_count: int
     enabled: bool
     token_configured: bool
+    grant_keys: GrantKeysView
 
     @classmethod
-    def of(cls, row: Relay) -> "RelayView":
+    def of(
+        cls,
+        row: Relay,
+        retired: Iterable[RelayRetiredGrantKey] = (),
+        held: Iterable[RelayPortLease] = (),
+    ) -> "RelayView":
+        """The view of a relay row, with its retired keys and its held leases."""
+        held = tuple(held)
+        active = None
+        if row.grant_key_id is not None:
+            active = ActiveGrantKeyView(
+                kid=row.grant_key_id,
+                public_key=row.grant_key_public,
+                activated_at=row.grant_key_activated_at,
+            )
+        staged = None
+        if row.staged_grant_key_id is not None:
+            staged = StagedGrantKeyView(
+                kid=row.staged_grant_key_id, public_key=row.staged_grant_key_public
+            )
         return cls(
             id=row.id,
             label=row.label,
@@ -91,6 +184,18 @@ class RelayView:
             vm_port_range_count=row.vm_port_range_count,
             enabled=bool(row.enabled),
             token_configured=bool(row.relay_token_encrypted),
+            grant_keys=GrantKeysView(
+                active=active,
+                staged=staged,
+                retired=tuple(
+                    RetiredGrantKeyView(
+                        kid=key.key_id,
+                        retired_at=key.retired_at,
+                        grants_valid_until=_grants_valid_until(key, held),
+                    )
+                    for key in retired
+                ),
+            ),
         )
 
 
@@ -106,6 +211,8 @@ class RelayLeaseRecord:
     owner_id: str
     allocated_at: datetime
     released_at: datetime | None
+    grant_expires_at: datetime | None
+    grant_key_id: str | None
 
     @classmethod
     def of(cls, row: RelayPortLease) -> "RelayLeaseRecord":
@@ -118,13 +225,24 @@ class RelayLeaseRecord:
             owner_id=row.owner_id,
             allocated_at=row.created_at,
             released_at=row.released_at,
+            grant_expires_at=row.grant_expires_at,
+            grant_key_id=row.grant_key_id,
         )
 
 
 class RelayService:
-    def __init__(self, session_factory: Any, settings: Any | None = None) -> None:
+    def __init__(
+        self,
+        session_factory: Any,
+        settings: Any | None = None,
+        *,
+        connection_codecs: ConnectionCodecs,
+    ) -> None:
         self._session_factory = session_factory
         self._settings = settings
+        # The host authority's codecs, through which moving a relay reads the
+        # connection addresses of the hosts it serves.
+        self._connection_codecs = connection_codecs
         # Set only on a view returned by ``joining``.
         self._joined: Session | None = None
 
@@ -150,7 +268,9 @@ class RelayService:
     def joining(self, db: Session) -> "RelayService":
         """A view whose operations run in *db* and do not commit."""
         bound = RelayService(
-            session_factory=self._session_factory, settings=self._settings
+            session_factory=self._session_factory,
+            settings=self._settings,
+            connection_codecs=self._connection_codecs,
         )
         bound._joined = db
         return bound
@@ -178,11 +298,25 @@ class RelayService:
     def list_relays(self) -> list[RelayView]:
         with self._read() as session:
             rows = session.query(Relay).order_by(Relay.id).all()
-            return [RelayView.of(row) for row in rows]
+            retired: dict[str, list[RelayRetiredGrantKey]] = {}
+            for key in session.query(RelayRetiredGrantKey).order_by(
+                RelayRetiredGrantKey.retired_at, RelayRetiredGrantKey.key_id
+            ):
+                retired.setdefault(key.relay_id, []).append(key)
+            held: dict[str, list[RelayPortLease]] = {}
+            if retired:
+                for lease in session.query(RelayPortLease).filter(
+                    RelayPortLease.released_at.is_(None)
+                ):
+                    held.setdefault(lease.relay_id, []).append(lease)
+            return [
+                RelayView.of(row, retired.get(row.id, ()), held.get(row.id, ()))
+                for row in rows
+            ]
 
     def get_relay(self, relay_id: str) -> RelayView:
         with self._read() as session:
-            return RelayView.of(self._require(session, relay_id))
+            return self._view(session, self._require(session, relay_id))
 
     def list_leases(self, relay_id: str) -> list[RelayLeaseRecord]:
         """Every lease row the relay has, held or released, by remote port.
@@ -215,11 +349,21 @@ class RelayService:
         label: str | None = None,
         token: str | None = None,
         enabled: bool = True,
+        grant_key: GrantKey | None = None,
     ) -> RelayView:
+        """Record a relay, with an active grant-signing key from the start.
+
+        ``grant_key`` is that key; with none supplied, the service generates
+        one. A generated key never leaves the
+        service, so it survives only with the database, and the operator
+        configures the relay's plugin with the public half the read returns.
+        """
         with self._write() as db:
             addr = self._validated_addr(relay_addr)
             self._validate_window(vm_port_range_start, vm_port_range_count)
             self._reject_duplicate_endpoint(db, addr, relay_port, excluding=None)
+            key = grant_key or GrantKey.generate()
+            self._reject_used_key(db, key.kid)
             row = Relay(
                 id=relay_id or str(uuid.uuid4()),
                 label=label,
@@ -228,6 +372,10 @@ class RelayService:
                 vm_port_range_start=int(vm_port_range_start),
                 vm_port_range_count=int(vm_port_range_count),
                 enabled=enabled,
+                grant_key_encrypted=self._encrypt(key.profile_form()),
+                grant_key_id=key.kid,
+                grant_key_public=key.public_key,
+                grant_key_activated_at=_utcnow(),
             )
             if token:
                 row.relay_token_encrypted = self._encrypt(token)
@@ -264,6 +412,10 @@ class RelayService:
                 check_relay_endpoint_change(
                     db, relay=row, new_addr=addr, new_port=port
                 )
+            if addr != row.relay_addr:
+                check_relay_address_against_hosts(
+                    db, relay=row, new_addr=addr, codecs=self._connection_codecs
+                )
             start = (
                 row.vm_port_range_start
                 if vm_port_range_start is None
@@ -285,7 +437,7 @@ class RelayService:
             if enabled is not None:
                 row.enabled = enabled
             db.flush()
-            return RelayView.of(row)
+            return self._view(db, row)
 
     def rotate_token(self, relay_id: str, token: str) -> RelayView:
         """Replace a relay's admission token.
@@ -314,14 +466,83 @@ class RelayService:
             check_relay_token_rotation(db, relay=row)
             row.relay_token_encrypted = self._encrypt(token)
             db.flush()
-            return RelayView.of(row)
+            return self._view(db, row)
 
     def set_enabled(self, relay_id: str, enabled: bool) -> RelayView:
         return self.update_relay(relay_id, enabled=enabled)
 
+    def stage_grant_key(
+        self, relay_id: str, private_key: str | None = None
+    ) -> StagedGrantKeyView:
+        """Stage the relay's next grant-signing key, and return its public half.
+
+        ``private_key``, when supplied, is in the profile's form: an operator
+        who keeps a relay's key in the secrets profile stages that same key, so
+        a reinstall from an empty database recreates the relay with the key its
+        plugin knows. With none supplied the service generates one. A key
+        already staged is replaced. The staged key stays staged until it is
+        activated, so the operator adds its public half to the relay's plugin
+        first.
+        """
+        if private_key is None:
+            key = GrantKey.generate()
+        else:
+            try:
+                key = GrantKey.from_profile_form(private_key)
+            except GrantKeyError as exc:
+                raise RelayValidationError(str(exc)) from None
+        with self._write() as db:
+            row = self._require(db, relay_id)
+            self._reject_used_key(db, key.kid)
+            row.staged_grant_key_encrypted = self._encrypt(key.profile_form())
+            row.staged_grant_key_id = key.kid
+            row.staged_grant_key_public = key.public_key
+            db.flush()
+            return StagedGrantKeyView(kid=key.kid, public_key=key.public_key)
+
+    def activate_grant_key(self, relay_id: str) -> RelayView:
+        """Make the staged key the active one, retiring the active one.
+
+        The retired key is kept by id with its retirement time, so the relay
+        read tells the operator which key the relay's plugin still holds and
+        since when it has been retired.
+        """
+        with self._write() as db:
+            row = self._require(db, relay_id)
+            if row.staged_grant_key_id is None:
+                raise RelayGrantKeyNotStagedError(
+                    f"Relay '{relay_id}' has no staged grant key to activate"
+                )
+            now = _utcnow()
+            if row.grant_key_id is not None:
+                db.add(
+                    RelayRetiredGrantKey(
+                        relay_id=row.id, key_id=row.grant_key_id, retired_at=now
+                    )
+                )
+            row.grant_key_encrypted = row.staged_grant_key_encrypted
+            row.grant_key_id = row.staged_grant_key_id
+            row.grant_key_public = row.staged_grant_key_public
+            row.grant_key_activated_at = now
+            row.staged_grant_key_encrypted = None
+            row.staged_grant_key_id = None
+            row.staged_grant_key_public = None
+            db.flush()
+            return self._view(db, row)
+
     # ------------------------------------------------------------------
     # Seeding support
     # ------------------------------------------------------------------
+
+    def grant_key_conflict(self, kid: str) -> str | None:
+        """Why a key with this id cannot be given to a relay, or None if it can.
+
+        Lets a caller creating several relays refuse a held key before it
+        writes any of them; ``create_relay`` and ``stage_grant_key`` refuse it
+        themselves all the same.
+        """
+        with self._read() as db:
+            return self._key_conflict(db, kid)
 
     def find_by_endpoint(
         self, db: Session, relay_addr: str, relay_port: int
@@ -356,6 +577,50 @@ class RelayService:
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+
+    @classmethod
+    def _reject_used_key(cls, db: Session, kid: str) -> None:
+        """Refuse a grant key any relay holds or has held.
+
+        A key belongs to one relay, once. Shared by two relays, one leak would
+        let its holder sign grants for both; made active again by a relay that
+        retired it, its retirement time would no longer say when the relay's
+        plugin may drop it.
+        """
+        conflict = cls._key_conflict(db, kid)
+        if conflict is not None:
+            raise RelayValidationError(conflict)
+
+    @staticmethod
+    def _key_conflict(db: Session, kid: str) -> str | None:
+        holder = (
+            db.query(Relay)
+            .filter(or_(Relay.grant_key_id == kid, Relay.staged_grant_key_id == kid))
+            .first()
+        )
+        if holder is not None:
+            return f"grant key '{kid}' is already held by relay '{holder.id}'"
+        retired = (
+            db.query(RelayRetiredGrantKey)
+            .filter(RelayRetiredGrantKey.key_id == kid)
+            .first()
+        )
+        if retired is not None:
+            return f"grant key '{kid}' was retired by relay '{retired.relay_id}'"
+        return None
+
+    @staticmethod
+    def _view(db: Session, row: Relay) -> RelayView:
+        retired = (
+            db.query(RelayRetiredGrantKey)
+            .filter(RelayRetiredGrantKey.relay_id == row.id)
+            .order_by(RelayRetiredGrantKey.retired_at, RelayRetiredGrantKey.key_id)
+            .all()
+        )
+        held = (
+            RelayPortAllocator.active_leases_for_relay(db, row.id) if retired else []
+        )
+        return RelayView.of(row, retired, held)
 
     @staticmethod
     def _require(db: Session, relay_id: str) -> Relay:
@@ -401,10 +666,15 @@ class RelayService:
 
 __all__ = [
     "UNSET",
+    "ActiveGrantKeyView",
+    "GrantKeysView",
     "RelayEndpointConflictError",
+    "RelayGrantKeyNotStagedError",
     "RelayLeaseRecord",
     "RelayNotFoundError",
     "RelayService",
     "RelayValidationError",
     "RelayView",
+    "RetiredGrantKeyView",
+    "StagedGrantKeyView",
 ]

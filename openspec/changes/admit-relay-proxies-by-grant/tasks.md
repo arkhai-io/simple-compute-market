@@ -1,11 +1,19 @@
 # Tasks
 
 Planned against the design settled in `design.md` and advanced by
-`reviews/14-design.triage.md`. Every task answers to a decision (D1–D15, with D3a), a
-requirement of the delta `specs/frp-grant-admission/spec.md`, or a repository obligation
-cited at the task: `openspec/README.md#plan-closeout-requirements`, the task rules in
-`openspec/config.yaml`, `docs/development/TESTING.md`'s levels, `docs/development/BUILD_AND_PACKAGING.md`,
-and `AGENTS.md`.
+`reviews/14-design.triage.md`; replanned against D16–D23, settled after section 1 returned
+the change to design and advanced by `reviews/27-design.triage.md`. Section 1's tasks and
+notes are kept as implemented; sections 2–8 were replanned against the reviewed design.
+Every task answers to a decision (D1–D23, with D3a), a requirement of the delta
+`specs/frp-grant-admission/spec.md`, or a repository obligation cited at the task:
+`openspec/README.md#plan-closeout-requirements`, the task rules in `openspec/config.yaml`,
+`docs/development/TESTING.md`'s levels, `docs/development/BUILD_AND_PACKAGING.md`, and
+`AGENTS.md`.
+
+The change is `admit-relay-proxies-by-grant` (D16, D17); the tool, its distribution,
+console script, image, root targets, and capability keep the name `frp-grant-admission`
+(D14). A command naming the change uses the change's name; a path or name of the tool or
+the capability keeps the tool's.
 
 Test levels follow `docs/development/TESTING.md`. **Unit**: one module in isolation, no
 socket and no process. **Integration (in-process)**: the plugin's real HTTP server on an
@@ -20,17 +28,18 @@ it until `prove-relay-provisioning`, whose real lanes do. No section owes one.
 Every path below is under `tools/frp-grant-admission/` unless it names another root.
 The tool depends on `cryptography`, PyJWT, and the standard library only (D4); nothing in
 it names hosts, leases, sites, or SCM. Public-repository discipline (`AGENTS.md`) applies
-to the vector, the examples, and every note: the only key is RFC 8032 §7.1's TEST 1 key,
-labelled as a test value never to be used on any network, and every address is loopback
+to the vector, the examples, and every note: the only keys are RFC 8032 §7.1's test keys,
+labelled as test values never to be used on any network, and every address is loopback
 or a documentation example.
 
 Order: sections 1–4 deliver the plugin proven in-process — configuration, verification
 and the vector, the server, and the README specification; sections 5–7 deliver real frp,
-CI, and shipping; section 8 is the closeout. Section 5 needs sections 1–3; section 6
-needs section 5; section 7 needs section 3. No dependency gates implementation. If a
-premise about frp that section 5 tests is false — frps failing closed, frpc retrying a
-refused proxy, a refusal reason reaching frpc, a reload leaving unchanged proxies
-registered — the change returns to design rather than being worked around (D15).
+CI with the floor run, and shipping; section 8 is the closeout. Section 5 needs sections
+1–3; section 6 needs section 5; section 7 needs section 3. No dependency gates
+implementation. If a premise about frp that section 5 tests is false — frps failing
+closed, frpc retrying a refused proxy, a refusal reason reaching frpc, a reload leaving
+unchanged proxies registered — the change returns to design rather than being worked
+around (D15, D21).
 
 Permanent documentation outside the tool — the capability's `architecture.md`,
 `openspec/specs/README.md`, `ARCHITECTURE.md`, and `TESTING.md` — is written at closeout
@@ -40,12 +49,12 @@ Permanent documentation outside the tool — the capability's `architecture.md`,
 
 Delivers the tool's project and the configuration loader: TOML, issuers grouping keys,
 thumbprint key ids, the loopback listen rule, and every load refusal (D3, D3a, D4, D8's
-Python floor, D13; delta "Issuers bind keys to an audience and a port range", and the
+Python floor, D13, D20; delta "Issuers bind keys to an audience and a port range", and the
 listen-address rule of "Configuration reloads only when valid").
 
 Files: `pyproject.toml`, `uv.lock`, `Makefile`, `LICENSE`, `.gitignore`,
 `src/frp_grant_admission/__init__.py`, `src/frp_grant_admission/config.py`,
-`tests/unit/test_config.py`, `examples/config.toml`.
+`tests/unit/test_config.py`, `tests/rfc8032.py`, `examples/config.toml`.
 
 - [ ] 1.1 Create the project as `docs/development/BUILD_AND_PACKAGING.md` lays one out:
       distribution `frp-grant-admission`, import package `frp_grant_admission` at
@@ -56,6 +65,10 @@ Files: `pyproject.toml`, `uv.lock`, `Makefile`, `LICENSE`, `.gitignore`,
       `Makefile` exports `UV_PYTHON` from `../../.python-version` and has `test`; it needs
       no `reinit`, since its lock installs nothing from the wheelhouse. Lock with
       `make lock PROJECTS="tools/frp-grant-admission"`. (D4, D8)
+      Note: as planned; `cryptography>=42`, `PyJWT>=2.8.0` (1.2). The console script
+      names `frp_grant_admission.cli:main`, which section 3 writes. `pyproject.toml`
+      gains `readme = "README.md"` in section 4, when the README exists. The lock
+      resolves cryptography 50.0.2 and PyJWT 2.15.1; `make check-packaging` passes.
 - [ ] 1.2 **Decision gate on PyJWT's `iat`.** Find the lowest PyJWT release whose
       `jwt.decode` refuses, with zero leeway, an `iat` later than the clock, as D12 step 7
       and the delta's "A grant is not yet valid" require of "`nbf` and `iat` validated as
@@ -63,6 +76,20 @@ Files: `pyproject.toml`, `uv.lock`, `Makefile`, `LICENSE`, `.gitignore`,
       release does, stop: the design must decide whether the plugin checks `iat` itself,
       and the change returns to design (`openspec/README.md#open-questions-and-prescribed-tasks`).
       (D8, D12)
+      Note: **2.6.0** is the lowest release refusing an `iat` later than the clock
+      (`if iat > (now + leeway): raise ImmatureSignatureError`), and the first whose
+      expiry check is `exp <= now - leeway`, refusing at exactly `exp` as D12 requires;
+      2.0.0, 2.4.0, and 2.5.0 have no future-`iat` check and refuse only `exp < now`.
+      2.2's `strict_aud` option first appears in **2.8.0** (absent in 2.6.0 and 2.7.0),
+      so the declared floor is `PyJWT>=2.8.0`. Evidence: each release locked in turn and
+      its installed `jwt/api_jwt.py` read. Every release from 2.8.0 to 2.15.1 compares
+      in `_validate_iat`, `_validate_nbf`, and `_validate_exp(payload, now, leeway)`, but
+      reads `now` itself (`datetime.now()` in `_validate_claims`) and takes no clock
+      argument — see 2.2's note for how the injected clock reaches those comparisons.
+      Correction (replanned): the gate is settled by the design, not by this note. D18
+      makes the time checks the plugin's own, so PyJWT's `iat` behaviour no longer bears
+      on the floor, and D20 keeps `PyJWT>=2.8.0` for `strict_aud` alone; the clock never
+      reaches PyJWT (2.2). Done when `pyproject.toml` declares `PyJWT>=2.8.0`, as it does.
 - [ ] 1.3 `config.py` loads a TOML file with `tomllib` into an immutable configuration:
       `listen` and a list of issuers, each with `name`, `audience`, `ports.start`,
       `ports.end`, and `keys`, each key a `public_key` — single-line standard base64 of
@@ -71,6 +98,11 @@ Files: `pyproject.toml`, `uv.lock`, `Makefile`, `LICENSE`, `.gitignore`,
       `{"crv":"Ed25519","kty":"OKP","x":"<base64url raw key>"}`), and the configuration
       maps each id to its key and issuer. Types are strict: a quoted port is an error.
       (D3, D3a, D13)
+      Note: `load_config(path)` and `parse_config(text)` return a frozen `Config`
+      (`listen`, `issuers`, and a read-only `keys` map from thumbprint to `Key`, which
+      names its `Issuer`); `thumbprint()` is the derivation. A key must be canonical: its
+      base64 decodes strictly and re-encodes to the same DER, so trailing bytes are
+      refused.
 - [ ] 1.4 Loading collects every problem and refuses the file, naming each: a key listed
       twice (by thumbprint, in any issuers); two issuers with the same `name`; two
       issuers whose ranges overlap, naming both; an issuer with no keys; a range outside
@@ -78,27 +110,56 @@ Files: `pyproject.toml`, `uv.lock`, `Makefile`, `LICENSE`, `.gitignore`,
       a missing or mistyped field; and a `listen` that is not an IPv4 address in
       `127.0.0.0/8` or `[::1]` with a port from 1 to 65535 — a hostname such as
       `localhost` included, decided without a resolver. (D3, D13; 14 F2)
+      Note: beyond the plan, an unknown field at any level is refused too, so a file
+      written for a later format (D3's "a later list of ranges") fails to load rather
+      than loading with part of it ignored. The listen address is parsed with
+      `ipaddress` alone, which also refuses `127.1` and `[::ffff:127.0.0.1]`. A file that
+      cannot be read or is not TOML is one problem naming why.
 - [ ] 1.5 `examples/config.toml` is D13's example, with RFC 8032's TEST 1 public key and
       a comment saying it is a test value never to be used on any network. (D13;
       `AGENTS.md` public-repository discipline)
+      Note: D13 elides the second issuer's key; the example gives it RFC 8032's TEST 2
+      public key, labelled the same way, since a key cannot be listed twice.
 - [ ] 1.6 `.gitignore` ignores the tool's frp cache directory (section 5) and its
       environment. (D5)
+      Note: the cache directory is `.frp-cache/`, which section 5's fetch must use.
 - [ ] 1.7 Unit (`tests/unit/test_config.py`): the example loads; the TEST 1 key's derived
       id is RFC 8037 Appendix A.3's `kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k`; two keys
       in one issuer both resolve to it; each refusal in 1.4 is reported, and a file with
       several problems reports all of them; `listen` values `0.0.0.0:7300`,
       `192.0.2.1:7300`, `localhost:7300`, and `[::]:7300` are refused, and
       `127.0.0.1:7300`, `127.1.2.3:7300`, and `[::1]:7300` load.
+      Note: unit, 45 cases, all pass; they also hold the example's keys to RFC 8032's
+      TEST 1 and TEST 2 hex. The RFC 8032 keys the tests and the vector use live in
+      `tests/rfc8032.py` (TEST 1, 2, and 3).
 - [ ] 1.8 Verification: `make -C tools/frp-grant-admission test` (unit); `make
       check-packaging` (a new project and lock).
       End-to-end: none (see the preamble).
+      Note: `make -C tools/frp-grant-admission test` — unit, 45 passed (the suite at this
+      section's end); `make check-packaging` — passes. End-to-end: none, confirmed.
+      Handoff: `scripts/uv_project.py lock` needs an existing `uv.lock`, and uv refuses an
+      empty one, so the first lock was made from a stub holding `version = 1` and
+      `requires-python`; `make lock` keeps a third-party package at its locked version,
+      so moving one means relocking from that stub.
+- [ ] 1.9 Re-check section 1 after the rename and the merge of `dev` (D16, D21): the work
+      of 1.1–1.8 is unchanged; `make -C tools/frp-grant-admission test` (unit) passes;
+      `make check-packaging` passes; `make check-change CHANGE=admit-relay-proxies-by-grant`
+      reports no failure but its citations check's, which may name only files the change
+      creates — comment hygiene included, now that no code line contains the change's
+      name. Then check 1.1–1.9 and commit the section.
+
+Section 1 first stopped, its work done, because `make check-comment-hygiene` refuses any
+code line containing a change's name and the change shared the tool's name. The design
+settled it by renaming the change, not the tool (D16, D17); `reviews/27-design.triage.md`
+records comment hygiene passing on the renamed change. Section 1 is completed by 1.9.
 
 ## 2. Grant verification and the test vector
 
-Delivers the grant check of D12 steps 5–9 through PyJWT, its reason codes, and the
-published vector with verification, signing, and thumbprint cases (D2, D7, D12; delta "A
-proxy is admitted only for its granted port" for the grant's checks, and "The plugin
-owns its grant specification").
+Delivers the grant check of D12 steps 5–11 — the plugin's own header, time, and
+claim-type checks around PyJWT's parsing and signature — its reason codes, and the
+published vector with verification, signing, and thumbprint cases (D2, D7, D12, D18, D19,
+D22; delta "A proxy is admitted only for its granted port" for the grant's checks, and
+"The plugin owns its grant specification").
 
 Files: `src/frp_grant_admission/grant.py`, `src/frp_grant_admission/reasons.py`,
 `vector/frp-grant-1.json`, `tests/unit/test_grant.py`, `tests/unit/test_vector.py`,
@@ -111,19 +172,25 @@ Files: `src/frp_grant_admission/grant.py`, `src/frp_grant_admission/reasons.py`,
       `grant_expired`, `grant_not_yet_valid`, `port_mismatch`, `port_outside_range` —
       each with its short text. (D10, D12)
 - [ ] 2.2 `grant.py` verifies a grant string against a configuration, a remote port, and
-      an injected clock, in D12's order: at most 4 KiB, else `grant_malformed`; the
-      unverified header's `kid` names a configured key, else `key_unknown`;
-      `jwt.decode_complete` with `algorithms=["EdDSA"]`, the key's issuer's audience,
-      `options={"require": ["exp", "aud", "port"], "strict_aud": True}`, and no leeway,
-      PyJWT's errors mapped to `signature_invalid`, `claim_missing`,
-      `audience_mismatch`, `grant_expired`, `grant_not_yet_valid`, and
-      `grant_malformed`; then `typ` exactly `frp-grant+jwt`, else
-      `grant_type_unsupported`, and no `crit`, else `grant_malformed`; then `port` a JSON
-      integer and not a boolean, equal to the remote port, else `port_mismatch`, and
-      inside the issuer's range, else `port_outside_range`. The result is a verdict, its
-      reason, the issuer's name, and the `kid`, `sub`, `jti`, and `exp` it read, with
-      whether they were verified. Unknown claims are ignored. The clock is a parameter,
-      never read inside the check. (D2, D12)
+      a clock passed in by the caller, in D12's order, refusing at the first failure:
+      (a) at most 4 KiB, else `grant_malformed`; (b) the unverified header's `kid` names
+      a configured key, else `key_unknown`; (c) the unverified header's `typ` is exactly
+      `frp-grant+jwt`, else `grant_type_unsupported`, and it has no `crit`, else
+      `grant_malformed` — before PyJWT verifies anything (D22); (d) `jwt.decode_complete`
+      with `algorithms=["EdDSA"]`, the key's issuer's audience, and `options={"require":
+      ["exp", "aud", "port"], "strict_aud": True, "verify_exp": False, "verify_nbf":
+      False, "verify_iat": False, "verify_sub": False, "verify_jti": False}`, PyJWT's
+      errors mapped to `signature_invalid`, `claim_missing`, `audience_mismatch`, and
+      `grant_malformed`; (e) `exp`, and `nbf` and `iat` when present, are JSON integers
+      and not booleans, else `grant_malformed`, and against the passed clock `now ≥ exp`
+      is `grant_expired` and an `nbf` or `iat` later than `now` is
+      `grant_not_yet_valid`, with no leeway (D18); (f) `sub` and `jti`, when present, are
+      strings, else `grant_malformed` (D19); (g) `port` a JSON integer and not a boolean,
+      equal to the remote port, else `port_mismatch`, and inside the issuer's range, else
+      `port_outside_range`. The result is a verdict, its reason, the issuer's name, and the `kid`, `sub`,
+      `jti`, and `exp` it read, with whether they were verified. Unknown claims are
+      ignored. The check never reads the system clock, and no time comparison is left to
+      PyJWT. (D2, D12, D18, D19, D22)
 - [ ] 2.3 `vector/frp-grant-1.json`: the specification's version (`frp-grant 1.0`); the
       TEST 1 key's seed and public key, labelled a test value never to be used on any
       network; a configuration of two issuers with adjacent ranges; verification cases
@@ -138,17 +205,25 @@ Files: `src/frp_grant_admission/grant.py`, `src/frp_grant_admission/reasons.py`,
       return, and these named cases: valid; a second key of the same issuer; wrong port;
       outside the issuer's range; inside the other issuer's range; wrong audience; an
       `aud` list (`strict_aud`); forged signature; unknown `kid`; `typ` `JWT`; `typ`
-      absent; `crit` present; `port` as a string; `port` as `true`; missing `exp`; a
-      padded token admitted; an unknown claim admitted; and D12's three boundary cases —
-      one second before `exp` admitted, exactly `exp` refused as `grant_expired`, and an
-      `iat` one second ahead refused as `grant_not_yet_valid`. (D7, D12; 14 F1)
+      absent; `crit` present on a correctly signed grant; `crit` present on a forged grant,
+      refused as `grant_malformed`, not `signature_invalid` (D22); `port` as a string;
+      `port` as `true`; missing `exp`; `exp` as a string, `exp` as a float, `exp` as
+      `true`, and `iat` as a string, each refused as `grant_malformed` (D18); an integer
+      `jti` and an object `sub`, each refused as `grant_malformed` (D19); a padded token
+      admitted; an unknown claim admitted; and D12's three boundary cases — one second
+      before `exp` admitted, exactly `exp` refused as `grant_expired`, and an `iat` one
+      second ahead refused as `grant_not_yet_valid` — with an `nbf` one second ahead
+      refused as `grant_not_yet_valid` too. (D7, D12, D18, D19, D22; 14 F1)
 - [ ] 2.5 Unit (`tests/unit/test_vector.py`): every verification case returns its
-      verdict and reason through `grant.py`; every signing case's token is reproduced
-      byte for byte by serializing its header and claims as JCS and signing with the
-      TEST 1 key; the thumbprint case matches `config.py`'s derivation; the committed
-      file equals the builder's output. Unit (`tests/unit/test_grant.py`): the result's
-      `verified` is false and its `kid`, `sub`, and `jti` are the token's for a forged
-      grant, and absent for a malformed one; the clock is the injected one.
+      verdict and reason through `grant.py`, at the case's time; every signing case's
+      token is reproduced byte for byte by serializing its header and claims as JCS and
+      signing with the TEST 1 key; the thumbprint case matches `config.py`'s derivation;
+      the committed file equals the builder's output. Unit (`tests/unit/test_grant.py`):
+      the result's `verified` is false and its `kid`, `sub`, and `jti` are the token's for
+      a forged grant, and absent for a malformed one; a grant whose `exp` is before the
+      wall clock is admitted when the passed clock is earlier than its `exp`, and one whose
+      `iat` is after the wall clock is admitted when the passed clock is later, proving no
+      time check is PyJWT's and the system clock is never read. (D18)
 - [ ] 2.6 Verification: `make -C tools/frp-grant-admission test` (unit).
       End-to-end: none (see the preamble).
 
@@ -156,9 +231,9 @@ Files: `src/frp_grant_admission/grant.py`, `src/frp_grant_admission/reasons.py`,
 
 Delivers the HTTP endpoint frps calls, request handling and answers, decision logging,
 SIGHUP reload, and the `serve` and `check` commands (D6, D8, D9, D10, D12 steps 1–4 and
-its answers; delta "A proxy is admitted only for its granted port" for the request's
-checks, "The plugin holds no state and calls nothing", "Configuration reloads only when
-valid", and "Every decision is explained and logged").
+its answers, D18's system clock; delta "A proxy is admitted only for its granted port" for
+the request's checks, "The plugin holds no state and calls nothing", "Configuration
+reloads only when valid", and "Every decision is explained and logged").
 
 Files: `src/frp_grant_admission/server.py`, `src/frp_grant_admission/decision_log.py`,
 `src/frp_grant_admission/cli.py`, `tests/integration/test_server.py`,
@@ -171,11 +246,12 @@ Files: `src/frp_grant_admission/server.py`, `src/frp_grant_admission/decision_lo
       `tcp`, else `proxy_type_not_allowed`; `content.group` absent or empty, else
       `group_not_allowed`; `content.remote_port` an integer from 1 to 65535, else
       `port_invalid`; the grant from `content.metas.grant` only, else `grant_missing` —
-      `content.user.metas` is never read; then section 2's check. An admission answers
-      HTTP 200 `{"reject": false, "unchange": true}`; a refusal answers HTTP 200
+      `content.user.metas` is never read; then section 2's check, given the system clock
+      read once per request, the server's clock being injectable for tests. An admission
+      answers HTTP 200 `{"reject": false, "unchange": true}`; a refusal answers HTTP 200
       `{"reject": true, "reject_reason": "<code>: <text>"}`. Each request reads the
       configuration reference once, so it finishes under the configuration it started
-      with. The server holds no other state and makes no outbound call. (D6, D8, D12)
+      with. The server holds no other state and makes no outbound call. (D6, D8, D12, D18)
 - [ ] 3.2 `decision_log.py` writes one JSON line to stderr per decision, in D10's shape —
       `ts`, `event` (`admit` or `refuse`), `reason` on a refusal, `proxy`, `type`,
       `remote_port`, `issuer` where known, `kid`, `sub`, `jti`, `exp` where present, and
@@ -216,26 +292,29 @@ Files: `src/frp_grant_admission/server.py`, `src/frp_grant_admission/decision_lo
 ## 4. The README specification
 
 Delivers the tool's README as the published grant specification, after sections 1–3
-prove the behaviour it states (D2, D3, D3a, D7, D9, D10, D12, D13, D14's README part;
-delta "The plugin owns its grant specification").
+prove the behaviour it states (D2, D3, D3a, D7, D9, D10, D12, D13, D14's README part,
+D18, D19, D22; delta "The plugin owns its grant specification").
 
-Files: `README.md`.
+Files: `README.md`, `pyproject.toml` (`readme`).
 
 - [ ] 4.1 `README.md` states, naming no concept of any particular issuing system: what
       the plugin does and does not (D1, D6); the grant — header, claims, required and
-      optional, where it is carried in frpc's configuration and on the wire; `typ` as the
-      major version and the compatibility rule, with the specification's version
-      `frp-grant 1.x` (D2); key ids as RFC 7638 thumbprints (D3a); signing as JCS and
-      unpadded base64url, required of signers only (D7); expiry checked on the relay's
-      clock with no leeway, and the boundary (D12); the configuration format with D13's
-      example, the loopback rule, and the frps `[[httpPlugins]]` stanza (`path = "/"`,
-      `ops = ["NewProxy"]`) (D13); reload by SIGHUP, `listen` at restart only, and `check`
-      (D9); the reason codes and the decision log's fields (D10, D12); the vector's
-      format and the conformance a signer owes (D7); and D3's operating rules — drain
-      before refusing what was admitted, a signer granting only within its range, ranges
-      within frps's `allowPorts`. (D14)
-- [ ] 4.2 Verification: every section, field, and reason code the README names exists in
-      the code and the vector (read against sections 1–3); `make check-comment-hygiene`.
+      optional, their types (`exp`, `nbf`, `iat` JSON integers; `sub` and `jti` strings),
+      where it is carried in frpc's configuration and on the wire (D2, D18, D19); `typ`
+      as the major version and the compatibility rule, with the specification's version
+      `frp-grant 1.x`, and that `typ` and `crit` are checked before the signature (D2,
+      D22); key ids as RFC 7638 thumbprints (D3a); signing as JCS and unpadded base64url,
+      required of signers only (D7); expiry checked on the relay's clock with no leeway,
+      and the boundary (D12, D18); the configuration format with D13's example, the
+      loopback rule, and the frps `[[httpPlugins]]` stanza (`path = "/"`, `ops =
+      ["NewProxy"]`) (D13); reload by SIGHUP, `listen` at restart only, and `check` (D9);
+      the reason codes and the decision log's fields (D10, D12); the vector's format and
+      the conformance a signer owes (D7); and D3's operating rules — drain before
+      refusing what was admitted, a signer granting only within its range, ranges within
+      frps's `allowPorts`. `pyproject.toml` gains `readme = "README.md"`. (D14)
+- [ ] 4.2 Verification: every section, field, type, and reason code the README names
+      exists in the code and the vector (read against sections 1–3); `make
+      check-comment-hygiene`; `make check-packaging` (`readme` added).
       End-to-end: none.
 
 ## 5. The real-frp gate
@@ -245,10 +324,10 @@ tool's gate (D5; delta "Admission fails closed", "The plugin is proven against p
 frp", and the real-frp scenarios of "A proxy is admitted only for its granted port", "The
 plugin holds no state and calls nothing", and "Every decision is explained and logged").
 
-Files: `frp-pins.toml`, `src/frp_grant_admission/frp_pins.py` or `tests/frp_fetch.py`
-(the fetch is test tooling and need not ship in the wheel), `tests/frp/conftest.py`,
-`tests/frp/test_real_frp.py`, `tests/unit/test_frp_fetch.py`, `Makefile`, `README.md`
-(the supported frp version and the pins file's format).
+Files: `frp-pins.toml`, `tests/frp_fetch.py` (the fetch is test tooling and does not
+ship in the wheel), `tests/frp/conftest.py`, `tests/frp/test_real_frp.py`,
+`tests/unit/test_frp_fetch.py`, `Makefile`, `README.md` (the supported frp version and the
+pins file's format).
 
 - [ ] 5.1 `frp-pins.toml` names frp 0.61.1 and, for `linux_amd64`, the official release
       archive's URL and SHA-256, the SHA-256 taken from a download of that archive and
@@ -257,12 +336,12 @@ Files: `frp-pins.toml`, `src/frp_grant_admission/frp_pins.py` or `tests/frp_fetc
       supported version. (D5)
 - [ ] 5.2 The fetch downloads the pinned archive for the running platform, verifies its
       SHA-256 against the pin before extracting anything, extracts `frps` and `frpc` into
-      the ignored cache, and reuses a cached binary only when its archive verified.
-      `FRPS_BIN` and `FRPC_BIN` override it. A platform with no pin and no override makes
-      the real-frp tests skip in the default suite. Unit (`tests/unit/test_frp_fetch.py`),
-      against a local archive file: a matching archive extracts both binaries; a
-      mismatching one fails naming both digests and extracts nothing. (D5; delta "An
-      archive does not match its pin")
+      the ignored `.frp-cache/`, and reuses a cached binary only when its archive
+      verified. `FRPS_BIN` and `FRPC_BIN` override it. A platform with no pin and no
+      override makes the real-frp tests skip in the default suite. Unit
+      (`tests/unit/test_frp_fetch.py`), against a local archive file: a matching archive
+      extracts both binaries; a mismatching one fails naming both digests and extracts
+      nothing. (D5; delta "An archive does not match its pin")
 - [ ] 5.3 Fixtures (`tests/frp/conftest.py`) start the plugin, `frps`, and `frpc` as
       processes, every port chosen at runtime on `127.0.0.1` — frps's bind port, the
       plugin's, `allowPorts`, the issuers' ranges, the remote ports — with frps's
@@ -298,42 +377,58 @@ Files: `frp-pins.toml`, `src/frp_grant_admission/frp_pins.py` or `tests/frp_fetc
       or 5.7 shows an frp premise false, stop and return the change to design (D15).
       End-to-end: none (see the preamble).
 
-## 6. Repository integration, CI, and the `tools/` boundary
+## 6. Repository integration, CI, the floor run, and the `tools/` boundary
 
-Delivers the tool in `make test` and CI, the gate job, the guard standing in for
-`check-architecture`, and `tools/README.md`'s account of standalone components (D4, D5).
+Delivers the tool in `make test` and CI, the gate job with the floor run, the guard
+standing in for `check-architecture`, and `tools/README.md`'s account of standalone
+components (D4, D5, D23; delta "The plugin owns its grant specification" for the floor
+run, scenario "The vector runs at the declared floors").
 
-Files: the root `Makefile`; `.github/workflows/tests.yml`;
-`tools/frp-grant-admission/tests/unit/test_structure.py`; `tools/README.md`.
+Files: `tools/frp-grant-admission/Makefile`; the root `Makefile`;
+`.github/workflows/tests.yml`; `tools/frp-grant-admission/tests/unit/test_structure.py`;
+`tools/README.md`.
 
-- [ ] 6.1 The root `Makefile` gains `test-frp-grant-admission` (`$(MAKE) -C
-      tools/frp-grant-admission test`), appended to the prerequisites of `test`, and
-      `test-frp-grant-admission-frp` running the tool's `test-frp`. `tests.yml`'s matrix
-      appends `test-frp-grant-admission` in the same position, which
-      `scripts/tests/test_tests_workflow.py` holds equal to `make test`'s targets. (D5)
-- [ ] 6.2 `tests.yml` gains a job, `frp · real-frp gate`, that checks out, sets
+- [ ] 6.1 The tool's `make test-floor` runs `tests/unit` — the vector included — with
+      each runtime dependency, PyJWT and `cryptography`, resolved at the lowest release
+      `pyproject.toml` declares, as uv's `lowest-direct` resolution gives it, in an
+      environment apart from the project's: the committed `uv.lock` and `.venv` are left
+      untouched. It prints the installed PyJWT and `cryptography` versions and fails
+      unless they equal the floors `pyproject.toml` declares, so the run can never test
+      the lock by mistake. It needs the network, and is not part of `make test`. (D23;
+      27 F2)
+- [ ] 6.2 The root `Makefile` gains `test-frp-grant-admission` (`$(MAKE) -C
+      tools/frp-grant-admission test`), appended to the prerequisites of `test`;
+      `test-frp-grant-admission-frp`, running the tool's `test-frp`; and
+      `test-frp-grant-admission-floor`, running the tool's `test-floor`. `tests.yml`'s
+      matrix appends `test-frp-grant-admission` in the same position, which
+      `scripts/tests/test_tests_workflow.py` holds equal to `make test`'s targets. (D5,
+      D23)
+- [ ] 6.3 `tests.yml` gains a job, `frp · real-frp gate`, that checks out, sets
       `UV_PYTHON` from `.python-version` under checkout's condition, installs uv 0.12.19
-      as the matrix does, and runs `make test-frp-grant-admission-frp`. It is in
-      `tests.yml` because that is the workflow `scripts/ci_evidence.py` may dispatch.
-      `make check-python-version` passes on the edited workflow. (D5; `BUILD_AND_PACKAGING.md`,
-      "One Python version")
-- [ ] 6.3 Unit (`tests/unit/test_structure.py`), standing in for `check-architecture`,
+      as the matrix does, and runs `make test-frp-grant-admission-frp` and `make
+      test-frp-grant-admission-floor`. It is in `tests.yml` because that is the workflow
+      `scripts/ci_evidence.py` may dispatch. `make check-python-version` passes on the
+      edited workflow. (D5, D23; `BUILD_AND_PACKAGING.md`, "One Python version")
+- [ ] 6.4 Unit (`tests/unit/test_structure.py`), standing in for `check-architecture`,
       which skips `tools/`: the tool's `uv.lock` resolves no package from the wheelhouse,
-      its `pyproject.toml` declares only `cryptography` and `PyJWT` at runtime, and every
-      import under `src/` is of the standard library, `jwt`, `cryptography`, or the
-      package itself. (D4)
-- [ ] 6.4 `tools/README.md` gains a section: `tools/` also holds standalone
+      its `pyproject.toml` declares only `cryptography` and `PyJWT` at runtime, each with
+      a lower bound and no upper bound, and every import under `src/` is of the standard
+      library, `jwt`, `cryptography`, or the package itself. (D4, D23)
+- [ ] 6.5 `tools/README.md` gains a section: `tools/` also holds standalone
       infrastructure components — not market runtime services, depending on no internal
       package, intended for their own repositories — naming `frp-grant-admission`, its
-      `make test` and `make test-frp`, the root targets, and the gate job; the opening
-      paragraph's "not part of the market runtime services" is kept true by saying what a
-      standalone component is instead. (D4)
-- [ ] 6.5 Verification: `make test-frp-grant-admission`; `make test-release-tooling`
-      (`scripts/tests`, including the matrix test); `make test`; `make check-packaging`;
-      `make check-python-version`.
+      `make test`, `make test-frp`, and `make test-floor`, the root targets, and the gate
+      job; the opening paragraph's "not part of the market runtime services" is kept true
+      by saying what a standalone component is instead. (D4)
+- [ ] 6.6 Verification: `make -C tools/frp-grant-admission test-floor` (unit at the
+      floors: PyJWT 2.8.0 and `cryptography` 42.0.0 printed, every case passing, `git
+      status` showing `uv.lock` unchanged); `make test-frp-grant-admission`; `make
+      test-release-tooling` (`scripts/tests`, including the matrix test); `make test`;
+      `make check-packaging`; `make check-python-version`.
       Owed by validation: `tests.yml`, job `test · test-frp-grant-admission` — passes; and
       job `frp · real-frp gate` — the fetch verifies frp 0.61.1's `linux_amd64` archive
-      against its pin, and `tests/frp/` passes with no test skipped.
+      against its pin, `tests/frp/` passes with no test skipped, and the floor run prints
+      PyJWT 2.8.0 and `cryptography` 42.0.0 and passes.
       End-to-end: none (see the preamble).
 
 ## 7. Shipping: the wheel, the image, and the systemd example
@@ -342,7 +437,7 @@ Delivers the plain program and the image (D11, D13's network-namespace note).
 
 Files: `tools/frp-grant-admission/Dockerfile` and its ignore file, if one is needed;
 `tools/frp-grant-admission/examples/frp-grant-admission.service`;
-`tools/frp-grant-admission/README.md`; the root `Makefile`.
+`tools/frp-grant-admission/README.md`; the tool's `Makefile`; the root `Makefile`.
 
 - [ ] 7.1 The tool's `make build` builds its wheel. `examples/frp-grant-admission.service`
       runs `frp-grant-admission serve --config /etc/frp-grant-admission/config.toml` with
@@ -382,23 +477,24 @@ The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
       against `openspec/README.md`'s placement table, and that the tool's README names no
       concept of any particular issuing system.
 - [ ] 8.4 **Narrative compression.** Shorten completed-task notes to final behaviour,
-      evidence, and destinations; move debugging narrative and declined suggestions into
-      `design.md` first.
+      evidence, and destinations — section 1's return to design included; move debugging
+      narrative and declined suggestions into `design.md` first.
 - [ ] 8.5 **Roadmap currency.** No change to `docs/development/ROADMAP.md`: the plugin
       admits nothing until a relay runs it, which `prove-relay-provisioning` delivers and
       whose closeout records in Goal 1. Record that disposition in the design-promotion
       record.
 - [ ] 8.6 **Campaign index currency.** This change's row in `openspec/changes/README.md`
-      ("Lesser goal — Reach hosts and VMs that have no inbound route"): status `in
-      closeout`, notes rewritten to the evidence; the campaign graph line
-      `frp-grant-admission ──► prove-relay-provisioning (implementation)` unchanged; `make
-      check-change-index`.
+      (`admit-relay-proxies-by-grant`, under "Lesser goal — Reach hosts and VMs that have
+      no inbound route"): status `in closeout`, notes rewritten to the evidence; the
+      campaign graph line `admit-relay-proxies-by-grant ──► prove-relay-provisioning
+      (implementation)` unchanged; `make check-change-index`.
 - [ ] 8.7 **Packaging.** `make check-packaging`; `make check-architecture-change
-      CHANGE=admit-relay-proxies-by-grant`. `make check-agent-skills` is not owed unless the change
-      touched `.agents/`, `.claude/`, or `.codex/`.
+      CHANGE=admit-relay-proxies-by-grant`. `make check-agent-skills` is not owed unless
+      the change touched `.agents/`, `.claude/`, or `.codex/`.
 - [ ] 8.8 **End-to-end pipeline.** Record the pipeline run validating `HEAD` and its
       result. No `e2e-tests` scenario exercises the plugin; its system-level evidence is
-      section 6's gate job, recorded here with its run.
+      section 6's gate job, its real-frp tests and its floor run, recorded here with its
+      run.
 - [ ] 8.9 **Promotion.** Write:
       - `openspec/specs/frp-grant-admission/architecture.md` (new): why grants travel per
         proxy; why the plugin holds no state and calls nothing; its SCM-agnostic
@@ -418,13 +514,17 @@ The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
       - `docs/development/TESTING.md`, "### 2. Integration Tests": registration and
         traffic are different proofs; a test that a connection was admitted also carries
         traffic through it.
-      - The spec is written by the archive (8.11).
+      - The spec is written by the archive (8.11), carrying D18's, D19's, and D22's rules
+        and D23's floor run from the delta.
       Complete the design-promotion record in `design.md`, naming each destination above,
       the tool's README for the grant specification (sections 4, 5, 7), and
-      `tools/README.md` (6.4).
+      `tools/README.md` (6.5). The principle behind D18, D19, and D22 — the plugin owns
+      the rules it publishes — stays in `design.md` only, by the owner's direction; record
+      that disposition too.
 - [ ] 8.10 **Documentation citations.** `make check-doc-citations
-      CHANGE=admit-relay-proxies-by-grant`; `openspec validate admit-relay-proxies-by-grant --strict` (the
-      pinned validator, run by `make check-change CHANGE=admit-relay-proxies-by-grant`).
+      CHANGE=admit-relay-proxies-by-grant`; `openspec validate admit-relay-proxies-by-grant
+      --strict` (the pinned validator, run by `make check-change
+      CHANGE=admit-relay-proxies-by-grant`).
 - [ ] 8.11 **Archival.** `openspec archive admit-relay-proxies-by-grant -y`, merging the
-      `frp-grant-admission` delta into a new `openspec/specs/frp-grant-admission/spec.md`
-      (no `--skip-specs`).
+      delta `specs/frp-grant-admission/` into a new
+      `openspec/specs/frp-grant-admission/spec.md` (no `--skip-specs`).

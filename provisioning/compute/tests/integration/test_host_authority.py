@@ -182,12 +182,15 @@ def test_no_write_records_a_gpu_field(authority, session_factory) -> None:
 
 
 def test_hosts_name_existing_pools_and_a_move_runs_its_hooks(authority, moves) -> None:
+    """A host placed as it is registered moves from no pool, so the hooks see
+    it as they see a host moved in later."""
     authority.register_host(HostCreate(host_id="h1", connection=_connection(), pool_id="gpu"))
     with pytest.raises(ValueError, match="does not exist"):
         authority.register_host(HostCreate(host_id="h2", connection=_connection(), pool_id="none"))
+    assert authority.get_host("h2") is None
 
     assert authority.update_host("h1", HostUpdate(pool_id="default")).pool_id == "default"
-    assert moves == [("h1", "gpu", "default")]
+    assert moves == [("h1", None, "gpu"), ("h1", "gpu", "default")]
     with pytest.raises(ValueError, match="does not exist"):
         authority.update_host("h1", HostUpdate(pool_id="none"))
 
@@ -218,11 +221,11 @@ def test_an_update_omitting_the_pool_keeps_it_and_an_explicit_none_unplaces(
 
     assert authority.update_host("h1", HostUpdate(enabled=False)).pool_id == "gpu"
     assert authority.update_host("h1", HostUpdate(pool_id=None)).pool_id is None
-    assert moves == [("h1", "gpu", None)]
+    assert moves == [("h1", None, "gpu"), ("h1", "gpu", None)]
     # Unplacing an unplaced host is not a move, and placing it again is one.
     authority.update_host("h1", HostUpdate(pool_id=None))
     assert authority.update_host("h1", HostUpdate(pool_id="default")).pool_id == "default"
-    assert moves == [("h1", "gpu", None), ("h1", None, "default")]
+    assert moves == [("h1", None, "gpu"), ("h1", "gpu", None), ("h1", None, "default")]
 
 
 def test_an_inventory_entry_states_a_pool_unplaces_or_says_nothing(authority, moves) -> None:
@@ -242,7 +245,7 @@ def test_an_inventory_entry_states_a_pool_unplaces_or_says_nothing(authority, mo
         [InventoryHost(host_id="kvm1", connection=_connection(), pool_id=None)]
     )
     assert unplaced[0].pool_id is None
-    assert moves == [("kvm1", "gpu", None)]
+    assert moves == [("kvm1", None, "gpu"), ("kvm1", "gpu", None)]
 
 
 def test_a_hook_refusing_an_unplacing_leaves_the_host_and_the_import(
@@ -275,6 +278,26 @@ def test_a_hook_refusing_an_unplacing_leaves_the_host_and_the_import(
     assert guarded.get_host("h2") is None
 
 
+def test_a_hook_refusing_a_placement_registers_nothing(authority, session_factory) -> None:
+    """A host placed as it is registered or imported is refused as a move would
+    be: nothing of it is stored."""
+    with session_factory() as db:
+        db.add(ResourcePool(id="refused", label="refused", provider="test", policy_tags={}))
+        db.commit()
+
+    with pytest.raises(PoolChangeRefusedError, match="refused"):
+        authority.register_host(
+            HostCreate(host_id="h1", connection=_connection(), pool_id="refused")
+        )
+    with pytest.raises(PoolChangeRefusedError, match="refused"):
+        authority.apply_inventory(
+            [InventoryHost(host_id="h2", connection=_connection(), pool_id="refused")]
+        )
+
+    assert authority.get_host("h1") is None
+    assert authority.get_host("h2") is None
+
+
 def test_a_hook_refusing_a_move_leaves_the_host_where_it_was(authority, session_factory) -> None:
     authority.register_host(HostCreate(host_id="h1", connection=_connection(), pool_id="default"))
     with session_factory() as db:
@@ -295,7 +318,7 @@ def test_assigning_a_host_its_current_pool_is_not_a_move(authority, moves) -> No
         [InventoryHost(host_id="h1", connection=_connection(), pool_id="gpu")]
     )
 
-    assert moves == []
+    assert moves == [("h1", None, "gpu")]
 
 
 def test_listing_filters_disabled_hosts_and_searches_by_id(authority) -> None:
@@ -335,13 +358,13 @@ def test_an_inventory_moving_a_host_runs_the_pool_change_hooks(authority, moves)
     authority.apply_inventory(
         [InventoryHost(host_id="kvm1", connection=_connection(), pool_id="gpu")]
     )
-    assert moves == []
+    assert moves == [("kvm1", None, "gpu")]
 
     authority.apply_inventory(
         [InventoryHost(host_id="kvm1", connection=_connection(), pool_id="default")]
     )
 
-    assert moves == [("kvm1", "gpu", "default")]
+    assert moves == [("kvm1", None, "gpu"), ("kvm1", "gpu", "default")]
     assert authority.get_host("kvm1").pool_id == "default"
 
 

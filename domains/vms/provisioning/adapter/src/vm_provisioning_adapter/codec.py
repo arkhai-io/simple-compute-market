@@ -44,6 +44,11 @@ from compute_provisioning_contracts import (
 )
 from pydantic import ValidationError
 from compute_provisioning.jobs import JobRun
+from compute_provisioning.relays import (
+    RELAY_GRANT_VARIABLE,
+    RELAY_SECRET_VARIABLES,
+    RELAY_TOKEN_VARIABLE,
+)
 from compute_provisioning_ansible import (
     AnsibleJobInterpretation,
     AnsibleJobPlan,
@@ -59,9 +64,9 @@ logger = logging.getLogger(__name__)
 #: The inventory group the VM-operations playbook targets.
 VM_INVENTORY_GROUP = "kvm_hosts"
 
-#: Fields the VM playbooks print whose values are secret: the root key's path
-#: on the host and a relay's admission token.
-VM_SECRET_FIELDS = frozenset({"ssh_key_path_host", "frp_auth_token"})
+#: Fields whose values are secret wherever a VM playbook prints them: the root
+#: key's path on the host, and the relay family's secret variable names.
+VM_SECRET_FIELDS = frozenset({"ssh_key_path_host"}) | RELAY_SECRET_VARIABLES
 
 #: VM failures that running the same job again cannot fix.
 VM_NON_RETRYABLE_FAILURES: tuple[str, ...] = (
@@ -132,8 +137,16 @@ class GoldenImageCredentials:
 
 
 class RelayResolver(Protocol):
-    def resolve_into(self, params: VmJobParams) -> VmJobParams:
-        """``params`` with the referenced relay's address and token filled in."""
+    def resolve_into(
+        self,
+        params: VmJobParams,
+        *,
+        remote_port: int | None = None,
+        owner_id: str | None = None,
+    ) -> VmJobParams:
+        """``params`` with the referenced relay's address and token filled in,
+        and the grant for ``remote_port``'s lease, held by ``owner_id``, when a
+        port is given."""
 
 
 @dataclass
@@ -197,9 +210,10 @@ class VmAnsibleCodec:
     """The VM domain's ``AnsibleJobCodec``; see the module docstring.
 
     ``relay_resolver``, when given, fills a referenced relay's address and
-    token into a job's parameters immediately before its variables are
-    written, so the token never enters the job's stored parameters and a
-    rotation takes effect on a retry.
+    token, and a create's signed grant, into a job's parameters immediately
+    before its variables are written, so the token and the grant never enter
+    the job's stored parameters, and a rotated token or key takes effect on a
+    retry.
     """
 
     inventory_group = VM_INVENTORY_GROUP
@@ -221,7 +235,12 @@ class VmAnsibleCodec:
     def prepare(self, run: JobRun) -> AnsibleJobPlan:
         params = vm_job_params(run.parameters, host_id=run.host.host_id)
         if self._relay_resolver is not None:
-            params = self._relay_resolver.resolve_into(params)
+            # A create carries its leased port, and so adds a proxy, which
+            # carries a grant for the lease its reservation holds; a removal
+            # carries no port and needs no grant.
+            params = self._relay_resolver.resolve_into(
+                params, remote_port=params.vm_remote_port, owner_id=params.escrow_uid
+            )
         return AnsibleJobPlan(
             variables=self.variables(params),
             extra_variables=dict(params.provider_extra_vars),
@@ -304,17 +323,19 @@ class VmAnsibleCodec:
         for name in ("vm_gpu_device", "vm_gpu_devices", "vm_gpu_partition_size"):
             if getattr(params, name):
                 variables[name] = getattr(params, name)
-        # Relay inputs. The token is a credential and reaches the playbook the
-        # way every other job variable does; the codec's secret fields keep it
-        # out of logged output. The remote port is supplied, never chosen:
-        # allocation belongs to the service, which is also what can reclaim it
-        # when the VM's life ends by any path.
+        # Relay inputs. The token and the grant are credentials and reach the
+        # playbook the way every other job variable does; the codec's secret
+        # fields keep them out of logged output. The remote port is supplied,
+        # never chosen: allocation belongs to the service, which is also what
+        # can reclaim it when the VM's life ends by any path.
         if params.relay_addr:
             variables["frp_server_addr"] = params.relay_addr
         if params.relay_port:
             variables["frp_server_port"] = params.relay_port
         if params.relay_token:
-            variables["frp_auth_token"] = params.relay_token
+            variables[RELAY_TOKEN_VARIABLE] = params.relay_token
+        if params.relay_grant:
+            variables[RELAY_GRANT_VARIABLE] = params.relay_grant
         if params.vm_remote_port:
             variables["vm_remote_port"] = params.vm_remote_port
         for name in ("golden_image_name", "gcs_bucket_url", "gcs_image_path", "escrow_uid"):

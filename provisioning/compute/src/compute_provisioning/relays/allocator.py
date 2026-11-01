@@ -17,6 +17,13 @@ exists beneath that.
 One allocator serves every domain: pools on one relay draw from its one window,
 whatever their provider, so two allocators over that namespace would issue one
 port twice.
+
+Each lease records when the grants for it expire, and a released port is not
+reissued until that expiry plus a reuse margin has passed. A relay admits a
+proxy carrying an unexpired grant for its port, so a grant copied from a host
+whose lease ended could otherwise register the port another host now holds.
+The margin covers the relay's clock running behind the service's, since the
+relay checks expiry on its own clock with no leeway.
 """
 
 from __future__ import annotations
@@ -29,7 +36,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
 from market_fulfillment.settlement_repository import begin_sqlite_write_transaction
-from sqlalchemy import func
+from market_site.db import CapacityReservation
+from market_site.ledger import parse_utc
+from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -37,6 +46,17 @@ from ..release_effects import reservation_is_released
 from .db import Relay, RelayPortLease
 
 logger = logging.getLogger(__name__)
+
+#: How long a lease's grants outlive its scheduled end, by default: the lease
+#: watchdog's grace period (300 seconds by default) and a teardown job's
+#: retries (three by default, backing off 60, 120, and 240 seconds) with their
+#: runs, so a grant never expires while the teardown that revokes it is still
+#: due. The service's ``relay_grant_expiry_grace_seconds`` sets it.
+DEFAULT_GRANT_EXPIRY_GRACE = timedelta(hours=1)
+
+#: How long a released port is held past its grant's expiry, by default. The
+#: service's ``relay_port_reuse_margin_seconds`` sets it.
+DEFAULT_PORT_REUSE_MARGIN = timedelta(seconds=300)
 
 
 class RelayWindowExhaustedError(RuntimeError):
@@ -50,9 +70,36 @@ class PortLease:
     remote_port: int
 
 
+def grant_expiry(lease_ends_at: datetime, grace: timedelta) -> datetime:
+    """When a lease's grants expire: its end plus the grace, rounded up.
+
+    Rounded up to the whole second because a grant's ``exp`` is an integer
+    number of seconds, and one stored value then serves both readers: the
+    signer, which converts it exactly, and quarantine, which holds the port
+    until it plus the reuse margin. Rounding down would expire a grant before
+    the lease end plus the grace. Returned in UTC with no zone, as the lease
+    table stores times; a naive ``lease_ends_at`` is taken as UTC.
+    """
+    end = lease_ends_at if lease_ends_at.tzinfo else lease_ends_at.replace(tzinfo=timezone.utc)
+    expiry = end.astimezone(timezone.utc) + grace
+    if expiry.microsecond:
+        expiry = expiry.replace(microsecond=0) + timedelta(seconds=1)
+    return expiry.replace(tzinfo=None)
+
+
 class RelayPortAllocator:
-    def __init__(self, session_factory: Any) -> None:
+    def __init__(
+        self,
+        session_factory: Any,
+        *,
+        grant_expiry_grace: timedelta = DEFAULT_GRANT_EXPIRY_GRACE,
+        reuse_margin: timedelta = DEFAULT_PORT_REUSE_MARGIN,
+    ) -> None:
         self._session_factory = session_factory
+        self._grant_expiry_grace = grant_expiry_grace
+        # Applied when a port is selected, never stored on a lease, so a raised
+        # margin holds back ports already released as well as later ones.
+        self._reuse_margin = reuse_margin
 
     def allocate(
         self,
@@ -60,6 +107,7 @@ class RelayPortAllocator:
         relay_id: str,
         owner_kind: str,
         owner_id: str,
+        lease_ends_at: datetime,
         host_id: str | None = None,
         pool_id: str | None = None,
     ) -> PortLease:
@@ -73,6 +121,7 @@ class RelayPortAllocator:
                 relay_id=relay_id,
                 owner_kind=owner_kind,
                 owner_id=owner_id,
+                lease_ends_at=lease_ends_at,
                 host_id=host_id,
                 pool_id=pool_id,
             )
@@ -86,14 +135,19 @@ class RelayPortAllocator:
         relay_id: str,
         owner_kind: str,
         owner_id: str,
+        lease_ends_at: datetime,
         host_id: str | None = None,
         pool_id: str | None = None,
     ) -> PortLease:
         """Lease the lowest free port in the relay's window.
 
+        ``lease_ends_at`` is the owning reservation's scheduled lease end. The
+        lease records its grants' expiry from it, in the caller's transaction.
+
         Lowest-free rather than next-after-last so that a released port is
         reused promptly: the window is finite, and a strategy that always moves
-        forward turns a slow leak into an outage sooner.
+        forward turns a slow leak into an outage sooner. A port still in its
+        quarantine is not free.
 
         The unique constraint is the arbiter, not the read that precedes it.
         Two allocations racing on one relay both see the same free port; the
@@ -128,6 +182,7 @@ class RelayPortAllocator:
             relay.vm_port_range_start,
             relay.vm_port_range_start + relay.vm_port_range_count,
         )
+        expires_at = grant_expiry(lease_ends_at, self._grant_expiry_grace)
         # Bounded by the window size so a full window cannot spin forever.
         for _ in range(relay.vm_port_range_count):
             try:
@@ -141,6 +196,7 @@ class RelayPortAllocator:
                         owner_id=owner_id,
                         host_id=host_id,
                         pool_id=pool_id,
+                        grant_expires_at=expires_at,
                     )
                     db.flush()
             except IntegrityError:
@@ -158,8 +214,13 @@ class RelayPortAllocator:
         owner_id: str,
         host_id: str | None,
         pool_id: str | None,
+        grant_expires_at: datetime,
     ) -> RelayPortLease:
         """Take the row for this port, reusing a released one if it exists.
+
+        A reused row is a new tenancy: its owner, host, pool, grant expiry,
+        and signing key are this one's, and nothing of the last tenancy's
+        grants carries over.
 
         Uniqueness is ``(relay_id, remote_port)`` unconditionally, so a
         released lease still occupies its port in the index. Reclaiming the row
@@ -188,6 +249,8 @@ class RelayPortAllocator:
             existing.pool_id = pool_id
             existing.released_at = None
             existing.created_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            existing.grant_expires_at = grant_expires_at
+            existing.grant_key_id = None
             return existing
         lease = RelayPortLease(
             id=str(uuid.uuid4()),
@@ -197,6 +260,10 @@ class RelayPortAllocator:
             pool_id=pool_id,
             owner_kind=owner_kind,
             owner_id=owner_id,
+            # Set here rather than by the database's clock, so it is UTC as
+            # every time a retired key's validity is compared against is.
+            created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            grant_expires_at=grant_expires_at,
         )
         db.add(lease)
         return lease
@@ -348,14 +415,27 @@ class RelayPortAllocator:
                 .all()
             )
 
-    @staticmethod
-    def _lowest_free(db: Session, relay_id: str, window: range) -> int:
+    def _lowest_free(self, db: Session, relay_id: str, window: range) -> int:
+        """The lowest port in the window neither held nor in quarantine.
+
+        A released port is in quarantine until its last grant's expiry plus
+        the reuse margin, read now rather than when it was released.
+        """
+        reusable_before = (
+            datetime.now(timezone.utc).replace(tzinfo=None) - self._reuse_margin
+        )
         held = {
             row.remote_port
             for row in db.query(RelayPortLease)
             .filter(
                 RelayPortLease.relay_id == relay_id,
-                RelayPortLease.released_at.is_(None),
+                or_(
+                    RelayPortLease.released_at.is_(None),
+                    and_(
+                        RelayPortLease.grant_expires_at.is_not(None),
+                        RelayPortLease.grant_expires_at > reusable_before,
+                    ),
+                ),
             )
             .all()
         }
@@ -467,11 +547,27 @@ def fulfillment_lease_owner_is_released(session_factory) -> Any:
     return is_owner_released
 
 
+def reservation_lease_end(db: Session, capacity_reservation_id: str) -> datetime | None:
+    """The scheduled lease end of a reservation, or None when it states none.
+
+    A plan leasing a relay port for a fulfillment passes this to allocation,
+    reading it in the acceptance session: the site ledger shares this database.
+    """
+    reservation = db.get(CapacityReservation, capacity_reservation_id)
+    if reservation is None:
+        return None
+    return parse_utc(reservation.lease_end_utc)
+
+
 __all__ = [
+    "DEFAULT_GRANT_EXPIRY_GRACE",
+    "DEFAULT_PORT_REUSE_MARGIN",
     "FULFILLMENT_OWNER_KIND",
     "PortLease",
     "RelayPortAllocator",
     "RelayWindowExhaustedError",
     "fulfillment_lease_owner_is_released",
+    "grant_expiry",
     "release_reservation_ports",
+    "reservation_lease_end",
 ]

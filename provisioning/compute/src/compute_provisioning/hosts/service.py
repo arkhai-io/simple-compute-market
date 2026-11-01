@@ -159,12 +159,14 @@ class HostAuthority:
     def register_host(self, data: HostCreate) -> HostResponse:
         """Register a host in the pool it names, or unplaced when it names none."""
         connection = self._build(data.connection, previous=None)
-        host = Host(host_id=data.host_id, enabled=data.enabled, pool_id=data.pool_id)
+        host = Host(host_id=data.host_id, enabled=data.enabled, pool_id=None)
         host.set_connection(connection)
         with self._session_factory() as db:
-            if data.pool_id is not None:
-                self._require_pool_exists(db, data.pool_id)
             db.add(host)
+            db.flush()
+            # Placed as a move from no pool, so a rule about which hosts a pool
+            # may hold sees a host registered into it as it sees one moved in.
+            self._move_to_pool(db, host, data.pool_id)
             db.commit()
             db.refresh(host)
             return _view(host)
@@ -217,13 +219,12 @@ class HostAuthority:
                     self._require_pool_exists(db, entry.pool_id)
                 existing = db.query(Host).filter(Host.host_id == entry.host_id).one_or_none()
                 if existing is None:
-                    host = Host(
-                        host_id=entry.host_id,
-                        enabled=True,
-                        pool_id=entry.pool_id if stated else None,
-                    )
+                    host = Host(host_id=entry.host_id, enabled=True, pool_id=None)
                     host.set_connection(self._build(entry.connection, previous=None))
                     db.add(host)
+                    db.flush()
+                    if stated:
+                        self._move_to_pool(db, host, entry.pool_id)
                 else:
                     host = existing
                     host.set_connection(
@@ -265,8 +266,9 @@ class HostAuthority:
         )
 
     def _move_to_pool(self, db: Session, host: Host, pool_id: Optional[str]) -> None:
-        """Assign ``pool_id`` to an existing host, or unplace it for ``None``;
-        a real move runs the hooks."""
+        """Assign ``pool_id`` to a host, or unplace it for ``None``; a real move
+        runs the hooks. A host placed as it is registered moves from no pool,
+        so the hooks see it in the session, with its connection."""
         if pool_id is not None:
             self._require_pool_exists(db, pool_id)
         if host.pool_id == pool_id:

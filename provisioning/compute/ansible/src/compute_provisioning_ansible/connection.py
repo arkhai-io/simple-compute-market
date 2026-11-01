@@ -127,6 +127,11 @@ class SshConnectionCodec:
             )
         )
 
+    def address(self, envelope: ConnectionEnvelope) -> str | None:
+        """The ``ssh_host`` the service connects to, whatever the version."""
+        value = envelope.public.get("ssh_host")
+        return str(value) if value else None
+
     def validate(self, envelope: ConnectionEnvelope) -> ConnectionEnvelope:
         if envelope.kind != self.kind or envelope.version != self.version:
             raise ValueError(

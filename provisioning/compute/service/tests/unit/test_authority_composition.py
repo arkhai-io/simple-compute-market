@@ -9,6 +9,9 @@ whose persistence is an in-memory database.
 
 from __future__ import annotations
 
+from datetime import timedelta
+from types import SimpleNamespace
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -19,7 +22,8 @@ from compute_provisioning.release import (
     FulfillmentReleaseStatusPort,
 )
 
-from compute_provisioning.relays import RELAY_HOST_POOL_CHANGE_HOOKS, release_reservation_ports
+from compute_provisioning.relays import release_reservation_ports
+from compute_provisioning.relays.rebinding import relay_host_pool_change
 
 from compute_provisioning_service.container import Container
 
@@ -57,9 +61,26 @@ def test_one_engine_and_one_host_authority_reach_both_runtimes():
 
 
 def test_the_host_authority_carries_the_relays_pool_change_hooks():
-    host_authority = _container().host_authority()
+    """Both relay checks, the rebinding rule and the management route, over
+    the codecs the authority and the relay service share."""
+    container = _container()
+    host_authority = container.host_authority()
 
-    assert set(RELAY_HOST_POOL_CHANGE_HOOKS) <= set(host_authority._pool_change_hooks)
+    assert relay_host_pool_change in host_authority._pool_change_hooks
+    assert len(host_authority._pool_change_hooks) == 2
+    assert host_authority._codecs is container.connection_codecs()
+    assert container.relay_service()._connection_codecs is container.connection_codecs()
+
+
+def test_the_allocator_reads_the_grant_grace_and_the_reuse_margin():
+    container = _container()
+    container.config.override(
+        SimpleNamespace(relay_grant_expiry_grace_seconds=120, relay_port_reuse_margin_seconds=45)
+    )
+    allocator = container.relay_port_allocator()
+
+    assert allocator._grant_expiry_grace == timedelta(seconds=120)
+    assert allocator._reuse_margin == timedelta(seconds=45)
 
 
 def test_the_relays_are_composed_once_for_every_domain():

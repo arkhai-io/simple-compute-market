@@ -1,8 +1,10 @@
-"""Resolving a relay's address and admission token at execution.
+"""Resolving a relay's address, admission token, and grant at execution.
 
 An accepted operation carries the relay *reference* and the leased remote port,
-never the token. The address and token are read here, immediately before a
-job's variables are written.
+never the token or a grant. The address and token are read here, and a job
+that adds a proxy has its grant signed here, immediately before its variables
+are written, on every attempt: a grant is signed with the relay's key active
+at that moment, so a key activated after a job was accepted signs its grant.
 
 Two independent reasons, either sufficient on its own.
 
@@ -22,7 +24,10 @@ configuration cannot change what a running job does; a credential is the one
 input where the newest value is the correct one.
 
 The resolver works on any domain's job parameters: a dataclass with
-``relay_id``, ``relay_addr``, ``relay_port``, and ``relay_token`` fields.
+``relay_id``, ``relay_addr``, ``relay_port``, ``relay_token``, and
+``relay_grant`` fields. The domain passes the leased port of a job that adds a
+proxy, under whatever name its parameters store it, and the reservation that
+holds its lease.
 """
 
 from __future__ import annotations
@@ -32,7 +37,9 @@ from typing import Any
 
 from market_config import decrypt_secret
 
-from .db import Relay
+from .db import Relay, RelayPortLease
+from .grants import sign_grant
+from .keys import GrantKey
 
 
 class RelayUnusableAtExecutionError(RuntimeError):
@@ -49,8 +56,20 @@ class RelayExecutionResolver:
         self._session_factory = session_factory
         self._settings = settings
 
-    def resolve_into(self, params: Any) -> Any:
+    def resolve_into(
+        self,
+        params: Any,
+        *,
+        remote_port: int | None = None,
+        owner_id: str | None = None,
+    ) -> Any:
         """Return *params* with the relay's address and token filled in.
+
+        ``remote_port`` is the leased port of a job that adds a proxy, and
+        ``owner_id`` the reservation whose lease holds it; with them, the grant
+        for that lease is signed with the relay's active key and filled in too,
+        and the lease records the key that signed it. A job that only removes a
+        proxy needs no grant and passes no port.
 
         A job with no relay reference reaches its buyer without a relay and
         passes through untouched.
@@ -59,8 +78,14 @@ class RelayExecutionResolver:
         if not relay_id:
             return params
 
-        with self._session_factory() as db:
-            relay = db.get(Relay, relay_id)
+        with self._session_factory() as db, db.begin():
+            # Locked, so an activation cannot commit between reading the
+            # active key and signing: a grant signed by a key retired after
+            # the read, for a lease allocated after that retirement, would
+            # outlive the retired key's reported validity. SQLite ignores the
+            # lock, but its writers are serialized, so there the signing's own
+            # write fails instead and the job's retry signs with the new key.
+            relay = db.get(Relay, relay_id, with_for_update=True)
             if relay is None:
                 raise RelayUnusableAtExecutionError(
                     f"job references relay '{relay_id}', which no longer exists; "
@@ -76,16 +101,59 @@ class RelayExecutionResolver:
                     f"relay '{relay_id}' has no admission token configured, so "
                     "the tunnel client would be refused at the rendezvous"
                 )
-            token = decrypt_secret(
-                relay.relay_token_encrypted,
-                str(getattr(self._settings, "ssh_decryption_key", "") or ""),
+            encryption_key = str(getattr(self._settings, "ssh_decryption_key", "") or "")
+            fields: dict[str, Any] = {
+                "relay_addr": relay.relay_addr,
+                "relay_port": relay.relay_port,
+                "relay_token": decrypt_secret(relay.relay_token_encrypted, encryption_key),
+            }
+            if remote_port is not None:
+                fields["relay_grant"] = self._signed_grant(
+                    db, relay, int(remote_port), owner_id, encryption_key
+                )
+            return replace(params, **fields)
+
+    @staticmethod
+    def _signed_grant(
+        db: Any, relay: Relay, remote_port: int, owner_id: str | None, encryption_key: str
+    ) -> str:
+        """The grant for the job's own held lease of ``remote_port``, signed now.
+
+        Refused as unusable, like a relay with no token, when the relay holds
+        no active key: a proxy registered without a grant is refused by a
+        relay enforcing admission. Refused too when the port's held lease is
+        not the job's reservation's, or the job names none: a grant authorizes
+        its port alone, so one signed for another tenancy's lease would let
+        this job's proxy take a port another buyer holds.
+        """
+        if not relay.grant_key_encrypted:
+            raise RelayUnusableAtExecutionError(
+                f"relay '{relay.id}' has no active grant key, so the proxy's "
+                "grant cannot be signed and the relay would refuse it"
             )
-            return replace(
-                params,
-                relay_addr=relay.relay_addr,
-                relay_port=relay.relay_port,
-                relay_token=token,
+        lease = (
+            db.query(RelayPortLease)
+            .filter(
+                RelayPortLease.relay_id == relay.id,
+                RelayPortLease.remote_port == remote_port,
+                RelayPortLease.released_at.is_(None),
             )
+            .one_or_none()
+        )
+        if lease is None or owner_id is None or lease.owner_id != owner_id:
+            raise RelayUnusableAtExecutionError(
+                f"relay '{relay.id}' holds no lease on port {remote_port} for this "
+                "job's reservation, so no grant can be signed for its proxy"
+            )
+        key = GrantKey.from_profile_form(
+            decrypt_secret(relay.grant_key_encrypted, encryption_key)
+        )
+        try:
+            grant = sign_grant(lease, key)
+        except ValueError as exc:
+            raise RelayUnusableAtExecutionError(str(exc)) from exc
+        lease.grant_key_id = key.kid
+        return grant
 
 
 __all__ = ["RelayExecutionResolver", "RelayUnusableAtExecutionError"]

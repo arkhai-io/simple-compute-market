@@ -14,6 +14,7 @@ import pytest
 from cryptography.fernet import Fernet
 from market_resource_pools import ResourcePool
 
+from compute_provisioning.hosts import ConnectionCodecs
 from compute_provisioning.relays import (
     PoolRelay,
     RelayPortLease,
@@ -33,7 +34,9 @@ _KEY = Fernet.generate_key().decode()
 @pytest.fixture
 def relays(session_factory):
     service = RelayService(
-        session_factory=session_factory, settings=SimpleNamespace(ssh_decryption_key=_KEY)
+        session_factory=session_factory,
+        settings=SimpleNamespace(ssh_decryption_key=_KEY),
+        connection_codecs=ConnectionCodecs([]),
     )
     for relay_id, addr in (("site-a", "10.0.0.9"), ("site-b", "10.0.0.10")):
         service.create_relay(
