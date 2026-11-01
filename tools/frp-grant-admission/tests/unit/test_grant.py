@@ -37,7 +37,7 @@ def test_an_admitted_grant_carries_its_verified_claims_and_issuer() -> None:
 
     assert result.admitted
     assert result.reason is None
-    assert result.issuer == "site-a"
+    assert result.issuer == "issuer-a"
     assert (result.kid, result.sub, result.jti, result.exp) == (
         TEST_1_THUMBPRINT,
         "host-1",
@@ -58,7 +58,7 @@ def test_a_forged_grant_reports_the_claims_it_carried_as_unverified() -> None:
     result = check_grant(forged(header(), claims()), CONFIG, PORT, NOW)
 
     assert result.reason is Reason.SIGNATURE_INVALID
-    assert result.issuer == "site-a"
+    assert result.issuer == "issuer-a"
     assert (result.kid, result.sub, result.jti, result.exp) == (
         TEST_1_THUMBPRINT,
         "host-1",
@@ -130,7 +130,7 @@ def test_a_grant_refused_for_its_time_or_port_still_carries_verified_claims() ->
         (port_as_text, Reason.PORT_MISMATCH),
     ):
         assert result.reason is reason
-        assert result.issuer == "site-a"
+        assert result.issuer == "issuer-a"
         assert (result.kid, result.sub, result.jti, result.exp) == (
             TEST_1_THUMBPRINT,
             "host-1",
@@ -145,7 +145,7 @@ def test_a_claim_of_the_wrong_type_leaves_the_claims_unverified() -> None:
     exp_as_text = check_grant(sign(header(), claims(exp=str(EXP))), CONFIG, PORT, NOW)
 
     assert jti_as_number.reason is exp_as_text.reason is Reason.GRANT_MALFORMED
-    assert (jti_as_number.issuer, jti_as_number.jti, jti_as_number.exp) == ("site-a", 1, EXP)
+    assert (jti_as_number.issuer, jti_as_number.jti, jti_as_number.exp) == ("issuer-a", 1, EXP)
     assert (exp_as_text.kid, exp_as_text.exp) == (TEST_1_THUMBPRINT, str(EXP))
     assert not jti_as_number.verified
     assert not exp_as_text.verified
@@ -170,4 +170,4 @@ def test_a_grant_signed_with_the_issuers_key_is_bound_to_that_issuers_range() ->
     result = check_grant(sign(header(), claims(port=6201)), CONFIG, 6201, NOW)
 
     assert result.reason is Reason.PORT_OUTSIDE_RANGE
-    assert result.issuer == "site-a"
+    assert result.issuer == "issuer-a"

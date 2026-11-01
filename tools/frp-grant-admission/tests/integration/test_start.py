@@ -56,7 +56,7 @@ def test_start_binds_the_configured_address_logs_and_reloads_on_sighup(tmp_path:
         os.kill(os.getpid(), signal.SIGHUP)
 
         reloaded = log.wait_for(lambda line: line.get("trigger") == "reload")
-        assert [issuer["name"] for issuer in reloaded["issuers"]] == ["site-a", "site-b"]
+        assert [issuer["name"] for issuer in reloaded["issuers"]] == ["issuer-a", "issuer-b"]
         connection = http.client.HTTPConnection("127.0.0.1", port, timeout=WAIT_SECONDS)
         try:
             # The system clock decides here, against which the vector's grant,

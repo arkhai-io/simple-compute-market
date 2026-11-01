@@ -39,7 +39,7 @@ CONFIGURATION = f"""\
 listen = "127.0.0.1:7300"
 
 [[issuers]]
-name = "site-a"
+name = "issuer-a"
 audience = "{AUDIENCE}"
 ports = {{ start = 6100, end = 6199 }}
 keys = [
@@ -48,7 +48,7 @@ keys = [
 ]
 
 [[issuers]]
-name = "site-b"
+name = "issuer-b"
 audience = "{AUDIENCE}"
 ports = {{ start = 6200, end = 6249 }}
 keys = [

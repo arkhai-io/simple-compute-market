@@ -3,6 +3,7 @@ name = "frp-grant-admission"
 version = "0.1.0"
 license = "MIT"
 description = "An frps server plugin admitting a proxy only for the remote port a signed grant names"
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "cryptography>=42",

@@ -498,7 +498,7 @@ D18, D19, D22; delta "The plugin owns its grant specification").
 
 Files: `README.md`, `pyproject.toml` (`readme`).
 
-- [ ] 4.1 `README.md` states, naming no concept of any particular issuing system: what
+- [x] 4.1 `README.md` states, naming no concept of any particular issuing system: what
       the plugin does and does not (D1, D6); the grant — header, claims, required and
       optional, their types (`exp`, `nbf`, `iat` JSON integers; `sub` and `jti` strings),
       where it is carried in frpc's configuration and on the wire (D2, D18, D19); `typ`
@@ -513,10 +513,48 @@ Files: `README.md`, `pyproject.toml` (`readme`).
       the conformance a signer owes (D7); and D3's operating rules — drain before
       refusing what was admitted, a signer granting only within its range, ranges within
       frps's `allowPorts`. `pyproject.toml` gains `readme = "README.md"`. (D14)
-- [ ] 4.2 Verification: every section, field, type, and reason code the README names
+      Note: the README states the specification as version 1.0 within `frp-grant 1.x`,
+      matching the vector's `frp-grant 1.0`, and holds every part listed above; the frp
+      version, the pins file's format (section 5), and installation (section 7) are
+      left to their sections, so it names no frp version yet. Its admission steps are
+      D12's, with an unreadable header at step 5 as D12 now records. Beyond the plan,
+      the example issuers are renamed `issuer-a` and `issuer-b` in the README and in
+      `examples/config.toml` (with `test_config.py` and `test_cli.py` following), since
+      D13's `vm-site` and `bm-site` name one issuing system's concepts, which the
+      README must not; for the same reason the vector's issuers become `issuer-a` and
+      `issuer-b` (the builder's configuration and the committed file's `configuration`
+      text alone change, no token, and the tests follow). **For the owner:** the README
+      keeps the word "relay" for the frps server it guards, as the delta spec and the
+      reason texts do, though D14 and D17 call "relay" this repository's word; whether
+      the README must say "server" instead is the owner's or the review's to settle.
+      The README states frp's behaviour the plugin relies on — frps asking once per
+      registration and again after a reconnect, failing closed, frpc retrying a refused
+      proxy, a reload registering only changed proxies — as the design does; section 5
+      tests each against real frp. It says the vector is replayed at the locked
+      dependencies only: section 6 adds the floor run and the sentence saying so.
+- [x] 4.2 Verification: every section, field, type, and reason code the README names
       exists in the code and the vector (read against sections 1–3); `make
       check-comment-hygiene`; `make check-packaging` (`readme` added).
       End-to-end: none.
+      Note: read against the code and the vector — the claim table against
+      `grant.py`, the reason table against `reasons.py` and where each is returned
+      (corrected while reading: a wrong-typed `port` is `port_mismatch`, not
+      `grant_malformed`, and `malformed_request` covers a missing `op` or `content`),
+      the configuration rules against `config.py`, the log's fields against
+      `decision_log.py`, and the vector's members against `vector/frp-grant-1.json`.
+      The fresh-context check then corrected: a floor run the README claimed before
+      section 6 delivers it; `verified`'s meaning (true too for a grant refused for its
+      time or port); `claim_missing` covering a `null` claim; when the log carries the
+      proxy's fields and the grant's; step 1's socket timeout and `content` object; and
+      the vector's `warning` and `name` members. Its finding that PyJWT 2.15.1 may map
+      an empty `aud` to `claim_missing` where 2.8.0 says `audience_mismatch` is not
+      checked here and no vector case holds it: section 6's floor run is where such a
+      difference would show, and the vector could gain the case.
+      `make -C tools/frp-grant-admission test` — unit and in-process integration, 174
+      passed; `make check-comment-hygiene` — passes; `make check-packaging` — passes,
+      the lock unchanged by `readme`; `make test` — passes; `make check-change` — 5 of 6 pass, citations
+      reporting 7 paths, every one a file the change creates at closeout or in
+      section 6. End-to-end: none, confirmed.
 
 ## 5. The real-frp gate
 

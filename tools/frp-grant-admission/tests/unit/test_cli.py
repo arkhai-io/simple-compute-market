@@ -36,8 +36,8 @@ def test_check_prints_each_issuer_its_range_and_its_keys_thumbprints(
 
     out = capsys.readouterr().out
     assert "listen 127.0.0.1:7300" in out
-    assert "issuer vm-site: audience relay-1, ports 6100-6199" in out
-    assert "issuer bm-site: audience relay-1, ports 6200-6249" in out
+    assert "issuer issuer-a: audience relay-1, ports 6100-6199" in out
+    assert "issuer issuer-b: audience relay-1, ports 6200-6249" in out
     assert f"  key {TEST_1_THUMBPRINT}" in out
 
 

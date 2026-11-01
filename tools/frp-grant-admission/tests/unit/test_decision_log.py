@@ -31,7 +31,7 @@ def test_an_admission_is_one_line_naming_the_proxy_and_the_verified_grant() -> N
             "proxy": "host-1.guest-17",
             "type": "tcp",
             "remote_port": PORT,
-            "issuer": "site-a",
+            "issuer": "issuer-a",
             "kid": TEST_1_THUMBPRINT,
             "sub": "host-1",
             "jti": "grant-0001",
@@ -121,8 +121,8 @@ def test_a_load_lists_each_issuer_its_range_and_its_keys() -> None:
     assert line["trigger"] == "startup"
     assert line["listen"] == "127.0.0.1:7300"
     assert [(i["name"], i["ports"], len(i["keys"])) for i in line["issuers"]] == [
-        ("site-a", {"start": 6100, "end": 6199}, 2),
-        ("site-b", {"start": 6200, "end": 6249}, 1),
+        ("issuer-a", {"start": 6100, "end": 6199}, 2),
+        ("issuer-b", {"start": 6200, "end": 6249}, 1),
     ]
     assert TEST_1_THUMBPRINT in line["issuers"][0]["keys"]
     assert "listen_at_restart" not in line

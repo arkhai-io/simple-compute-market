@@ -36,8 +36,8 @@ def test_the_example_loads() -> None:
 
     assert str(loaded.listen) == "127.0.0.1:7300"
     assert [(i.name, i.audience, i.port_start, i.port_end) for i in loaded.issuers] == [
-        ("vm-site", "relay-1", 6100, 6199),
-        ("bm-site", "relay-1", 6200, 6249),
+        ("issuer-a", "relay-1", 6100, 6199),
+        ("issuer-b", "relay-1", 6200, 6249),
     ]
     assert loaded.issuers[0].kids == (TEST_1_THUMBPRINT,)
 
@@ -51,7 +51,7 @@ def test_the_example_keys_are_rfc8032_test_1_and_test_2() -> None:
         for issuer in loaded.issuers
     }
 
-    assert raw == {"vm-site": TEST_1.public_hex, "bm-site": TEST_2.public_hex}
+    assert raw == {"issuer-a": TEST_1.public_hex, "issuer-b": TEST_2.public_hex}
 
 
 def test_a_key_id_is_its_rfc7638_thumbprint() -> None:
@@ -275,7 +275,7 @@ def test_an_overlap_is_reported_for_an_issuer_with_no_name() -> None:
     [
         ('listen = "127.0.0.1:7300"\n', "issuers: missing"),
         (
-            'listen = "127.0.0.1:7300"\nissuers = "vm-site"\n',
+            'listen = "127.0.0.1:7300"\nissuers = "issuer-a"\n',
             "issuers: must be an array of tables ([[issuers]])",
         ),
         (

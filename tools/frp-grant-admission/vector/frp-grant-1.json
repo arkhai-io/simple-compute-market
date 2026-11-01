@@ -24,7 +24,7 @@
       "kid": "FVV5umTuau890q59V-4Ga_R6qWb7ON_ivJc4EjvCwTM"
     }
   ],
-  "configuration": "# RFC 8032 test keys only: never use them on any network.\nlisten = \"127.0.0.1:7300\"\n\n[[issuers]]\nname = \"site-a\"\naudience = \"relay-1\"\nports = { start = 6100, end = 6199 }\nkeys = [\n  { public_key = \"MCowBQYDK2VwAyEA11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=\" },  # RFC 8032 TEST 1\n  { public_key = \"MCowBQYDK2VwAyEAPUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=\" },  # RFC 8032 TEST 2\n]\n\n[[issuers]]\nname = \"site-b\"\naudience = \"relay-1\"\nports = { start = 6200, end = 6249 }\nkeys = [\n  { public_key = \"MCowBQYDK2VwAyEA/FHNjmIYoaONpH7QAjDwWAgW7RO6MwOsXeuRFUiQgCU=\" },  # RFC 8032 TEST 3\n]\n",
+  "configuration": "# RFC 8032 test keys only: never use them on any network.\nlisten = \"127.0.0.1:7300\"\n\n[[issuers]]\nname = \"issuer-a\"\naudience = \"relay-1\"\nports = { start = 6100, end = 6199 }\nkeys = [\n  { public_key = \"MCowBQYDK2VwAyEA11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=\" },  # RFC 8032 TEST 1\n  { public_key = \"MCowBQYDK2VwAyEAPUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=\" },  # RFC 8032 TEST 2\n]\n\n[[issuers]]\nname = \"issuer-b\"\naudience = \"relay-1\"\nports = { start = 6200, end = 6249 }\nkeys = [\n  { public_key = \"MCowBQYDK2VwAyEA/FHNjmIYoaONpH7QAjDwWAgW7RO6MwOsXeuRFUiQgCU=\" },  # RFC 8032 TEST 3\n]\n",
   "verification": [
     {
       "name": "valid",

@@ -9,7 +9,7 @@
 listen = "127.0.0.1:7300"
 
 [[issuers]]
-name = "vm-site"
+name = "issuer-a"
 audience = "relay-1"
 ports = { start = 6100, end = 6199 }
 keys = [
@@ -18,7 +18,7 @@ keys = [
 ]
 
 [[issuers]]
-name = "bm-site"
+name = "issuer-b"
 audience = "relay-1"
 ports = { start = 6200, end = 6249 }
 keys = [

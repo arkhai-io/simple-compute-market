@@ -39,16 +39,16 @@ WAIT_SECONDS = 5
 
 
 def configuration(*, listen: str = "127.0.0.1:7300", site_b: bool = False) -> str:
-    """Site A always; site B, with TEST 3's key, when asked. RFC 8032 test keys only."""
+    """Issuer A always; issuer B, with TEST 3's key, when asked. RFC 8032 test keys only."""
     text = (
-        f'listen = "{listen}"\n\n[[issuers]]\nname = "site-a"\naudience = "{AUDIENCE}"\n'
+        f'listen = "{listen}"\n\n[[issuers]]\nname = "issuer-a"\naudience = "{AUDIENCE}"\n'
         "ports = { start = 6100, end = 6199 }\n"
         f'keys = [ {{ public_key = "{TEST_1.spki_base64}" }}, '
         f'{{ public_key = "{TEST_2.spki_base64}" }} ]\n'
     )
     if site_b:
         text += (
-            f'\n[[issuers]]\nname = "site-b"\naudience = "{AUDIENCE}"\n'
+            f'\n[[issuers]]\nname = "issuer-b"\naudience = "{AUDIENCE}"\n'
             "ports = { start = 6200, end = 6249 }\n"
             f'keys = [ {{ public_key = "{TEST_3.spki_base64}" }} ]\n'
         )
@@ -164,7 +164,7 @@ def test_a_valid_grant_is_admitted_and_logged_verified(plugin: RunningPlugin) ->
     line = plugin.log.wait_for(lambda line: line["event"] == "admit")
     assert line["proxy"] == "host-1.guest-17"
     assert line["remote_port"] == PORT
-    assert line["issuer"] == "site-a"
+    assert line["issuer"] == "issuer-a"
     assert line["verified"] is True
     assert GRANT not in plugin.log.raw
 
@@ -270,7 +270,7 @@ def test_an_issuer_added_by_reload_is_admitted_without_a_restart(plugin: Running
     line = plugin.log.wait_for(
         lambda line: line["event"] == "config_loaded" and line["trigger"] == "reload"
     )
-    assert [issuer["name"] for issuer in line["issuers"]] == ["site-a", "site-b"]
+    assert [issuer["name"] for issuer in line["issuers"]] == ["issuer-a", "issuer-b"]
     assert plugin.new_proxy(remote_port=6201, metas={"grant": grant}) == {
         "reject": False,
         "unchange": True,
