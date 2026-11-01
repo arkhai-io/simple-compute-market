@@ -47,7 +47,7 @@ BUILT_HERE = "arkhai"
 # storefront, not `foo`'s. A test holds the list to what the build writes.
 BUILT_IMAGES = ("apicredits-sample-app", "apicredits-service", "apicredits-storefront",
                 "bare-metal-storefront", "compute-provisioning", "dev-env", "e2e-tests",
-                "registry", "storefront")
+                "frp-grant-admission", "registry", "storefront")
 _CHANGE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 _KEY = re.compile(r"^(?P<indent> *)(?P<key>[A-Za-z0-9_.-]+):(?P<value>.*)$")
 
