@@ -36,6 +36,7 @@ from tests.unit.stage_sources import (
     fields,
     is_stage,
     run_order,
+    running_stages,
     state_use,
     tree,
 )
@@ -83,7 +84,15 @@ REAL_LANE = Lane(
     ROLES / "scenarios" / "vms" / "real_compute_deal_driver.py",
     "RealVmDealState",
 )
-ALL_LANES = (*LANES, REAL_LANE)
+REAL_BM_LANE = Lane(
+    "bare_metal_real",
+    ROLES / "scenarios" / "bare_metal" / "test_real_provisioning_deal.py",
+    ROLES / "scenarios" / "bare_metal" / "real_compute_deal_driver.py",
+    "RealBareMetalDealState",
+)
+REAL_LANES = (REAL_LANE, REAL_BM_LANE)
+ALL_LANES = (*LANES, *REAL_LANES)
+BARE_METAL_STAGES = classes(tree(ROLES / "scenarios" / "bare_metal" / "publication_stages.py"))
 
 #: The real lane's run order: every shared stage, by its name here, with the
 #: lane's own stages, by their declared names, where they replace a mock lane's
@@ -168,13 +177,13 @@ MOCK_GATES = _members("MockGates")
 
 def _lane_own_stages(lane: Lane) -> list[ast.ClassDef]:
     return [
-        node for node in domain_stages(lane.scenario)
-        if not set(base_names(node)) & set(STAGE_NAMES)
+        body for _name, body in running_stages(lane.scenario, BARE_METAL_STAGES)
+        if not set(base_names(body)) & set(STAGE_NAMES)
     ]
 
 
 def _scenario(lane: Lane) -> list[tuple[str, StateUse]]:
-    return run_order(lane.scenario, STAGES, state=STATE)
+    return run_order(lane.scenario, [*STAGES, *BARE_METAL_STAGES], state=STATE)
 
 
 def _driver_annotation(stage: ast.ClassDef) -> str | None:
@@ -390,3 +399,30 @@ def test_a_lane_stage_uses_only_its_states_fields(lane: Lane):
     use = state_use(_lane_own_stages(lane), state=STATE)
     used = use.written | use.required
     assert used - declared == set(), used - declared
+
+
+@pytest.mark.parametrize("lane", REAL_LANES, ids=lambda lane: lane.name)
+def test_every_real_lane_reuses_all_shared_stages_without_mock_gates(lane):
+    declared = []
+    for node in domain_stages(lane.scenario):
+        names = [name for name in base_names(node) if name in STAGE_NAMES]
+        if names:
+            (name,) = names
+            assert name in SHARED_NAMES, f"{lane.name} uses mock stage {name}"
+            assert len(node.body) == 1 and isinstance(node.body[0], ast.Pass)
+            declared.append(name)
+    assert declared == SHARED_NAMES
+
+
+def test_real_bare_metal_orders_physical_effects_and_observations():
+    names = [name for name, _use in _scenario(REAL_BM_LANE)]
+    ordered = ["TestStage00e1_BareMetalExecutionIsReal", "TestStage00f1_ExecutorHostRegistry",
+               "TestStage03a_PublicationDryRun", "TestStage03b_PublicationStepPublishes",
+               "TestStage08a2_SettlementPreviewChoseTheTarget", "TestStage08b_SettlementSubmittedAndJobQueued",
+               "TestStage08b3_GrantJobSucceeded", "TestStage09a_FulfillmentConvergesToActive",
+               "TestStage09a2_PublicationClosesTheListing", "TestStage09bb_EvidencePublishedForTheFulfilledEscrow",
+               "TestStage09d_BuyerConnectsWithPinnedHostKey", "TestStage09e_UnrelatedKeyRefused",
+               "TestStage10b2_ManagementBeforeReclaim", "TestStage11a_TeardownDispatch",
+               "TestStage11a3_ReclaimJobSucceeded", "TestStage11b_TeardownCompletion",
+               "TestStage11c_DeliveredAccessEnded"]
+    assert [names.index(name) for name in ordered] == sorted(names.index(name) for name in ordered)

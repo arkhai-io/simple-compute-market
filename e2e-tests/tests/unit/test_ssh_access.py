@@ -528,3 +528,54 @@ def test_heartbeat_eof_is_failure_even_after_a_timestamp(heartbeat_session):
     monitor.process.wait(timeout=2)
     with pytest.raises(SshAccessError, match="ended"):
         monitor.assert_alive()
+
+
+def test_pinned_host_key_is_written_before_first_attempt_and_checked_strictly(tmp_path, fake_ssh, clock):
+    directory = tmp_path / "pinned"
+    directory.mkdir(mode=0o700)
+    pinned = SshSession(directory, ssh=fake_ssh.path, host_key=f"ssh-ed25519 {HOST_KEY}", clock=clock, sleep=clock.sleep)
+    fake_ssh.plan({"host_key": HOST_KEY, "stdout": "tenant\n"})
+    assert pinned.run(ENDPOINT, pinned.new_key("buyer"), "id -un") == "tenant\n"
+    invocation = fake_ssh.calls()[0]
+    assert _option(invocation, "StrictHostKeyChecking") == "yes"
+    assert pinned.host_key_fingerprint(ENDPOINT) is not None
+    assert stat.S_IMODE(pinned.known_hosts.stat().st_mode) == 0o600
+    assert _option(invocation, "ControlMaster") == "no"
+    assert _option(invocation, "ControlPath") == "none"
+
+
+def test_pinned_host_key_refuses_a_different_key_on_first_contact(tmp_path, fake_ssh, clock):
+    directory = tmp_path / "pinned"
+    directory.mkdir(mode=0o700)
+    pinned = SshSession(directory, ssh=fake_ssh.path, host_key=f"ssh-ed25519 {HOST_KEY}", clock=clock, sleep=clock.sleep)
+    fake_ssh.plan({"host_key": OTHER_HOST_KEY, "stdout": "unexpected"})
+    with pytest.raises(HostKeyChanged):
+        pinned.run(ENDPOINT, pinned.new_key("buyer"), "id -un")
+    assert len(fake_ssh.calls()) == 1
+
+
+def test_pinned_key_is_bound_to_each_leased_port_without_relearning(tmp_path):
+    with ssh_session(host_key=f"ssh-ed25519 {HOST_KEY}") as pinned:
+        key = pinned.new_key("buyer")
+        pinned.argv(ENDPOINT, key, "true")
+        second = SshEndpoint(ENDPOINT.host, ENDPOINT.port + 1, ENDPOINT.user)
+        pinned.argv(second, key, "true")
+        assert pinned.host_key_fingerprint(ENDPOINT) == pinned.host_key_fingerprint(second)
+        assert len(pinned.known_hosts.read_text().splitlines()) == 2
+
+
+def test_external_known_hosts_is_read_only_and_not_removed_by_session_cleanup(tmp_path):
+    known = tmp_path / "operator-known-hosts"
+    text = f"[{ENDPOINT.host}]:{ENDPOINT.port} ssh-ed25519 {HOST_KEY}\n"
+    known.write_text(text)
+    with ssh_session(known_hosts_file=known) as pinned:
+        args = pinned.argv(ENDPOINT, pinned.new_key("buyer"), "true")
+        assert _option(args, "StrictHostKeyChecking") == "yes"
+        assert _option(args, "UserKnownHostsFile") == str(known)
+    assert known.read_text() == text
+
+
+@pytest.mark.parametrize("key", ["", "ssh-ed25519 not-a-key", "options=invalid ssh-ed25519 blob", "ssh-ed25519 value\nother"])
+def test_invalid_pinned_key_is_refused_before_ssh(tmp_path, key):
+    with pytest.raises(ValueError, match="ssh_host_public_key"):
+        SshSession(tmp_path, host_key=key)

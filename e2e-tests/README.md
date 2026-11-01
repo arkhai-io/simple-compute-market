@@ -183,6 +183,35 @@ running; `make e2e-<lane>-down` takes it down. `make test-e2e` runs all three in
 turn, taking each stack down before the next. The compute lanes' provisioning
 services run the mock profile unless `PROVISIONING_MODE=real`.
 
+### Real bare-metal provisioning
+
+`e2e_bare_metal_real_provisioning` runs the canonical complete deal against a
+real bare-metal provisioning service and an operator-prepared relay-backed host.
+It is in no default lane. Configure the existing `BARE_METAL_LANE` client settings
+for that release and its pinned principals, and select the ignored
+`real-provisioning-target` profile with a `domain: bare_metal` host. The target
+must contain the operator-verified OpenSSH host public key and relay identifier;
+it contains no private key, token or signing key.
+
+```bash
+make test-module MODULE=e2e_bare_metal_real_provisioning ACTIVE_PROFILES=local,real-provisioning-target
+```
+
+Before any hold or supply write, the target, real executor and enabled relay with
+a configured token and active grant key are checked. The run reconciles its own
+pool, executor and whole-machine declaration, adopts exactly one open listing
+for its verified machine/shape, and refuses another declaration on that host.
+Reconcile older declarations under paused admission before running it; the
+scenario does not delete or reassign unrelated supply.
+
+The buyer uses a generated key and the pinned machine key at the delivered relay
+port; an unrelated key must be refused. Grant and reclaim jobs must succeed on
+the target, management connectivity must survive, and lease expiry must release
+capacity and close the delivered access while retaining relay quarantine.
+Failure recovery truncates only the run's lease and names unconfirmed cleanup.
+Without a bare-metal target the module skips before mutation. These checks are
+source capabilities; a passing mock pipeline does not qualify real hardware.
+
 ### Real VM provisioning
 
 `e2e_vm_real_provisioning` runs the canonical compute deal against a real KVM

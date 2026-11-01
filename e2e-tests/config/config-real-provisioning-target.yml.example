@@ -30,5 +30,6 @@ REAL_PROVISIONING_TARGET:
         mode: relay
         relay_id: example-bm-relay
       capacity: {vcpu_count: 2, ram_gb: 4, disk_gb: 40}
-      # Replace this visible placeholder with the operator-verified public key.
-      ssh_host_public_key: 'ssh-ed25519 EXAMPLE_PUBLIC_KEY_REPLACE_BEFORE_USE'
+      # RFC8032 TEST1 public key: deterministic offline fixture, never use on any network.
+      # Replace with the operator-verified machine key before running a real lane.
+      ssh_host_public_key: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINdamAGCsQq31Uv+08lkBzoO4XLz2qYjJa8CGmj3B1Ea'

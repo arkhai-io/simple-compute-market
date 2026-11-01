@@ -1084,6 +1084,22 @@ writes. Nothing pauses or creates a listing, unlike the VM lane's adoption.
 Rejected: extending `e2e_bare_metal_deal` (rebuilding it into what the shared stages
 already provide, and losing its payment qualification).
 
+Implementation seam: the public bare-metal listing carries its executor host,
+physical host identity and hardware shape, not the site's opaque Physical Resource
+identifier. The real lane first refuses another declaration for that host through
+the canonical site snapshot, then adopts exactly one open listing matching the
+target's host, physical identity and declared shape. Its settlement preview must
+still name its exact owned Physical Resource before submission. This preserves
+resource ownership without adding an accounting field to the buyer payload.
+
+The two real lanes share
+`e2e-tests/tests/e2e/roles/helpers/real_provisioning.py` for job polling, management continuity and relay holdings. Bare-metal
+commercial/lease behavior is gate-free in its domain driver base; mock gates
+remain only on its mock driver. Publication-close and evidence stages live in
+that domain's `publication_stages.py` and are reused by both lanes. SSH host-key
+parsing belongs to `e2e_harness.ssh_host_key`, so the typed target and SSH session
+share validation without a production harness module importing test code.
+
 ### D11. One SSH helper
 
 `e2e-tests/tests/e2e/roles/helpers/ssh_access.py` becomes the one SSH helper and

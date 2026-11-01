@@ -8,9 +8,9 @@ One ``SshSession`` lives for one scenario run. Its owner-only directory holds
 the keys it generates and its own ``known_hosts``, and is removed when the run
 ends. A host's key is trusted on first use within the run and only for the run:
 every later connection checks it against that one file, so a host presenting
-another key mid-run fails rather than being trusted again. The delivered
-machine's host key is not delivered with its access, so nothing earlier could
-pin it.
+another key mid-run fails rather than being trusted again. Where the operator
+knows the host key, the session pins that key before first contact; an external
+known_hosts file is read strictly and is never rewritten or removed.
 
 Connections use the system ``ssh`` in batch mode, offering only the key they
 are given (``IdentitiesOnly``) and reading no user or system SSH configuration,
@@ -44,6 +44,8 @@ from cryptography.hazmat.primitives.serialization import (
     PrivateFormat,
     PublicFormat,
 )
+
+from e2e_harness.ssh_host_key import canonical_host_public_key
 
 log = logging.getLogger(__name__)
 
@@ -268,13 +270,21 @@ class SshSession:
         directory: Path,
         *,
         ssh: str = "ssh",
+        host_key: str | None = None,
+        known_hosts_file: Path | None = None,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
         connect_retry_seconds: float = CONNECT_RETRY_SECONDS,
         attempt_seconds: float = CONNECT_TIMEOUT_SECONDS + COMMAND_SECONDS,
     ) -> None:
         self.directory = directory
-        self.known_hosts = directory / "known_hosts"
+        if host_key is not None and known_hosts_file is not None:
+            raise ValueError("select a pinned host key or known_hosts file, not both")
+        self._pinned_host_key = canonical_host_public_key(host_key) if host_key is not None else None
+        self._pinned = host_key is not None or known_hosts_file is not None
+        self.known_hosts = known_hosts_file if known_hosts_file is not None else directory / "known_hosts"
+        if known_hosts_file is not None and not known_hosts_file.is_file():
+            raise ValueError("pinned known_hosts file does not exist")
         self._ssh = ssh
         self._clock = clock
         self._sleep = sleep
@@ -300,6 +310,7 @@ class SshSession:
 
     def argv(self, endpoint: SshEndpoint, key: SshKey, command: str) -> list[str]:
         """The ``ssh`` invocation for one attempt."""
+        self._pin(endpoint)
         return [
             self._ssh,
             "-F", "/dev/null",
@@ -309,13 +320,35 @@ class SshSession:
             "-o", f"ConnectTimeout={CONNECT_TIMEOUT_SECONDS}",
             "-o", "IdentitiesOnly=yes",
             "-o", "IdentityAgent=none",
-            "-o", "StrictHostKeyChecking=accept-new",
+            "-o", "StrictHostKeyChecking=yes" if self._pinned else "StrictHostKeyChecking=accept-new",
+            "-o", "ControlMaster=no",
+            "-o", "ControlPath=none",
+            "-o", "PreferredAuthentications=publickey",
+            "-o", "PasswordAuthentication=no",
+            "-o", "KbdInteractiveAuthentication=no",
+            "-o", "UpdateHostKeys=no",
             "-o", f"UserKnownHostsFile={self.known_hosts}",
             "-o", "GlobalKnownHostsFile=/dev/null",
             "-o", "HashKnownHosts=no",
             f"{endpoint.user}@{endpoint.host}",
             command,
         ]
+
+    def _pin(self, endpoint: SshEndpoint) -> None:
+        """Bind the operator's key to each delivered port before its first attempt."""
+        if self._pinned_host_key is None:
+            return
+        name = endpoint.host if endpoint.port == 22 else f"[{endpoint.host}]:{endpoint.port}"
+        lines = self.known_hosts.read_text().splitlines() if self.known_hosts.exists() else []
+        matching = [line.split() for line in lines if line.split() and name in line.split()[0].split(",")]
+        wanted = self._pinned_host_key.split()
+        if matching:
+            if any(fields[1:3] != wanted for fields in matching):
+                raise HostKeyChanged(f"{name} already has another key pinned in this run")
+            return
+        with self.known_hosts.open("a") as stream:
+            stream.write(f"{name} {self._pinned_host_key}\n")
+        self.known_hosts.chmod(0o600)
 
     def heartbeat(self, endpoint: SshEndpoint, key: SshKey) -> SshHeartbeat:
         """Start one established session that stays open across other proxy changes."""
@@ -498,7 +531,7 @@ class SshSession:
                     f"{endpoint.user}@{endpoint.host}:{endpoint.port} accepted "
                     f"{key.private_key.name}, which it should refuse"
                 )
-            if result is not None and "Permission denied" in result.stderr:
+            if result is not None and "Permission denied" in result.stderr and "publickey" in result.stderr:
                 reason = result.stderr.strip()
                 log.info(
                     "%s@%s:%s refused %s: %s",

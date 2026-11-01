@@ -1640,14 +1640,14 @@ round formal triage are not claimed complete.
 Delivers D10 and D11's pinned mode: "A real-provisioning bare-metal scenario proves
 relay access on a real host".
 
-- [ ] 12.1 Add a pinned `known_hosts` mode to `ssh_access.py`. (D10, D11)
-- [ ] 12.2 Add the real bare-metal driver
+- [x] 12.1 Add a pinned `known_hosts` mode to `ssh_access.py`. (D10, D11)
+- [x] 12.2 Add the real bare-metal driver
       (the planned `real_compute_deal_driver.py` module under `e2e-tests/tests/e2e/roles/scenarios/bare_metal/`)
       implementing `ComputeDealDriver` without `MockGates`: it registers, from the
       target, a backed pool delivering and advertising bare metal with
       `provider_config.relay_id`, the host with its connection, and the declaration; it
       checks the relay as 11.1 does. (D10)
-- [ ] 12.3 Add the planned `test_real_provisioning_deal.py` module under `e2e-tests/tests/e2e/roles/scenarios/bare_metal/`,
+- [x] 12.3 Add the planned `test_real_provisioning_deal.py` module under `e2e-tests/tests/e2e/roles/scenarios/bare_metal/`,
       marker `e2e_bare_metal_real_provisioning` registered in `e2e-tests/pyproject.toml`
       and in no lane: every shared stage; bare metal's publication, listing-closing,
       and evidence-publication stages, adopting the open listing on its resource as
@@ -1657,12 +1657,64 @@ relay access on a real host".
       from the target; connectivity checks; after release the string refused and the
       holdings read showing the lease released; a finaliser that cuts the lease short
       and names what it cannot confirm. (D10)
-- [ ] 12.4 Tests. Unit: the bare-metal real lane's stage set against the shared stages
+- [x] 12.4 Tests. Unit: the bare-metal real lane's stage set against the shared stages
       (`test_compute_deal_stages.py`), the driver's registration and relay checks, the
       pinned mode.
-- [ ] 12.5 Verify. `make test-e2e-unit`; `make test`. End-to-end: `e2e_bare_metal_real_provisioning`,
+- [x] 12.5 Verify. `make test-e2e-unit`; `make test`. End-to-end: `e2e_bare_metal_real_provisioning`,
       in no lane, skips without a bare-metal host in its target; the live run (section
       16) runs it.
+
+### Section 12 handoff
+
+The opt-in `e2e_bare_metal_real_provisioning` module runs every canonical shared
+stage and no mock stage. It validates the target's OpenSSH host key, real executor
+and relay before any hold or supply write; reconciles a backed pool, management
+connection and whole-machine declaration; adopts one open listing matching the
+host/physical identity/shape; waits for actual grant/reclaim jobs; uses a generated
+buyer key with the pinned host key and rejects an unrelated key; checks management
+continuity and reservation-owned relay delivery/release with retained quarantine.
+Its failure finalizer expires only its own lease and names unconfirmed recovery.
+Before deployment, the operator must pause admission and reconcile older
+resource declarations/pools/listings on that physical host. The lane refuses a
+conflicting declaration instead of deleting or silently reassigning it.
+
+Shared real observations moved into
+`e2e-tests/tests/e2e/roles/helpers/real_provisioning.py`; VM keeps its imported
+aliases and uses the same implementation. Gate-free bare-metal commercial/lease
+methods are in its driver base. Domain publication-close/evidence bodies moved
+to `publication_stages.py`, reused by mock and real scenarios; source checks now
+resolve those inherited bodies so producers remain verified. Public listing
+payloads intentionally carry no opaque resource id: adoption checks the target's
+host/physical identity/shape after the declaration guard, and settlement still
+requires the exact owned resource. Host-key parsing lives in
+`e2e-tests/src/e2e_harness/ssh_host_key.py`, shared by target validation and the
+pinned SSH mode. The committed key is an explicitly labelled RFC8032 offline
+fixture, never a runtime key.
+
+Focused harness evidence: the initial run passed 408 and failed two source-stage
+checks while the extracted domain bodies were not yet included in their resolver;
+after correction 441 passed. The expanded final run passed 451 tests (14.27s),
+including typed pool/host/declaration composition, no-write refusal, stale and
+ambiguous listing refusal, exact relay ownership, conservative/owned recovery,
+pinned first-contact rejection and actual pytest fixture order. These are harness
+unit/component-boundary tests, not a running application or hardware proof.
+After import/constant cleanup, 170 affected tests passed; after harmless Unicode
+comment normalization and the final owned-truncation assertion, all 238 affected
+target/SSH/VM/bare-metal/stage tests passed (8.58s). Unchanged broader-suite
+evidence is retained rather than relabelled as a new full run.
+The no-target invocation reported 38 explicit skips / 273 deselected (1.00s),
+with no holds or supply mutation. `make check-packaging` passed with transient
+files on owned private-home storage; the earlier sandbox marker ENOSPC occurred
+before its read command, and no passing tests were repeated for that disk remedy.
+`make check-change` passed; final task-note/index checks are recorded with commit.
+
+The owner-authorized cadence consolidates fresh-context compliance and independent
+implementation review into the frozen sections 10–13 round, with full `make test`
+and pipeline validation there. No broad extra section review or full repository
+run is claimed. Section 16 still owes actual-host grant/reclaim, SSH, refusal and
+released-holding evidence. The normal pipeline must collect this new marker as
+opt-in/skipped without a target; it is added to no lane. Owed by validation: no
+additional push-only workflow beyond that frozen-round pipeline.
 
 ## 13. One SSH helper
 

@@ -667,6 +667,19 @@ fails naming the escrow, negotiation, fulfillment, reservation, jobs, guest, and
 host. It never releases reservations fleet-wide, which would return the host's
 capacity to the market while its guest may still run.
 
+The opt-in `e2e_bare_metal_real_provisioning` scenario
+(`e2e-tests/tests/e2e/roles/scenarios/bare_metal/test_real_provisioning_deal.py`)
+uses the same canonical shared stages with a gate-free bare-metal driver. It
+registers a backed relay-bound pool, the target's management connection and one
+whole-machine declaration. Publication creates or reuses the open listing for
+that machine and declared shape; the scenario never creates a listing directly.
+The target's host key is validated and pinned before first SSH contact. Actual
+grant/reclaim jobs, management continuity, negotiated-key access, unrelated-key
+refusal, ordinary expiry/release, closed access and released/quarantined relay
+holdings require a configured real host. The module belongs to no pipeline lane;
+without its target it skips before any holds or supply writes. Unit and mock
+pipeline results do not substitute for this physical qualification.
+
 ## Coverage Contract Between Levels
 
 Each level has a defined jurisdiction. Duplicating coverage across

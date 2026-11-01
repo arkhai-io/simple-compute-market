@@ -16,6 +16,8 @@ from pydantic import (
     field_validator, model_validator,
 )
 
+from e2e_harness.ssh_host_key import canonical_host_public_key
+
 SECTION = "REAL_PROVISIONING_TARGET"
 PROFILE = "real-provisioning-target"
 PROFILE_FILE = f"config-{PROFILE}.yml"
@@ -84,6 +86,11 @@ class BareMetalHost(_Host):
     domain: Literal["bare_metal"]
     physical_host_id: _Text
     ssh_host_public_key: _Text
+
+    @field_validator("ssh_host_public_key")
+    @classmethod
+    def valid_host_key(cls, value: str) -> str:
+        return canonical_host_public_key(value)
 
 
 TargetHost = Annotated[VmHost | BareMetalHost, Field(discriminator="domain")]
