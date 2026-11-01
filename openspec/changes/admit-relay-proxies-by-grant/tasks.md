@@ -56,7 +56,7 @@ Files: `pyproject.toml`, `uv.lock`, `Makefile`, `LICENSE`, `.gitignore`,
 `src/frp_grant_admission/__init__.py`, `src/frp_grant_admission/config.py`,
 `tests/unit/test_config.py`, `tests/rfc8032.py`, `examples/config.toml`.
 
-- [ ] 1.1 Create the project as `docs/development/BUILD_AND_PACKAGING.md` lays one out:
+- [x] 1.1 Create the project as `docs/development/BUILD_AND_PACKAGING.md` lays one out:
       distribution `frp-grant-admission`, import package `frp_grant_admission` at
       `src/frp_grant_admission`, hatchling with `packages = ["src/frp_grant_admission"]`
       and nothing else, `requires-python = ">=3.11"`, `license = "MIT"`, version `0.1.0`,
@@ -69,7 +69,7 @@ Files: `pyproject.toml`, `uv.lock`, `Makefile`, `LICENSE`, `.gitignore`,
       names `frp_grant_admission.cli:main`, which section 3 writes. `pyproject.toml`
       gains `readme = "README.md"` in section 4, when the README exists. The lock
       resolves cryptography 50.0.2 and PyJWT 2.15.1; `make check-packaging` passes.
-- [ ] 1.2 **Decision gate on PyJWT's `iat`.** Find the lowest PyJWT release whose
+- [x] 1.2 **Decision gate on PyJWT's `iat`.** Find the lowest PyJWT release whose
       `jwt.decode` refuses, with zero leeway, an `iat` later than the clock, as D12 step 7
       and the delta's "A grant is not yet valid" require of "`nbf` and `iat` validated as
       PyJWT does"; declare `PyJWT>=` that release and record it in this task's note. If no
@@ -90,7 +90,7 @@ Files: `pyproject.toml`, `uv.lock`, `Makefile`, `LICENSE`, `.gitignore`,
       makes the time checks the plugin's own, so PyJWT's `iat` behaviour no longer bears
       on the floor, and D20 keeps `PyJWT>=2.8.0` for `strict_aud` alone; the clock never
       reaches PyJWT (2.2). Done when `pyproject.toml` declares `PyJWT>=2.8.0`, as it does.
-- [ ] 1.3 `config.py` loads a TOML file with `tomllib` into an immutable configuration:
+- [x] 1.3 `config.py` loads a TOML file with `tomllib` into an immutable configuration:
       `listen` and a list of issuers, each with `name`, `audience`, `ports.start`,
       `ports.end`, and `keys`, each key a `public_key` — single-line standard base64 of
       the DER SubjectPublicKeyInfo of an Ed25519 key. Each key's id is derived at load as
@@ -103,7 +103,7 @@ Files: `pyproject.toml`, `uv.lock`, `Makefile`, `LICENSE`, `.gitignore`,
       names its `Issuer`); `thumbprint()` is the derivation. A key must be canonical: its
       base64 decodes strictly and re-encodes to the same DER, so trailing bytes are
       refused.
-- [ ] 1.4 Loading collects every problem and refuses the file, naming each: a key listed
+- [x] 1.4 Loading collects every problem and refuses the file, naming each: a key listed
       twice (by thumbprint, in any issuers); two issuers with the same `name`; two
       issuers whose ranges overlap, naming both; an issuer with no keys; a range outside
       1–65535 or with `end` before `start`; a key that is not Ed25519 SPKI DER base64;
@@ -115,15 +115,15 @@ Files: `pyproject.toml`, `uv.lock`, `Makefile`, `LICENSE`, `.gitignore`,
       than loading with part of it ignored. The listen address is parsed with
       `ipaddress` alone, which also refuses `127.1` and `[::ffff:127.0.0.1]`. A file that
       cannot be read or is not TOML is one problem naming why.
-- [ ] 1.5 `examples/config.toml` is D13's example, with RFC 8032's TEST 1 public key and
+- [x] 1.5 `examples/config.toml` is D13's example, with RFC 8032's TEST 1 public key and
       a comment saying it is a test value never to be used on any network. (D13;
       `AGENTS.md` public-repository discipline)
       Note: D13 elides the second issuer's key; the example gives it RFC 8032's TEST 2
       public key, labelled the same way, since a key cannot be listed twice.
-- [ ] 1.6 `.gitignore` ignores the tool's frp cache directory (section 5) and its
+- [x] 1.6 `.gitignore` ignores the tool's frp cache directory (section 5) and its
       environment. (D5)
       Note: the cache directory is `.frp-cache/`, which section 5's fetch must use.
-- [ ] 1.7 Unit (`tests/unit/test_config.py`): the example loads; the TEST 1 key's derived
+- [x] 1.7 Unit (`tests/unit/test_config.py`): the example loads; the TEST 1 key's derived
       id is RFC 8037 Appendix A.3's `kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k`; two keys
       in one issuer both resolve to it; each refusal in 1.4 is reported, and a file with
       several problems reports all of them; `listen` values `0.0.0.0:7300`,
@@ -132,7 +132,7 @@ Files: `pyproject.toml`, `uv.lock`, `Makefile`, `LICENSE`, `.gitignore`,
       Note: unit, 45 cases, all pass; they also hold the example's keys to RFC 8032's
       TEST 1 and TEST 2 hex. The RFC 8032 keys the tests and the vector use live in
       `tests/rfc8032.py` (TEST 1, 2, and 3).
-- [ ] 1.8 Verification: `make -C tools/frp-grant-admission test` (unit); `make
+- [x] 1.8 Verification: `make -C tools/frp-grant-admission test` (unit); `make
       check-packaging` (a new project and lock).
       End-to-end: none (see the preamble).
       Note: `make -C tools/frp-grant-admission test` — unit, 45 passed (the suite at this
@@ -141,12 +141,28 @@ Files: `pyproject.toml`, `uv.lock`, `Makefile`, `LICENSE`, `.gitignore`,
       empty one, so the first lock was made from a stub holding `version = 1` and
       `requires-python`; `make lock` keeps a third-party package at its locked version,
       so moving one means relocking from that stub.
-- [ ] 1.9 Re-check section 1 after the rename and the merge of `dev` (D16, D21): the work
+- [x] 1.9 Re-check section 1 after the rename and the merge of `dev` (D16, D21): the work
       of 1.1–1.8 is unchanged; `make -C tools/frp-grant-admission test` (unit) passes;
       `make check-packaging` passes; `make check-change CHANGE=admit-relay-proxies-by-grant`
       reports no failure but its citations check's, which may name only files the change
       creates — comment hygiene included, now that no code line contains the change's
       name. Then check 1.1–1.9 and commit the section.
+      Note: unchanged — `git log -- tools/frp-grant-admission` shows only the section's
+      work-in-progress commit `2c4e080b8`, and the tree under it is clean. `make -C
+      tools/frp-grant-admission test` — unit, 45 passed; `make check-packaging` — passes;
+      `make check-change` — 5 of 6 pass, comment hygiene and strict OpenSpec validation
+      included; citations reports 8 missing paths, every one a file the change creates
+      (`openspec/specs/frp-grant-admission/spec.md` and `architecture.md` at closeout,
+      `tools/frp-grant-admission/README.md` in section 4, `tests/unit/test_structure.py`
+      in section 6). End-to-end: none, confirmed.
+      Correction (fresh-context check): an issuer skipped for a bad field was left out of
+      the overlap check, so 1.4's "collects every problem" did not hold — fixing a key
+      could reveal an overlap. A valid range is now checked whatever its issuer's other
+      fields. Unit tests added for that, for each structural refusal 1.7 had covered only
+      by sample (`issuers` missing or not an array of tables, `keys` missing or not tables,
+      `ports.start` or `ports.end` missing, a non-string `public_key`), and for unknown
+      fields in `ports` and key tables; `__version__`, a hand copy of `pyproject.toml`'s
+      version that nothing read, removed. Unit, 55 passed.
 
 Section 1 first stopped, its work done, because `make check-comment-hygiene` refuses any
 code line containing a change's name and the change shared the tool's name. The design

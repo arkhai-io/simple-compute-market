@@ -243,6 +243,86 @@ def test_a_file_with_several_problems_reports_all_of_them() -> None:
     )
 
 
+def test_an_overlap_is_reported_beside_its_issuers_other_problems() -> None:
+    found = problems(
+        config(
+            issuer("a", 6100, 6199, TEST_1.spki_base64),
+            issuer("b", 6150, 6249, "not base64!"),
+        )
+    )
+
+    assert found == (
+        "issuers[1] ('b') keys[0]: public_key is not the base64 of an Ed25519 "
+        "SubjectPublicKeyInfo in DER",
+        "issuers[0] ('a') and issuers[1] ('b'): port ranges 6100-6199 and 6150-6249 overlap",
+    )
+
+
+def test_an_overlap_is_reported_for_an_issuer_with_no_name() -> None:
+    text = config(issuer("a", 6100, 6199, TEST_1.spki_base64)) + (
+        '[[issuers]]\naudience = "relay-1"\nports = { start = 6150, end = 6249 }\n'
+        f'keys = [ {{ public_key = "{TEST_2.spki_base64}" }} ]\n'
+    )
+
+    assert problems(text) == (
+        "issuers[1]: name missing",
+        "issuers[0] ('a') and issuers[1]: port ranges 6100-6199 and 6150-6249 overlap",
+    )
+
+
+@pytest.mark.parametrize(
+    ("text", "problem"),
+    [
+        ('listen = "127.0.0.1:7300"\n', "issuers: missing"),
+        (
+            'listen = "127.0.0.1:7300"\nissuers = "vm-site"\n',
+            "issuers: must be an array of tables ([[issuers]])",
+        ),
+        (
+            'listen = "127.0.0.1:7300"\n[[issuers]]\nname = "a"\naudience = "r"\n'
+            "ports = { start = 6100, end = 6199 }\n",
+            "issuers[0] ('a'): keys missing",
+        ),
+        (
+            'listen = "127.0.0.1:7300"\n[[issuers]]\nname = "a"\naudience = "r"\n'
+            f'ports = {{ start = 6100, end = 6199 }}\nkeys = [ "{TEST_1.spki_base64}" ]\n',
+            "issuers[0] ('a'): keys must be an array of tables such as "
+            '[ { public_key = "..." } ]',
+        ),
+        (
+            'listen = "127.0.0.1:7300"\n[[issuers]]\nname = "a"\naudience = "r"\n'
+            f'ports = {{ end = 6199 }}\nkeys = [ {{ public_key = "{TEST_1.spki_base64}" }} ]\n',
+            "issuers[0] ('a') ports: start missing",
+        ),
+        (
+            'listen = "127.0.0.1:7300"\n[[issuers]]\nname = "a"\naudience = "r"\n'
+            f'ports = {{ start = 6100 }}\nkeys = [ {{ public_key = "{TEST_1.spki_base64}" }} ]\n',
+            "issuers[0] ('a') ports: end missing",
+        ),
+        (
+            'listen = "127.0.0.1:7300"\n[[issuers]]\nname = "a"\naudience = "r"\n'
+            "ports = { start = 6100, end = 6199 }\nkeys = [ { public_key = 5 } ]\n",
+            "issuers[0] ('a') keys[0]: public_key must be a non-empty string",
+        ),
+    ],
+)
+def test_each_missing_or_mistyped_structure_is_refused(text: str, problem: str) -> None:
+    assert problems(text) == (problem,)
+
+
+def test_unknown_fields_in_ports_and_keys_are_refused() -> None:
+    text = (
+        'listen = "127.0.0.1:7300"\n[[issuers]]\nname = "a"\naudience = "r"\n'
+        "ports = { start = 6100, end = 6199, step = 1 }\n"
+        f'keys = [ {{ public_key = "{TEST_1.spki_base64}", kid = "x" }} ]\n'
+    )
+
+    assert problems(text) == (
+        "issuers[0] ('a') ports: unknown field 'step'",
+        "issuers[0] ('a') keys[0]: unknown field 'kid'",
+    )
+
+
 def test_text_that_is_not_toml_is_refused() -> None:
     (problem,) = problems("listen = \n")
 

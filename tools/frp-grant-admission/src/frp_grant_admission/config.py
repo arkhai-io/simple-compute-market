@@ -177,10 +177,13 @@ class _Loader:
             audience = self._text(entry, "audience", where)
             ports = self._ports(entry, where)
             kids = self._keys(entry, where, name, listed)
+            # A valid range is checked for overlap even when another field of its
+            # issuer is wrong, so fixing that field never reveals a new problem.
+            if ports is not None:
+                placed.append((where, ports[0], ports[1]))
             if name is None or audience is None or ports is None or kids is None:
                 continue
             issuers.append(Issuer(name, audience, ports[0], ports[1], tuple(kids)))
-            placed.append((where, ports[0], ports[1]))
 
         for first in range(len(placed)):
             for second in range(first + 1, len(placed)):
