@@ -57,7 +57,7 @@ from market_identity import (
 from compute_provisioning_service import container as _container_module
 from vm_provisioning_adapter.db import Base as VmBase
 from vm_provisioning_adapter.bundle import VM_JOB_ACTIONS, build_vm_adapter_bundle
-from compute_provisioning.relays import RelayPortAllocator, RelayService
+from compute_provisioning.relays import RelayExecutionResolver, RelayService
 from compute_provisioning.relays.db import Base as RelaysBase
 from compute_provisioning import JobExecutorTable, compose_adapter_bundles
 from vm_provisioning_adapter.services.vm_fulfillment_plan import VmFulfillmentPlan
@@ -545,13 +545,15 @@ def job_executor_table_for():
     return _job_executor_table
 
 
-def _ansible_executors(runner, settings, bare_metal_runner=None):
+def _ansible_executors(runner, settings, bare_metal_runner=None, relay_resolver=None):
     """VM's and bare metal's Ansible executors, each with its mode's playbook,
     as their runtimes build them: VM's over ``runner``, bare metal's over
-    ``bare_metal_runner`` (``runner`` when absent)."""
+    ``bare_metal_runner`` (``runner`` when absent). ``relay_resolver`` fills a
+    relayed VM job's token and signed grant as it runs, as the service's
+    composition gives VM's codec one."""
     vm = AnsibleJobExecutor(
         runner,
-        VmAnsibleCodec(),
+        VmAnsibleCodec(relay_resolver=relay_resolver),
         settings.resolved_vm_playbook_path,
         timeout_seconds=settings.ansible_timeout_seconds,
         additional_non_retryable_errors=settings.additional_non_retryable_errors,
@@ -647,6 +649,8 @@ async def client_and_queue(
         database_url=str(session_factory.kw["bind"].url),
         lease_watchdog_grace_period_seconds=300,
         lease_watchdog_enabled=False,
+        relay_grant_expiry_grace_seconds=3600,
+        relay_port_reuse_margin_seconds=300,
         storefront_url="http://test-storefront:8001",
         storefront_site_id="default",
         resolved_bare_metal_playbook_path=Path(
@@ -684,12 +688,13 @@ async def client_and_queue(
         release_effect=release_effects,
     )
 
+    connection_codecs = ConnectionCodecs([SshConnectionCodec(TEST_CONNECTION_KEY)])
     host_authority = HostAuthority(
         session_factory,
-        codecs=ConnectionCodecs([SshConnectionCodec(TEST_CONNECTION_KEY)]),
-        # The pool-change hooks exactly as the production container merges them,
-        # so a move refused there is refused here, by every host route.
-        pool_change_hooks=_container_module.Container.host_pool_change_hooks(),
+        codecs=connection_codecs,
+        # The pool-change hooks exactly as the production container composes
+        # them, so a move refused there is refused here, by every host route.
+        pool_change_hooks=_container_module.host_pool_change_hooks(connection_codecs),
     )
 
     from market_resource_pools import ResourcePoolService
@@ -753,8 +758,14 @@ async def client_and_queue(
     # container builds them: the relay table is the thing under test in the
     # relay suite, and the allocator is what fulfillment leases through and the
     # release effect releases through.
-    relay_port_allocator = RelayPortAllocator(session_factory)
-    relay_service = RelayService(session_factory=session_factory, settings=mock_settings)
+    relay_port_allocator = _container_module._make_relay_port_allocator(
+        session_factory, mock_settings
+    )
+    relay_service = RelayService(
+        session_factory=session_factory,
+        settings=mock_settings,
+        connection_codecs=connection_codecs,
+    )
 
     ansible_fulfillment_provider = JobFulfillmentProvider(
         plan=VmFulfillmentPlan(
@@ -780,8 +791,14 @@ async def client_and_queue(
     # Both adapter bundles composed as the container composes them: their
     # executors fill the job table, and their providers, pool handlers, and
     # inventory views are what the routes and the status read.
+    relay_resolver = RelayExecutionResolver(
+        session_factory=session_factory, settings=mock_settings
+    )
     vm_executor, bare_metal_executor = _ansible_executors(
-        fake_ansible, mock_settings, bare_metal_runner=bare_metal_runner
+        fake_ansible,
+        mock_settings,
+        bare_metal_runner=bare_metal_runner,
+        relay_resolver=relay_resolver,
     )
     composed_adapters = compose_adapter_bundles(
         [
@@ -844,7 +861,9 @@ async def client_and_queue(
         session_factory=session_factory,
         job_queue_provider=lambda: job_queue,
         ansible_service=fake_ansible,
-        codec=VmAnsibleCodec(),
+        # The relay resolver as production composes it, so a relayed job's
+        # token and grant are filled in, and its grant signed, as it runs.
+        codec=VmAnsibleCodec(relay_resolver=relay_resolver),
         host_authority=host_authority,
         pool_config_handler=AnsiblePoolConfigHandler(settings=mock_settings),
         job_engine=job_engine,

@@ -600,7 +600,7 @@ the service's `migrations.py` and `settings.toml`, the contracts' `relays.py`;
 `models/jobs_model.py`, `services/vm_fulfillment_plan.py`);
 `provisioning/compute/pyproject.toml` and its lock.
 
-- [ ] 5.1 `relay_port_leases` gains `grant_expires_at` and the id of the key that
+- [x] 5.1 `relay_port_leases` gains `grant_expires_at` and the id of the key that
       signed its latest grant, by an additive migration. Allocation records
       `grant_expires_at` in the acceptance transaction: the reservation's lease end,
       which the plan passes to allocation, plus the grace setting
@@ -609,26 +609,50 @@ the service's `migrations.py` and `settings.toml`, the contracts' `relays.py`;
       `settings.toml` beside the relay settings, its default covering the lease
       watchdog's grace and a teardown's retries, as its comment says. A re-tenancy of a
       released row overwrites both fields. (D16 lifecycle 1)
-- [ ] 5.2 The allocator does not reissue a released port until its `grant_expires_at`
+      Done: `RelayPortLease.grant_expires_at` and `grant_key_id`, by migration
+      `20261101_003_relay_lease_grants`. `allocate` and `allocate_in_session` take a
+      required `lease_ends_at`, so no plan can forget it, and `grant_expiry`
+      computes the stored value. The family read
+      `reservation_lease_end(db, capacity_reservation_id)` parses the
+      reservation's `lease_end_utc`, and VM's plan reads it in the acceptance
+      session through an injected `lease_end`. The allocator takes the grace and
+      the margin as constructor values; the container's
+      `_make_relay_port_allocator` reads both settings. Grace default 3600 s: a
+      300 s watchdog grace plus three retries backing off 60/120/240 s with
+      their runs, and room. Decided here: a relayed create whose reservation
+      states no lease end is refused in preparation, on validation too, since a
+      grant has no expiry without one. A leased reservation always carries one
+      (`ReservationState.leased`). A new lease row's `created_at` is now set in
+      UTC by the allocator rather than by the database's clock, as a reused
+      row's already was, because retired keys' validity compares against it.
+- [x] 5.2 The allocator does not reissue a released port until its `grant_expires_at`
       plus `relay_port_reuse_margin_seconds` (default 300, documented in
       `settings.toml` with the clock-synchronisation requirement) has passed, reading
       the margin when it selects a port, so a raised margin covers leases already
       released; a lease cut short leaves its port held back and allocation selects
       another. (D16 lifecycle 3; "Relay port leases are unique per relay", scenarios
       "A lease is cut short" and "The reuse margin is raised")
-- [ ] 5.3 `relays/grants.py`: a header-and-claims signer — RFC 8785 JSON of each
+      Done in `_lowest_free`, now an instance method: a released row whose
+      `grant_expires_at` is after now minus the margin counts as held. A lease
+      with no recorded expiry, stored before the migration, is free once
+      released, as it was.
+- [x] 5.3 `relays/grants.py`: a header-and-claims signer — RFC 8785 JSON of each
       through `rfc8785`, unpadded base64url, joined with `.`, signed with an Ed25519
       private key through `cryptography` — with no JWT library. `compute_provisioning`
       declares `rfc8785` at runtime (the JCS library `kit/identity` uses).
       (D16 "Signing")
-- [ ] 5.4 The grant builder: from a lease and the relay's active key, the header
+      Done: `sign_compact`. `rfc8785>=0.1.4` is a runtime dependency of the
+      family kit, with a comment saying what imports it.
+- [x] 5.4 The grant builder: from a lease and the relay's active key, the header
       exactly `{"alg":"EdDSA","kid":<thumbprint>,"typ":"frp-grant+jwt"}` and the claims
       `aud` (the relay id), `port` (the leased port), `exp` (the stored
       `grant_expires_at` converted as UTC to its integer epoch seconds — never through a
       naive `timestamp()`), `sub` (the lease's host, omitted when it records none,
       never `null`), and `jti` (the lease's `owner_id`, always present); no `iat` and
       no `nbf`. (D16)
-- [ ] 5.5 The execution resolver (`relays/execution.py`) signs the grant immediately
+      Done: `grant_claims`, `epoch_seconds`, and `sign_grant(lease, key)`. A
+      lease with no recorded expiry is refused rather than signed.
+- [x] 5.5 The execution resolver (`relays/execution.py`) signs the grant immediately
       before a job's variables are written, on every attempt, with the relay's
       then-active key, filling a `relay_grant` field the resolver's parameter
       contract gains beside `relay_token`, and records the signing key id on the lease;
@@ -637,24 +661,97 @@ the service's `migrations.py` and `settings.toml`, the contracts' `relays.py`;
       (`models/jobs_model.py`) gain the field, and its codec writes it as the proxy's
       grant variable. Conformance to the tool's published vector is section 14's.
       (D16 lifecycle 2)
-- [ ] 5.6 Relay reads report each retired key's `grants_valid_until`: the latest
+      Done:
+      - `resolve_into(params, *, remote_port=None, owner_id=None)`. The domain
+        passes the leased port of a job that adds a proxy, under whatever name
+        its parameters store it, and the reservation that holds the lease. VM
+        passes `vm_remote_port`, which a removal does not carry, and
+        `escrow_uid`.
+      - The resolver reads the relay row `FOR UPDATE`, so on PostgreSQL an
+        activation cannot commit between reading the active key and signing;
+        a grant signed that way would outlive the retired key's reported
+        validity. SQLite ignores the lock, but serializes writers, so there
+        the signing's write fails and the job's retry signs with the new key.
+        No test exercises the race. It signs
+        only for the port's held lease when that lease's owner is the job's
+        reservation, and records `grant_key_id` in the same transaction. A
+        grant authorizes its port alone. With no such lease, or no active key,
+        it raises `RelayUnusableAtExecutionError`.
+      - `VmJobParams.relay_grant` is persisted as `None` at preparation and
+        filled only in the codec's `prepare`. VM's codec writes it as
+        `relay_grant`.
+      - An operator's VM create carries no reservation, so a relayed one now
+        fails at execution: no grant can be signed for its proxy, and a relay
+        enforcing admission would refuse it. That follows from a grant being
+        per lease and the operator path leasing no port (correction 8); the
+        owner may want it recorded. `test_vms_api.py`'s first relay-bearing
+        create asserts this refusal by name, against a port another
+        reservation holds; the second asserts that the failed job's read and
+        logs carry no token. No grant was signed, so there is none to find.
+      - Beyond the plan: the service's integration harness (`conftest.py`)
+        built VM's codec with no relay resolver, so no relayed job there
+        resolved anything, unlike production. It now builds the codec with
+        the resolver as the container does.
+- [x] 5.6 Relay reads report each retired key's `grants_valid_until`: the latest
       `grant_expires_at` among the relay's unreleased leases allocated before it was
       retired, or none when none remains; and the holdings read (`RelayLeaseRecord`,
       `RelayLeaseView`, field for field, per section 3's handoff) gains each lease's
       `grant_expires_at` and signing key id. (D17, 28 F2; D9)
-- [ ] 5.7 The relay family supplies one set of the variable names carrying the grant,
+      Done: `RetiredGrantKeyView.grants_valid_until`, computed in
+      `RelayView.of` from the relay's held leases (`created_at` before
+      `retired_at`), and the wire field on `RelayRetiredGrantKey`.
+      `RelayLeaseRecord` and `RelayLeaseView` gain `grant_expires_at` and
+      `grant_key_id`.
+- [x] 5.7 The relay family supplies one set of the variable names carrying the grant,
       the relay token, and the client's admin password, and VM's codec takes its
       secret fields from it (`VM_SECRET_FIELDS`). (D3, 28 F3)
-- [ ] 5.8 Fulfillment preparation refuses a pool whose relay holds no active grant
+      Done: `relays/variables.py`, with `RELAY_TOKEN_VARIABLE` (`frp_auth_token`,
+      the name VM's playbook reads today), `RELAY_GRANT_VARIABLE`
+      (`relay_grant`), `RELAY_ADMIN_PASSWORD_VARIABLE`
+      (`relay_admin_password`), and `RELAY_SECRET_VARIABLES`. Sections 6 and 7
+      name the roles' inputs; if they rename one, they change it here, the one
+      place.
+- [x] 5.8 Fulfillment preparation refuses a pool whose relay holds no active grant
       key, naming the relay and the missing key, beside its refusals for a missing
       token or window, through a family check `vm_fulfillment_plan.py` calls and
       section 8's bare-metal plan will call. (D19)
-- [ ] 5.9 Refuse placing a host in a relay-backed pool when its connection address
+      Done: `check_relay_usable(relay_id, fields)` in `relays/pool_relays.py`,
+      over the execution read, which now carries the active key's
+      `grant_key_id` (never the key). VM's `AnsiblePoolConfig` gains
+      `grant_key_id`. The VM plan's own missing-field list is replaced by the
+      family check.
+- [x] 5.9 Refuse placing a host in a relay-backed pool when its connection address
       equals that relay's normalized address, and refuse setting a relay's address to
       the connection address of a host in a pool referencing it, naming the host and
       the relay; register the check with the family's host pool-change hooks
       (`RELAY_HOST_POOL_CHANGE_HOOKS`) and the relay update. (D19)
-- [ ] 5.10 Tests. Unit (`provisioning/compute/tests/unit/`): the builder's header has
+      Done, with two changes to the plan's means:
+      - **The address comes from the codec.** The host authority treats a
+        connection envelope as opaque, so the family cannot read `ssh_host`.
+        `ConnectionCodec` gains `address(envelope)`, and `ConnectionCodecs`
+        delegates to it; `SshConnectionCodec.address` returns `ssh_host`.
+        This is the Ansible distribution's one version bump on this branch
+        (0.6.0 → 0.7.0); the service's floor on it rises to 0.7.0 because the
+        service composes that codec.
+      - **The hooks are built from the codecs.** `RELAY_HOST_POOL_CHANGE_HOOKS`
+        became `relay_host_pool_change_hooks(codecs)`, returning the rebinding
+        hook and the management-route hook. The container builds one
+        `connection_codecs` for the host authority, its hooks, and
+        `RelayService`, which now takes `connection_codecs` (required). Its
+        `update_relay` refuses moving the relay onto a served host's address
+        with `ManagementRouteRefused`, which the route answers with 409.
+      - **Beyond the plan:** a host placed at registration or by an inventory
+        creating it now runs the pool-change hooks as a move from no pool.
+        Before, only a move of an existing host ran them, so registering a
+        host straight into a relay-backed pool skipped the check. The host
+        route answers a refused registration with 409.
+      - **Not covered:** a connection change on a host already placed, and a
+        pool gaining a relay reference over its existing members. The
+        requirement names two write paths, placing a host and setting a
+        relay's address, and both are covered. These two other paths can
+        still reach the forbidden state, and are recorded for the owner to
+        decide.
+- [x] 5.10 Tests. Unit (`provisioning/compute/tests/unit/`): the builder's header has
       exactly three members; its claims for a lease with a host, and for one without
       (no `sub`); `exp` is an integer equal to the stored expiry's UTC epoch seconds
       with the process time zone set to one other than UTC; `jti` is the owner id;
@@ -672,13 +769,156 @@ the service's `migrations.py` and `settings.toml`, the contracts' `relays.py`;
       and a relay address change refused for a placed host's address; the holdings read
       showing grant expiry and key id; a relayed job read, after success and after a
       failure past writing its variables, carrying no grant, token, or admin password.
-- [ ] 5.11 Verify. `make test-compute-provisioning` (unit, library integration),
+      Done.
+
+      Unit, `tests/unit/test_relay_grants.py`:
+      - The header has exactly its three members, and the claims of a lease
+        with a host and of one without (no `sub`) are as specified, serialized
+        as canonical JSON.
+      - `exp` is the stored expiry's UTC epoch seconds with the process time
+        zone set to America/New_York, where a naive `timestamp()` differs.
+      - A verifier written to D16 in the test (signature, `typ`, `alg`, `kid`
+        equal to the key's `kid`, no `crit`, integer `exp`, string `sub` and
+        `jti`, no `iat` or `nbf`) accepts the grant and refuses a tampered
+        claim and another key's signature. That `kid` is the RFC 7638
+        thumbprint is section 4's RFC 8037 test. A lease with no expiry is not
+        signed.
+      - `grant_expiry` rounds up to the second. `check_relay_usable` names the
+        relay and its missing active key, and a disabled relay lacks
+        everything.
+
+      Library integration (`provisioning/compute/tests/integration/`):
+      - `test_relay_port_allocator.py::TestGrantExpiryAndQuarantine`: the
+        expiry rounded up, and a zoned lease end stored as UTC; a lease cut
+        short holds its port, another is issued; the margin holds a port past
+        its expiry; a raised margin reaches a lease released before it, and
+        the old margin frees it; a re-tenancy replaces the grant fields.
+        The allocator's existing tests use a long-past lease end, so their
+        released ports are free at once.
+      - `test_relay_administration.py::TestGrantsAtExecution`, through
+        `RelayExecutionResolver`:
+        - the grant's header, claims, and signature under the active key, the
+          input parameters untouched, and the lease recording the key;
+        - a retry after a rotation signs with the new key and records it,
+          while the retired key's `grants_valid_until` is the lease's expiry
+          and is none once the lease is released; a lease allocated after
+          the retirement does not extend it;
+        - no `sub` without a host, and a re-tenancy's `jti` is the new
+          reservation;
+        - no active key, no held lease on the port, or a lease another
+          reservation holds (or a job naming none) fails the job, the last
+          recording no key; a removal needs no grant;
+        - the holdings record's grant fields.
+      - `TestManagementRoute`, through the hooks and `update_relay` over a
+        test codec: a host reached at its pool's relay address is refused,
+        normalized and naming both; a host reached another way is placed; a
+        relay is not moved onto a placed host's address.
+      - `test_host_authority.py`: a placement at registration or inventory
+        creation runs the hooks, and a refused one stores nothing.
+      - Ansible unit: `SshConnectionCodec.address` is `ssh_host`, not
+        `public_host`.
+
+      Application integration through the typed client
+      (`provisioning/compute/service/tests/integration/`):
+      - `test_fulfillment_api.py`:
+        - a relay with no active key is refused on validation, naming the
+          relay and the key, and on begin, with no port held;
+        - the failed-create test now reads the holdings after its create ran
+          past writing its variables. The lease's `grant_expires_at` is the
+          committed lease end plus the grace, and its `grant_key_id` is the
+          relay's active key. No job read or log carries the token or a
+          grant's fixed prefix;
+        - a relayed create that succeeds (every job of its reservation
+          succeeded) recorded the active key on its lease, and no job read or
+          log carries the token or the grant's prefix.
+
+        The harness's fake runner returns fixed output that never echoes the
+        variables, so the log assertions show the grant and token stay out of
+        the persisted parameters and the job read. They do not show the
+        executor's redaction of printed output. That rests on the names being
+        in the codec's `secret_fields` (VM codec unit test) and on the
+        executor's own redaction tests.
+      - `test_vms_api.py`: an operator's relayed create naming a port another
+        reservation holds fails, naming the relay and port, with no key
+        recorded on that lease; the failed job's read and logs carry no token.
+      - `test_relay_migrations.py::TestTheLeaseGrantMigration`: a database
+        with the grant-key migration recorded, and not the lease one, gains
+        the lease columns.
+      - `test_host_pool_moves_api.py`: placing a host at its pool's relay
+        address is refused with 409, naming both, by registration, by
+        inventory import, and by an update; a relay is not moved onto a
+        placed host's address.
+      - `test_authority_composition.py` (unit): the host authority carries
+        both relay hooks over the codecs the relay service shares, and the
+        allocator reads both settings.
+
+      Not shown: the admin password in a job read. No job carries it as a
+      variable yet; sections 6–7's tasks read it on the host, and its
+      variable is among the redacted names (VM codec unit test).
+- [x] 5.11 Verify. `make test-compute-provisioning` (unit, library integration),
       `make test-provisioning` (application integration through the typed client),
       `make test-provisioning-adapter`, `make test-compute-provisioning-contracts`,
       `make test-compute-provisioning-client`; `make test`; `make check-packaging`
       (`rfc8785` at runtime). End-to-end: none in the pipeline — no lane runs a
       relay-backed pool; the real lanes (sections 11 and 12) and the live run
       (section 16).
+      Results:
+      - `make test-compute-provisioning` 451 passed (unit and library
+        integration);
+      - `make test-provisioning`: service unit 609, application integration
+        528 passed;
+      - `make test-provisioning-adapter` 222 passed;
+      - `make test-compute-provisioning-ansible` 135 passed;
+      - contracts 128 passed, client 74 passed;
+      - `make test-bare-metal` passed (193, 543, 30, 90);
+      - `make lock` run; `make test` passed; `make check-packaging` OK;
+      - `make check-change` fails only on the four citations of files
+        sections 10–12 create.
+
+      End-to-end scenarios confirmed: none in the pipeline runs a relay-backed
+      pool, so none signs a grant.
+
+  Section 5 handoff:
+  - Section 8's bare-metal plan calls `check_relay_usable` and
+    `reservation_lease_end`, and passes `lease_ends_at` to allocation.
+    `BareMetalJobParams` gains the resolver's fields, `relay_grant` included.
+    Its codec calls `resolve_into(params, remote_port=<its leased port>,
+    owner_id=<the capacity reservation id>)`; without the reservation every
+    grant is refused. It also adds `RELAY_SECRET_VARIABLES` to its secret
+    fields.
+  - VM's `reserved_var_keys` is computed from unresolved parameters, so a
+    pool's `extra_vars` naming `frp_auth_token` or `relay_grant` is not
+    refused at preparation. That gap predates this change, and section 7,
+    which rewrites VM's relay variables, may close it.
+  - The relay-variable names in `relays/variables.py` are what VM's playbook
+    reads today, or will read. Sections 6–7 settle the roles' inputs and
+    change the names there if they differ.
+  - The real VM lane (section 11) shows whether a deal's reservation carries
+    a lease end when fulfillment begins. Preparation refuses a relayed create
+    without one.
+  - Fresh-context check, run once over the section's whole diff. It fixed:
+    - grants signed for any held lease on the port, now only the job's
+      reservation's;
+    - the activation race, closed by the `FOR UPDATE` read;
+    - the lease columns folded into section 4's committed migration, now
+      their own migration;
+    - five comments that described a plan or were wrong;
+    - two import orders, and the time-zone test's restore;
+    - three tests' assertions;
+    - overstated notes.
+
+    Declined: the two management-route paths the requirement does not name
+    (5.9, "Not covered"), recorded for the owner.
+
+    A narrower second run over the fixes found no bug in them. It fixed the
+    stale `owner_id` instruction above, the `FOR UPDATE` comment's claim on
+    SQLite, two docstrings, an assertion that could not fail, two overstated
+    notes, and the missing upgrade test from migration 002. Declined:
+    seeding the lease and relay through the API in `test_vms_api.py` and the
+    no-key fulfillment test. They follow the suites' existing helpers
+    (`_relay_backed_reservation`, and `test_host_pool_moves_api.py`'s seeded
+    lease), and driving a whole fulfillment in a VM-route test would test
+    fulfillment.
 
 ## 6. The family relay roles: one verified frp, the admin API locked down, and a relay that discloses nothing
 

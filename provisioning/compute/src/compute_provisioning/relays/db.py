@@ -73,7 +73,9 @@ class Relay(Base):
     # The relay's active grant-signing key: the private key in its profile
     # form, encrypted as the token is; its id (the thumbprint the admission
     # plugin derives); its public half, kept so a read never decrypts a private
-    # key; and when it became active. NULL while the relay holds no active key.
+    # key; and when it became active. NULL while the relay holds no active key,
+    # which fulfillment preparation refuses: a proxy without a grant would be
+    # refused by a relay enforcing admission.
     grant_key_encrypted = Column(String, nullable=True)
     grant_key_id = Column(String, nullable=True)
     grant_key_public = Column(String, nullable=True)
@@ -154,6 +156,17 @@ class RelayPortLease(Base):
     owner_id = Column(String, nullable=False, index=True)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     released_at = Column(DateTime, nullable=True)
+    # When the grants for this tenancy expire: the reservation's lease end plus
+    # the configured grace, rounded up to the whole second, in UTC with no zone
+    # as the table's other times are. Fixed at allocation, so every grant a
+    # job's retries sign carries one expiry, and the port is not reissued until
+    # it plus the reuse margin has passed. NULL only on a lease allocated
+    # before grants existed.
+    grant_expires_at = Column(DateTime, nullable=True)
+    # The key that signed this lease's latest grant: a diagnostic the holdings
+    # read reports. A retired key's validity is bounded from the leases, not
+    # from this, since a retried job may have installed grants from two keys.
+    grant_key_id = Column(String, nullable=True)
 
 
 class RelayRetiredGrantKey(Base):

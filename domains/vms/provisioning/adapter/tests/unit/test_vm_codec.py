@@ -314,15 +314,47 @@ class TestGoldenImageCredentials:
 
 class TestPrepare:
     def test_a_referenced_relay_is_resolved_at_preparation(self):
-        class Resolver:
-            def resolve_into(self, params):
-                return replace(params, relay_addr="203.0.113.4", relay_token="fresh")
+        asked: list[tuple] = []
 
-        stored = {"host_id": "kvm1", "vm_action": "create", "offering_mode": "vm", "relay_id": "r"}
+        class Resolver:
+            def resolve_into(self, params, *, remote_port=None, owner_id=None):
+                asked.append((remote_port, owner_id))
+                grant = "signed-grant" if remote_port is not None else None
+                return replace(
+                    params, relay_addr="203.0.113.4", relay_token="fresh", relay_grant=grant
+                )
+
+        stored = {
+            "host_id": "kvm1", "vm_action": "create", "offering_mode": "vm",
+            "relay_id": "r", "vm_remote_port": 6101, "escrow_uid": "cr-1",
+        }
         plan = VmAnsibleCodec(relay_resolver=Resolver()).prepare(_run(stored))
 
+        assert asked == [(6101, "cr-1")]
         assert plan.variables["frp_auth_token"] == "fresh"
+        assert plan.variables["relay_grant"] == "signed-grant"
         assert plan.limit == "kvm1"
+
+    def test_a_removal_asks_for_no_grant(self):
+        asked: list[int | None] = []
+
+        class Resolver:
+            def resolve_into(self, params, *, remote_port=None, owner_id=None):
+                asked.append(remote_port)
+                return replace(params, relay_addr="203.0.113.4", relay_token="fresh")
+
+        stored = {
+            "host_id": "kvm1", "vm_action": "vm_remove", "offering_mode": "vm", "relay_id": "r",
+        }
+        plan = VmAnsibleCodec(relay_resolver=Resolver()).prepare(_run(stored))
+
+        assert asked == [None]
+        assert "relay_grant" not in plan.variables
+
+    def test_the_relay_familys_secret_variables_are_redacted(self):
+        assert {"frp_auth_token", "relay_grant", "relay_admin_password"} <= (
+            VmAnsibleCodec.secret_fields
+        )
 
     def test_pool_variables_and_playbook_come_from_the_stored_parameters(self):
         stored = {

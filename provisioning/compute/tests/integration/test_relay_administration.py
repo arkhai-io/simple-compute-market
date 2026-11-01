@@ -23,23 +23,34 @@ I/O, so the real engine is used rather than a mock.
 
 from __future__ import annotations
 
+import base64
+import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
 import yaml
+from cryptography.exceptions import InvalidSignature
 from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import serialization
+from market_resource_pools import ResourcePool
 from sqlalchemy.orm import Session
 
+from compute_provisioning.hosts import ConnectionCodecs, ConnectionEnvelope
+from compute_provisioning.hosts.db import Host
+from compute_provisioning.hosts.service import PoolChangeRefusedError
 from compute_provisioning.relays import (
     GrantKey,
+    ManagementRouteRefused,
+    PoolRelay,
     Relay,
     RelayDefinitionError,
     RelayEndpointConflictError,
     RelayExecutionResolver,
     RelayGrantKeyNotStagedError,
     RelayNotFoundError,
+    RelayPortAllocator,
     RelayPortLease,
     RelayRebindingRefused,
     RelayService,
@@ -47,6 +58,7 @@ from compute_provisioning.relays import (
     RelayValidationError,
     import_relay_definitions,
     parse_relay_definitions,
+    relay_host_pool_change_hooks,
 )
 
 # A development-only Fernet key. Generated for this fixture, never used on any
@@ -65,9 +77,30 @@ def settings():
     )
 
 
+class _AddressCodec:
+    """A connection kind whose address is its one public field."""
+
+    kind = "fake"
+    version = 1
+
+    def build(self, public, secrets, *, previous=None):
+        return ConnectionEnvelope(kind=self.kind, version=self.version, public=dict(public))
+
+    def validate(self, envelope):
+        return envelope
+
+    def address(self, envelope):
+        return envelope.public.get("address")
+
+
+_CODECS = ConnectionCodecs([_AddressCodec()])
+
+
 @pytest.fixture
 def relays(session_factory, settings):
-    return RelayService(session_factory=session_factory, settings=settings)
+    return RelayService(
+        session_factory=session_factory, settings=settings, connection_codecs=_CODECS
+    )
 
 
 def _make_relay(relays, **overrides):
@@ -682,6 +715,7 @@ class _JobParams:
     relay_addr: str | None = None
     relay_port: int | None = None
     relay_token: str | None = None
+    relay_grant: str | None = None
 
 
 class TestExecutionTimeTokenResolution:
@@ -749,3 +783,250 @@ class TestExecutionTimeTokenResolution:
             self._resolver(session_factory, settings).resolve_into(
                 self._params(relay_id="never-created")
             )
+
+
+def _decoded(part: str) -> bytes:
+    return base64.urlsafe_b64decode(part + "=" * (-len(part) % 4))
+
+
+def _segments(token: str) -> tuple[dict, dict]:
+    header, claims, _ = token.split(".")
+    return json.loads(_decoded(header)), json.loads(_decoded(claims))
+
+
+def _verifies(token: str, public_key: str) -> bool:
+    signing_input, _, signature = token.rpartition(".")
+    key = serialization.load_der_public_key(base64.b64decode(public_key))
+    try:
+        key.verify(_decoded(signature), signing_input.encode("ascii"))
+    except InvalidSignature:
+        return False
+    return True
+
+
+class TestGrantsAtExecution:
+    """A job adding a proxy has its grant signed as it runs, on every attempt,
+    with the relay's then-active key, and the lease records which key."""
+
+    _LEASE_END = datetime(2031, 6, 1, 12, 0, tzinfo=timezone.utc)
+
+    def _relay_with_lease(self, relays, session_factory, *, owner="cr-1", host="kvm1"):
+        _make_relay(relays, token="admission-token")
+        return RelayPortAllocator(session_factory).allocate(
+            relay_id="site-a",
+            owner_kind="fulfillment",
+            owner_id=owner,
+            lease_ends_at=self._LEASE_END,
+            host_id=host,
+        )
+
+    def _resolve(self, session_factory, settings, port, owner="cr-1"):
+        return RelayExecutionResolver(
+            session_factory=session_factory, settings=settings
+        ).resolve_into(_JobParams(relay_id="site-a"), remote_port=port, owner_id=owner)
+
+    def _lease_row(self, session_factory) -> RelayPortLease:
+        with Session(session_factory.kw["bind"]) as db:
+            row = db.query(RelayPortLease).one()
+            db.expunge(row)
+            return row
+
+    def test_the_grant_is_signed_for_the_lease_with_the_active_key(
+        self, relays, session_factory, settings
+    ):
+        lease = self._relay_with_lease(relays, session_factory)
+        active = relays.get_relay("site-a").grant_keys.active
+
+        params = _JobParams(relay_id="site-a")
+        resolved = RelayExecutionResolver(
+            session_factory=session_factory, settings=settings
+        ).resolve_into(params, remote_port=lease.remote_port, owner_id="cr-1")
+
+        assert params.relay_grant is None
+        header, claims = _segments(resolved.relay_grant)
+        assert header == {"alg": "EdDSA", "kid": active.kid, "typ": "frp-grant+jwt"}
+        assert claims == {
+            "aud": "site-a",
+            "port": lease.remote_port,
+            "exp": int((self._LEASE_END + timedelta(hours=1)).timestamp()),
+            "sub": "kvm1",
+            "jti": "cr-1",
+        }
+        assert _verifies(resolved.relay_grant, active.public_key)
+        assert self._lease_row(session_factory).grant_key_id == active.kid
+
+    def test_a_retry_after_a_rotation_signs_with_the_new_key(
+        self, relays, session_factory, settings
+    ):
+        lease = self._relay_with_lease(relays, session_factory)
+        first = relays.get_relay("site-a").grant_keys.active
+        self._resolve(session_factory, settings, lease.remote_port)
+        staged = relays.stage_grant_key("site-a")
+        relays.activate_grant_key("site-a")
+
+        retried = self._resolve(session_factory, settings, lease.remote_port)
+
+        header, claims = _segments(retried.relay_grant)
+        assert header["kid"] == staged.kid
+        assert _verifies(retried.relay_grant, staged.public_key)
+        assert claims["jti"] == "cr-1"
+        row = self._lease_row(session_factory)
+        assert row.grant_key_id == staged.kid
+        # The retired key may still have a grant installed on the host, so it
+        # stays valid until the lease's grant expiry while the lease is held.
+        (retired,) = relays.get_relay("site-a").grant_keys.retired
+        assert retired.kid == first.kid
+        assert retired.grants_valid_until == row.grant_expires_at
+        assert relays.list_relays()[0].grant_keys.retired[0].grants_valid_until == (
+            row.grant_expires_at
+        )
+
+        RelayPortAllocator(session_factory).release(owner_kind="fulfillment", owner_id="cr-1")
+        assert relays.get_relay("site-a").grant_keys.retired[0].grants_valid_until is None
+
+    def test_a_lease_allocated_after_a_retirement_does_not_extend_it(
+        self, relays, session_factory, settings
+    ):
+        _make_relay(relays, token="admission-token")
+        relays.stage_grant_key("site-a")
+        relays.activate_grant_key("site-a")
+        RelayPortAllocator(session_factory).allocate(
+            relay_id="site-a",
+            owner_kind="fulfillment",
+            owner_id="cr-later",
+            lease_ends_at=self._LEASE_END,
+        )
+
+        (retired,) = relays.get_relay("site-a").grant_keys.retired
+        assert retired.grants_valid_until is None
+
+    def test_a_lease_with_no_host_carries_no_subject(self, relays, session_factory, settings):
+        lease = self._relay_with_lease(relays, session_factory, host=None)
+        _, claims = _segments(self._resolve(session_factory, settings, lease.remote_port).relay_grant)
+        assert "sub" not in claims
+        assert claims["jti"] == "cr-1"
+        assert isinstance(claims["exp"], int)
+
+    def test_a_retenancy_names_the_new_reservation(self, relays, session_factory, settings):
+        _make_relay(relays, token="admission-token", vm_port_range_count=1)
+        allocator = RelayPortAllocator(session_factory)
+        ended = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        allocator.allocate(
+            relay_id="site-a", owner_kind="fulfillment", owner_id="cr-old", lease_ends_at=ended
+        )
+        allocator.release(owner_kind="fulfillment", owner_id="cr-old")
+        lease = allocator.allocate(
+            relay_id="site-a",
+            owner_kind="fulfillment",
+            owner_id="cr-new",
+            lease_ends_at=self._LEASE_END,
+        )
+
+        _, claims = _segments(
+            self._resolve(session_factory, settings, lease.remote_port, owner="cr-new").relay_grant
+        )
+
+        assert claims["jti"] == "cr-new"
+
+    def test_a_relay_with_no_active_key_fails_the_job(self, relays, session_factory, settings):
+        lease = self._relay_with_lease(relays, session_factory)
+        with session_factory() as db, db.begin():
+            row = db.get(Relay, "site-a")
+            row.grant_key_encrypted = row.grant_key_id = row.grant_key_public = None
+
+        with pytest.raises(RelayUnusableAtExecutionError, match="no active grant key"):
+            self._resolve(session_factory, settings, lease.remote_port)
+
+    def test_a_port_with_no_held_lease_fails_the_job(self, relays, session_factory, settings):
+        _make_relay(relays, token="admission-token")
+        with pytest.raises(RelayUnusableAtExecutionError, match="holds no lease"):
+            self._resolve(session_factory, settings, 6150)
+
+    @pytest.mark.parametrize("owner", ["cr-another", None])
+    def test_a_port_another_reservation_holds_gets_no_grant(
+        self, relays, session_factory, settings, owner
+    ):
+        """A grant authorizes its port alone, so a job naming another
+        tenancy's port, or no reservation at all, is refused one."""
+        lease = self._relay_with_lease(relays, session_factory)
+        with pytest.raises(RelayUnusableAtExecutionError, match="for this job's reservation"):
+            self._resolve(session_factory, settings, lease.remote_port, owner=owner)
+        assert self._lease_row(session_factory).grant_key_id is None
+
+    def test_a_removal_needs_no_grant(self, relays, session_factory, settings):
+        _make_relay(relays, token="admission-token")
+        resolved = RelayExecutionResolver(
+            session_factory=session_factory, settings=settings
+        ).resolve_into(_JobParams(relay_id="site-a"))
+        assert resolved.relay_grant is None
+        assert resolved.relay_token == "admission-token"
+
+    def test_the_holdings_read_shows_the_grant_expiry_and_signing_key(
+        self, relays, session_factory, settings
+    ):
+        lease = self._relay_with_lease(relays, session_factory)
+        self._resolve(session_factory, settings, lease.remote_port)
+
+        (record,) = relays.list_leases("site-a")
+
+        assert record.grant_expires_at == datetime(2031, 6, 1, 13, 0)
+        assert record.grant_key_id == relays.get_relay("site-a").grant_keys.active.kid
+
+
+class TestManagementRoute:
+    """A host is not reached through the relay its pool sells buyers on."""
+
+    def _pool(self, session_factory, pool_id, relay_id=None):
+        with session_factory() as db, db.begin():
+            db.add(ResourcePool(id=pool_id, label=pool_id, provider="test", policy_tags={}))
+            if relay_id is not None:
+                db.add(PoolRelay(pool_id=pool_id, relay_id=relay_id))
+
+    def _host(self, session_factory, host_id, address, pool_id=None):
+        with session_factory() as db, db.begin():
+            host = Host(host_id=host_id, enabled=True, pool_id=pool_id)
+            host.set_connection(
+                ConnectionEnvelope(kind="fake", version=1, public={"address": address})
+            )
+            db.add(host)
+
+    def _move(self, session_factory, host_id, new_pool):
+        hooks = relay_host_pool_change_hooks(_CODECS)
+        with session_factory() as db, db.begin():
+            current = db.get(Host, host_id).pool_id
+            for hook in hooks:
+                hook(db, host_id, current, new_pool)
+
+    def test_a_host_reached_at_its_pools_relay_address_is_refused(
+        self, relays, session_factory
+    ):
+        _make_relay(relays, relay_addr="10.0.0.9")
+        self._pool(session_factory, "relayed", "site-a")
+        self._host(session_factory, "kvm1", " 10.0.0.9 ")
+
+        with pytest.raises(PoolChangeRefusedError) as refused:
+            self._move(session_factory, "kvm1", "relayed")
+
+        assert "kvm1" in str(refused.value) and "site-a" in str(refused.value)
+
+    def test_a_host_reached_another_way_is_placed(self, relays, session_factory):
+        _make_relay(relays, relay_addr="10.0.0.9")
+        self._pool(session_factory, "relayed", "site-a")
+        self._pool(session_factory, "direct")
+        self._host(session_factory, "kvm1", "10.0.0.50")
+        self._host(session_factory, "kvm2", "10.0.0.9")
+
+        self._move(session_factory, "kvm1", "relayed")
+        self._move(session_factory, "kvm2", "direct")
+
+    def test_a_relay_is_not_moved_onto_a_placed_hosts_address(self, relays, session_factory):
+        _make_relay(relays, relay_addr="10.0.0.9")
+        self._pool(session_factory, "relayed", "site-a")
+        self._host(session_factory, "kvm1", "10.0.0.50", pool_id="relayed")
+
+        with pytest.raises(ManagementRouteRefused) as refused:
+            relays.update_relay("site-a", relay_addr="10.0.0.50")
+
+        assert "kvm1" in str(refused.value) and "site-a" in str(refused.value)
+        assert relays.get_relay("site-a").relay_addr == "10.0.0.9"
+        assert relays.update_relay("site-a", relay_addr="10.0.0.60").relay_addr == "10.0.0.60"

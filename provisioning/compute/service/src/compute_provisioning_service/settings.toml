@@ -84,6 +84,22 @@ additional_non_retryable_errors = []
 # absent token is a valid state; what fails is a relay configured without one.
 relay_token = ""
 
+# How long a relay port lease's grants outlive the reservation's scheduled lease
+# end. A relay admits a proxy whose grant is unexpired, and teardown is what
+# revokes access, so the grace must cover the lease watchdog's grace period
+# (lease_watchdog_grace_period_seconds) and a teardown job's retries
+# (default_max_retries and the retry backoff) with their runs; the default
+# covers the defaults with room. The expiry is fixed when the port is leased.
+relay_grant_expiry_grace_seconds = 3600
+
+# How long a released relay port is held past its last grant's expiry before it
+# is leased again, so a grant copied from the host that held it cannot register
+# the port for another host. A relay checks a grant's expiry on its own clock
+# with no leeway, so the relays' and this service's clocks must be kept
+# synchronised with skew well under this margin. Read when a port is selected:
+# raising it holds back ports already released too.
+relay_port_reuse_margin_seconds = 300
+
 # Rate limiting
 enable_rate_limiting = false
 rate_limit_requests_per_minute = 30

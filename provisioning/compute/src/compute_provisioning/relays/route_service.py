@@ -31,7 +31,7 @@ from compute_provisioning_contracts import (
 from pydantic import ValidationError
 
 from ..route_errors import ProvisioningRouteError
-from .rebinding import RelayRebindingRefused
+from .rebinding import ManagementRouteRefused, RelayRebindingRefused
 from .service import (
     UNSET,
     RelayEndpointConflictError,
@@ -131,6 +131,8 @@ class RelayRouteService:
             # 409, not 422: the request is well-formed and would be valid once
             # the relay is drained. The message carries the drain sequence, so
             # it must reach the caller rather than becoming a 500.
+            raise ProvisioningRouteError(409, str(exc)) from exc
+        except ManagementRouteRefused as exc:
             raise ProvisioningRouteError(409, str(exc)) from exc
         except RelayValidationError as exc:
             raise ProvisioningRouteError(422, str(exc)) from exc

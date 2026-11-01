@@ -20,9 +20,11 @@ from __future__ import annotations
 import dataclasses
 import os
 from collections.abc import Callable, Mapping
+from datetime import datetime
 from typing import Any
 
 from compute_provisioning.job_fulfillment import PreparedJob
+from compute_provisioning.relays import check_relay_usable, reservation_lease_end
 from market_core import VersionedEnvelope
 from market_fulfillment import ProviderConfigInvalidError, SettlementResource
 from sqlalchemy.orm import Session
@@ -57,6 +59,7 @@ class VmFulfillmentPlan:
         reserved_var_keys: Callable[[VmJobParams], frozenset[str]],
         vm_playbook_path: str | os.PathLike[str] | None,
         port_allocator: Any | None = None,
+        lease_end: Callable[[Session, str], datetime | None] = reservation_lease_end,
     ) -> None:
         # Required, though it may be None, so no composition can forget the
         # service's playbook; with none, a pool stating no playbook is refused.
@@ -71,43 +74,46 @@ class VmFulfillmentPlan:
         # allocator at all. A pool that does reference a relay and finds no
         # allocator is rejected rather than dispatched without a port.
         self._port_allocator = port_allocator
+        # Reads a reservation's scheduled lease end in the acceptance session,
+        # from which the port's lease records when its grants expire.
+        self._lease_end = lease_end
 
     @staticmethod
     def _validate_access_path(config: AnsiblePoolConfig) -> bool:
         """Decide which access path this pool selects, refusing to select none.
 
         Exactly one of two paths must apply: direct NAT for a pool with no
-        relay, or a relay tunnel for a pool with one. A configuration
-        satisfying neither would produce a VM with no external route while
-        reporting success, so it is refused here.
-
-        Every check here is answerable from configuration before any host is
-        touched, and each names what is missing. A rejection reading only
-        "misconfigured" would leave the operator to find the cause later, as
-        a relay refusing a proxy asynchronously in a log.
+        relay, or a relay tunnel for a pool with one. A relay a tunnel cannot
+        use is refused by the family's check, which names what it lacks —
+        address, window, token, or active grant key — before any host is
+        touched, rather than as a relay refusing a proxy asynchronously in a
+        log.
         """
         if not config.relay_id:
             return False
-
-        missing = [
-            name
-            for name, value in (
-                ("relay address", config.relay_addr),
-                ("port window start", config.vm_port_range_start),
-                ("port window size", config.vm_port_range_count),
-                ("admission token", config.relay_token),
-            )
-            if not value
-        ]
-        if missing:
-            raise ProviderConfigInvalidError(
-                f"pool references relay {config.relay_id!r}, but the relay is "
-                f"unusable: no {', no '.join(missing)}. A relay that is disabled, "
-                "has no allocation window, or has no token configured cannot "
-                "carry a VM tunnel, and a VM created against it would have no "
-                "external route."
-            )
+        check_relay_usable(config.relay_id, config.model_dump())
         return True
+
+    def _reservation_lease_end(
+        self, db: Session | None, capacity_reservation_id: str
+    ) -> datetime:
+        """The reservation's scheduled lease end, which a relayed create needs.
+
+        A grant carries an expiry, fixed from the lease end when the port is
+        leased, so a relayed create whose reservation states no end is
+        refused.
+        """
+        if db is None:
+            raise ProviderConfigInvalidError(
+                "relay port allocation requires the fulfillment acceptance session"
+            )
+        lease_end = self._lease_end(db, capacity_reservation_id)
+        if lease_end is None:
+            raise ProviderConfigInvalidError(
+                f"reservation {capacity_reservation_id!r} states no lease end, so "
+                "no relay grant can be given an expiry"
+            )
+        return lease_end
 
     def _leased_relay_id(self, capacity_reservation_id: str) -> str | None:
         """The relay this fulfillment's port was leased on, if any.
@@ -130,6 +136,7 @@ class VmFulfillmentPlan:
         capacity_reservation_id: str,
         host_id: str,
         pool_id: str | None,
+        lease_ends_at: datetime,
     ) -> int:
         """Lease a remote port on the relay this pool references.
 
@@ -153,6 +160,7 @@ class VmFulfillmentPlan:
                 relay_id=config.relay_id,
                 owner_kind="fulfillment",
                 owner_id=capacity_reservation_id,
+                lease_ends_at=lease_ends_at,
                 host_id=host_id,
                 pool_id=pool_id,
             )
@@ -244,6 +252,11 @@ class VmFulfillmentPlan:
         # in preparation, where a misconfiguration is rejected before anything
         # is written.
         uses_relay = self._validate_access_path(config)
+        lease_ends_at = (
+            self._reservation_lease_end(db, capacity_reservation_id)
+            if uses_relay
+            else None
+        )
         # Leasing is not. Validation prepares in order to decide whether a
         # request *would* be accepted, so allocating here would let a
         # validation-only call consume a durable port — and repeated validation
@@ -259,6 +272,7 @@ class VmFulfillmentPlan:
                 capacity_reservation_id=capacity_reservation_id,
                 host_id=host_id,
                 pool_id=resource.pool_id,
+                lease_ends_at=lease_ends_at,
             )
             if uses_relay and allocate
             else None

@@ -59,6 +59,8 @@ class HostRouteService:
                 f"Host '{body.host_id}' already exists. Use PUT /hosts/{body.host_id} to "
                 f"update or POST /hosts/{body.host_id}/enable to re-enable.",
             ) from exc
+        except PoolChangeRefusedError as exc:
+            raise ProvisioningRouteError(409, str(exc)) from exc
         except ValueError as exc:
             raise ProvisioningRouteError(400, str(exc)) from exc
 

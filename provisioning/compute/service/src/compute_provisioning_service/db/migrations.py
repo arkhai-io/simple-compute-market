@@ -3575,8 +3575,8 @@ def _migrate_relay_grant_keys(engine: Engine) -> None:
 
     Additive: the active and staged keys' encrypted private halves, ids, and
     public halves, and the active key's activation time, are nullable columns
-    on ``relays``. A relay stored before this has no active key until the
-    operator stages and activates one.
+    on ``relays``. A relay stored before this has no active key, so fulfillment
+    preparation refuses its pools until the operator stages and activates one.
     """
     for column in (
         "grant_key_encrypted",
@@ -3589,6 +3589,16 @@ def _migrate_relay_grant_keys(engine: Engine) -> None:
         _add_column_if_missing(engine, "relays", column, "VARCHAR")
     _add_column_if_missing(engine, "relays", "grant_key_activated_at", "TIMESTAMP")
     RelayRetiredGrantKey.__table__.create(bind=engine, checkfirst=True)
+
+
+def _migrate_relay_lease_grants(engine: Engine) -> None:
+    """Give each port lease its grants' expiry and the key that signed the latest.
+
+    Additive and nullable. A lease stored before this records no expiry, so its
+    port, once released, is free at once, as it was.
+    """
+    _add_column_if_missing(engine, "relay_port_leases", "grant_expires_at", "TIMESTAMP")
+    _add_column_if_missing(engine, "relay_port_leases", "grant_key_id", "VARCHAR")
 
 
 MIGRATIONS: tuple[Migration, ...] = (
@@ -3725,4 +3735,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("20261028_002_hosts_drop_gpu_columns", _migrate_hosts_drop_gpu_columns),
     Migration("20261101_001_pool_relays", _migrate_pool_relays),
     Migration("20261101_002_relay_grant_keys", _migrate_relay_grant_keys),
+    Migration("20261101_003_relay_lease_grants", _migrate_relay_lease_grants),
 )

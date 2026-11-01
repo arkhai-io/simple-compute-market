@@ -59,6 +59,7 @@ dependencies = [
     { name = "cryptography" },
     { name = "pydantic" },
     { name = "pyyaml" },
+    { name = "rfc8785" },
     { name = "sqlalchemy" },
 ]
 wheels = [
@@ -67,7 +68,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning-ansible"
-version = "0.6.0"
+version = "0.7.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning" },
@@ -77,7 +78,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning_ansible-0.6.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning_ansible-0.7.0-py3-none-any.whl" },
 ]
 
 [[package]]

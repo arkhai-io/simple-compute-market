@@ -35,6 +35,7 @@ _GRANT_KEY_COLUMNS = (
     "staged_grant_key_id",
     "staged_grant_key_public",
 )
+_LEASE_GRANT_COLUMNS = ("grant_expires_at", "grant_key_id")
 
 
 def _engine():
@@ -241,18 +242,47 @@ class TestThePoolRelaysMigration:
             assert session.query(RelayPortLease).count() == 1
 
 
+class TestTheLeaseGrantMigration:
+    def test_a_database_with_the_grant_keys_gains_the_lease_columns(self, tmp_path):
+        """The upgrade from a database that recorded the grant-key migration
+        and not the lease one."""
+        engine = create_db_engine(f"sqlite:///{tmp_path / 'leases.db'}", is_sqlite=True)
+        run_migrations(engine)
+        with engine.begin() as connection:
+            for column in _LEASE_GRANT_COLUMNS:
+                connection.execute(
+                    text(f"ALTER TABLE relay_port_leases DROP COLUMN {column}")
+                )
+            connection.execute(text(
+                "DELETE FROM schema_migrations WHERE id = '20261101_003_relay_lease_grants'"
+            ))
+
+        run_migrations(engine)
+
+        lease_names = {c["name"] for c in inspect(engine).get_columns("relay_port_leases")}
+        assert set(_LEASE_GRANT_COLUMNS) <= lease_names
+        check_schema_version(engine)
+        engine.dispose()
+
+
 class TestTheGrantKeyMigration:
     def test_a_stored_relay_gains_grant_key_state_and_holds_no_key(self, tmp_path):
         """A relay stored before relays held grant keys keeps its row, with no
-        active key, and the retired-key table appears."""
+        active key, the retired-key table appears, and each port lease gains
+        its grant's expiry and signing key."""
         engine = create_db_engine(f"sqlite:///{tmp_path / 'keys.db'}", is_sqlite=True)
         run_migrations(engine)
         with engine.begin() as connection:
             connection.execute(text("DROP TABLE relay_retired_grant_keys"))
             for column in _GRANT_KEY_COLUMNS:
                 connection.execute(text(f"ALTER TABLE relays DROP COLUMN {column}"))
+            for column in _LEASE_GRANT_COLUMNS:
+                connection.execute(
+                    text(f"ALTER TABLE relay_port_leases DROP COLUMN {column}")
+                )
             connection.execute(text(
-                "DELETE FROM schema_migrations WHERE id = '20261101_002_relay_grant_keys'"
+                "DELETE FROM schema_migrations WHERE id IN "
+                "('20261101_002_relay_grant_keys', '20261101_003_relay_lease_grants')"
             ))
             connection.execute(text(
                 "INSERT INTO relays (id, relay_addr, relay_port, vm_port_range_start, "
@@ -264,6 +294,8 @@ class TestTheGrantKeyMigration:
 
         names = {c["name"] for c in inspect(engine).get_columns("relays")}
         assert set(_GRANT_KEY_COLUMNS) <= names
+        lease_names = {c["name"] for c in inspect(engine).get_columns("relay_port_leases")}
+        assert set(_LEASE_GRANT_COLUMNS) <= lease_names
         assert {c["name"] for c in inspect(engine).get_columns("relay_retired_grant_keys")} == {
             "relay_id",
             "key_id",

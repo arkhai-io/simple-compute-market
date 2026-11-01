@@ -26,9 +26,15 @@ from market_config import encrypt_secret
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from ..hosts.connection import ConnectionCodecs
+from .allocator import RelayPortAllocator
 from .db import Relay, RelayPortLease, RelayRetiredGrantKey
 from .keys import GrantKey, GrantKeyError
-from .rebinding import check_relay_endpoint_change, check_relay_token_rotation
+from .rebinding import (
+    check_relay_address_against_hosts,
+    check_relay_endpoint_change,
+    check_relay_token_rotation,
+)
 
 
 class _Unset:
@@ -51,6 +57,17 @@ UNSET = _Unset()
 def _utcnow() -> datetime:
     """Now, as the relay tables store times: UTC with no zone."""
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _grants_valid_until(
+    key: RelayRetiredGrantKey, held: Iterable[RelayPortLease]
+) -> datetime | None:
+    expiries = [
+        lease.grant_expires_at
+        for lease in held
+        if lease.grant_expires_at is not None and lease.created_at < key.retired_at
+    ]
+    return max(expiries, default=None)
 
 
 class RelayNotFoundError(LookupError):
@@ -89,8 +106,22 @@ class StagedGrantKeyView:
 
 @dataclass(frozen=True)
 class RetiredGrantKeyView:
+    """A retired key, and until when grants it may have signed stay valid.
+
+    ``grants_valid_until`` is the latest grant expiry among the relay's
+    unreleased leases allocated before the key was retired, or None when none
+    remains, and the key can leave the relay's plugin. A grant is signed on
+    every attempt of a job, so a lease whose job was retried across a rotation
+    may have grants from this key and its successor on its host; a record of
+    one key per lease could call this key removable while a host still holds
+    its grant. The bound is never short: every grant the key signed was for a
+    lease allocated before its retirement, and a lease's grant expiry is fixed
+    at allocation. Released leases are left out, since teardown revokes.
+    """
+
     kid: str
     retired_at: datetime
+    grants_valid_until: datetime | None
 
 
 @dataclass(frozen=True)
@@ -125,8 +156,13 @@ class RelayView:
 
     @classmethod
     def of(
-        cls, row: Relay, retired: Iterable[RelayRetiredGrantKey] = ()
+        cls,
+        row: Relay,
+        retired: Iterable[RelayRetiredGrantKey] = (),
+        held: Iterable[RelayPortLease] = (),
     ) -> "RelayView":
+        """The view of a relay row, with its retired keys and its held leases."""
+        held = tuple(held)
         active = None
         if row.grant_key_id is not None:
             active = ActiveGrantKeyView(
@@ -152,7 +188,11 @@ class RelayView:
                 active=active,
                 staged=staged,
                 retired=tuple(
-                    RetiredGrantKeyView(kid=key.key_id, retired_at=key.retired_at)
+                    RetiredGrantKeyView(
+                        kid=key.key_id,
+                        retired_at=key.retired_at,
+                        grants_valid_until=_grants_valid_until(key, held),
+                    )
                     for key in retired
                 ),
             ),
@@ -171,6 +211,8 @@ class RelayLeaseRecord:
     owner_id: str
     allocated_at: datetime
     released_at: datetime | None
+    grant_expires_at: datetime | None
+    grant_key_id: str | None
 
     @classmethod
     def of(cls, row: RelayPortLease) -> "RelayLeaseRecord":
@@ -183,13 +225,24 @@ class RelayLeaseRecord:
             owner_id=row.owner_id,
             allocated_at=row.created_at,
             released_at=row.released_at,
+            grant_expires_at=row.grant_expires_at,
+            grant_key_id=row.grant_key_id,
         )
 
 
 class RelayService:
-    def __init__(self, session_factory: Any, settings: Any | None = None) -> None:
+    def __init__(
+        self,
+        session_factory: Any,
+        settings: Any | None = None,
+        *,
+        connection_codecs: ConnectionCodecs,
+    ) -> None:
         self._session_factory = session_factory
         self._settings = settings
+        # The host authority's codecs, through which moving a relay reads the
+        # connection addresses of the hosts it serves.
+        self._connection_codecs = connection_codecs
         # Set only on a view returned by ``joining``.
         self._joined: Session | None = None
 
@@ -215,7 +268,9 @@ class RelayService:
     def joining(self, db: Session) -> "RelayService":
         """A view whose operations run in *db* and do not commit."""
         bound = RelayService(
-            session_factory=self._session_factory, settings=self._settings
+            session_factory=self._session_factory,
+            settings=self._settings,
+            connection_codecs=self._connection_codecs,
         )
         bound._joined = db
         return bound
@@ -248,7 +303,16 @@ class RelayService:
                 RelayRetiredGrantKey.retired_at, RelayRetiredGrantKey.key_id
             ):
                 retired.setdefault(key.relay_id, []).append(key)
-            return [RelayView.of(row, retired.get(row.id, ())) for row in rows]
+            held: dict[str, list[RelayPortLease]] = {}
+            if retired:
+                for lease in session.query(RelayPortLease).filter(
+                    RelayPortLease.released_at.is_(None)
+                ):
+                    held.setdefault(lease.relay_id, []).append(lease)
+            return [
+                RelayView.of(row, retired.get(row.id, ()), held.get(row.id, ()))
+                for row in rows
+            ]
 
     def get_relay(self, relay_id: str) -> RelayView:
         with self._read() as session:
@@ -347,6 +411,10 @@ class RelayService:
                 # every buyer on it at once. Refused while it carries tunnels.
                 check_relay_endpoint_change(
                     db, relay=row, new_addr=addr, new_port=port
+                )
+            if addr != row.relay_addr:
+                check_relay_address_against_hosts(
+                    db, relay=row, new_addr=addr, codecs=self._connection_codecs
                 )
             start = (
                 row.vm_port_range_start
@@ -549,7 +617,10 @@ class RelayService:
             .order_by(RelayRetiredGrantKey.retired_at, RelayRetiredGrantKey.key_id)
             .all()
         )
-        return RelayView.of(row, retired)
+        held = (
+            RelayPortAllocator.active_leases_for_relay(db, row.id) if retired else []
+        )
+        return RelayView.of(row, retired, held)
 
     @staticmethod
     def _require(db: Session, relay_id: str) -> Relay:

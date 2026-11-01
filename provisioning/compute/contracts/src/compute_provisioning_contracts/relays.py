@@ -55,10 +55,16 @@ class RelayStagedGrantKey(BaseModel):
 
 
 class RelayRetiredGrantKey(BaseModel):
-    """A key the relay held before its active one."""
+    """A key the relay held before its active one.
+
+    ``grants_valid_until`` is when the last grant it may have signed for an
+    unreleased lease expires; None once no such lease remains, when the key
+    can be removed from the relay's plugin.
+    """
 
     kid: str
     retired_at: datetime
+    grants_valid_until: datetime | None = None
 
 
 class RelayGrantKeys(BaseModel):
@@ -146,6 +152,10 @@ class RelayLeaseView(BaseModel):
     owner_id: str
     allocated_at: datetime
     released_at: datetime | None = None
+    # When this tenancy's grants expire, fixed when the port was leased, and
+    # the id of the key that signed its latest grant, None until one is.
+    grant_expires_at: datetime | None = None
+    grant_key_id: str | None = None
 
 
 class RelayLeaseListResponse(BaseModel):

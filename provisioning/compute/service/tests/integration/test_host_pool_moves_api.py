@@ -19,10 +19,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import pytest
+from compute_provisioning_ansible import ssh_connection
 from compute_provisioning_client import ComputeProvisioningError
-from compute_provisioning_contracts import HostUpdate
+from compute_provisioning_contracts import HostCreate, HostUpdate, RelayCreate, RelayUpdate
 from market_resource_pools_contracts import PoolCreate
-from compute_provisioning_contracts import RelayCreate
 
 from compute_provisioning_service import container as _container_module
 from compute_provisioning.relays import RelayPortLease
@@ -193,3 +193,61 @@ async def test_a_tunnelled_host_moves_to_a_bare_metal_pool_on_its_relay(client_a
     moved = await clients.family.update_host("kvm1", HostUpdate(pool_id="bare-metal-relay-pool"))
 
     assert moved.pool_id == "bare-metal-relay-pool"
+
+
+async def test_a_host_reached_at_its_pools_relay_address_is_not_placed(client_and_queue):
+    """Management proxies carry no grant, so a host reached through its pool's
+    buyer relay would be refused by that relay: each way of placing it is
+    refused, naming the host and the relay, and leaves it where it was."""
+    clients, _ = client_and_queue
+    await _relay_and_pools(clients)
+
+    with pytest.raises(ComputeProvisioningError) as refused:
+        await clients.family.register_host(
+            HostCreate(
+                host_id="kvm-relayed",
+                connection=ssh_connection(ssh_host="203.0.113.9", key_path="/keys/id"),
+                pool_id=_RELAY_POOL,
+            )
+        )
+    assert refused.value.status_code == 409
+    assert "kvm-relayed" in str(refused.value) and "site-a" in str(refused.value)
+    assert await _absent(clients, "kvm-relayed")
+
+    with pytest.raises(ComputeProvisioningError) as refused:
+        await clients.host_import.import_hosts_from_text(
+            _inventory(_RELAY_POOL, address="203.0.113.9")
+        )
+    assert refused.value.status_code == 409
+    assert "kvm1" in str(refused.value) and "site-a" in str(refused.value)
+    assert await _absent(clients, "kvm1")
+
+    await clients.host_import.import_hosts_from_text(
+        _inventory(_PLAIN_POOL, address="203.0.113.9")
+    )
+    with pytest.raises(ComputeProvisioningError) as refused:
+        await clients.family.update_host("kvm1", HostUpdate(pool_id=_RELAY_POOL))
+    assert refused.value.status_code == 409
+    assert "kvm1" in str(refused.value) and "site-a" in str(refused.value)
+    assert (await clients.family.get_host("kvm1")).pool_id == _PLAIN_POOL
+
+
+async def test_a_relay_is_not_moved_onto_a_placed_hosts_address(client_and_queue):
+    clients, _ = client_and_queue
+    await _relay_and_pools(clients)
+    await clients.host_import.import_hosts_from_text(_inventory(_RELAY_POOL, address="10.0.0.1"))
+
+    with pytest.raises(ComputeProvisioningError) as refused:
+        await clients.family.update_relay("site-a", RelayUpdate(relay_addr="10.0.0.1"))
+
+    assert refused.value.status_code == 409
+    assert "kvm1" in str(refused.value) and "site-a" in str(refused.value)
+    assert (await clients.family.get_relay("site-a")).relay_addr == "203.0.113.9"
+
+
+async def _absent(clients, host_id: str) -> bool:
+    try:
+        await clients.family.get_host(host_id)
+    except ComputeProvisioningError as missing:
+        return missing.status_code == 404
+    return False

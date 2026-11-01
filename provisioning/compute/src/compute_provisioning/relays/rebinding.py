@@ -28,7 +28,9 @@ from typing import Sequence
 
 from sqlalchemy.orm import Session
 
-from ..hosts.service import PoolChangeRefusedError
+from ..hosts.connection import ConnectionCodecs
+from ..hosts.db import Host
+from ..hosts.service import PoolChangeHook, PoolChangeRefusedError
 from .allocator import RelayPortAllocator
 from .db import PoolRelay, Relay, RelayPortLease
 
@@ -193,18 +195,92 @@ def relay_host_pool_change(
         raise PoolChangeRefusedError(str(exc)) from exc
 
 
-#: The host pool-change checks the relays contribute to the one host authority
-#: the composition root builds, which exists before any runtime does.
-RELAY_HOST_POOL_CHANGE_HOOKS = (relay_host_pool_change,)
+class ManagementRouteRefused(ValueError):
+    """A host would reach the service through the relay its pool sells buyers on."""
+
+
+def check_management_route(
+    *, relay_id: str, relay_addr: str, host_id: str, address: str | None
+) -> None:
+    """Refuse a host whose connection address is its pool's buyer relay's.
+
+    Management proxies carry no grant, so a relay enforcing admission refuses
+    them, and admitting them by a static list would let anyone holding the
+    relay's token bind a dropped host's management port. So management ports
+    use another relay. Normalized addresses are compared, which catches the
+    obvious case only: an alias or another name for the relay is not detected.
+    """
+    relay_addr = Relay.normalize_addr(relay_addr)
+    if address and Relay.normalize_addr(address) == relay_addr:
+        raise ManagementRouteRefused(
+            f"Host '{host_id}' is reached at {relay_addr}, the address "
+            f"of relay '{relay_id}', which its pool sells buyer access through. "
+            "Management proxies carry no grant, so that relay would refuse them; "
+            "reach the host's management port through another relay."
+        )
+
+
+def relay_host_pool_change_hooks(codecs: ConnectionCodecs) -> tuple[PoolChangeHook, ...]:
+    """The host pool-change checks the relays contribute to the host authority.
+
+    ``codecs`` are the host authority's own, through which the management
+    check reads a host's connection address without learning its kind's
+    fields. The composition root builds the authority and these hooks over one
+    set of codecs.
+    """
+
+    def management_route(
+        db: Session, host_id: str, current_pool_id: str | None, new_pool_id: str | None
+    ) -> None:
+        relay_id = pool_relay_id(db, new_pool_id)
+        if relay_id is None:
+            return
+        relay = db.get(Relay, relay_id)
+        host = db.query(Host).filter(Host.host_id == host_id).one_or_none()
+        if relay is None or host is None:
+            return
+        try:
+            check_management_route(
+                relay_id=relay.id,
+                relay_addr=relay.relay_addr,
+                host_id=host.host_id,
+                address=codecs.address(host.connection()),
+            )
+        except ManagementRouteRefused as exc:
+            raise PoolChangeRefusedError(str(exc)) from exc
+
+    return (relay_host_pool_change, management_route)
+
+
+def check_relay_address_against_hosts(
+    db: Session, *, relay: Relay, new_addr: str, codecs: ConnectionCodecs
+) -> None:
+    """Refuse moving a relay onto the connection address of a host it serves."""
+    pool_ids = [
+        row.pool_id
+        for row in db.query(PoolRelay).filter(PoolRelay.relay_id == relay.id).all()
+    ]
+    if not pool_ids:
+        return
+    for host in db.query(Host).filter(Host.pool_id.in_(pool_ids)).order_by(Host.host_id):
+        check_management_route(
+            relay_id=relay.id,
+            relay_addr=new_addr,
+            host_id=host.host_id,
+            address=codecs.address(host.connection()),
+        )
 
 
 __all__ = [
-    "RELAY_HOST_POOL_CHANGE_HOOKS",
+    "ManagementRouteRefused",
     "RelayRebindingRefused",
     "check_host_pool_change",
+    "check_management_route",
     "check_pool_relay_change",
+    "check_relay_address_against_hosts",
     "check_relay_endpoint_change",
     "check_relay_token_rotation",
     "pool_relay_id",
     "relay_host_pool_change",
+    "relay_host_pool_change_hooks",
 ]

@@ -16,6 +16,8 @@ dependencies = [
     "cryptography>=42.0",
     "pydantic>=2",
     "pyyaml>=6.0",
+    # Imported to serialize a relay grant's header and claims.
+    "rfc8785>=0.1.4",
     "sqlalchemy>=2.0",
 ]
 

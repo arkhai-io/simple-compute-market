@@ -29,6 +29,7 @@ from sqlalchemy.orm import sessionmaker
 
 from compute_provisioning_service import app_runtime
 from compute_provisioning_service import container as _container_module
+from compute_provisioning.hosts import ConnectionCodecs
 from compute_provisioning.relays import GrantKey, Relay, RelayService
 from compute_provisioning_service.db.database import run_migrations
 
@@ -89,7 +90,9 @@ class _Deployment:
     def restart(self, monkeypatch) -> RelayService:
         """Bring the service up again against the same database and document."""
         relay_service = RelayService(
-            session_factory=self.session_factory, settings=self.settings
+            session_factory=self.session_factory,
+            settings=self.settings,
+            connection_codecs=ConnectionCodecs([]),
         )
         monkeypatch.setattr(
             _container_module, "resolved_session_factory", self.session_factory,
