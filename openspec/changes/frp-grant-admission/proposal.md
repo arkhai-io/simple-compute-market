@@ -25,8 +25,10 @@ plugin, as generic infrastructure that names nothing about SCM.
   grant: a JWT of type `frp-grant+jwt`, signed with EdDSA (Ed25519) by a configured key
   named by its thumbprint, whose `aud` is that key's issuer's audience, whose `port`
   equals the requested remote port and lies in that issuer's range, and whose `exp` has
-  not been reached on the relay's clock, with no leeway. Anything else is refused with a stable reason code that reaches the
-  client.
+  not been reached on the relay's clock, with no leeway. Time claims are integers and
+  `sub` and `jti` strings; the header, time, and claim-type checks are the plugin's own,
+  so a verdict does not depend on the installed PyJWT release. Anything else is refused
+  with a stable reason code that reaches the client.
 - **Configuration**: a TOML file naming the listen address, which must be loopback, and the issuers, each with a
   name, an audience, one port range, and its public keys; overlapping ranges and repeated
   keys are refused at load. SIGHUP reloads it, validated before it replaces the running
@@ -43,7 +45,8 @@ plugin, as generic infrastructure that names nothing about SCM.
 - **Tests against real frp**: a gate fetches frp 0.61.1 from archives whose SHA-256 the
   tool pins and runs `frps` and `frpc` against the plugin — admission, each refusal,
   frps failing closed on any bad answer, frpc's retry, and the drain rule's premise —
-  as a `tests.yml` job; the default suite passes offline.
+  as a `tests.yml` job, which also runs the unit tests against the lowest PyJWT release
+  the tool declares; the default suite passes offline.
 - **Shipping**: a wheel, runnable as a plain program under systemd, and a container image
   built as the repository's others are.
 
@@ -86,6 +89,10 @@ None.
   this plugin. This design's notes for it (`design.md`, "Notes for
   `prove-relay-provisioning`") change its grant type, key ids, key format, runbook
   steps, frp version, download verification, and port-reuse rule.
+- This change is renamed `admit-relay-proxies-by-grant` on `dev` before its design
+  review (`design.md`, D16 and D17), since no code line may contain a change's name and
+  the tool keeps `frp-grant-admission`; `prove-relay-provisioning`'s `Depends on` follows
+  the rename.
 
 ## Permanent documentation impact
 
