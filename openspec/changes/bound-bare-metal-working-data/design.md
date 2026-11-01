@@ -86,3 +86,37 @@ The selected finite UID policy, Linux-only IPC adapter and strict refusal on for
 | D8: bare-metal IaC test ownership and native/deployed evidence | `docs/development/TESTING.md` |
 | Readiness and remaining gaps | `docs/development/ROADMAP.md`; `openspec/changes/README.md` |
 | Repository-wide architecture | No new authority or dependency rule; confirm this disposition at closeout |
+
+## Helper wire contract (version 1)
+
+The root-only entrypoint is `python3 tenant_working_data.py --policy /etc/arkhai-working-data/policy.json`; it reads one JSON request from stdin and emits one JSON result. Initialization is the separate explicit `--init` invocation and creates the stable lock exclusively: an existing lock, even with a missing ledger, refuses initialization. Installation must create the protected policy/state directories first. There is no reset, prune, restore or adoption operation. A failed initial write requires operator recovery; it does not silently repeat initialization. Normal operations cannot create either missing lock or ledger. Removal of both is a continuity loss to quarantine, never a reason to reinstall fresh state.
+
+Policy schema (all fields required; unknown/duplicate fields rejected):
+
+```json
+{"version":1,"policy_id":"example-policy-v1","state_dir":"/srv/example-working-state","home_parent":"/srv/example-tenant-homes","scratch_roots":["/srv/example-scratch"],"ipc_roots":["/dev/shm"],"uid_min":41000,"uid_max":41999,"exclude_ids":[41001],"mount_ids":[123,124]}
+```
+
+These are invented fixture identities and illustrative mount IDs, not deployable host configuration. Mount IDs must be obtained on the selected host in its actual mount namespace. The finite range is inclusive, starts at least at 1000 (the conventional Linux non-system boundary) and excludes every current NSS UID/GID/primary-GID plus every consumed or explicitly excluded value. The account name must match `[a-z_][a-z0-9_-]{0,31}` and cannot be root, nobody or daemon. This preserves existing `arkhai-...` settlement/access-reference-derived names; it does not introduce a fixture-only runtime namespace. Existing NSS name conflicts and any unreceipted home refuse allocation. Home derives by appending it to `home_parent`. All paths are absolute and normalized; roots cannot overlap each other or protected state/service/log/backup roots. `/dev/shm` and `/dev/mqueue` are permitted as exact path-backed IPC roots only. Within `/var/lib`, only an explicit dedicated state directory or exact `/var/lib/BrlAPI` scratch root is accepted; all other service state is refused. Targeted NSS name/UID/GID lookups supplement enumeration, including backends whose enumeration omits entries. Policy, lock and ledger are regular single-link files owned by root with no group/other permissions; directories and ancestors have no group/other write or symlink components (root's sticky `/tmp` is the sole ancestor exception for disposable test environments). The state directory itself must have the protected owner. Policy bytes normalize to a SHA-256 digest of canonical sorted compact JSON; a changed value refuses every existing receipt.
+
+Each ordinary request has exactly these fields:
+
+```json
+{"version":1,"operation":"reserve","reservation_id":"example-reservation-a","account":"tenant_example_a","policy_id":"example-policy-v1"}
+```
+
+Operations are `reserve`, `verify-identity`, `clean`, `remove-home` and `verify-complete`. Neither paths nor numeric identities nor quiescence assertions are caller inputs. `reserve` consumes UID/private-GID durably before returning; an exact retry reuses it, a completed reservation refuses grant, and no new reservation may reuse its account name. `verify-identity` accepts an absent identity or an exactly matching receipted account/private group, and rejects supplementary membership or foreign primary-group references. It performs no account creation.
+
+Ledger schema and successful reservation result:
+
+```json
+{"version":1,"policy_digest":"illustrative-sha256","consumed":[41000],"receipts":{"example-reservation-a":{"reservation_id":"example-reservation-a","account":"tenant_example_a","uid":41000,"gid":41000,"home":"/srv/example-tenant-homes/tenant_example_a","state":"reserved","policy_digest":"illustrative-sha256"}}}
+```
+
+```json
+{"version":1,"operation":"reserve","reservation_id":"example-reservation-a","account":"tenant_example_a","uid":41000,"gid":41000,"home":"/srv/example-tenant-homes/tenant_example_a","state":"reserved","policy_digest":"illustrative-sha256"}
+```
+
+The real digest is a 64-character SHA-256 hex string. Ledger version is exactly 1; every consumed identity has exactly one receipt with the same UID/GID, derived home and matching policy digest. Receipt states are `reserved`, `cleaned`, `complete`; consumption and receipts are retained in all states for the entire policy lifetime. Writes fsync the restrictive same-directory temporary file, replace atomically and fsync the directory under the stable exclusive lock. A failed write is reported as failure even when replacement already happened; retry inspects the actual ledger rather than inferring success from a previous response. Errors emit version/error/message JSON on stderr and exit nonzero. Success output is diagnostic and never an alternative release authority.
+
+The helper cannot identify a valid older copy as rolled back. Service-state restoration and image redeployment leave this ledger untouched; suspected host-ledger rollback keeps the host disabled until the operator verifies all consumed history or decommissions it. These schemas and continuity rules promote with D2–D7 at closeout; helper-only checks establish no deployed qualification.

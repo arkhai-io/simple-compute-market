@@ -1099,3 +1099,7 @@ fetch-e2e-logs: ## Wait for an E2E run, fetch its logs, and zip the resulting di
 
 prune-tombstones: ## Delete every file whose contents are a tombstone comment
 	@python3 scripts/prune_tombstones.py
+
+.PHONY: test-bare-metal-iac
+test-bare-metal-iac:
+	$(MAKE) -C domains test-bare-metal-iac
