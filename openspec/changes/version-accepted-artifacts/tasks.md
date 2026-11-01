@@ -21,7 +21,7 @@ Files: `domains/bare_metal/src/arkhai_bare_metal/evidence.py`,
 `test_evidence_routes.py`; domain package metadata and the actual affected
 consumer metadata/locks described in 1.5. No core or kit ownership changes.
 
-- [ ] 1.1 Implement the concrete immutable evidence/result documents and separate
+- [x] 1.1 Implement the concrete immutable evidence/result documents and separate
   validated views in `evidence.py` (D1; proof-representation requirement). Retain
   canonical UTF-8 bytes, verify the expected outer digest and original result
   JSON's nested digest before view conversion, and expose `canonical_bytes`,
@@ -29,26 +29,26 @@ consumer metadata/locks described in 1.5. No core or kit ownership changes.
   Verify with unit cases for fixed v1 golden bytes/digests, changed view defaults,
   nested/outer tampering, unknown kinds/fields, and immutable retained data after
   a caller mutates a fresh `to_wire()` result.
-- [ ] 1.2 Keep new production and binding/fulfillment identity derivation on the
+- [x] 1.2 Keep new production and binding/fulfillment identity derivation on the
   fixed current-v1 representations (D1–D2). Extend the builder and its helpers to
   produce one snapshot without a new kind, algorithm, wrapper, or binding table.
   Verify existing identity fixtures and strict principal, resource-selection,
   timestamp, and credential-exclusion cases; pin that current v1 production has
   unchanged fields, null/omission rules, and canonical encoding.
-- [ ] 1.3 Update `evidence_routes.py`'s framework-free service and named signed
+- [x] 1.3 Update `evidence_routes.py`'s framework-free service and named signed
   carrier to sign retained bytes and serialize the original evidence object
   (D2–D3; signed-wire requirement). Preserve the existing field-style evidence
   and nested-result reads with explicit read-only properties and export the
   public document types from the domain package. Verify all existing field
   reads, byte-derived digest/canonical methods, reader roles, signature input,
   and the four unchanged envelope fields in domain unit tests.
-- [ ] 1.4 Make the shared async/sync response parsing retain original evidence
+- [x] 1.4 Make the shared async/sync response parsing retain original evidence
   JSON and match the requested digest before returning the validated document
   (D2–D3; client digest-matching scenarios). Preserve method signatures and the
   named signed-response return carrier. Verify both clients accept fixed v1
   responses, refuse another otherwise-valid document's digest and malformed
   content, and retain signature/role/resource behavior using recording transports.
-- [ ] 1.5 Version the new public types with the next minor release from
+- [x] 1.5 Version the new public types with the next minor release from
   `arkhai-bare-metal` 0.14.0, following D3 and
   `docs/development/RELEASING.md#versioning-policy`. Raise the minimum of
   consumers importing the document API, inventory every lock resolving the
@@ -59,7 +59,7 @@ consumer metadata/locks described in 1.5. No core or kit ownership changes.
   that needs the new API and locks resolving the changed distribution. Verify
   installed exports, wheel contents, and `make check-packaging` before this
   section's commit, so later new imports cannot depend on stale metadata.
-- [ ] 1.6 Verify this domain slice (D5; `docs/development/TESTING.md` and
+- [x] 1.6 Verify this domain slice (D5; `docs/development/TESTING.md` and
   `openspec/config.yaml`): rebuild the domain wheel, refresh its environment,
   run unit-focused `test_evidence.py` and `test_evidence_routes.py`, then
   `make -C domains/bare_metal test` and `make check-packaging`; record exact commands/results and the
@@ -68,6 +68,51 @@ consumer metadata/locks described in 1.5. No core or kit ownership changes.
   no new system scenario is owed for codec permutations. No dedicated domain
   type-check target currently exists; disclose that and verify annotations and
   both typed-client signatures rather than claiming an unrun static check.
+
+### Section 1 evidence and handoff
+
+- Concrete frozen documents retain canonical bytes, verified identities, separate
+  strict views and explicit read-only field properties. The signed carrier uses
+  the original JSON for serialization in both schema modes; clients compare the
+  requested digest before decoding. Golden content and all four identities were
+  compared with the starting implementation, not regenerated as expectations.
+- Unit checks: `domains/bare_metal/.venv/bin/python -m pytest
+  domains/bare_metal/tests/test_evidence.py
+  domains/bare_metal/tests/test_evidence_routes.py -q` — **30 passed**;
+  `make -C domains/bare_metal test` — **210 passed**. Coverage includes defaults
+  on evolved inputs, retained omitted defaults/explicit nulls/timestamp spelling,
+  outer and nested tampering, strict validation, mutation isolation, all facade
+  fields, client digest refusal, and the existing four-field signed envelope.
+- Package release is `arkhai-bare-metal` **0.15.0**. Storefront alone imports the
+  new document API and raises its minimum to 0.15.0. Buyer, provisioning adapter,
+  VM composition, provisioning-service adapter extra, and e2e need no new API
+  minimum. All seven locks resolving the distribution were refreshed using
+  `make lock PROJECTS='domains/bare_metal domains/bare_metal/storefront
+  domains/bare_metal/buyer domains/bare_metal/provisioning/adapter
+  domains/vms/storefront provisioning/compute/service e2e-tests'`.
+- The concrete Pydantic serialization adapter directly imports `pydantic-core`;
+  it is declared. Its JSON-schema input API requires core 2.33/Pydantic 2.11,
+  so those floors replace the previous Pydantic floor. The locked versions
+  already satisfy them; no unrelated third-party upgrade was introduced.
+- `make check-packaging` — **passed** after the final metadata/lock refresh;
+  `make check-change CHANGE=version-accepted-artifacts` — **passed**;
+  `git diff --check` — **passed**. An earlier packaging attempt correctly
+  rejected the domain lock while the direct dependency was being declared;
+  the shared lock refresh resolved it.
+- `make -C domains/bare_metal/storefront reinit` and an installed-wheel check
+  through that environment verified both exported document types, the signed
+  carrier annotation, matching async/sync method signatures, both JSON schema
+  modes and wheel module contents. There is no dedicated domain type-check
+  target or existing domain `py.typed` marker; no static typing pass is claimed.
+- Per the authorized round cadence, root `make test` and the independent diff
+  review run once over sections 1–3 together; neither is claimed for this staging
+  commit. The parent session arranges the independent review. No push or pipeline
+  execution occurs in implementation. End-to-end remains
+  `e2e_bare_metal_mock_deal` after the storefront slice; no extra system scenario
+  or workflow-only job is owed. Owed by validation: none beyond ordinary validation.
+- Next section must replace persistence's current-model parse with document
+  verification and keep the worker from rebuilding a partially present/corrupt
+  stored document. Intermediate source is deliberately not deployable.
 
 ## 2. Verified persistence, publication, and authenticated resolution
 

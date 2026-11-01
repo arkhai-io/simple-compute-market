@@ -131,7 +131,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal"
-version = "0.14.0"
+version = "0.15.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-compute" },
@@ -139,9 +139,10 @@ dependencies = [
     { name = "arkhai-kit-capability-shape" },
     { name = "arkhai-kit-resource-pools-contracts" },
     { name = "pydantic" },
+    { name = "pydantic-core" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal-0.14.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal-0.15.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -215,7 +216,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-bare-metal", specifier = ">=0.14.0" },
+    { name = "arkhai-bare-metal", specifier = ">=0.15.0" },
     { name = "arkhai-compute-provisioning-client", specifier = ">=0.7.0" },
     { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.11.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
