@@ -568,12 +568,24 @@ ship in the wheel), `tests/frp/conftest.py`, `tests/frp/test_real_frp.py`,
 `tests/unit/test_frp_fetch.py`, `Makefile`, `README.md` (the supported frp version and the
 pins file's format).
 
-- [ ] 5.1 `frp-pins.toml` names frp 0.61.1 and, for `linux_amd64`, the official release
+- [x] 5.1 `frp-pins.toml` names frp 0.61.1 and, for `linux_amd64`, the official release
       archive's URL and SHA-256, the SHA-256 taken from a download of that archive and
       recorded here, never read from the release's checksums file at run time. Its format
       gains platform entries without changing shape, and the README states it and the
       supported version. (D5)
-- [ ] 5.2 The fetch downloads the pinned archive for the running platform, verifies its
+      Note: `version` and one `[archives.<os>_<arch>]` table per platform, each `url`
+      (https only) and `sha256` (64 lowercase hex); an unknown member at either level is
+      refused, so a later shape fails to load rather than half-loading. The SHA-256,
+      `bff260b6…2c40`, is the digest of the archive GitHub served this session's fetch
+      (the fetch's own mismatch error named it against a zero placeholder, and the next
+      run verified the download against it). **For the owner:** it was not cross-checked
+      against the release's published `frp_sha256_checksums.txt`, since this unattended
+      step was denied WebFetch; comparing the two once by hand is worth doing, as the
+      pin is trust on first use. The README gains "The frp it is tested against": the
+      version, what the tests run against it, the pins format, and why the release's
+      checksums file is never read; and states frpc 0.61.1's 30-second retry, measured
+      below.
+- [x] 5.2 The fetch downloads the pinned archive for the running platform, verifies its
       SHA-256 against the pin before extracting anything, extracts `frps` and `frpc` into
       the ignored `.frp-cache/`, and reuses a cached binary only when its archive
       verified. `FRPS_BIN` and `FRPC_BIN` override it. A platform with no pin and no
@@ -581,7 +593,27 @@ pins file's format).
       (`tests/unit/test_frp_fetch.py`), against a local archive file: a matching archive
       extracts both binaries; a mismatching one fails naming both digests and extracts
       nothing. (D5; delta "An archive does not match its pin")
-- [ ] 5.3 Fixtures (`tests/frp/conftest.py`) start the plugin, `frps`, and `frpc` as
+      Note: `tests/frp_fetch.py`. The archive is cached under its own name and verified
+      on every use, so a binary is (re)extracted only from an archive that verifies that
+      run; a download lands as `<name>.part` and takes the archive's name only once it
+      verifies, so a mismatching download leaves nothing. Each binary is read from its
+      one member named `frps` or `frpc` and written under that name, so no path in the
+      archive decides where anything is written. **Beyond the plan:** the default suite
+      never fetches and never reads the cache — only `FRPS_BIN` and `FRPC_BIN` give it
+      binaries — so `make test` skips the real-frp tests even on a machine where the gate
+      has cached them, rather than turning a 7-second suite into a two-minute one; the
+      cache is the gate's. The bytes hashed are the bytes extracted (one open file), and
+      any download failure, `http.client`'s included, is a `FetchError` leaving no
+      `.part`. Unit, 18 cases, all pass: matching archive extracted (both binaries,
+      executable, nothing else); mismatching archive names both digests and creates no
+      destination; an archive missing `frpc`; a `file:` download verified, cached, and
+      reused once its source is gone; a mismatching download, and one cut short, leave
+      the cache empty; a tampered cached archive (and binary) downloaded and extracted
+      again; the default suite refused binaries despite a verified cache; a platform with
+      no pin; the overrides, alone and paired; the committed pins file; seven refusals
+      of the pins format (unknown members, a version, a URL that is not https or not a
+      `.tar.gz`, an uppercase digest, no archives).
+- [x] 5.3 Fixtures (`tests/frp/conftest.py`) start the plugin, `frps`, and `frpc` as
       processes, every port chosen at runtime on `127.0.0.1` — frps's bind port, the
       plugin's, `allowPorts`, the issuers' ranges, the remote ports — with frps's
       `[[httpPlugins]]` pointing at the plugin; tokens are signed with the TEST 1 key. A
@@ -589,32 +621,104 @@ pins file's format).
       sleep; the wait for frpc's retry of a refused proxy is sized to frpc 0.61.1's retry
       interval, with a comment saying why it is that long. Without binaries every test in
       `tests/frp/` skips. (D5)
-- [ ] 5.4 Integration, real frp (`tests/frp/test_real_frp.py`): a valid grant admitted,
+      Note: the helpers are in `tests/frp/stack.py` (not in the plan's file list), so
+      `conftest.py` holds only the fixtures and the gate's hooks, as `tests/frps_request.py`
+      keeps shared helpers elsewhere. The plugin runs as `python -m
+      frp_grant_admission.cli serve`, its stderr read by a thread whose lines a test
+      waits on under a condition; frps and frpc run from generated TOML. Ports, all
+      distinct: a block of eight consecutive free ports split as issuer A (3), issuer B
+      (3), one outside every range, and `allowPorts` over all eight; then frps's, the
+      plugin's, and each frpc's admin port free singly. Issuer A holds TEST 1 and TEST 2,
+      so 5.6 can remove TEST 1 and leave it a key. Grants are signed on the system clock
+      (the plugin's clock here), not the vector's 2027 one. frpc's status and frps's
+      readiness are polled within a bound (15 s; 60 s for a retry) at 0.2 s intervals — a
+      poll is the only observation an external process offers — and the plugin's log is
+      awaited on a condition. The retry wait's comment states frpc 0.61.1's measured
+      retry, 30.1–30.2 s after a refusal. Both binaries must report, by `--version`, the
+      release the pins file names, whether fetched or given by the overrides, so the gate
+      cannot pass on an unpinned frp. Under `FRP_GATE=1` a missing binary fails, and
+      hooks fail the run on any skip, in collection or in a test (unexercised: no test
+      here skips by design); pytest itself exits 5 when none run, which `make test-frp
+      PYTEST_ADDOPTS="-k no_such_test"` showed.
+- [x] 5.4 Integration, real frp (`tests/frp/test_real_frp.py`): a valid grant admitted,
       and traffic reaching a local listener through the remote port; refused, with the
       reason frpc reports — no grant, a forged signature, the wrong port, the wrong
       audience, an expired grant, a port outside its issuer's range, one issuer's grant for
       another issuer's range, a non-`tcp` proxy (`stcp`), and a grant only in client-wide
       metadata. (D5; delta "A valid grant is presented", "A proxy carries no grant of its
       own", and the refusal scenarios; "A grant is refused")
-- [ ] 5.5 Integration, real frp: frps refuses the proxy while the plugin is stopped, while
+      Note: integration (real frp), all pass. The valid grant: frpc reports `running`,
+      bytes sent to the remote port on frps come back from an echo service behind the
+      proxy, and the plugin logged `admit`, `issuer-a`, `verified: true`. Each refusal:
+      frpc reports `start error` with the reason code in its `err` — so the reason
+      reaches frpc through frps, as frps's default `detailedErrorsToClient` passes it —
+      and the plugin logged `refuse` with the same reason for that proxy. The
+      client-wide case also shows no `kid` read and `verified: false`.
+- [x] 5.5 Integration, real frp: frps refuses the proxy while the plugin is stopped, while
       a stand-in answers HTTP 500, and while it answers a malformed body; and in each
       case, once the plugin answers again, the same frpc's proxy is admitted on its own
       retry without restarting frpc. (D5, D9; delta "Admission fails closed")
-- [ ] 5.6 Integration, real frp: a registered proxy keeps running after a SIGHUP reload
+      Note: integration (real frp), all pass. frpc reports `start error` and the remote
+      port refuses a connection; the stand-in is an in-process HTTP server on the
+      plugin's port, answering 500 or HTTP 200 with `{not json`, and records that frps
+      asked it exactly one `NewProxy`. The plugin then starts on that port, and the frpc
+      the test started — still running, and the only one started — reports `running`
+      about 30 s later, carries traffic, and the plugin logged the admission. Premise
+      held: frps refused on each failure, and frpc retried without a restart.
+- [x] 5.6 Integration, real frp: a registered proxy keeps running after a SIGHUP reload
       removes its key, and is refused once frpc is restarted — the reconnect forced by
       restart, not by waiting for a heartbeat. (D3's drain premise; delta "A registered
       proxy is not rechecked")
-- [ ] 5.7 Integration, real frp: an frpc reload adding a second proxy beside a registered
+      Note: integration (real frp), passes. A connection held through the proxy carries
+      traffic before and after the reload line (TEST 1 removed, TEST 2 kept); frpc then
+      still reports `running` and a new connection carries traffic; a new frpc from the
+      same file is refused with `key_unknown`, and that is the plugin's only refusal.
+      Premise held: frps did not recheck the registered proxy when the plugin's
+      configuration changed, and refused it when it was registered again.
+- [x] 5.7 Integration, real frp: an frpc reload adding a second proxy beside a registered
       one produces exactly one decision line in the plugin's log, for the new proxy.
       (D5; delta "A client reload adds a proxy")
-- [ ] 5.8 The tool's `make test-frp` fetches the binaries and runs `tests/frp/`, failing
+      Note: integration (real frp), passes, through `frpc reload -c <file>` (frpc's admin
+      API). A connection held through the first proxy carries traffic before and after
+      the reload, and the decision lines after the reload are exactly one `admit`, for
+      the new proxy, which then carries traffic. The count is taken once the new proxy's
+      decision is logged: frpc sends every `NewProxy` a reload causes when the reload
+      runs, so a second decision for the first proxy would be logged by then — a strong
+      negative, not one a bounded test can make airtight. Premise held.
+- [x] 5.8 The tool's `make test-frp` fetches the binaries and runs `tests/frp/`, failing
       when any test skips or none runs; its `make test` runs everything else and passes
       with the network off. (D5; delta "The gate runs without frp")
-- [ ] 5.9 Verification: `make -C tools/frp-grant-admission test` with the network off
+      Note: `test-frp` is `FRP_GATE=1 uv run pytest tests/frp -q -rs`; `test` is
+      unchanged, `tests` with the real-frp tests skipping, since without the gate it
+      reads no binaries but the overrides and so never reaches the network.
+- [x] 5.9 Verification: `make -C tools/frp-grant-admission test` with the network off
       (unit, in-process integration; real-frp tests skip); `make -C
       tools/frp-grant-admission test-frp` (real-frp integration, no skips). If 5.5, 5.6,
       or 5.7 shows an frp premise false, stop and return the change to design (D15).
       End-to-end: none (see the preamble).
+      Note: `make -C tools/frp-grant-admission test` — unit and in-process integration,
+      192 passed, the 15 real-frp tests skipped. The network was not switched off: this
+      step cannot do that, and the suite is offline by construction (no fetch without
+      the gate, a unit case proving it). `make -C tools/frp-grant-admission test-frp` —
+      integration (real frp), 15 passed, none skipped, about 100 s, run three times: the
+      first downloaded and verified the archive, the later ones reused the verified
+      cache, the last after the fresh-context check's fixes; a run from the cache timed
+      each test (the three retry cases 30.1–30.2 s, the rest under 1 s). `make test` —
+      passes (the tool joins it in section 6). `make check-change` — 5 of 6 pass;
+      citations reports the 7 paths of 4.2, every one a file the change creates at
+      closeout or in section 6. No frp premise was false. End-to-end: none, confirmed.
+      Handoff: the fresh-context check found no blocking defect; this section fixed what
+      it found — 5.7's count strengthened by a held connection, the README's real-frp
+      coverage stated case by case, the binaries' version checked against the pin, a
+      tautological pid check, the stand-in now recording frps's request, collection
+      skips counted, ports made distinct, refusal cases named rather than indexed, the
+      fetch's edge cases, the retry comment stated as measured, and helpers moved out of
+      `conftest.py`. Declined: refusing the overrides under the gate (D5 makes them how
+      another platform runs it; the version check covers the risk). For 8.9: the real-frp
+      tests are a third integration flavour, under `tests/frp/` rather than
+      `integration/`; the TESTING.md promotion may say so beside the
+      registration-and-traffic principle. The pin is trust on first use until the owner
+      compares it with the release's checksums file (5.1).
 
 ## 6. Repository integration, CI, the floor run, and the `tools/` boundary
 

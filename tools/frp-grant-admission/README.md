@@ -160,7 +160,9 @@ the client's operator sees why in frpc's log and admin status.
 frps refuses a proxy whenever the plugin does not answer with an admission — when it
 is stopped, answers an HTTP error, or answers something frps cannot read — and frpc
 retries a refused proxy on its own, so it is admitted once the plugin admits it,
-without restarting frpc.
+without restarting frpc. frpc 0.61.1 retries 30 seconds after a refusal. The plugin
+relies on these behaviours of frp, and its tests run each of them against the frp
+release [below](#the-frp-it-is-tested-against).
 
 ### Reason codes
 
@@ -322,3 +324,38 @@ A signer conforms when, for each signing case, serializing `header` and `claims`
 JCS, encoding them as unpadded base64url, and signing with the named key's seed
 reproduces `token` exactly, and when it derives each key's `kid` as the vector does. A
 verifier conforms when it returns each verification case's verdict and reason.
+
+## The frp it is tested against
+
+The plugin is tested against frp **0.61.1**: its tests run that release's `frps` and
+`frpc` against the plugin. They show a grant admitted and traffic carried through the
+remote port; refusals for a missing grant, a grant only in client-wide metadata, a
+forged signature, another port, another audience, an expired grant, a port outside its
+issuer's range, and a proxy that is not `tcp`, each reaching frpc with its reason;
+frps refusing while the plugin is stopped, answers HTTP 500, or answers a body that is
+not JSON, and frpc's own retry admitting once the plugin answers; a registered proxy
+outliving a reload that removes its key, and refused when a restarted frpc registers it
+again; and an frpc reload asking only about the proxy it added. Every reason code is
+proven against the plugin itself by the vector and the plugin's own tests.
+
+[`frp-pins.toml`](frp-pins.toml) names that release and, for each platform, the official
+release archive and its SHA-256:
+
+```toml
+version = "0.61.1"
+
+[archives.linux_amd64]
+url = "https://github.com/fatedier/frp/releases/download/v0.61.1/frp_0.61.1_linux_amd64.tar.gz"
+sha256 = "bff260b68ca7b1461182a46c4f34e9709ba32764eed30a15dd94ac97f50a2c40"
+```
+
+- `version` is the frp release, for `frps` and `frpc` both.
+- Each `archives.<os>_<arch>` table is one platform, named as frp names its release
+  archives, with `url`, the official archive, and `sha256`, its SHA-256 in lowercase
+  hex, computed from a download of the archive.
+
+The format gains platforms as further `archives` tables and changes shape in no other
+way, so other software may read it, to install and verify the same frp. An archive is
+checked against its pinned SHA-256 before anything is extracted from it; the checksums
+file published beside a release is never read, since it comes from the same place as
+the archive.
