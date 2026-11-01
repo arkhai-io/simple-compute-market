@@ -774,6 +774,12 @@ operations authenticate every reload and status request. Removal applies a
 proxy diff by reload and retains pending state across a failed reload.
 The host's management client and binary remain operator-owned.
 
+Service jobs always supply `vm_relay_required` from accepted relay ownership;
+provider extra variables cannot override it. Manual create/cleanup/undefine calls
+default to requiring relay cleanup. Set `vm_relay_required=false` explicitly only
+for a guest known to use direct access. A missing client configuration fails a
+required cleanup, since its running client may still forward traffic.
+
 ### VM Management Operations (vm-management role)
 - **VM Lifecycle Management**: Complete VM operations including create, start, stop, shutdown, reboot, destroy, undefine, and reset-password
 - **Multi-GPU VM Support**: Advanced GPU allocation with IOMMU group detection, device passthrough configuration, and GPU combination selection scripts

@@ -31,7 +31,9 @@ Every add and remove attempt installs the root-owned, owner-only helper
 returns its path as `relay_proxy_teardown_library`. A generated cleanup script
 sources this file under `set -e` and calls
 `remove_guest_proxy <config> <full-proxy-name> <loopback-reload-url>`.
-The helper reads the admin password from the root-only config, supplies it to
+A missing or unreadable configuration fails removal: a running client may still
+hold its proxies. Valid configuration with neither marker nor pending record is
+idempotent absence. The helper reads the admin password from the root-only config, supplies it to
 curl through stdin, and never restarts the client. It sets `GUEST_PROXY` to
 `absent` or `removed` on success. A failed reload returns failure and retains
 `<config>.reload-pending.<name>`; the next call retries the reload even though

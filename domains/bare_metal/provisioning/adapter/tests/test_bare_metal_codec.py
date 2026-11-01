@@ -269,7 +269,10 @@ def _reclaim(**changes) -> BareMetalJobParams:
 
 @pytest.mark.parametrize("render", [shipped_output, json_output], ids=["shipped yaml", "json"])
 def test_a_reclaim_reports_its_fact(render) -> None:
-    fact = _fact(NODE_RECLAIM_ACCESS_ACTION, reclaim_policy="remove_lease_key", host="bm-node-1")
+    fact = _fact(NODE_RECLAIM_ACCESS_ACTION, reclaim_policy="remove_lease_key", host="bm-node-1",
+                 activity={"tenant_uid": 41000, "sessions_ended": 1, "linger_disabled": True,
+                           "processes_killed": 2, "crontab_removed": True,
+                           "at_jobs_removed": 1, "activity_terminated": True})
 
     outcome = _interpret(_reclaim(), render(_RECLAIM_FACT, fact))
 

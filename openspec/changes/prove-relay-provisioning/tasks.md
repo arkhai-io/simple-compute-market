@@ -1332,21 +1332,132 @@ to section 5's tasks.
 Delivers D15: "A bare-metal reclaim ends the tenant's activity" and the modified "A
 bare-metal reclaim tolerates an account its grant never created".
 
-- [ ] 9.1 In `roles/bare-metal-access/tasks/main.yml`, where the account exists and
+- [x] 9.1 In `roles/bare-metal-access/tasks/main.yml`, where the account exists and
       after the key is removed: end its sessions (`loginctl terminate-user`) and
       lingering (`loginctl disable-linger`), kill what remains (`pkill -KILL -u`),
       remove its crontab and `at` jobs, and only then keep, lock, or delete it. Drop
       `failed_when: false` from the lock and delete; fail the reclaim when a process of
       the account survives. The reclaim fact reports what was ended. (D15)
-- [ ] 9.2 The codec keeps the reclaim result diagnostic and records the new fact
+- [x] 9.2 The codec keeps the reclaim result diagnostic and records the new fact
       fields as detail. (D15; "A bare-metal reclaim's printed fact is a diagnostic")
-- [ ] 9.3 Tests (`test_bare_metal_ansible_assets.py`, the codec's tests): the order of
+- [x] 9.3 Tests (`test_bare_metal_ansible_assets.py`, the codec's tests): the order of
       the reclaim tasks, no swallowed failure, the absent-account path unchanged, the
       fact's new fields read.
-- [ ] 9.4 Verify. `make test-bare-metal`, `make test-provisioning`;
+- [x] 9.3a Correct the shared runtime-removal proof in
+      `provisioning/compute/iac/ansible/roles/relay-proxy/files/remove_proxy.sh`
+      and `tasks/remove.yml`: refuse missing/unreadable/failed configuration
+      observations without discarding pending reload evidence. Gate VM's partial
+      fallback, generated cleanup and undefine callers on codec-owned accepted
+      `vm_relay_required`, reserved against provider extra variables. Add helper,
+      actual task and caller regressions for both relay-required failure and
+      explicit direct cleanup. This corrects the existing proven-runtime-cleanup
+      requirement; it adds no migration framework.
+- [x] 9.4 Verify. `make test-bare-metal`, `make test-provisioning`;
       `make test-provisioning-iac-native`; `make test`. End-to-end: `e2e_bare_metal_mock_deal` runs
       its reclaim through the mock profile's output; the live run (section 16) shows a
       real reclaim.
+
+  Implementation scope clarification: `tenant_activity.py` is a Python 3.10+
+  host command barrier, copied by the bare-metal role after key revocation and
+  before account policy. Its activity diagnostics remain unchanged codec detail;
+  they are not release evidence or protected receipts. The legacy absent-account
+  role path still succeeds after required relay cleanup. A root-only explicit
+  numeric-UID seam accepts identity supplied by a separately authorized caller
+  after NSS disappearance; it creates no identity/receipt authority. Existing
+  inactive working-data/UID/IPC helpers remain untouched. Focused helper and
+  service/adapter checks plus native packaged role tests and packaging precede
+  this section's commit. The single full suite and independent combined review
+  remain the frozen sections 6–9 round checks under delegated cadence.
+  Permanent promotion stays with 17.9: the physical-provisioning spec's reclaim
+  activity and proven proxy removal requirements, its architecture's proof-driven
+  release and buyer-access explanation, and operator prerequisite guidance.
+
+  Implementation notes / handoff:
+  - `tenant_activity.py` is installed root-owned and owner-only at
+    `/usr/local/lib/arkhai-tenant-activity.py`. The ordinary invocation is
+    `python3 <helper> <account> <observed_uid>`; it rejects a changed or conflicting
+    NSS identity and refuses UID zero. A separately authorized protected-receipt
+    caller may use `python3 <helper> --trusted-uid <account> <receipt_uid>` after
+    NSS disappearance. That path ends observed session IDs, stops the UID's user
+    manager, removes that account's linger marker and verifies both UID process
+    classes. Missing-name cron/at state is never recreated: retained spool evidence
+    fails closed. This is an explicit execution seam, not receipt authentication,
+    allocation, reuse policy, or role activation. The ordinary role still skips
+    the helper for absent accounts; the later bounded cleanup integration must
+    deliberately compose the receipt authority and numeric seam.
+  - The helper removes the crontab and attributable at jobs and independently
+    observes processes, sessions, the user manager, lingering and scheduled state.
+    Missing `atq` requires an inactive/absent `atd.service` plus inspection of
+    supported queue/spool directories. Missing `crontab`, or absent NSS in numeric
+    mode, requires absent named cron spools. Unreadable state and command failures
+    fail the barrier; a bounded five-second settling window handles asynchronous
+    process/systemd exit. Unit tests use injected command boundaries and a zero
+    settling window for survivor cases. Python 3.10 parsing, import and construction were checked with the
+    host interpreter; there is no host dependency on tomllib or third-party Python
+    packages. No real tenant termination is claimed by these controlled tests.
+  - Key revocation now precedes the barrier for every account policy, including
+    deletion. Lock/delete use normal Ansible failure behavior. The result's
+    `activity` object records `tenant_uid`, `sessions_ended`, `linger_disabled`,
+    `processes_killed`, `crontab_removed`, `at_jobs_removed` and
+    `activity_terminated`. Matching reclaim facts remain unchanged diagnostic
+    detail; failure/success and capacity release still depend only on job status.
+  - Shared removal reads and validates the protected configuration before accepting
+    known absence, and refuses a missing/unreadable file or failed cat/grep/awk
+    observation. Pending reload records survive failures. Valid no-marker/no-pending
+    calls remain idempotent, and a failed reload still retries before success.
+    This corrects section 6's earlier absent-configuration evidence rather than
+    adopting it as a runtime absence proof. VM's generated cleanup, fallback and
+    undefine skip relay work only on explicit accepted `vm_relay_required=false`;
+    the codec always emits/reserves this key, so provider extras cannot override
+    required cleanup. Manual callers default to requiring cleanup. The running-
+    guest undefine refusal still precedes relay removal. Management and neighbour
+    state remain outside this guest's removal.
+  - Focused evidence: VM adapter unit/library checks 225 passed; bare-metal adapter
+    unit/controlled-runner checks 110 passed; bare-metal IaC default helper checks
+    114 passed, with four inactive working-data native cases deselected. These
+    include 19 activity-helper unit cases, not real systemd/process termination.
+    Composed service checks (assets plus bare-metal mock profile, relay and lease
+    release application integration) 29 passed; mocked teardown failure keeps
+    capacity held. Unchanged domain/storefront/buyer and broad service evidence
+    is reused from sections 7–8, not relabelled as new runs.
+  - The first broader IaC run passed the family suite but failed four VM cleanup
+    fixture cases: extraction began after the new condition, and a legacy case
+    still expected filesystem absence to imply direct mode. Corrected extraction
+    and explicit direct-mode input passed all 50 affected cleanup/caller cases;
+    the final clean aggregate passed family 16 (13 native skips) and VM 168 with
+    two subtests (three native skips). The separate shared helper's final six
+    file/HTTP regressions passed, including failed observation and retained
+    pending evidence. A separate unprivileged collection-only uv probe could not
+    write its cache; the authorized project runs above succeeded. One workflow-log
+    read accidentally used system Python 3.10 and lacked tomllib; rerunning with
+    the declared toolchain succeeded. Host-executed activity code does not import
+    tomllib.
+  - The final `arkhai:compute-provisioning-relay-section9-final` image was rebuilt
+    after the last runtime/fixture edits. `make test-provisioning-iac-native`
+    passed VM three and family 13 native cases with no skips from its packaged
+    trees, with no checkout mounts: actual Ansible covers missing/unreadable
+    config refusal, the absent-account role under all policies, and a failing
+    activity command stopping before account policy. All six VM playbooks, both
+    family playbooks and both bare-metal playbooks passed their configuration
+    syntax checks, including shared service configuration. Ansible was 2.19.14
+    with ansible.posix 1.5.4. Preliminary image checks also passed, but the final
+    image is the current-assets evidence. These are local role/boundary checks,
+    not native systemd host qualification, real proxy traffic, or hardware proof.
+  - `make check-packaging` and `make check-change` passed, including architecture,
+    comment hygiene, citations and strict OpenSpec validation. No dependency/lock
+    input changed. Scoped context loading followed the coordinator's assignment;
+    literal full-document reading, personal owner reading and a per-section
+    fresh-context review are not claimed. The single full `make test` and combined
+    independent compliance/implementation review remain the frozen sections 6–9
+    round checks. No later section, live host, hardware, deployment or working-data
+    role integration was started.
+  - End-to-end scenarios confirmed: `e2e_bare_metal_mock_deal` exercises mock-profile
+    reclaim and codec output only; no current pipeline scenario executes this real
+    activity barrier or a relayed bare-metal reclaim. Section 16 still owes real
+    termination, access revocation and management preservation. Owed by validation:
+    `tests.yml`, job `test · test-provisioning-iac` — family and VM IaC must both
+    run and pass; the VM pipeline's native gate must additionally check its built
+    image. The controlled local results are not deployed or pipeline evidence.
 
 ## 10. The real-provisioning target, version 2
 

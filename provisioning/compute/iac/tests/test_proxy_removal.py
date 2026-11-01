@@ -9,6 +9,8 @@ from pathlib import Path
 import subprocess
 import threading
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 LIBRARY = (ROOT / "ansible/roles/relay-proxy/files/remove_proxy.sh").read_text()
 PASSWORD = "a" * 64
@@ -58,7 +60,7 @@ def remove(config, url, name="tenant-example"):
 
 def test_removal_authenticates_preserves_neighbours_and_retries_failed_reload(tmp_path):
     config = tmp_path / "frpc-buyers.toml"
-    original = f'webServer.password = "{PASSWORD}"\n' + block("tenant-example") + block("tenant-example-2")
+    original = f'webServer.port = 600\nwebServer.password = "{PASSWORD}"\n' + block("tenant-example") + block("tenant-example-2")
     config.write_text(original)
     config.chmod(0o600)
     management = tmp_path / "frpc.toml"
@@ -84,7 +86,7 @@ def test_removal_authenticates_preserves_neighbours_and_retries_failed_reload(tm
 
 def test_a_missing_end_marker_is_refused_without_removing_a_neighbour(tmp_path):
     config = tmp_path / "frpc-buyers.toml"
-    original = block("tenant-example").replace("# END ANSIBLE MANAGED RELAY PROXY tenant-example\n", "") + block("tenant-example-2")
+    original = f'webServer.port = 600\nwebServer.password = "{PASSWORD}"\n' + block("tenant-example").replace("# END ANSIBLE MANAGED RELAY PROXY tenant-example\n", "") + block("tenant-example-2")
     config.write_text(original)
     with Peer([]) as peer:
         failed = remove(config, peer.url)
@@ -93,9 +95,36 @@ def test_a_missing_end_marker_is_refused_without_removing_a_neighbour(tmp_path):
     assert config.read_text() == original
 
 
-def test_a_missing_configuration_is_absent_without_a_reload(tmp_path):
+def test_a_missing_configuration_fails_without_claiming_absence(tmp_path):
     with Peer([]) as peer:
         result = remove(tmp_path / "absent", peer.url)
-        assert result.returncode == 0
-        assert result.stdout.strip() == "absent"
+        assert result.returncode != 0
+        assert result.stdout.strip() != "absent"
+        assert peer.calls == []
+
+
+@pytest.mark.parametrize("failed_command", ["cat", "grep"])
+def test_config_read_failure_is_not_treated_as_a_missing_marker(tmp_path, failed_command):
+    config = tmp_path / "frpc-buyers.toml"
+    config.write_text(f'webServer.port = 600\nwebServer.password = "{PASSWORD}"\n' + block("tenant-example"))
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    (binary / failed_command).write_text("#!/bin/sh\nexit 2\n")
+    (binary / failed_command).chmod(0o755)
+    run = subprocess.run(["bash", "-c", "set -e\n" + LIBRARY +
+                          '\nPATH="$4:$PATH"; remove_guest_proxy "$1" "$2" "$3"',
+                          "test", str(config), "tenant-example", "http://127.0.0.1:1/api/reload", str(binary)],
+                         capture_output=True, text=True, check=False)
+    assert run.returncode != 0
+    assert block("tenant-example") in config.read_text()
+
+
+def test_disappeared_config_keeps_pending_reload_evidence(tmp_path):
+    config = tmp_path / "missing.toml"
+    pending = Path(str(config) + ".reload-pending.tenant-example")
+    pending.touch()
+    with Peer([]) as peer:
+        result = remove(config, peer.url)
+        assert result.returncode != 0
+        assert pending.exists()
         assert peer.calls == []

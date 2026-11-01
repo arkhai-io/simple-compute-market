@@ -301,6 +301,9 @@ class VmAnsibleCodec:
         variables: dict[str, Any] = {
             "host_id": params.host_id,
             "vm_action": params.vm_action,
+            # Accepted relay ownership, also reserved for direct jobs: provider
+            # extras must never switch off a required teardown.
+            "vm_relay_required": bool(params.relay_id or params.vm_remote_port is not None),
             "offering_mode": params.offering_mode,
             "executor_action": params.executor_action,
             "executor_target": params.executor_target,

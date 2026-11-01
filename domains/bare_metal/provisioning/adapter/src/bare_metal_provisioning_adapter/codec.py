@@ -23,7 +23,9 @@ and the fact's own host and port describe the provisioner's route, so they stay
 detail. A grant whose fact does not match its job, or cannot say when access
 became ready, reports no evidence, its detail naming any mismatch, so the
 family's provider fails the create while an operator can still read why. A
-reclaim's result is its fact, or only the mismatch when the fact does not match
+reclaim's result retains its activity diagnostics unchanged as detail. Job
+status alone decides teardown; these fields are never release evidence. The
+result is its fact, or only the mismatch when the fact does not match
 its job. No result carries a credential: the buyer already holds the private
 half of the key that was installed.
 """
@@ -58,8 +60,8 @@ BARE_METAL_INVENTORY_GROUP = "bare_metal_nodes"
 #: The kind of a reclaim's result; a grant's is the family's create result.
 BARE_METAL_ACCESS_RESULT_KIND = "bare_metal_access"
 
-#: What a reclaim does to the tenant account: remove only the lease's key,
-#: also lock the account, or delete the account and its home directory.
+#: All policies end tenant activity; they then keep the account after key
+#: removal, lock it, or delete it and its home directory.
 BARE_METAL_RECLAIM_POLICIES = frozenset({"remove_lease_key", "lock_user", "delete_user"})
 DEFAULT_BARE_METAL_RECLAIM_POLICY = "remove_lease_key"
 

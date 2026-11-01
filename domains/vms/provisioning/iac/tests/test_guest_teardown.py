@@ -77,6 +77,7 @@ def _render(text: str, name: str) -> str:
         "relay_client_config | quote": "/etc/frp/frpc-buyers.toml",
         "relay_proxy_name | quote": f"vm-{name}",
         "relay_proxy_name": f"vm-{name}",
+        "vm_relay_required | default(true) | bool | ternary('true', 'false')": "true",
     }
 
     def resolve(match: re.Match) -> str:
@@ -220,6 +221,18 @@ class _ReloadFailures:
     guest's proxy removal, then recovering. A teardown fails while the running
     client may still hold the proxy, and a retry reloads before it succeeds,
     though the configuration no longer names the guest."""
+
+    def test_missing_required_configuration_refuses_cleanup(self):
+        self._host(a_rules=True, a_proxy=True, a_reservation=True,
+                   a_domain={"state": "shut off", "mac": A_MAC})
+        self.config.unlink()
+        disk = self.images / f"{A}.qcow2"
+        disk.write_text("guest A")
+        result = self._run(self._script())
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn(A, self.host.virsh()["domains"])
+        self.assertTrue(disk.exists())
+        self.assertEqual(self.reloads(), 0)
 
     def test_a_refused_reload_fails_and_a_retry_reloads_before_succeeding(self) -> None:
         self._failing_then_recovering([22])
@@ -390,10 +403,9 @@ class TheCleanupScriptACreateWrites(_ReloadFailures, _Teardown):
                    a_domain={"state": "running", "address": A_IP, "mac": A_MAC})
         self.config.unlink()
 
-        result = self._run(self._script())
+        result = self._run(self._script().replace("if true; then", "if false; then"))
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("STEP_STATUS|remove_relay_proxy|skipped", result.stdout)
         self.assertEqual(self.reloads(), 0)
         self.assertNotIn(A, self.host.virsh()["domains"])
 
@@ -525,7 +537,7 @@ class ARemoveWithNoCleanupScript(_ReloadFailures, _Teardown):
                    a_domain={"state": "shut off", "mac": A_MAC})
         self.config.unlink()
 
-        result = self._run(self._script())
+        result = self._run(self._script().replace("if true; then", "if false; then"))
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("GUEST_PRESENT=true", result.stdout)

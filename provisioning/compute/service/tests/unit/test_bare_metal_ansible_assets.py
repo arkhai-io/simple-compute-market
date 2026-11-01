@@ -48,3 +48,15 @@ def test_bare_metal_relay_calls_share_the_family_roles_without_management_edits(
     assert "- relay-client" in host_setup.read_text()
     gate = (REPO_ROOT / "provisioning/compute/iac/scripts/image_syntax_gate.sh").read_text()
     assert gate.count("playbooks/host-kit/host-setup.yaml --syntax-check") == 2
+
+
+def test_reclaim_activity_barrier_precedes_all_account_policies_and_propagates_failures():
+    text = (BARE_METAL_ANSIBLE_ROOT / "roles/bare-metal-access/tasks/main.yml").read_text()
+    key = text.index("Remove bare-metal tenant authorized_keys")
+    barrier = text.index("End and verify bare-metal tenant activity")
+    assert key < barrier < text.index("Lock bare-metal tenant account") < text.index("Delete bare-metal tenant account")
+    assert "failed_when: false" not in text
+    assert 'activity: "{{ bare_metal_activity_detail | default({}) }}"' in text
+    body = text[barrier:text.index("- name: Record verified bare-metal", barrier)]
+    assert "bare_metal_account_present | bool" in body
+    assert "become: true" in body and "bare_metal_account_lookup.stdout.split(':')[2]" in body

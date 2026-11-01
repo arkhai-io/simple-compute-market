@@ -75,10 +75,6 @@
     NAME="{{ vm_name }}"
     MARKER="{{ vm_guest_rule_marker }}"
     source {{ relay_proxy_teardown_library | quote }}
-    CONFIG={{ relay_client_config | quote }}
-    ADMIN_PORT="$(awk -F ' = ' '$1 == "webServer.port" {print $2; exit}' "$CONFIG" 2>/dev/null || true)"
-    RELOAD_URL="http://127.0.0.1:$ADMIN_PORT/api/reload"
-
     {{ lookup('file', 'guest_teardown.sh') }}
 
     FOUND=0
@@ -126,9 +122,14 @@
     # Fails here, under `set -e`, while the VM tunnel client has not reloaded
     # without the proxy of this guest, so the relay port stays held with the
     # capacity of the reservation until the reload of a retry succeeds.
-    remove_guest_proxy "$CONFIG" "vm-$NAME" "$RELOAD_URL"
-    if [ "$GUEST_PROXY" = "removed" ]; then
-      found "relay proxy block"
+    if {{ vm_relay_required | default(true) | bool | ternary('true', 'false') }}; then
+      CONFIG={{ relay_client_config | quote }}
+      ADMIN_PORT="$(awk -F ' = ' '$1 == "webServer.port" {print $2; exit}' "$CONFIG")"
+      [[ "$ADMIN_PORT" =~ ^[0-9]+$ ]] && [ "$ADMIN_PORT" -gt 0 ] && [ "$ADMIN_PORT" -lt 1024 ]
+      remove_guest_proxy "$CONFIG" "vm-$NAME" "http://127.0.0.1:$ADMIN_PORT/api/reload"
+      if [ "$GUEST_PROXY" = "removed" ]; then
+        found "relay proxy block"
+      fi
     fi
 
 

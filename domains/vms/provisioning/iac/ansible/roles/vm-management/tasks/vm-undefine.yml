@@ -121,7 +121,9 @@
     relay_proxy_action: remove
     relay_proxy_name: "vm-{{ vm_name }}"
   no_log: true
-  when: vm_action == "undefine"
+  when:
+    - vm_action == "undefine"
+    - vm_relay_required | default(true) | bool
 
 - name: Clean up iptables port forwarding rules
   # By this guest's marker, and, for a rule without one, by its exact address

@@ -23,12 +23,34 @@ remove_guest_proxy() {
   local begin="# BEGIN ANSIBLE MANAGED RELAY PROXY $2"
   local end="# END ANSIBLE MANAGED RELAY PROXY $2"
   local pending="$config.reload-pending.$2"
-  local rest
-  GUEST_PROXY="absent"
-  if [ -f "$config" ] && grep -qxF "$begin" "$config"; then
+  local rest content match
+  GUEST_PROXY="unproven"
+  # A missing file says nothing about the running client. Read the complete
+  # protected configuration before treating an absent marker as evidence.
+  if [ ! -f "$config" ] || [ ! -r "$config" ]; then
+    echo "the buyer tunnel configuration cannot be read" >&2
+    return 1
+  fi
+  content="$(cat "$config")" || return 1
+  local password
+  password="$(awk -F ' = ' '$1 == "webServer.password" {gsub(/"/, "", $2); print $2; exit}' <<< "$content")" || return 1
+  if ! [[ "$password" =~ ^[a-f0-9]{64}$ ]]; then
+    echo "the buyer tunnel client has no valid admin password" >&2
+    return 1
+  fi
+  local port
+  port="$(awk -F ' = ' '$1 == "webServer.port" {print $2; exit}' <<< "$content")" || return 1
+  if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -le 0 ] || [ "$port" -ge 1024 ]; then
+    echo "the buyer tunnel client has no valid privileged admin port" >&2
+    return 1
+  fi
+  match=0
+  grep -qxF "$begin" <<< "$content" || match=$?
+  [ "$match" -le 1 ] || return 1
+  if [ "$match" -eq 0 ]; then
     # A block with no end would take every block after it, other guests'
     # included, so it is refused rather than removed.
-    if ! grep -qxF "$end" "$config"; then
+    if ! grep -qxF "$end" <<< "$content"; then
       echo "$config has '$begin' with no matching end line" >&2
       return 1
     fi
@@ -46,13 +68,8 @@ remove_guest_proxy() {
     fi
     rm -f "$rest"
   elif [ ! -e "$pending" ]; then
+    GUEST_PROXY="absent"
     return 0
-  fi
-  local password
-  password="$(awk -F ' = ' '$1 == "webServer.password" {gsub(/"/, "", $2); print $2; exit}' "$config")" || return 1
-  if ! [[ "$password" =~ ^[a-f0-9]{64}$ ]]; then
-    echo "the buyer tunnel client has no valid admin password" >&2
-    return 1
   fi
   # Supply the credential through stdin, never a process argument.
   if ! printf 'user = "admin:%s"\n' "$password" | curl --config - --connect-timeout 5 --max-time 30 --noproxy '*' -fsS "$reload_url" >/dev/null 2>&1; then

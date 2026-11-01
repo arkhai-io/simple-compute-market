@@ -59,6 +59,7 @@ _BLOCK_END = '      log "=== Cleaning up port forwarding rules ==="\n'
 _SUBSTITUTIONS = {
     "{{ relay_proxy_teardown_library | quote }}": "/usr/local/lib/arkhai-relay/remove_proxy.sh",
     "{{ relay_client_config | quote }}": "/etc/frp/frpc-buyers.toml",
+    "{{ vm_relay_required | default(true) | bool | ternary('true', 'false') }}": "true",
 }
 
 
@@ -92,7 +93,7 @@ class CleanupScriptRelayTeardownTests(unittest.TestCase):
         a command that does not exist parses fine."""
         assert_bash_syntax_valid(_PRELUDE + LIBRARY + self.block)
 
-    def _run(self, *, config_exists: bool, reload_ok: bool = True, neighbour: bool = False):
+    def _run(self, *, config_exists: bool, reload_ok: bool = True, neighbour: bool = False, relay_required: bool = True):
         curl = (
             "#!/bin/bash\necho \"CURL $@\" >> \"$RECORD\"\nexit 0\n"
             if reload_ok
@@ -138,7 +139,7 @@ class CleanupScriptRelayTeardownTests(unittest.TestCase):
                 _PRELUDE
                 + LIBRARY
                 + f'RECORD="{record}"\nexport RECORD\n'
-                + self.block.replace("/etc/frp/", f"{etc}/").replace("/usr/local/lib/arkhai-relay/remove_proxy.sh", str(library))
+                + self.block.replace("if true; then", "if true; then" if relay_required else "if false; then").replace("/etc/frp/", f"{etc}/").replace("/usr/local/lib/arkhai-relay/remove_proxy.sh", str(library))
             )
             result = run_bash(script, fake_bin_dir=fake_bin)
             calls = Path(record).read_text(encoding="utf-8")
@@ -189,11 +190,13 @@ class CleanupScriptRelayTeardownTests(unittest.TestCase):
         self.assertIn("STEP|remove_relay_proxy|failed", result.stdout)
         self.assertNotIn("STEP|remove_relay_proxy|success", result.stdout)
 
-    def test_an_absent_configuration_is_skipped_not_failed(self) -> None:
-        """A direct-NAT host has no VM tunnel client. Cleanup must not fail
-        there — the VM still needs undefining."""
+    def test_an_absent_configuration_fails_a_required_relay_cleanup(self) -> None:
         result, calls, _, _ = self._run(config_exists=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("/api/reload", calls)
 
+    def test_an_explicit_direct_job_skips_relay_cleanup(self) -> None:
+        result, calls, _, _ = self._run(config_exists=False, relay_required=False)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("STEP|remove_relay_proxy|skipped", result.stdout)
         self.assertNotIn("/api/reload", calls)

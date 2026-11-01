@@ -2555,26 +2555,30 @@
       track_step "get_external_port" "success"
       
       log "=== Removing this VM's tunnel proxy ==="
-      # The installed family library owns authenticated reloads and pending
-      # retries. A missing library fails before any guest artifact is removed.
-      source {{ relay_proxy_teardown_library | quote }}
-      CONFIG={{ relay_client_config | quote }}
-      ADMIN_PORT="$(awk -F ' = ' '$1 == "webServer.port" {print $2; exit}' "$CONFIG" 2>/dev/null || true)"
-      if ! remove_guest_proxy "$CONFIG" "vm-$VM_NAME" "http://127.0.0.1:$ADMIN_PORT/api/reload"; then
-        log_error "This VM's proxy is not removed from the running buyer tunnel client"
-        track_step "remove_relay_proxy" "failed"
-        exit 1
+      if {{ vm_relay_required | default(true) | bool | ternary('true', 'false') }}; then
+        # The installed family library owns authenticated reloads and pending
+        # retries. A missing library fails before any guest artifact is removed.
+        source {{ relay_proxy_teardown_library | quote }}
+        CONFIG={{ relay_client_config | quote }}
+        ADMIN_PORT="$(awk -F ' = ' '$1 == "webServer.port" {print $2; exit}' "$CONFIG")"
+        if ! remove_guest_proxy "$CONFIG" "vm-$VM_NAME" "http://127.0.0.1:$ADMIN_PORT/api/reload"; then
+          log_error "This VM's proxy is not removed from the running buyer tunnel client"
+          track_step "remove_relay_proxy" "failed"
+          exit 1
+        fi
+        case "$GUEST_PROXY" in
+          removed)
+            log "Proxy stanza removed; VM tunnel client reloaded"
+            track_step "remove_relay_proxy" "success"
+            ;;
+          *)
+            log "No proxy stanza for this VM"
+            track_step "remove_relay_proxy" "skipped"
+            ;;
+        esac
+      else
+        track_step "remove_relay_proxy" "skipped"
       fi
-      case "$GUEST_PROXY" in
-        removed)
-          log "Proxy stanza removed; VM tunnel client reloaded"
-          track_step "remove_relay_proxy" "success"
-          ;;
-        *)
-          log "No proxy stanza for this VM"
-          track_step "remove_relay_proxy" "skipped"
-          ;;
-      esac
       
       # Clean up iptables port forwarding rules
       log "=== Cleaning up port forwarding rules ==="

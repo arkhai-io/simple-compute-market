@@ -932,3 +932,14 @@ class TestPlaybookContract:
     def test_the_inventory_target_carries_the_tenant_address(self):
         target = inventory_target(_HOST)
         assert (target.public_host, target.ssh_host) == ("203.0.113.1", "10.0.0.1")
+
+
+@pytest.mark.parametrize("relay_id,port,required", [(None, None, False), ("fixture-relay", None, True), (None, 6100, True)])
+def test_cleanup_mode_is_accepted_job_state_and_cannot_be_overridden(relay_id, port, required):
+    codec = VmAnsibleCodec()
+    params = _params(relay_id=relay_id, vm_remote_port=port)
+    variables = codec.variables(params)
+    assert variables["vm_relay_required"] is required
+    assert "vm_relay_required" in codec.reserved_var_keys(params)
+    with pytest.raises(ValueError, match="vm_relay_required"):
+        render_extra_vars(variables, {"vm_relay_required": not required})

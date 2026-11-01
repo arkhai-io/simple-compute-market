@@ -863,6 +863,24 @@ teardown fails and convergence requeues it rather than a release being recorded.
 reclaim's fact reports what was ended and stays diagnostic. A reclaim for an account
 that does not exist still succeeds reporting it absent.
 
+Implementation clarification: observation failures cannot prove absence. The host
+barrier verifies sessions, lingering, both real/effective-UID processes, the user
+manager, cron and at queues before account policy. Missing scheduler commands are
+benign only after supported daemon/spool observations prove absence. Python 3.10+
+is the host prerequisite. Numeric-UID termination is an explicit root-only seam
+for a separately authorized protected-receipt caller; section 9 creates no such
+receipt or UID authority, and the legacy absent-account role path remains intact.
+
+The same proof rule applies to the shared relay helper: a disappeared protected
+configuration does not mean a live client lost its proxy. Missing/unreadable state
+fails removal, retaining reload evidence. VM cleanup skips relay work only from
+its accepted job's authoritative relay mode, emitted and reserved by the codec
+for both direct and relayed operations; manual callers default conservatively to
+requiring cleanup. Generated cleanup and undefine use the same rule, after the
+running-guest refusal where applicable. Valid known absence and pending-reload
+retry remain idempotent. This is a correction to the existing runtime-removal
+requirement, accepted under delegated technical authority, not a new owner vote.
+
 Why (correction 11): the boundary D4 records assumes the tenant is gone after
 reclaim; a process left behind outlives the lease and can wait for a privilege
 escalation, a client restart, or the next tenant. This holds for direct access as
