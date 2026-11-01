@@ -46,6 +46,10 @@ MAX_GRANT_BYTES = 4096
 
 _SEGMENT = re.compile(r"[A-Za-z0-9_-]*={0,2}")
 _UNREAD = object()
+# PyJWT 2.8.0, the declared floor, has no module-level `jwt.decode_complete`; the
+# `PyJWT` class carries it in every declared release. Decoding never changes the
+# instance, so one serves every request thread.
+_PYJWT = jwt.PyJWT()
 
 
 @dataclass(frozen=True)
@@ -105,7 +109,7 @@ def check_grant(grant: str, config: Config, remote_port: int, now: int) -> Grant
         return GrantResult(Reason.GRANT_MALFORMED, issuer.name, **read)
 
     try:
-        decoded = jwt.decode_complete(
+        decoded = _PYJWT.decode_complete(
             grant,
             key.public_key,
             algorithms=["EdDSA"],

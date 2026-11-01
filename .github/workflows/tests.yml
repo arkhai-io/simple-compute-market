@@ -23,7 +23,8 @@ permissions:
 #
 # Not included here: the docker-compose end-to-end suite (e2e-tests/), which
 # builds the full image stack and runs in the e2e workflow. tools/issue-discovery
-# is also excluded (its bootstrap tests probe the host system).
+# is also excluded (its bootstrap tests probe the host system). The frps
+# admission plugin's network-bound gate is its own job below, beside the matrix.
 
 jobs:
   test:
@@ -57,6 +58,7 @@ jobs:
           - test-apicredits
           - test-e2e-unit
           - test-deployment-packaging
+          - test-frp-grant-admission
     steps:
       - uses: actions/checkout@v4
       - name: Use the repository's declared Python version
@@ -83,6 +85,26 @@ jobs:
         run: make dist-ci
       - name: make ${{ matrix.target }}
         run: make ${{ matrix.target }}
+
+  # The frps admission plugin's gate, which needs the network: real frps and frpc,
+  # fetched and verified against the tool's pins, and its unit tests with each runtime
+  # dependency at its declared floor. Both fail rather than skip.
+  frp-grant-admission-gate:
+    name: frp · real-frp gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use the repository's declared Python version
+        run: echo "UV_PYTHON=$(cat .python-version)" >> "$GITHUB_ENV"
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.12.19"
+      - name: make test-frp-grant-admission-frp
+        run: make test-frp-grant-admission-frp
+      # Run whatever the real-frp step concluded, so one run reports both.
+      - name: make test-frp-grant-admission-floor
+        if: ${{ !cancelled() }}
+        run: make test-frp-grant-admission-floor
 
   arkhai-payments-kit:
     name: build · kit-arkhai-payments

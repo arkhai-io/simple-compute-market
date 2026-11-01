@@ -233,6 +233,11 @@ Files: `src/frp_grant_admission/grant.py`, `src/frp_grant_admission/reasons.py`,
       on the Python version's recursion limit. Correction: "never reads the system clock"
       holds for the check's own code only: PyJWT reads `datetime.now()` while decoding,
       but every time check it would make with it is off, so no verdict depends on it.
+      Correction (section 6): (d) is called on a `jwt.PyJWT()` instance, since PyJWT
+      2.8.0, the declared floor, exports no module-level `jwt.decode_complete`; the
+      function and its options are D12 step 8's. D12 and D22 still write
+      `jwt.decode_complete`; documents promoted at closeout should say PyJWT's
+      `decode_complete`.
 - [x] 2.3 `vector/frp-grant-1.json`: the specification's version (`frp-grant 1.0`); the
       TEST 1 key's seed and public key, labelled a test value never to be used on any
       network; a configuration of two issuers with adjacent ranges; verification cases
@@ -731,7 +736,7 @@ Files: `tools/frp-grant-admission/Makefile`; the root `Makefile`;
 `.github/workflows/tests.yml`; `tools/frp-grant-admission/tests/unit/test_structure.py`;
 `tools/README.md`.
 
-- [ ] 6.1 The tool's `make test-floor` runs `tests/unit` — the vector included — with
+- [x] 6.1 The tool's `make test-floor` runs `tests/unit` — the vector included — with
       each runtime dependency, PyJWT and `cryptography`, resolved at the lowest release
       `pyproject.toml` declares, as uv's `lowest-direct` resolution gives it, in an
       environment apart from the project's: the committed `uv.lock` and `.venv` are left
@@ -739,31 +744,79 @@ Files: `tools/frp-grant-admission/Makefile`; the root `Makefile`;
       unless they equal the floors `pyproject.toml` declares, so the run can never test
       the lock by mistake. It needs the network, and is not part of `make test`. (D23;
       27 F2)
-- [ ] 6.2 The root `Makefile` gains `test-frp-grant-admission` (`$(MAKE) -C
+      Note: the run builds `.floor/.venv` (`.floor/` added to the tool's `.gitignore`;
+      named `.venv` so the repository's scans skip it, see 6.6's handoff) with `uv venv
+      --clear`, installs `-r pyproject.toml --group dev` with
+      `--resolution lowest-direct` — reading the project's dependencies as direct
+      requirements is what makes lowest-direct floor them; `uv run --resolution`
+      would relock `uv.lock` — then the project itself `--no-deps -e .`, then runs
+      `python -m tests.floor` (`tests/floor.py`, not in the plan's file list: reads the
+      floors from `pyproject.toml`, prints each installed version, and exits 1 unless
+      each equals its floor, `42` and `42.0.0` alike) and `pytest tests/unit`. No version
+      is repeated in the Makefile. pytest is floored too, at the dev group's 8.3.4.
+      **The floor run found a defect:** PyJWT 2.8.0 has no module-level
+      `jwt.decode_complete`, so at the declared floor every grant check raised
+      `AttributeError` (45 unit failures). `grant.py` now calls `decode_complete` on one
+      `jwt.PyJWT()` instance, which every declared release carries — the same function
+      D12 step 8 names, with the same options, so no decision changes; its comment
+      records why. Unit at the floors (PyJWT 2.8.0, `cryptography` 42.0.0 printed): 186
+      passed, the vector included; `git status` showed `uv.lock` unchanged, and no
+      command of the recipe names the project's `.venv` (which Git ignores, so no status
+      could show it).
+- [x] 6.2 The root `Makefile` gains `test-frp-grant-admission` (`$(MAKE) -C
       tools/frp-grant-admission test`), appended to the prerequisites of `test`;
       `test-frp-grant-admission-frp`, running the tool's `test-frp`; and
       `test-frp-grant-admission-floor`, running the tool's `test-floor`. `tests.yml`'s
       matrix appends `test-frp-grant-admission` in the same position, which
       `scripts/tests/test_tests_workflow.py` holds equal to `make test`'s targets. (D5,
       D23)
-- [ ] 6.3 `tests.yml` gains a job, `frp · real-frp gate`, that checks out, sets
+      Note: as planned; the three targets are declared `.PHONY`, and the two
+      network-bound ones carry `##` help. The matrix test passes (in `make
+      test-release-tooling`, 1816 passed).
+- [x] 6.3 `tests.yml` gains a job, `frp · real-frp gate`, that checks out, sets
       `UV_PYTHON` from `.python-version` under checkout's condition, installs uv 0.12.19
       as the matrix does, and runs `make test-frp-grant-admission-frp` and `make
       test-frp-grant-admission-floor`. It is in `tests.yml` because that is the workflow
       `scripts/ci_evidence.py` may dispatch. `make check-python-version` passes on the
       edited workflow. (D5, D23; `BUILD_AND_PACKAGING.md`, "One Python version")
-- [ ] 6.4 Unit (`tests/unit/test_structure.py`), standing in for `check-architecture`,
+      Note: job id `frp-grant-admission-gate`, name `frp · real-frp gate`, after the
+      matrix; it builds no wheelhouse, since the tool's lock installs nothing from it.
+      The floor step runs `if: ${{ !cancelled() }}`, so a failing real-frp step does not
+      hide the floor run's result. The workflow's header comment says the gate is its
+      own job. `make
+      check-python-version` — passes. Not yet run in CI: owed by validation (6.6).
+- [x] 6.4 Unit (`tests/unit/test_structure.py`), standing in for `check-architecture`,
       which skips `tools/`: the tool's `uv.lock` resolves no package from the wheelhouse,
       its `pyproject.toml` declares only `cryptography` and `PyJWT` at runtime, each with
       a lower bound and no upper bound, and every import under `src/` is of the standard
       library, `jwt`, `cryptography`, or the package itself. (D4, D23)
-- [ ] 6.5 `tools/README.md` gains a section: `tools/` also holds standalone
+      Note: unit, 8 cases, all pass: every locked package but the project (`editable =
+      "."`) comes from `https://pypi.org/simple`, so neither the wheelhouse nor any path;
+      `[project] dependencies` are exactly `cryptography` and `PyJWT`, each written
+      `<name>>=<release>` (the same parser the floor run uses, so the two cannot read
+      the declarations differently), and the project declares no optional
+      dependencies; an upper bound, an exact pin, a bare name, or a marker is refused;
+      releases compare as releases; and every absolute import anywhere in
+      `src/frp_grant_admission`, the one package under `src/` (any nesting,
+      `ast.walk`), is of `sys.stdlib_module_names`, `jwt`, `cryptography`, or
+      `frp_grant_admission`.
+- [x] 6.5 `tools/README.md` gains a section: `tools/` also holds standalone
       infrastructure components — not market runtime services, depending on no internal
       package, intended for their own repositories — naming `frp-grant-admission`, its
       `make test`, `make test-frp`, and `make test-floor`, the root targets, and the gate
       job; the opening paragraph's "not part of the market runtime services" is kept true
       by saying what a standalone component is instead. (D4)
-- [ ] 6.6 Verification: `make -C tools/frp-grant-admission test-floor` (unit at the
+      Note: the opening paragraph now names both kinds of project, and the wrapper and
+      entrypoint paragraphs are scoped to the developer and validation tools, which a
+      standalone component is not invoked like. The new section says what a standalone
+      component is (generic, no market concept, no internal package, liftable, owning
+      its interface with the market conforming to it, its own licence and version), that
+      a structure test stands in for `check-architecture`, and lists the component's
+      three targets, the root ones, and the gate job. The tool's README also gains the
+      sentence 4.1 left for this section: the vector is replayed at the lock and at the
+      floors, two tested points, with the structure, not every release's verdicts, what
+      the specification promises (D23).
+- [x] 6.6 Verification: `make -C tools/frp-grant-admission test-floor` (unit at the
       floors: PyJWT 2.8.0 and `cryptography` 42.0.0 printed, every case passing, `git
       status` showing `uv.lock` unchanged); `make test-frp-grant-admission`; `make
       test-release-tooling` (`scripts/tests`, including the matrix test); `make test`;
@@ -773,6 +826,29 @@ Files: `tools/frp-grant-admission/Makefile`; the root `Makefile`;
       against its pin, `tests/frp/` passes with no test skipped, and the floor run prints
       PyJWT 2.8.0 and `cryptography` 42.0.0 and passes.
       End-to-end: none (see the preamble).
+      Note: `make -C tools/frp-grant-admission test-floor` — unit at the floors, PyJWT
+      2.8.0 and `cryptography` 42.0.0 printed, 186 passed, `uv.lock` unchanged (after
+      6.1's `decode_complete` fix; before it, 45 failed). `make test-frp-grant-admission`
+      — unit and in-process integration, 200 passed, 15 real-frp skipped. `make
+      test-release-tooling` — 1816 passed, the matrix test included. `make test` —
+      passes, with the tool's suite in it. `make check-packaging` — passes. `make
+      check-python-version` — passes. Also `make test-frp-grant-admission-frp` —
+      integration (real frp), 15 passed after the `grant.py` change; and
+      `make test-frp-grant-admission-floor`, as above. The owed lines are confirmed as
+      written: the job names match `tests.yml`. End-to-end: none, confirmed.
+      Handoff: the floor environment first lived at `.floor-venv/`, which
+      `make check-comment-hygiene` scans, since it skips only directories named `.venv`;
+      it moved to `.floor/.venv`. **For the owner:** the earlier directory,
+      `tools/frp-grant-admission/.floor-venv/`, is still on disk in this clone — Git
+      ignores it through the `*` `.gitignore` uv writes in every environment, but the
+      hygiene scan reports four RFC citations in `cryptography`'s source inside it until
+      it is deleted (`rm -rf tools/frp-grant-admission/.floor-venv`), which this step may
+      not do. Every hygiene finding since is inside it. The fresh-context check found no
+      correctness defect; this section fixed the stale 6.1 note, 6.4's overstated scope
+      (and added the optional-dependencies check), the reason `grant.py`'s comment gave
+      for sharing one `PyJWT`, the `.venv` evidence wording, a `tools/README.md`
+      paragraph still speaking of every tool as a `scripts/` entrypoint's package, and
+      the gate job's floor step being skipped after a real-frp failure.
 
 ## 7. Shipping: the wheel, the image, and the systemd example
 

@@ -318,7 +318,13 @@ vector. It holds:
   `claims`, and the exact `token` a conforming signer writes;
 - `thumbprint`: a public key and its `kid`.
 
-The plugin's own tests replay every verification case at its locked dependencies.
+The plugin's own tests replay every verification case at two tested points: the
+dependencies its lock pins, and each runtime dependency, PyJWT and `cryptography`, at
+the lowest release the plugin declares. The declared ranges have no upper bound, and
+PyJWT still decides parsing, the signature, `aud`, and the required claims, so no test
+proves a verdict for a release between the two or above the lock. What every release
+shares is the structure: the header, time, and claim-type rules are the plugin's own,
+not the library's.
 
 A signer conforms when, for each signing case, serializing `header` and `claims` as
 JCS, encoding them as unpadded base64url, and signing with the named key's seed
