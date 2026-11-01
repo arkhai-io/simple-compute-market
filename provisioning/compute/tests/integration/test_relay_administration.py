@@ -30,6 +30,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+from pydantic import BaseModel, ConfigDict
 import yaml
 from cryptography.exceptions import InvalidSignature
 from cryptography.fernet import Fernet
@@ -1030,3 +1031,34 @@ class TestManagementRoute:
         assert "kvm1" in str(refused.value) and "site-a" in str(refused.value)
         assert relays.get_relay("site-a").relay_addr == "10.0.0.9"
         assert relays.update_relay("site-a", relay_addr="10.0.0.60").relay_addr == "10.0.0.60"
+
+
+class _FrozenJobParams(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    relay_id: str | None = None
+    relay_addr: str | None = None
+    relay_port: int | None = None
+    relay_token: str | None = None
+    relay_grant: str | None = None
+
+
+@pytest.mark.parametrize("params_type", [_JobParams, _FrozenJobParams])
+def test_resolver_copies_supported_parameters_without_mutating_the_accepted_snapshot(
+    params_type, relays, session_factory, settings
+):
+    lease = TestGrantsAtExecution()._relay_with_lease(relays, session_factory)
+    params = params_type(relay_id="site-a")
+    resolved = RelayExecutionResolver(session_factory, settings).resolve_into(
+        params, remote_port=lease.remote_port, owner_id="cr-1"
+    )
+    assert type(resolved) is params_type
+    assert resolved.relay_addr == "10.0.0.9"
+    assert resolved.relay_token == "admission-token"
+    assert _segments(resolved.relay_grant)[1]["jti"] == "cr-1"
+    assert params.relay_token is None and params.relay_grant is None
+
+
+def test_resolver_refuses_unsupported_parameter_objects(session_factory, settings):
+    resolver = RelayExecutionResolver(session_factory, settings)
+    with pytest.raises(TypeError, match="dataclass or frozen Pydantic"):
+        resolver.resolve_into(SimpleNamespace(relay_id=None))

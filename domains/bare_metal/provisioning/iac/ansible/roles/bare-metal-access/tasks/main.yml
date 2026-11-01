@@ -79,6 +79,38 @@
   delegate_to: "{{ target_host }}"
   when: node_action == "node_grant_access"
 
+- name: Add the leased bare-metal buyer proxy
+  ansible.builtin.include_role:
+    name: relay-proxy
+    apply:
+      become: true
+      delegate_to: "{{ target_host }}"
+  vars:
+    relay_proxy_action: add
+    relay_proxy_name: "bm-{{ bare_metal_ssh_user }}"
+    relay_proxy_local_ip: "127.0.0.1"
+    relay_proxy_local_port: 22
+    relay_proxy_remote_port: "{{ bare_metal_remote_port }}"
+  no_log: true
+  when:
+    - node_action == "node_grant_access"
+    - relay_id | default('') | length > 0
+
+# Proxy removal runs even when a partially failed grant created no account.
+- name: Remove the leased bare-metal buyer proxy
+  ansible.builtin.include_role:
+    name: relay-proxy
+    apply:
+      become: true
+      delegate_to: "{{ target_host }}"
+  vars:
+    relay_proxy_action: remove
+    relay_proxy_name: "bm-{{ bare_metal_ssh_user }}"
+  no_log: true
+  when:
+    - node_action == "node_reclaim_access"
+    - relay_id | default('') | length > 0
+
 # A reclaim may compensate a grant that failed before it created the tenant
 # account. Every reclaim task below reads or writes that account, and the key
 # module fails looking it up, while the lock task's `state: present` would
@@ -178,6 +210,13 @@
   when:
     - node_action == "node_grant_access"
     - node_access_timestamp is defined
+
+- name: Record the granted relay endpoint
+  set_fact:
+    node_grant_access_data: "{{ node_grant_access_data | combine({'relay': {'enabled': true, 'relay_addr': frp_server_addr, 'remote_port': bare_metal_remote_port | int}}) }}"
+  when:
+    - node_action == "node_grant_access"
+    - relay_id | default('') | length > 0
 
 - name: Create JSON formatted output for node_grant_access
   set_fact:

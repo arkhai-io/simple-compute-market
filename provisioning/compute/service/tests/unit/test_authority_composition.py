@@ -93,6 +93,9 @@ def test_the_relays_are_composed_once_for_every_domain():
 
     assert container.vm_runtime().relay_port_allocator is container.relay_port_allocator()
     assert container.vm_runtime().codec._relay_resolver is container.relay_execution_resolver()
+    bare_metal = container.bare_metal_runtime()
+    assert bare_metal.fulfillment_provider._plan._port_allocator is container.relay_port_allocator()
+    assert bare_metal.job_executor()._codec._relay_resolver is container.relay_execution_resolver()
     assert container.release_effects()._effects.count(release_reservation_ports) == 1
     assert [d.kind for d in composed.definition_documents] == ["relays"]
     assert [t.name for t in composed.background_tasks] == ["relay-port-reconciliation"]

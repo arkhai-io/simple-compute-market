@@ -5,12 +5,15 @@ from __future__ import annotations
 import dataclasses
 import re
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pydantic
 import pytest
 from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTION
+from compute_provisioning_ansible import AnsibleJobExecutor, MockAnsibleRunner
 from compute_provisioning_ansible.runner import AnsibleResult, inventory_target
 from compute_provisioning_contracts import CREATE_JOB_RESULT_KIND
+from compute_provisioning.relays import RELAY_SECRET_VARIABLES
 
 from bare_metal_provisioning_adapter.codec import (
     BARE_METAL_INVENTORY_GROUP,
@@ -448,3 +451,62 @@ class TestReclaimOfAnAbsentAccount:
         body = dict(self.tasks)["Create JSON data structure for node_reclaim_access action"]
 
         assert 'account_present: "{{ bare_metal_account_present | bool }}"' in body
+
+
+# Documentation endpoints and synthetic credentials below are development fixtures
+# and must never be used on a public network.
+@pytest.mark.parametrize("render", [shipped_output, json_output])
+def test_relay_delivery_uses_the_held_port_and_reported_relay(render):
+    params = _grant(relay_id="buyer-relay", remote_port=6100)
+    fact = _fact(relay={"enabled": True, "relay_addr": "203.0.113.9", "remote_port": "6100"})
+    outcome = _interpret(params, render(_GRANT_FACT, fact))
+    endpoint = outcome.result.value["evidence"]["endpoints"][0]
+    assert (endpoint["host"], endpoint["port"], endpoint["user"]) == ("203.0.113.9", 6100, "tenant-a")
+
+
+@pytest.mark.parametrize("relay", [None, {}, {"enabled": False}, {"enabled": True, "relay_addr": "203.0.113.9", "remote_port": 6101}])
+def test_a_relay_fact_without_the_jobs_leased_port_yields_no_delivery(relay):
+    outcome = _interpret(_grant(relay_id="buyer-relay", remote_port=6100), json_output(_GRANT_FACT, _fact(relay=relay)))
+    assert outcome.result.value["evidence"] is None
+
+
+@pytest.mark.parametrize("action", [NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTION])
+def test_the_codec_resolves_credentials_only_for_the_execution_copy(action):
+    params = _grant(action=action, relay_id="buyer-relay", remote_port=6100, capacity_reservation_id="reservation-1")
+    resolver = MagicMock()
+    resolver.resolve_into.return_value = params.model_copy(update={
+        "relay_addr": "203.0.113.9", "relay_port": 7000,
+        "relay_token": "fixture-token", "relay_grant": "fixture-grant",
+    })
+    codec = BareMetalAnsibleCodec(relay_resolver=resolver)
+    run = job_run(params)
+    plan = codec.prepare(run)
+    resolver.resolve_into.assert_called_once_with(
+        params, remote_port=6100 if action == NODE_GRANT_ACCESS_ACTION else None,
+        owner_id="reservation-1",
+    )
+    assert plan.variables["frp_auth_token"] == "fixture-token"
+    assert plan.variables["relay_grant"] == "fixture-grant"
+    assert codec.secret_fields == RELAY_SECRET_VARIABLES
+    assert run.parameters["relay_token"] is None and run.parameters["relay_grant"] is None
+
+
+@pytest.mark.asyncio
+async def test_the_executor_redacts_bare_metal_relay_secrets_from_logs():
+    params = _grant(relay_id="buyer-relay", capacity_reservation_id="reservation-1", remote_port=6100)
+    resolver = MagicMock()
+    resolver.resolve_into.return_value = params.model_copy(update={
+        "relay_token": "fixture-token", "relay_grant": "fixture-grant",
+    })
+    runner = MockAnsibleRunner(default_output=lambda _: (
+        'frp_auth_token: fixture-token\nrelay_grant: fixture-grant\nrelay_admin_password: fixture-password'
+    ))
+    executor = AnsibleJobExecutor(
+        runner, BareMetalAnsibleCodec(relay_resolver=resolver), Path("/playbooks/node-access.yaml"),
+        timeout_seconds=5,
+    )
+    outcome = await executor.execute(job_run(params))
+    assert "fixture-token" not in outcome.logs
+    assert "fixture-grant" not in outcome.logs
+    assert "fixture-password" not in outcome.logs
+    assert outcome.logs.count("[REDACTED]") == 3

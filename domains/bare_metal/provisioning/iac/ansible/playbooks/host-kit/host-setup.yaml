@@ -1,0 +1,6 @@
+---
+- name: Prepare bare-metal buyer relay access
+  hosts: bare_metal_nodes
+  become: true
+  roles:
+    - relay-client

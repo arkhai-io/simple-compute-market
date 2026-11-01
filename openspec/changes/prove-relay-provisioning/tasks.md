@@ -1204,12 +1204,12 @@ Delivers D1 and D3 for bare metal: "A bare-metal grant on a relay-backed pool
 delivers a leased port". Replanned against the reviewed design only in its references
 to section 5's tasks.
 
-- [ ] 8.1 `BareMetalFulfillmentPlan.prepare_create` leases a port through the
+- [x] 8.1 `BareMetalFulfillmentPlan.prepare_create` leases a port through the
       acceptance session when the pool references a relay, passing the reservation's
       lease end and the host as VM's plan does (5.1), and refusing an unusable relay
       through the family check (window, token, active key; 5.8); `prepare_teardown`
       reads the relay from the lease. A pool with no relay prepares as today. (D1)
-- [ ] 8.2 `BareMetalAnsibleCodec` carries the relay reference and leased port in
+- [x] 8.2 `BareMetalAnsibleCodec` carries the relay reference and leased port in
       `BareMetalJobParams`, which gains the resolver's relay fields, `relay_grant`
       included, so the execution resolver fills the relay's address, token, and grant
       at execution (5.5); it names the family's secret variable set among its secret
@@ -1217,13 +1217,13 @@ to section 5's tasks.
       the lease for a relayed grant; a grant with no relay delivers the host's buyer
       route as today (`grant_evidence`). The mock output (`services/mock_output.py`)
       follows. (D1, 28 F3)
-- [ ] 8.3 The `bare-metal-access` role calls `relay-proxy` *add* for a relayed grant,
+- [x] 8.3 The `bare-metal-access` role calls `relay-proxy` *add* for a relayed grant,
       proxying `127.0.0.1:22`, and *remove* on reclaim, never touching the management
       client. (D1, D3)
-- [ ] 8.4 Add `domains/bare_metal/provisioning/iac/ansible/playbooks/host-kit/`
+- [x] 8.4 Add `domains/bare_metal/provisioning/iac/ansible/playbooks/host-kit/`
       with a host-preparation playbook applying `relay-client`, and an `ansible.cfg`
       whose `roles_path` names the family roles. (D3, 28 F5)
-- [ ] 8.5 Tests. Unit (`domains/bare_metal/provisioning/adapter/tests/`): the plan's
+- [x] 8.5 Tests. Unit (`domains/bare_metal/provisioning/adapter/tests/`): the plan's
       lease and its refusals; the codec's relayed and unrelayed evidence and its
       redaction. Role assets
       (`provisioning/compute/service/tests/unit/test_bare_metal_ansible_assets.py`):
@@ -1232,11 +1232,100 @@ to section 5's tasks.
       fulfillment leases a port, its grant job's read carries no grant or token, and
       its release returns the port; a fulfillment on a pool whose relay has no active
       key is refused.
-- [ ] 8.6 Verify. `make test-bare-metal`, `make test-provisioning`,
+- [x] 8.6 Verify. `make test-bare-metal`, `make test-provisioning`,
       `make -C provisioning/compute/iac test`; `make test-provisioning-iac-native`;
       `make test`.
       End-to-end: the bare-metal lane (`e2e_bare_metal_mock_deal`) on a pool with no
       relay; no pipeline scenario runs a relayed grant.
+
+  Section 8 evidence and handoff:
+  - The bare-metal plan leases through the shared allocator in the acceptance
+    session, recording host, pool, owning reservation and the reservation's
+    scheduled lease end. Validation checks usability and expiry without taking
+    a port. Reclaim resolves its relay from the active lease, clears its remote
+    port and execution-only fields, and signs no grant. Direct pools keep their
+    existing buyer-route evidence.
+  - `BareMetalJobParams.capacity_reservation_id` is the signing owner; it is
+    separate from the commercial `escrow_uid`. Persisted parameters hold only
+    the relay reference and leased `remote_port`; address, token and grant are
+    filled in an execution copy. The family resolver explicitly supports
+    dataclasses and frozen Pydantic models, rejects unsupported objects and
+    undeclared resolved fields, and preserves the input snapshot. The actual
+    bare-metal model runs through application execution; VM's actual dataclass
+    is covered by its relay-pool integration module. Both production composition
+    and the integration harness pass the same allocator/resolver to bare metal.
+  - The codec renders `relay_id`, `bare_metal_remote_port`, the family client
+    inputs and `relay_grant`, and uses `RELAY_SECRET_VARIABLES`. A relayed grant
+    requires its printed `relay` block to name the job's own leased port; the
+    block supplies the relay address and the fact confirms the tenant. Its
+    default mock, like VM's, has no execution-resolved address and therefore
+    needs an explicit relayed-output boundary for a relayed case. The new
+    application module supplies that controlled renderer; it does not claim
+    that mock output registered a real proxy or carried traffic.
+  - The role calls family `relay-proxy` with exact name
+    `bm-<bare_metal_ssh_user>`, add target `127.0.0.1:22`, the leased remote port
+    and execution grant. Reclaim removes this proxy before account lookup,
+    including compensation where no account was created. Includes apply become
+    and delegation to the selected host, with `no_log`. The separate management
+    client is untouched. `playbooks/host-kit/host-setup.yaml` applies
+    `relay-client`; the role-search configuration added in section 7 is retained.
+  - Section 9 remains unimplemented: activity termination and removal of the
+    existing swallowed lock/delete failures still belong there. The separate
+    bounded working-data helper remains inactive; this section adds no data,
+    IPC, identity-ledger or account-policy integration. The signing owner's
+    reservation identity is available for that later integration, independently
+    of the tenant name and commercial escrow identity.
+  - Coordinator-authorized scoped context loading was used for this bounded
+    assignment, reading the governing ownership, secrets, test, packaging,
+    configuration and promotion guidance, applicable change decisions and
+    requirements, completed handoffs and touched code. Literal full-document
+    read compliance and personal owner reading are not claimed.
+  - Shared cleanup follow-up for section 9: the coordinator reported a
+    controlled real-frp observation where deleting protected client configuration
+    left a live proxy forwarding while the helper reported it absent. Both the
+    installed helper and `relay-proxy/tasks/remove.yml`'s early missing-config
+    success need a focused refusal/read-error regression before the frozen round
+    can qualify reclaim. This section does not fix or claim that missing-config
+    path. No live host was changed by this section's tests.
+  - Evidence: adapter unit/controlled-runner tests 109 passed before the
+    final redaction case; family unit/library integration 454 passed, followed
+    by the final resolver database module's 80 passes; actual VM relay-pool
+    library integration 9 passed. The affected service run had 42 passes and one
+    incorrect assertion expecting the sanitized begin error to name the missing
+    key. The corrected relay application module passed both cases, checking the
+    named issue through typed validation and 422 through begin. Final service
+    composition/assets unit checks passed all 10 cases. These results do not
+    relabel the initial nonzero service command a clean full rerun.
+  - Family IaC default checks passed 13 tests with 10 native skips. Separately,
+    `make test-provisioning-iac-native` passed against the newly built section
+    image's packaged trees, without checkout mounts: VM 3 and family 10 native
+    tests, no skips. All six VM playbooks passed under their own and shared
+    configurations; both family playbooks and bare metal's node-access and new
+    host-kit playbooks passed their configuration checks, with both bare-metal
+    playbooks also parsed under the shared service configuration. Ansible was
+    2.19.14 with ansible.posix 1.5.4. This proves local role boundaries and syntax,
+    not real proxy traffic or host preparation. Only Python formatting/docstring
+    cleanup followed that image build; the IaC and runtime behavior inputs are
+    unchanged. Final `make check-packaging`, comment hygiene and
+    `make check-change` passed.
+  - `make test-bare-metal` passed: IaC helper checks 95 passed with 4 native
+    cases deselected, domain 224 passed, storefront 557 passed, buyer 30 passed,
+    and final adapter 110 passed, including the executor redaction case. The
+    deselected helper-native cases are not activity-termination evidence and the
+    helper remains inactive. No dependency or lock changed. The broad provisioning
+    service suites are not repeated: affected bare-metal application and
+    composition checks above supplement section 7's unchanged passing cases.
+    The full `make test` and one independent combined compliance/implementation
+    review remain the frozen sections 6–9 checks under the accepted cadence;
+    there was no per-section fresh-context review and no owner-reading claim.
+  - End-to-end scenarios confirmed: `e2e_bare_metal_mock_deal` remains the direct
+    mock-profile lane; no pipeline scenario runs a relayed bare-metal grant or
+    prepares a host. Section 16 owes real grant/reclaim, access revocation and
+    management preservation. Owed by validation: `tests.yml`, job
+    `test · test-provisioning-iac` — family and VM IaC projects must run and pass;
+    the VM pipeline's native gate additionally checks the built image. Permanent
+    D1/D3 behavior and rationale destinations remain 17.9's physical-provisioning
+    spec/architecture and seller guides; promotion follows the reviewed code.
 
 ## 9. Reclaim ends the tenant's activity
 

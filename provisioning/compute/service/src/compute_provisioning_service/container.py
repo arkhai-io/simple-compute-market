@@ -521,6 +521,8 @@ class Container(containers.DeclarativeContainer):
 
     bare_metal_runtime = providers.Singleton(
         build_bare_metal_runtime,
+        relay_port_allocator=relay_port_allocator,
+        relay_resolver=relay_execution_resolver,
         job_engine=job_engine,
         job_submission=job_submission,
         config=config,

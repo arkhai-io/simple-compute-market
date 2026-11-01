@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import MagicMock
 from types import SimpleNamespace
 
 import pytest
@@ -321,3 +323,76 @@ async def test_a_mock_grant_is_delivered_and_reclaimed_through_the_family_provid
     reclaimed = jobs.get_job(reclaim.provider_metadata["teardown_job_id"])
     assert reclaimed.params["action"] == NODE_RECLAIM_ACCESS_ACTION
     assert reclaimed.result.value["action"] == NODE_RECLAIM_ACCESS_ACTION
+
+
+# Deterministic documentation endpoints and synthetic credentials, never for a public network.
+RELAY_CONFIG = {
+    "relay_id": "buyer-relay", "relay_addr": "203.0.113.9", "relay_port": 7000,
+    "relay_token": "fixture-token", "vm_port_range_start": 6100,
+    "vm_port_range_count": 5, "grant_key_id": "fixture-kid",
+}
+
+
+def _relay_grant(plan, db, *, allocate=True, config=None):
+    return plan.prepare_create(
+        capacity_reservation_id="reservation-1", request=_request(), resource=_resource(),
+        pool_config=RELAY_CONFIG if config is None else config, allocate=allocate, db=db,
+    )
+
+
+def test_a_relay_port_is_leased_in_acceptances_session_with_reservation_expiry():
+    db = object()
+    end = datetime(2030, 1, 2, tzinfo=timezone.utc)
+    allocator = MagicMock()
+    allocator.allocate_in_session.return_value = SimpleNamespace(remote_port=6100)
+    lease_end = MagicMock(return_value=end)
+    plan = _plan(port_allocator=allocator, lease_end=lease_end)
+
+    prepared = _relay_grant(plan, db)
+
+    allocator.allocate_in_session.assert_called_once_with(
+        db, relay_id="buyer-relay", owner_kind="fulfillment", owner_id="reservation-1",
+        lease_ends_at=end, host_id=HOST.host_id, pool_id="pool-1",
+    )
+    assert prepared.parameters["relay_id"] == "buyer-relay"
+    assert prepared.parameters["remote_port"] == 6100
+    assert prepared.parameters["capacity_reservation_id"] == "reservation-1"
+    assert prepared.parameters["relay_token"] is None
+    assert prepared.parameters["relay_grant"] is None
+
+
+def test_relay_validation_does_not_allocate_a_port():
+    allocator = MagicMock()
+    plan = _plan(port_allocator=allocator, lease_end=lambda *_: datetime.now(timezone.utc))
+    prepared = _relay_grant(plan, object(), allocate=False)
+    allocator.allocate_in_session.assert_not_called()
+    assert prepared.parameters["remote_port"] is None
+
+
+@pytest.mark.parametrize("missing", ["relay_addr", "vm_port_range_start", "vm_port_range_count", "relay_token", "grant_key_id"])
+def test_an_unusable_relay_is_refused_before_allocation(missing):
+    allocator = MagicMock()
+    config = {k: v for k, v in RELAY_CONFIG.items() if k != missing}
+    with pytest.raises(ProviderConfigInvalidError, match="unusable"):
+        _relay_grant(_plan(port_allocator=allocator), object(), config=config)
+    allocator.allocate_in_session.assert_not_called()
+
+
+@pytest.mark.parametrize("missing", ["session", "expiry", "allocator"])
+def test_a_relay_requires_acceptance_session_expiry_and_allocator(missing):
+    plan = _plan(
+        port_allocator=None if missing == "allocator" else MagicMock(),
+        lease_end=lambda *_: None if missing == "expiry" else datetime.now(timezone.utc),
+    )
+    with pytest.raises(ProviderConfigInvalidError):
+        _relay_grant(plan, None if missing == "session" else object())
+
+
+def test_reclaim_uses_the_held_lease_rather_than_either_pool_or_grant_reference():
+    allocator = MagicMock()
+    allocator.find_active_lease.return_value = SimpleNamespace(relay_id="held-relay")
+    grant = dict(_grant(_plan()).parameters, relay_id="old-relay", remote_port=6100)
+    reclaim = _reclaim(_plan(port_allocator=allocator), grant)
+    assert reclaim.parameters["relay_id"] == "held-relay"
+    assert reclaim.parameters["remote_port"] is None
+    allocator.find_active_lease.assert_called_once_with(owner_kind="fulfillment", owner_id="reservation-1")

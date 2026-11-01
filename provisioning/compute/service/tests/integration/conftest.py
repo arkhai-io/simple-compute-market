@@ -549,8 +549,8 @@ def _ansible_executors(runner, settings, bare_metal_runner=None, relay_resolver=
     """VM's and bare metal's Ansible executors, each with its mode's playbook,
     as their runtimes build them: VM's over ``runner``, bare metal's over
     ``bare_metal_runner`` (``runner`` when absent). ``relay_resolver`` fills a
-    relayed VM job's token and signed grant as it runs, as the service's
-    composition gives VM's codec one."""
+    relayed job's token and signed grant as it runs, as the service's
+    composition gives each codec one."""
     vm = AnsibleJobExecutor(
         runner,
         VmAnsibleCodec(relay_resolver=relay_resolver),
@@ -560,7 +560,7 @@ def _ansible_executors(runner, settings, bare_metal_runner=None, relay_resolver=
     )
     bare_metal = AnsibleJobExecutor(
         bare_metal_runner if bare_metal_runner is not None else runner,
-        BareMetalAnsibleCodec(),
+        BareMetalAnsibleCodec(relay_resolver=relay_resolver),
         settings.resolved_bare_metal_playbook_path,
         timeout_seconds=settings.ansible_timeout_seconds,
         additional_non_retryable_errors=settings.additional_non_retryable_errors,
@@ -815,6 +815,7 @@ async def client_and_queue(
                     plan=BareMetalFulfillmentPlan(
                         playbook_path=mock_settings.resolved_bare_metal_playbook_path,
                         reclaim_policy=mock_settings.bare_metal_reclaim_policy,
+                        port_allocator=relay_port_allocator,
                     ),
                     submission=job_submission,
                     jobs=job_engine,

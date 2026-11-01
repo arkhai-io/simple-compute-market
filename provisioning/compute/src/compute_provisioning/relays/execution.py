@@ -23,7 +23,7 @@ its resolved provider variables. The rule exists so an operator editing pool
 configuration cannot change what a running job does; a credential is the one
 input where the newest value is the correct one.
 
-The resolver works on any domain's job parameters: a dataclass with
+The resolver works on a domain's dataclass or frozen Pydantic job parameters with
 ``relay_id``, ``relay_addr``, ``relay_port``, ``relay_token``, and
 ``relay_grant`` fields. The domain passes the leased port of a job that adds a
 proxy, under whatever name its parameters store it, and the reservation that
@@ -32,10 +32,11 @@ holds its lease.
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import is_dataclass, replace
 from typing import Any
 
 from market_config import decrypt_secret
+from pydantic import BaseModel
 
 from .db import Relay, RelayPortLease
 from .grants import sign_grant
@@ -74,6 +75,10 @@ class RelayExecutionResolver:
         A job with no relay reference reaches its buyer without a relay and
         passes through untouched.
         """
+        if isinstance(params, type) or (not is_dataclass(params) and not (
+            isinstance(params, BaseModel) and params.model_config.get("frozen")
+        )):
+            raise TypeError("relay parameters must be a dataclass or frozen Pydantic model")
         relay_id = getattr(params, "relay_id", None)
         if not relay_id:
             return params
@@ -111,6 +116,10 @@ class RelayExecutionResolver:
                 fields["relay_grant"] = self._signed_grant(
                     db, relay, int(remote_port), owner_id, encryption_key
                 )
+            if isinstance(params, BaseModel):
+                if not fields.keys() <= type(params).model_fields.keys():
+                    raise TypeError("relay parameters do not declare the resolved fields")
+                return params.model_copy(update=fields)
             return replace(params, **fields)
 
     @staticmethod

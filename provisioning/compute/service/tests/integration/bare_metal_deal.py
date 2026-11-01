@@ -107,27 +107,32 @@ async def schedule(clients, capacity_reservation_id: str) -> None:
     )
 
 
+def fulfillment_body(capacity_reservation_id: str, escrow_uid: str) -> FulfillmentRequestBody:
+    """The typed bare-metal request used by validation and acceptance."""
+    return FulfillmentRequestBody(
+        capacity_reservation_id=capacity_reservation_id,
+        market="bare_metal",
+        fulfillment_request=VersionedEnvelope(
+            kind="bare_metal.v2",
+            schema_version=1,
+            payload={
+                "kind": "bare_metal.v2",
+                "escrow_uid": escrow_uid,
+                "host_id": HOST_ID,
+                "physical_host_id": PHYSICAL_HOST_ID,
+                "lease_start_utc": "2030-01-01T00:00:00Z",
+                "lease_end_utc": "2030-01-02T00:00:00Z",
+                "access_method": "ssh",
+                "ssh_public_key": "ssh-ed25519 AAAA tenant-a",
+            },
+        ),
+    )
+
+
 async def begin(clients, capacity_reservation_id: str, escrow_uid: str) -> str:
     """Begin the deal's fulfillment, which dispatches the grant; its id."""
     accepted = await clients.family.begin_fulfillment(
-        FulfillmentRequestBody(
-            capacity_reservation_id=capacity_reservation_id,
-            market="bare_metal",
-            fulfillment_request=VersionedEnvelope(
-                kind="bare_metal.v2",
-                schema_version=1,
-                payload={
-                    "kind": "bare_metal.v2",
-                    "escrow_uid": escrow_uid,
-                    "host_id": HOST_ID,
-                    "physical_host_id": PHYSICAL_HOST_ID,
-                    "lease_start_utc": "2030-01-01T00:00:00Z",
-                    "lease_end_utc": "2030-01-02T00:00:00Z",
-                    "access_method": "ssh",
-                    "ssh_public_key": "ssh-ed25519 AAAA tenant-a",
-                },
-            ),
-        )
+        fulfillment_body(capacity_reservation_id, escrow_uid)
     )
     return accepted.fulfillment_id
 

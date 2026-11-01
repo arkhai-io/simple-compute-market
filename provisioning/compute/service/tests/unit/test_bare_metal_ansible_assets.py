@@ -35,3 +35,16 @@ def test_vm_management_role_does_not_dispatch_bare_metal_actions():
 
     assert "node_grant_access" not in main.read_text(encoding="utf-8")
     assert "node_reclaim_access" not in main.read_text(encoding="utf-8")
+
+
+def test_bare_metal_relay_calls_share_the_family_roles_without_management_edits():
+    text = (BARE_METAL_ANSIBLE_ROOT / "roles/bare-metal-access/tasks/main.yml").read_text()
+    assert text.count("name: relay-proxy") == 2
+    assert "relay_proxy_action: add" in text and "relay_proxy_action: remove" in text
+    assert 'relay_proxy_local_ip: "127.0.0.1"' in text
+    assert text.index("Remove the leased bare-metal buyer proxy") < text.index("Look up the bare-metal tenant account")
+    assert "frpc-management" not in text
+    host_setup = BARE_METAL_ANSIBLE_ROOT / "playbooks/host-kit/host-setup.yaml"
+    assert "- relay-client" in host_setup.read_text()
+    gate = (REPO_ROOT / "provisioning/compute/iac/scripts/image_syntax_gate.sh").read_text()
+    assert gate.count("playbooks/host-kit/host-setup.yaml --syntax-check") == 2
