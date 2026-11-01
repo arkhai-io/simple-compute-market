@@ -796,12 +796,25 @@ templates/configmap.yaml,templates/deployment.yaml,tests/test_render.py}`;
 
 ## 6. Change-workflow tooling fixes
 
-Delivers the three tooling fixes D11 records, accepted at the design review's
-triage to land with this change.
+*Amended on the owner's word at workflow log seq 44 and 47–49, after the first
+round's denials were read.* 6.1 is left for the owner's local run, and 6.3 is a
+new task: a deny-rule denial redone with the Edit or Write tool is a gap when
+the rule exists only to keep file writes on those tools. The checkpoint becomes
+6.4. Sections 1–3 stay as committed, and sections 4, 5 and 7 are unchanged.
 
-Files: `.claude/change-steps.toml` (the orchestrator's edit);
-`.agents/skills/change-design/SKILL.md`; `scripts/change_workflow/review.py`;
-`scripts/tests/test_change_workflow_review.py`.
+Delivers the four tooling fixes D11 records: three accepted at the design
+review's triage, and the fourth on the owner's word at seq 49. Each lands with
+this change. The fourth also delivers the change-workflow delta "Unattended runs
+are held to their step's permissions".
+
+Files: `.claude/change-steps.toml` (the orchestrator's edit, left for the owner's
+local run); `.agents/skills/change-design/SKILL.md`;
+`scripts/change_workflow/review.py`; `scripts/tests/test_change_workflow_review.py`;
+the eight step skills' `SKILL.md` under `.agents/skills/` (`change-archive-cleanup`,
+`change-closeout`, `change-design`, `change-implement`, `change-merge`,
+`change-plan`, `change-triage`, `change-validate`);
+`.agents/skills/change-orchestrate/SKILL.md`;
+`openspec/specs/change-workflow/architecture.md`; `docs/agents/change-workflow.md`.
 
 - [ ] 6.1 The design step's proposal-worktree rules (D11, records 07 R1 and 10
   R2). **The orchestrating session's edit, made on the owner's word before this
@@ -815,6 +828,11 @@ Files: `.claude/change-steps.toml` (the orchestrator's edit);
   propose-<prerequisite> origin/dev`, and records in the section notes how the
   orchestrating session tested the write rules. Verify: `make
   check-agent-skills`.
+  *Amended (seq 44): on the owner's word, the whole of 6.1 is left for the
+  owner's local run, the skill text included, since it must match the rule.* No
+  orchestrated session makes the `.claude/` edit. Section 6's session leaves
+  6.1 unchecked, with a note saying so, and the owner's local run completes and
+  checks it before closeout.
 - [ ] 6.2 The review wrapper's title (D11, record 18 R3). In
   `scripts/change_workflow/review.py`, take the first line that is a `# <kind>
   review … <change>` title as the review's start, drop anything before it (the
@@ -824,9 +842,46 @@ Files: `.claude/change-steps.toml` (the orchestrator's edit);
   `test_rejected_output_is_kept_with_its_transcript`): a review preceded by a
   narrating line and a blank line is published from its title, and output with
   no title line is rejected.
-- [ ] 6.3 **Verification checkpoint.** Unit: `pytest -q scripts/tests` (part of
+- [ ] 6.3 A deny-rule denial redone with the Edit or Write tool (D11's fourth
+  fix; change-workflow delta "Unattended runs are held to their step's
+  permissions").
+
+  Some deny rules exist only to keep file writes on the Edit and Write tools:
+  sed's in-place forms, find's deleting, running, and writing actions, and the
+  diff family's `--output` forms, each named by a comment in the step table. A
+  shell write such a rule refuses, made instead with the Edit or Write tool the
+  step's rules allow, is a gap that needs no ruling from the owner. Every other
+  deny rule keeps the rule that no other tool does the work.
+
+  State this, in the delta's words, everywhere the workflow states the
+  deny-rule rule:
+  - the denial paragraph of `openspec/specs/change-workflow/architecture.md`,
+    "Restrictions bind unattended runs only", which now says "after a deny-rule
+    denial, no other tool may do the work";
+  - the shared paragraph of the eight step skills listed above, which now says
+    "A call a deny rule refused is forbidden: no other tool does it", worded
+    identically in each so `make check-agent-skills` holds them alike;
+  - `.agents/skills/change-orchestrate/SKILL.md`'s reading of denials: a
+    write-steering rule's denial whose write was made with the Edit or Write
+    tool is recorded as a gap, with no ruling asked of the owner;
+  - `docs/agents/change-workflow.md`, where it states the deny-rule rule.
+
+  **Marking which deny rules steer writes in `.claude/change-steps.toml` is the
+  orchestrating session's edit, and is left with 6.1 for the owner's local run
+  (seq 44, seq 49).** Until it is made, these texts name the three kinds above;
+  the owner's run makes the table's markings agree with them.
+
+  Verify:
+  - `make check-agent-skills` and `bunx @fission-ai/openspec@1.14.0 validate
+    bring-host-inventory-under-definition-documents --strict` pass;
+  - a search for "no other tool" across `.agents/skills/`,
+    `openspec/specs/change-workflow/architecture.md`, and
+    `docs/agents/change-workflow.md` finds only statements that carry the
+    exception, or that concern rules forbidding the work itself.
+- [ ] 6.4 **Verification checkpoint.** Unit: `pytest -q scripts/tests` (part of
   `make test-release-tooling`). `make check-agent-skills`. `make test`. `make
-  check-comment-hygiene`.
+  check-comment-hygiene`. `make check-change
+  CHANGE=bring-host-inventory-under-definition-documents`.
   End-to-end: none — the workflow tooling is not deployed. None is owed.
   Owed by validation: `tests.yml`, job `test · test-deployment-packaging` — its
   `test-release-tooling` step runs `scripts/tests` and passes.
@@ -890,7 +945,7 @@ implementation.
   lazy-load reason keeps it local. A needed move returns to implementation.
 - [ ] 8.3 **Documentation compliance.** Check D1–D14 against
   `openspec/README.md`'s placement rules and the promotion record: normative
-  behaviour in the three deltas, rationale in the companions, repository shape in
+  behaviour in the four deltas, rationale in the companions, repository shape in
   `ARCHITECTURE.md`, operator behaviour in `DEPLOYMENT_AND_CONFIG.md` and the
   quickstarts, test ownership in `TESTING.md`. Record a disposition for every
   decision, and check every promoted statement against the code.
@@ -949,15 +1004,20 @@ implementation.
   - `docs/development/TESTING.md`, "Host Requirement Enforcement": the dispatch
     case's "configured inventory file naming the host" becomes the refused host
     document 4.3 tests.
-  - The `physical-provisioning`, `deployment-state`, and `resource-pool-management`
-    specs are written by the archive (8.11), and the record names them.
+  - The `physical-provisioning`, `deployment-state`, `resource-pool-management`,
+    and `change-workflow` specs are written by the archive (8.11), and the record
+    names them. The change-workflow companion and the skills were written in 6.3;
+    confirm they still match the merged requirement, and that 6.1 and the table's
+    deny-rule markings were completed by the owner's local run. If they were not,
+    record that in the promotion record and the index notes, and do not invent
+    the markings here.
 - [ ] 8.10 **Documentation citations.** Run `make check-doc-citations
   CHANGE=bring-host-inventory-under-definition-documents` after promotion and
   resolve every match; `keep-new-deliveries-off-disabled-hosts` is cited by name
   and exists on this branch once `dev` is merged in. Then run `openspec validate
   bring-host-inventory-under-definition-documents --strict`.
 - [ ] 8.11 **Archival.** Archive last with `openspec archive
-  bring-host-inventory-under-definition-documents -y`, which merges the three
+  bring-host-inventory-under-definition-documents -y`, which merges the four
   deltas into `openspec/specs/`. Then, in the same commit, make the edits the
   merged text cannot carry: retitle the two scenarios a modified requirement
   could not rename in `openspec/specs/physical-provisioning/spec.md` — "The
@@ -989,4 +1049,5 @@ and a clean `make check-change-index`.
 | How hosts reach the registry | `docs/development/ARCHITECTURE.md`, "Resource pools" (8.9) |
 | No startup INI seeding | `docs/development/ROADMAP.md` Goal 1 (8.5); `openspec/specs/site-capacity/architecture.md` (8.9); both seller quickstarts and `domains/vms/provisioning/iac/README.md` (7.2, 8.9) |
 | D10 (no same-pool rule) and the D4 revisit trigger | `design.md` Open Questions; `docs/development/ROADMAP.md` Goal 1 if the relay changes have not landed (8.5) |
-| D11 tooling fixes | Workflow tooling itself (`.claude/change-steps.toml`, `.agents/skills/change-design/SKILL.md`, `scripts/change_workflow/review.py`); no permanent document |
+| D11 tooling fixes 1–3 | Workflow tooling itself (`.claude/change-steps.toml`, `.agents/skills/change-design/SKILL.md`, `scripts/change_workflow/review.py`); no permanent document |
+| D11 fix 4: a write-steering deny rule's denial redone with Edit or Write is a gap | `openspec/specs/change-workflow/spec.md`, "Unattended runs are held to their step's permissions" (by the archive); `openspec/specs/change-workflow/architecture.md`, "Restrictions bind unattended runs only", the eight step skills, `.agents/skills/change-orchestrate/SKILL.md`, and `docs/agents/change-workflow.md` (6.3); the table's markings in `.claude/change-steps.toml` (the owner's local run) |

@@ -339,7 +339,41 @@ One round of two sessions, then closeout:
 
    Steps are denied edits under `.claude/`, so the orchestrating session makes
    the first two on the owner's word, and session 2's commit carries them; the
-   third is implemented in the session.
+   third is implemented in the session. On the owner's word at workflow log
+   seq 44, the first two are left whole for the owner's local run: no
+   orchestrated session makes the `.claude/` edit, and session 2 leaves them
+   unchecked, saying so.
+
+   Session 2 also carries a fourth fix, settled on the owner's word at workflow
+   log seq 47–49 after the first round's denials were read. Some deny rules exist
+   only to keep file writes on the Edit and Write tools: the step table's comments
+   name them, namely sed's in-place forms, find's deleting, running and writing
+   actions, and the diff family's `--output` forms. A shell write refused by such
+   a rule, and then made with the Edit or Write tool the step's rules allow, is
+   the rules being used. It is a gap, not a workaround, and needs no ruling from
+   the owner. Deny rules that forbid the work itself (`git stash`, `git push`
+   other than the guarded push, `make lock` in validation, and their like) keep
+   today's rule that no other tool does the work. The fix amends the
+   change-workflow requirement "Unattended runs are held to their step's
+   permissions" (delta `specs/change-workflow/spec.md`) and states the rule where
+   the workflow states it:
+   - the denial paragraph of `openspec/specs/change-workflow/architecture.md`;
+   - the shared deny-rule paragraph of the eight step skills;
+   - the change-orchestrate skill's reading of denials;
+   - `docs/agents/change-workflow.md`.
+
+   Marking which deny rules are of the first kind in `.claude/change-steps.toml`
+   is the orchestrating session's edit. Like the first two fixes, it is left for
+   the owner's local run.
+
+   *Rationale (the owner's words).* Some deny rules are there precisely to steer a
+   step to the Edit and Write tools, so a step that does exactly that should not
+   need a ruling.
+
+   *Rejected.* Ruling on each such denial as a workaround, which is what the
+   workflow did before; the owner called the ruling at seq 43 and seq 47
+   needless. Allowing any deny-rule denial to be redone by another tool: that
+   would undo the rules that forbid the work itself.
 
 ### D12. The host registry exports a canonical host document
 

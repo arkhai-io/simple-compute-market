@@ -60,6 +60,9 @@ applies to relays.
   refused keys.
 - `resource-pool-management`: a host definitions entry's rule for its host's
   pool, beside the create, update, and INI rules of explicit host membership.
+- `change-workflow`: a shell write refused by a deny rule that exists only to
+  keep file writes on the Edit and Write tools, and then made with the tool the
+  step's rules allow, is a gap rather than a workaround.
 
 ### New Capabilities
 
@@ -99,8 +102,12 @@ None.
   whose provisioning-secrets Secret states `inventory_ini`, even empty, must drop
   the key before upgrading.
 - The change workflow's tooling, fixed on this branch: the design step's
-  proposal-worktree rules in `.claude/change-steps.toml`, and the review
-  wrapper's title check in `scripts/change_workflow/review.py`.
+  proposal-worktree rules in `.claude/change-steps.toml`, the review wrapper's
+  title check in `scripts/change_workflow/review.py`, and the reading of a
+  deny-rule denial redone with the Edit or Write tool. The last is stated in the
+  change-workflow spec and companion, the step skills, the change-orchestrate
+  skill, and `docs/agents/change-workflow.md`, with the table's markings left
+  for the owner's local run.
 
 ## Dependencies and Related Changes
 
@@ -118,7 +125,7 @@ None.
 
 - [x] `docs/development/ARCHITECTURE.md`
 - [x] Existing subsystem specification: `physical-provisioning`,
-      `deployment-state`, `resource-pool-management`
+      `deployment-state`, `resource-pool-management`, `change-workflow`
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
@@ -141,6 +148,12 @@ None.
   unnamed hosts are retained, and the first-document path through the export (D4,
   D6, D8, D12) → `openspec/specs/physical-provisioning/architecture.md`, beside
   "Selected-resource execution" and "The host registry owns the connection".
+- A deny-rule denial redone with the Edit or Write tool is a gap when the rule
+  exists only to keep file writes on those tools (D11) →
+  `openspec/specs/change-workflow/spec.md`, "Unattended runs are held to their
+  step's permissions" (by the archive), and
+  `openspec/specs/change-workflow/architecture.md`, the denial paragraph of
+  "Restrictions bind unattended runs only" (written in section 6).
 - The general method every definition document kind follows (D13) →
   `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Definition documents".
 - Startup order with host definitions in place of the inventory seed (D8) →
