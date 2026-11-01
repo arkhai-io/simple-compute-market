@@ -68,6 +68,8 @@ from .mock_rules import (
 )
 from .relays import (
     RelayCreate,
+    RelayLeaseListResponse,
+    RelayLeaseView,
     RelayListResponse,
     RelayResponse,
     RelayTokenRotate,
@@ -163,6 +165,8 @@ __all__ = [
     "MockRuleResumed",
     "MockRuleView",
     "RelayCreate",
+    "RelayLeaseListResponse",
+    "RelayLeaseView",
     "RelayListResponse",
     "RelayResponse",
     "RelayTokenRotate",

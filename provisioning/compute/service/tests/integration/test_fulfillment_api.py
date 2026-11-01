@@ -1160,6 +1160,12 @@ class TestRelayPortLifecycleOverTheApi:
             LeaseState.RELEASED
         )
         assert self._held_ports() == []
+        # The holdings read shows the torn-down delivery's lease released, and
+        # no other lease on its port.
+        holdings = (await clients.family.list_relay_leases("site-a")).leases
+        (ours,) = [lease for lease in holdings if lease.owner_id == capacity_reservation_id]
+        assert ours.released_at is not None
+        assert [lease for lease in holdings if lease.remote_port == ours.remote_port] == [ours]
 
     async def test_a_direct_nat_pool_takes_no_port(self, fulfillment: FulfillmentApi):
         """A deployment with no relay is a supported state, not a degraded one."""

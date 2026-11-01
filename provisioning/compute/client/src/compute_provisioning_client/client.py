@@ -49,6 +49,7 @@ from compute_provisioning_contracts import (
     PrincipalRotationResponse,
     ProvisioningRouteContract,
     RelayCreate,
+    RelayLeaseListResponse,
     RelayListResponse,
     RelayResponse,
     RelayTokenRotate,
@@ -265,6 +266,10 @@ def _rotate_relay_token(relay_id: str, body: RelayTokenRotate) -> _Call:
 def _set_relay_enabled(relay_id: str, enabled: bool) -> _Call:
     action = "enable" if enabled else "disable"
     return _Call("POST", f"/api/v1/relays/{relay_id}/{action}", {}, parse=_model(RelayResponse))
+
+
+def _relay_leases(relay_id: str) -> _Call:
+    return _Call("GET", f"/api/v1/relays/{relay_id}/leases", parse=_model(RelayLeaseListResponse))
 
 
 # The service's system and identity routes.
@@ -648,6 +653,12 @@ class ComputeProvisioningClient(SigningBase):
     ) -> RelayResponse:
         return await self._run(_set_relay_enabled(relay_id, enabled), request_id)
 
+    async def list_relay_leases(
+        self, relay_id: str, *, request_id: str | None = None
+    ) -> RelayLeaseListResponse:
+        """The ports a relay holds and has released; the administrator's alone."""
+        return await self._run(_relay_leases(relay_id), request_id)
+
     # The service's system and identity routes.
 
     async def get_health(self) -> HealthResponse:
@@ -948,6 +959,12 @@ class SyncComputeProvisioningClient(SigningBase):
         self, relay_id: str, enabled: bool, *, request_id: str | None = None
     ) -> RelayResponse:
         return self._run(_set_relay_enabled(relay_id, enabled), request_id)
+
+    def list_relay_leases(
+        self, relay_id: str, *, request_id: str | None = None
+    ) -> RelayLeaseListResponse:
+        """See ``ComputeProvisioningClient.list_relay_leases``."""
+        return self._run(_relay_leases(relay_id), request_id)
 
     # The service's system and identity routes.
 

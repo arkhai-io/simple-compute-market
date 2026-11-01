@@ -137,6 +137,59 @@ class TestRelayAdministration:
             _make_relay(relays, vm_port_range_start=65500, vm_port_range_count=100)
 
 
+class TestHoldings:
+    """What a relay holds and has released, as the administrator reads it."""
+
+    def _lease(self, session_factory, port, owner_id, *, released=False):
+        with session_factory() as db, db.begin():
+            db.add(
+                RelayPortLease(
+                    id=f"lease-{owner_id}",
+                    relay_id="site-a",
+                    remote_port=port,
+                    host_id="kvm1",
+                    pool_id="gpu-pool",
+                    owner_kind="fulfillment",
+                    owner_id=owner_id,
+                    released_at=datetime.now(timezone.utc) if released else None,
+                )
+            )
+
+    def test_held_and_released_leases_are_read_by_port(self, relays, session_factory):
+        _make_relay(relays)
+        _make_relay(relays, relay_id="site-b", relay_addr="10.0.0.10")
+        self._lease(session_factory, 6102, "cr-held")
+        self._lease(session_factory, 6100, "cr-done", released=True)
+        with session_factory() as db, db.begin():
+            db.add(
+                RelayPortLease(
+                    id="lease-elsewhere",
+                    relay_id="site-b",
+                    remote_port=6101,
+                    owner_kind="fulfillment",
+                    owner_id="cr-elsewhere",
+                )
+            )
+
+        holdings = relays.list_leases("site-a")
+
+        assert [(record.remote_port, record.owner_id) for record in holdings] == [
+            (6100, "cr-done"),
+            (6102, "cr-held"),
+        ]
+        assert holdings[0].released_at is not None
+        assert holdings[1].released_at is None
+        assert holdings[1].allocated_at is not None
+
+    def test_a_relay_with_no_lease_holds_nothing(self, relays):
+        _make_relay(relays)
+        assert relays.list_leases("site-a") == []
+
+    def test_an_unknown_relay_is_reported_as_missing(self, relays):
+        with pytest.raises(RelayNotFoundError):
+            relays.list_leases("absent")
+
+
 class TestTokenConfidentiality:
     def test_a_stored_token_is_ciphertext(self, relays, session_factory):
         _make_relay(relays, token="admission-secret")

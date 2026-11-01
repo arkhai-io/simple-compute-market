@@ -13,10 +13,14 @@ serializer someone adds later.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 __all__ = [
     "RelayCreate",
+    "RelayLeaseListResponse",
+    "RelayLeaseView",
     "RelayListResponse",
     "RelayResponse",
     "RelayTokenRotate",
@@ -70,3 +74,30 @@ class RelayUpdate(BaseModel):
 
 class RelayTokenRotate(BaseModel):
     token: str = Field(min_length=1)
+
+
+class RelayLeaseView(BaseModel):
+    """One port a relay holds or held: what it is bound for, and whether it
+    has been released. Carries no credential."""
+
+    lease_id: str
+    remote_port: int
+    host_id: str | None = None
+    pool_id: str | None = None
+    # The reservation whose released capacity releases the lease, under the
+    # kind of owner that holds it.
+    owner_kind: str
+    owner_id: str
+    allocated_at: datetime
+    released_at: datetime | None = None
+
+
+class RelayLeaseListResponse(BaseModel):
+    """A relay's holdings, every lease row it has, by remote port.
+
+    A released row stays until its port is leased again, so a released
+    delivery's port reads released until then.
+    """
+
+    relay_id: str
+    leases: list[RelayLeaseView]

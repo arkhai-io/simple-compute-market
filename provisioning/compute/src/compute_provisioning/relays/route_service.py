@@ -1,7 +1,7 @@
 """The relay administration routes, without a web framework.
 
-``RelayRouteService`` serves list, create, read, update, token rotation, and
-enable and disable over the relay service, reporting a refusal as a
+``RelayRouteService`` serves list, create, read, update, token rotation,
+enable and disable, and the holdings read over the relay service, reporting a refusal as a
 ``ProvisioningRouteError``. Every relay route admits only the administrator:
 relays are operator infrastructure, and no storefront administers them.
 
@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from compute_provisioning_contracts import (
     RelayCreate,
+    RelayLeaseListResponse,
+    RelayLeaseView,
     RelayListResponse,
     RelayResponse,
     RelayTokenRotate,
@@ -117,6 +119,17 @@ class RelayRouteService:
             return _response(self._relays.set_enabled(relay_id, enabled))
         except RelayNotFoundError as exc:
             raise _missing(relay_id) from exc
+
+    def list_leases(self, relay_id: str) -> RelayLeaseListResponse:
+        """The relay's holdings: each lease's port, host, owner, and release."""
+        try:
+            records = self._relays.list_leases(relay_id)
+        except RelayNotFoundError as exc:
+            raise _missing(relay_id) from exc
+        return RelayLeaseListResponse(
+            relay_id=relay_id,
+            leases=[RelayLeaseView(**record.__dict__) for record in records],
+        )
 
 
 __all__ = ["RelayRouteService"]

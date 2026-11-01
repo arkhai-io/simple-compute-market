@@ -272,18 +272,64 @@ accept `relay_id`) and the renamed "A relay binding is fixed for a lease's life"
 
 Delivers D9's holdings read and "Relay holdings are readable by the administrator".
 
-- [ ] 3.1 Add `GET /api/v1/relays/{relay_id}/leases`, administrator only: its route
+- [x] 3.1 Add `GET /api/v1/relays/{relay_id}/leases`, administrator only: its route
       contract and wire models in `compute_provisioning_contracts`, its route service
       in `compute_provisioning.relays`, its binding in the service, and typed sync and
       async client methods. Each lease reports its port, host, owning reservation,
       `released_at`, and, once section 5 adds them, its grant expiry and signing key
       id; no credential. (D9)
-- [ ] 3.2 Tests. Application integration through the typed client: a torn-down
+      Done: contract `provisioning_relay_leases` (admin only); wire models
+      `RelayLeaseView` (lease id, remote port, host, pool, `owner_kind` and
+      `owner_id` for the owning reservation, `allocated_at`, `released_at`) and
+      `RelayLeaseListResponse`; `RelayService.list_leases` (every row, held or
+      released, by port; unknown relay refused) and
+      `RelayRouteService.list_leases` (404 for an unknown relay); the binding in
+      `relays_controller.py`; `list_relay_leases` on both family clients. Grant
+      expiry and signing key id are section 5's to add to `RelayLeaseView`.
+- [x] 3.2 Tests. Application integration through the typed client: a torn-down
       delivery's lease reads released and no other lease holds its port; a caller
       other than the administrator is refused.
-- [ ] 3.3 Verify. `make test-provisioning`, `make test-compute-provisioning-contracts`,
+      Done: `test_fulfillment_api.py::TestRelayPortLifecycleOverTheApi::test_a_failed_create_is_compensated_and_its_port_returns_with_the_capacity`
+      now ends by reading the holdings once the capacity is released: the
+      fulfillment's lease reads released, which, since a lease row is its port
+      (`UNIQUE(relay_id, remote_port)`), is what shows no other lease holds the
+      port (application integration, a real fulfillment through the typed
+      clients). The fulfillment reaches `torn_down` by a compensating teardown
+      of a failed create, not by an ordinary delivery's teardown; both release
+      through the same release effect, and the suite has no relay-backed
+      ordinary teardown to extend. `test_relays_api.py::TestHoldingsOverTheApi`
+      reads held and released seeded leases by port through the typed client,
+      a 404 for an unknown relay, and the seller refused by the canonical
+      client before sending (the contract's role refusal, no status). That the
+      server itself refuses a seller's signed read (403 before dispatch) is the
+      middleware unit test
+      `tests/unit/middleware/test_auth.py::test_the_relay_holdings_read_admits_the_administrator_only`,
+      over a stand-in handler. No credential can appear in the response:
+      `RelayLeaseView` has no field for one. The family's library integration,
+      `test_relay_administration.py::TestHoldings`, proves the read's rows,
+      order, and unknown-relay refusal against the database.
+- [x] 3.3 Verify. `make test-provisioning`, `make test-compute-provisioning-contracts`,
       `make test-compute-provisioning-client`. End-to-end: none in the pipeline; the
       real lanes read it (sections 11 and 12).
+      Results: `make test-provisioning` service unit 602 and application
+      integration 514 passed; contracts 123 passed (the relay-route tests cover
+      the leases path); client 74 passed; `make test-compute-provisioning` 373
+      passed; `make test-e2e-unit` 352 passed; `make check-packaging` OK;
+      `make test` passed. End-to-end scenarios confirmed: none in the pipeline.
+      Fresh-context check: added the family library test and the leases path to
+      the route comment, pinned the seller test to the client's refusal, and
+      corrected these notes' claims; it found no layering, route-pattern,
+      comment, import, or packaging break.
+
+  Section 3 handoff:
+  - Section 5 adds `grant_expires_at` and the signing key id to
+    `RelayPortLease`, `RelayLeaseRecord`, and `RelayLeaseView` (all three map
+    field for field; the route service builds the view from the record's
+    `__dict__`).
+  - A released lease row is reused when its port is leased again, so the
+    holdings read shows a released delivery only until its port is reissued;
+    section 5's quarantine holds the port, and so the row, until the grant
+    expires.
 
 ## 4. A grant-signing key per relay
 

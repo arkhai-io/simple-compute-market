@@ -146,6 +146,7 @@ def test_every_relay_route_is_the_administrators_alone():
         "provisioning_relay_rotate_token",
         "provisioning_relay_enable",
         "provisioning_relay_disable",
+        "provisioning_relay_leases",
     }
     assert all(contract.allowed_roles == ("admin",) for contract in relay_routes)
 
@@ -158,11 +159,12 @@ def test_every_relay_route_is_the_administrators_alone():
         ("POST", "/api/v1/relays/site-a/token", "provisioning_relay_rotate_token"),
         ("POST", "/api/v1/relays/site-a/enable", "provisioning_relay_enable"),
         ("POST", "/api/v1/relays/site-a/disable", "provisioning_relay_disable"),
+        ("GET", "/api/v1/relays/site-a/leases", "provisioning_relay_leases"),
     ],
 )
 def test_a_relay_id_never_matches_an_action_path(method, path, operation):
     """A capture takes no slash, so a bare relay id never matches the token,
-    enable, or disable path, and each resolves to its own operation."""
+    enable, disable, or leases path, and each resolves to its own operation."""
     resolved, _ = resolve_provisioning_route(method, path, {})
 
     assert resolved == operation
