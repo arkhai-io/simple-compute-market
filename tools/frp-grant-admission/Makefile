@@ -6,7 +6,10 @@ export UV_PYTHON := $(or $(shell cat ../../.python-version 2>/dev/null),$(error 
 # repository's scans skip the third-party code installed in it.
 FLOOR_ENV := .floor/.venv
 
-.PHONY: test test-frp test-floor
+.PHONY: build test test-frp test-floor
+
+build: ## Build the plugin's wheel into dist/
+	uv build --wheel --out-dir dist
 
 test: ## Run the unit and in-process integration tests; needs no network, and the real-frp tests skip without binaries
 	uv run pytest tests -q

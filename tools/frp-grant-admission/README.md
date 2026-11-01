@@ -16,6 +16,62 @@ itself against. It is version **1.0** of the `frp-grant` specification. Within
 `frp-grant 1.x`, a change never makes a conforming verifier refuse a grant an earlier
 1.x version admitted, or admit one it refused.
 
+## Installing
+
+The plugin runs beside frps, on the same host or in the same network namespace, since
+it listens on loopback only. It ships two ways; either serves a relay.
+
+### As a program under systemd
+
+`make build` writes the plugin's wheel to `dist/`. Install it into an environment of its
+own with Python 3.11 or later, write the configuration — starting from
+[`examples/config.toml`](examples/config.toml), with each issuer's own public keys in
+place of its test keys — and run it under
+[`examples/frp-grant-admission.service`](examples/frp-grant-admission.service), beside
+frps's own unit. From this directory:
+
+```sh
+python3 -m venv /opt/frp-grant-admission
+/opt/frp-grant-admission/bin/pip install dist/frp_grant_admission-*.whl
+install -d /etc/frp-grant-admission
+install -m 0644 config.toml /etc/frp-grant-admission/config.toml   # your configuration
+/opt/frp-grant-admission/bin/frp-grant-admission check /etc/frp-grant-admission/config.toml
+install -m 0644 examples/frp-grant-admission.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now frp-grant-admission
+```
+
+The unit runs the plugin as a user systemd allocates, so the configuration must be
+readable by any user; it holds only public keys. `systemctl reload frp-grant-admission`
+sends SIGHUP; the decision log is the unit's journal.
+
+### As a container image
+
+The [`Dockerfile`](Dockerfile) builds from this directory alone, labelled with the
+plugin's version:
+
+```sh
+docker build --build-arg VERSION=<version in pyproject.toml> -t <image> .
+```
+
+The image runs `frp-grant-admission serve --config
+/etc/frp-grant-admission/config.toml` as an unprivileged user. Run it in frps's network
+namespace, so that frps reaches it on loopback: as a sidecar in frps's pod, with
+Compose's `network_mode: service:frps`, or with host networking. Mount the configuration
+read-only:
+
+```sh
+docker run -d --name frp-grant-admission --network container:frps \
+  -v /etc/frp-grant-admission/config.toml:/etc/frp-grant-admission/config.toml:ro \
+  <image>
+docker kill -s HUP frp-grant-admission    # reload the configuration
+```
+
+The image's arguments replace `serve` and its configuration path, so `docker run --rm
+<image> check <path>` checks a file mounted at `<path>`. The image also carries the
+example configuration, at `/app/examples/config.toml`. Its stop signal is SIGINT, on
+which the plugin exits at once.
+
 ## What the plugin does and does not do
 
 It does:

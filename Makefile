@@ -15,7 +15,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: helm-values-schema e2e-dev-identities e2e-dev-identities-env e2e-vms-dev-env e2e-apicredits-dev-env e2e-apicredits-stack-env e2e-bare-metal-dev-env review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-bare-metal-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-uv-version check-python-version check-project-layout lock
 .PHONY: check-architecture check-architecture-layers check-architecture-scope check-architecture-dependencies check-architecture-kinds check-architecture-change architecture-report
 .PHONY: test-release-tooling test-deployment-packaging test-registry-client test-provisioning-adapter test-e2e-unit
-.PHONY: test-frp-grant-admission test-frp-grant-admission-frp test-frp-grant-admission-floor
+.PHONY: test-frp-grant-admission test-frp-grant-admission-frp test-frp-grant-admission-floor build-frp-grant-admission
 .PHONY: dist-arkhai-core-registry
 .PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits test-provisioning-iac-native
 .PHONY: dist-bare-metal-buyer
@@ -293,7 +293,7 @@ build: ## Build the wheels, the buyer CLI binary, and every runtime image
 	$(MAKE) dist
 	$(MAKE) build-buyer
 	$(MAKE) -j4 build-registry build-storefront build-bare-metal-storefront build-provisioning
-	$(MAKE) -j3 build-apicredits-service build-apicredits-storefront build-apicredits-sample-app
+	$(MAKE) -j4 build-apicredits-service build-apicredits-storefront build-apicredits-sample-app build-frp-grant-admission
 
 # ---------------------------------------------------------------------------
 # e2e-*-dev-env — each stack's signer, wallet, and buyer paths from the
@@ -547,6 +547,19 @@ build-apicredits-storefront:
 build-apicredits-sample-app:
 	docker build --ulimit nofile=65536:65536 -f domains/apicredits/sample-app/Dockerfile -t arkhai:apicredits-sample-app$(IMAGE_SUFFIX) .
 
+# The frps admission plugin builds from its own directory, which is the whole of its
+# build context; the image carries the plugin's own version, read from its project.
+FRP_GRANT_ADMISSION_DIR := tools/frp-grant-admission
+# Hoisted into a variable: macOS-shipped GNU Make 3.81 refuses `$$` inside single
+# quotes inside `$(shell ...)`.
+FRP_GRANT_ADMISSION_VERSION_SED := s/^version = "\(.*\)"$$/\1/p
+build-frp-grant-admission: ## Build the frps admission plugin's image
+	docker build --ulimit nofile=65536:65536 \
+		--build-arg VERSION=$(shell sed -n '$(FRP_GRANT_ADMISSION_VERSION_SED)' $(FRP_GRANT_ADMISSION_DIR)/pyproject.toml) \
+		-f $(FRP_GRANT_ADMISSION_DIR)/Dockerfile \
+		-t arkhai:frp-grant-admission$(IMAGE_SUFFIX) $(FRP_GRANT_ADMISSION_DIR)
+	$(if $(IMAGE_SUFFIX),,docker tag arkhai:frp-grant-admission arkhai:frp-grant-admission-$(GIT_SUFFIX))
+
 build-test-image:
 	cd e2e-tests && make build IMAGE_SUFFIX=$(IMAGE_SUFFIX)
 
@@ -742,6 +755,7 @@ push-images: _require-ar-project
 	$(call push_image,registry,registry)
 	$(call push_image,storefront,storefront)
 	$(call push_image,provisioning,compute-provisioning)
+	$(call push_image,frp-grant-admission,frp-grant-admission)
 
 push-dev-images: _require-ar-project
 	$(call push_image,dev-env,dev-env)

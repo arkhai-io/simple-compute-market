@@ -91,6 +91,22 @@ def test_a_subproject_image_target_appends_the_suffix_to_every_tag(project: str)
     assert suffixed == [image + SUFFIX]
 
 
+def _commit() -> str:
+    """The suffix of a bare build's commit tag, as the Makefiles derive it."""
+    return subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=REPO_ROOT,
+                          capture_output=True, text=True, check=True).stdout.strip()
+
+
+def test_the_frps_plugins_image_is_tagged_with_its_commit_unless_suffixed() -> None:
+    # The root builds this image itself, from the plugin's own directory, and
+    # `make push-images` pushes it from its commit tag.
+    image = "arkhai:frp-grant-admission"
+
+    assert _tags(_make_n("build-frp-grant-admission")) == [image, f"{image}-{_commit()}"]
+    assert _tags(_make_n("build-frp-grant-admission", f"IMAGE_SUFFIX={SUFFIX}")) == [
+        image + SUFFIX]
+
+
 @pytest.mark.parametrize("project", sorted(SUBPROJECT_IMAGE_TARGETS))
 def test_the_root_target_passes_the_suffix_to_its_subproject(project: str) -> None:
     _, root_target, _ = SUBPROJECT_IMAGE_TARGETS[project]
@@ -116,9 +132,12 @@ def test_an_aggregate_target_suffixes_its_own_images_and_passes_the_suffix_down(
     # the tests above.
     bare = _make_n(target)
     suffixed = _make_n(target, f"IMAGE_SUFFIX={SUFFIX}")
+    # A bare build may also tag an image with its commit, for `make push-images`;
+    # a suffixed build tags each image per change alone.
+    images = [tag for tag in _tags(bare) if not tag.endswith(f"-{_commit()}")]
 
-    assert _tags(bare) and not any(tag.endswith(SUFFIX) for tag in _tags(bare))
-    assert _tags(suffixed) == [tag + SUFFIX for tag in _tags(bare)]
+    assert images and not any(tag.endswith(SUFFIX) for tag in _tags(bare))
+    assert _tags(suffixed) == [tag + SUFFIX for tag in images]
     for project in AGGREGATE_TARGETS[target]:
         assert f"cd {project} && make build IMAGE_SUFFIX={SUFFIX}" in suffixed
         assert f"cd {project} && make build IMAGE_SUFFIX=\n" in bare + "\n"

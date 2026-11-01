@@ -583,10 +583,14 @@ pins file's format).
       refused, so a later shape fails to load rather than half-loading. The SHA-256,
       `bff260b6…2c40`, is the digest of the archive GitHub served this session's fetch
       (the fetch's own mismatch error named it against a zero placeholder, and the next
-      run verified the download against it). **For the owner:** it was not cross-checked
-      against the release's published `frp_sha256_checksums.txt`, since this unattended
-      step was denied WebFetch; comparing the two once by hand is worth doing, as the
-      pin is trust on first use. The README gains "The frp it is tested against": the
+      run verified the download against it). **For the owner:** it is still not
+      cross-checked against the release's published `frp_sha256_checksums.txt`. This
+      step was first denied WebFetch; with `github.com` granted in the section 7 run, the
+      checksums file's download redirects to `release-assets.githubusercontent.com`,
+      outside the grant, and the release's asset list on `github.com` shows sizes but no
+      digests. The one corroboration is the size: the cached archive is 13,040,253 bytes
+      (12.4 MiB), matching the 12.4 MB the release lists. Comparing the digest once by
+      hand is still worth doing, as the pin is trust on first use. The README gains "The frp it is tested against": the
       version, what the tests run against it, the pins format, and why the release's
       checksums file is never read; and states frpc 0.61.1's 30-second retry, measured
       below.
@@ -858,30 +862,105 @@ Files: `tools/frp-grant-admission/Dockerfile` and its ignore file, if one is nee
 `tools/frp-grant-admission/examples/frp-grant-admission.service`;
 `tools/frp-grant-admission/README.md`; the tool's `Makefile`; the root `Makefile`.
 
-- [ ] 7.1 The tool's `make build` builds its wheel. `examples/frp-grant-admission.service`
+- [x] 7.1 The tool's `make build` builds its wheel. `examples/frp-grant-admission.service`
       runs `frp-grant-admission serve --config /etc/frp-grant-admission/config.toml` with
       `ExecReload=/bin/kill -HUP $MAINPID` and the hardening `frps.service.j2` carries.
       (D11)
-- [ ] 7.2 The `Dockerfile` follows `BUILD_AND_PACKAGING.md`'s "Images": `ARG
+      Note: `make build` is `uv build --wheel --out-dir dist` (`dist/` ignored). The unit
+      runs `/opt/frp-grant-admission/bin/frp-grant-admission serve --config
+      /etc/frp-grant-admission/config.toml`, `Before=frps.service`, with `ExecReload`,
+      `Restart=always`, and frps's four hardening lines; **beyond the plan,**
+      `DynamicUser=yes`, since frps's unit runs as root and the plugin needs no
+      privilege (the fresh-context check's finding). `make -C tools/frp-grant-admission
+      build` — builds `frp_grant_admission-0.1.0-py3-none-any.whl`, which holds the
+      package's eight modules, the console script's entry point, and the licence, and no
+      tests (`unzip -l`). The unit itself was not run under systemd.
+- [x] 7.2 The `Dockerfile` follows `BUILD_AND_PACKAGING.md`'s "Images": `ARG
       PYTHON_VERSION` defaulting to the root declaration before the first `FROM`; a uv
       builder installing the committed lock unchanged; a `python:${PYTHON_VERSION}-slim`
       runtime for `linux/amd64` running as a non-root user; the tool's version as the
       `org.opencontainers.image.version` label; entrypoint `frp-grant-admission serve
       --config <path>`. It passes `make check-uv-setup`, `make check-project-layout`, and
       `make check-python-version`. (D11)
-- [ ] 7.3 The root `Makefile` gains `build-frp-grant-admission`, building
+      Note: the build context is the tool's directory alone, with a deny-all
+      `Dockerfile.dockerignore` admitting the project, lock, README (hatchling reads it
+      as the readme), licence, `src/`, and `examples/config.toml`. The tool's lock
+      installs nothing from the wheelhouse, so the builder copies none and runs `uv sync
+      --locked --no-dev` — the scripts' wheelhouse rules apply to a Dockerfile that
+      copies `.dist`, and `--locked` refuses a stale lock rather than rewriting it. The
+      project installs editable from `/app/src`, and the runtime keeps `/app/.venv` and
+      `/app/src` at their paths, as `core/registry` does. The runtime runs as uid 10001
+      (`plugin`, no home, no login shell; created without `--system`, since `useradd`
+      warns that 10001 is above the system range); `ARG VERSION` feeds the OCI version label, passed by the builder so the
+      version is written only in `pyproject.toml`; `ENTRYPOINT ["frp-grant-admission"]`
+      with `CMD ["serve", "--config", "/etc/frp-grant-admission/config.toml"]`, so
+      arguments replace the command (`check <path>`); `STOPSIGNAL SIGINT`, since PID 1
+      ignores a SIGTERM it has no handler for and SIGINT ends `serve_forever` cleanly.
+      `make check-uv-setup`, `make check-project-layout`, `make check-python-version` —
+      pass. The image itself is 7.5's to build.
+- [x] 7.3 The root `Makefile` gains `build-frp-grant-admission`, building
       `arkhai:frp-grant-admission$(IMAGE_SUFFIX)`, run by `make build`, and `push-images`
       pushes it as `push_image` pushes the others. (D11)
-- [ ] 7.4 The README gains installation: the plain program from the wheel under the
+      Note: the target builds from `tools/frp-grant-admission` as its context, passes
+      `VERSION` read from the tool's `pyproject.toml` (a sed program hoisted into a
+      variable, as `core/registry/Makefile` does for macOS's Make 3.81), and, unsuffixed,
+      tags the image with its commit as well, which `push_image` reads; it runs in
+      `make build`'s second parallel batch, and `push-images` pushes it. The `arkhai:`
+      name lives in the root Makefile, not the tool's, which names no SCM concept (D4).
+      **Beyond the plan's files**, two repository consequences of a new image in `make
+      build`: `scripts/change_namespace.py`'s `BUILT_IMAGES`, which validation's teardown
+      removes, gains `frp-grant-admission`; and
+      `scripts/tests/test_change_build_and_helm_targets.py`'s aggregate-target test,
+      which assumed no root target writes a commit tag, now sets a bare build's commit
+      tags aside before comparing — DEPLOYMENT_AND_CONFIG.md's rule, "a bare build still
+      writes `arkhai:<tag>-<sha>`, which `make push-images` reads" — and a new case holds
+      `build-frp-grant-admission` to the image and its commit tag bare, and the change tag
+      alone suffixed. Evidence is `make -n` (that suite reads targets so): `make
+      test-release-tooling` — 1817 passed, these included. The image's build is 7.5's.
+- [x] 7.4 The README gains installation: the plain program from the wheel under the
       systemd example, beside `frps.service`; and the image, run in frps's network
       namespace — a sidecar in frps's pod, Compose's `network_mode: service:frps`, or host
       networking — with the configuration mounted read-only and reload by `docker kill -s
       HUP`. (D11, D13)
-- [ ] 7.5 Verification: `make -C tools/frp-grant-admission build`; `make
+      Note: "Installing", after the specification's opening: the wheel into
+      `/opt/frp-grant-admission`, the configuration started from `examples/config.toml`
+      with each issuer's own keys, `check`, the unit, `daemon-reload`, and `enable
+      --now`; that the configuration must be world-readable, holding only public keys;
+      and the image — its standalone `docker build --build-arg VERSION=…`, the three ways
+      into frps's namespace, a `--network container:frps` example with the read-only
+      mount, `docker kill -s HUP`, `check` by argument, the bundled example, and the stop
+      signal. `tools/README.md` gains the tool's `make build` and the root image target.
+- [x] 7.5 Verification: `make -C tools/frp-grant-admission build`; `make
       build-frp-grant-admission`; `docker run --rm arkhai:frp-grant-admission check
       /app/examples/config.toml` or an equivalent that loads the example in the image and
       prints its thumbprint; `make check-packaging`.
       End-to-end: none (see the preamble).
+      Note: the first session stopped here, uncommitted, since the unattended step's
+      rules allowed none of the three build commands; the owner granted them for the
+      resumed run. `make -C tools/frp-grant-admission build` — the wheel (7.1). `make
+      build-frp-grant-admission` — builds `arkhai:frp-grant-admission` with `VERSION=0.1.0`
+      from the tool's directory (a 123 kB context: the ignore file holds), the builder
+      installing the lock's cryptography 50.0.2 and PyJWT 2.15.1, and tags
+      `arkhai:frp-grant-admission-<commit>`; Docker's only warnings are the constant
+      `--platform`, which every image here carries. `docker run --rm
+      arkhai:frp-grant-admission check /app/examples/config.toml` — prints `listen
+      127.0.0.1:7300`, issuer A with key `kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k`
+      (TEST 1, RFC 8037's thumbprint), and issuer B with TEST 2's — so the image runs as
+      its non-root user and the arguments replace `serve`. Not run: `serve` in the image,
+      SIGHUP through `docker kill`, or SIGINT as the stop signal. `make check-packaging`
+      — passes. `make test-release-tooling` — 1817 passed; `make test` — passes; `make
+      check-uv-setup` and `make check-python-version` — pass after the last Makefile and
+      Dockerfile edits. End-to-end: none, confirmed.
+      Handoff: the fresh-context check found no blocking defect; fixed — the unit running
+      as root (`DynamicUser=yes`), `tools/README.md` missing the build targets, the
+      README's install commands' paths and the configuration's source, the Dockerfile's
+      comment naming this repository's Makefile and the missing standalone build line,
+      the Make 3.81 portability of the version extraction, and the ignore file's and
+      `.gitignore`'s comments. Declined: an `ARG VERSION` default, which would repeat
+      `pyproject.toml`'s version; the label's hand-written `MIT` stays, as reading the
+      licence from the project would need another build argument for a value that does
+      not change. The resumed run's one fix, dropping `useradd --system`, is a one-line
+      change no second fresh-context check was run for.
 
 ## 8. Closeout
 

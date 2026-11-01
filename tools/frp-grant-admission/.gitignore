@@ -4,5 +4,8 @@
 __pycache__/
 .pytest_cache/
 
+# The wheel `make build` writes.
+dist/
+
 # frps and frpc binaries the real-frp gate fetches and verifies against frp-pins.toml.
 .frp-cache/

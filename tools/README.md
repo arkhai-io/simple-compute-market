@@ -154,10 +154,14 @@ specification.
 - `make test-floor` runs the unit tests, the test vector included, with each
   runtime dependency at the lowest release the project declares, in an
   environment of its own; it needs the network.
+- `make build` builds its wheel into its own `dist/`.
 - From the repository root, `make test-frp-grant-admission` runs its `make test`
   and is part of `make test` and the Tests workflow's matrix;
   `make test-frp-grant-admission-frp` and `make test-frp-grant-admission-floor`
   run the other two, which the Tests workflow's `frp · real-frp gate` job runs.
+- `make build-frp-grant-admission`, part of `make build`, builds its image from
+  its own directory as `arkhai:frp-grant-admission`, which `make push-images`
+  pushes.
 
 ## Adding More Tools
 
