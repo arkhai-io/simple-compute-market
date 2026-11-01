@@ -26,12 +26,11 @@ from __future__ import annotations
 
 from typing import Sequence
 
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..hosts.service import PoolChangeRefusedError
 from .allocator import RelayPortAllocator
-from .db import Relay, RelayPortLease
+from .db import PoolRelay, Relay, RelayPortLease
 
 
 class RelayRebindingRefused(ValueError):
@@ -67,18 +66,15 @@ def _refuse(what: str, leases: Sequence[RelayPortLease]) -> RelayRebindingRefuse
 
 
 def pool_relay_id(db: Session, pool_id: str | None) -> str | None:
-    """The relay a pool references, or None.
+    """The relay a pool references, or None, whatever the pool's provider.
 
-    The one read of a pool's relay reference every rebinding rule uses. The
-    reference is the VM pool configuration's ``relay_id`` column, read by name
-    because the family imports no domain.
+    The one read of a pool's relay reference: every rebinding rule and every
+    provider's pool configuration reads it here.
     """
     if not pool_id:
         return None
-    return db.execute(
-        text("SELECT relay_id FROM ansible_pool_configs WHERE pool_id = :pool_id"),
-        {"pool_id": pool_id},
-    ).scalar_one_or_none()
+    row = db.get(PoolRelay, pool_id)
+    return None if row is None else row.relay_id
 
 
 def check_relay_endpoint_change(
@@ -159,8 +155,9 @@ def check_host_pool_change(
     """Refuse moving a host between pools that dial different relays.
 
     A move between pools referencing the same relay is unconditional, including
-    while deliveries are running: the host keeps dialling the same rendezvous,
-    its proxies keep their ports, and nothing a buyer holds changes.
+    while deliveries are running and whichever provider each pool uses: the
+    host keeps dialling the same rendezvous, its proxies keep their ports, and
+    nothing a buyer holds changes.
     """
     if current_pool_id == new_pool_id:
         return

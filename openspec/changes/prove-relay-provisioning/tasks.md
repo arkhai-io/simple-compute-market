@@ -164,32 +164,109 @@ to behaviour, tables, route paths, or operation names.
 Delivers D2(b) and "Relay machinery belongs to the compute family" (both providers
 accept `relay_id`) and the renamed "A relay binding is fixed for a lease's life".
 
-- [ ] 2.1 Add the family table `pool_relays(pool_id → resource_pools, relay_id →
+- [x] 2.1 Add the family table `pool_relays(pool_id → resource_pools, relay_id →
       relays)` in `compute_provisioning/relays/db.py`, and one migration in
       `compute_provisioning_service/db/migrations.py` that creates it, copies any
       `ansible_pool_configs.relay_id`, and drops that column; drop the column from
       `AnsiblePoolConfig`. The migration is fail-forward (28 F4). (D2b)
-- [ ] 2.2 Read and write a pool's relay reference through one family function that
+      Done: `PoolRelay` and `20261101_001_pool_relays` (`_migrate_pool_relays`),
+      which copies the references and drops the column by rebuilding the table
+      from its model through `_rebuild_ansible_pool_configs`, the procedure
+      `20261023` used, now shared. `20261023` passes `keep=("relay_id",)` so a
+      database older than it keeps its references through that rebuild for the
+      new migration to copy. The docstring states the fail-forward upgrade;
+      `DEPLOYMENT_AND_CONFIG.md` records it at closeout (17.9).
+- [x] 2.2 Read and write a pool's relay reference through one family function that
       runs the rebinding check, and have VM's `AnsiblePoolConfigHandler` and bare
       metal's `BareMetalPoolConfigHandler`
       (`domains/bare_metal/provisioning/adapter/src/bare_metal_provisioning_adapter/services/bare_metal_pool_config_handler.py`)
       accept `provider_config.relay_id` through it; bare metal accepts no other field.
       The redacted read, the execution read, and preserve-on-absent hold for both.
       (D2b)
-- [ ] 2.3 The rebinding rules read `pool_relays`: a pool's relay reference, a host's
+      Done in `relays/pool_relays.py`: `set_pool_relay` (the one write, running
+      `check_pool_relay_change` first), `pool_relay_id` (the one read, in
+      `rebinding.py`), `validate_relay_reference` (one validation rule), and
+      `relay_execution_fields` (the endpoint, window, and decrypted token both
+      execution reads add). Bare metal's handler reads `{}` for a pool with no
+      relay and `{"relay_id": …}` otherwise, so an unrelayed pool's document entry
+      still compares equal; it takes `settings` for the token key (its runtime
+      passes the config). Preserve-on-absent is the pool service's: a PATCH that
+      omits `provider_config` never calls the handler. VM's adapter no longer
+      imports `market_config`, so its `arkhai-kit-config` declaration (and
+      `RELEASING.md`'s mention) went. Bare-metal adapter 0.13.0.
+      Beyond the plan: the pool routes (`controllers/pools_controller.py`, PUT,
+      PATCH, and import) answer a `RelayRebindingRefused` with 409 and its
+      message; before, a refused VM repoint over the API escaped as a 500 naming
+      nothing. `set_pool_relay` also refuses a relay that does not exist, as a
+      `PoolValidationError` (400): the service's SQLite connections enforce no
+      foreign keys, and a dangling `pool_relays` row would fail every later
+      table rebuild's whole-database foreign-key check. The change's delta spec
+      gains the MODIFIED requirement "Bare-metal inventory binds an existing
+      provider pool" (its scenario rejected any non-empty bare-metal
+      configuration) and a scenario for a pool naming no existing relay.
+- [x] 2.3 The rebinding rules read `pool_relays`: a pool's relay reference, a host's
       pool, and a relay's address refuse a change while an affected host holds an
       active lease, for VM and bare-metal pools alike, and a host moving between a VM
       pool and a bare-metal pool on the same relay is free. ("A relay binding is
       fixed for a lease's life")
-- [ ] 2.4 Tests. Library integration: the migration copies a reference and drops the
+      Done: `pool_relay_id` reads `PoolRelay`; the relay-address rule reads leases
+      and needed no change. The section-1 read of VM's table by name is gone.
+- [x] 2.4 Tests. Library integration: the migration copies a reference and drops the
       column; a bare-metal pool's relay reference round-trips and survives an
       unrelated write. Application integration through the typed client: a
       bare-metal pool written with `relay_id`; a bare-metal pool's relay change
       refused during a lease; a host move across providers on one relay accepted.
-- [ ] 2.5 Verify. `make test-compute-provisioning`, `make test-provisioning`,
+      Placement differs from the plan where the code does: the migration is the
+      service's, so its tests are the service's
+      (`test_relay_migrations.py::TestThePoolRelaysMigration`, a stored database
+      migrated through `run_migrations`, and `test_vm_pool_config_migration.py`,
+      whose pre-`20261023` database now ends with its reference in
+      `pool_relays`); the family's library integration
+      (`provisioning/compute/tests/integration/test_pool_relays.py`) proves the
+      reference round-trips, clears, is shared by two providers' pools, refuses
+      a change or a clear during a lease and accepts it drained, refuses an
+      unknown relay, and a host move across providers on one relay is free and
+      to another relay refused; the validation rule is unit-tested
+      (`tests/unit/test_relay_reference_validation.py`). A bare-metal pool's
+      round trip and survival of an unrelated write are application integration
+      through the typed pool client (`test_pool_relays_api.py`), with a foreign
+      field refused (400), an unknown relay refused (400), the refused change by
+      PATCH and by a PUT dropping the relay (409, naming the lease), the drained
+      change, and the execution read resolving the relay's endpoint and token
+      (read through the pool service the dispatch path calls); the import's 409
+      mapping is untested. The cross-provider host move is
+      `test_host_pool_moves_api.py::test_a_tunnelled_host_moves_to_a_bare_metal_pool_on_its_relay`.
+      `test_authority_composition.py` holds both handlers built over the
+      service's settings. No PostgreSQL run: the migration is proven on SQLite.
+- [x] 2.5 Verify. `make test-compute-provisioning`, `make test-provisioning`,
       `make test-provisioning-adapter`, `make test-bare-metal`; `make check-packaging`.
       End-to-end: the VM and bare-metal lanes as in 1.7, on pools with no relay; none
       runs a relay-backed pool.
+      Results: `make test-compute-provisioning` 370 passed (unit and library
+      integration); `make test-provisioning` service unit 597 and application
+      integration 511 passed; `make test-provisioning-adapter` 218 passed;
+      `make test-bare-metal` passed (193, 543, 30, 90); `make check-packaging` OK;
+      `make test` passed. End-to-end scenarios confirmed as listed; none added.
+      Service 0.22.0 (a fail-forward migration and new 409 answers).
+
+  Section 2 handoff:
+  - Every pool's relay is `pool_relays`; read it with `pool_relay_id`, write it
+    only with `set_pool_relay`. Section 8's bare-metal plan reads the resolved
+    relay from `BareMetalPoolConfigHandler.read_config_for_execution`, which
+    already adds `relay_execution_fields`.
+  - A pool write a lease forbids answers 409 from the pool routes; the pool
+    document import does too. `ResourcePoolService` itself still lets the
+    error propagate to its caller.
+  - `_migrate_pool_relays` copies references without filtering for relays that
+    exist: a reference to no relay fails the migration loudly (PostgreSQL's
+    foreign key, SQLite's rebuild check) rather than silently turning a relayed
+    pool into a direct one. The copy and the rebuild are separate
+    transactions; a rerun after a failed rebuild is safe (`NOT IN` guard).
+  - Fresh-context check: fixed the spec delta gap, the unknown-relay write, two
+    comments, a tombstone comment and assertion, the 400 assertion, the
+    validation tests' level, the migration test's docstring, the unreachable
+    create-route 409, import order, and the service version; the notes now
+    state which 409 paths and execution reads are tested.
 
 ## 3. The relay holdings read
 

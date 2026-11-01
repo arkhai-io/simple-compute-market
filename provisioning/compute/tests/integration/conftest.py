@@ -1,13 +1,16 @@
 """The relay tables over a real embedded database, built from the family's models.
 
-File-backed SQLite with a connection per session, so independent sessions
-contend as they do in a deployment. A suite with a schema of its own defines
-its own ``session_factory``, which takes precedence over this one.
+The schema is the resource-pool tables, which ``pool_relays`` references, and
+the relay tables. File-backed SQLite with a connection per session, so
+independent sessions contend as they do in a deployment. A suite with a schema
+of its own defines its own ``session_factory``, which takes precedence over
+this one.
 """
 
 from __future__ import annotations
 
 import pytest
+from market_resource_pools.db import Base as PoolsBase
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -20,6 +23,7 @@ def relay_engine(tmp_path):
         f"sqlite:///{tmp_path / 'relays.db'}",
         connect_args={"check_same_thread": False, "timeout": 30},
     )
+    PoolsBase.metadata.create_all(bind=engine)
     RelaysBase.metadata.create_all(bind=engine)
     try:
         yield engine

@@ -3,8 +3,9 @@
 A VM pool's ``playbook_path`` becomes nullable, so a pool may leave its playbook
 to the service, and the unread ``inventory_group`` is dropped. SQLite cannot
 relax ``NOT NULL`` in place, so the table is rebuilt; these tests prove the
-rebuild keeps every row's other values, the foreign keys, and the relay index,
-and that a table already in shape is left alone.
+rebuild keeps every row's other values and its pool foreign key, that a table
+already in shape is left alone, and that a pool's relay reference survives it
+to reach ``pool_relays`` when a later migration moves it there.
 """
 
 from __future__ import annotations
@@ -95,11 +96,13 @@ def _columns(engine) -> dict[str, dict]:
 
 
 def _rows(engine) -> dict[str, dict]:
+    """Each pool's configuration, its relay reference read from ``pool_relays``."""
     with engine.begin() as connection:
         rows = connection.execute(text(
-            "SELECT pool_id, playbook_path, requirement_delegate, extra_vars, "
-            "default_vm_ram, default_vm_vcpus, default_vm_disk_size, relay_id "
-            "FROM ansible_pool_configs ORDER BY pool_id"
+            "SELECT c.pool_id, c.playbook_path, c.requirement_delegate, c.extra_vars, "
+            "c.default_vm_ram, c.default_vm_vcpus, c.default_vm_disk_size, r.relay_id "
+            "FROM ansible_pool_configs c LEFT JOIN pool_relays r ON r.pool_id = c.pool_id "
+            "ORDER BY c.pool_id"
         )).mappings().all()
     return {row["pool_id"]: {k: v for k, v in row.items() if k != "pool_id"} for row in rows}
 
@@ -118,13 +121,11 @@ def _assert_current_shape(engine) -> None:
     columns = _columns(engine)
     assert columns["playbook_path"]["nullable"] is True
     assert "inventory_group" not in columns
-    assert "ix_ansible_pool_configs_relay_id" in {
-        index["name"] for index in inspect(engine).get_indexes("ansible_pool_configs")
-    }
+    assert "relay_id" not in columns
     references = {
         fk["referred_table"] for fk in inspect(engine).get_foreign_keys("ansible_pool_configs")
     }
-    assert references == {"resource_pools", "relays"}
+    assert references == {"resource_pools"}
 
 
 def _insert_unstated_playbook(engine, pool_id: str) -> None:

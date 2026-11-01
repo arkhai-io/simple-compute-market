@@ -158,6 +158,49 @@ then keep, lock, or delete the account as its policy says.
 - **WHEN** a reclaim under the default policy runs for an account holding the lease's key
 - **THEN** that key is removed, the account's activity ends, and the account and its files otherwise remain
 
+### Requirement: Bare-metal inventory binds an existing provider pool
+
+The compute provisioner MUST import configured Resource Pool definitions before
+seeding inventory. A bare-metal inventory host MAY name its exact pool through
+`pool_id`; the seed MUST reject an unknown pool and MUST preserve that binding
+on create and update. A capacity declaration's explicit `bare_metal_publication`
+view MUST carry the declaration's own pool. The `bare_metal.ansible` provider accepts no pool-local
+playbook, inventory-group, credential, or executor-target configuration; the one
+field its pool configuration accepts is `relay_id`, the compute family's relay
+reference: execution uses service-owned configuration and the scheduler-selected Physical
+Resource, and a bare-metal job's stored parameters carry the service's
+`bare_metal_playbook_path` as configured when the job is prepared. The operator MUST register that Physical Resource and its explicit
+`bare_metal_publication` view through the authenticated capacity administration
+surface before the host is publishable.
+
+#### Scenario: Fresh selected-site inventory binds to a bare-metal pool
+
+- **WHEN** startup imports a `bare_metal.ansible` pool and then seeds a host whose inventory row names that pool
+- **THEN** the durable host row retains the exact pool id and an unknown pool id fails the seed rather than leaving the host unplaced or assigning another pool
+
+#### Scenario: Publication retains the inventory pool binding
+
+- **GIVEN** a bare-metal inventory host is bound to a configured provider pool
+- **AND** the capacity declaration naming that host is in the same pool
+- **WHEN** the compute service projects its explicit `bare_metal_publication` view
+- **THEN** the view's `pool_id` is that pool, taken from the declaration
+
+#### Scenario: Publication carries the declaration's pool
+
+- **GIVEN** a capacity declaration with an enabled `bare_metal_publication` in a configured provider pool
+- **WHEN** the compute service projects its explicit `bare_metal_publication` view
+- **THEN** the view's `pool_id` is the declaration's pool
+
+#### Scenario: Pool-local executor configuration is supplied
+
+- **WHEN** a `bare_metal.ansible` pool's `provider_config` contains any field other than `relay_id`
+- **THEN** validation rejects the pool before it can authorize or dispatch fulfillment
+
+#### Scenario: The bare-metal playbook setting changes after a grant is prepared
+
+- **WHEN** `bare_metal_playbook_path` changes after a grant or reclaim job is prepared
+- **THEN** the job runs the playbook its stored parameters carry, and a job prepared afterwards carries the new one
+
 ## ADDED Requirements
 
 ### Requirement: Relay machinery belongs to the compute family
@@ -168,6 +211,11 @@ Relays, their port leases, allocation, release, reconciliation, administration, 
 
 - **WHEN** an operator writes a bare-metal pool with `provider_config.relay_id` naming a relay
 - **THEN** the reference is recorded where a VM pool's is, and the same rebinding rule governs it
+
+#### Scenario: A pool names a relay that does not exist
+
+- **WHEN** a pool of either provider is written with a `relay_id` no relay has
+- **THEN** the write is rejected naming the relay, and no reference is recorded
 
 #### Scenario: VM and bare-metal deliveries share a relay
 

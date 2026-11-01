@@ -102,7 +102,7 @@ class TestTheActiveOwnerIndex:
         engine.dispose()
 
     def test_a_fresh_database_created_from_the_models_migrates(self, tmp_path):
-        """With VM's model declaring the index, a fresh database migrates, twice,
+        """With the lease model declaring the index, a fresh database migrates, twice,
         and ends with the index in place."""
         engine = create_db_engine(f"sqlite:///{tmp_path / 'fresh.db'}", is_sqlite=True)
 
@@ -128,10 +128,19 @@ class TestMigrations:
         columns = [sorted(c["column_names"]) for c in constraints]
         assert ["relay_addr", "relay_port"] in columns
 
-    def test_pool_config_gains_the_relay_reference(self):
+    def test_a_pools_relay_reference_is_the_familys_not_vms(self):
+        """Every pool's reference is held in ``pool_relays``; VM's pool
+        configuration table carries none."""
         engine = _engine()
         names = {c["name"] for c in inspect(engine).get_columns("ansible_pool_configs")}
-        assert "relay_id" in names
+        assert "relay_id" not in names
+        assert {c["name"] for c in inspect(engine).get_columns("pool_relays")} == {
+            "pool_id",
+            "relay_id",
+        }
+        assert {
+            fk["referred_table"] for fk in inspect(engine).get_foreign_keys("pool_relays")
+        } == {"resource_pools", "relays"}
 
     def test_the_document_import_digest_table_exists(self):
         engine = _engine()
@@ -141,17 +150,78 @@ class TestMigrations:
         }
         assert {"document_kind", "digest", "imported_at"} <= names
 
-    def test_existing_pool_rows_keep_working_without_a_relay(self):
-        """Nullable reference: a pool row stored with no relay reads as none."""
-        engine = _engine()
+
+class TestThePoolRelaysMigration:
+    """A database whose VM pools hold their relay in ``ansible_pool_configs``
+    keeps every reference, now in ``pool_relays``, and loses the column."""
+
+    def _database_before_pool_relays(self, tmp_path):
+        """The current schema with the migration unrecorded and the column back
+        on VM's table holding references. Schema creation recreates
+        ``pool_relays`` before the chain runs, so what this exercises is the copy
+        and the drop; a database older than the rebuild that would otherwise
+        lose the column is ``test_vm_pool_config_migration.py``'s."""
+        engine = create_db_engine(f"sqlite:///{tmp_path / 'before.db'}", is_sqlite=True)
+        run_migrations(engine)
         with engine.begin() as connection:
+            connection.execute(text("DROP TABLE pool_relays"))
             connection.execute(text(
-                "INSERT INTO ansible_pool_configs "
-                "(pool_id, playbook_path, requirement_delegate, extra_vars) "
-                "VALUES ('legacy', :p, 'vm_management_v1', '{}')"
-            ), {"p": _PLAYBOOK_PATH})
+                "ALTER TABLE ansible_pool_configs ADD COLUMN relay_id VARCHAR"
+            ))
+            connection.execute(text(
+                "DELETE FROM schema_migrations WHERE id = '20261101_001_pool_relays'"
+            ))
+            connection.execute(text(
+                "INSERT INTO relays (id, relay_addr, relay_port, vm_port_range_start, "
+                "vm_port_range_count, enabled) VALUES ('site-a', '203.0.113.9', 7000, "
+                "6100, 100, 1)"
+            ))
+            for pool_id, relay_id in (("relayed", "site-a"), ("direct", None)):
+                connection.execute(
+                    text(
+                        "INSERT INTO resource_pools (id, label, provider, enabled, "
+                        "policy_tags) VALUES (:id, :id, 'vm.ansible', 1, '{}')"
+                    ),
+                    {"id": pool_id},
+                )
+                connection.execute(
+                    text(
+                        "INSERT INTO ansible_pool_configs (pool_id, playbook_path, "
+                        "requirement_delegate, extra_vars, relay_id) VALUES "
+                        "(:id, :p, 'vm_management_v1', '{}', :relay)"
+                    ),
+                    {"id": pool_id, "p": _PLAYBOOK_PATH, "relay": relay_id},
+                )
+        return engine
+
+    def test_a_stored_reference_is_copied_and_the_column_dropped(self, tmp_path):
+        engine = self._database_before_pool_relays(tmp_path)
+
+        run_migrations(engine)
+
+        with engine.begin() as connection:
+            held = connection.execute(
+                text("SELECT pool_id, relay_id FROM pool_relays ORDER BY pool_id")
+            ).all()
+        assert [tuple(row) for row in held] == [("relayed", "site-a")]
+        names = {c["name"] for c in inspect(engine).get_columns("ansible_pool_configs")}
+        assert "relay_id" not in names
         with Session(engine) as session:
-            assert session.get(AnsiblePoolConfig, "legacy").relay_id is None
+            assert session.get(AnsiblePoolConfig, "relayed").playbook_path == _PLAYBOOK_PATH
+            assert session.get(AnsiblePoolConfig, "direct").playbook_path == _PLAYBOOK_PATH
+        check_schema_version(engine)
+        engine.dispose()
+
+    def test_a_fresh_database_holds_no_reference_anywhere_else(self, tmp_path):
+        """Schema creation makes VM's table without the column and an earlier
+        migration adds it back; the chain ends without it all the same."""
+        engine = create_db_engine(f"sqlite:///{tmp_path / 'fresh.db'}", is_sqlite=True)
+
+        run_migrations(engine)
+
+        names = {c["name"] for c in inspect(engine).get_columns("ansible_pool_configs")}
+        assert "relay_id" not in names
+        engine.dispose()
 
     def test_running_migrations_twice_is_idempotent(self):
         engine = _engine()

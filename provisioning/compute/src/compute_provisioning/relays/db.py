@@ -1,4 +1,4 @@
-"""The relay tables: relays and the ports leased on them.
+"""The relay tables: relays, the ports leased on them, and each pool's relay.
 
 They are the compute family's: a relay is a rendezvous any family host dials,
 and every domain whose deliveries reach their buyer through one leases its
@@ -8,6 +8,7 @@ this metadata, and its migration history reads these models to create and
 evolve them.
 """
 
+from market_resource_pools import ResourcePool
 from sqlalchemy import (
     Boolean,
     Column,
@@ -142,4 +143,24 @@ class RelayPortLease(Base):
     released_at = Column(DateTime, nullable=True)
 
 
-__all__ = ["Base", "Relay", "RelayPortLease"]
+class PoolRelay(Base):
+    """Which relay a pool's hosts dial for buyer tunnels, whatever its provider.
+
+    One row per pool that references a relay; a pool with no row reaches its
+    buyers without one. A reference, not the endpoint: the rendezvous address,
+    its port window, and its token belong to the relay row, shared by every
+    pool pointing at it. Held in one table rather than in each provider's
+    configuration so "which relay does this pool use" and "which pools use this
+    relay" are one query each, and the rebinding rule has one place to read.
+
+    No ORM ``relationship()`` to ``ResourcePool``: that model lives in another
+    declarative registry, so navigation is by explicit ``pool_id``.
+    """
+
+    __tablename__ = "pool_relays"
+
+    pool_id = Column(String, ForeignKey(ResourcePool.__table__.c.id), primary_key=True)
+    relay_id = Column(String, ForeignKey("relays.id"), nullable=False, index=True)
+
+
+__all__ = ["Base", "PoolRelay", "Relay", "RelayPortLease"]
