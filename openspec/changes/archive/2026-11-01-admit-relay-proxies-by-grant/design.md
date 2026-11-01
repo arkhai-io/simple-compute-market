@@ -707,6 +707,137 @@ Stated in this design and recorded in no permanent document; promoted at closeou
 - **A relay without the plugin admits any proxy**, and nothing in this tool can tell;
   installing and checking it is `prove-relay-provisioning`'s.
 
+## Implementation record
+
+What implementation settled within the decisions above, what it declined, and what it
+left unproven. Moved here from `tasks.md`'s notes at closeout, which keep only final
+behaviour, evidence, and destinations.
+
+### Choices within the design
+
+- **Configuration.** An unknown field at any level is refused, so a file written for a
+  later format (D3's "a later list of ranges") fails to load rather than loading with
+  part of it ignored. A key must be canonical: strict base64 that re-encodes to the same
+  DER, so trailing bytes are refused. `listen` is parsed with `ipaddress` alone, which
+  also refuses `127.1` and `[::ffff:127.0.0.1]`. A valid range is checked for overlap
+  whatever its issuer's other fields, so fixing one problem never reveals another.
+- **Grant check.** The unverified header is read by the plugin, padded or unpadded, and
+  must be canonical base64url of a JSON object, else `grant_malformed` before the `kid`
+  lookup (recorded in D12). PyJWT's `InvalidSignatureError` and `InvalidAlgorithmError`
+  map to `signature_invalid` (so `alg: none` is), `MissingRequiredClaimError` to
+  `claim_missing`, `InvalidAudienceError` to `audience_mismatch`, and any other PyJWT
+  error to `grant_malformed`. A grant holding an unpaired surrogate is `grant_malformed`,
+  and so is a `RecursionError` escaping PyJWT's parser on deep nesting — a defence with
+  no test, since whether 4 KiB of nesting overflows depends on the Python version.
+  "Never reads the system clock" holds for the plugin's own code: PyJWT reads
+  `datetime.now()` while decoding, but every time check it would make with it is off.
+- **`decode_complete`.** D12 step 8 and D22 write `jwt.decode_complete`; PyJWT 2.8.0, the
+  declared floor, exports no module-level `decode_complete`, which the floor run found
+  (45 unit failures at the floor). The plugin calls the same function, with the same
+  options, on one `jwt.PyJWT()` instance, which every declared release carries; no
+  decision changed. The permanent documents say PyJWT's `decode_complete`.
+- **Request handling.** The request checks are a pure module, `request.py`, so they are
+  unit-tested from a request dict and the log names a decision without importing the
+  server. The handler answers `POST` to `/` with any query (frps appends
+  `?version=…&op=NewProxy`); another path is 404 and another method the standard
+  library's 501. A body with no or a bad `Content-Length` is `malformed_request`; at most
+  64 KiB + 1 bytes are read whatever the declared length. A non-string `metas.grant` is
+  `grant_malformed`, an empty one `grant_missing`. Binding skips the standard library's
+  host-name lookup, so it makes no resolver call, and `::1` binds IPv6.
+- **Decision log.** `verified` is on every decision line (false when no grant was read).
+  A forged grant's line carries `issuer` and the unverified `exp`, which D10's example
+  line omits; the README states the fields. Lines are strict ASCII JSON under a reentrant
+  lock, so a SIGHUP landing during a write cannot deadlock; a non-finite number is logged
+  as text and a field nested too deeply for a recursion to walk as a placeholder, so no
+  decision loses its line. The configuration lines (`config_loaded`, `config_refused`,
+  `listen_at_restart`, `kept`) are implementation's shape, stated in the README.
+- **Reload.** The handler is installed only after binding and the startup line; a SIGHUP
+  before then ends the process by its default action, which frps meets as a plugin that
+  does not answer. Any exception in a reload keeps the running configuration.
+- **Vector.** It carries RFC 8032's TEST 1, 2, and 3 keys; forged cases are signed with
+  TEST 2 naming TEST 1's `kid`. The issuers are `issuer-a` and `issuer-b`, as in the
+  README and the example, since D13's `vm-site` and `bm-site` name one issuing system's
+  concepts. The builder serializes the JCS subset the vector uses and refuses anything
+  else; a signing case with non-ASCII and control characters, held to RFC 8785's string
+  example, keeps a signer that escapes non-ASCII from passing (41 F1).
+- **Real-frp tests.** The default suite never fetches and never reads the gate's cache:
+  only `FRPS_BIN` and `FRPC_BIN` give it binaries, so `make test` stays offline and fast
+  on a machine where the gate has cached frp. Both binaries must report, by
+  `--version`, the release the pins file names, so the gate cannot pass on an unpinned
+  frp, and the gate prints the binaries' provenance — the verified archive's SHA-256, or
+  the overrides, unverified (42 observation). The pin was taken from the archive GitHub
+  served and cross-checked once, with the owner's grant, against the release's published
+  checksums file; the tests never read that file.
+- **Floor run.** `make test-floor` builds `.floor/.venv` (named `.venv` so the
+  repository's scans skip it), installs the project's requirements with uv's
+  `lowest-direct` resolution, and fails unless the installed versions equal the declared
+  floors; `uv run --resolution` would relock `uv.lock`, so it is not used.
+- **Shipping.** The systemd unit adds `DynamicUser=yes` beyond frps's hardening, since
+  the plugin needs no privilege. The image runs as uid 10001, takes its version label
+  from a build argument with no default (so the version is written only in
+  `pyproject.toml`), uses `ENTRYPOINT ["frp-grant-admission"]` with a `serve` command
+  arguments replace, and stops on SIGINT, since PID 1 ignores a SIGTERM it has no handler
+  for. Adding the image to `make build` also added it to validation's image inventory
+  (`scripts/change_namespace.py`) and taught the aggregate-target test that a bare build
+  writes a commit tag. The README mounts the configuration's directory, never the file or
+  a `subPath`, and says the plugin is PID 1 (45 O1, O2).
+
+### Declined
+
+- A vector case for the 4 KiB cap (D12's "each rule has a vector case"): its cases are
+  over 4,000 characters of filler each, and a signer's conformance gains nothing from
+  them; the cap is proven in `test_grant.py`. Adding them later is a builder edit and a
+  regeneration.
+- A per-body deadline: the 5-second socket timeout bounds each wait on the socket, as D12
+  says, so a body trickled faster than that holds a thread longer. A deadline would be a
+  design change.
+- Refusing `FRPS_BIN` and `FRPC_BIN` under the gate: D5 makes them how another platform
+  runs it, and the version check and printed provenance cover the risk.
+- An `ARG VERSION` default (it would repeat `pyproject.toml`'s version), and reading the
+  image's licence label from the project (another build argument for a value that does
+  not change).
+- A way to find the plugin's process under `shareProcessNamespace`, and naming the
+  overrides' paths in the provenance line.
+
+### Left unproven
+
+- `serve`, SIGHUP through `docker kill`, and SIGINT as the stop signal were not run in
+  the image; `check` was. The systemd unit was not run under systemd.
+- PyJWT 2.15.1 may map an empty `aud` to `claim_missing` where 2.8.0 says
+  `audience_mismatch`; no vector case holds it, and the floor run passing shows no case
+  the vector has differs.
+- 5.7's count of decisions after an frpc reload is a strong negative taken once the new
+  proxy's decision is logged, not one a bounded test can make airtight.
+
+### Closeout judgements
+
+- **The word "relay" in the README.** The README keeps "relay" for the frps server it
+  guards, as the delta spec and the reason texts do. D14 kept "relay" out of the tool's
+  *name* as this repository's word; the README's rule is that it names no concept of an
+  issuing system, and the relay is frp's server, not the issuer. Section 4 left this to
+  the owner or a review; no review raised it, and closeout judged it compliant.
+- **A test helper's `site_b` keyword.** `tests/integration/test_server.py` names its
+  second-issuer switch `site_b`, a market word D4 keeps out of the tool. It is a test's
+  local name, not an interface, and no review raised it; closeout, which edits no code,
+  records it for whichever change next touches those tests.
+
+## Design promotion record
+
+| Accepted decision | Permanent location |
+|---|---|
+| The admission rule (D1, D2, D6, D12, D18, D19, D22), fail-closed admission, issuers and thumbprints (D3, D3a), no state and loopback only (D8, D13), validated reload (D9), the decision log (D10), the specification and vector at the lock and floors (D7, D23), the real-frp proof (D5) | `openspec/specs/frp-grant-admission/spec.md`, written by the archive from the delta |
+| Why per-proxy grants, no state, loopback only, the issuer model and drain rule, thumbprint ids, explicit typing as the major version, no leeway and the port reuse it protects, where PyJWT ends, reload by validated SIGHUP, the real-frp proof, placement and shipping, and the limits (D1–D14, D18, D23) | `openspec/specs/frp-grant-admission/architecture.md` |
+| The grant, signing, configuration, reason codes, log, vector and pins formats, supported frp version, installation, and operating rules (D2, D3, D3a, D5, D7, D9–D13) | `tools/frp-grant-admission/README.md` (sections 4, 5, 7) |
+| `tools/` holds standalone infrastructure components, their targets and gate (D4, D5) | `tools/README.md#standalone-infrastructure-components` |
+| A standalone component depends on no internal package; generic infrastructure does not belong in a market package, and a component publishes its interface for market code to conform to (D4, "Principles for `ARCHITECTURE.md`") | `docs/development/ARCHITECTURE.md#kind` |
+| Registration and traffic are different proofs; real-process tests as a gated integration flavour (D5, "Principles for `ARCHITECTURE.md`") | `docs/development/TESTING.md#2-integration-tests` |
+| The capability's index row (D14) | `openspec/specs/README.md#capabilities` |
+| The plugin owns every rule it publishes, inheriting none that changes with a library's release (D18, D19, D22) | Not promoted, by the owner's direction: stays in this design's rationale for D18, D19, and D22 |
+| Roadmap | No change: the plugin admits nothing until a relay runs it; no `ROADMAP.md` gap names this change |
+| Campaign index | `openspec/changes/README.md`: this change's row set to `in closeout`, notes rewritten, and linked to its archive directory; the campaign graph line unchanged |
+| D15, D16, D17, D20, D21 (cadence, the rename and the change's name, the PyJWT floor's reason) | Change history only: the floor is in `pyproject.toml`, and the rest is workflow bookkeeping |
+| Notes for `prove-relay-provisioning` | That change's to adopt; they stay here |
+
 ## Open Questions
 
 Deferred beyond this change:
