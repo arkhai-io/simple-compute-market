@@ -1125,8 +1125,11 @@ A schema cutover that transfers ownership of active workloads between persistenc
 `make check-public-content` checks the staged index using
 `scripts/check_public_content.py`. The guarded branch push checks every outgoing
 commit, including intermediate additions and commit messages. The Public content
-CI workflow checks new commits against the event base; it runs after publication
-and therefore provides detection rather than preventing the first upload.
+CI workflow checks commits against the event base, using `origin/dev` for a
+new branch without a previous tip. This retains inspection of every commit outside
+the product branch, including intermediate changes, without treating existing
+product history as newly published work. It runs after publication and therefore
+provides detection rather than preventing the first upload.
 
 The scanner rejects literal personal home paths and private assistant
 planning/session paths. `example-user` is the synthetic fixture username;
