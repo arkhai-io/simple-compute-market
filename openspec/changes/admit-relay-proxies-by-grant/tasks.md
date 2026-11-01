@@ -394,7 +394,7 @@ The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
       `frp-grant-admission ──► prove-relay-provisioning (implementation)` unchanged; `make
       check-change-index`.
 - [ ] 8.7 **Packaging.** `make check-packaging`; `make check-architecture-change
-      CHANGE=frp-grant-admission`. `make check-agent-skills` is not owed unless the change
+      CHANGE=admit-relay-proxies-by-grant`. `make check-agent-skills` is not owed unless the change
       touched `.agents/`, `.claude/`, or `.codex/`.
 - [ ] 8.8 **End-to-end pipeline.** Record the pipeline run validating `HEAD` and its
       result. No `e2e-tests` scenario exercises the plugin; its system-level evidence is
@@ -423,8 +423,8 @@ The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
       the tool's README for the grant specification (sections 4, 5, 7), and
       `tools/README.md` (6.4).
 - [ ] 8.10 **Documentation citations.** `make check-doc-citations
-      CHANGE=frp-grant-admission`; `openspec validate frp-grant-admission --strict` (the
-      pinned validator, run by `make check-change CHANGE=frp-grant-admission`).
-- [ ] 8.11 **Archival.** `openspec archive frp-grant-admission -y`, merging the
+      CHANGE=admit-relay-proxies-by-grant`; `openspec validate admit-relay-proxies-by-grant --strict` (the
+      pinned validator, run by `make check-change CHANGE=admit-relay-proxies-by-grant`).
+- [ ] 8.11 **Archival.** `openspec archive admit-relay-proxies-by-grant -y`, merging the
       `frp-grant-admission` delta into a new `openspec/specs/frp-grant-admission/spec.md`
       (no `--skip-specs`).
