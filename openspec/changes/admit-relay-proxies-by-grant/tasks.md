@@ -327,7 +327,7 @@ Files: `src/frp_grant_admission/server.py`, `src/frp_grant_admission/decision_lo
 `src/frp_grant_admission/cli.py`, `tests/integration/test_server.py`,
 `tests/unit/test_request.py`, `tests/unit/test_cli.py`.
 
-- [ ] 3.1 `server.py` serves `http.server.ThreadingHTTPServer` on the configured loopback
+- [x] 3.1 `server.py` serves `http.server.ThreadingHTTPServer` on the configured loopback
       address, answering `POST /` only: a body of at most 64 KiB read within a 5-second
       socket timeout, else `malformed_request`; valid JSON with `op` `NewProxy`, else
       `malformed_request` or `operation_not_supported`; `content.proxy_type` exactly
@@ -340,28 +340,104 @@ Files: `src/frp_grant_admission/server.py`, `src/frp_grant_admission/decision_lo
       `{"reject": true, "reject_reason": "<code>: <text>"}`. Each request reads the
       configuration reference once, so it finishes under the configuration it started
       with. The server holds no other state and makes no outbound call. (D6, D8, D12, D18)
-- [ ] 3.2 `decision_log.py` writes one JSON line to stderr per decision, in D10's shape —
+      Note: the request's checks are a pure module of their own, `request.py` (not in the
+      plan's file list): `decide_request(request, config, now)` and `decide_body(body,
+      config, now)` return a `Decision` whose `answer()` is frps's reply, so they are
+      unit-tested from a request dict and `decision_log.py` can name a decision without
+      importing the server. `server.py` holds `Plugin` (the configuration reference, the
+      reload, and the clock, `time.time` unless injected, read once per request and
+      floored to whole seconds) and `PluginServer`, a `ThreadingHTTPServer` with daemon
+      threads, whose socket family follows the address (`::1` binds IPv6) and whose
+      `server_bind` skips the standard library's host-name lookup, so binding makes no
+      resolver call. The handler answers `POST` to path `/` with any query (frps
+      appends `?version=0.1.0&op=NewProxy`); another path is 404, and another method is
+      the standard library's 501. A body with no or a bad `Content-Length`, over 64 KiB,
+      or whose next bytes do not arrive within the socket timeout is
+      `malformed_request`; the timeout bounds each wait on the socket, not the whole
+      body, so a body trickled faster than it holds a thread longer. At most 64 KiB + 1
+      bytes are read whatever the declared length. A non-string `metas.grant` is
+      `grant_malformed`, an empty one `grant_missing`. The handler's access log is
+      silenced and a bind failure is a `config_refused` line, so stderr carries only
+      JSON lines but for a traceback from an unexpected exception.
+- [x] 3.2 `decision_log.py` writes one JSON line to stderr per decision, in D10's shape —
       `ts`, `event` (`admit` or `refuse`), `reason` on a refusal, `proxy`, `type`,
       `remote_port`, `issuer` where known, `kid`, `sub`, `jti`, `exp` where present, and
       `verified` — and one line per configuration load or reload, listing each issuer's
       name, range, and key thumbprints, or every problem found. It never writes the grant
       or the request's metadata. (D10)
-- [ ] 3.3 SIGHUP re-reads the file through section 1's loader: a valid file replaces the
+      Note: a decision line is D10's shape, its fields omitted where absent but
+      `verified`, which is always present (false when no grant was read); `ts` comes
+      from the same clock reading as the decision. A load is `{"event":
+      "config_loaded", "trigger": "startup" | "reload", "listen", "issuers": [{"name",
+      "audience", "ports": {"start", "end"}, "keys"}]}`, and a reload naming another
+      listen address adds `listen_at_restart`, `listen` staying the bound one. A refusal
+      is `{"event": "config_refused", "trigger", "problems"}`, with `"kept": "the running
+      configuration"` on reload. Lines are strict ASCII JSON, one write each, under a
+      reentrant lock; a non-finite number a sender wrote is logged as Python writes it
+      (`NaN` as `"nan"`, `1e400` as `"inf"`), and a field nested too deeply for a Python
+      recursion to walk — the JSON parser accepts deeper — as `"<nested too deeply to
+      log>"`, so no decision loses its line. Unit,
+      `tests/unit/test_decision_log.py` (not in the plan's file list): an admission's
+      exact line; a forged grant logged unverified with no segment of the grant in the
+      log; a request refusal naming only what the request sent, with no client-wide
+      metadata; a proxy name holding a quote and a newline staying one line; a `NaN`
+      name and an infinite port logged as text; a proxy name nested 5,000 deep logged as
+      the placeholder; and the three configuration lines — passes.
+- [x] 3.3 SIGHUP re-reads the file through section 1's loader: a valid file replaces the
       configuration reference in one assignment; an invalid one leaves the running
       configuration and logs every problem. `listen` is bound once at startup: a reload
       that changes it applies the rest and logs that the new address takes effect at
       restart. (D9; 14 F2)
-- [ ] 3.4 `cli.py`: `frp-grant-admission serve --config <path>` refuses to start, exiting
+      Note: `install_reload_on_sighup(plugin)` sets the handler and returns the one it
+      replaced. Python runs it in the main thread, which otherwise only serves the
+      socket, so the one write it can interrupt there is another reload's, when a
+      second SIGHUP lands during a reload; the log's lock is reentrant, so that never
+      deadlocks. `serve` installs it only after binding and writing its startup line; a
+      SIGHUP before then ends the process by its default action, which frps meets as a
+      plugin that does not answer. A reload that raises anything keeps the running
+      configuration: a file nesting too deeply for `tomllib` is a `ConfigError` from the
+      loader, any other exception in `Plugin.reload` a one-problem `config_refused`
+      (untested: nothing in the loader is known to raise one), and the handler catches
+      whatever escapes, since an exception leaving a signal handler would end
+      `serve_forever`. Unit, `tests/unit/test_reload_signal.py` (not in the plan's file
+      list): a plugin whose reload raises, signalled twice, is reloaded twice with the
+      traceback on stderr and nothing raised — passes. `Plugin` compares a reloaded `listen` with the one it started with, not with the
+      socket's address, so a test server bound to an ephemeral port reports the change
+      as an operator's would.
+- [x] 3.4 `cli.py`: `frp-grant-admission serve --config <path>` refuses to start, exiting
       non-zero with every problem, on a file that does not load; `frp-grant-admission
       check <path>` loads a file without touching a running plugin, prints each issuer
       with its range and its keys' thumbprints, and exits non-zero naming every problem
       when it does not load. (D9)
-- [ ] 3.5 Unit (`tests/unit/test_request.py`): each request refusal of 3.1 from a request
+      Note: `main(argv)` returns the exit status, and `cli.py` runs it as `python -m
+      frp_grant_admission.cli` too. `serve` is `start(path, log)` — load, bind, write
+      the startup `config_loaded` line, install the SIGHUP handler — then
+      `serve_forever`. On a file that does not load it writes one `config_refused`
+      line, `trigger: startup`, with every problem, and exits 1; a listen address it
+      cannot bind is a `config_refused` line naming it, and exits 1. `check` prints `listen <address>`,
+      then `issuer <name>: audience <audience>, ports <start>-<end>` and an indented `key
+      <thumbprint>` per key, and on a file that does not load prints every problem to
+      stderr and exits 1.
+- [x] 3.5 Unit (`tests/unit/test_request.py`): each request refusal of 3.1 from a request
       dict, including a grant only in `content.user.metas`, `remote_port` 0, a non-empty
       `group`, `op` `Login`. Unit (`tests/unit/test_cli.py`): `check` prints thumbprints
       for the example and fails naming each problem of an invalid file; `serve` exits
       non-zero on one.
-- [ ] 3.6 Integration, in-process (`tests/integration/test_server.py`), the server on an
+      Note: unit, all pass. `test_request.py`: an admission's answer and named fields;
+      the refusal answer's `"<code>: <text>"`; every request refusal — not an object,
+      `op` missing, not a string, `Login`, `CloseProxy`, no `content` or not an object,
+      `proxy_type` `stcp`, `TCP`, or absent, a non-empty `group`, `remote_port` 0, 65536,
+      a string, `true`, or absent, `metas` absent or without a grant, an empty grant, a
+      non-string grant; an empty `group` admitted; a grant only in `content.user.metas`
+      refused as `grant_missing` with no grant read; the request checks deciding before
+      a forged grant is read; the grant checked against the requested port; and bodies
+      that are not JSON or over 64 KiB. `test_cli.py`: `check` on the example and on a
+      file with four problems, `check` on a missing file, `serve` refusing to start on
+      the four-problem file (one `config_refused` line with four problems, and a return
+      of 1), and `serve` without `--config`. `test_config.py` gains a file nesting too
+      deeply for the parser, refused with one problem. The frps request shape is shared by the unit and
+      integration tests from `tests/frps_request.py`.
+- [x] 3.6 Integration, in-process (`tests/integration/test_server.py`), the server on an
       ephemeral `127.0.0.1` port with a fixed clock, sent bodies shaped as frps's
       `NewProxy` request: a valid grant is answered with an admission, and its log line
       has `verified: true`; a forged grant is refused as `signature_invalid`, and its log
@@ -373,9 +449,46 @@ Files: `src/frp_grant_admission/server.py`, `src/frp_grant_admission/decision_lo
       and every problem is logged; a reload changing `listen` keeps the bound address and
       logs that it waits for a restart. Waits are bounded and observe the log or the
       answer, never a sleep.
-- [ ] 3.7 Verification: `make -C tools/frp-grant-admission test` (unit and in-process
+      Note: integration (in-process), all pass. `tests/integration/test_server.py`, 12
+      cases: the server on `127.0.0.1:0` in a thread, its clock fixed at the vector's
+      time, logging to a stream whose lines a test waits for under a condition with a
+      5-second bound. Each case listed above, plus a body sent with no
+      `Content-Length` (refused as `malformed_request`, and logged), a body stalled past
+      a 0.2-second socket timeout the test sets (refused and logged), the server on
+      `[::1]` admitting a grant (skipped where no IPv6 loopback can be bound; it ran
+      here), and a `POST` to another path (404). `tests/integration/test_start.py`, 2
+      cases (not in the plan's file list): `start` binds the address the file names,
+      writes the startup line, reloads on a SIGHUP sent to the process (an issuer added,
+      its reload line awaited), and answers a request on the system clock (only the
+      answer's shape is asserted, since the vector's grant is not yet valid on it); and
+      an address already in use is a `config_refused` line, no server, and no handler
+      installed. The configured port is found free just before `start` binds it, a race
+      the test accepts. The over-64-KiB body is exactly 64 KiB + 1 bytes, so the server reads all
+      of it and its reply is not lost to a reset; a longer body is refused the same way,
+      but frps may then see the connection reset rather than the refusal, which fails
+      closed alike. SIGHUP is sent to the test process with the reload handler installed
+      in pytest's main thread and restored after each test; each test waits for the
+      reload's log line before posting, so it never depends on when the handler runs.
+      The invalid reload's file has two problems
+      (an overlap and `localhost`), and both are logged. Section 5 proves reload and
+      fail-closed against real frps.
+- [x] 3.7 Verification: `make -C tools/frp-grant-admission test` (unit and in-process
       integration).
       End-to-end: none (see the preamble).
+      Note: `make -C tools/frp-grant-admission test` — unit and in-process integration,
+      174 passed, none skipped. `make check-packaging` — passes. `make test` — passes
+      (the tool joins it in section 6). End-to-end: none, confirmed.
+      Handoff: the fresh-context check, run twice, found and this section fixed `[::1]`
+      failing to bind, a SIGHUP during startup able to deadlock on the log's lock, a
+      reload error other than `ConfigError` ending the server, `NaN` making a line
+      invalid JSON, deep nesting losing a line, and the standard library's host-name
+      lookup at bind; and notes that overstated their tests. Not fixed: the socket timeout bounds each wait rather than the body (D12
+      says "socket timeout"; a per-body deadline is a design change if wanted), and a
+      forged grant's line carries `issuer` and the unverified `exp`, which D10's example
+      line omits — 3.2's "where known, where present" puts them there, and the README
+      (section 4) states the fields. The configuration lines' shapes, `verified` always
+      present, the `Content-Length` rules, and 404 versus 501 are this section's choices;
+      section 4's README states the log's fields.
 
 ## 4. The README specification
 

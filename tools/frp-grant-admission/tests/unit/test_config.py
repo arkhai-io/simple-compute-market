@@ -329,6 +329,12 @@ def test_text_that_is_not_toml_is_refused() -> None:
     assert problem.startswith("not valid TOML: ")
 
 
+def test_a_file_nesting_too_deeply_for_the_parser_is_refused() -> None:
+    (problem,) = problems("listen = " + "[" * 5000 + "]" * 5000)
+
+    assert problem.startswith("not loadable: ")
+
+
 def test_a_missing_file_is_refused(tmp_path: Path) -> None:
     with pytest.raises(ConfigError) as caught:
         load_config(tmp_path / "absent.toml")

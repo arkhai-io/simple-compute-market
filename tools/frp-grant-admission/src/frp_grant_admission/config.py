@@ -118,6 +118,8 @@ def parse_config(text: str) -> Config:
         document = tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError([f"not valid TOML: {exc}"]) from None
+    except RecursionError:
+        raise ConfigError(["not loadable: its tables or arrays nest too deeply"]) from None
     return _Loader().load(document)
 
 
