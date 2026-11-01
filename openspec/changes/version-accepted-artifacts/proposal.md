@@ -1,52 +1,31 @@
 ## Why
 
-Marketplace roles persist *accepted artifacts*: records whose exact content was signed
-by a counterparty, pinned by a content digest, or used to derive an identity another
-service holds. Negotiation messages and terms, accepted settlement plans, accepted
-hosted bindings, lease-ready results and evidence, and fulfillment identities derived
-from them are all accepted artifacts. They can outlive many releases — a bare-metal
-contract can run for a year.
+Bare-metal Alkahest fulfillment stores canonical lease-ready evidence and publishes
+its digest. Recovery nevertheless decodes the document through current models,
+checks its nested result through model serialization, recomputes the outer digest
+for publication, and signs a reserialized body when serving it. A new model default
+can change the digest of unchanged accepted content. Selecting a row by its digest
+also does not verify the retrieved body.
 
-The repository has no rule for evolving them. `unify-host-identity` found the gap:
-renaming one field inside bare-metal terms left three choices — rewrite signed
-content (breaks the proof), refuse to upgrade until every live contract ends (not
-viable for year-long contracts), or reset the database (acceptable only because bare
-metal is unreleased). None is a patching strategy.
-
-A second, sharper defect sits beside the gap. The bare-metal storefront verifies a
-stored digest by re-serializing the loaded record through the *current* model and
-hashing the result (`arkhai_bare_metal_storefront/models.py`'s lifecycle validator;
-`arkhai_bare_metal/evidence.py`'s result check). Renaming a field, or adding one with
-a non-`None` default, makes untampered stored records fail to load. The check proves
-"this record still matches today's code", not "these are the bytes that were
-accepted".
-
-One precedent already exists: hosted-fiat keeps historical card-only accepted rows
-decodable for recovery under their original identities
-(`openspec/specs/settlement-servicing/spec.md`). This change generalizes it.
+Accepted content and its application view need separate authority. Negotiation and
+Arkhai payments already retain exact Agreement bytes. This change corrects the
+concrete bare-metal portable-evidence path and records accurate evolution guidance
+without changing payment protocols.
 
 ## What Changes
 
-- Establish a repository-wide rule for accepted artifacts:
-  1. **Never rewrite accepted content.** Stored accepted artifacts are immutable
-     bytes. Migrations may rewrite derived, unsigned state freely.
-  2. **Verify over stored bytes.** A digest or signature is checked against the
-     exact stored canonical bytes, never against a re-serialization through a live
-     model.
-  3. **Stop producing a kind; keep reading it.** Retiring an artifact `kind` stops
-     new production immediately. A read-only decoder for the retired kind remains,
-     converting to the current in-memory model.
-  4. **Retire decoders by measurement.** Each retained decoder has a count of
-     non-terminal records that still need it. The decoder is removed once that count
-     is zero on every deployment — so contracts retire their own kinds by ending, and
-     no operator is forced to drain.
-  5. **Never rename a kind retroactively.** Identities derived under a kind stay
-     under it.
-- Fix bare-metal digest verification to rule 2.
-- Add retained-decoder and live-count machinery, first for `bare_metal.v1`, and
-  decide whether it is shared kit machinery or per-domain.
-- Promote the rule to `docs/development/ARCHITECTURE.md`'s schema-evolution guidance
-  and to `deployment-state`.
+- Introduce a bare-metal-owned immutable evidence document containing retained
+  canonical UTF-8 bytes, their verified digest, and a separate validated view.
+- Verify the stored document against its expected digest before decoding, and
+  verify its nested result from original JSON rather than a live-model dump.
+- Carry the document through first-write-wins persistence, Alkahest recovery and
+  publication, authenticated evidence resolution, signing, and both typed clients.
+- Preserve existing v1 JSON, signed envelope, routes, canonicalization, identity
+  derivation, and authorization. Preserve field-style Python reads with explicit
+  read-only properties; version the nominal type change as a minor release of
+  `arkhai-bare-metal`.
+- Clarify preservation while retained, protocol-owned proof rules, and explicit
+  reader support boundaries. Keep authorized deletion and unsupported-wire refusals.
 
 ## Capabilities
 
@@ -56,50 +35,64 @@ None.
 
 ### Modified Capabilities
 
-- `deployment-state`: accepted artifacts evolve by retained readers and are verified
-  over stored bytes.
+- `deployment-state`: accepted-representation evolution and reader support boundaries.
+- `storefront-publication`: retained-byte bare-metal evidence verification,
+  publication, resolution, and client behavior.
 
 ## Non-Goals
 
-- Do not reintroduce a `bare_metal.v1` decoder for the preprod reset performed by
-  `unify-host-identity`; that state is gone by design. The first retained decoder is
-  for whichever kind is next retired after this change lands.
-- Do not change what any artifact contains or how any identity is derived.
-- Do not migrate hosted-fiat's existing recovery-only card path; confirm it already
-  satisfies the rule, and cite it as the precedent.
+- No generic envelope, decoder registry, fleet inventory, retirement-count endpoint,
+  or cross-domain conversion project. No artifact kind is retired.
+- No revival of retired bare-metal payloads or hosted-fiat recovery.
+- No repair of API-credit issuance evidence or generated payment wire models.
+- No new wire wrapper, canonicalization, hash, signature protocol, or accepted
+  identity. Arkhai payments retains its JCS rules.
+- No change to contact deletion/tombstoning, previous-wire mandate refusal,
+  publication-uncertainty handling, or access privileges.
 
 ## Status
 
-Proposed for a future session. Not planned. **Must land before bare metal is
-released**, because after release a reset stops being acceptable.
+Design settled for one coherent implementation round; not planned. Design review
+is next. The change remains `in design` until review triage advances it.
 
 ## Impact
 
-- **Affected code (expected):** `domains/bare_metal/storefront` lifecycle model and
-  persistence; `domains/bare_metal/src/arkhai_bare_metal/evidence.py` and
-  `hosted_contract.py`; possibly `kit/negotiation-runtime` for transcript storage; a
-  shared decoder registry if one is chosen.
-- **Affected data:** stored accepted artifacts gain a stored canonical-bytes form
-  where they lack one. Additive.
-- **Wire:** none.
+- **Code:** bare-metal evidence codecs, route service and clients, exports,
+  storefront evidence persistence, Alkahest lifecycle, thin HTTP binding, affected
+  tests, and package metadata/locks.
+- **Data:** reuse `lease_ready_evidence_json` and `lease_ready_evidence_digest`.
+  No accepted-content rewrite, schema backfill, or database reset.
+- **Wire:** unchanged v1 evidence and signed-response shapes. Unknown kinds remain
+  unsupported; existing readers receive the same fields.
+- **Python:** client method signatures and the named signed-response carrier stay.
+  Its evidence document preserves field-style reads, nested result fields, and
+  byte-derived digest operations. The nominal nested type changes, requiring a
+  minor domain-distribution release and refresh of affected consumers.
 
 ## Permanent documentation impact
 
-- [x] `docs/development/ARCHITECTURE.md` — "Build, packaging, and initialization"'s
-      schema-evolution paragraph gains the accepted-artifact rule.
-- [x] Existing subsystem specification — `deployment-state`.
+- [x] `docs/development/ARCHITECTURE.md` — accepted representation versus decoded
+  view, protocol-owned proof rules, and bounded schema-evolution guidance.
+- [x] Existing subsystem specifications — `deployment-state` and
+  `storefront-publication`, including architecture companions.
 - [ ] New subsystem specification — none.
 - [ ] No permanent documentation change — not applicable.
 
 ### Knowledge to promote
 
-- The five-part accepted-artifact rule — `ARCHITECTURE.md` and
-  `openspec/specs/deployment-state/spec.md`.
+- Preservation during evolution, proof inputs, retention and compatibility floors —
+  `docs/development/ARCHITECTURE.md`, `openspec/specs/deployment-state/spec.md`,
+  and `openspec/specs/deployment-state/architecture.md`.
+- Bare-metal documents, verification, first-write-wins recovery, signed JSON, and
+  client compatibility — `openspec/specs/storefront-publication/spec.md` and
+  `openspec/specs/storefront-publication/architecture.md`.
+- Bounded correction and remaining inventory disposition —
+  `docs/development/ROADMAP.md` and this change's campaign row at closeout.
 
 ## Dependencies and Related Changes
 
-- **Found by `unify-host-identity`**, which reset the preprod bare-metal storefront
-  instead of applying this rule.
-- **Blocks bare-metal release** — `add-bare-metal-hosted-settlement` and any change
-  that release-qualifies the bare-metal stack.
-- Precedent: hosted-fiat's recovery-only card path.
+No prerequisite. The originating host-identity rename used an explicit
+preproduction reset; that exception is not a recurring upgrade strategy.
+Negotiated Agreement retention and payment servicing remain the existing contracts
+in `openspec/specs/negotiation-protocol/spec.md` and
+`openspec/specs/settlement-servicing/spec.md`.
