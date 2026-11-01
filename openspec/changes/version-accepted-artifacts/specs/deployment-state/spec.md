@@ -1,41 +1,47 @@
 ## ADDED Requirements
 
-### Requirement: Accepted artifacts are immutable and verified over stored bytes
+### Requirement: Evolution preserves retained accepted representations
 
-A service MUST persist an accepted artifact — content signed by a counterparty,
-pinned by a content digest, or used to derive an identity another service holds — as
-its exact accepted canonical bytes, and MUST NOT rewrite those bytes in any migration.
-Signature and digest verification MUST be computed over the stored bytes, never over a
-re-serialization of the record through the current code's model.
+A change evolving retained signed or content-addressed state MUST preserve the
+original accepted representation and identity. Proof verification MUST use the
+owning protocol's canonicalization and framing over that representation before
+conversion to an application view. A migration MUST NOT replace accepted content
+with a current-model dump. Derived unsigned state MAY migrate separately.
 
-#### Scenario: A model gains a defaulted field
+#### Scenario: A decoded view gains a defaulted field
 
-- **WHEN** a release adds a field with a default to the model an accepted artifact
-  decodes into
-- **THEN** every artifact stored before the release still verifies and loads
+- **WHEN** an upgrade adds a defaulted field to the application view of retained
+  bare-metal lease-ready evidence
+- **THEN** original evidence bytes, digest, signature input, and supported v1
+  decoding remain unchanged
 
-#### Scenario: A migration renames a field
+#### Scenario: A derived field is renamed
 
-- **WHEN** a migration renames a field that appears inside stored accepted artifacts
-- **THEN** the stored accepted bytes are unchanged, and only derived unsigned state is
-  rewritten
+- **WHEN** a migration renames derived state beside retained accepted content
+- **THEN** the original accepted representation and identity are not rewritten
 
-### Requirement: Retired artifact kinds keep read-only decoders until unused
+### Requirement: Preservation respects explicit support and retention boundaries
 
-When an artifact kind is retired, a service MUST stop producing it and MUST retain a
-read-only decoder that converts it to the current model for as long as any
-non-terminal record references it. The service MUST expose the count of non-terminal
-records referencing each retained kind, and a decoder MUST NOT be removed while that
-count is non-zero on a deployment that still holds such records. A retired kind MUST
-NOT be renamed, and identities derived under it MUST NOT be re-derived under another.
+Representation preservation MUST NOT extend authorized retention, reverse deletion
+or tombstoning, or reenable explicitly unsupported wire versions. A reader-removal
+change MUST identify supported reference and read obligations and establish that
+none still needs the reader. Zero nonterminal records alone MUST NOT establish
+that retained terminal evidence or supported recovery is unused.
 
-#### Scenario: A long-running contract spans a kind retirement
+#### Scenario: Contact retention deletes an accepted payload
 
-- **WHEN** a release retires the kind a live contract was accepted under
-- **THEN** the contract continues to be serviced through the retained decoder, and no
-  operator drain is required before the upgrade
+- **WHEN** the contact capability deletes payloads under its authorized policy
+- **THEN** existing tombstone and refusal behavior remain authoritative, and the
+  deleted payload is not presented as replacement content under its old proof
 
-#### Scenario: The last contract under a retired kind ends
+#### Scenario: A previous-wire payment mandate is loaded
 
-- **WHEN** the count of non-terminal records referencing a retained kind reaches zero
-- **THEN** the decoder is eligible for removal in a later release
+- **WHEN** settlement data carries a mandate the settlement contract explicitly refuses
+- **THEN** it remains refused and unchanged rather than converted or reenabled
+
+#### Scenario: Terminal evidence still has supported readers
+
+- **WHEN** no nonterminal contract needs a decoder but retained terminal evidence
+  still has a supported read obligation
+- **THEN** a removal change cannot declare that decoder unused from the
+  nonterminal count alone
