@@ -35,21 +35,26 @@ holds a relay's token can register any free port the relay allows.
 - **Relay admission by signed grants.** The provisioning service signs a grant per
   lease with a key the relay row holds, conforming to the plugin's grant
   specification — type `frp-grant+jwt`, the key named by its RFC 7638 thumbprint,
-  RFC 8785 serialization, no `iat` — through `cryptography` and `rfc8785`, with no JWT
-  library; the proxy carries it; a plugin on the relay admits a proxy only for the
-  port its grant names, within its issuer's range. Every
+  RFC 8785 serialization, an integer expiry, the host and the owning reservation as
+  string subject and identifier, no `iat` — through `cryptography` and `rfc8785`, with
+  no JWT library; the proxy carries it; a plugin on the relay admits a proxy only for
+  the port its grant names, within its issuer's range. Every
   relay is configured for admission: every proxy carries a grant, and a relay with no
   active key is refused. That a relay enforces it is the operator's installation,
   stated as the relay's requirements and proven by the runbook's admission check
-  before its pools serve buyers; the service does not verify it. A retired key stays
+  before its pools serve buyers; the service does not verify it. The operator supplies
+  a relay's key through the secrets profile as base64 PKCS#8 DER, refused by name when
+  malformed, so a reinstall keeps it; rotation stages a supplied key, redacted
+  everywhere, or one the service generates. A retired key stays
   valid while a lease allocated before its retirement is unreleased and its grant
-  unexpired. Management ports use another relay; a relay may be shared
-  by several provisioning services, each bound to its own range, the relay's window
-  lying within it. A released port is not reissued until its grant's expiry plus a
+  unexpired. Management ports use another relay. One relay per operator, with its own
+  token, is the recommended deployment; a relay may be shared by several provisioning
+  services, each bound to its own range, the relay's window lying within it, with its
+  limits stated. A released port is not reissued until its grant's expiry plus a
   configured reuse margin has passed, with the relay's and the service's clocks kept
-  synchronised. The plugin itself is the prerequisite change `frp-grant-admission`'s;
-  SCM's tests check the signer against its vector and the frp pin against its pins
-  file.
+  synchronised. The plugin itself is the prerequisite change
+  `admit-relay-proxies-by-grant`'s, building the tool `frp-grant-admission`; SCM's tests
+  check the signer against its vector and the frp pin against its pins file.
 - **Relays run the plugin.** `relay-server` prepares a VPS relay — frps under systemd
   and the plugin as a plain program from a wheel it is given — and discloses no
   secret; a containerised relay runs the plugin's image as a sidecar beside frps, as
@@ -101,6 +106,9 @@ None. The plugin's capability is `frp-grant-admission`'s.
 - Running the real lanes in the end-to-end pipeline; like the direct real lane, they
   run outside every lane.
 - Extending a lease without dropping its session.
+- Emergency rotation of a relay's credentials across live hosts — re-issuing grants
+  under a new key, and rotating the relay token — recorded as a `ROADMAP.md` gap for a
+  follow-up change; the runbook states the per-incident choice meanwhile.
 - Relay deletion semantics (`relay-vm-access-without-a-dashboard` decision gate 1A.7)
   and the concurrent-allocation retry gap `ROADMAP.md` records.
 - Moving the admission plugin to its own repository, which is a later change, and
@@ -135,10 +143,12 @@ None. The plugin's capability is `frp-grant-admission`'s.
 
 ## Dependencies and Related Changes
 
-- `frp-grant-admission` (prerequisite, gating the plugin-dependent sections and
-  closeout): builds the relay admission plugin and owns the grant specification, test
-  vector, and frp pins this change's signer and roles conform to; its settled design's
-  notes for this change are reconciled in `design.md` (D16, D17, D18, D20, D22, D23).
+- `admit-relay-proxies-by-grant` (prerequisite, gating the plugin-dependent sections
+  and closeout): builds the relay admission plugin, the tool `frp-grant-admission`,
+  which owns the grant specification, test vector, and frp pins this change's signer
+  and roles conform to; its settled design (D1–D23, on this branch as copied from its
+  branch at `c792653e5`) and its notes for this change are reconciled in `design.md`
+  (D16, D17, D18, D20, D22, D23).
 - `relay-vm-access-without-a-dashboard` (blocked in closeout): its implemented relay
   resource, allocator, and split clients are what this change moves and exercises, and
   its sections 6 and 8 are closed with evidence this change's live run produces. It
@@ -180,10 +190,18 @@ None. The plugin's capability is `frp-grant-admission`'s.
   rotation and a retired key's retention, an emergency rotation, site onboarding with
   the window within its range, the drain rule, a host teardown cannot reach);
   `docs/seller-frp-setup.md` (what a relay must run).
-- The grant's conformance to the plugin's specification (no `iat`, JCS signing,
-  thumbprint key ids, public keys in the plugin's format) and the vector and pins
-  checks (D16, D17, D18) → `physical-provisioning` architecture, the section on relay
-  admission.
+- The grant's conformance to the plugin's specification (no `iat`, JCS signing, claim
+  types, `jti` the owning reservation, thumbprint key ids, public keys in the plugin's
+  format) and the vector and pins checks (D16, D17, D18) → `physical-provisioning` spec
+  and architecture, the section on relay admission.
+- The grant key's profile form and its refusal, rotation with a supplied key keeping
+  the profile current, and its redaction (D17) → `physical-provisioning` spec;
+  `docs/development/DEPLOYMENT_AND_CONFIG.md` (the secrets-profile key and its form);
+  the runbook (rotation, a service-generated key surviving only with the database).
+- One relay per operator as the recommended deployment, a shared relay's limits, the
+  emergency choice per incident, and the host- and relay-side steps for a host teardown
+  cannot reach (D16, D17, D20) → `physical-provisioning` architecture; the runbook;
+  `docs/seller-frp-setup.md`.
 - The reuse margin and the clock-synchronisation requirement (D16) →
   `physical-provisioning` spec; `docs/development/DEPLOYMENT_AND_CONFIG.md` (the
   setting); the runbook (clocks).
@@ -210,5 +228,6 @@ None. The plugin's capability is `frp-grant-admission`'s.
 - The target's version 2, both real lanes, and the evidence split (D5–D11) →
   `openspec/specs/test-compatibility/spec.md`; `docs/development/TESTING.md` "The
   real-provisioning lane"; `e2e-tests/README.md`; the runbook.
-- The closed relay-lane gap; the unowned gaps for `host_key_checking = False` and for
-  admission at login on a shared relay (D4, D21) → `docs/development/ROADMAP.md` Goal 1.
+- The closed relay-lane gap; the unowned gaps for `host_key_checking = False`, for
+  admission at login on a shared relay, and for emergency rotation of both relay
+  credentials across live hosts (D4, D21, D17) → `docs/development/ROADMAP.md` Goal 1.

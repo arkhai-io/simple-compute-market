@@ -2,10 +2,14 @@
 
 ## Context
 
-Designed against `dev` at `16d585d9d`, and reconciled with `frp-grant-admission`'s
-settled design (its `design.md`, decisions D1–D15 and its notes for this change), which
-owns the grant specification this change's signer conforms to. Where this document
-names that change's decisions it says so (its D2, its D3a, and so on).
+Designed against `dev` at `16d585d9d`, and reconciled with `admit-relay-proxies-by-grant`'s
+settled design (its `design.md`, decisions D1–D23, settled again at `2c4e080b8`, and its
+notes for this change), whose documents are on this branch as copied from its branch at
+`c792653e5`. That change builds the tool `frp-grant-admission`, which owns the grant
+specification this change's signer conforms to; the tool, its distribution, its
+capability, and its specification keep that name. Where this document names that
+change's decisions it says so (its D2, its D3a, and so on); its D16–D23 are its own, not
+this document's.
 
 The relay path `relay-vm-access-without-a-dashboard` built has never run on real
 hardware, and that change cannot close until its reload gate (its section 6) and its
@@ -89,9 +93,30 @@ What the code shows, where the proposal's first account of it was wrong:
     unknown (its D3a); the configuration is TOML, keys grouped under issuers with one
     audience and one range each (its D3, D13); a signer serializes header and claims
     as RFC 8785 JSON and reproduces the vector's tokens byte for byte (its D7); expiry
-    and issue time are checked on the relay's clock with no leeway (its D12); and the
-    plugin ships as a wheel runnable under systemd and as an image, neither published
-    until it moves to its own repository (its D11).
+    and issue time are checked on the relay's clock with no leeway (its D12, D18);
+    `exp`, `nbf`, and `iat` must be JSON integers, `sub` and `jti` strings when present,
+    and a header carrying `crit` is refused, each as `grant_malformed` and each decided
+    by the plugin itself rather than by PyJWT (its D18, D19, D22); the vector is proven
+    at the tool's lock and with each runtime dependency at its declared floor (its D23);
+    and the plugin ships as a wheel runnable under systemd and as an image, neither
+    published until it moves to its own repository (its D11).
+15. **A lease row is the port's, reused across tenancies.** `_claim` takes the released
+    row for a relay and port and keeps its id, resetting its owner, host, pool,
+    `released_at`, and `created_at` (`allocator.py`), so the table is bounded by window
+    size. A lease's id therefore names the port's row, and every tenancy of one port
+    shares it; the owning reservation (`owner_id`) is what differs per tenancy, and the
+    holdings read reports both.
+16. **A lease's host is optional and its times are naive UTC.** `relay_port_leases.host_id`
+    is nullable, and the table stores `DateTime` values in UTC without a zone
+    (`allocator.py`), so a grant built naively from a lease could carry `"sub": null`, a
+    fractional `exp`, or an `exp` converted as local time — each of which the plugin
+    refuses or misreads.
+17. **frps's admin API cannot end one client's sessions.** In frp 0.61.1 it is read-only
+    apart from clearing offline proxies' statistics, so ending sessions on a relay means
+    restarting frps under every client it serves, and restarting it alone readmits a
+    reconnecting client whose grant is unexpired. A relay token is rotated only while
+    the relay carries no tunnels (`RelayService.rotate_token`), since a host adopts a new
+    token only by restarting its client.
 
 ## Goals and non-goals
 
@@ -308,19 +333,38 @@ of RFC 8032's test key, an example only:
 
 ```text
 header  {"alg":"EdDSA","kid":"kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k","typ":"frp-grant+jwt"}
-claims  {"aud":"relay-bm","exp":1798765200,"jti":"lease-7f3a","port":6203,"sub":"example-bm-1"}
+claims  {"aud":"relay-bm","exp":1798765200,"jti":"res-3f0a9c2e","port":6203,"sub":"example-bm-1"}
 ```
 
-`aud` is the relay's id, `port` the leased port, `exp` the lease end plus a grace,
-`sub` the host, `jti` the lease, and `kid` the signing key's thumbprint (D17). The type
-is a constant naming the specification's version 1; an incompatible version would take
-the specification's next type.
+`aud` is the relay's id, `port` the leased port, `exp` the lease's `grant_expires_at`,
+`sub` the lease's host, `jti` the lease's owning reservation (`owner_id`), and `kid` the
+signing key's thumbprint (D17). The type is a constant naming the specification's
+version 1; an incompatible version would take the specification's next type. The
+header has exactly `alg`, `kid`, and `typ`, so it never carries `crit`; a grant is
+some 300 bytes against the plugin's 4 KiB bound (its D12).
+
+Every claim has the type the specification requires (its D2, D18, D19). `exp` is a JSON
+integer: allocation records `grant_expires_at` rounded up to the whole second, stored
+as the table's other times are (naive UTC), and the signer converts that stored value
+as UTC — never through a naive `timestamp()`, which reads local time — to exactly its
+epoch seconds. One value then serves both rules that read it: the grant expires no
+earlier than the lease end plus the grace, and quarantine holds the port until that
+same instant plus the reuse margin. `sub` and `jti` are strings; `sub` is omitted when
+the lease records no host (correction 16), never `null`, which the plugin refuses, and
+`jti` is always present, since `owner_id` is not nullable.
+
+`jti` names the owning reservation rather than the lease row because a row is reused
+for every tenancy of its port (correction 15): the reservation is unique per tenancy —
+one active lease per owner is enforced, and a released reservation takes no other — so
+a relay's log line resolves through the holdings read to the reservation, and through
+it to the deal, even after the port is reissued. Grants re-signed on a job's retries
+share it, and their `exp`.
 
 The grant carries no `iat`. The plugin refuses an `iat` later than the relay's clock,
-with no leeway (its D12), so a service clock even seconds ahead of the relay's would
-refuse a freshly signed grant until frpc's own retry, failing a create whose status
-wait is shorter; and no reader uses the claim — the plugin logs `kid`, `sub`, `jti`,
-and `exp`, and `jti` already names the grant. No `nbf` is set either.
+with no leeway (its D12, D18), so a service clock even seconds ahead of the relay's
+would refuse a freshly signed grant until frpc's own retry, failing a create whose
+status wait is shorter; and no reader uses the claim — the plugin logs `kid`, `sub`,
+`jti`, and `exp`, and `jti` already names the tenancy. No `nbf` is set either.
 
 The plugin admits a proxy only when its type is `tcp`, the signature is valid under
 a configured key matching `kid`, `aud` is the key's issuer's audience, `port` equals
@@ -340,7 +384,7 @@ runtime. Conformance is the vector check (D18).
 Lifecycle:
 
 1. Allocation records `grant_expires_at` on the lease: the reservation's lease end
-   plus a configured grace covering teardown.
+   plus a configured grace covering teardown, rounded up to the whole second.
 2. Execution signs the grant from the lease, immediately before the job's variables
    are written, as the relay token is resolved, on every attempt of the job; it never
    enters job parameters, and never a job's logs, error, or result (D3's `no_log` and
@@ -357,9 +401,18 @@ Lifecycle:
 4. Teardown is the revocation: it removes the proxy and the access (the guest, or
    the key and the tenant's activity, D15). The grant's remaining life matters only
    to root on that host, and only for its own former port. A host teardown cannot
-   reach keeps its live registration until an operator acts on the relay or the
-   host; frp checks admission only at registration, so no grant scheme removes
-   that, and the runbook gains a relay step for it.
+   reach keeps its live registration until an operator acts on the host or the
+   relay; frp checks admission only at registration, so no grant scheme removes
+   that, and the runbook gives both steps. On a host the operator can still reach,
+   `systemctl disable --now frpc-buyers` deregisters its proxies and ends its buyer
+   sessions without touching the management client (D3's split units); disabling as
+   well as stopping keeps a reboot from registering them again while their grants are
+   unexpired. On a host it cannot reach, restarting frps alone does not keep it out —
+   its client reconnects and registers again with an unexpired grant (correction 17) —
+   so the relay-side step blocks the host's source address at the relay's firewall
+   and then restarts frps, dropping every session on that relay: under the
+   recommended deployment (D20), one operator's. Where that address is shared with
+   other hosts, the alternative is removing the relay's key at once (D17).
 
 Extending a lease would mean re-signing and rewriting the stanza, which drops that
 buyer's session; it is a recorded limit, and no fulfillment path extends a lease
@@ -377,7 +430,17 @@ so the copy lands only while the new holder's proxy is unregistered. The margin 
 cheap beside it: a released port held five minutes longer. It does not apply to D17's
 retirement bound, since by `exp` the lease the grant served has ended.
 
-Rejected: short-lived grants renewed (renewal drops the session, and an expiry
+Rejected: `jti` as the lease row's id (shared by every tenancy of a port, so an old log
+line resolves only to "this port, some earlier lease"); a fresh lease row per tenancy
+(reopens the allocator's claim-by-update, which keeps the port's unique constraint as
+strict as it reads, to tie a log line to nothing beyond the lease table); no `jti` (the
+relay's log correlates only by port, `sub`, and `exp`); rounding `exp` down at signing
+(an expiry up to a second before the lease end plus the grace); rounding it up at
+signing (the signed expiry runs past the stored one and takes up to a second of the
+reuse margin); an integer epoch column (departs from the table's `DateTime` convention
+for one column); a placeholder `sub`, or refusing to sign for a lease with no host (a
+false value in an audit log, or a failure over a claim that decides nothing);
+short-lived grants renewed (renewal drops the session, and an expiry
 mid-lease stops the proxy returning after a reconnect); `iat` backdated by a margin (a
 deliberately wrong timestamp, and a skew constant in the signer); `iat` kept with a
 status wait sized to frpc's retry (slow creates on a skewed clock, and every real
@@ -400,11 +463,42 @@ and plugin state for a risk that reaches only root on the same host).
 Each relay row holds its Ed25519 grant-signing private key, encrypted under
 `ssh_decryption_key`, and its key id. A definitions-document entry names the profile
 key holding it (`grant_key_secret_key`), read once at creation, as
-`token_secret_key` is. Reads return the public half, the active key id, any staged
-key, and each retired key with the time its grants stay valid until — never a
-private key. Rotation is two controller operations: *stage* generates a key pair in
-the service and returns its public half, the operator adds it to the plugin under the
-relay's issuer, and *activate* starts signing with it.
+`token_secret_key` is. The operator supplies the key there rather than letting the
+service generate one, because a deployment reinstalled from an empty database must
+keep the same key: the plugin's configuration holds its public half. Reads return the
+public half, the active key id, any staged key, and each retired key with the time its
+grants stay valid until — never a private key. Rotation is two controller operations:
+*stage* takes a private key supplied in the request, or generates one in the service
+when none is supplied, and returns its public half; the operator adds it to the plugin
+under the relay's issuer, and *activate* starts signing with it.
+
+**The profile's form.** The key is the single-line standard base64 of its PKCS#8 DER,
+the private twin of the public half's form below, which one pipe produces (the key is
+RFC 8032's test key, an example only):
+
+```yaml
+# openssl genpkey -algorithm ed25519 -outform DER | base64 -w0
+RELAY_BM_GRANT_KEY: "MC4CAQAwBQYDK2VwBCIEIJ1hsZ3v/VpguoRK9JLsLMREScVpezJpGXA7rAMcrn9g"
+```
+
+Surrounding whitespace is stripped before decoding, since secret stores commonly add a
+trailing newline. A value that is not base64 PKCS#8 DER, or is not an Ed25519 key,
+fails the import before any relay is created, naming the relay and the profile key and
+never echoing the value, beside the importer's refusal of a profile key with no value.
+*Stage* takes a supplied key in the same form, under the same checks, and refuses one
+that fails them.
+
+**Rotation keeps the profile current.** For a relay established from the definitions
+document, the runbook's rotation generates the key, puts it in the secrets profile,
+points the entry's `grant_key_secret_key` at it (read only on a reinstall, since an
+existing relay's key is never restated by the document), stages it through the API,
+adds its public half to the plugin, and activates it. A reinstall from an empty
+database then recreates the relay with the key the plugin knows. A key the service
+generates — for a relay created through the API with no key (D19), or staged with
+none supplied — never leaves the service and survives only with the database, as the
+runbook says. A supplied private key is redacted as the relay token and the grant are:
+never in an access log, an error body, or the response, which carries only the public
+half and its id.
 
 A key's id is its RFC 7638 JWK thumbprint — the base64url SHA-256 of
 `{"crv":"Ed25519","kty":"OKP","x":"<raw public key, base64url>"}` — computed when the
@@ -440,20 +534,40 @@ a lease's grant expiry is fixed at allocation. Released leases are left out, sin
 teardown is the revocation (D16), and refusing a reconnect from a host teardown
 could not reach is wanted. Each lease still records the key id that signed its
 latest grant, as a diagnostic the holdings read reports. The bound can keep a key in
-the plugin longer than strictly needed; an emergency rotation removes the old key at
-once and accepts that sessions on it fail at their next reconnect, as the runbook
-says.
+the plugin longer than strictly needed.
 
-Rejected: recording every key that signed a lease's grants (exact, but state every
-signing writes, for a bound time gives free); keeping a lease's key stable across
+**Emergency rotation is a choice per incident.** No operation re-issues grants to a
+relay's live leases, so for a compromised key the runbook states the choice: remove it
+from the plugin at once, and that operator's buyers are refused at their next reconnect
+until their leases end; or keep it until its leases end, and an attacker holding it can
+sign grants within that operator's range only (D20) — under the recommended deployment,
+only on that operator's relay. A leaked relay token, the likelier leak since every host
+holds it, has no path short of draining every lease, since a token is rotated only while
+the relay carries no tunnels (correction 17). Emergency rotation of both credentials
+across live hosts — re-issuing grants under a new key, and rotating the token, each by
+re-running the proxy add or the client baseline and dropping each session once — is a
+recorded gap (Open Questions).
+
+Rejected: PKCS#8 PEM in the profile (several lines, needing a block scalar, and broken
+by a newline a rendered secret mangles); the 32-byte seed as unpadded base64url, the
+marketplace identity key's form (not self-describing, and indistinguishable from that
+key, so pasting it here would pass unnoticed though reusing it is rejected below; and
+`openssl` cannot print a raw seed); *stage* reading a profile key the operator names
+(settings load at startup, so every rotation needs a redeploy first); service-generated
+staging only (after a rotation, a reinstall from an empty database recreates the relay
+with the profile's old key, refused once the plugin has dropped it — recovered only by a
+database backup, at the moment an operator is rebuilding); recording every key that
+signed a lease's grants (exact, but state every signing writes, for a bound time gives
+free); keeping a lease's key stable across
 retries (retired private keys kept for signing); key ids prefixed with the relay id, or
 counted or random (the plugin refuses any `kid` but the thumbprint); PEM (multi-line in
 the plugin's key list); the bare JWK `x` (not self-describing, and not the plugin's
 format).
 
 Why: it treats the key exactly as the relay token is treated — a relay is
-establishable by applying the chart alone, and no private key passes through a
-workstation — and bounds a leaked key to one relay.
+establishable by applying the chart alone, from a key the operator keeps in the secrets
+profile and supplies again on rotation, as `rotate_token` takes the new token — and
+bounds a leaked key to one relay.
 
 Rejected: one key for the whole service in the secrets profile (every relay exposed
 by one leak, rotation by redeployment); reusing the service's marketplace identity
@@ -469,8 +583,8 @@ specification, and SCM's tests check its own copies against the tool's files. It
 as a wheel runnable as a plain program under systemd and as an image, neither
 published; a VPS relay runs the plain program, installed by `relay-server` (D23), and
 a containerised relay runs the image as a sidecar (D23). It is built by the
-prerequisite change `frp-grant-admission`, and a later change moves it to its own
-open-source repository, where publishing its wheel and a public image belong.
+prerequisite change `admit-relay-proxies-by-grant`, and a later change moves it to its
+own open-source repository, where publishing its wheel and a public image belong.
 
 **Conformance.** A family test reads the tool's published vector (its
 `vector/frp-grant-1.json`) in place: for every signing case,
@@ -481,7 +595,9 @@ test requires `frp-binary`'s pin to equal the tool's `frp-pins.toml` (D22). Both
 the producer from the consumer, the direction the tool's design permits; once the tool
 moves out they read a copy vendored by content hash, as
 `kit/arkhai-payments/schema/SOURCE.md` vendors its schema. Both need the tool on this
-branch, so they land once `frp-grant-admission` is archived (D13).
+branch, so they land once `admit-relay-proxies-by-grant` is archived (D13). Until then,
+round 1's own unit test checks the grants it signs against D16's format, the claim types
+included.
 
 Why: no existing plugin fits. `frp_jwt_allowed_ports`, the nearest, documents
 claims `sub` and `ports` and appears to read client-wide metadata, which D16
@@ -567,22 +683,37 @@ ended — for SCM's own rotation, D17's `grants_valid_until` — because frps re
 proxy only when it registers again; widening a range or adding a key or an issuer is
 safe at any time.
 
+**One relay per operator is the recommended deployment.** Each operator — each
+provisioning service — runs its own relay with its own token, and the runbook and the
+seller relay guide recommend it. A shared relay with several issuers stays supported,
+and both documents state its limits: frps accepts one token for every client, so a host
+compromised to root anywhere yields a credential that logs in from anywhere and can
+exhaust the relay for every operator; rotating that token touches every operator's
+hosts; and frps cannot end one client's sessions (correction 17), so ending one
+operator's sessions means restarting the relay under everyone. The live run uses a
+separate relay for each lane's release, each with its own token and key (D5).
+
 Why (correction 10): two provisioning services pointing at one relay would
 otherwise grant overlapping ports with nothing to stop them, and Arkhai intends to
 run a relay serving several sites it does not control, each with its own storefront
 and provisioning service. Onboarding a site to a shared relay is the site sending its
-public key and being assigned a range, which the runbook describes.
+public key and being assigned a range, which the runbook describes. Ranges separate
+operators' ports; only separate relays separate their tokens and sessions, which is
+why one relay per operator is what the documents recommend.
 
-Rejected: one relay per provisioning service (a rule enforced only by documentation,
-and a relay per site); a YAML issuer list `relay-server` renders into the plugin's
-TOML (a mirror of the plugin's format that must follow every change to it).
+Rejected: one relay per provisioning service *as a rule* (enforced only by
+documentation, and it would forbid the shared relay Arkhai intends to run); a YAML
+issuer list `relay-server` renders into the plugin's TOML (a mirror of the plugin's
+format that must follow every change to it).
 
 ### D21. Admission at login on a shared relay is deferred
 
 frps accepts one token for every client, so on a shared relay every site's hosts can
 log in and open connections and pools; grants limit only which ports they register.
 That is a way to exhaust the relay, not to reach anyone's guests or hosts, and
-removing a site's key does not stop its hosts logging in. See Open Questions.
+removing a site's key does not stop its hosts logging in. It concerns the shared
+arrangement only: on the recommended relay per operator (D20), every client holding the
+token is that operator's. See Open Questions.
 
 Rejected now: admission at login in this change (a further credential, its
 distribution to hosts without passing through a workstation, and its rotation, for a
@@ -614,8 +745,8 @@ version the plugin is tested against (its D5), for frps and frpc alike.
 
 A version change changes the unit's binary, so it restarts `frpc-buyers` or frps: the
 version is part of the client's baseline (D3, D4), and the runbook makes the change
-drained. Once `frp-grant-admission` is on this branch, a family IaC test holds the pin
-equal to the tool's `frp-pins.toml` (D18).
+drained. Once the tool is on this branch (`admit-relay-proxies-by-grant` archived), a
+family IaC test holds the pin equal to the tool's `frp-pins.toml` (D18).
 
 Why (correction 12): one digest proves only a download that happens, so the
 skip-when-present check has to name the version; a versioned path does, and it takes the
@@ -668,8 +799,10 @@ evidence.
 
 Why: the plain program fits how `relay-server` already builds a relay, as the plugin's
 design notes for a VPS (its note 7); hash-pinned dependencies keep the install as
-verified as D22's downloads; and taking the plugin as an input means its publication
-never gates this change. Documenting the image covers the other kind of relay without a
+verified as D22's downloads, and, exported from the tool's lock, they are one of the two
+points the plugin proves its vector at (its D23), so a VPS relay never runs an untested
+release between the declared floors and the lock; and taking the plugin as an input
+means its publication never gates this change. Documenting the image covers the other kind of relay without a
 second install path in the role.
 
 Rejected: the image installed by `relay-server` (a container runtime and registry
@@ -882,24 +1015,27 @@ inconsistent.
 ### D13. Implementation cadence
 
 On the owner's direction after the design review (workflow log seq 39), the work
-that does not need the admission plugin comes first, and `frp-grant-admission` gates
-only the work that does and this change's closeout. Nothing in SCM imports the
+that does not need the admission plugin comes first, and `admit-relay-proxies-by-grant`
+gates only the work that does and this change's closeout. Nothing in SCM imports the
 plugin: the signer is built to the grant format D16 states, which is the
 prerequisite's settled specification, and the family roles take the plugin's wheel and
 configuration as inputs (D23). What needs the plugin itself is a fourth round:
 installing it on a relay, checking the signer against the plugin's published test
 vector and the frp pin against its pins file (D18), the operator documentation of
 admission, and the live run. So rounds 1–3 below start
-now, round 4 waits for `frp-grant-admission` to be archived, and the operator
+now, round 4 waits for `admit-relay-proxies-by-grant` to be archived, and the operator
 documentation the third round first carried moves to round 4, since it describes
 the plugin's configuration. Four rounds, each ending in its own review:
 
 - **Round 1 — the service core.** Session 1: the relay machinery's move into the
   family kit, contracts, client, and routes; the `pool_relays` migration; the
   holdings read; bare metal's pool configuration accepting `relay_id`. Session 2:
-  keys per relay with staged rotation, thumbprint ids, and public halves read as the
-  plugin takes them (D17); the grant signer built to D16's format, with no `iat`,
-  through `cryptography` and `rfc8785`; the expiry grace and the port quarantine with
+  keys per relay, read from the profile as base64 PKCS#8 DER and refused by name when
+  malformed, with staged rotation taking a supplied key or generating one, the
+  supplied key redacted, thumbprint ids, and public halves read as the plugin takes
+  them (D17); the grant signer built to D16's format — integer `exp`, `jti` the owning
+  reservation, `sub` omitted with no host, no `iat` — through `cryptography` and
+  `rfc8785`; the expiry grace rounded up to the second and the port quarantine with
   its reuse margin (D16); preparation refusing a relay with no active key; the
   management-address check.
 - **Round 2 — hosts and playbooks.** Session 1: the family IaC project; `frp-binary`
@@ -913,20 +1049,26 @@ the plugin's configuration. Four rounds, each ending in its own review:
 - **Round 3 — the lanes.** Session 1: target version 2 and the VM lane over a relay,
   with the second-deal sequence and its evidence stages. Session 2: the real
   bare-metal lane; the SSH helper convergence.
-- **Round 4 — admission end to end, once `frp-grant-admission` is archived.**
+- **Round 4 — admission end to end, once `admit-relay-proxies-by-grant` is archived.**
   Session 1: `relay-server` installing the plugin from a wheel path, checking its
   configuration before reloading (D23); the vector check and the pins check (D18);
   the runbook — relay preparation, a containerised relay with the plugin's image
-  pinned by revision beside frps at the pinned version, onboarding a site to a shared
+  pinned by revision beside frps at the pinned version, one relay per operator as the
+  recommended deployment and a shared relay's limits, onboarding a site to a shared
   relay, the window within its range, the drain rule, synchronised clocks, key
-  rotation, and the admission check — and seller documentation and the e2e README.
+  rotation keeping the profile current, the emergency choice per incident, the host-
+  and relay-side steps for a host teardown cannot reach, and the admission check —
+  and seller documentation and the e2e README.
   Session 2: a live-verification section in the `[log]` form
   `prove-real-vm-provisioning` used, on a containerised relay (D23): the owner
   supplies the run's output, free of environment identifiers, and the change is
   `blocked in implementation` until then.
 
 Sections 1–3 (round 1, session 1) are implemented and are unaffected by the
-reconciliation with the plugin's settled design: none of them signs or stores a grant.
+reconciliation with the plugin's settled design: none of them signs or stores a grant,
+and `jti` names the reservation the lease already records. The reconciliation leaves
+this cadence unchanged; its additions to the signer, the keys, and the runbook fall in
+round 1 session 2 and round 4 as listed.
 
 ## Risks and trade-offs
 
@@ -946,14 +1088,31 @@ reconciliation with the plugin's settled design: none of them signs or stores a 
 - **`relay-server`'s plugin install has no live evidence** (D23): the live run's relay
   is containerised, so the role is proven by its IaC tests and syntax checks only.
 - **Lease extension would drop the session** of the extended lease (D16).
+- **No emergency rotation across live hosts** (D17): a compromised key is either removed
+  at once, refusing that operator's buyers at their next reconnect until their leases
+  end, or kept until its leases end; a leaked relay token has no path short of draining
+  every lease.
+- **A shared relay shares its token and its sessions** (D20): root on any host can log
+  in from anywhere and exhaust it for every operator, and ending one operator's
+  sessions restarts it under everyone; one relay per operator is recommended for this
+  reason.
+- **A key the service generates survives only with the database** (D17); a reinstall
+  from an empty database keeps a relay's key only when the profile holds it.
 - **The real lanes are not in the pipeline** and can rot; their markers, the
   `.example`, and the runbook keep them reproducible.
 
 ## Open Questions
 
-- **Admission at login on a shared relay (D21).** Revisit when the first site Arkhai
-  does not control joins an Arkhai relay. Likely design: the plugin also handles
-  `Login`, requiring a per-site or per-host credential signed by the site's key in
-  client-wide metadata, so removing a site's issuer refuses its next logins.
+- **Admission at login on a shared relay (D21).** Concerns the shared arrangement
+  only. Revisit when the first site Arkhai does not control joins an Arkhai relay.
+  Likely design: the plugin also handles `Login`, requiring a per-site or per-host
+  credential signed by the site's key in client-wide metadata, so removing a site's
+  issuer refuses its next logins.
+- **Emergency rotation of both relay credentials across live hosts (D17).** An
+  operation re-issuing grants to a relay's live leases under its newly active key, and
+  one rotating the relay token across live hosts, each dropping every session once.
+  Recorded as an unowned `ROADMAP.md` gap at closeout; a follow-up change owns it once
+  proposed. Revisit before relay-backed pools serve buyers whose operator could not
+  accept the per-incident choice D17 states, or at the first credential compromise.
 - **Relay deletion** stays `relay-vm-access-without-a-dashboard`'s decision gate
   1A.7; nothing here forecloses its answers.

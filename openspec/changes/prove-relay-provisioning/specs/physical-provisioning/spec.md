@@ -243,12 +243,22 @@ A bare-metal grant on a pool referencing a relay MUST lease a port from the rela
 
 ### Requirement: Every relay proxy carries a signed grant
 
-Every proxy the buyer-facing tunnel client registers MUST carry, in its own metadata, a grant the provisioning service signed with the relay's active grant-signing key, conforming to the grant specification the relay admission plugin publishes: an EdDSA JWT of type `frp-grant+jwt` whose key identifier is the signing key's RFC 7638 thumbprint, naming the relay as its audience, the leased port, an expiry no earlier than the lease's scheduled end plus a grace period, the host as its subject, and the lease as its identifier, with its header and claims serialized as RFC 8785 JSON. The grant MUST NOT carry an issued-at or not-before time, which a relay whose clock lags the service's would refuse. The grant MUST be signed immediately before the job's variables are written, on every attempt of the job, and MUST NOT be written into an accepted operation's persisted parameters. Neither the grant, the relay's admission token, nor the buyer-facing client's admin password MUST appear in a job read, its logs, its error, or its result: every playbook task that renders, writes, sends, or reads one of them MUST set `no_log`, and every codec whose jobs carry them MUST name their variables among the secret fields the executor redacts. The lease MUST record the grant's expiry and the identifier of the key that signed its latest grant.
+Every proxy the buyer-facing tunnel client registers MUST carry, in its own metadata, a grant the provisioning service signed with the relay's active grant-signing key, conforming to the grant specification the relay admission plugin publishes: an EdDSA JWT of type `frp-grant+jwt` whose key identifier is the signing key's RFC 7638 thumbprint, naming the relay as its audience, the leased port, an expiry no earlier than the lease's scheduled end plus a grace period, as a JSON integer of seconds equal to the grant expiry recorded on the lease, the host as its subject when the lease records one, and the lease's owning reservation as its identifier, the subject and identifier each a string, with a header of exactly `alg`, `kid`, and `typ`, and its header and claims serialized as RFC 8785 JSON. The grant MUST NOT carry an issued-at or not-before time, which a relay whose clock lags the service's would refuse. The grant MUST be signed immediately before the job's variables are written, on every attempt of the job, and MUST NOT be written into an accepted operation's persisted parameters. Neither the grant, the relay's admission token, nor the buyer-facing client's admin password MUST appear in a job read, its logs, its error, or its result: every playbook task that renders, writes, sends, or reads one of them MUST set `no_log`, and every codec whose jobs carry them MUST name their variables among the secret fields the executor redacts. The lease MUST record the grant's expiry and the identifier of the key that signed its latest grant.
 
 #### Scenario: A relayed create is executed
 
 - **WHEN** a create or grant job runs for a delivery holding a relay port lease
 - **THEN** its proxy carries a grant for exactly that relay and port, signed with the relay's active key, and the job's persisted parameters carry no grant
+
+#### Scenario: A relayed job's lease records no host
+
+- **WHEN** a grant is signed for a lease that records no host
+- **THEN** the grant carries no subject, its identifier is the lease's owning reservation as a string, and its expiry is an integer
+
+#### Scenario: A port is leased again after quarantine
+
+- **WHEN** a released port is leased to another reservation and a grant is signed for it
+- **THEN** the grant's identifier is the new reservation, not the one the port's previous grant named
 
 #### Scenario: The signer is checked against the plugin's vector
 
@@ -272,7 +282,7 @@ Every proxy the buyer-facing tunnel client registers MUST carry, in its own meta
 
 ### Requirement: Each relay holds its own grant-signing key
 
-Each relay MUST hold its own Ed25519 grant-signing private key, encrypted at rest under the deployment's configured encryption key. A relay definition entry MUST name the secrets-profile key holding it, read only when the relay is created; a relay created through the API with no key MUST be given one the service generates. A key's identifier MUST be its RFC 7638 JWK thumbprint, the identifier the admission plugin derives from the public key. No read path MUST return a private key: relay reads MUST return the active key's identifier and public half, any staged key's, and each retired key's identifier with the time its grants remain valid until, each public half as the single-line base64 of its DER SubjectPublicKeyInfo, the form the plugin's configuration takes. Rotation MUST be two explicit operations: staging generates a key and returns its public half without signing with it, and activating makes the staged key sign every later grant. A retired key's grants MUST be reported valid until the latest grant expiry among the relay's unreleased leases allocated before the key was retired, since a lease whose job was retried across a rotation may hold grants signed by more than one key.
+Each relay MUST hold its own Ed25519 grant-signing private key, encrypted at rest under the deployment's configured encryption key. A relay definition entry MUST name the secrets-profile key holding it, read only when the relay is created; a relay created through the API with no key MUST be given one the service generates. A profile key's value MUST be the single-line standard base64 of an Ed25519 key's PKCS#8 DER, read after stripping surrounding whitespace; a value that is not MUST fail the import before any relay is created, naming the relay and the profile key and not disclosing the value. A key's identifier MUST be its RFC 7638 JWK thumbprint, the identifier the admission plugin derives from the public key. No read path MUST return a private key: relay reads MUST return the active key's identifier and public half, any staged key's, and each retired key's identifier with the time its grants remain valid until, each public half as the single-line base64 of its DER SubjectPublicKeyInfo, the form the plugin's configuration takes. Rotation MUST be two explicit operations: staging takes a private key supplied in the request, in the profile's form and under the same checks, or generates one when none is supplied, and returns its public half without signing with it; activating makes the staged key sign every later grant. A supplied private key MUST NOT appear in an access log, an error body, or the response. A retired key's grants MUST be reported valid until the latest grant expiry among the relay's unreleased leases allocated before the key was retired, since a lease whose job was retried across a rotation may hold grants signed by more than one key.
 
 #### Scenario: A relay is read
 
@@ -288,6 +298,16 @@ Each relay MUST hold its own Ed25519 grant-signing private key, encrypted at res
 
 - **WHEN** a job's attempt installs a grant signed with key A, key B is then activated, and a retry of the job signs its grant with B
 - **THEN** the relay read reports A's grants valid until that lease is released or its grant expires, whichever is first
+
+#### Scenario: A definition entry names a malformed grant key
+
+- **WHEN** the profile key a relay definition entry names holds a value that is not base64 PKCS#8 DER of an Ed25519 key, apart from surrounding whitespace
+- **THEN** the import fails naming the relay and the profile key, without the value, and no relay is created
+
+#### Scenario: A supplied key is staged
+
+- **WHEN** an operator stages a private key supplied in the request
+- **THEN** the response carries that key's public half and thumbprint, and neither the response, an error body, nor an access log carries the private key
 
 #### Scenario: A definition entry names no grant key
 
