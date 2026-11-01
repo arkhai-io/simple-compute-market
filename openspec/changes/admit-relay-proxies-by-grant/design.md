@@ -648,7 +648,8 @@ verdicts on every declared release (no test can hold it, 27 F2).
 ## Notes for `prove-relay-provisioning`
 
 This design changes what that change's signer and roles conform to. To be sent once this
-design is settled:
+design is settled. The decision numbers in these notes (D16, D17) are that change's own,
+not this design's D16 and D17:
 
 1. D16's grant header carries `typ: "frp-grant+jwt"`.
 2. D17's key id is the key's RFC 7638 JWK thumbprint.
