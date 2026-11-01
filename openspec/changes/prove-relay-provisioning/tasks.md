@@ -360,7 +360,7 @@ Files: `provisioning/compute/src/compute_provisioning/relays/` (`db.py`, `servic
 `provisioning/compute/contracts/src/compute_provisioning_contracts/relays.py`; the
 family client; `provisioning/compute/pyproject.toml` and its lock.
 
-- [ ] 4.1 `relays/keys.py`: load a private key from the profile's form — strip
+- [x] 4.1 `relays/keys.py`: load a private key from the profile's form — strip
       surrounding whitespace, decode single-line standard base64, load PKCS#8 DER with
       `cryptography`, and refuse anything that is not an Ed25519 key, the error naming
       what was wrong and never carrying the value; generate a key; derive a key's id
@@ -369,13 +369,28 @@ family client; `provisioning/compute/pyproject.toml` and its lock.
       public half as single-line standard base64 of its DER SubjectPublicKeyInfo.
       `compute_provisioning` declares `cryptography` at runtime (it is a dev
       dependency today, 1.6). (D17)
-- [ ] 4.2 Grant-key state on the relay in `relays/db.py`, with an additive migration
+      Done: `GrantKey` (`generate`, `from_profile_form`, `profile_form`, `kid`,
+      `public_key`, its private half kept out of `repr`), `GrantKeyError`,
+      `thumbprint`, `public_key_text`. Every refusal is raised `from None`, so no
+      parser error that might quote the bytes is chained. `cryptography` moved
+      from the family kit's dev group to its runtime dependencies; no version
+      was bumped, since every wheel this section touches was bumped once on
+      this branch already (1.6).
+- [x] 4.2 Grant-key state on the relay in `relays/db.py`, with an additive migration
       in the service's `migrations.py`: the active key encrypted under
       `ssh_decryption_key` as the token is, its id, and its activation time; a staged
       key, encrypted, with its id; and a family table of retired keys, each with its
       relay, id, and retirement time. Ids are stored for active, staged, and retired
       keys alike. (D17)
-- [ ] 4.3 The relay definitions document accepts and requires `grant_key_secret_key`
+      Done: `relays` gains `grant_key_encrypted`, `grant_key_id`,
+      `grant_key_public`, `grant_key_activated_at`, and the staged
+      `staged_grant_key_encrypted`, `_id`, `_public`. The table
+      `relay_retired_grant_keys` is keyed by `(relay_id, key_id)`. Migration
+      `20261101_002_relay_grant_keys` adds them. Beyond the plan: each public
+      half is stored beside its id, so a relay read never decrypts a private
+      key. A relay stored before the migration holds no active key; 5.8's
+      refusal covers its pools.
+- [x] 4.3 The relay definitions document accepts and requires `grant_key_secret_key`
       on every entry, read once at creation as `token_secret_key` is and never
       restated for an existing relay. An entry naming none fails the import naming the
       entry; a named profile key with no value, or whose value 4.1 refuses, fails the
@@ -383,7 +398,20 @@ family client; `provisioning/compute/pyproject.toml` and its lock.
       the value. A relay created through the API with no key gets one the service
       generates. `settings.toml`'s relay definitions comment names the new field.
       (D17, D19)
-- [ ] 4.4 *Stage* and *activate*, in `RelayService`, the route service, the contracts
+      Done: `_reconcile` resolves every new entry's token and grant key before
+      writing any relay, so the import fails with nothing created even through
+      `import_relay_definitions`, whose writes each commit on their own. A
+      missing-field refusal names the entry by index and by id.
+      `RelayService.create_relay` takes `grant_key` and generates one when it
+      is given none. A create through the API takes no key, so it always
+      generates one. An existing relay's entry is never resolved, so a profile
+      key that has since gone or changed does not fail a reconciliation. Two
+      new entries resolving to one key fail before either is written. So does
+      a new entry naming a key an existing relay holds or retired; its check
+      is `RelayService.grant_key_conflict`. The provisioning chart's comments
+      on relay entries (`values.yaml`, `templates/configmap.yaml`) name the
+      new field.
+- [x] 4.4 *Stage* and *activate*, in `RelayService`, the route service, the contracts
       (two admin-only routes, which `PROVISIONING_ROUTE_CONTRACTS` and
       `ADMIN_PROVISIONING_OPERATIONS` gain), the controller binding, and the family
       client's sync and async methods. Staging takes an optional private key in the
@@ -394,12 +422,45 @@ family client; `provisioning/compute/pyproject.toml` and its lock.
       key never appears in an access log, an error body, or the response: the request
       model holds it as a secret value, and its refusals name the problem only.
       (D17)
-- [ ] 4.5 Relay reads return `grant_keys` as D17 shows it — the active key's `kid`,
+      Done: `POST /api/v1/relays/{relay_id}/grant-keys/stage`
+      (`provisioning_relay_grant_key_stage`, request `RelayGrantKeyStage`,
+      `private_key: SecretStr | None`, answering `RelayStagedGrantKey`) and
+      `POST .../grant-keys/activate` (`provisioning_relay_grant_key_activate`,
+      answering `RelayResponse`), both admin only. The client methods are
+      `stage_relay_grant_key(relay_id, body=None)` and
+      `activate_relay_grant_key`. The client builds the stage body from the
+      secret's value, since a model serialization masks it.
+      Decided here: a malformed supplied key answers 422 with the loader's
+      message. Activating with nothing staged answers 409. Staging over a
+      staged key replaces it. A key any relay holds (active or staged) or has
+      retired is refused, both for staging and for a create. Shared by two
+      relays, one leak would open both (D17), and signed again by the relay
+      that retired it, its retirement time would no longer say when the plugin
+      may drop it. The service has no access log of its own, and the only
+      request logging is uvicorn's line of method, path, and status, so a key
+      sent in the body cannot reach a log.
+      The stage binding takes the body as any JSON (`Body(default=None)`, its
+      schema restated in `openapi_extra`). The route service validates it
+      against `RelayGrantKeyStage` and answers 422 with each problem's `loc`,
+      `msg`, and `type`, never its input. An unknown field is located at
+      `body` alone, since its name is input too. FastAPI's default validation answer
+      quotes the input it refuses, so a bare-string body or a key inside a
+      list would have come back in the error body, and the auth middleware
+      stores response bodies in its replay table. `RelayGrantKeyStage` forbids
+      unknown fields, so a misspelled `private_key` is refused rather than
+      staging a generated key.
+- [x] 4.5 Relay reads return `grant_keys` as D17 shows it — the active key's `kid`,
       `public_key`, and `activated_at`; any staged key's `kid` and `public_key`; and
       each retired key's `kid` and `retired_at`; its `grants_valid_until` reads
       the leases' grant expiry and is section 5's (5.6). No read, export, or
       reconciliation comparison returns a private key. (D17)
-- [ ] 4.6 Tests. Unit (`provisioning/compute/tests/unit/`): 4.1's loader accepts the
+      Done: `RelayView.grant_keys` (`GrantKeysView` of `ActiveGrantKeyView`,
+      `StagedGrantKeyView`, and `RetiredGrantKeyView`s, oldest first) and the
+      wire `RelayResponse.grant_keys` (`RelayGrantKeys`, `RelayActiveGrantKey`,
+      `RelayStagedGrantKey`, `RelayRetiredGrantKey`). None of these types has a
+      field for a private key. `RelayRetiredGrantKey` has no
+      `grants_valid_until` yet; 5.6 adds it.
+- [x] 4.6 Tests. Unit (`provisioning/compute/tests/unit/`): 4.1's loader accepts the
       form with a trailing newline, and refuses a non-base64 value, a non-PKCS#8 value,
       and a non-Ed25519 key, the refusal never containing the value; the thumbprint of
       RFC 8037's published example public key equals its published thumbprint; the
@@ -415,12 +476,112 @@ family client; `provisioning/compute/pyproject.toml` and its lock.
       value in the error body, and the private key appears in no response or captured
       access log; staging leaves the active key unchanged until activation; a relay
       created through the API with no key reads an active key.
-- [ ] 4.7 Verify. `make test-compute-provisioning` (unit, library integration),
+      Done. Unit, `tests/unit/test_relay_grant_keys.py`: the loader takes RFC
+      8032's TEST 1 key, built from its seed and the RFC 8410 PKCS#8 prefix,
+      with surrounding whitespace. It refuses a non-base64 value, a value
+      broken across lines, a DER that is not a key, a raw seed, and a P-256
+      key, and no refusal carries the value or chains a cause. Its thumbprint
+      equals RFC 8037's published one, computed from the seed and from the
+      published `x`. Its public half equals the SubjectPublicKeyInfo D17
+      shows, and a generated key's public half round-trips.
+      Library integration, `test_relay_administration.py`:
+      - `TestGrantKeys`: a key is generated when none is supplied, a supplied
+        key is the active one, and a stored key is ciphertext that decrypts
+        under the profile key. No view's `repr` carries the active or staged
+        private key. Staging leaves the active key and refuses a malformed
+        key without its value. A key this relay holds or retired is refused
+        for staging. Another relay's active, staged, or retired key is
+        refused for staging, and its active or retired key for a create.
+        Activation retires the previous key with its time, a list read agrees
+        with it, and activation needs a staged key.
+      - `TestRelayDefinitionDocuments`: the named profile key supplies the
+        grant key. An entry naming none fails, naming the entry and creating
+        nothing. An absent, blank, non-key, or truncated value fails naming
+        the relay and the profile key, and a sound entry before it is not
+        created either. Two entries naming one key fail, naming both and
+        creating neither. An entry naming a key another relay holds fails,
+        naming the holder, and a sound entry before it is not created. A
+        reconciliation after a rotation leaves the rotated key active.
+      Unit, `tests/unit/test_relay_route_service.py`: the stage route service
+      over a mocked relay service. A bare key, a key in a list, a key in a
+      list under the field, a number, and a key used as a field name each
+      answer 422, located under `body`. No answer repeats the key or chains a
+      cause, and the relay service is never called. A well-formed key is
+      passed on, and no body or an empty one asks for a generated key.
+
+      Application integration through the typed client,
+      `test_relays_api.py::TestGrantKeysOverTheApi`: a relay created with no
+      key reads an active one. Staging a supplied key answers its kid and
+      public half, which shows the client sent the real value. Its private key
+      is in no field of the parsed stage, get, or list responses: the check
+      runs on the client's models, which drop unknown fields, so what it shows
+      is that the wire models carry no key. It is also in no log record the
+      in-process app emitted (`caplog` at DEBUG). This run has no server
+      access log: under `ASGITransport` uvicorn writes none. Staging leaves
+      the active key until activation retires it. A malformed supplied key
+      answers 422 with no value in the error or the logs. Activating with
+      nothing staged answers 409. As rejection-path tests, three bodies the
+      typed client never sends are sent signed through its
+      `authenticated_request`: the bare key as the body, the key inside a
+      list, and a misspelled field. Each answers 422 without the key in the
+      error, and stages nothing.
+      Contracts unit: both routes are admin only and resolve past a bare relay
+      id, and `RelayGrantKeyStage` masks its key in `repr` and serialization.
+      Beyond the plan: `test_relay_migrations.py::TestTheGrantKeyMigration`, a
+      stored relay table without the columns migrated, gaining them and the
+      retired table, with no active key (the service's migrations against a
+      real SQLite database, no application). The restart-safety documents and
+      `test_database.py`'s list of migrations follow the new field and
+      migration.
+- [x] 4.7 Verify. `make test-compute-provisioning` (unit, library integration),
       `make test-provisioning` (application integration through the typed client),
       `make test-compute-provisioning-contracts`, `make test-compute-provisioning-client`;
       `make test`; `make check-packaging` (`cryptography` at runtime).
       End-to-end: none in the pipeline — no lane runs a relay-backed pool; the real
       lanes read the active key (sections 11 and 12).
+      Results: `make test-compute-provisioning` 417 passed (unit and library
+      integration); `make test-provisioning` service unit 608 and application
+      integration 523 passed; contracts 128 passed; client 74 passed;
+      `make test-provisioning-adapter` 218 passed; `make lock` run; `make test`
+      passed; `make check-packaging` OK; `make check-change` fails only on the
+      four citations of files sections 10–12 create. End-to-end scenarios
+      confirmed: none in the pipeline exercises a grant key.
+
+  Section 4 handoff:
+  - The service's suites run the family kit from its built wheel, not from
+    source. After editing `provisioning/compute/src`, run `make lock` (it
+    rebuilds the wheelhouse and the locks) before `make test-provisioning`,
+    or the service tests run the old kit. A stale run shows up as an
+    `AttributeError` behind a 500.
+  - A relay's active private key is `Relay.grant_key_encrypted`: the profile
+    form, encrypted with `encrypt_secret` under `ssh_decryption_key`. Section
+    5's signer decrypts it with `decrypt_secret` and loads it with
+    `GrantKey.from_profile_form`. `grant_key_id` is the `kid` the grant's
+    header names.
+  - `RelayRetiredGrantKey` rows are `(relay_id, key_id, retired_at)`. 5.6's
+    `grants_valid_until` is computed per retired key from the leases, and
+    `RelayRetiredGrantKey`/`RetiredGrantKeyView` gain that field then.
+  - Fresh-context check, run twice. It fixed:
+    - the 422 echo (above), including a key used as a field name;
+    - key reuse across relays, now refused by the importer before any write;
+    - the chart comments and the forbidden extra field;
+    - the P-256 test's cause check;
+    - a test docstring pointing at a design not on this branch;
+    - a rejection-path assertion on the response body's content;
+    - comments that described section 5's signing and refusal as present;
+      they now say only what this section does, and section 5 adds the
+      rest;
+    - notes that overstated.
+
+    Declined, with reasons:
+    - A relay create with no `ssh_decryption_key` answering 500. A
+      deployment without the at-rest key can hold no relay credential, and a
+      relay without a grant key is unusable (D19), so creation fails, and the
+      error names the missing key.
+    - A database constraint for one key, one relay. The rule spans active,
+      staged, and retired keys across two tables, which no one unique index
+      expresses. Relay administration is an operator's serial action, and
+      the query refuses the misconfiguration the rule exists for.
 
 ## 5. Grants, port quarantine, and the checks before dispatch
 

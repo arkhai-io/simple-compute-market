@@ -4,15 +4,20 @@ The deployment path applies a chart; there is no operator API call in it, and
 secret material must not pass through an operator's workstation to get there.
 So a relay has to be establishable from configuration alone.
 
-The document carries a rendezvous address, a port, a window, and the *name* of
-the secrets-profile key holding that relay's admission token. It carries no
-credential, so it needs no Secret and can be an ordinary mounted file.
+The document carries a rendezvous address, a port, a window, and the *names*
+of the secrets-profile keys holding that relay's admission token and its
+grant-signing key. It carries no credential, so it needs no Secret and can be
+an ordinary mounted file. Every entry names a grant key, which the operator
+supplies rather than letting the service generate one, so that a deployment
+reinstalled from an empty database recreates the relay with the key its
+admission plugin already holds.
 
-The named key is read only when a relay is created. A relay that already exists
-keeps whatever token it holds, so a rotation performed through the relay
-routes is not reverted by a later reconciliation of a document that still
-names the key holding the old value. That is the one field a reconciliation
-must never touch; everything else the document declares, it may correct.
+The named keys are read only when a relay is created. A relay that already
+exists keeps whatever token and keys it holds, so a rotation performed through
+the relay routes is not reverted by a later reconciliation of a document that
+still names the key holding the old value. Those are the fields a
+reconciliation must never touch; everything else the document declares, it may
+correct.
 """
 
 from __future__ import annotations
@@ -23,6 +28,7 @@ from typing import Any
 import yaml
 
 from ..definition_documents import DefinitionDocumentContribution
+from .keys import GrantKey, GrantKeyError
 
 
 class RelayDefinitionError(ValueError):
@@ -43,12 +49,20 @@ class RelayDefinition:
     relay_port: int
     vm_port_range_start: int
     vm_port_range_count: int
+    grant_key_secret_key: str
     label: str | None = None
     token_secret_key: str | None = None
     enabled: bool = True
 
 
-_REQUIRED = ("id", "relay_addr", "relay_port", "vm_port_range_start", "vm_port_range_count")
+_REQUIRED = (
+    "id",
+    "relay_addr",
+    "relay_port",
+    "vm_port_range_start",
+    "vm_port_range_count",
+    "grant_key_secret_key",
+)
 _ALLOWED = frozenset(_REQUIRED) | {"label", "token_secret_key", "enabled"}
 
 
@@ -84,8 +98,10 @@ def parse_relay_definitions(yaml_text: str) -> tuple[RelayDefinition, ...]:
             )
         missing = [key for key in _REQUIRED if entry.get(key) in (None, "")]
         if missing:
+            named = f" ('{entry['id']}')" if entry.get("id") not in (None, "") else ""
             raise RelayDefinitionError(
-                f"relays[{index}] is missing required field(s): {', '.join(missing)}"
+                f"relays[{index}]{named} is missing required field(s): "
+                f"{', '.join(missing)}"
             )
         relay_id = str(entry["id"])
         if relay_id in seen_ids:
@@ -117,6 +133,7 @@ def parse_relay_definitions(yaml_text: str) -> tuple[RelayDefinition, ...]:
                 relay_port=port,
                 vm_port_range_start=start,
                 vm_port_range_count=count,
+                grant_key_secret_key=str(entry["grant_key_secret_key"]),
                 label=entry.get("label"),
                 token_secret_key=entry.get("token_secret_key"),
                 enabled=bool(entry.get("enabled", True)),
@@ -167,6 +184,38 @@ def _reconcile(
     definitions = parse_relay_definitions(yaml_text)
     existing = {view.id: view for view in relay_service.list_relays()}
 
+    # Every credential a new relay needs is resolved before any relay is
+    # written, so a profile key missing or malformed on a later entry fails the
+    # import with nothing created, whether or not the caller's transaction
+    # would have rolled the earlier entries back.
+    credentials = {
+        definition.id: (
+            _resolve_token(definition, settings),
+            _resolve_grant_key(definition, settings),
+        )
+        for definition in definitions
+        if definition.id not in existing
+    }
+    # A key belongs to one relay, so a key two new entries name, or one an
+    # existing relay holds or retired, is refused here, before any is written.
+    signing_for: dict[str, str] = {}
+    for definition in definitions:
+        if definition.id not in credentials:
+            continue
+        kid = credentials[definition.id][1].kid
+        other = signing_for.setdefault(kid, definition.id)
+        if other != definition.id:
+            raise RelayDefinitionError(
+                f"relays '{other}' and '{definition.id}' name the same grant key; "
+                "each relay holds its own"
+            )
+        conflict = relay_service.grant_key_conflict(kid)
+        if conflict is not None:
+            raise RelayDefinitionError(
+                f"relay '{definition.id}' names grant_key_secret_key "
+                f"'{definition.grant_key_secret_key}': {conflict}"
+            )
+
     created: list[str] = []
     updated: list[str] = []
     unchanged: list[str] = []
@@ -174,7 +223,7 @@ def _reconcile(
     for definition in definitions:
         current = existing.get(definition.id)
         if current is None:
-            token = _resolve_token(definition, settings)
+            token, grant_key = credentials[definition.id]
             relay_service.create_relay(
                 relay_id=definition.id,
                 label=definition.label,
@@ -184,6 +233,7 @@ def _reconcile(
                 vm_port_range_count=definition.vm_port_range_count,
                 token=token,
                 enabled=definition.enabled,
+                grant_key=grant_key,
             )
             created.append(definition.id)
             continue
@@ -199,9 +249,9 @@ def _reconcile(
         if same:
             unchanged.append(definition.id)
             continue
-        # The token is absent from this call deliberately: an existing relay's
-        # credential is owned by whoever last rotated it, and the document has
-        # no standing to restate it.
+        # The token and the grant key are absent from this call deliberately:
+        # an existing relay's credentials are owned by whoever last rotated
+        # them, and the document has no standing to restate them.
         # ``label`` is passed even when the document omits it, so an omitted
         # label clears a stored one. The document declares the relay's whole
         # non-secret shape; a field it cannot reach would compare unequal on
@@ -240,6 +290,29 @@ def _resolve_token(definition: RelayDefinition, settings: Any) -> str | None:
             "which the secrets profile does not carry a value for"
         )
     return str(value)
+
+
+def _resolve_grant_key(definition: RelayDefinition, settings: Any) -> GrantKey:
+    """Load the grant key from the profile key this relay's entry names.
+
+    A profile key with no value, or a value that is not a key in the profile's
+    form, fails the import naming the relay and the profile key. The value is
+    a private key, so no refusal quotes it.
+    """
+    key = definition.grant_key_secret_key
+    value = getattr(settings, key, None)
+    if value is None or not str(value).strip():
+        raise RelayDefinitionError(
+            f"relay '{definition.id}' names grant_key_secret_key '{key}', "
+            "which the secrets profile does not carry a value for"
+        )
+    try:
+        return GrantKey.from_profile_form(str(value))
+    except GrantKeyError as exc:
+        raise RelayDefinitionError(
+            f"relay '{definition.id}' names grant_key_secret_key '{key}', "
+            f"whose value is unusable: {exc}"
+        ) from None
 
 
 #: The relay document's kind, which names its recorded digest. It must not

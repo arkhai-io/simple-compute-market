@@ -46,14 +46,14 @@ class Relay(Base):
     callers and the refusal would surface asynchronously in a tunnel client's
     log rather than as a failed allocation.
 
-    The admission token is stored encrypted under the deployment's
-    ``ssh_decryption_key``, the same key that protects embedded host key
-    material. The database therefore holds no usable credential: recovering a
-    token requires both this row and a key held outside the database. No read
-    path that serves an API response, an export, or a reconciliation
-    comparison may return it — the pool configuration handlers expose a
-    redacted read under the unqualified name and secrets only through an
-    explicitly named execution read.
+    The admission token and the grant-signing private keys are stored
+    encrypted under the deployment's ``ssh_decryption_key``, the same key that
+    protects embedded host key material. The database therefore holds no
+    usable credential: recovering one requires both this row and a key held
+    outside the database. No read path that serves an API response, an export,
+    or a reconciliation comparison may return either — the pool configuration
+    handlers expose a redacted read under the unqualified name and secrets only
+    through an explicitly named execution read.
     """
 
     __tablename__ = "relays"
@@ -70,6 +70,19 @@ class Relay(Base):
     # Ciphertext, or NULL when no token has been supplied yet. A relay with no
     # token is rejected before dispatch rather than dialled and refused.
     relay_token_encrypted = Column(String, nullable=True)
+    # The relay's active grant-signing key: the private key in its profile
+    # form, encrypted as the token is; its id (the thumbprint the admission
+    # plugin derives); its public half, kept so a read never decrypts a private
+    # key; and when it became active. NULL while the relay holds no active key.
+    grant_key_encrypted = Column(String, nullable=True)
+    grant_key_id = Column(String, nullable=True)
+    grant_key_public = Column(String, nullable=True)
+    grant_key_activated_at = Column(DateTime, nullable=True)
+    # A key staged for rotation: returned to the operator to configure on the
+    # relay's plugin before it is activated.
+    staged_grant_key_encrypted = Column(String, nullable=True)
+    staged_grant_key_id = Column(String, nullable=True)
+    staged_grant_key_public = Column(String, nullable=True)
     enabled = Column(Boolean, nullable=False, default=True, server_default=sa_true())
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(DateTime, nullable=True, onupdate=func.now())
@@ -143,6 +156,21 @@ class RelayPortLease(Base):
     released_at = Column(DateTime, nullable=True)
 
 
+class RelayRetiredGrantKey(Base):
+    """A grant-signing key a relay held before its active one.
+
+    Only the id and the retirement time are kept: a retired key is never
+    active again, and the operator removes it from the relay's plugin by the
+    thumbprint the plugin prints for it.
+    """
+
+    __tablename__ = "relay_retired_grant_keys"
+
+    relay_id = Column(String, ForeignKey("relays.id"), primary_key=True)
+    key_id = Column(String, primary_key=True)
+    retired_at = Column(DateTime, nullable=False)
+
+
 class PoolRelay(Base):
     """Which relay a pool's hosts dial for buyer tunnels, whatever its provider.
 
@@ -163,4 +191,4 @@ class PoolRelay(Base):
     relay_id = Column(String, ForeignKey("relays.id"), nullable=False, index=True)
 
 
-__all__ = ["Base", "PoolRelay", "Relay", "RelayPortLease"]
+__all__ = ["Base", "PoolRelay", "Relay", "RelayPortLease", "RelayRetiredGrantKey"]

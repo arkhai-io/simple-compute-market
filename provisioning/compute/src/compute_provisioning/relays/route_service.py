@@ -1,9 +1,10 @@
 """The relay administration routes, without a web framework.
 
 ``RelayRouteService`` serves list, create, read, update, token rotation,
-enable and disable, and the holdings read over the relay service, reporting a refusal as a
-``ProvisioningRouteError``. Every relay route admits only the administrator:
-relays are operator infrastructure, and no storefront administers them.
+enable and disable, the holdings read, and grant-key staging and activation over
+the relay service, reporting a refusal as a ``ProvisioningRouteError``. Every
+relay route admits only the administrator: relays are operator infrastructure,
+and no storefront administers them.
 
 Deletion is deliberately absent. A relay carrying live port leases cannot
 simply be removed: the proxies it carries outlive the row, and a deletion that
@@ -13,21 +14,28 @@ Disable is the operator's answer to "stop using this relay".
 
 from __future__ import annotations
 
+from dataclasses import asdict
+from typing import Any
+
 from compute_provisioning_contracts import (
     RelayCreate,
+    RelayGrantKeyStage,
     RelayLeaseListResponse,
     RelayLeaseView,
     RelayListResponse,
     RelayResponse,
+    RelayStagedGrantKey,
     RelayTokenRotate,
     RelayUpdate,
 )
+from pydantic import ValidationError
 
 from ..route_errors import ProvisioningRouteError
 from .rebinding import RelayRebindingRefused
 from .service import (
     UNSET,
     RelayEndpointConflictError,
+    RelayGrantKeyNotStagedError,
     RelayNotFoundError,
     RelayService,
     RelayValidationError,
@@ -38,14 +46,39 @@ from .service import (
 def _response(view: RelayView) -> RelayResponse:
     """The wire model built from the service view.
 
-    The view is the type that structurally cannot carry a token; this only
-    renames it for the wire.
+    The view is the type that structurally cannot carry a token or a private
+    key; this only renames it for the wire.
     """
-    return RelayResponse(**view.__dict__)
+    return RelayResponse(**asdict(view))
 
 
 def _missing(relay_id: str) -> ProvisioningRouteError:
     return ProvisioningRouteError(404, f"Relay '{relay_id}' not found")
+
+
+def _stage_request(payload: Any) -> RelayGrantKeyStage:
+    """The stage request, or a 422 locating each problem without its input.
+
+    An unknown field is located at the body alone: its name is caller input
+    too, and a key pasted where a field name belongs would otherwise come back
+    as the error's location.
+    """
+    try:
+        return RelayGrantKeyStage.model_validate({} if payload is None else payload)
+    except ValidationError as exc:
+        problems = [
+            {
+                "loc": ["body"]
+                if error["type"] == "extra_forbidden"
+                else ["body", *error["loc"]],
+                "msg": error["msg"],
+                "type": error["type"],
+            }
+            for error in exc.errors(
+                include_url=False, include_context=False, include_input=False
+            )
+        ]
+        raise ProvisioningRouteError(422, problems) from None
 
 
 class RelayRouteService:
@@ -130,6 +163,37 @@ class RelayRouteService:
             relay_id=relay_id,
             leases=[RelayLeaseView(**record.__dict__) for record in records],
         )
+
+    def stage_grant_key(self, relay_id: str, payload: Any) -> RelayStagedGrantKey:
+        """Stage the relay's next grant key and answer its id and public half.
+
+        ``payload`` is the request's decoded JSON body, validated here rather
+        than by the binding: the framework's own validation answer quotes the
+        input it refuses, and this input may be a private key. A malformed
+        body, or a key the loader refuses, answers 422 saying what was wrong,
+        never what was sent.
+        """
+        body = _stage_request(payload)
+        supplied = (
+            None if body.private_key is None else body.private_key.get_secret_value()
+        )
+        try:
+            staged = self._relays.stage_grant_key(relay_id, supplied)
+        except RelayNotFoundError as exc:
+            raise _missing(relay_id) from exc
+        except RelayValidationError as exc:
+            raise ProvisioningRouteError(422, str(exc)) from None
+        return RelayStagedGrantKey(kid=staged.kid, public_key=staged.public_key)
+
+    def activate_grant_key(self, relay_id: str) -> RelayResponse:
+        try:
+            view = self._relays.activate_grant_key(relay_id)
+        except RelayNotFoundError as exc:
+            raise _missing(relay_id) from exc
+        except RelayGrantKeyNotStagedError as exc:
+            # 409: the request is well-formed, and is valid once a key is staged.
+            raise ProvisioningRouteError(409, str(exc)) from exc
+        return _response(view)
 
 
 __all__ = ["RelayRouteService"]

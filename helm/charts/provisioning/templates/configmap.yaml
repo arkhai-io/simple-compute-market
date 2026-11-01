@@ -37,8 +37,9 @@ data:
   {{- with .Values.definitions.relays }}
   {{- /*
     Relay inventory. An entry may name which key of the provisioning-secrets
-    profile holds its admission token; the key is named here, the value never
-    is. That key is read once, when the relay is created — a token rotated
+    profile holds its admission token, and must name the key holding its
+    grant-signing key; the keys are named here, the values never are. Each is
+    read once, when the relay is created — a token or a grant key rotated
     through the relay API is authoritative from then on.
   */}}
   relay-definitions.yaml: |

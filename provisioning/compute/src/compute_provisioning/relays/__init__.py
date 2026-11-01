@@ -20,7 +20,7 @@ from .composition import (
     RelayReconciliationSchedule,
     relay_contribution,
 )
-from .db import PoolRelay, Relay, RelayPortLease
+from .db import PoolRelay, Relay, RelayPortLease, RelayRetiredGrantKey
 from .definitions import (
     RELAY_DOCUMENT_KIND,
     RelayDefinitionError,
@@ -30,6 +30,7 @@ from .definitions import (
     relay_definitions_document,
 )
 from .execution import RelayExecutionResolver, RelayUnusableAtExecutionError
+from .keys import GrantKey, GrantKeyError, public_key_text, thumbprint
 from .rebinding import (
     RELAY_HOST_POOL_CHANGE_HOOKS,
     RelayRebindingRefused,
@@ -48,15 +49,24 @@ from .pool_relays import (
 from .route_service import RelayRouteService
 from .service import (
     UNSET,
+    ActiveGrantKeyView,
+    GrantKeysView,
     RelayEndpointConflictError,
+    RelayGrantKeyNotStagedError,
     RelayNotFoundError,
     RelayService,
     RelayValidationError,
     RelayView,
+    RetiredGrantKeyView,
+    StagedGrantKeyView,
 )
 
 __all__ = [
+    "ActiveGrantKeyView",
     "FULFILLMENT_OWNER_KIND",
+    "GrantKey",
+    "GrantKeyError",
+    "GrantKeysView",
     "PoolRelay",
     "PortLease",
     "RELAY_ID_FIELD",
@@ -67,17 +77,21 @@ __all__ = [
     "RelayDefinitionError",
     "RelayEndpointConflictError",
     "RelayExecutionResolver",
+    "RelayGrantKeyNotStagedError",
     "RelayNotFoundError",
     "RelayPortAllocator",
     "RelayPortLease",
     "RelayRebindingRefused",
     "RelayReconciliationSchedule",
+    "RelayRetiredGrantKey",
     "RelayRouteService",
     "RelayService",
     "RelayUnusableAtExecutionError",
     "RelayValidationError",
     "RelayView",
     "RelayWindowExhaustedError",
+    "RetiredGrantKeyView",
+    "StagedGrantKeyView",
     "UNSET",
     "check_host_pool_change",
     "check_pool_relay_change",
@@ -88,10 +102,12 @@ __all__ = [
     "import_relay_definitions_in_session",
     "parse_relay_definitions",
     "pool_relay_id",
+    "public_key_text",
     "relay_contribution",
     "relay_definitions_document",
     "relay_execution_fields",
     "release_reservation_ports",
     "set_pool_relay",
+    "thumbprint",
     "validate_relay_reference",
 ]

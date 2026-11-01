@@ -10,6 +10,7 @@ from compute_provisioning_contracts import (
     HostResponse,
     HostUpdate,
     LeaseTermination,
+    RelayGrantKeyStage,
     resolve_provisioning_route,
 )
 
@@ -147,6 +148,8 @@ def test_every_relay_route_is_the_administrators_alone():
         "provisioning_relay_enable",
         "provisioning_relay_disable",
         "provisioning_relay_leases",
+        "provisioning_relay_grant_key_stage",
+        "provisioning_relay_grant_key_activate",
     }
     assert all(contract.allowed_roles == ("admin",) for contract in relay_routes)
 
@@ -160,14 +163,35 @@ def test_every_relay_route_is_the_administrators_alone():
         ("POST", "/api/v1/relays/site-a/enable", "provisioning_relay_enable"),
         ("POST", "/api/v1/relays/site-a/disable", "provisioning_relay_disable"),
         ("GET", "/api/v1/relays/site-a/leases", "provisioning_relay_leases"),
+        (
+            "POST",
+            "/api/v1/relays/site-a/grant-keys/stage",
+            "provisioning_relay_grant_key_stage",
+        ),
+        (
+            "POST",
+            "/api/v1/relays/site-a/grant-keys/activate",
+            "provisioning_relay_grant_key_activate",
+        ),
     ],
 )
 def test_a_relay_id_never_matches_an_action_path(method, path, operation):
     """A capture takes no slash, so a bare relay id never matches the token,
-    enable, disable, or leases path, and each resolves to its own operation."""
+    enable, disable, leases, or grant-key path, and each resolves to its own
+    operation."""
     resolved, _ = resolve_provisioning_route(method, path, {})
 
     assert resolved == operation
+
+
+def test_a_staged_private_key_is_masked_in_the_model():
+    """The request holds the key as a secret value: neither its repr nor its
+    serialization shows it, so logging the model discloses nothing."""
+    body = RelayGrantKeyStage(private_key="c3VwcGxpZWQta2V5")
+
+    assert "c3VwcGxpZWQta2V5" not in repr(body)
+    assert "c3VwcGxpZWQta2V5" not in body.model_dump_json()
+    assert body.private_key.get_secret_value() == "c3VwcGxpZWQta2V5"
 
 
 def test_every_fulfillment_route_is_a_family_route():

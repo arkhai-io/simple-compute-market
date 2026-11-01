@@ -13,18 +13,24 @@ behind them, the holdings read included, is covered by the family kit's
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 import pytest
 from httpx import ASGITransport
 
-from compute_provisioning.relays import RelayPortLease
+from compute_provisioning.relays import GrantKey, RelayPortLease
 from compute_provisioning_client import (
     ComputeProvisioningAuthenticationError,
     ComputeProvisioningClient,
     ComputeProvisioningError,
 )
-from compute_provisioning_contracts import RelayCreate, RelayTokenRotate, RelayUpdate
+from compute_provisioning_contracts import (
+    RelayCreate,
+    RelayGrantKeyStage,
+    RelayTokenRotate,
+    RelayUpdate,
+)
 
 from compute_provisioning_service import container as _container_module
 from compute_provisioning_service.main import app
@@ -124,6 +130,103 @@ class TestRelayAdministrationOverTheApi:
     async def test_an_unusable_window_is_refused(self, relays):
         with pytest.raises(ComputeProvisioningError):
             await relays.create_relay(_relay(vm_port_range_count=0))
+
+
+class TestGrantKeysOverTheApi:
+    """A relay's grant keys are read by id and public half, and rotated in two
+    steps; a private key never comes back."""
+
+    async def test_a_relay_created_with_no_key_reads_an_active_key(self, relays):
+        created = await relays.create_relay(_relay())
+        active = created.grant_keys.active
+        assert active is not None
+        assert (await relays.get_relay("site-a")).grant_keys.active == active
+        assert created.grant_keys.staged is None
+        assert created.grant_keys.retired == []
+
+    async def test_staging_a_supplied_key_returns_its_public_half_and_thumbprint(
+        self, relays, caplog
+    ):
+        await relays.create_relay(_relay())
+        supplied = GrantKey.generate()
+        private = supplied.profile_form()
+
+        with caplog.at_level(logging.DEBUG):
+            staged = await relays.stage_relay_grant_key(
+                "site-a", RelayGrantKeyStage(private_key=private)
+            )
+            fetched = await relays.get_relay("site-a")
+            listing = await relays.list_relays()
+
+        assert (staged.kid, staged.public_key) == (supplied.kid, supplied.public_key)
+        assert fetched.grant_keys.staged.kid == supplied.kid
+        for response in (staged, fetched, *listing.relays):
+            assert private not in response.model_dump_json()
+        assert private not in caplog.text
+
+    async def test_staging_leaves_the_active_key_until_activation(self, relays):
+        created = await relays.create_relay(_relay())
+        staged = await relays.stage_relay_grant_key("site-a")
+
+        assert (await relays.get_relay("site-a")).grant_keys.active == created.grant_keys.active
+
+        activated = await relays.activate_relay_grant_key("site-a")
+        assert activated.grant_keys.active.kid == staged.kid
+        assert activated.grant_keys.staged is None
+        assert [key.kid for key in activated.grant_keys.retired] == [
+            created.grant_keys.active.kid
+        ]
+
+    async def test_a_malformed_supplied_key_is_refused_without_the_value(
+        self, relays, caplog
+    ):
+        await relays.create_relay(_relay())
+        value = GrantKey.generate().profile_form()[:-8]
+
+        with caplog.at_level(logging.DEBUG):
+            with pytest.raises(ComputeProvisioningError) as refused:
+                await relays.stage_relay_grant_key(
+                    "site-a", RelayGrantKeyStage(private_key=value)
+                )
+
+        assert refused.value.status_code == 422
+        assert "PKCS#8" in str(refused.value)
+        assert value not in str(refused.value)
+        assert value not in caplog.text
+        assert (await relays.get_relay("site-a")).grant_keys.staged is None
+
+    @pytest.mark.parametrize(
+        "shape",
+        ["bare", "listed", "misspelled"],
+    )
+    async def test_a_malformed_stage_body_is_refused_without_the_key(
+        self, relays, shape
+    ):
+        """Rejection-path test: bodies the typed client never sends, sent
+        signed through its transport. The framework's own validation answer
+        quotes what it refuses; this route's answers say where, never what."""
+        await relays.create_relay(_relay())
+        key = GrantKey.generate().profile_form()
+        body = {
+            "bare": key,
+            "listed": {"private_key": [key]},
+            "misspelled": {"privat_key": key},
+        }[shape]
+
+        with pytest.raises(ComputeProvisioningError) as refused:
+            await relays.authenticated_request(
+                "POST", "/api/v1/relays/site-a/grant-keys/stage", body
+            )
+
+        assert refused.value.status_code == 422
+        assert key not in str(refused.value)
+        assert (await relays.get_relay("site-a")).grant_keys.staged is None
+
+    async def test_activating_with_nothing_staged_is_a_conflict(self, relays):
+        await relays.create_relay(_relay())
+        with pytest.raises(ComputeProvisioningError) as refused:
+            await relays.activate_relay_grant_key("site-a")
+        assert refused.value.status_code == 409
 
 
 class TestHoldingsOverTheApi:

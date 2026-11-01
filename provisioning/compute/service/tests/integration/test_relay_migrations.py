@@ -26,6 +26,15 @@ from vm_provisioning_adapter.db import AnsiblePoolConfig
 
 _PLAYBOOK_PATH = "/configured/playbook.yaml"
 _ACTIVE_OWNER_INDEX = "uq_relay_port_leases_active_owner"
+_GRANT_KEY_COLUMNS = (
+    "grant_key_encrypted",
+    "grant_key_id",
+    "grant_key_public",
+    "grant_key_activated_at",
+    "staged_grant_key_encrypted",
+    "staged_grant_key_id",
+    "staged_grant_key_public",
+)
 
 
 def _engine():
@@ -230,3 +239,39 @@ class TestThePoolRelaysMigration:
             session.add(_lease(6100, "cr-1"))
             session.commit()
             assert session.query(RelayPortLease).count() == 1
+
+
+class TestTheGrantKeyMigration:
+    def test_a_stored_relay_gains_grant_key_state_and_holds_no_key(self, tmp_path):
+        """A relay stored before relays held grant keys keeps its row, with no
+        active key, and the retired-key table appears."""
+        engine = create_db_engine(f"sqlite:///{tmp_path / 'keys.db'}", is_sqlite=True)
+        run_migrations(engine)
+        with engine.begin() as connection:
+            connection.execute(text("DROP TABLE relay_retired_grant_keys"))
+            for column in _GRANT_KEY_COLUMNS:
+                connection.execute(text(f"ALTER TABLE relays DROP COLUMN {column}"))
+            connection.execute(text(
+                "DELETE FROM schema_migrations WHERE id = '20261101_002_relay_grant_keys'"
+            ))
+            connection.execute(text(
+                "INSERT INTO relays (id, relay_addr, relay_port, vm_port_range_start, "
+                "vm_port_range_count, enabled) VALUES ('site-a', '203.0.113.9', 7000, "
+                "6100, 100, 1)"
+            ))
+
+        run_migrations(engine)
+
+        names = {c["name"] for c in inspect(engine).get_columns("relays")}
+        assert set(_GRANT_KEY_COLUMNS) <= names
+        assert {c["name"] for c in inspect(engine).get_columns("relay_retired_grant_keys")} == {
+            "relay_id",
+            "key_id",
+            "retired_at",
+        }
+        with engine.begin() as connection:
+            assert connection.execute(
+                text("SELECT grant_key_id FROM relays WHERE id = 'site-a'")
+            ).scalar_one() is None
+        check_schema_version(engine)
+        engine.dispose()
