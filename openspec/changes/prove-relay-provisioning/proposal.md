@@ -200,8 +200,14 @@ None. The plugin's capability is `frp-grant-admission`'s.
   the runbook (rotation, a service-generated key surviving only with the database).
 - One relay per operator as the recommended deployment, a shared relay's limits, the
   emergency choice per incident, and the host- and relay-side steps for a host teardown
-  cannot reach (D16, D17, D20) → `physical-provisioning` architecture; the runbook;
+  cannot reach — the leased port blocked and its connections ended, the block's record
+  and lifting, the step's limit to access through the relay, and on a shared relay who
+  does what (D16, D17, D20) → `physical-provisioning` architecture; the runbook;
   `docs/seller-frp-setup.md`.
+- Tracing a plugin log line's `jti` to its tenancy — the holdings read while the row
+  stands, the lease read once it has been reused (D16) → the runbook.
+- The plugin wheel as the operator's trusted input, with its dependencies checked
+  against the tool's lock (D23) → `physical-provisioning` architecture; the runbook.
 - The reuse margin and the clock-synchronisation requirement (D16) →
   `physical-provisioning` spec; `docs/development/DEPLOYMENT_AND_CONFIG.md` (the
   setting); the runbook (clocks).

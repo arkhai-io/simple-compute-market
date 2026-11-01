@@ -356,8 +356,10 @@ the lease records no host (correction 16), never `null`, which the plugin refuse
 `jti` names the owning reservation rather than the lease row because a row is reused
 for every tenancy of its port (correction 15): the reservation is unique per tenancy —
 one active lease per owner is enforced, and a released reservation takes no other — so
-a relay's log line resolves through the holdings read to the reservation, and through
-it to the deal, even after the port is reissued. Grants re-signed on a job's retries
+a relay's log line names its tenancy even after the port is reissued: the holdings read
+shows the reservation while that tenancy's row stands, and the lease read
+(`GET /contract/leases/{jti}`) returns the reservation and its deal once the row has
+been reused (55 F3). Grants re-signed on a job's retries
 share it, and their `exp`.
 
 The grant carries no `iat`. The plugin refuses an `iat` later than the relay's clock,
@@ -409,10 +411,40 @@ Lifecycle:
    well as stopping keeps a reboot from registering them again while their grants are
    unexpired. On a host it cannot reach, restarting frps alone does not keep it out —
    its client reconnects and registers again with an unexpired grant (correction 17) —
-   so the relay-side step blocks the host's source address at the relay's firewall
-   and then restarts frps, dropping every session on that relay: under the
-   recommended deployment (D20), one operator's. Where that address is shared with
-   other hosts, the alternative is removing the relay's key at once (D17).
+   and removing the relay's key does not either, since the plugin never rechecks a
+   registered proxy (its spec, "A registered proxy is not rechecked"). The relay-side
+   step therefore closes the buyer's path, the lease's port, rather than the host's
+   registration (55 F1):
+   - It blocks inbound traffic to the leased port at the relay's firewall, then ends
+     the connections already established on it, which a firewall does not cut:
+     `ss -K state established '( sport = :<port> )'`, the state filter sparing frps's
+     listening socket, run with `NET_ADMIN` in the relay's network namespace — on
+     Kubernetes, from an ephemeral debug container. Where `ss -K` is unavailable, one
+     frps restart ends them instead. Other hosts keep or regain their proxies, since
+     no key is removed; the stale host may register again, behind the block.
+   - Where the operator controls frps but not the relay's firewall, the step removes
+     the port from frps's `allowPorts` and restarts frps: the restart clears the stale
+     registration and frps refuses it on its return. Lifting it takes another
+     restart.
+   - The block records its port, its lease, and the grant's expiry, and is lifted only
+     once that expiry has passed and the registration has cleared — by an frps
+     restart, or by the stale client's reconnect being refused. Lifted earlier, the
+     old registration is the port's again; left in place past the port's
+     quarantine, the next tenancy's create fails on a port it cannot register, which
+     is visible and exposes nothing.
+   - On a relay run for other operators (D20), the relay-side step is the relay
+     operator's, at the site operator's request; the runbook says who does what.
+
+   The step ends access through the relay only. A tenant with a shell may have opened
+   an outbound tunnel of their own during the lease, which only the reclaim on the
+   host (D15) ends: fully revoking an unreachable host needs the host recovered, and
+   the relay step limits the damage meanwhile. It works whether or not the host's
+   source address is shared, so it replaces both a block of that address followed by
+   a restart (every session on the relay dropped, and no answer for a shared address)
+   and removing the relay's key (the live registration untouched, and every other
+   grant the key signed refused at its next reconnect); stating that the relay
+   offers no remedy was rejected too, since it leaves an unreachable host's buyer
+   access open until the host is recovered.
 
 Extending a lease would mean re-signing and rewriting the stanza, which drops that
 buyer's session; it is a recorded limit, and no fulfillment path extends a lease
@@ -473,12 +505,11 @@ when none is supplied, and returns its public half; the operator adds it to the 
 under the relay's issuer, and *activate* starts signing with it.
 
 **The profile's form.** The key is the single-line standard base64 of its PKCS#8 DER,
-the private twin of the public half's form below, which one pipe produces (the key is
-RFC 8032's test key, an example only):
+the private twin of the public half's form below, which one pipe produces:
 
 ```yaml
 # openssl genpkey -algorithm ed25519 -outform DER | base64 -w0
-RELAY_BM_GRANT_KEY: "MC4CAQAwBQYDK2VwBCIEIJ1hsZ3v/VpguoRK9JLsLMREScVpezJpGXA7rAMcrn9g"
+RELAY_BM_GRANT_KEY: "<the key's PKCS#8 DER, standard base64, one line>"
 ```
 
 Surrounding whitespace is stripped before decoding, since secret stores commonly add a
@@ -798,11 +829,16 @@ The live run's buyer relay is of the second kind, so section 16 proves the image
 evidence.
 
 Why: the plain program fits how `relay-server` already builds a relay, as the plugin's
-design notes for a VPS (its note 7); hash-pinned dependencies keep the install as
-verified as D22's downloads, and, exported from the tool's lock, they are one of the two
-points the plugin proves its vector at (its D23), so a VPS relay never runs an untested
-release between the declared floors and the lock; and taking the plugin as an input
-means its publication never gates this change. Documenting the image covers the other kind of relay without a
+design notes for a VPS (its note 7); the role checks every dependency it installs
+against the lock's hashes, and, exported from the tool's lock, they are one of the two
+points the plugin proves its vector at (its D23), so a VPS relay never runs dependency
+versions the vector was not proven at; and taking the plugin as an input means its
+publication never gates this change. The wheel itself is not checked (55 F2): like the
+configuration and the token, it is the operator's input, copied from the controller,
+built from the repository or taken from a release — never fetched by the role, as D22's
+archives are — so a digest the same operator supplied beside it would add an input and
+no assurance. Once the move-out publishes a release, its digest can be pinned in the
+role as D22 pins frp (Open Questions). Documenting the image covers the other kind of relay without a
 second install path in the role.
 
 Rejected: the image installed by `relay-server` (a container runtime and registry
@@ -1057,7 +1093,9 @@ the plugin's configuration. Four rounds, each ending in its own review:
   recommended deployment and a shared relay's limits, onboarding a site to a shared
   relay, the window within its range, the drain rule, synchronised clocks, key
   rotation keeping the profile current, the emergency choice per incident, the host-
-  and relay-side steps for a host teardown cannot reach, and the admission check —
+  and relay-side steps for a host teardown cannot reach (the leased port blocked and
+  its connections ended, the block's record and lifting, who does what on a shared
+  relay), tracing a log line's `jti`, and the admission check —
   and seller documentation and the e2e README.
   Session 2: a live-verification section in the `[log]` form
   `prove-real-vm-provisioning` used, on a containerised relay (D23): the owner
@@ -1088,6 +1126,11 @@ round 1 session 2 and round 4 as listed.
 - **`relay-server`'s plugin install has no live evidence** (D23): the live run's relay
   is containerised, so the role is proven by its IaC tests and syntax checks only.
 - **Lease extension would drop the session** of the extended lease (D16).
+- **The relay-side step for an unreachable host ends access through the relay only**
+  (D16): an outbound tunnel the tenant opened from the host during the lease lasts
+  until the host is recovered and reclaimed (D15).
+- **The plugin wheel is taken on the operator's word** (D23): the role checks its
+  dependencies against the lock's hashes, not the wheel itself.
 - **No emergency rotation across live hosts** (D17): a compromised key is either removed
   at once, refusing that operator's buyers at their next reconnect until their leases
   end, or kept until its leases end; a leaked relay token has no path short of draining
@@ -1114,5 +1157,9 @@ round 1 session 2 and round 4 as listed.
   Recorded as an unowned `ROADMAP.md` gap at closeout; a follow-up change owns it once
   proposed. Revisit before relay-backed pools serve buyers whose operator could not
   accept the per-incident choice D17 states, or at the first credential compromise.
+- **Pinning the plugin wheel's digest in `relay-server` (D23).** The role takes the
+  wheel on the operator's word. Revisit when the plugin's move-out publishes a release:
+  the role can then pin that release's version and digest in its defaults and check the
+  wheel before installing it, as `frp-binary` pins frp (D22).
 - **Relay deletion** stays `relay-vm-access-without-a-dashboard`'s decision gate
   1A.7; nothing here forecloses its answers.
