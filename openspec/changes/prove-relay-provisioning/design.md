@@ -999,7 +999,7 @@ operator logs only (unreproducible).
 
 ### D10. The real bare-metal lane takes the real VM lane's shape
 
-`e2e-tests/tests/e2e/roles/scenarios/bare_metal/test_real_provisioning_deal.py`,
+the planned `test_real_provisioning_deal.py` module under `e2e-tests/tests/e2e/roles/scenarios/bare_metal/`,
 marker `e2e_bare_metal_real_provisioning`, in no lane, skipping and naming the
 profile when the target has no bare-metal host, run against the bare-metal release.
 A real bare-metal `ComputeDealDriver` without `MockGates` registers, from the target,
@@ -1053,6 +1053,8 @@ Rejected: renaming only the generated-key block to `frp`; leaving the variants
 inconsistent.
 
 ### D13. Implementation cadence
+
+Execution reconciliation: the plugin prerequisite is now archived and integrated. Keep the section order below. The owner-authorized cadence for unfinished work is focused checks and packaging per intermediate commit, then one full suite and combined independent review per frozen source round, reusing unchanged evidence. The tasks record this override without rewriting completed history. Bounded-working-data integration joins after verified section 9; its real-lane qualification additionally waits for section 12. Sections 14–15 gate live admission/section 16, not harness implementation. D23 retains native installation and containerized live qualification as separate evidence scopes.
 
 On the owner's direction after the design review (workflow log seq 39), the work
 that does not need the admission plugin comes first, and `admit-relay-proxies-by-grant`

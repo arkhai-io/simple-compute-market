@@ -14,6 +14,14 @@ Sections 4–16 were replanned against the design as reviewed in `reviews/55-des
 and triaged, which carries 45-design F2's list of stale tasks and the reconciliation
 with `admit-relay-proxies-by-grant`; sections 1–3 are unchanged.
 
+## Execution reconciliation
+
+The admission-plugin prerequisite is archived and integrated. Preserve D13's four-round order and all completed task and handoff history. Sections 6–9 precede cleanup integration; sections 10–13 build the real lanes; sections 14–15 precede live admission and section 16. Writing harness code does not require prior live deployment.
+
+The owner-authorized validation cadence applies prospectively to unfinished sections: focused meaningful checks, comment hygiene and packaging before intermediate commits; one full `make test` and combined independent implementation review per frozen source round. This supersedes per-section full-suite/review wording below, while preserving named native gates, integration suites, pipeline evidence and closeout obligations. Reuse passing evidence with unchanged relevant inputs; source changes or unresolved failures require affected checks. Record delegated technical decisions truthfully without claiming personal owner reading.
+
+The native `relay-server` installer remains native under D23. Section 16 uses containerized frps and plugin sharing a network namespace. Review the relevant source and verify admission before live buyer qualification. The additive bounded-working-data change joins after verified section 9 termination; its new real-lane observations additionally require section 12. Preserve legacy absent-account behavior; receipt-backed bounded cleanup must still verify numeric-identity activity/data/IPC absence when NSS no longer names the account.
+
 ## 1. The relay machinery in the compute family kit
 
 Delivers D2(a) and "Relay machinery belongs to the compute family": the relay
@@ -1107,7 +1115,7 @@ typed, versioned settings section".
       `e2e-tests/config/` with `config-real-provisioning-target.yml.example`
       (documentation addresses and invented names, said so), and the ignore rule in
       `e2e-tests/.gitignore`. (D5)
-- [ ] 10.3 Tests. Unit (`e2e-tests/tests/unit/test_real_provisioning_target.py`,
+- [ ] 10.3 Tests. Unit (the planned `test_real_provisioning_target.py` module under `e2e-tests/tests/unit/`,
       replacing `test_real_vm_target.py`): every refusal names its field; a listing
       shape not fitting twice names the dimension; version 1 refused.
 - [ ] 10.4 Verify. `make test-e2e-unit`; `make test`. End-to-end: none; the real
@@ -1154,12 +1162,12 @@ relay access on a real host".
 
 - [ ] 12.1 Add a pinned `known_hosts` mode to `ssh_access.py`. (D10, D11)
 - [ ] 12.2 Add the real bare-metal driver
-      (`e2e-tests/tests/e2e/roles/scenarios/bare_metal/real_compute_deal_driver.py`)
+      (the planned `real_compute_deal_driver.py` module under `e2e-tests/tests/e2e/roles/scenarios/bare_metal/`)
       implementing `ComputeDealDriver` without `MockGates`: it registers, from the
       target, a backed pool delivering and advertising bare metal with
       `provider_config.relay_id`, the host with its connection, and the declaration; it
       checks the relay as 11.1 does. (D10)
-- [ ] 12.3 Add `e2e-tests/tests/e2e/roles/scenarios/bare_metal/test_real_provisioning_deal.py`,
+- [ ] 12.3 Add the planned `test_real_provisioning_deal.py` module under `e2e-tests/tests/e2e/roles/scenarios/bare_metal/`,
       marker `e2e_bare_metal_real_provisioning` registered in `e2e-tests/pyproject.toml`
       and in no lane: every shared stage; bare metal's publication, listing-closing,
       and evidence-publication stages, adopting the open listing on its resource as
