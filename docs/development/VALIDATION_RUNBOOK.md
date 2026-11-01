@@ -977,8 +977,8 @@ VM entry under `hosts`:
 - `connection.ssh_host`, `ssh_user`, `ssh_port`, and `ssh_key_path`, where the
   provisioning service connects and section 23's service-local key path;
 - `access: {mode: direct, public_host: <buyer-address>}` for forwarded guest
-  ports; the current VM scenario requires direct access before mutation. The
-  target schema also admits relay access naming only `relay_id`;
+  ports, or `access: {mode: relay, relay_id: <configured-relay-id>}`. A
+  relayed run requires an enabled relay with a token and active grant key;
 - `capacity`, the sellable `vcpu_count`, `ram_gb`, and `disk_gb` from section 21;
 - `listing_shape`, an explicit guest shape fitting twice within that capacity.
 
@@ -1026,10 +1026,16 @@ several, a closed one, or one of another shape, as after the target's capacity
 changes — fails the run naming them; rerun with the target they were made for,
 or against a fresh stack.
 
-A run that fails after its settlement was accepted expires its own deal's lease
-so the provisioning service tears the VM down. Where it cannot confirm the VM
-gone, it fails naming the escrow, negotiation, fulfillment, reservation, jobs,
-VM, and host; recover that VM by hand from those names.
+The lane keeps the first guest's SSH heartbeat process open while a second guest
+is created and removed, requiring no observed gap over five seconds. It checks
+management connectivity before and after both guests' create and teardown, and
+checks released relay holdings without requiring immediate reuse during grant
+quarantine. Both guests need no GPU; this proves tunnel coexistence, not a GPU
+rental.
+
+A failed run attempts normal lifecycle cleanup for both accepted settlements,
+even if one recovery fails. Unconfirmed cleanup names each escrow, negotiation,
+fulfillment, reservation, job, VM and host that an operator must recover.
 
 ## 26. Restore And Cleanup
 

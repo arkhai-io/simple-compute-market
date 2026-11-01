@@ -25,6 +25,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import logging
+import math
 import os
 import shutil
 import subprocess
@@ -34,6 +35,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Condition, Thread
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import (
@@ -162,6 +164,102 @@ def _fingerprint(key_base64: str) -> str:
     return "SHA256:" + base64.b64encode(digest).decode().rstrip("=")
 
 
+class SshHeartbeat:
+    """One uninterrupted SSH process, drained while the scenario does other work.
+
+    Local arrival times catch a stalled connection; remote timestamps also catch
+    a remote pause hidden by buffered delivery. No reconnect can erase a gap.
+    """
+
+    def __init__(self, process: subprocess.Popen[str], *, clock: Callable[[], float]) -> None:
+        self.process = process
+        self._clock = clock
+        self._condition = Condition()
+        self._last_arrival: float | None = None
+        self._last_remote: float | None = None
+        self._longest_gap = 0.0
+        self.sample_count = 0
+        self._error: str | None = None
+        self._ended = False
+        self._reader = Thread(target=self._read, daemon=True)
+        self._reader.start()
+
+    def _read(self) -> None:
+        try:
+            assert self.process.stdout is not None
+            for line in self.process.stdout:
+                with self._condition:
+                    try:
+                        remote = float(line.strip())
+                        if not math.isfinite(remote):
+                            raise ValueError("nonfinite timestamp")
+                        now = self._clock()
+                        if self._last_remote is not None:
+                            assert self._last_arrival is not None
+                            if remote < self._last_remote:
+                                raise ValueError("remote time moved backwards")
+                            self._longest_gap = max(
+                                self._longest_gap, remote - self._last_remote,
+                                now - self._last_arrival,
+                            )
+                        self._last_arrival, self._last_remote = now, remote
+                        self.sample_count += 1
+                    except ValueError as error:
+                        self._error = f"invalid heartbeat timestamp: {error}"
+                    self._condition.notify_all()
+        finally:
+            with self._condition:
+                self._ended = True
+                self._condition.notify_all()
+
+    def wait_ready(self, *, min_samples: int = 1, timeout: float = CONNECT_TIMEOUT_SECONDS + COMMAND_SECONDS) -> None:
+        """Require a first observation from this exact process within a bound."""
+        with self._condition:
+            ready = self._condition.wait_for(
+                lambda: self.sample_count >= min_samples or self._ended or self._error,
+                timeout=timeout,
+            )
+            if not ready or self.sample_count < min_samples or self._error:
+                raise SshAccessError(self._error or "heartbeat produced no timestamp before ending or timing out")
+        self.assert_alive()
+
+    @property
+    def running(self) -> bool:
+        return self.process.poll() is None and not self._ended
+
+    @property
+    def longest_gap(self) -> float:
+        with self._condition:
+            if self._last_arrival is None:
+                return float("inf")
+            return max(self._longest_gap, self._clock() - self._last_arrival)
+
+    def assert_alive(self, *, max_gap: float = 5.0) -> None:
+        """Require the original process still alive and no excessive heartbeat gap."""
+        if self._error:
+            raise SshAccessError(self._error)
+        if not self.running:
+            raise SshAccessError(f"heartbeat SSH process ended (exit={self.process.poll()})")
+        gap = self.longest_gap
+        if gap > max_gap:
+            raise SshAccessError(f"heartbeat longest gap {gap:.3f}s exceeds {max_gap:.3f}s")
+
+    def close(self) -> None:
+        """End only this monitor's process and reap it before removing run keys."""
+        if self.process.poll() is None:
+            self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait(timeout=5)
+        self._reader.join(timeout=5)
+        if self._reader.is_alive():
+            raise SshAccessError("heartbeat reader did not stop after its process exited")
+        if self.process.stdout is not None:
+            self.process.stdout.close()
+
+
 class SshSession:
     """One run's keys, known hosts, and connections."""
 
@@ -182,6 +280,7 @@ class SshSession:
         self._sleep = sleep
         self._connect_retry_seconds = connect_retry_seconds
         self._attempt_seconds = attempt_seconds
+        self._heartbeats: list[SshHeartbeat] = []
 
     # -- keys ---------------------------------------------------------------
 
@@ -217,6 +316,37 @@ class SshSession:
             f"{endpoint.user}@{endpoint.host}",
             command,
         ]
+
+    def heartbeat(self, endpoint: SshEndpoint, key: SshKey) -> SshHeartbeat:
+        """Start one established session that stays open across other proxy changes."""
+        command = "while :; do date +%s; sleep 1; done"
+        argv = self.argv(endpoint, key, command)
+        argv[-2:-2] = ["-o", "ServerAliveInterval=2", "-o", "ServerAliveCountMax=3"]
+        error_path = self.directory / f"heartbeat-{len(self._heartbeats)}.stderr"
+        with error_path.open("w") as errors:
+            process = subprocess.Popen(
+                argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                stderr=errors, text=True, bufsize=1,
+            )
+        monitor = SshHeartbeat(process, clock=self._clock)
+        self._heartbeats.append(monitor)
+        try:
+            monitor.wait_ready()
+        except BaseException:
+            monitor.close()
+            raise
+        return monitor
+
+    def close(self) -> None:
+        """Close every owned heartbeat, including one a failed stage left open."""
+        failures = []
+        for heartbeat in self._heartbeats:
+            try:
+                heartbeat.close()
+            except Exception as error:
+                failures.append(str(error))
+        if failures:
+            raise SshAccessError("; ".join(failures))
 
     def _attempt(
         self,
@@ -395,7 +525,17 @@ def ssh_session(**options) -> Iterator[SshSession]:
     directory = Path(tempfile.mkdtemp(prefix="e2e-ssh-"))
     try:
         directory.chmod(0o700)
-        yield SshSession(directory, **options)
+        session = SshSession(directory, **options)
+        try:
+            yield session
+        except BaseException:
+            try:
+                session.close()
+            except Exception as error:
+                log.warning("Could not close the run's heartbeat sessions: %s", error)
+            raise
+        else:
+            session.close()
     finally:
         # Reported rather than raised, so a failure here cannot hide the run's
         # own outcome; the directory holds private keys, so it is never silent.

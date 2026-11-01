@@ -598,8 +598,10 @@ once the lease expires and its capacity is released, a VM list job on the host
 no longer names the guest and the delivered access no longer connects. It claims
 nothing about the guest's other credentials, which a batch-mode SSH client never
 tries. The guest's host key is trusted on first use for the run only, and a
-later connection presenting another fails the run. The lane proves direct access
-through the host's forwarded port; no lane runs a relay-backed pool.
+later connection presenting another fails the run. Direct access uses forwarded
+guest ports; relay access checks the relay address and the reservation's leased
+port against the delivered endpoint. Released holdings retain their grant expiry;
+the scenario does not require immediate port reuse during quarantine.
 
 It is in no lane, because the pipeline has no host to provision on. It runs from
 an operator's machine against a deployed stack's forwarded services, signing as
@@ -616,15 +618,16 @@ access and sellable capacity. A VM host adds a listing shape fitting twice withi
 capacity; a bare-metal host adds its physical identity and verified SSH public
 host key. Direct access names a public host, while relay access names only its
 relay identifier. Unknown or foreign fields fail by name; version 1 is refused
-with conversion instructions. The current VM scenario requires direct access
-before any mutation. The target contains no private key or relay secret.
+with conversion instructions. A relayed run requires an enabled relay with a
+configured token and active grant key before taking holds or registering supply.
+The target contains no private key or relay secret.
 Without the profile every stage skips naming it, and nothing is written to the
 stack.
 
 The lane registers its own supply from the target — a pool stating a GPU-less
 shape, the host with its connection, and one declaration selling the whole
-capacity — after checking, before its holds are taken, that the service reports
-its VM executor real. It runs every shared stage and no mock-lane stage, and
+capacity — and publishes the target's smaller listing shape. It checks before
+its holds are taken that the service reports its VM executor real. It runs every shared stage and no mock-lane stage, and
 inserts its own: a check that the settlement preview chose the target host,
 before settlement; a create-job poll after it; SSH access stages once the lease
 is recorded; a teardown-job poll; and the VM-list and access-ended checks after
@@ -644,9 +647,17 @@ the deal's own `job_submitted` event, filtered by its negotiation and counted
 from a mark taken before settling, because an adopted listing's event log holds
 earlier deals' events.
 
-A run that fails after the storefront accepted its settlement, and before the
-guest is confirmed gone, is recovered by a module finaliser. It expires only its
-own deal's lease, through the site, and advances the held workers, so the
+The lane keeps one SSH process printing a timestamp each second, with a five-second
+maximum observed gap, while a second deal creates a guest and then expires it.
+It requires the original session alive across both operations and checks management
+connectivity before and after each create and teardown. Each guest uses its own
+delivered port. A temporary reservation proves the second guest's shape is available
+again while the first guest remains active. The first deal then follows ordinary
+lease expiry and proves the whole host capacity is available again.
+
+A run that fails after an accepted settlement is recovered by a module finaliser.
+It tries both deals even if one recovery fails, expiring only their own leases
+through the site, and advances the held workers, so the
 provisioning service tears the guest down through its own lease lifecycle; it
 then confirms the teardown job and the guest's absence. It takes any settlement
 the storefront records, or whose dispatch it logs within a bound, as having

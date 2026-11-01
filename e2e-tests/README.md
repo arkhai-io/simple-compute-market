@@ -209,9 +209,9 @@ virtualization; it needs no GPU.
    fits twice within capacity. Direct access states `public_host`; relay access
    states only `relay_id`. Bare-metal hosts additionally state `physical_host_id`
    and their verified `ssh_host_public_key`, and have no VM listing shape.
-   The current VM scenario requires direct access before making any changes;
-   relay references are part of the shared target format. The target carries no
-   private key or relay credential. Version 1 is refused
+   The lane reads a relay before any mutation and requires it enabled, with
+   a configured token and active grant key; it never creates the relay. The
+   target carries no private key or relay credential. Version 1 is refused
    with conversion instructions; a missing or misspelled field fails by name.
 2. Forward the stack's services to the ports the `local` profile names
    (`config/config-local.yml`): the storefront, the registry, the provisioning
@@ -225,9 +225,11 @@ virtualization; it needs no GPU.
 
 Without the `real-provisioning-target` profile, or with its file missing, every stage
 skips naming the profile and file, and nothing is written to the stack. A run
-that fails after settlement expires its own deal's lease so the provisioning
-service tears the VM down, and fails naming the fulfillment, jobs, VM, and host
-where it cannot confirm the VM is gone.
+that fails after settlement tries cleanup for both guests through their leases,
+and reports each unconfirmed removal. The first SSH session stays open across the
+second guest's create and teardown, with a maximum five-second observed gap;
+management connectivity is checked around each operation. The two smaller guests
+prove tunnel coexistence and require no GPU.
 
 ---
 

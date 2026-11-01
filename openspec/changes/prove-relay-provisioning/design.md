@@ -985,6 +985,21 @@ Rejected: deriving half the capacity (rounding can yield a guest that does not
 boot, and the shape is in no file); a fixed shape in the lane (one shape for every
 environment, held in code).
 
+### D7a. Shared ready-stage listing expectation follows the lane's remaining capacity
+
+Source integration found that the shared ready stage assumed every first deal
+consumed a host's whole capacity and therefore asserted a closed listing. That
+conflicts with D7's explicit two-guest shape and D8's second negotiation on the
+same open listing. The accepted technical correction keeps one shared ready
+stage and adds the explicit driver contract
+`listing_status_after_first_fulfillment`: whole-capacity mock drivers state
+`closed`, and the real VM lane states `open`. The shared stage still checks
+settlement readiness and delivery identically, then checks that stated listing
+status. No fallback or lane-specific replacement stage is added. D8's unchanged
+shared-stage intent means shared ownership and reuse, rather than retaining an
+impossible whole-capacity assertion. Permanent explanation belongs with the
+canonical compute-deal and real-lane documentation at closeout.
+
 ### D8. The VM lane runs a second deal while a session stays open
 
 Between the first deal's access checks and its expiry, real-lane stages:
@@ -1209,3 +1224,13 @@ round 1 session 2 and round 4 as listed.
   wheel before installing it, as `frp-binary` pins frp (D22).
 - **Relay deletion** stays `relay-vm-access-without-a-dashboard`'s decision gate
   1A.7; nothing here forecloses its answers.
+
+
+## Design promotion record
+
+| Accepted decision | Classification | Permanent destination | State |
+|---|---|---|---|
+| D7a explicit ready-stage listing expectation follows remaining capacity, with one shared implementation | Permanent test contract | `openspec/specs/test-compatibility/spec.md#requirement-the-canonical-compute-deals-shared-stages-are-defined-once`; `docs/development/TESTING.md#the-canonical-compute-deal` | Normative/rationale promotion remains closeout; current real-lane operator instructions are reconciled |
+
+The proposal's existing knowledge-to-promote list and section 17 retain every
+other material decision; this additional row does not replace that mapping.

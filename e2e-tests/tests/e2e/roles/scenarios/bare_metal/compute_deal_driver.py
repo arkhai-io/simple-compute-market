@@ -82,6 +82,10 @@ class BareMetalComputeDealDriver:
     site_id: str
     run: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
 
+    @property
+    def listing_status_after_first_fulfillment(self) -> str:
+        return "closed"
+
     def __post_init__(self) -> None:
         self.pool_id = f"bm-deal-{self.run}"
         self.reserved_resource_id = f"bm-deal-host-{self.run}"

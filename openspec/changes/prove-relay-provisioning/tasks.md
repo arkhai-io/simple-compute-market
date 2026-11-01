@@ -1540,17 +1540,17 @@ no additional push-only workflow beyond the normal frozen-round pipeline.
 Delivers D6's lane half, D8, D9's lane evidence, and D11's heartbeat session: the
 modified "A real-provisioning VM scenario proves delivery on a real host".
 
-- [ ] 11.1 The real VM driver
+- [x] 11.1 The real VM driver
       (`e2e-tests/tests/e2e/roles/scenarios/vms/real_compute_deal_driver.py`) reads its
       host from version 2, publishes `listing_shape`, registers its pool with
       `provider_config.relay_id` under relay access, and before writing anything reads
       the relay and requires it enabled with a token and an active grant key; under
       relay access the delivered address is the relay's and the port the leased one.
       Adoption compares against `listing_shape`. (D6, D7)
-- [ ] 11.2 Add the heartbeat session to `e2e-tests/tests/e2e/roles/helpers/ssh_access.py`:
+- [x] 11.2 Add the heartbeat session to `e2e-tests/tests/e2e/roles/helpers/ssh_access.py`:
       one `ssh` process printing the time each second with `ServerAliveInterval`, its
       liveness and longest gap readable, closed on demand. (D8, D11)
-- [ ] 11.3 Add the second-deal stages to
+- [x] 11.3 Add the second-deal stages to
       `e2e-tests/tests/e2e/roles/scenarios/vms/test_real_provisioning_deal.py` between
       the first deal's access checks and its expiry: open the heartbeat; the second
       deal (negotiate, escrow, settle, create-job poll, active, access at its own port);
@@ -1558,16 +1558,80 @@ modified "A real-provisioning VM scenario proves delivery on a real host".
       its capacity released and its port shown released by the holdings read; the
       heartbeat across the proxy removal, then closed. Each new field has one producer
       stage. (D8, D9)
-- [ ] 11.4 Check host connectivity through `GET /api/v1/hosts/{id}/connectivity` before
+- [x] 11.4 Check host connectivity through `GET /api/v1/hosts/{id}/connectivity` before
       and after each create and teardown. (D9, 8.4)
-- [ ] 11.5 The finaliser recovers both deals: it cuts short each live lease, confirms
+- [x] 11.5 The finaliser recovers both deals: it cuts short each live lease, confirms
       each guest gone, and names what it cannot confirm. (D8)
-- [ ] 11.6 Tests. Unit (`e2e-tests/tests/unit/test_real_vm_lane.py`,
+- [x] 11.6 Tests. Unit (`e2e-tests/tests/unit/test_real_vm_lane.py`,
       `test_compute_deal_stages.py`, `test_ssh_access.py`): the stage set's order and
       producers, the relay checks, the heartbeat's gap detection, recovery of two deals.
-- [ ] 11.7 Verify. `make test-e2e-unit`; `make test`. End-to-end: `e2e_vm_real_provisioning`, in no
+- [x] 11.7 Verify. `make test-e2e-unit`; `make test`. End-to-end: `e2e_vm_real_provisioning`, in no
       lane, skips without its target; the live run (section 16) runs it. The pipeline's
       lanes must still pass with the real module skipping.
+
+
+### Section 11 handoff
+
+The VM lane reads its domain's version-2 host, publishes its explicit guest
+shape while declaring unchanged whole-host capacity, and reconciles an existing
+listing against that guest shape. Relay access reads the configured relay before
+worker holds or registration and again before supply writes, requires its identity,
+enabled state, configured token and active grant key, and stores only `relay_id`
+in the pool's provider configuration. The shared executor registration helper now
+forwards explicit provider metadata; omitted metadata preserves existing callers.
+Delivered relay addresses and ports are checked against the reservation's active
+holding, and release checks retain the original grant expiry and refuse an active
+owner on the same port; immediate reuse is not required.
+
+One SSH process emits timestamps across the second deal's create and teardown.
+Its reader drains output independently while jobs are polled, observes local and
+remote gaps, requires the process still alive, and fails a gap over five seconds.
+It is reaped on demand and by the run's SSH owner even after a failed stage. The
+second deal's negotiation, escrow, submission intent, fulfillment, guest and access
+have explicit producers; its normal expiry and teardown are followed by a guest
+list, access refusal, relay holding and a returned-shape reservation. The first
+guest remains active during that check and subsequently proves ordinary expiry
+and whole-capacity return. Management connectivity is checked before and after
+each create/teardown. The finalizer attempts both accepted deals even if one
+recovery fails and reports both failures; no fleet-wide release is used.
+
+Accepted D7a resolves a real contract conflict: the shared ready stage assumed a
+whole-capacity deal and required a closed listing, which would make the second
+negotiation impossible. Its explicit driver expectation is now `closed` for the
+existing whole-capacity mock lanes and `open` for this smaller real VM deal. The
+stage remains defined once and unchanged across its callers; no duplicate or
+fallback implementation was added. The design records the rationale and permanent
+destination. The current operator instructions describe the actual target and
+lane; detailed relay installation/admission documentation remains section 15.
+
+The final `make test-e2e-unit` passed all 405 unit tests (including controlled
+subprocess SSH substitutes, not real SSH traffic). These cover stage order and
+state producers/consumers, relay preflight refusals, typed pool request composition,
+listing adoption, explicit ready-stage expectations, leased-port identity and
+release evidence, both-deal recovery, and deterministic FIFO-driven heartbeat
+gaps/EOF. An actual aggregate executor-registration test found a misrouted helper
+argument during the source check; it was corrected, and the pool/host/async site
+composition regression passed. Earlier runs are retained as failed evidence:
+12 stale stage/fixture assertions, then two positional fixtures, then one missing
+mock method spec; the last 405-test run is the passing source candidate. A later
+typed pool test initially supplied a flat hint rather than the canonical family
+shape; it was corrected to consume `capacity_source_for`, and its affected module
+passed all 69 tests before the final whole harness run.
+
+`make check-packaging` passed; no dependency, lock, package-layout or install inputs
+changed in subsequent test/doc/helper-signature corrections, so that evidence is
+reused. `make check-change CHANGE=prove-relay-provisioning` passed, including
+comment hygiene. The no-target marker invocation completed with 47 explicit skips
+and 645 deselections before any stack write; these skips are not live passes.
+No physical guest or relay was exercised by this section. End-to-end coverage is
+`e2e_vm_real_provisioning`, outside all default lanes, with actual execution owed
+by section 16. Validation must still show every normal pipeline lane passes with
+this real module skipping. Owed by validation: no extra push-only workflow beyond
+the normal frozen-round pipeline. Full `make test` and one combined independent
+review remain the frozen sections 10–13 gates under the owner-authorized cadence;
+no additional broad per-section review was run. The lead accepted the D7a seam
+correction and requested this consolidation; personal owner reading and prior
+round formal triage are not claimed complete.
 
 ## 12. The real bare-metal lane
 

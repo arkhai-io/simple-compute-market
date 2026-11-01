@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import re
 import stat
 import subprocess
@@ -470,3 +471,60 @@ def test_memory_is_the_negotiated_amount_less_a_strict_tolerance():
     assert memory_within_tolerance(28, 28)
     assert not memory_within_tolerance(26.5, 28)
     assert not memory_within_tolerance(28.5, 28)
+
+
+@pytest.fixture
+def heartbeat_session(tmp_path):
+    """An injected SSH executable controlled by a FIFO, without timing sleeps."""
+    control = tmp_path / "heartbeat-control"
+    os.mkfifo(control)
+    executable = tmp_path / "heartbeat-ssh"
+    executable.write_text(
+        f"#!{sys.executable}\n"
+        "import sys\n"
+        "print('100', flush=True)\n"
+        f"with open({str(control)!r}) as commands:\n"
+        "    for line in commands:\n"
+        "        print(line.strip(), flush=True)\n"
+    )
+    executable.chmod(0o700)
+    directory = tmp_path / "heartbeat-run"
+    directory.mkdir(mode=0o700)
+    session = SshSession(directory, ssh=str(executable), clock=lambda: 0.0)
+    try:
+        yield session, control
+    finally:
+        session.close()
+
+
+def test_heartbeat_keeps_one_process_and_detects_a_gap_without_reconnecting(heartbeat_session):
+    session, control = heartbeat_session
+    monitor = session.heartbeat(ENDPOINT, session.new_key("buyer"))
+    assert _option(monitor.process.args, "ServerAliveInterval") == "2"
+    assert _option(monitor.process.args, "ServerAliveCountMax") == "3"
+    with control.open("w") as commands:
+        commands.write("101\n")
+        commands.flush()
+        monitor.wait_ready(min_samples=2, timeout=2)
+        assert monitor.running and monitor.longest_gap == 1
+        monitor.assert_alive()
+        commands.write("110\n")
+        commands.flush()
+        with pytest.raises(SshAccessError, match="longest gap"):
+            monitor.wait_ready(min_samples=3, timeout=2)
+        assert monitor.longest_gap == 9
+        with pytest.raises(SshAccessError, match="longest gap"):
+            monitor.assert_alive()
+        process = monitor.process
+        monitor.close()
+        assert process.poll() is not None
+
+
+def test_heartbeat_eof_is_failure_even_after_a_timestamp(heartbeat_session):
+    session, control = heartbeat_session
+    monitor = session.heartbeat(ENDPOINT, session.new_key("buyer"))
+    with control.open("w"):
+        pass
+    monitor.process.wait(timeout=2)
+    with pytest.raises(SshAccessError, match="ended"):
+        monitor.assert_alive()

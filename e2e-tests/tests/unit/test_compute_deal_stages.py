@@ -123,8 +123,18 @@ REAL_LANE_ORDER = [
     # The access checks.
     "TestStage09d_BuyerReachesTheNegotiatedShape",
     "TestStage09e_UnrelatedKeyRefused",
+    "TestStage09f_HeartbeatOpened",
+    "TestStage09g_SecondDealAccepted",
+    "TestStage09h_SecondEscrowCreated",
+    "TestStage09i_SecondSettlementSubmitted",
+    "TestStage09j_SecondGuestAccessible",
+    "TestStage09k_HeartbeatSurvivedCreate",
+    "TestStage09l_SecondLeaseCutShort",
+    "TestStage09m_SecondGuestReleased",
+    "TestStage09n_HeartbeatSurvivedRemoval",
     "Stage10a_LeaseExpirySetup",
     "Stage10b_LeaseCycleBeginsTeardown",
+    "TestStage10b2_ManagementBeforeTeardown",
     "Stage11a_TeardownDispatch",
     # The teardown-job poll, where a mock lane releases its teardown gate.
     "TestStage11a3_TeardownJobSucceeded",

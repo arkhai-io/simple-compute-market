@@ -29,10 +29,12 @@ stages:
   03b  Resume it into publication at the registry
   08a2 The settlement preview chose the target host, so 08b may settle
   08b3 The create job ran on the target host and succeeded; its guest recorded
-  09a2 Step the capacity-event loop so the deal's listing closes
+  09a2 Step capacity events; a second guest shape remains sellable
   09c3 The lease names the create job found
   09d  The buyer reaches the negotiated shape with the delivered access
   09e  An unrelated key is refused for the delivered user
+  09f–09n A second deal creates and removes a guest while the first session stays open
+  10b2 Management remains reachable before the first guest's teardown
   11a3 The teardown job ran on the target host and succeeded
   11c  A VM list job on the host no longer names the guest
   11d  The delivered access no longer connects
@@ -49,6 +51,8 @@ return to the market while its guest may still run.
 from __future__ import annotations
 
 import logging
+import time
+from datetime import datetime, timezone
 
 import pytest
 from market_alkahest.alkahest import (
@@ -61,6 +65,11 @@ from e2e_harness.real_provisioning_target import TargetNotConfigured, load_real_
 from e2e_harness.settings import settings
 from tests.e2e.roles.helpers.compute_deal_stages import (
     DEAL_TOKEN,
+    BUYER_INITIAL_PRICE,
+    BUYER_MAX_PRICE,
+    ESCROW_TTL_SECONDS,
+    E2E_LEASE_EXPIRY_BACKDATE,
+    alkahest_opening,
     DURATION_HOURS,
     LISTED_HOURLY_RATE,
     Stage00_LifecycleHeld,
@@ -88,6 +97,10 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     Stage11a_TeardownDispatch,
     Stage11b_TeardownCompletion,
 )
+from tests.e2e.roles.helpers.compute_deal import (
+    advance_fulfillment_to, latest_stage_event_id, wait_for_stage_event,
+)
+from tests.e2e.roles.helpers.escrow import create_buyer_escrow
 from tests.e2e.roles.helpers.domain_deal import require_state
 from tests.e2e.roles.helpers.ssh_access import memory_within_tolerance, ssh_session
 from tests.e2e.roles.scenarios.vms.conftest import (
@@ -103,6 +116,7 @@ from tests.e2e.roles.scenarios.vms.real_compute_deal_driver import (
     RealVmDealState,
     assert_registered_as_target,
     created_guest_name,
+    configured_relay,
     vm_executor_is_real,
 )
 
@@ -154,9 +168,6 @@ def real_vm_target():
     host = target.host_for("vm")
     if host is None:
         pytest.skip("REAL_PROVISIONING_TARGET.hosts holds no vm host")
-    assert host.access.mode == "direct", (
-        "the current VM scenario requires REAL_PROVISIONING_TARGET.hosts.vm.access.mode=direct"
-    )
     return host
 
 
@@ -167,7 +178,9 @@ def real_vm_execution(real_vm_target, provisioning_client):
     A fixture, not only a stage, because the module's holds pause the shared
     services when they are set up, before the first stage runs.
     """
-    return vm_executor_is_real(provisioning_client.get_system_status().execution)
+    executor = vm_executor_is_real(provisioning_client.get_system_status().execution)
+    configured_relay(provisioning_client, real_vm_target)
+    return executor
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -196,12 +209,12 @@ def buyer_key(ssh):
 
 @pytest.fixture(scope="module")
 def offer_resource(real_vm_target) -> dict:
-    """The listing's resource: everything the target host sells, and no GPU."""
+    """The target's explicit guest listing shape, and no GPU."""
     return {
         "offering_mode": "vm",
         "interruptible": True,
         "resource_id": REAL_RESOURCE_ID,
-        **real_vm_target.capacity.model_dump(),
+        **real_vm_target.listing_shape.model_dump(),
         "sla": 90.0,
         "region": REAL_REGION,
     }
@@ -246,8 +259,10 @@ def recover_failed_run(deal_driver, deal_state: RealVmDealState):
     assertions, and a create is already running once settle dispatches it.
     """
     yield
-    if deal_state._settle_preflight_passed and not deal_state._guest_absent:
-        deal_driver.tear_down_after_failure(deal_state)
+    first_pending = deal_state._settle_preflight_passed and not deal_state._guest_absent
+    second_pending = deal_state._second_settlement_submitted and not deal_state._second_guest_absent
+    if first_pending or second_pending:
+        deal_driver.recover_both(deal_state)
 
 
 # ===========================================================================
@@ -416,7 +431,7 @@ class TestStage08a_EvaluateSettle(Stage08a_EvaluateSettle):
 
 class TestStage08a2_SettlementPreviewChoseTheTarget:
     def test_08a2_the_settlement_preview_chose_the_target_host(
-        self, real_vm_target, deal_state: RealVmDealState
+        self, real_vm_target, deal_driver: RealVmComputeDealDriver, deal_state: RealVmDealState
     ):
         """The lane's last check before settlement: the preview chose the target.
 
@@ -430,6 +445,7 @@ class TestStage08a2_SettlementPreviewChoseTheTarget:
             f"the settlement preview chose host {chosen!r}, not the target "
             f"{real_vm_target.host_id!r}; settlement is not submitted"
         )
+        deal_driver.assert_management_connected()
         deal_state._settle_preflight_passed = True
         log.info("[08a2] Settlement preview chose the target host %s", chosen)
 
@@ -472,11 +488,7 @@ class TestStage09a2_CapacityEventCycle:
     def test_09a2_capacity_events_dry_run_then_advance(
         self, storefront_admin_client, deal_state: RealVmDealState
     ):
-        """Step the held capacity-event loop so the deal's listing closes.
-
-        The deal holds everything the host sells, so its listing is no longer
-        satisfiable (`step_listing_reconciliation`).
-        """
+        """Apply capacity events; the first guest leaves a second shape sellable."""
         require_state(deal_state, "seller_listing_id", "provisioning_result_injected")
         pending, applied = step_listing_reconciliation(storefront_admin_client)
         deal_state._listing_reconciled = True
@@ -517,7 +529,7 @@ class TestStage09d_BuyerReachesTheNegotiatedShape:
         require_state(deal_state, "settlement_status", "create_job_id")
         endpoint = deal_driver.delivered_access(deal_state)
         shape = ssh.probe(endpoint, buyer_key)
-        capacity = real_vm_target.capacity
+        capacity = real_vm_target.listing_shape
         log.info(
             "[09d] %s@%s:%s (host key %s) shows %s against %s",
             endpoint.user, endpoint.host, endpoint.port,
@@ -552,6 +564,170 @@ class TestStage09e_UnrelatedKeyRefused:
         log.info("[09e] An unrelated key is refused: %s", reason)
 
 
+class TestStage09f_HeartbeatOpened:
+    def test_09f_keep_one_session_open(self, ssh, buyer_key, deal_state: RealVmDealState):
+        require_state(deal_state, "delivered_access")
+        deal_state.heartbeat = ssh.heartbeat(deal_state.delivered_access, buyer_key)
+
+
+class TestStage09g_SecondDealAccepted:
+    def test_09g_negotiate_second_guest(
+        self, storefront_client, storefront_admin_client, registry_client,
+        deal_driver: RealVmComputeDealDriver, deal_state: RealVmDealState,
+    ):
+        require_state(deal_state, "heartbeat", "seller_listing_id", "listing_published")
+        deal_state.heartbeat.assert_alive()
+        listing = storefront_admin_client.get_listing(deal_state.seller_listing_id)
+        assert listing.status == "open", "the first guest left no sellable second shape"
+        option, escrow = alkahest_opening(registry_client.get_listing(deal_state.seller_listing_id))
+        deal_state._second_escrow_expiration_unix = int(time.time()) + ESCROW_TTL_SECONDS
+        opened = storefront_client.negotiate_new(
+            listing_id=deal_state.seller_listing_id,
+            initial_amount=BUYER_INITIAL_PRICE,
+            escrow_expiration_unix=deal_state._second_escrow_expiration_unix,
+            provision_terms=deal_driver.provision_terms(),
+            token=DEAL_TOKEN["contract_address"], chain_name=escrow["chain_name"],
+            escrow_address=escrow["escrow_address"], literal_fields=escrow["literal_fields"],
+            demands=[escrow["demand"]],
+            settlement_selection=deal_driver.opening_selection(option, deal_state._second_escrow_expiration_unix),
+        )
+        negotiation = opened.get("negotiation_id") if isinstance(opened, dict) else None
+        assert negotiation, opened
+        accepted = storefront_admin_client.force_accept_negotiation(
+            deal_state.seller_listing_id, negotiation,
+            amount=(BUYER_INITIAL_PRICE + BUYER_MAX_PRICE) // 2,
+        )
+        assert accepted.action == "accept", accepted
+        detail = storefront_admin_client.get_negotiation(deal_state.seller_listing_id, negotiation)
+        assert detail.terminal_state == "success", detail
+        deal_state.second_negotiation_id = negotiation
+
+
+class TestStage09h_SecondEscrowCreated:
+    def test_09h_create_second_escrow(
+        self, buyer_config, seller_wallet, deal_state: RealVmDealState,
+    ):
+        require_state(deal_state, "second_negotiation_id", "_second_escrow_expiration_unix", "_alkahest_configured")
+        deal_state.second_escrow_uid = create_buyer_escrow(
+            buyer_private_key=buyer_config["private_key"], seller_wallet_address=seller_wallet,
+            agreed_amount=(BUYER_INITIAL_PRICE + BUYER_MAX_PRICE) // 2,
+            duration_seconds=DURATION_HOURS * 3600,
+            token_contract_address=DEAL_TOKEN["contract_address"], rpc_url=buyer_config["rpc_url"],
+            expiration_unix=deal_state._second_escrow_expiration_unix,
+        )
+
+
+class TestStage09i_SecondSettlementSubmitted:
+    def test_09i_preview_target_and_settle_second_guest(
+        self, storefront_client, storefront_admin_client, buyer_config,
+        deal_driver: RealVmComputeDealDriver, deal_state: RealVmDealState,
+    ):
+        require_state(deal_state, "second_negotiation_id", "second_escrow_uid", "seller_listing_id")
+        preview = storefront_admin_client.evaluate_settle(
+            deal_state.second_escrow_uid, listing_id=deal_state.seller_listing_id,
+            negotiation_id=deal_state.second_negotiation_id,
+            **deal_driver.evaluate_settle_arguments(),
+        )
+        assert preview.get("would_submit") is True, preview
+        assert deal_driver.check_evaluate_settle(preview) == deal_driver.target.host_id, preview
+        deal_driver.assert_management_connected()
+        since = latest_stage_event_id(storefront_admin_client, negotiation_id=deal_state.second_negotiation_id)
+        # Record submission intent before crossing the network: recovery must
+        # find accepted work even if the client never receives the response.
+        deal_state._second_settlement_submitted = True
+        settled = storefront_client.settle_evm(
+            deal_state.second_escrow_uid, negotiation_id=deal_state.second_negotiation_id,
+            buyer_evm_address=buyer_config["wallet_address"],
+        )
+        second = deal_driver.second_deal_state(deal_state)
+        deal_state.second_fulfillment_id = deal_driver.settle_dispatched(settled, second, events_since=since)
+
+
+class TestStage09j_SecondGuestAccessible:
+    def test_09j_second_guest_has_its_own_access(
+        self, storefront_admin_client, provisioning_client, ssh, buyer_key,
+        deal_driver: RealVmComputeDealDriver, deal_state: RealVmDealState,
+    ):
+        require_state(deal_state, "second_fulfillment_id", "second_escrow_uid", "delivered_access", "_second_settlement_submitted")
+        created = deal_driver.create_job(deal_state.second_fulfillment_id)
+        deal_state.second_create_job_id = created.job_id
+        deal_state.second_vm_name = created_guest_name(created)
+        advance_fulfillment_to(provisioning_client, deal_state.second_fulfillment_id, "active")
+        ready = storefront_admin_client.wait_for_settlement(deal_state.second_escrow_uid, timeout=60)
+        assert ready.ready and ready.status == "ready", ready
+        second = deal_driver.second_deal_state(deal_state)
+        deal_driver.assert_delivery(second)
+        endpoint = deal_driver.delivered_access(second)
+        assert endpoint.port != deal_state.delivered_access.port, "two guests received the same buyer port"
+        assert ssh.run(endpoint, buyer_key, "id -un").strip() == endpoint.user
+        deal_state.second_access = endpoint
+
+
+class TestStage09k_HeartbeatSurvivedCreate:
+    def test_09k_first_session_survived_second_create(self, deal_state: RealVmDealState):
+        require_state(deal_state, "heartbeat", "second_access")
+        deal_state.heartbeat.assert_alive()
+        log.info("First session survived second create; longest gap %.3fs", deal_state.heartbeat.longest_gap)
+        deal_state._second_create_preserved_session = True
+
+
+class TestStage09l_SecondLeaseCutShort:
+    def test_09l_expire_only_the_second_lease(
+        self, provisioning_client, deal_driver: RealVmComputeDealDriver, deal_state: RealVmDealState,
+    ):
+        require_state(deal_state, "second_fulfillment_id", "second_create_job_id", "_second_create_preserved_session")
+        deal_driver.assert_management_connected()
+        reservation, _state = deal_driver.reservation_of(deal_state.second_fulfillment_id)
+        end = datetime.now(timezone.utc) - E2E_LEASE_EXPIRY_BACKDATE
+        assert deal_driver.site_capacity.truncate_lease(reservation, end.isoformat().replace("+00:00", "Z")) is not None
+        provisioning_client.check_leases()
+        lease = provisioning_client.get_lease(reservation)
+        assert lease.release_job_id, lease
+        deal_state.second_teardown_fulfillment_id = lease.release_job_id
+        advance_fulfillment_to(provisioning_client, lease.release_job_id, "tearing_down")
+
+
+class TestStage09m_SecondGuestReleased:
+    def test_09m_second_guest_capacity_and_port_released(
+        self, provisioning_client, storefront_admin_client, ssh, buyer_key,
+        deal_driver: RealVmComputeDealDriver, deal_state: RealVmDealState,
+    ):
+        require_state(deal_state, "second_teardown_fulfillment_id", "second_create_job_id",
+                      "second_vm_name", "second_access", "second_fulfillment_id", "seller_listing_id", "second_escrow_uid")
+        deal_driver.teardown_job(deal_state.second_teardown_fulfillment_id, create_job_id=deal_state.second_create_job_id)
+        sync_stage, sync_event = deal_driver.lease_view(deal_driver.second_deal_state(deal_state)).released_stage_event
+        existing = storefront_admin_client.get_events(limit=500, stage=sync_stage)
+        since = max((event.id for event in existing.events), default=0)
+        advance_fulfillment_to(provisioning_client, deal_state.second_teardown_fulfillment_id, "torn_down")
+        provisioning_client.check_leases()
+        wait_for_stage_event(storefront_admin_client, sync_stage, sync_event, since_id=since, timeout=10)
+        reservation, _state = deal_driver.reservation_of(deal_state.second_fulfillment_id)
+        assert provisioning_client.get_lease(reservation).status == "released"
+        deal_driver.assert_guest_absent(deal_state.second_vm_name)
+        ssh.assert_refused(deal_state.second_access, buyer_key)
+        deal_driver.assert_relay_released(deal_state.second_fulfillment_id, deal_state.second_access)
+        # Reserve only the returned guest shape: the first guest still owns its
+        # slice, so asking for the whole host would incorrectly report failure.
+        capacity = storefront_admin_client.admin_reserve_capacity(
+            required_attributes={"resource_id": REAL_RESOURCE_ID,
+                                 "dimensions": deal_driver.target.listing_shape.model_dump()},
+            listing_id=deal_state.seller_listing_id,
+            escrow_uid=f"{deal_state.second_escrow_uid}-reuse",
+        )
+        assert capacity.capacity_reservation_id, capacity
+        deal_driver.release_reserved(capacity)
+        deal_state._second_guest_absent = True
+
+
+class TestStage09n_HeartbeatSurvivedRemoval:
+    def test_09n_first_session_survived_second_removal(self, deal_state: RealVmDealState):
+        require_state(deal_state, "heartbeat", "_second_guest_absent")
+        deal_state.heartbeat.assert_alive()
+        log.info("First session survived second removal; longest gap %.3fs", deal_state.heartbeat.longest_gap)
+        deal_state.heartbeat.close()
+        deal_state._second_removal_preserved_session = True
+
+
 # ===========================================================================
 # Phases 10 and 11 — lease expiry, the real teardown, and its effects
 # ===========================================================================
@@ -562,6 +738,14 @@ class TestStage10a_LeaseExpirySetup(Stage10a_LeaseExpirySetup):
 
 class TestStage10b_LeaseCycleBeginsTeardown(Stage10b_LeaseCycleBeginsTeardown):
     pass
+
+
+class TestStage10b2_ManagementBeforeTeardown:
+    def test_10b2_management_still_connects_before_first_teardown(
+        self, deal_driver: RealVmComputeDealDriver, deal_state: RealVmDealState,
+    ):
+        require_state(deal_state, "teardown_fulfillment_id", "_second_removal_preserved_session")
+        deal_driver.assert_management_connected()
 
 
 class TestStage11a_TeardownDispatch(Stage11a_TeardownDispatch):
@@ -601,7 +785,7 @@ class TestStage11c_GuestGoneFromHost:
 
 class TestStage11d_DeliveredAccessEnded:
     def test_11d_the_delivered_access_no_longer_connects(
-        self, ssh, buyer_key, deal_state: RealVmDealState
+        self, ssh, buyer_key, deal_driver: RealVmComputeDealDriver, deal_state: RealVmDealState
     ):
         """The delivered access with the negotiated key fails within its bound.
 
@@ -610,4 +794,5 @@ class TestStage11d_DeliveredAccessEnded:
         """
         require_state(deal_state, "delivered_access", "_teardown_job_completed")
         reason = ssh.assert_refused(deal_state.delivered_access, buyer_key)
+        deal_driver.assert_relay_released(deal_state.fulfillment_id, deal_state.delivered_access)
         log.info("[11d] The delivered access no longer connects: %s", reason)

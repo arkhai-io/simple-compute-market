@@ -36,7 +36,7 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     E2E_LEASE_EXPIRY_BACKDATE,
     ComputeDealState,
 )
-from tests.e2e.roles.helpers.ssh_access import SshEndpoint
+from tests.e2e.roles.helpers.ssh_access import SshEndpoint, SshHeartbeat
 from tests.e2e.roles.scenarios.vms.compute_deal_driver import VmDealDriverBase
 from tests.e2e.roles.scenarios.vms.host_registry import (
     provision_e2e_executor,
@@ -93,6 +93,19 @@ class RealVmDealState(ComputeDealState):
     delivered_access: Optional[SshEndpoint] = None
     #: A VM list job on the host no longer names the guest.
     _guest_absent: bool = False
+    heartbeat: Optional[SshHeartbeat] = None
+    second_negotiation_id: Optional[str] = None
+    _second_escrow_expiration_unix: Optional[int] = None
+    second_escrow_uid: Optional[str] = None
+    _second_settlement_submitted: bool = False
+    second_fulfillment_id: Optional[str] = None
+    second_create_job_id: Optional[str] = None
+    second_vm_name: Optional[str] = None
+    second_access: Optional[SshEndpoint] = None
+    _second_create_preserved_session: bool = False
+    second_teardown_fulfillment_id: Optional[str] = None
+    _second_guest_absent: bool = False
+    _second_removal_preserved_session: bool = False
 
 
 def vm_executor_is_real(execution: Any) -> Any:
@@ -109,6 +122,18 @@ def vm_executor_is_real(execution: Any) -> Any:
         f"would report mock delivery as real: executors={execution.executors!r}"
     )
     return entries[0]
+
+
+def configured_relay(provisioning_client: Any, target: VmHost) -> Any | None:
+    """Read an operator-owned relay before any scenario mutation; never create it."""
+    if target.access.mode == "direct":
+        return None
+    relay = provisioning_client.get_relay(target.access.relay_id)
+    assert relay.id == target.access.relay_id, "relay read returned another identity"
+    assert relay.enabled, f"target relay {relay.id!r} is disabled"
+    assert relay.token_configured, f"target relay {relay.id!r} has no configured token"
+    assert relay.grant_keys.active is not None, f"target relay {relay.id!r} has no active grant key"
+    return relay
 
 
 def target_connection(target: VmHost) -> ConnectionSubmission:
@@ -303,6 +328,47 @@ class RealVmComputeDealDriver(VmDealDriverBase):
     dispatch_bound: float = DISPATCH_BOUND_SECONDS
 
     @property
+    def listing_status_after_first_fulfillment(self) -> str:
+        return "open"
+
+    def assert_management_connected(self) -> None:
+        result = self.provisioning_client.check_connectivity(self.target.host_id)
+        assert result.host == self.target.host_id and result.reachable, (
+            f"target management connection failed: {result}"
+        )
+
+    def assert_relay_delivery(self, fulfillment_id: str, endpoint: SshEndpoint) -> None:
+        if self.target.access.mode == "direct":
+            return
+        reservation, _state = self.reservation_of(fulfillment_id)
+        holdings = self.provisioning_client.list_relay_leases(self.target.access.relay_id)
+        owned = [lease for lease in holdings.leases
+                 if lease.owner_kind == "fulfillment" and lease.owner_id == reservation]
+        assert len(owned) == 1 and owned[0].released_at is None, (
+            f"no unique active relay holding for reservation {reservation!r}"
+        )
+        assert owned[0].host_id == self.target.host_id and owned[0].remote_port == endpoint.port, (
+            "delivered port/host differs from the reservation's relay holding"
+        )
+
+    def assert_relay_released(self, fulfillment_id: str, endpoint: SshEndpoint) -> None:
+        if self.target.access.mode == "direct":
+            return
+        reservation, _state = self.reservation_of(fulfillment_id)
+        holdings = self.provisioning_client.list_relay_leases(self.target.access.relay_id)
+        owned = [lease for lease in holdings.leases
+                 if lease.owner_kind == "fulfillment" and lease.owner_id == reservation]
+        assert len(owned) == 1, f"no unique released relay holding for {reservation!r}"
+        lease = owned[0]
+        assert lease.remote_port == endpoint.port and lease.released_at is not None, (
+            "relay holding did not record release of the delivered port"
+        )
+        assert lease.grant_expires_at is not None, "released holding lost its grant expiry"
+        assert not any(other.remote_port == endpoint.port and other.released_at is None
+                       for other in holdings.leases), "released port has another active owner"
+        log.info("Relay port released; quarantine follows original grant expiry %s", lease.grant_expires_at)
+
+    @property
     def capacity(self) -> dict[str, int]:
         """What the host sells, in the VM capacity dimensions."""
         return self.target.capacity.model_dump()
@@ -312,8 +378,9 @@ class RealVmComputeDealDriver(VmDealDriverBase):
 
         The host is registered with the target's connection, replacing the one
         an earlier run left; the declaration states everything the host sells
-        and no GPU, so the one deal takes all of it.
+        and no GPU, while the listing sells the explicit smaller guest shape.
         """
+        configured_relay(self.provisioning_client, self.target)
         host = provision_e2e_executor(
             self.provisioning_client,
             self.site_capacity_admin_client,
@@ -325,6 +392,8 @@ class RealVmComputeDealDriver(VmDealDriverBase):
             attributes={"region": REAL_REGION, "sla": "90.0"},
             listing_shapes={"vm": [self.listing_shape]},
             connection=target_connection(self.target),
+            provider_config=({"relay_id": self.target.access.relay_id}
+                             if self.target.access.mode == "relay" else {}),
         )
         assert host.host_id == self.target.host_id
         refresh_storefront_projections(self.storefront_admin_client)
@@ -339,7 +408,7 @@ class RealVmComputeDealDriver(VmDealDriverBase):
         rerun derives the same source from the same target, so a second listing
         on it is refused: a rerun takes over the listing already there. None on
         the resource returns nothing, for the run to create its own. Exactly
-        one, open, stating everything the host sells is paused unless it is
+        one, open, stating the target listing shape is paused unless it is
         already, read back paused and open, and returned. Any other finding
         fails naming the listings and the capacity, for an operator to recover,
         and changes nothing.
@@ -347,7 +416,7 @@ class RealVmComputeDealDriver(VmDealDriverBase):
         listings = self._listings_on_resource()
         if not listings:
             return None
-        capacity = self.capacity
+        capacity = self.target.listing_shape.model_dump()
         stated = [
             (listing, {name: listing.listing_resource.get(name) for name in capacity})
             for listing in listings
@@ -355,7 +424,7 @@ class RealVmComputeDealDriver(VmDealDriverBase):
         (listing, shape), *others = stated
         assert not others and listing.status == "open" and shape == capacity, (
             f"the storefront holds listings on resource {REAL_RESOURCE_ID!r} this "
-            f"run cannot adopt, where one open listing of the target's capacity "
+            f"run cannot adopt, where one open listing of the target's listing shape "
             f"{capacity} can be: "
             + "; ".join(
                 f"{each.listing_id} {each.status!r} paused={each.paused} {each_shape}"
@@ -421,13 +490,14 @@ class RealVmComputeDealDriver(VmDealDriverBase):
             f"the delivered access names {endpoint.host!r}, not {expected!r}, the "
             f"address the target's {self.target.access.mode!r} access reaches"
         )
+        self.assert_relay_delivery(deal_state.fulfillment_id, endpoint)
         return endpoint
 
     def _buyer_address(self) -> str:
         """The address a buyer reaches the guest at under the target's access mode."""
         if self.target.access.mode == "direct":
             return self.target.access.public_host
-        raise AssertionError(f"access mode {self.target.access.mode!r} is not one this driver proves")
+        return configured_relay(self.provisioning_client, self.target).relay_addr
 
     def reserve_released_capacity(
         self, storefront_admin_client: Any, *, listing_id: str, escrow_uid: str
@@ -461,7 +531,9 @@ class RealVmComputeDealDriver(VmDealDriverBase):
             host_id=self.target.host_id,
             context=f"fulfillment {fulfillment_id} is {state!r}",
         )
-        return self.jobs.until_succeeded(job.job_id, describe="create job")
+        result = self.jobs.until_succeeded(job.job_id, describe="create job")
+        self.assert_management_connected()
+        return result
 
     def teardown_job(self, fulfillment_id: str, *, create_job_id: str) -> Any:
         """The deal's teardown job, the one job besides its create, once it succeeded."""
@@ -472,12 +544,39 @@ class RealVmComputeDealDriver(VmDealDriverBase):
             besides=(create_job_id,),
             context=f"fulfillment {fulfillment_id} is {state!r}",
         )
-        return self.jobs.until_succeeded(job.job_id, describe="teardown job")
+        result = self.jobs.until_succeeded(job.job_id, describe="teardown job")
+        self.assert_management_connected()
+        return result
 
     def assert_guest_absent(self, vm_name: str) -> list[str]:
         return assert_guest_absent(
             self.jobs, self.vm_operator_client, host_id=self.target.host_id, vm_name=vm_name
         )
+
+    def second_deal_state(self, state: RealVmDealState) -> RealVmDealState:
+        """A recovery view over the second deal's independently recorded identities."""
+        return RealVmDealState(
+            seller_listing_id=state.seller_listing_id,
+            negotiation_id=state.second_negotiation_id,
+            real_escrow_uid=state.second_escrow_uid,
+            fulfillment_id=state.second_fulfillment_id,
+            create_job_id=state.second_create_job_id,
+            vm_name=state.second_vm_name,
+            _settle_preflight_passed=state._second_settlement_submitted,
+            _guest_absent=state._second_guest_absent,
+        )
+
+    def recover_both(self, state: RealVmDealState) -> None:
+        """Attempt both recoveries even when one fails; preserve both diagnostics."""
+        failures = []
+        for name, deal in (("second", self.second_deal_state(state)), ("first", state)):
+            if deal._settle_preflight_passed and not deal._guest_absent:
+                try:
+                    self.tear_down_after_failure(deal)
+                except (Exception, pytest.fail.Exception) as error:
+                    failures.append(f"{name} deal: {error}")
+        if failures:
+            raise AssertionError("; ".join(failures))
 
     # -- a failed run ---------------------------------------------------
 
