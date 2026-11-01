@@ -409,3 +409,25 @@ def test_bare_metal_pool_refuses_provider_role_controls(key):
             resource=_resource(), pool_config={"extra_vars": {key: "synthetic-other"}},
             allocate=False,
         )
+
+
+def test_bounded_policy_is_frozen_before_grant_and_preserved_after_reconfiguration():
+    grant = _grant(_plan(reclaim_policy="bounded_working_data", working_data_policy_id="fixture-v1"))
+    assert grant.parameters["capacity_reservation_id"] == "reservation-1"
+    assert grant.parameters["reclaim_policy"] == "bounded_working_data"
+    assert grant.parameters["working_data_policy_id"] == "fixture-v1"
+    reclaimed = _reclaim(_plan(reclaim_policy="delete_user"), grant.parameters)
+    assert reclaimed.parameters["reclaim_policy"] == "bounded_working_data"
+    assert reclaimed.parameters["working_data_policy_id"] == "fixture-v1"
+    with pytest.raises(ProviderConfigInvalidError, match="reservation does not match"):
+        _reclaim(_plan(), {**grant.parameters, "capacity_reservation_id": "other-reservation"})
+
+
+def test_bounded_policy_cannot_adopt_a_legacy_grant_or_omit_host_policy():
+    with pytest.raises(ValueError, match="working_data_policy_id"):
+        _plan(reclaim_policy="bounded_working_data")
+    bounded = _plan(reclaim_policy="bounded_working_data", working_data_policy_id="fixture-v1")
+    with pytest.raises(ProviderConfigInvalidError, match="cannot adopt"):
+        _reclaim(bounded, _grant(_plan()).parameters)
+    with pytest.raises(ProviderConfigInvalidError, match="invalid bare-metal"):
+        _grant(bounded, working_data_policy_id="buyer-policy", cleanup_roots=["/root"])

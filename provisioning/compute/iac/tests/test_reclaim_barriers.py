@@ -77,6 +77,6 @@ class TestReclaimBarriers(unittest.TestCase):
             marker = Path(work) / 'policy-reached'
             run, report = play([barrier, {'ansible.builtin.file': {'path': str(marker), 'state': 'touch'}}], {
                 'node_action': 'node_reclaim_access', 'bare_metal_account_present': True,
-                'target_host': 'localhost'})
+                'bare_metal_bounded': False, 'target_host': 'localhost'})
             self.assertNotEqual(run.returncode, 0, report)
             self.assertFalse(marker.exists())

@@ -19,8 +19,8 @@ import unittest
 
 root = Path.cwd()
 sys.path.insert(0, str(root / "ansible/roles/bare-metal-access/files"))
-suite = unittest.defaultTestLoader.discover("tests/integration", pattern="test_native_cleanup.py")
-result = unittest.TextTestRunner(verbosity=2).run(suite)
+suite = unittest.defaultTestLoader.discover("tests/integration", pattern="test_native*.py")
+result = unittest.TextTestRunner(verbosity=2, failfast=True).run(suite)
 for test, reason in result.skipped:
     print(f"native gate skipped: {test.id()}: {reason}", file=sys.stderr)
 if not result.testsRun:

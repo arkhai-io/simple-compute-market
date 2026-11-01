@@ -619,21 +619,31 @@ def fake_ansible() -> MagicMock:
 # ---------------------------------------------------------------------------
 # App fixture — wires all overrides and starts the job processing loop
 # ---------------------------------------------------------------------------
+@pytest.fixture
+def job_retry_options():
+    return {"default_max_retries": 3, "retry_backoff_initial_seconds": 60,
+            "retry_backoff_multiplier": 2.0, "retry_backoff_max_seconds": 3600}
+
+
+@pytest.fixture
+def bare_metal_plan_options():
+    return {"reclaim_policy": "remove_lease_key", "working_data_policy_id": None}
+
+
 @pytest_asyncio.fixture
 async def client_and_queue(
     session_factory,
     fake_ansible,
     bare_metal_runner,
+    bare_metal_plan_options,
+    job_retry_options,
     monkeypatch,
 ) -> AsyncIterator[tuple[ProvisioningClients, AsyncJobQueue]]:
     """Yield an authenticated provisioning client and fresh async job queue."""
 
     _install_signed_asgi_transport(monkeypatch)
     mock_settings = MagicMock(
-        default_max_retries=3,
-        retry_backoff_initial_seconds=60,
-        retry_backoff_multiplier=2.0,
-        retry_backoff_max_seconds=3600,
+        **job_retry_options,
         ansible_timeout_seconds=30,
         additional_non_retryable_errors=["UNREACHABLE", "Domain not found"],
         frp_server_addr="",
@@ -814,7 +824,7 @@ async def client_and_queue(
                 fulfillment_provider=JobFulfillmentProvider(
                     plan=BareMetalFulfillmentPlan(
                         playbook_path=mock_settings.resolved_bare_metal_playbook_path,
-                        reclaim_policy=mock_settings.bare_metal_reclaim_policy,
+                        **bare_metal_plan_options,
                         port_allocator=relay_port_allocator,
                     ),
                     submission=job_submission,

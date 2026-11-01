@@ -52,7 +52,7 @@ from compute_provisioning.jobs import JobRun
 from compute_provisioning.relays import RELAY_SECRET_VARIABLES
 from compute_provisioning_ansible import AnsibleJobInterpretation, AnsibleJobPlan, read_fact
 from compute_provisioning_ansible.runner import AnsibleResult, InventoryTarget
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 #: The inventory group the bare-metal access playbook targets.
 BARE_METAL_INVENTORY_GROUP = "bare_metal_nodes"
@@ -61,8 +61,8 @@ BARE_METAL_INVENTORY_GROUP = "bare_metal_nodes"
 BARE_METAL_ACCESS_RESULT_KIND = "bare_metal_access"
 
 #: All policies end tenant activity; they then keep the account after key
-#: removal, lock it, or delete it and its home directory.
-BARE_METAL_RECLAIM_POLICIES = frozenset({"remove_lease_key", "lock_user", "delete_user"})
+#: removal, lock it, delete its home, or verify bounded working-data removal.
+BARE_METAL_RECLAIM_POLICIES = frozenset({"remove_lease_key", "lock_user", "delete_user", "bounded_working_data"})
 DEFAULT_BARE_METAL_RECLAIM_POLICY = "remove_lease_key"
 
 #: The fact the access role prints for each action. The role prints the job's
@@ -108,12 +108,24 @@ class BareMetalJobParams(BaseModel):
     access_ref: dict[str, Any] | None = None
     ssh_user: str | None = None
     ssh_public_key: str | None = None
-    # Set on a reclaim only; a grant has nothing to reclaim.
+    # Bounded grants freeze their cleanup policy before any host effect.
     reclaim_policy: str | None = None
+    working_data_policy_id: str | None = None
     # The access playbook, frozen when the job is prepared so a later
     # configuration change never rewrites an accepted operation. A job stored
     # without one runs the executor's configured playbook.
     playbook_path: str | None = None
+
+    @model_validator(mode="after")
+    def bounded_identity(self) -> "BareMetalJobParams":
+        if self.reclaim_policy == "bounded_working_data":
+            if not self.capacity_reservation_id or not self.capacity_reservation_id.strip():
+                raise ValueError("bounded cleanup requires capacity_reservation_id")
+            if not self.working_data_policy_id or not self.working_data_policy_id.strip():
+                raise ValueError("bounded cleanup requires working_data_policy_id")
+        elif self.working_data_policy_id is not None:
+            raise ValueError("working_data_policy_id requires bounded_working_data")
+        return self
 
 
 #: The grant fact's fields kept as operator detail: what the role did, on which
@@ -265,6 +277,7 @@ class BareMetalAnsibleCodec:
             "offering_mode": BARE_METAL_OFFERING_MODE,
             "executor_action": params.action,
             "executor_target": params.host_id,
+            "bare_metal_reclaim_policy": params.reclaim_policy or DEFAULT_BARE_METAL_RECLAIM_POLICY,
         }
         optional = {
             "relay_id": params.relay_id,
@@ -279,7 +292,8 @@ class BareMetalAnsibleCodec:
             "bare_metal_ssh_user": params.ssh_user,
             "bare_metal_ssh_public_key": params.ssh_public_key,
             "bare_metal_access_ref": params.access_ref,
-            "bare_metal_reclaim_policy": params.reclaim_policy,
+            "bare_metal_capacity_reservation_id": params.capacity_reservation_id,
+            "bare_metal_working_data_policy_id": params.working_data_policy_id,
         }
         variables.update({name: value for name, value in optional.items() if value})
         return variables

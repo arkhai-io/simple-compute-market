@@ -16,7 +16,7 @@ Use `bounded_working_data` as an explicit operator-selected access/reclaim polic
 
 ### D2. The bare-metal role owns a stdlib host-local helper
 
-Add `domains/bare_metal/provisioning/iac/ansible/roles/bare-metal-access/files/tenant_working_data.py`. It has a small versioned JSON request/result interface for reserve, clean, remove-home and verify-complete operations. Inputs carry the capacity reservation ID and derived tenant name; the protected installed policy supplies everything destructive. Commands use argument vectors, never shell-expanded tenant input. It imports only the Python standard library and runs under root on the selected host; it is an Ansible asset, not a new service or importable runtime distribution.
+Add `domains/bare_metal/provisioning/iac/ansible/roles/bare-metal-access/files/tenant_working_data.py`. It has a small versioned JSON request/result interface for protected identity inspection/reservation, fixed-path SSH key installation/revocation, clean, remove-home and verify-complete operations. Inputs carry the capacity reservation ID and derived tenant name; the protected installed policy supplies everything destructive. Commands use argument vectors, never shell-expanded tenant input. It imports only the Python standard library and runs under root on the selected host; it is an Ansible asset, not a new service or importable runtime distribution.
 
 Reserve produces the UID and its expected home for explicit account creation. Clean removes attributable scratch and IPC only after checking the no-process precondition. The role then removes the account without recursive home deletion, invokes the explicit descriptor-safe remove-home operation, and removes its recorded private primary group; verify-complete independently checks every covered absence and durably marks completion. Partial progress is not success. The helper never kills a process or removes scheduled activity; those effects stay with section 9. Alternatives rejected: broad `find / -uid` cleanup, shell pipelines parsing human command output, a new network service, and placing bare-metal host policy in generic fulfillment.
 
@@ -46,7 +46,7 @@ Path-backed IPC (including POSIX shared-memory/semaphore objects exposed under c
 
 The role first revokes access and invokes section 9's verified termination of sessions, lingering and scheduled activity. Those detailed barriers and their checks stay with section 9. The helper independently verifies only that no remaining process references the UID (real, effective, saved or filesystem UID); denied/unreadable process observations fail. It does not duplicate section 9’s schedule, session or lingering observers. Quiescence checks and cleanup occur while new grants are excluded; recheck before completion. A caller-provided `quiescent=true` is not evidence. If the account already vanished, the ledger still gives the numeric UID for these checks; absent account must not skip them.
 
-Receipts survive partial cleanup and account deletion. A retry re-reads protected identity and policy, removes only remaining attributed objects, and verifies account/NSS name and UID, private primary group, home, UID-owned covered scratch and IPC all absent, with no UID process and section 9’s activity barrier satisfied before committing `complete`. Missing receipt plus absent account fails closed for this policy: there is no safe UID to clean. A reserved receipt whose account was never created can complete after the same bounded absence checks, without creating the account. A complete retry re-verifies absence rather than trusting stale success. Cleanup never resurrects an account. Consumed UID history survives all terminal states.
+The codec emits the accepted policy explicitly even for a legacy grant, so inventory cannot enable bounded behavior outside the stored selection. Receipts survive partial cleanup and account deletion. A retry re-reads protected identity and policy, removes only remaining attributed objects, and verifies account/NSS name and UID, private primary group, home, UID-owned covered scratch and IPC all absent, with no UID process and section 9’s activity barrier satisfied before committing `complete`. Missing receipt plus absent account fails closed for this policy: there is no safe UID to clean. A reserved receipt whose account was never created can complete after the same bounded absence checks, without creating the account. A complete retry re-verifies absence rather than trusting stale success. Cleanup never resurrects an account. Consumed UID history survives all terminal states.
 
 ### D7. Integrate only after verified activity termination
 
@@ -99,13 +99,13 @@ Policy schema (all fields required; unknown/duplicate fields rejected):
 
 These are invented fixture identities and illustrative mount IDs, not deployable host configuration. Mount IDs must be obtained on the selected host in its actual mount namespace. The finite range is inclusive, starts at least at 1000 (the conventional Linux non-system boundary) and excludes every current NSS UID/GID/primary-GID plus every consumed or explicitly excluded value. The account name must match `[a-z_][a-z0-9_-]{0,31}` and cannot be root, nobody or daemon. This preserves existing `arkhai-...` settlement/access-reference-derived names; it does not introduce a fixture-only runtime namespace. Existing NSS name conflicts and any unreceipted home refuse allocation. Home derives by appending it to `home_parent`. All paths are absolute and normalized, including rejection of initial double-slash aliases; roots cannot overlap each other or protected state/service/log/backup roots. `/dev/shm` and `/dev/mqueue` are permitted as exact path-backed IPC roots only. Within `/var/lib`, only an explicit dedicated state directory or exact `/var/lib/BrlAPI` scratch root is accepted; all other service state is refused. Targeted NSS name/UID/GID lookups supplement enumeration, including backends whose enumeration omits entries. Policy, lock and ledger are regular single-link files owned by root with no group/other permissions; directories and ancestors have no group/other write or symlink components (root's sticky `/tmp` is the sole ancestor exception for disposable test environments). The state directory itself must have the protected owner. Policy bytes normalize to a SHA-256 digest of canonical sorted compact JSON; a changed value refuses every existing receipt.
 
-Each ordinary request has exactly these fields:
+Every request has these common fields; only `install-key` additionally requires `ssh_public_key`, one OpenSSH public-key line. No other operation accepts that field:
 
 ```json
 {"version":1,"operation":"reserve","reservation_id":"example-reservation-a","account":"tenant_example_a","policy_id":"example-policy-v1"}
 ```
 
-Operations are `reserve`, `verify-identity`, `clean`, `remove-home` and `verify-complete`. Neither paths nor numeric identities nor quiescence assertions are caller inputs. `reserve` consumes UID/private-GID durably before returning; an exact retry reuses it, a completed reservation refuses grant, and a new reservation may reuse its account name only after every prior same-name receipt is complete and its absence is independently reverified; it still consumes a fresh numeric pair. `verify-identity` requires both the exactly matching receipted account and private group to exist, and rejects supplementary membership or foreign primary-group references. It performs no account creation.
+Operations are `reserve`, `inspect`, `verify-identity`, `install-key`, `revoke-key`, `clean`, `remove-home` and `verify-complete`. Neither paths nor numeric identities nor quiescence assertions are caller inputs. `reserve` consumes UID/private-GID durably before returning; an exact retry reuses it, a completed reservation refuses grant, and a new reservation may reuse its account name only after every prior same-name receipt is complete and its absence is independently reverified; it still consumes a fresh numeric pair. `verify-identity` requires both the exactly matching receipted account and private group to exist, and rejects supplementary membership or foreign primary-group references. It performs no account creation.
 
 Ledger schema and successful reservation result:
 
@@ -136,3 +136,83 @@ The ledger binds each cleanup root's device, inode and actual Linux mount ID at 
 ### Destructive-entry mutation authority
 
 An owned entry beneath a foreign-owned directory cannot be safely removed by checking ownership and then unlinking its name: that directory owner can chmod and replace a child even when its current mode is 0555. Similarly, a tenant-owned nonsticky directory with effective foreign write authority permits replacement while the tenant UID is quiescent. Cleanup therefore refuses the entire preflight if any selected entry's containing directory or ancestor is controlled by a UID other than trusted root or the quiesced tenant, or is group/other writable without the sticky bit. Linux POSIX ACL effective class masks are reflected in group mode bits, so the refusal covers named-user/group ACL writers as well. Root-owned sticky shared roots remain supported; the sticky rule prevents foreign UIDs from replacing root/tenant-owned candidates. The helper retains the checked entry descriptor across unlink/rmdir and rechecks parent authority during removal. No silently skipped tenant residue or new staging subsystem is introduced. Native regressions exercise foreign-owner 0555, tenant 0777 and named ACL write masks with preserved operator sentinels, followed by explicit fixture repair and ordinary retry. This is the accepted frozen-round review correction and promotes with D4's attribution/race rationale at closeout.
+
+
+## Integration interface and prerequisite verification
+
+The integration consumes the activity helper's protected numeric interface,
+`--trusted-uid <account> <uid>`, including when NSS no longer contains the account.
+That interface does not authenticate receipts: only the bounded helper may supply
+its numeric identity. The reviewed relay implementation preserves legacy absent-
+account success, fails on an unverified termination barrier and requires relay
+removal before reporting success. Its focused activity tests and packaged native
+barrier checks establish this source prerequisite; no deployed cleanup is implied.
+
+The lead accepted one necessary integration amendment under delegated technical
+authority: `inspect` reads an existing protected receipt with the normal exclusive
+lock, exact policy/reservation/account matching and current identity-conflict
+checks. It does not allocate, initialize, reset, adopt, clean, terminate or write
+the ledger. It permits absent accounts and complete receipts, requiring current
+identity absence for a complete receipt. Missing attribution refuses. Reclaim uses
+this read before the numeric activity barrier; using `reserve` here would allocate
+during teardown and refuse completed retries, while using `clean` would violate
+the termination-before-deletion invariant. Tests cover read-only behavior, missing
+and mismatched attribution, identity conflict and completed replay.
+
+The deployment chooses `bare_metal_reclaim_policy` and, for the bounded policy,
+`bare_metal_working_data_policy_id` before grant. Accepted bounded parameters
+retain both values and their capacity reservation into reclaim even if deployment
+configuration changes. Existing grants cannot be adopted into the bounded policy.
+The protected host policy remains the sole owner of paths and numeric identities.
+The operator-only `bare-metal-working-data` host-preparation role installs the
+helper and a previously absent protected policy, refuses policy replacement, and
+initializes only when `bare_metal_working_data_initialize` is explicitly true.
+Policy roots and the state directory must already exist with protected ancestry
+in the actual target mount namespace. An existing initialization lock refuses a
+second initialization. Normal grant/reclaim never runs the installer or init.
+
+Ordinary retry qualification must repair the unsafe fixture while the same job
+still has retry budget. The real runner raises `AnsibleError("Playbook failed")`
+on a helper's nonzero play; that message is retryable through the bare-metal
+codec unless it matches an explicit transport/operator nonretryable rule. The
+queue retains capacity while that failed attempt awaits a scheduler retry.
+A terminal failed teardown is immutable under the current lifecycle contract:
+retry-release adopts proven completed teardown, it does not reexecute a failed
+job. Such a failure retains capacity and needs the existing separately audited
+operator verification/force-release procedure. Neither injected aggregate state
+nor a force-release may be reported as ordinary successful retry. Native role
+refusal/repair checks prove host idempotency, and typed application checks prove
+transient same-job retry and terminal failed/held behavior separately; deployed
+qualification must still prove the actual ordinary lifecycle on the target.
+
+
+### Bounded SSH key authority
+
+The packaged `ansible.posix.authorized_key` implementation's `follow=false` does
+not prevent traversal of an intermediate `.ssh` symlink: its pathname-based
+`chown` and `chmod` follow that link. A disposable native reproduction confirmed
+an outside root-owned sentinel directory was changed and an outside key file
+created. The bounded path therefore does not use the inherited key or permission
+modules. Its protected receipt helper owns two fixed-path operations:
+`install-key` (only this operation additionally requires `ssh_public_key`) and
+`revoke-key`. Neither accepts a target path, UID or group. Both pin the protected
+home parent, receipted home and `.ssh` with no-follow directory descriptors,
+verify current owner/private GID, permissions, mount and entry identity, and
+refuse symlinks or ambiguous existing key files. Installation writes one validated
+public key through a new restrictive descriptor and replaces only that private
+key entry, with descriptor-only permission changes. Revocation unlinks only the
+validated fixed entry; missing home/directory/key is benign and creates nothing.
+Neither operation initializes or changes consumption history. Completed receipts
+cannot install a key. Bounded account/group creation skips existing matching
+receipted identities instead of applying pathname-based account mutations on a
+retry. The normal assumption that the operator excludes new execution during
+reclaim still applies; these operations do not claim to replace activity control.
+
+Buyer relay removal precedes receipt inspection, so an attribution refusal does
+not leave a reachable buyer proxy behind. Receipt-bound key revocation still
+precedes the activity barrier and all working-data deletion. A refusal fails the
+job and retains capacity. Native tests cover intermediate `.ssh`, final key and
+home symlinks on both grant retry and reclaim, preserving outside sentinels and
+then using ordinary repaired retry. This correction is bounded-policy-only;
+legacy key-path behavior is not represented as corrected by these tests. The
+current-state authority rationale and operator limits promote with D2–D7.

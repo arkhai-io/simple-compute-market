@@ -61,5 +61,5 @@ def policy_fixture():
 
 def pytest_collection_modifyitems(items):
     for item in items:
-        if item.path.name == "test_native_cleanup.py":
+        if item.path.name.startswith("test_native"):
             item.add_marker(pytest.mark.native)

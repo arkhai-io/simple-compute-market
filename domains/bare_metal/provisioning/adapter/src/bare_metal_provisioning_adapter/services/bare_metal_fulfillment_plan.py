@@ -3,7 +3,7 @@
 A grant installs the buyer's key for a tenant account on the whole host the
 lease sells; the reclaim that undoes it is prepared from the grant job's own
 parameters, so it removes exactly the access the grant gave, on the same host,
-with the reclaim policy the deployment configures. Each job carries the access
+with the accepted bounded policy or the current legacy reclaim policy. Each job carries the access
 playbook the deployment configures when the job is prepared, so a later
 configuration change never rewrites an accepted operation.
 
@@ -110,6 +110,7 @@ class BareMetalFulfillmentPlan:
         *,
         playbook_path: str | os.PathLike[str],
         reclaim_policy: str | None = None,
+        working_data_policy_id: str | None = None,
         port_allocator: Any | None = None,
         lease_end: Callable[[Any, str], datetime | None] = reservation_lease_end,
     ) -> None:
@@ -119,6 +120,11 @@ class BareMetalFulfillmentPlan:
         # Validated here, at composition, so a deployment configured with a
         # policy the access role does not implement refuses to start.
         self._reclaim_policy = reclaim_policy_from(reclaim_policy)
+        self._working_data_policy_id = working_data_policy_id
+        if self._reclaim_policy == "bounded_working_data" and (
+            not isinstance(working_data_policy_id, str) or not working_data_policy_id.strip()
+        ):
+            raise ValueError("bounded cleanup requires bare_metal_working_data_policy_id")
 
     def prepare_create(
         self,
@@ -132,8 +138,21 @@ class BareMetalFulfillmentPlan:
     ) -> PreparedJob:
         _validate_pool_config(pool_config)
         _require_bare_metal(resource)
+        protected = {
+            "reclaim_policy", "working_data_policy_id", "cleanup_roots", "scratch_roots",
+            "ipc_roots", "home", "home_parent", "uid", "gid", "ledger", "policy",
+            "bare_metal_reclaim_policy", "bare_metal_working_data_policy_id",
+            "capacity_reservation_id", "bare_metal_capacity_reservation_id",
+        }
+        payload = request.payload
+        if isinstance(payload, Mapping):
+            access = payload.get("access_ref")
+            if protected.intersection(payload) or (
+                isinstance(access, Mapping) and protected.intersection(access)
+            ):
+                raise ProviderConfigInvalidError("invalid bare-metal fulfillment requirements: cleanup authority is operator-selected")
         try:
-            materialization = BareMetalMaterialization.model_validate(request.payload)
+            materialization = BareMetalMaterialization.model_validate(payload)
         except ValidationError as exc:
             raise ProviderConfigInvalidError(
                 f"invalid bare-metal fulfillment requirements: {exc}"
@@ -194,6 +213,8 @@ class BareMetalFulfillmentPlan:
             ssh_public_key=_access_value(
                 access_ref, "ssh_public_key", "ssh_pubkey", "public_key"
             ),
+            reclaim_policy=(self._reclaim_policy if self._reclaim_policy == "bounded_working_data" else None),
+            working_data_policy_id=(self._working_data_policy_id if self._reclaim_policy == "bounded_working_data" else None),
             playbook_path=self._playbook_path,
         )
         return PreparedJob(
@@ -234,8 +255,13 @@ class BareMetalFulfillmentPlan:
             raise ProviderConfigInvalidError(
                 "the grant's physical_host_id does not match the selected resource"
             )
-        # The reclaim takes the policy and playbook configured now, whatever
-        # the grant ran with; a grant stored without a playbook gains one.
+        bounded = grant.reclaim_policy == "bounded_working_data"
+        if bounded and grant.capacity_reservation_id != capacity_reservation_id:
+            raise ProviderConfigInvalidError("bounded grant reservation does not match teardown")
+        if not bounded and self._reclaim_policy == "bounded_working_data":
+            raise ProviderConfigInvalidError("cannot adopt a legacy grant into bounded cleanup")
+        # Bounded grants retain their accepted policy; legacy policies keep
+        # their existing deployment-selected reclaim behavior.
         lease = (
             self._port_allocator.find_active_lease(
                 owner_kind="fulfillment", owner_id=capacity_reservation_id
@@ -248,7 +274,7 @@ class BareMetalFulfillmentPlan:
                 "remote_port": None,
                 "relay_addr": None, "relay_port": None,
                 "relay_token": None, "relay_grant": None,
-                "reclaim_policy": self._reclaim_policy,
+                "reclaim_policy": grant.reclaim_policy if bounded else self._reclaim_policy,
                 "playbook_path": self._playbook_path,
             }
         )

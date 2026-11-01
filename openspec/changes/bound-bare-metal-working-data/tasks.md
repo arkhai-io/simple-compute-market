@@ -43,11 +43,103 @@ No existing `e2e-tests/` marker exercises this inactive helper. Owed by validati
 
 ## 3. Integrate reservation-bound grant and reclaim after the termination prerequisite
 
-- [ ] 3.1 Gate this section on reviewed/verified `prove-relay-provisioning` section 9 code and relevant validation; inspect its actual activity/absent-account interface and reconcile this change's deltas without editing its completed tasks or duplicating termination. Record the prerequisite evidence and integration assumptions in `design.md`; verify section 9 failure propagation remains intact. Until available, keep this section pending while independent work remains usable.
-- [ ] 3.2 In `domains/bare_metal/provisioning/adapter/src/bare_metal_provisioning_adapter/codec.py` and `services/bare_metal_fulfillment_plan.py`, carry accepted `capacity_reservation_id` and trusted policy selection from grant through stored parameters into reclaim and helper variables. Snapshot policy before grant for bounded jobs, retain compatibility for existing policies, reject missing/conflicting bounded correlation and buyer-selected targets. Verify `test_bare_metal_codec.py` and `test_bare_metal_fulfillment_plan.py` cover grant/reclaim roundtrip, policy changes, legacy inputs and exact reservation mismatch without a physical effect. Preserve existing username derivation from settlement identity/access references; it is not derived from the SSH key.
-- [ ] 3.3 Integrate `ansible/roles/bare-metal-access/tasks/main.yml`, `ansible/playbooks/node-access.yaml`, and protected helper/policy installation with the host-preparation entrypoint available after the prerequisite. Select bounded policy explicitly; reserve before account creation, create only the recorded nonprivileged UID/private primary GID pair, and refuse existing unreceipted accounts. After section 9's verified termination invoke clean between quiescence and account removal; delete the account without unchecked home recursion, invoke explicit helper remove-home, remove only the recorded unused private primary group, then verify-complete before success. Verify native execution of the shipped tasks for successful grant/reclaim, helper rejection, partial create, account-absent retry, foreign-home child and no account/group resurrection. Every failed helper or removal must yield a failed play.
-- [ ] 3.4 Confirm `provisioning/compute/service/Dockerfile` packages the helper/policy assets and root native targets run bare-metal assets without borrowing VM ownership. Extend `provisioning/compute/service/tests/unit/test_bare_metal_ansible_assets.py` only for package/task structure; keep behavioral coverage in bare-metal IaC. Verify syntax/native checks in the built image; all asset paths resolve there and source/image imports remain stdlib-only for the helper.
-- [ ] 3.5 Extend `provisioning/compute/service/tests/integration/test_bare_metal_leases_api.py` and the existing bare-metal fulfillment/mock integration modules through canonical typed clients to prove correlated grant/reclaim, compensation after failed create, cleanup failure → failed teardown/held capacity, and successful retry → ordinary release. Update adapter mock output only for actual diagnostic fields; facts remain diagnostic. Run `make test-bare-metal`, `make test-provisioning`, both relevant native gates, `make check-comment-hygiene` and `make check-packaging`; record unrun prerequisites.
+- [x] 3.1 Gate this section on reviewed/verified `prove-relay-provisioning` section 9 code and relevant validation; inspect its actual activity/absent-account interface and reconcile this change's deltas without editing its completed tasks or duplicating termination. Record the prerequisite evidence and integration assumptions in `design.md`; verify section 9 failure propagation remains intact. Until available, keep this section pending while independent work remains usable.
+- [x] 3.2 In `domains/bare_metal/provisioning/adapter/src/bare_metal_provisioning_adapter/codec.py` and `services/bare_metal_fulfillment_plan.py`, carry accepted `capacity_reservation_id` and trusted policy selection from grant through stored parameters into reclaim and helper variables. Snapshot policy before grant for bounded jobs, retain compatibility for existing policies, reject missing/conflicting bounded correlation and buyer-selected targets. Verify `test_bare_metal_codec.py` and `test_bare_metal_fulfillment_plan.py` cover grant/reclaim roundtrip, policy changes, legacy inputs and exact reservation mismatch without a physical effect. Preserve existing username derivation from settlement identity/access references; it is not derived from the SSH key.
+- [x] 3.3 Integrate `ansible/roles/bare-metal-access/tasks/main.yml`, `ansible/playbooks/node-access.yaml`, and protected helper/policy installation with the host-preparation entrypoint available after the prerequisite. Select bounded policy explicitly; reserve before account creation, create only the recorded nonprivileged UID/private primary GID pair, and refuse existing unreceipted accounts. After section 9's verified termination invoke clean between quiescence and account removal; delete the account without unchecked home recursion, invoke explicit helper remove-home, remove only the recorded unused private primary group, then verify-complete before success. Verify native execution of the shipped tasks for successful grant/reclaim, helper rejection, partial create, account-absent retry, foreign-home child and no account/group resurrection. Every failed helper or removal must yield a failed play.
+- [x] 3.4 Confirm `provisioning/compute/service/Dockerfile` packages the helper/policy assets and root native targets run bare-metal assets without borrowing VM ownership. Extend `provisioning/compute/service/tests/unit/test_bare_metal_ansible_assets.py` only for package/task structure; keep behavioral coverage in bare-metal IaC. Verify syntax/native checks in the built image; all asset paths resolve there and source/image imports remain stdlib-only for the helper.
+- [x] 3.5 Extend `provisioning/compute/service/tests/integration/test_bare_metal_leases_api.py` and the existing bare-metal fulfillment/mock integration modules through canonical typed clients to prove correlated grant/reclaim, compensation after failed create, cleanup failure → failed teardown/held capacity, and successful retry → ordinary release. Update adapter mock output only for actual diagnostic fields; facts remain diagnostic. Run `make test-bare-metal`, `make test-provisioning`, both relevant native gates, `make check-comment-hygiene` and `make check-packaging`; record unrun prerequisites.
+
+
+### Section 3 handoff
+
+The reviewed activity-termination prerequisite is present, including the explicit
+`--trusted-uid` interface for protected receipt identities after NSS absence.
+The integration retains early buyer-proxy removal and key revocation before that
+barrier. `inspect` supplies an existing identity without allocation or ledger
+mutation; bounded grants freeze policy and policy ID before host effects, and
+reclaim refuses missing/conflicting reservation correlation or legacy adoption.
+The codec always emits policy authority, including the legacy default, so
+inventory cannot silently activate bounded behavior. Username derivation remains
+the existing settlement/access-reference derivation.
+
+The operator-only `bare-metal-working-data` host-preparation role installs the
+protected helper/policy and runs one-time initialization only when explicitly
+requested. Policy roots and state directories must already exist safely in the
+target mount namespace. It refuses policy replacement and ledger reinitialization;
+normal grant/reclaim cannot initialize or adopt history. The existing Dockerfile
+already copies the entire owned IaC tree, so no new distribution or dependency
+was required. Runtime composition, settings documentation and test composition
+now supply the trusted policy ID.
+
+A native reproduction found that the inherited `authorized_key` implementation
+follows an intermediate tenant `.ssh` symlink despite `follow=false`. Bounded
+jobs now use receipt-bound no-follow `install-key`/`revoke-key` operations, with
+fixed targets and descriptor-only writes/permissions. They skip pathname-based
+key/permission tasks and do not modify an existing receipted account on grant
+retry. Legacy key-path behavior is not claimed as corrected. See the design's
+bounded SSH key authority rationale and closeout promotion mapping.
+
+Focused evidence: the adapter suite passed 137 unit/library integration tests;
+the bare-metal IaC default suite passed 123 unit/library integration tests, with
+nine native cases explicitly deselected. Focused provisioning service coverage
+passed 38 unit, library integration and application integration tests, including five new typed-client
+bounded cases: correlated transient failure/same-job retry/ordinary release,
+terminal failure/held capacity, partial-create compensation, and two rejected
+buyer authority overrides before dispatch. Existing relay, legacy policy,
+migration and release behavior remains covered. The structural asset module's
+five tests supplement behavior rather than proving it.
+
+The dedicated bare-metal native gate passed all nine library integration cases,
+zero skips, using the actual packaged role/helper and disposable NSS accounts,
+files, kernel IPC and process activity. It covers ordinary grant/reclaim, complete
+replay, a fresh UID for a second reservation, failed create after private-group
+creation, account-absent retry, unsafe-home refusal/repaired retry, explicit init
+and refusal to reset/replace state, and home/intermediate/final-key symlink
+sentinels. The disposable controller image has no systemd/procps target stack:
+systemd/scheduler commands are explicit fixtures, while process adapters observe
+real private procfs and send real signals. A fixture aliases the image's Python
+to the conventional target interpreter path. Docker's owned `/work` tmpfs remains
+noexec; executable boundary fixtures live in the disposable container's own layer.
+These are not claims of deployed systemd, host isolation or purchase readiness.
+Initial missing callback/interpreter and noexec-fixture failures were diagnosed
+and retained rather than counted as passes.
+
+The final provisioning image passed VM native (three cases), family native
+(13 cases), and both domains' own/shared-configuration syntax checks with zero
+native skips. A single corrected legacy barrier fixture then passed separately,
+ensuring its direct command-failure test supplies the policy fact set by the full
+role and fails for the intended command rather than an undefined condition.
+Bare-metal native host-operation evidence is reused after an adapter-only policy
+correction; production Ansible/helper behavior remains unchanged, and final image
+imports confirm the corrected policy emission. A later account-absence comment
+clarification changes no YAML task semantics. Helper SHA-256:
+`c470e93ae1ffc79be77697287f6cd74efb2dca977d6484c357e375525cf7f646`.
+
+`make check-packaging` passed, including lock, project, interpreter, wheelhouse and
+architecture checks. `make check-change CHANGE=bound-bare-metal-working-data`
+passed before this handoff and is rerun with the final task/index edits. Per the
+owner-approved intermediate cadence, the broad `make test-bare-metal`,
+`make test-provisioning` and full `make test` aggregates remain owed at the frozen
+combined source round; focused changed-boundary evidence is recorded above.
+A fresh-context section-check spawn hit the agent thread limit. The lead explicitly
+consolidated that check into the one independent frozen-round source review;
+no passing fresh review, personal owner reading, prior-round triage completion or
+formal round advance is claimed. Source-only completion is recorded as an
+orchestrator note, leaving the combined review/validation join with the lead.
+
+Ordinary refusal/recovery qualification must repair the fixture while the actual
+executor job still has retry budget. Real runner `AnsibleError("Playbook failed")`
+classification is retryable under the default bare-metal codec; terminal failures
+remain immutable and hold capacity, with the existing separately audited operator
+override boundary. No synthetic terminal-job success or new recovery API was added.
+There is no deployed bounded-cleanup E2E marker yet. Section 4 still waits for the
+relay section 12 real bare-metal module and the frozen integration source's review
+and validation before destructive target qualification. Existing
+`e2e_bare_metal_mock_deal` proves the ordinary mock journey only. Owed by validation:
+`tests.yml`, jobs `test · test-bare-metal`, `test · test-provisioning` and
+`test · test-provisioning-iac` must run the owned aggregates successfully. Native
+and deployed cleanup evidence remain separately scoped; green CI alone does not
+qualify them. Permanent promotion remains closeout work.
 
 ## 4. Deployed cleanup qualification of the reviewed integration round
 

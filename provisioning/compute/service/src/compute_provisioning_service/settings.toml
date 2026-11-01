@@ -39,12 +39,15 @@ bare_metal_playbook_path = "/opt/domains/bare_metal/provisioning/iac/ansible/pla
 inventory_path = "/opt/domains/vms/provisioning/iac/ansible/inventory/provisioning-hosts.ini"
 management_vars_path = "/opt/domains/vms/provisioning/iac/ansible/inventory/management-vars.yaml"
 
-# Bare-metal reclaim policy for node_reclaim_access.
+# Bare-metal account policy, frozen at grant for bounded working data.
 # Options:
 #   remove_lease_key — remove only the SSH key recorded for the lease.
 #   lock_user        — remove the lease key and lock the account.
 #   delete_user      — delete the tenant account and home directory.
+#   bounded_working_data — use protected reservation identity and bounded cleanup.
 bare_metal_reclaim_policy = "remove_lease_key"
+# Required only for bounded_working_data; must match the protected host policy.
+bare_metal_working_data_policy_id = ""
 
 # Golden image credentials.
 # Used when image_setup_type=golden. Set via config-production.yml or env vars.

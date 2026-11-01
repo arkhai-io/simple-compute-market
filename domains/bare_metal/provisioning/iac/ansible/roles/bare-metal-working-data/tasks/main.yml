@@ -1,0 +1,103 @@
+---
+# This operator entrypoint never runs as part of a tenant grant or reclaim.
+# Roots and the state directory must already exist in their intended namespace.
+- name: Inspect protected installation ancestors without following links
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop:
+    - /etc
+    - /usr
+    - /usr/local
+    - /usr/local/lib
+  register: working_data_install_ancestors
+
+- name: Refuse unsafe installation ancestors
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isdir
+      - not item.stat.islnk
+      - item.stat.uid == 0
+      - not item.stat.wgrp
+      - not item.stat.woth
+  loop: "{{ working_data_install_ancestors.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Inspect the protected policy directory
+  ansible.builtin.stat:
+    path: /etc/arkhai-working-data
+    follow: false
+  register: working_data_policy_directory
+
+- name: Refuse an unsafe existing policy directory
+  ansible.builtin.assert:
+    that:
+      - not working_data_policy_directory.stat.exists or (working_data_policy_directory.stat.isdir and not working_data_policy_directory.stat.islnk and working_data_policy_directory.stat.uid == 0 and not working_data_policy_directory.stat.wgrp and not working_data_policy_directory.stat.woth)
+
+- name: Create the protected policy directory
+  ansible.builtin.file:
+    path: /etc/arkhai-working-data
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Inspect existing installed policy and helper
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop:
+    - /etc/arkhai-working-data/policy.json
+    - /usr/local/lib/arkhai-tenant-working-data.py
+  register: working_data_install_files
+
+- name: Refuse unsafe existing installation files
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists or (item.stat.isreg and not item.stat.islnk and item.stat.uid == 0 and item.stat.nlink == 1 and not item.stat.wgrp and not item.stat.woth)
+      - item.item != '/etc/arkhai-working-data/policy.json' or not item.stat.exists or item.stat.mode in ['0600', '0400']
+  loop: "{{ working_data_install_files.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Install the bounded working-data helper
+  ansible.builtin.copy:
+    src: "{{ role_path }}/../bare-metal-access/files/tenant_working_data.py"
+    dest: /usr/local/lib/arkhai-tenant-working-data.py
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install a policy only when none exists
+  ansible.builtin.copy:
+    content: "{{ bare_metal_working_data_policy | to_json }}"
+    dest: /etc/arkhai-working-data/policy.json
+    force: false
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Read the installed policy for exact continuity verification
+  ansible.builtin.slurp:
+    src: /etc/arkhai-working-data/policy.json
+  register: working_data_installed_policy
+  no_log: true
+
+- name: Refuse replacing an existing host policy
+  ansible.builtin.assert:
+    that:
+      - (working_data_installed_policy.content | b64decode | from_json) == bare_metal_working_data_policy
+  no_log: true
+
+- name: Explicitly initialize a new host consumption ledger
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - /usr/local/lib/arkhai-tenant-working-data.py
+      - --policy
+      - /etc/arkhai-working-data/policy.json
+      - --init
+  when: bare_metal_working_data_initialize | default(false) | bool

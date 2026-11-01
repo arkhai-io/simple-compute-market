@@ -83,6 +83,7 @@ def build_bare_metal_runtime(
             plan=BareMetalFulfillmentPlan(
                 playbook_path=config.resolved_bare_metal_playbook_path,
                 reclaim_policy=getattr(config, "bare_metal_reclaim_policy", None),
+                working_data_policy_id=getattr(config, "bare_metal_working_data_policy_id", None),
                 port_allocator=relay_port_allocator,
             ),
             submission=job_submission,

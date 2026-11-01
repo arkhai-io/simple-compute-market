@@ -23,7 +23,7 @@ from bare_metal_provisioning_adapter.codec import (
     reclaim_policy_from,
 )
 
-from execution import HOST, host_with, job_run, json_output, shipped_output
+from execution import HOST, executor, host_with, job_run, json_output, shipped_output
 
 _ANSIBLE_ROOT = Path(__file__).resolve().parents[2] / "iac" / "ansible"
 
@@ -54,6 +54,7 @@ def test_a_grant_renders_the_access_playbooks_variables() -> None:
         "offering_mode": "bare_metal",
         "executor_action": NODE_GRANT_ACCESS_ACTION,
         "executor_target": "bm-node-1",
+        "bare_metal_reclaim_policy": "remove_lease_key",
         "executor_ref": {"physical_host_id": "physical-1"},
         "escrow_uid": "escrow-1",
         "physical_host_id": "physical-1",
@@ -530,3 +531,30 @@ def test_stored_bare_metal_job_refuses_undeclared_role_controls(key, action):
             BareMetalAnsibleCodec().prepare(dataclasses.replace(
                 run, parameters={**run.parameters, **injected}
             ))
+
+
+def test_bounded_policy_renders_only_accepted_correlation_and_policy_identity():
+    params = _grant(capacity_reservation_id="fixture-reservation", reclaim_policy="bounded_working_data", working_data_policy_id="fixture-v1")
+    variables = BareMetalAnsibleCodec.variables(params)
+    assert variables["bare_metal_capacity_reservation_id"] == "fixture-reservation"
+    assert variables["bare_metal_working_data_policy_id"] == "fixture-v1"
+    assert variables["bare_metal_reclaim_policy"] == "bounded_working_data"
+    assert not any(key in variables for key in ("uid", "home", "cleanup_roots", "ledger"))
+
+
+@pytest.mark.parametrize("field", ["capacity_reservation_id", "working_data_policy_id"])
+def test_bounded_policy_refuses_missing_correlation_before_execution(field):
+    values = dict(capacity_reservation_id="fixture-reservation", reclaim_policy="bounded_working_data", working_data_policy_id="fixture-v1")
+    values[field] = None
+    with pytest.raises(pydantic.ValidationError, match=field):
+        _grant(**values)
+
+
+@pytest.mark.parametrize("message, expected", [("Playbook failed", True), ("UNREACHABLE", False), ("Permission denied", False)])
+def test_real_runner_failure_messages_preserve_bounded_retry_classification(message, expected):
+    assert executor(MockAnsibleRunner(default_output=lambda run: "")).is_retryable(message) is expected
+
+
+def test_legacy_grant_explicitly_prevents_inventory_from_enabling_bounded_cleanup():
+    variables = BareMetalAnsibleCodec.variables(_grant())
+    assert variables["bare_metal_reclaim_policy"] == "remove_lease_key"

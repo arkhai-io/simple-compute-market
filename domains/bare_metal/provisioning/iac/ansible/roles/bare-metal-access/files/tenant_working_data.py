@@ -7,6 +7,8 @@ is an operator precondition: a valid older ledger cannot detect its own rollback
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import contextlib
 import ctypes
 import fcntl
@@ -274,10 +276,11 @@ class Store:
         require(not any(receipt["account"] in group.gr_mem for group in groups), "tenant supplementary membership")
 
     def execute(self, request):
-        exact(request, ("version", "operation", "reservation_id", "account", "policy_id"))
+        fields = ("version", "operation", "reservation_id", "account", "policy_id")
+        exact(request, fields + (("ssh_public_key",) if isinstance(request, dict) and request.get("operation") == "install-key" else ()))
         require(type(request["version"]) is int and request["version"] == 1, "unsupported request version")
         operation = request["operation"]
-        require(operation in ("reserve", "verify-identity", "clean", "remove-home", "verify-complete"), "unknown operation")
+        require(operation in ("reserve", "inspect", "verify-identity", "install-key", "revoke-key", "clean", "remove-home", "verify-complete"), "unknown operation")
         reservation = text(request["reservation_id"])
         account = self.account(request["account"])
         require(request["policy_id"] == self.policy["policy_id"], "policy identity mismatch")
@@ -303,7 +306,13 @@ class Store:
                 self.write(fd, ledger)
             require(receipt["account"] == account, "reservation/account mismatch")
             self.fsync(fd)
-            if operation in ("reserve", "verify-identity"):
+            if operation in ("inspect", "install-key", "revoke-key"):
+                self.identity(receipt, absent=receipt["state"] == "complete", present=operation == "install-key")
+                if operation == "install-key":
+                    require(receipt["state"] != "complete", "completed reservation cannot grant")
+                if operation != "inspect":
+                    self.ssh_key(operation, receipt, request.get("ssh_public_key"))
+            elif operation in ("reserve", "verify-identity"):
                 require(receipt["state"] != "complete", "completed reservation cannot grant")
                 self.identity(receipt, present=operation == "verify-identity")
             else:
@@ -312,6 +321,78 @@ class Store:
                     receipt["state"] = "complete" if operation == "verify-complete" or receipt["state"] == "complete" else "cleaned"
                     self.write(fd, ledger)
             return {"version": 1, "operation": operation, **receipt}
+
+    def ssh_key(self, operation, receipt, key):
+        """Touch only the receipt's key file through pinned no-follow descriptors."""
+        install = operation == "install-key"
+        if install:
+            require(isinstance(key, str), "invalid SSH public key")
+            key = key.strip()
+            require(0 < len(key) <= 16384 and not any(ord(c) < 32 for c in key), "invalid SSH public key")
+            parts = key.split()
+            require(len(parts) >= 2 and parts[0].startswith(("ssh-", "ecdsa-", "sk-")), "invalid SSH public key")
+            try:
+                blob = base64.b64decode(parts[1], validate=True)
+                length = int.from_bytes(blob[:4], "big")
+                require(0 < length and 4 + length < len(blob) and blob[4:4 + length].decode("ascii") == parts[0], "invalid SSH public key")
+            except (ValueError, UnicodeError, binascii.Error):
+                raise Refusal("invalid SSH public key") from None
+        with directory(self.policy["home_parent"], owner=self.owner) as parent:
+            try:
+                home = os.open(receipt["account"], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+            except FileNotFoundError:
+                require(not install, "tenant home absent")
+                return
+            try:
+                home_info = os.fstat(home)
+                require((home_info.st_uid, home_info.st_gid) == (receipt["uid"], receipt["gid"]), "tenant home identity conflict")
+                require(not home_info.st_mode & 0o022, "unsafe tenant home permissions")
+                require(self.mounts(home) == self.mounts(parent), "unexpected SSH home mount")
+                try:
+                    ssh = os.open(".ssh", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=home)
+                except FileNotFoundError:
+                    if not install:
+                        return
+                    os.mkdir(".ssh", 0o700, dir_fd=home)
+                    ssh = os.open(".ssh", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=home)
+                    os.fchown(ssh, receipt["uid"], receipt["gid"])
+                try:
+                    ssh_info = os.fstat(ssh)
+                    require((ssh_info.st_uid, ssh_info.st_gid) == (receipt["uid"], receipt["gid"]), "tenant SSH directory identity conflict")
+                    require(not ssh_info.st_mode & 0o022, "unsafe SSH directory permissions")
+                    require(self.mounts(ssh) == self.mounts(home), "unexpected SSH directory mount")
+                    try:
+                        current = os.stat("authorized_keys", dir_fd=ssh, follow_symlinks=False)
+                    except FileNotFoundError:
+                        current = None
+                    if current is not None:
+                        require(stat.S_ISREG(current.st_mode) and current.st_nlink == 1 and (current.st_uid, current.st_gid) == (receipt["uid"], receipt["gid"]), "unsafe SSH key file")
+                    if install:
+                        temporary = ".authorized-" + uuid.uuid4().hex
+                        handle = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=ssh)
+                        try:
+                            with os.fdopen(handle, "wb") as stream:
+                                os.fchown(stream.fileno(), receipt["uid"], receipt["gid"])
+                                stream.write((key.strip() + "\n").encode())
+                                stream.flush()
+                                self.fsync(stream.fileno())
+                            os.replace(temporary, "authorized_keys", src_dir_fd=ssh, dst_dir_fd=ssh)
+                            os.fchmod(ssh, 0o700)
+                            self.fsync(ssh)
+                        finally:
+                            try:
+                                os.unlink(temporary, dir_fd=ssh)
+                            except FileNotFoundError:
+                                pass
+                    elif current is not None:
+                        require(os.stat("authorized_keys", dir_fd=ssh, follow_symlinks=False) == current, "SSH key file replaced")
+                        os.unlink("authorized_keys", dir_fd=ssh)
+                        self.fsync(ssh)
+                    require(os.stat(".ssh", dir_fd=home, follow_symlinks=False).st_ino == ssh_info.st_ino and os.stat(receipt["account"], dir_fd=parent, follow_symlinks=False).st_ino == home_info.st_ino, "SSH directory replaced")
+                finally:
+                    os.close(ssh)
+            finally:
+                os.close(home)
 
     def cleanup(self, operation, receipt):
         uid = receipt["uid"]

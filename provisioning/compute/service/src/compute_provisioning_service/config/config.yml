@@ -8,7 +8,7 @@
 #
 # Available keys:
 #   database_url, vm_playbook_path, bare_metal_playbook_path, inventory_path, management_vars_path
-#   bare_metal_reclaim_policy
+#   bare_metal_reclaim_policy, bare_metal_working_data_policy_id
 #   ansible_cfg, ansible_timeout_seconds
 #   golden_root_ssh_filename, golden_root_ssh_password, golden_image_name
 #   golden_gcs_bucket, golden_gcs_project

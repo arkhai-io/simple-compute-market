@@ -200,3 +200,57 @@ def test_provider_username_and_direct_nss(installation):
     host.user("arkhai-third", 42000)
     with pytest.raises(Refusal, match="unreceipted"):
         store.execute(request("fixture-c", "arkhai-third"))
+
+
+def test_inspect_is_read_only_and_never_allocates(installation):
+    store = installation.store
+    ledger = installation.root / "state/ledger.json"
+    before = ledger.read_bytes()
+    with pytest.raises(Refusal, match="missing receipt"):
+        store.execute(request(operation="inspect"))
+    assert ledger.read_bytes() == before
+    receipt = store.execute(request())
+    before = ledger.read_bytes()
+    assert store.execute(request(operation="inspect"))["uid"] == receipt["uid"]
+    assert ledger.read_bytes() == before
+    with pytest.raises(Refusal, match="reservation/account mismatch"):
+        store.execute(request(account="other_tenant", operation="inspect"))
+    assert ledger.read_bytes() == before
+    installation.host.user("foreign", receipt["uid"], home=receipt["home"])
+    with pytest.raises(Refusal, match="account identity conflict"):
+        store.execute(request(operation="inspect"))
+    assert ledger.read_bytes() == before
+
+
+def test_inspect_complete_receipt_rechecks_identity_without_mutating(installation):
+    store = installation.store
+    receipt = store.execute(request())
+    installation.host.quiescent = lambda uid: None
+    installation.host.ipc = lambda: []
+    store.execute(request(operation="verify-complete"))
+    ledger = installation.root / "state/ledger.json"
+    before = ledger.read_bytes()
+    assert store.execute(request(operation="inspect"))["state"] == "complete"
+    assert ledger.read_bytes() == before
+    installation.host.group("tenant_a", receipt["gid"])
+    with pytest.raises(Refusal, match="private group conflict"):
+        store.execute(request(operation="inspect"))
+    assert ledger.read_bytes() == before
+
+
+@pytest.mark.parametrize("key", ["not-a-key", "ssh-ed25519 !!!", "ssh-ed25519 AAAA\nssh-ed25519 AAAA", 17])
+def test_key_installation_refuses_invalid_public_keys_before_path_effects(installation, key):
+    receipt = installation.store.execute(request())
+    installation.host.user("tenant_a", receipt["uid"], home=receipt["home"])
+    installation.host.group("tenant_a", receipt["gid"])
+    before = (installation.root / "state/ledger.json").read_bytes()
+    with pytest.raises(Refusal, match="invalid SSH public key"):
+        installation.store.execute({**request(operation="install-key"), "ssh_public_key": key})
+    assert not os.path.lexists(receipt["home"])
+    assert (installation.root / "state/ledger.json").read_bytes() == before
+
+
+@pytest.mark.parametrize("operation", ["reserve", "inspect", "revoke-key"])
+def test_only_key_installation_accepts_a_public_key_field(installation, operation):
+    with pytest.raises(Refusal, match="invalid fields"):
+        installation.store.execute({**request(operation=operation), "ssh_public_key": "unused"})
