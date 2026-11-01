@@ -583,14 +583,14 @@ pins file's format).
       refused, so a later shape fails to load rather than half-loading. The SHA-256,
       `bff260b6…2c40`, is the digest of the archive GitHub served this session's fetch
       (the fetch's own mismatch error named it against a zero placeholder, and the next
-      run verified the download against it). **For the owner:** it is still not
-      cross-checked against the release's published `frp_sha256_checksums.txt`. This
-      step was first denied WebFetch; with `github.com` granted in the section 7 run, the
-      checksums file's download redirects to `release-assets.githubusercontent.com`,
-      outside the grant, and the release's asset list on `github.com` shows sizes but no
-      digests. The one corroboration is the size: the cached archive is 13,040,253 bytes
-      (12.4 MiB), matching the 12.4 MB the release lists. Comparing the digest once by
-      hand is still worth doing, as the pin is trust on first use. The README gains "The frp it is tested against": the
+      run verified the download against it). Cross-checked once, at pin time, against
+      the release's published `frp_sha256_checksums.txt` (fetched from the v0.61.1
+      release, through its redirect to `release-assets.githubusercontent.com`, with the
+      owner's grant): its line `bff260b68ca7b1461182a46c4f34e9709ba32764eed30a15dd94ac97f50a2c40
+      frp_0.61.1_linux_amd64.tar.gz` equals the pin, digit for digit. The cached
+      archive's size, 13,040,253 bytes, also matches the 12.4 MB the release lists. The
+      tests themselves still never read the checksums file; it served only to confirm
+      the pin. The README gains "The frp it is tested against": the
       version, what the tests run against it, the pins format, and why the release's
       checksums file is never read; and states frpc 0.61.1's 30-second retry, measured
       below.
