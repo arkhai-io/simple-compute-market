@@ -2,7 +2,7 @@
 
 ### Requirement: A proxy is admitted only for its granted port
 
-The plugin MUST admit a `NewProxy` only when the proxy's type is `tcp`, it names no load-balancer group, its remote port is from 1 to 65535, and its own metadata (`content.metas.grant`, never `content.user.metas`) carries a grant of type `frp-grant+jwt`, signed with EdDSA by a configured key, whose audience is that key's issuer's, whose `port` equals the remote port and lies in that issuer's range, and which has not expired. Time checks MUST use the relay's clock with no leeway: a grant MUST be refused as expired from the moment the clock reaches its `exp`, and as not yet valid while its `nbf` or `iat` is later than the clock. It MUST refuse every other request.
+The plugin MUST admit a `NewProxy` only when the proxy's type is `tcp`, it names no load-balancer group, its remote port is from 1 to 65535, and its own metadata (`content.metas.grant`, never `content.user.metas`) carries a grant of type `frp-grant+jwt`, signed with EdDSA by a configured key, whose audience is that key's issuer's, whose `port` equals the remote port and lies in that issuer's range, and which has not expired. Time checks MUST use the relay's clock with no leeway: a grant MUST be refused as expired from the moment the clock reaches its `exp`, and as not yet valid while its `nbf` or `iat` is later than the clock. A grant's `exp`, `nbf`, and `iat` MUST be JSON integers, and its `sub` and `jti`, when present, MUST be strings; a grant whose header carries `crit` MUST be refused as `grant_malformed`, and one whose header `typ` is not `frp-grant+jwt` as `grant_type_unsupported`, whether or not its signature verifies. A grant's verdict and reason MUST NOT depend on which release of a verification library within the plugin's declared range is installed. It MUST refuse every other request.
 
 #### Scenario: A valid grant is presented
 
@@ -38,6 +38,16 @@ The plugin MUST admit a `NewProxy` only when the proxy's type is `tcp`, it names
 
 - **WHEN** a grant's `iat` or `nbf` is one second later than the relay's clock
 - **THEN** the plugin refuses the registration as `grant_not_yet_valid`
+
+#### Scenario: A grant's claim has the wrong type
+
+- **WHEN** a correctly signed grant's `exp` is a string, its `jti` is an integer, or its `sub` is an object
+- **THEN** the plugin refuses the registration as `grant_malformed`
+
+#### Scenario: A forged grant carries a critical header
+
+- **WHEN** a grant whose header carries `crit` is presented, its signature not verifying
+- **THEN** the plugin refuses the registration as `grant_malformed`
 
 #### Scenario: A proxy is not a plain tcp proxy
 
@@ -131,7 +141,7 @@ The plugin MUST answer every refusal with a stable reason code and a short text,
 
 ### Requirement: The plugin owns its grant specification
 
-The plugin MUST publish the grant's claims and type, where a grant is carried, its signing serialization, its configuration format, its reason codes, the frp version it is tested against, and a test vector of a test key, verification cases with verdicts and reasons, and signing cases; its own tests MUST hold its verifier to that vector. A grant type it does not implement MUST be refused, and claims it does not know MUST be ignored. Its specification MUST name no concept of any particular issuing system.
+The plugin MUST publish the grant's claims and type, where a grant is carried, its signing serialization, its configuration format, its reason codes, the frp version it is tested against, and a test vector of a test key, verification cases with verdicts and reasons, and signing cases; its own tests MUST hold its verifier to that vector, at its locked dependencies and at the lowest release of each verification library it declares. A grant type it does not implement MUST be refused, and claims it does not know MUST be ignored. Its specification MUST name no concept of any particular issuing system.
 
 #### Scenario: A signer checks conformance
 
@@ -142,6 +152,11 @@ The plugin MUST publish the grant's claims and type, where a grant is carried, i
 
 - **WHEN** a correctly signed grant's type is `JWT` or absent
 - **THEN** the plugin refuses it as `grant_type_unsupported`
+
+#### Scenario: The vector runs at the declared floor
+
+- **WHEN** the real-frp gate runs the plugin's unit tests with the lowest PyJWT release the plugin declares
+- **THEN** every verification case returns its verdict and reason, as it does at the locked release
 
 ### Requirement: The plugin is proven against pinned frp
 

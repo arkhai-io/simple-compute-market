@@ -2,7 +2,8 @@
 
 ## Context
 
-Designed against `dev` at `6855f6de7`. This change was split out of
+Designed against `dev` at `6855f6de7`, and settled again at `2c4e080b8` after section 1
+of implementation returned the change to design (D16–D23). This change was split out of
 `prove-relay-provisioning`'s design, which settled the admission mechanism and the
 plugin's shape; the decisions carried from it are restated here as settled.
 
@@ -70,9 +71,10 @@ claims  {"aud": "<audience>", "port": <remote port>, "exp": <expiry>,
          "sub": "<optional subject>", "jti": "<optional grant id>", "iat": <optional issued at>}
 ```
 
-`aud`, `port`, and `exp` are required. `sub` and `jti` identify the grant in the
-plugin's log and never decide admission: a client's `user` is whatever its configuration
-says.
+`aud`, `port`, and `exp` are required. `exp`, `nbf`, and `iat` are JSON integers (D18);
+`sub` and `jti`, when present, are strings (D19). `sub` and `jti` identify the grant in
+the plugin's log and never decide admission beyond being well-formed: a client's `user`
+is whatever its configuration says.
 
 The `typ` is also the specification's major version. The plugin admits only types it
 implements and refuses any other, `JWT` and an absent `typ` included. Verifiers ignore
@@ -207,7 +209,8 @@ offline. The tool's `make test-frp` fetches the binaries and runs the real-frp t
 failing on a skip or on no tests. The root's `test-frp-grant-admission` joins `make test`
 and the `tests.yml` matrix, and a separate `tests.yml` job runs the gate — in `tests.yml`
 because it is the workflow validation may dispatch, so the plan can owe the job to
-validation.
+validation. The gate also runs the unit tests against the lowest PyJWT release the tool
+declares (D23).
 
 **Cases against real frp.** A valid grant admitted, and carrying traffic through the
 remote port to a local listener, since registration and traffic are different proofs;
@@ -277,7 +280,9 @@ lenient decoder passes what the plugin refuses).
 
 The plugin serves frps with `http.server.ThreadingHTTPServer` on loopback, with a body
 cap, a socket timeout, and `POST /` only. Grants are verified with PyJWT over
-`cryptography`. `requires-python >= 3.11`, so the plain program runs on a stock relay's
+`cryptography`: PyJWT parses the token and checks its signature, `aud`, and required
+claims; the header, time, and claim-type rules are the plugin's own (D18, D19, D22).
+`PyJWT>=2.8.0`, the first release with `strict_aud` (D20). `requires-python >= 3.11`, so the plain program runs on a stock relay's
 Python; the image uses the repository's declared Python.
 
 Why: a library's JWS parsing is trusted over hand-written parsing. One route on loopback
@@ -369,27 +374,34 @@ In order, refusing at the first failure:
 5. The grant is `content.metas.grant`, at most 4 KiB (`grant_missing`,
    `grant_malformed`); `content.user.metas` is never read.
 6. The unverified header's `kid` names a configured key (`key_unknown`).
-7. `jwt.decode_complete` with `algorithms=["EdDSA"]`, the issuer's audience,
-   `options={"require": ["exp", "aud", "port"], "strict_aud": True}`, and no leeway
-   (`signature_invalid`, `claim_missing`, `audience_mismatch`, `grant_expired`,
-   `grant_not_yet_valid`, `grant_malformed`). On the relay's clock a grant is expired
-   from the second `now ≥ exp`, and an `nbf` or `iat` later than `now` is not yet
-   valid.
-8. The header's `typ` is `frp-grant+jwt` and it carries no `crit`
-   (`grant_type_unsupported`, `grant_malformed`).
-9. `port` is a JSON integer, not a boolean, equal to `remote_port` (`port_mismatch`), and
-   inside the issuer's range (`port_outside_range`).
+7. The unverified header's `typ` is `frp-grant+jwt` (`grant_type_unsupported`) and it
+   carries no `crit` (`grant_malformed`) (D22).
+8. `jwt.decode_complete` with `algorithms=["EdDSA"]`, the issuer's audience, and
+   `options={"require": ["exp", "aud", "port"], "strict_aud": True, "verify_exp":
+   False, "verify_nbf": False, "verify_iat": False, "verify_sub": False, "verify_jti":
+   False}` (`signature_invalid`, `claim_missing`, `audience_mismatch`,
+   `grant_malformed`).
+9. `exp`, and `nbf` and `iat` when present, are JSON integers, not booleans
+   (`grant_malformed`); on the injected clock a grant is expired from the second
+   `now ≥ exp` (`grant_expired`), and not yet valid while an `nbf` or `iat` is later
+   than `now` (`grant_not_yet_valid`), with no leeway (D18).
+10. `sub` and `jti`, when present, are strings (`grant_malformed`) (D19).
+11. `port` is a JSON integer, not a boolean, equal to `remote_port` (`port_mismatch`), and
+    inside the issuer's range (`port_outside_range`).
 
 An admission answers `{"reject": false, "unchange": true}`: the plugin never rewrites a
-proxy. A refusal answers HTTP 200 with `reject: true` and the reason. Where PyJWT has a
-behaviour the rule adopts it unless it is less safe: padded segments are accepted (signers
-still never pad), `nbf` and `iat` are validated as PyJWT does, and `strict_aud` makes
-`aud` one string. Each rule has a vector case; the expiry boundary has three — one
-second before `exp` admitted, exactly `exp` refused as `grant_expired`, and an `iat` one
-second ahead refused as `grant_not_yet_valid`.
+proxy. A refusal answers HTTP 200 with `reject: true` and the reason. PyJWT decides the
+token's parsing, its signature, `aud`, and the presence of the required claims; padded
+segments are accepted (signers still never pad), and `strict_aud` makes `aud` one string.
+Every rule whose PyJWT behaviour differs between the releases the tool declares — the
+time checks, the types of `sub` and `jti`, and `crit` — is the plugin's own, so a grant's
+verdict and reason do not depend on the installed release. Each rule has a vector case;
+the expiry boundary has three — one second before `exp` admitted, exactly `exp` refused
+as `grant_expired`, and an `iat` one second ahead refused as `grant_not_yet_valid`.
 
-Why: the checks PyJWT cannot know — `typ`, the thumbprint lookup, the port — are the
-plugin's; the rest is the library's, as D8 chose. Refusing groups and port 0 keeps one
+Why: the checks PyJWT cannot know — `typ`, the thumbprint lookup, the port — and the ones
+whose behaviour it changes between releases are the plugin's; JWS parsing and the
+signature are the library's, as D8 chose. Refusing groups and port 0 keeps one
 grant to one port. No leeway (14 F1), because an issuer reuses a port once its grant's
 `exp` has passed, and a leeway would let a copied grant claim the port again in the
 window after; the expiry boundary is the one both contracts state, and the residual skew
@@ -402,8 +414,7 @@ for not writing them; `strict_aud` covers the list, and padding is harmless); al
 groups (a group lets a second proxy share a granted port); a 60-second leeway with every
 issuer's quarantine lengthened by it (the plugin's tolerance becomes a published
 constant every allocator must know, and a relay clock further behind reopens the
-window); leeway on `nbf` and `iat` only, with `exp` checked ourselves (a check around
-the library, buying only what frpc's retry already gives).
+window); leeway on `nbf` and `iat` only (buying only what frpc's retry already gives).
 
 ### D13. The configuration is TOML; keys are SPKI DER in base64
 
@@ -451,7 +462,8 @@ transport security and access control, which no caller asks for).
 
 The capability is named `frp-grant-admission`, after the tool: the tool is SCM-agnostic
 and named for frp, while "relay" is SCM's word, and one name makes the later move carry
-or remove one capability.
+or remove one capability. The change itself carries another name (D17), since no code
+line may contain a change's name.
 
 - The tool's README is the published specification and travels with it: the grant, its
   type and compatibility rule, thumbprint ids, JCS signing, the configuration format,
@@ -480,7 +492,141 @@ One round of two sessions, then one implementation review before closeout:
 The real-frp gate lands against a complete plugin. If a premise about frp it tests —
 frps failing closed, frpc retrying a refused proxy, a refusal reason reaching frpc, a
 reload leaving unchanged proxies registered — is false, the change returns to design
-rather than being worked around.
+rather than being worked around. D21 restates this cadence after the return.
+
+### D16. The change is renamed on `dev` first
+
+The change's name moves to D17's through a pull request to `dev`, before the design
+review, and `dev` is then merged into this change's branch and into
+`prove-relay-provisioning`'s, so both branches name it the same way at once. The tool,
+its distribution, console script, image, and capability keep `frp-grant-admission`.
+
+The orchestrating session carries it out, once this design is committed and pushed
+under the old name — a step's outcome is recorded through the change's directory, so no
+step may be running across the rename:
+
+1. A worktree on a new branch from `dev` renames `openspec/changes/frp-grant-admission/`
+   and the three index cells naming the change — its row, the campaign graph line, and
+   `prove-relay-provisioning`'s `Depends on` — and passes `make check-change-index`.
+2. Once that pull request merges, `dev` is merged into `feat/frp-grant-admission` and
+   into `prove-relay-provisioning`'s branch.
+3. The change gets a clone of its new name, `make change-clone
+   CHANGE=admit-relay-proxies-by-grant BRANCH=feat/frp-grant-admission`, since a clone's
+   directory is derived from its change's name; the untracked `reviews/` is copied into
+   it and checked identical with `diff -r`, and the old clone is retired by hand.
+4. Orchestration resumes under the new name. Planning updates `tasks.md`'s commands that
+   name the change.
+
+The branch keeps its name: branch names are not scanned, and the clone's marker records a
+non-default branch.
+
+Why: `make check-comment-hygiene` refuses every code line containing any change's name,
+archived ones included, and D11 and D14 make `frp-grant-admission` the tool's public
+name. The change's name is the workflow's bookkeeping. Renaming on `dev` first keeps
+`prove-relay-provisioning`'s branch consistent with this one rather than carrying the
+old name until this change lands.
+
+Rejected: renaming on this branch alone (`prove-relay-provisioning`'s branch keeps the
+old name until this change merges); also renaming the branch (a new remote branch and
+the old one deleted, for no functional gain); narrowing the hygiene check to exempt a
+change named after a capability or a `tools/` project it creates (a repository-policy
+edit outside this change, weakening the rule for exactly such names); renaming the tool
+(gives up D14's one name).
+
+### D17. The change is named `admit-relay-proxies-by-grant`
+
+A verb phrase for what the change does, as change names here are. No planned code line
+contains it; it is no substring of the tool's names (`frp-grant-admission`,
+`test-frp-grant-admission`, `build-frp-grant-admission`), and it does not contain
+`archive`. "Relay" is SCM's word, which suits the workflow's bookkeeping, where D14 kept
+it out of the SCM-agnostic tool's name.
+
+Rejected: `build-frp-proxy-admission-plugin` (says less of the behaviour, and its prefix
+reads as a make target); `gate-relay-ports-by-signed-grant`.
+
+### D18. The time checks are the plugin's, against an injected clock
+
+PyJWT's `verify_exp`, `verify_nbf`, and `verify_iat` are off. The plugin requires `exp`,
+and `nbf` and `iat` when present, to be JSON integers and not booleans
+(`grant_malformed`), and compares them against the clock it is given: expired from the
+second `now ≥ exp`, not yet valid while `nbf` or `iat` is later than `now`, with no
+leeway. The clock is a parameter of the grant check; the server passes the system clock.
+The vector gains cases of time claims of the wrong type.
+
+Why: PyJWT takes no clock — every release from 2.8.0 to 2.15.1 reads `datetime.now()`
+inside `_validate_claims` — so the vector's exact-time cases could not be replayed
+without overriding private methods or patching time. Its time semantics have also moved
+between releases (2.6.0 changed `exp < now` to `exp <= now`), and it reads each time
+claim through `int()`, admitting a string or truncating a float. The expiry boundary is
+the rule this design tightened on purpose (D12, 14 F1); it is exact and stable only as
+the plugin's own few comparisons. PyJWT keeps what D8 chose it for.
+
+Rejected: subclassing PyJWT to feed its private `_validate_exp`, `_validate_nbf`, and
+`_validate_iat` the injected clock (rests on private methods, and makes PyJWT's loose
+types the specification); freezing time in tests with a dev dependency (patches
+`datetime` globally, leaves no clock seam in the check, and keeps the release-dependent
+semantics).
+
+### D19. `sub` and `jti` are strings when present
+
+The plugin refuses a grant whose `sub` or `jti` is present and not a string, as
+`grant_malformed`, by its own check; PyJWT's `verify_sub` and `verify_jti` are off. The
+vector gains an integer-`jti` case and an object-`sub` case.
+
+Why: PyJWT after 2.9.0 refuses non-string `sub` and `jti` by default and 2.8.0 and 2.9.0
+do not, so inside the declared range a grant's verdict depended on the installed
+release. RFC 7519 defines both as strings, so a signer on any JOSE library agrees with
+the plugin, and the decision log's `sub` and `jti` are always strings when verified.
+
+Rejected: accepting any JSON value and only logging it (admits what RFC 7519 forbids,
+and the log's field types vary); adopting PyJWT's check by raising the floor (the rule
+would move with PyJWT's releases).
+
+### D20. The PyJWT floor is 2.8.0
+
+`PyJWT>=2.8.0`, the first release with `strict_aud`, the one feature the plugin needs
+beyond EdDSA verification. On 2.8.0 the `verify_sub` and `verify_jti` option keys are
+harmless: options merge into a dictionary, and only known keys are read. After D18, the
+release at which PyJWT first refuses a future `iat` no longer bears on the floor.
+
+### D21. Implementation cadence after the return
+
+D15 stands: one round of two sessions, then one implementation review. Session 1
+re-checks section 1's work after the rename and the merge of `dev`, then delivers grant
+verification with the plugin's own header, time, and claim-type checks (D18, D19, D22),
+the vector, the server, and the README. Session 2 delivers real frp, CI with D23's
+floor run, and shipping. The rename (D16) is the orchestrating session's work before the
+design review, not an implementation round.
+
+### D22. `typ` and `crit` are checked from the unverified header, before PyJWT
+
+The plugin refuses a `typ` other than `frp-grant+jwt` (`grant_type_unsupported`) and any
+`crit` (`grant_malformed`) from the unverified header, beside the `kid` lookup and before
+`jwt.decode_complete` (D12 step 7). The vector gains a forged grant carrying `crit`,
+refused as `grant_malformed`.
+
+Why: PyJWT 2.15.1 validates `crit` while parsing, before the signature, and honours
+`crit: ["b64"]` (RFC 7797); 2.8.0 ignores `crit`. Checked after decoding, a forged grant
+with `crit` was refused as `grant_malformed` on one release and `signature_invalid` on
+the other. Every check must pass, so checking the header first changes only which
+refusal is reported, and a header grants nothing.
+
+Rejected: keeping the order and mapping PyJWT's `crit` error to `grant_malformed` (the
+reason still depends on the release).
+
+### D23. The declared PyJWT range is proven at its floor
+
+The tool's `make test-floor` runs the unit tests, the vector included, against the
+lowest PyJWT release the tool declares, with the rest of the lock unchanged; the
+real-frp gate job runs it beside `make test-frp`, since it needs the network. The
+default suite runs on the lock and stays offline.
+
+Why: the wheel installs any release from the floor up, and the release-dependent
+behaviours D18, D19, and D22 remove were found by hand. Running the published vector at
+both ends of the declared range catches the next one.
+
+Rejected: pinning PyJWT exactly or narrowly (burdens installing the wheel beside other
+software); relying on the vector at each relock (proves only the locked release).
 
 ## Notes for `prove-relay-provisioning`
 
