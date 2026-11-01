@@ -43,6 +43,21 @@ routes.py,__init__.py}`; `provisioning/compute/contracts/tests/`.
   the contracts package, `pool_change_refused` among them, so the service, the
   client, and tests share one spelling. Unit: the models round-trip, and a
   response with problems and `applied: false` validates.
+  *Implemented, left unchecked by the return below.* `hosts.py` holds `HostDefinitionsImportRequest`,
+  `HostDefinitionsImportResponse` (`applied`, `diff`, `not_named`, `problems`),
+  `HostDefinitionsDiff`, `HostDefinitionProblem` (`path`, `code`, `message`;
+  `code` read as text so an unknown newer code parses), and the codes as
+  `HostDefinitionProblemCode`, a `StrEnum`. Beyond the task, per D8, the entry
+  model is here too: `HostDefinition` and `HostDefinitionConnection`, both
+  `extra="forbid", strict=True` in their own configuration, so no reader can
+  validate an entry leniently, with `connection.version` required; the models
+  refuse `connection.secrets` as an undefined field, and section 2's document
+  validation is to report it as `connection_secrets`. The not-named hosts are a
+  top-level `not_named` rather than a diff list, since they are not a change.
+  Unit (`contracts/tests/unit/test_host_definitions.py`): the entry and import
+  models round-trip; validation without any caller flag refuses a null or quoted
+  value and any undefined field at its location; a refused response with two
+  problems parses; an unknown code parses — passed.
 - [ ] 1.2 Add the two route contracts to `routes.py` (D12, D14):
   `GET /api/v1/hosts/definitions/export` (`provisioning_host_definitions_export`)
   and `POST /api/v1/hosts/definitions/import`
@@ -53,10 +68,87 @@ routes.py,__init__.py}`; `provisioning/compute/contracts/tests/`.
   the path has two — and say so in a unit assertion that resolves both paths to
   their own contracts. Unit: the route table resolves each new path and method
   to its operation, and the host-get contract does not claim either.
+  *Implemented; its unit evidence passes, but the service suite fails on it, so
+  the section returns to planning (notes below).* Both contracts sit among the
+  host routes in
+  `PROVISIONING_ROUTE_CONTRACTS` and in `ADMIN_PROVISIONING_OPERATIONS`, so each
+  admits the administrator alone, like every host route. Unit
+  (`test_host_definitions.py`): each path and method resolves to its own
+  operation with roles `("admin",)`; neither `provisioning_host_get` nor
+  `provisioning_host_update` matches either path; `GET /api/v1/hosts/definitions`
+  still resolves to `provisioning_host_get`, so no host name is reserved — passed.
 - [ ] 1.3 **Verification checkpoint.** Unit: the contracts suite
   (`make test-compute-provisioning-contracts`). `make check-comment-hygiene`.
   End-to-end: none — the models carry no behaviour, and no scenario calls the
   routes. None is owed.
+  *Not passed.* `make test-compute-provisioning-contracts`: 126 passed. `make
+  check-comment-hygiene`: OK. `make check-packaging`: OK. `make test`: failed in
+  `make test-provisioning` (2 failed, 597 passed in its unit run), and stopped
+  there, so the suites after it did not run. End-to-end: confirmed none; no
+  marker in `e2e-tests/` calls either route. None is owed.
+
+Section 1 notes:
+
+- **The plan is wrong: task 1.2 cannot land before section 3.** The service's
+  unit suite holds every contract in the composed route table to a mounted
+  route:
+  `provisioning/compute/service/tests/unit/test_route_binding.py::test_every_contract_resolves_to_a_mounted_route`
+  fails for `provisioning_host_definitions_export` and
+  `provisioning_host_definitions_import` ("no mounted GET route serves
+  /api/v1/hosts/definitions/export", and the same for the POST). The family's
+  contracts reach that table through `assemble_provisioning_route_table`, so a
+  family route contract and its controller binding must land in one commit.
+  Section 1's premise, "route contracts … with no behaviour behind them yet",
+  does not hold for the routes; it does for the models (1.1), which nothing
+  binds. Recommended amendment: move 1.2's route contracts and their unit
+  assertions into section 3, beside 3.1's binding, and keep 1.1 in section 1.
+  Merging sections 1–3 into one commit would also pass, at the cost of
+  per-section review. The work-in-progress commit carries 1.1 and 1.2 as
+  implemented here.
+- **Section 2 work begun in the same commit, untested beyond the existing
+  suites.** `compute_provisioning/hosts/service.py` gained
+  `HostAuthority.put_host_in_session` (the session-scoped write 2.2 asks for,
+  with the codec-normalized equality 2.3 needs), `UnknownPoolError` (a
+  `ValueError`, so existing callers keep catching it), `HostChange`,
+  `serves_connection`, `host_ids_in_session`, and `session()`; `apply_inventory`
+  is rebuilt on `put_host_in_session` with no change of behaviour; and
+  `hosts/connection.py`'s `ConnectionCodecs` gained `serves(kind, version)`. No
+  test of the new methods exists yet. `make test-compute-provisioning`: 281
+  passed; `make test-compute-provisioning-ansible`: 134 passed — the existing
+  `apply_inventory` tests hold on the rebuilt path.
+- **Section 2 needs a relock this session could not make.** `hosts/definitions.py`
+  imports `yaml`, so `provisioning/compute/pyproject.toml` must declare `pyyaml`
+  (AGENTS.md, "Package and dependency discipline"); it is already in that
+  project's lock, through `arkhai-kit-site`. Declaring it changes the project's
+  requirements, so its lock must be rewritten by `make lock`, which refuses this
+  session's uv, 0.11.32: the locks need uv 0.12 or newer, and updating uv
+  (`uv self update 0.12.19`) was not permitted. Running a project's `make
+  reinit` after the declaration would rewrite the lock with the older uv, which
+  the repository refuses, so the next session declares `pyyaml` and relocks
+  only with uv 0.12 or newer.
+- **No version bump yet, and no task owns one.** RELEASING.md's policy gives a
+  minor bump to each package these sections change, against its version on
+  `dev`: contracts 0.12.0 → 0.13.0, the kit (`provisioning/compute`) 0.23.0 →
+  0.24.0, the client 0.9.1 → 0.10.0, and the service 0.21.0 → 0.22.0, each
+  dependent's lower bound raised to the version whose API it uses. A bump moves
+  every exact pin, so `make lock` must rewrite the locks (`make check-locks`
+  refused the contracts bump alone in eleven projects), and this session's uv,
+  0.11.32, cannot. The bump is reverted here; without it every lock matches its
+  project and `make check-packaging` passes. Recommended for the plan's
+  amendment: a task owning the bumps, the `pyyaml` declaration below, `make
+  lock`, and `make check-packaging`, in the first section that runs with uv 0.12
+  or newer.
+- **Fresh-context check.** Run on this section's diff before these notes were
+  rewritten. It found the `make test` failure above and the missing task for the
+  version bump, both now recorded; a response docstring that gave a structurally
+  invalid document a diff (corrected: its `diff` and `not_named` are empty); a
+  version rationale that assumed a default served version (corrected to D2's
+  reason); two accounts of how `secrets` is refused (the docstring now names the
+  model's refusal and the document's code); an uncommented `INVALID_VALUE`
+  (commented); and that strictness rested on each caller's `strict=True` flag
+  (the models now carry it, and the tests pass no flag). It found the models and
+  routes consistent with D2, D8, D9, D12, D14 and the deltas, and nothing in
+  layering, comments, or test level.
 
 ## 2. The family host document
 

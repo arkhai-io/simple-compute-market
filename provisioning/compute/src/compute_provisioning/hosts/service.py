@@ -1,9 +1,15 @@
 """The host authority: the compute family's registry of hosts jobs run against.
 
 It owns each host's identity, pool, enabled state, and connection envelope, the
-lookup made immediately before execution, and applying an imported inventory. It
-knows no connection kind: a submitted connection is validated, and its secrets
-protected, by the kind's codec, and what it stores is the resulting envelope.
+lookup made immediately before execution, and applying an imported inventory or
+a host definitions document. It knows no connection kind: a submitted connection
+is validated, and its secrets protected, by the kind's codec, and what it stores
+is the resulting envelope.
+
+A write either runs in a transaction of its own or, as ``put_host_in_session``,
+joins a caller's session and leaves committing to the caller, so several hosts
+and a caller's own records, such as a document's digest, commit or roll back
+together.
 
 A host is connection identity and placement, never capacity or hardware: no
 host write declares anything a site sells, and a host records nothing about the
@@ -38,6 +44,10 @@ class HostNotFoundError(Exception):
     """Raised when a requested host_id does not exist."""
 
 
+class UnknownPoolError(ValueError):
+    """A host write named a pool that does not exist."""
+
+
 class PoolChangeRefusedError(ValueError):
     """A pool-change hook refused moving a host to another pool, or to none.
 
@@ -69,6 +79,9 @@ class PoolUnstated(Enum):
 #: never unplaces hosts placed since through the API.
 POOL_UNSTATED = PoolUnstated.POOL_UNSTATED
 
+#: What a session-scoped write did to the host it names.
+HostChange = Literal["created", "updated", "unchanged"]
+
 
 @dataclass(frozen=True)
 class InventoryHost:
@@ -82,6 +95,21 @@ class InventoryHost:
     host_id: str
     connection: ConnectionSubmission
     pool_id: Optional[str] | Literal[PoolUnstated.POOL_UNSTATED] = POOL_UNSTATED
+
+
+def _same_connection(built: ConnectionEnvelope, stored: ConnectionEnvelope) -> bool:
+    """Whether a connection its codec built states exactly the stored one.
+
+    Compared after the codec, so a field the codec defaults equals a stored
+    default; protected values compare by scheme, since a kept value is carried
+    forward as it is and a resubmitted one is never equal ciphertext.
+    """
+    return (
+        built.kind == stored.kind
+        and built.version == stored.version
+        and dict(built.public) == dict(stored.public)
+        and built.protected_schemes() == stored.protected_schemes()
+    )
 
 
 def _view(host: Host) -> HostResponse:
@@ -152,9 +180,89 @@ class HostAuthority:
                 host_id=host.host_id, pool_id=host.pool_id, connection=host.connection()
             )
 
+    def serves_connection(self, kind: str, version: int) -> bool:
+        """Whether a composed codec serves connections of ``kind`` at ``version``.
+
+        A host stored under a kind or version no codec serves runs no work
+        until it is submitted again at a served one.
+        """
+        return self._codecs.serves(kind, version)
+
+    @staticmethod
+    def host_ids_in_session(db: Session) -> list[str]:
+        """Every registered host's id, in the caller's session, ordered."""
+        return [host_id for (host_id,) in db.query(Host.host_id).order_by(Host.host_id)]
+
     # ------------------------------------------------------------------
     # Writes
     # ------------------------------------------------------------------
+
+    def session(self) -> Session:
+        """A new session over the registry's database.
+
+        For a caller composing several session-scoped writes into one
+        transaction it decides to commit or roll back; the caller owns the
+        session and closes it.
+        """
+        return self._session_factory()
+
+    def put_host_in_session(
+        self,
+        db: Session,
+        host_id: str,
+        connection: ConnectionSubmission,
+        *,
+        pool_id: Optional[str] | Literal[PoolUnstated.POOL_UNSTATED] = POOL_UNSTATED,
+        enabled: Optional[bool] = None,
+    ) -> HostChange:
+        """Register a host or replace what the arguments state, in ``db``.
+
+        Never commits: the caller commits or rolls back the whole session. The
+        connection is built through its kind's codec, with the stored one as
+        the previous connection, so a stored protected value it still needs is
+        kept. ``pool_id`` places or moves the host, ``None`` unplaces it, and
+        :data:`POOL_UNSTATED` leaves an existing host's pool alone; ``enabled``
+        set replaces the enabled state, and ``None`` leaves an existing host's
+        alone. A new host is created enabled unless ``enabled`` says otherwise,
+        and unplaced unless a pool is stated.
+
+        A host whose built connection, pool, and enabled state equal the stored
+        ones is written nothing and runs no hook. A pool move runs every
+        pool-change hook before anything about the host changes.
+
+        Raises ``UnknownPoolError`` for a stated pool that does not exist and
+        ``ValueError`` for a connection the codec refuses, both before writing,
+        and ``PoolChangeRefusedError`` when a hook refuses the move.
+        """
+        stated = pool_id is not POOL_UNSTATED
+        if stated and pool_id is not None:
+            self._require_pool_exists(db, pool_id)
+        existing = db.query(Host).filter(Host.host_id == host_id).one_or_none()
+        if existing is None:
+            host = Host(
+                host_id=host_id,
+                enabled=True if enabled is None else enabled,
+                pool_id=pool_id if stated else None,
+            )
+            host.set_connection(self._build(connection, previous=None))
+            db.add(host)
+            return "created"
+        stored = existing.connection()
+        built = self._build(connection, previous=stored)
+        target_pool = pool_id if stated else existing.pool_id
+        target_enabled = existing.enabled if enabled is None else enabled
+        same_connection = _same_connection(built, stored)
+        if (
+            same_connection
+            and target_pool == existing.pool_id
+            and target_enabled == existing.enabled
+        ):
+            return "unchanged"
+        self._move_to_pool(db, existing, target_pool)
+        if not same_connection:
+            existing.set_connection(built)
+        existing.enabled = target_enabled
+        return "updated"
 
     def register_host(self, data: HostCreate) -> HostResponse:
         """Register a host in the pool it names, or unplaced when it names none."""
@@ -212,25 +320,11 @@ class HostAuthority:
         applied: list[str] = []
         with self._session_factory() as db:
             for entry in entries:
-                stated = entry.pool_id is not POOL_UNSTATED
-                if stated and entry.pool_id is not None:
-                    self._require_pool_exists(db, entry.pool_id)
-                existing = db.query(Host).filter(Host.host_id == entry.host_id).one_or_none()
-                if existing is None:
-                    host = Host(
-                        host_id=entry.host_id,
-                        enabled=True,
-                        pool_id=entry.pool_id if stated else None,
-                    )
-                    host.set_connection(self._build(entry.connection, previous=None))
-                    db.add(host)
-                else:
-                    host = existing
-                    host.set_connection(
-                        self._build(entry.connection, previous=existing.connection())
-                    )
-                    if stated:
-                        self._move_to_pool(db, host, entry.pool_id)
+                # An inventory entry cannot state ``enabled``, so an existing
+                # host keeps its own.
+                self.put_host_in_session(
+                    db, entry.host_id, entry.connection, pool_id=entry.pool_id
+                )
                 applied.append(entry.host_id)
             db.commit()
 
@@ -293,14 +387,17 @@ class HostAuthority:
     @staticmethod
     def _require_pool_exists(db: Session, pool_id: str) -> None:
         if db.query(ResourcePool).filter(ResourcePool.id == pool_id).one_or_none() is None:
-            raise ValueError(f"Pool '{pool_id}' does not exist")
+            raise UnknownPoolError(f"Pool '{pool_id}' does not exist")
 
 
 __all__ = [
     "HostAuthority",
+    "HostChange",
     "HostNotFoundError",
     "InventoryHost",
     "POOL_UNSTATED",
     "PoolChangeHook",
+    "PoolChangeRefusedError",
     "PoolUnstated",
+    "UnknownPoolError",
 ]

@@ -107,6 +107,11 @@ class ConnectionCodecs:
             by_kind[codec.kind] = codec
         self._codecs = by_kind
 
+    def serves(self, kind: str, version: int) -> bool:
+        """Whether a codec of ``kind`` is composed and serves ``version``."""
+        codec = self._codecs.get(kind)
+        return codec is not None and codec.version == version
+
     def codec(self, kind: str) -> ConnectionCodec:
         try:
             return self._codecs[kind]
