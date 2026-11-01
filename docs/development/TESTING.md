@@ -1024,17 +1024,21 @@ can refuse.
 
 `domains/vms/provisioning/iac/scripts/validate_playbooks.sh` syntax-checks every playbook the VM IaC tree
 ships from one list, which a structure test holds equal to the playbooks
-present; `make validate-playbooks` runs it. Tests that run a shipped task through
-a real `ansible-playbook`, such as the relay-wait test against a loopback HTTP
-peer, are integration tests in this document's sense, and skip in the default
-suite without ansible-core 2.17 to 2.19 and the `ansible.posix` collection's
-`json` callback. `make test-provisioning-iac-native` runs both in the built
-provisioning image, whose Ansible and collections are the ones that run these
-roles, with the checkout's IaC tree mounted read-only and no network but
-loopback. It fails rather than skips: a skipped test, no test, or a missing
-Ansible or callback fails it. A structure test holds the gate's list of native
-test modules to every module that defines their skip guard. The VM end-to-end
-lane runs the gate as its own step once it has built the image.
+present; `make validate-playbooks` runs it. Tests that run shipped tasks through
+real `ansible-playbook` are library integration: the VM suite renders both create
+facts and exercises its family-role call boundary, and the family suite runs its
+installer and authenticated status wait against controlled local file and HTTP
+boundaries. Native tests skip in the default suite without supported Ansible;
+the family HTTP tests also require the `ansible.posix.json` callback.
+
+`make test-provisioning-iac-native` runs the native suites and syntax checks from
+the built provisioning image's packaged IaC trees, with no network but loopback.
+A missing image, supported Ansible or required callback, no native test, or a
+skipped native test fails the gate. Both domains' playbooks are parsed with their
+own configuration and with the shared service configuration and image role path.
+The shared configuration contains no domain path. A structure test holds the VM
+gate's list of native modules to every module defining its skip guard. The VM
+end-to-end lane runs this gate once it has built the image.
 
 ## Chart Render Tests
 

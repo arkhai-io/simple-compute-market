@@ -118,9 +118,7 @@ def _create_fact(
             "mode": "direct_port_forwarding",
             "port_forwarding": f"{tenant_host}:{port} -> {MOCK_GUEST_ADDRESS}:22",
         },
-        # The provided-key fact names its relay block ``frp``; the generated-key
-        # fact names it ``relay``.
-        ("frp" if provided_key else "relay"): no_relay,
+        "relay": no_relay,
     }
 
 

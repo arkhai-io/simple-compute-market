@@ -264,14 +264,18 @@ module arguments, so an unbalanced quote, an apostrophe in a bash comment includ
 fails the whole task file as it loads. A syntax check templates nothing and runs
 nothing.
 
-`tests/test_frp_proxy_wait.py` runs the relay proxy wait through a real
-`ansible-playbook` against a loopback HTTP peer, an integration test. It is skipped,
-saying which is missing, without ansible-core 2.17 to 2.19 and the `ansible.posix`
-collection's `json` callback, which the default `make test` does not install.
-`make native-ansible-gate` here, or `make test-provisioning-iac-native` from the
-repository root, which runs it in the built provisioning image with this tree mounted
-read-only, runs every syntax check and that test, and fails rather than skips when
-Ansible or the callback is missing. The VM end-to-end lane runs the root target.
+`tests/test_vm_relay_roles.py` renders both create-fact variants and exercises the
+VM-to-family proxy call through real `ansible-playbook`, with a controlled family
+role at that boundary. The shared family's IaC suite tests its authenticated proxy
+wait against a loopback HTTP peer. These are library integration tests; the default
+`make test` skips native cases without supported Ansible (and the family's HTTP
+cases need the `ansible.posix.json` callback).
+
+`make native-ansible-gate` here runs VM syntax and native tests, failing on a skip.
+`make test-provisioning-iac-native` from the repository root runs the packaged VM
+and family suites in a built provisioning image, with external networking disabled.
+It also parses both domains with their own configuration and the image's shared
+service configuration. The VM end-to-end lane runs the root target.
 
 `ansible-lint` is not part of the default validation path in this repo yet.
 
@@ -1080,7 +1084,7 @@ retried within the wait's bound, and a body that is not the client's status docu
 ends the create as an error at once.
 
 A teardown removes the guest's proxy block and then reloads the client. A
-`frpc-vms.toml.reload-pending.<guest>` record beside the configuration stays until a
+`frpc-buyers.toml.reload-pending.vm-<guest>` record beside the configuration stays until a
 reload succeeds. While it remains, the teardown fails and capacity stays held, and a
 retry reloads before it reports the proxy gone, so retrying is safe.
 

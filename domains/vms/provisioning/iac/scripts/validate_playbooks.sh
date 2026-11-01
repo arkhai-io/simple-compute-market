@@ -10,7 +10,9 @@
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
-export ANSIBLE_CONFIG=ansible/ansible.cfg
+if [ "${IAC_SYNTAX_USE_ENV:-0}" != 1 ]; then
+  export ANSIBLE_CONFIG=ansible/ansible.cfg
+fi
 
 PLAYBOOKS=(
   ansible/playbooks/frp/docker-app-setup.yaml

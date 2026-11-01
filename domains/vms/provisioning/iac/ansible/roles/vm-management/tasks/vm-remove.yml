@@ -23,6 +23,15 @@
 # The host machine has no knowledge of leases.  "Remove" simply means
 # "destroy and clean up this VM completely."
 
+- name: Install the shared proxy teardown library for VM cleanup
+  include_role:
+    name: relay-proxy
+    tasks_from: helper
+    public: true
+    apply:
+      delegate_to: "{{ target_host }}"
+  when: vm_action == "vm_remove"
+
 - name: Verify cleanup script exists on target host
   stat:
     path: "/usr/local/bin/cleanup_vm_{{ vm_name }}.sh"
@@ -54,6 +63,7 @@
     echo "Cleanup log: $LOG_FILE"
     exit $EXIT_CODE
   register: vm_cleanup_result
+  no_log: true
   delegate_to: "{{ target_host }}"
   when:
     - vm_action == "vm_remove"
@@ -64,7 +74,10 @@
     set -e
     NAME="{{ vm_name }}"
     MARKER="{{ vm_guest_rule_marker }}"
-    RELOAD_URL="http://127.0.0.1:{{ frp_admin_port | default(7400) }}/api/reload"
+    source {{ relay_proxy_teardown_library | quote }}
+    CONFIG={{ relay_client_config | quote }}
+    ADMIN_PORT="$(awk -F ' = ' '$1 == "webServer.port" {print $2; exit}' "$CONFIG" 2>/dev/null || true)"
+    RELOAD_URL="http://127.0.0.1:$ADMIN_PORT/api/reload"
 
     {{ lookup('file', 'guest_teardown.sh') }}
 
@@ -110,6 +123,15 @@
 
     PORT="$(guest_forwarded_port "$MARKER" "$ADDRESS")"
 
+    # Fails here, under `set -e`, while the VM tunnel client has not reloaded
+    # without the proxy of this guest, so the relay port stays held with the
+    # capacity of the reservation until the reload of a retry succeeds.
+    remove_guest_proxy "$CONFIG" "vm-$NAME" "$RELOAD_URL"
+    if [ "$GUEST_PROXY" = "removed" ]; then
+      found "relay proxy block"
+    fi
+
+
     if [ -n "$DOMAIN" ]; then
       if virsh domstate "$NAME" 2>/dev/null | grep -q running; then
         virsh destroy "$NAME"
@@ -127,14 +149,6 @@
         found "$path"
       fi
     done
-
-    # Fails here, under `set -e`, while the VM tunnel client has not reloaded
-    # without the proxy of this guest, so the relay port stays held with the
-    # capacity of the reservation until the reload of a retry succeeds.
-    remove_guest_proxy /etc/frp/frpc-vms.toml "$NAME" "$RELOAD_URL"
-    if [ "$GUEST_PROXY" = "removed" ]; then
-      found "relay proxy block"
-    fi
 
     while IFS= read -r reservation; do
       [ -n "$reservation" ] || continue
@@ -193,6 +207,7 @@
   args:
     executable: /bin/bash
   register: vm_attributed_removal
+  no_log: true
   delegate_to: "{{ target_host }}"
   when:
     - vm_action == "vm_remove"

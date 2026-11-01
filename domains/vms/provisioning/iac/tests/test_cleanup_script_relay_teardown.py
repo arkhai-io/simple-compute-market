@@ -4,7 +4,9 @@
 YAML. It cannot prove the embedded shell behaves, and this is shell that runs
 unattended on a rented host: `vm-create.yml` writes
 `/usr/local/bin/cleanup_vm_<name>.sh` onto the host, and that script removes
-the VM's proxy stanza with `sed` and reloads the tunnel client with `curl`.
+the VM's proxy stanza through the shared family helper and reloads the tunnel
+client with `curl`. Addresses and admin passwords here are deterministic
+development fixtures and must never be used on a public network.
 
 Two properties matter enough to run the real shell for.
 
@@ -24,8 +26,10 @@ script runs, and the correctness bug this harness exists for — a corrupted
 kind a substring assertion reports as present and working.
 """
 
-from pathlib import Path
+import os
+import tempfile
 import unittest
+from pathlib import Path
 
 from shell_harness import (
     assert_bash_syntax_valid,
@@ -53,7 +57,8 @@ _BLOCK_END = '      log "=== Cleaning up port forwarding rules ==="\n'
 # Ansible templating the extracted shell still carries. Substituted with the
 # values a real run would render, since bash has no opinion about Jinja.
 _SUBSTITUTIONS = {
-    "{{ frp_admin_port | default(7400) }}": "7400",
+    "{{ relay_proxy_teardown_library | quote }}": "/usr/local/lib/arkhai-relay/remove_proxy.sh",
+    "{{ relay_client_config | quote }}": "/etc/frp/frpc-buyers.toml",
 }
 
 
@@ -70,7 +75,7 @@ def _teardown_block() -> str:
 
 
 _PRELUDE = """
-set -u
+set -eu
 VM_NAME="agent-vm-01"
 log() { echo "LOG: $1"; }
 log_error() { echo "ERR: $1" >&2; }
@@ -100,28 +105,29 @@ class CleanupScriptRelayTeardownTests(unittest.TestCase):
             "systemctl": "#!/bin/bash\necho \"SYSTEMCTL $@\" >> \"$RECORD\"\nexit 0\n",
         }
         with fake_binaries(fakes) as fake_bin:
-            import tempfile
-            import os
-
             workdir = tempfile.mkdtemp()
             record = os.path.join(workdir, "record")
             open(record, "w").close()
             etc = os.path.join(workdir, "etc", "frp")
             os.makedirs(etc)
-            vms_conf = os.path.join(etc, "frpc-vms.toml")
+            vms_conf = os.path.join(etc, "frpc-buyers.toml")
             mgmt_conf = os.path.join(etc, "frpc.toml")
             stanza = (
                 "serverAddr = \"203.0.113.9\"\n"
-                "# BEGIN ANSIBLE MANAGED BLOCK FOR VM agent-vm-01\n"
+                "# BEGIN ANSIBLE MANAGED RELAY PROXY vm-agent-vm-01\n"
                 "[[proxies]]\nname = \"vm-agent-vm-01\"\nremotePort = 6142\n"
-                "# END ANSIBLE MANAGED BLOCK FOR VM agent-vm-01\n"
+                "# END ANSIBLE MANAGED RELAY PROXY vm-agent-vm-01\n"
             )
+            stanza = 'webServer.port = 740\nwebServer.password = "' + 'a' * 64 + '"\n' + stanza
+            library = Path(workdir) / "remove_proxy.sh"
+            family = ROOT.parents[3] / "provisioning/compute/iac/ansible/roles/relay-proxy/files/remove_proxy.sh"
+            library.write_text(family.read_text(encoding="utf-8"), encoding="utf-8")
             if neighbour:
                 # Another guest, whose name begins with this guest's.
                 stanza += (
-                    "# BEGIN ANSIBLE MANAGED BLOCK FOR VM agent-vm-012\n"
+                    "# BEGIN ANSIBLE MANAGED RELAY PROXY vm-agent-vm-012\n"
                     "[[proxies]]\nname = \"vm-agent-vm-012\"\nremotePort = 6143\n"
-                    "# END ANSIBLE MANAGED BLOCK FOR VM agent-vm-012\n"
+                    "# END ANSIBLE MANAGED RELAY PROXY vm-agent-vm-012\n"
                 )
             if config_exists:
                 Path(vms_conf).write_text(stanza, encoding="utf-8")
@@ -132,7 +138,7 @@ class CleanupScriptRelayTeardownTests(unittest.TestCase):
                 _PRELUDE
                 + LIBRARY
                 + f'RECORD="{record}"\nexport RECORD\n'
-                + self.block.replace("/etc/frp/", f"{etc}/")
+                + self.block.replace("/etc/frp/", f"{etc}/").replace("/usr/local/lib/arkhai-relay/remove_proxy.sh", str(library))
             )
             result = run_bash(script, fake_bin_dir=fake_bin)
             calls = Path(record).read_text(encoding="utf-8")
@@ -158,8 +164,8 @@ class CleanupScriptRelayTeardownTests(unittest.TestCase):
         remaining = Path(vms_conf).read_text(encoding="utf-8")
         self.assertNotIn('name = "vm-agent-vm-01"\n', remaining)
         self.assertIn('name = "vm-agent-vm-012"', remaining)
-        self.assertIn("# BEGIN ANSIBLE MANAGED BLOCK FOR VM agent-vm-012\n", remaining)
-        self.assertIn("# END ANSIBLE MANAGED BLOCK FOR VM agent-vm-012\n", remaining)
+        self.assertIn("# BEGIN ANSIBLE MANAGED RELAY PROXY vm-agent-vm-012\n", remaining)
+        self.assertIn("# END ANSIBLE MANAGED RELAY PROXY vm-agent-vm-012\n", remaining)
 
     def test_the_management_tunnel_configuration_is_untouched(self) -> None:
         """The property that matters most, and the one YAML cannot show."""

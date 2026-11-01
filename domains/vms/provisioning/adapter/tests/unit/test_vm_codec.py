@@ -587,9 +587,9 @@ class TestBuildResultPayload:
     @pytest.mark.parametrize("enabled", [True, "True"])
     def test_an_enabled_relays_remote_port_overrides_ssh_port(self, enabled):
         frp = {"enabled": enabled, "relay_addr": "198.51.100.7", "remote_port": "54321", "subdomain": "vm-abc"}
-        payload = build_result_payload(_output(ssh_port="2222", ansible_result={"action": "create", "frp": frp}))
+        payload = build_result_payload(_output(ssh_port="2222", ansible_result={"action": "create", "relay": frp}))
         assert payload["ssh_port"] == "54321"
-        assert payload["frp"] == frp
+        assert payload["relay"] == frp
 
     @pytest.mark.parametrize("enabled", [False, "False"])
     @pytest.mark.parametrize("remote_port", ["N/A", "54321"])
@@ -597,20 +597,20 @@ class TestBuildResultPayload:
         """The playbook reports the relay block on every create; without a relay
         it is disabled and its fields are ``N/A``."""
         frp = {"enabled": enabled, "relay_addr": "N/A", "remote_port": remote_port, "ssh_access": "N/A"}
-        payload = build_result_payload(_output(ssh_port="2222", ansible_result={"action": "create", "frp": frp}))
+        payload = build_result_payload(_output(ssh_port="2222", ansible_result={"action": "create", "relay": frp}))
         assert payload["ssh_port"] == "2222"
-        assert payload["frp"] == frp
+        assert payload["relay"] == frp
 
     @pytest.mark.parametrize("remote_port", ["N/A", "", "0", "65536", "40001x", "²", True, 4.5, None])
     def test_an_enabled_relay_without_a_port_keeps_the_forwarded_port(self, remote_port):
         frp = {"enabled": True, "relay_addr": "198.51.100.7", "remote_port": remote_port}
-        payload = build_result_payload(_output(ssh_port="2222", ansible_result={"action": "create", "frp": frp}))
+        payload = build_result_payload(_output(ssh_port="2222", ansible_result={"action": "create", "relay": frp}))
         assert payload["ssh_port"] == "2222"
 
     def test_a_disabled_relay_block_keeps_the_forwarded_port(self):
         """The buyer-key fact prints its relay block on the direct path too,
         disabled, with ``N/A`` for its port."""
-        fact = {"action": "create", "frp": {"enabled": False, "remote_port": "N/A"}}
+        fact = {"action": "create", "relay": {"enabled": False, "remote_port": "N/A"}}
         payload = build_result_payload(_output(ssh_port="2222", ansible_result=fact))
         assert payload["ssh_port"] == "2222"
 
@@ -761,7 +761,7 @@ def _create_fact_output(*, relay: dict | None) -> str:
             },
         },
         "network": network,
-        "frp": frp,
+        "relay": frp,
         "gpu": {
             "provisioned": False,
             "pci_address": "N/A",
@@ -817,7 +817,7 @@ _DIRECT = {
 _RELAY = {
     **_DIRECT,
     "ssh_port": "40001",
-    "frp": {"enabled": "True", "relay_addr": "relay.example", "remote_port": "40001"},
+    "relay": {"enabled": "True", "relay_addr": "relay.example", "remote_port": "40001"},
 }
 
 
@@ -847,7 +847,7 @@ class TestCreateResult:
         created = create_result(_RELAY, _create_params(relay_id="r1", vm_remote_port=40002))
 
         assert created.evidence is None
-        assert created.detail["frp"]["remote_port"] == "40001"
+        assert created.detail["relay"]["remote_port"] == "40001"
 
     def test_a_relayed_guest_with_no_relay_reported_yields_no_evidence(self):
         assert create_result(_DIRECT, _create_params(relay_id="r1", vm_remote_port=40001)).evidence is None

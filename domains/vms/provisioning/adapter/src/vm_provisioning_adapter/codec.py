@@ -498,9 +498,9 @@ def build_result_payload(result: VmPlaybookOutput) -> dict:
         if tenant_cmds.get("external"):
             payload["ssh_command"] = tenant_cmds["external"]
 
-    frp = ar.get("frp")
-    if frp:
-        payload["frp"] = frp
+    relay_block = ar.get("relay")
+    if relay_block:
+        payload["relay"] = relay_block
         # The buyer-key fact prints its relay block on the direct path too,
         # disabled and with "N/A" placeholders for its port. Only an enabled
         # relay reporting a TCP port replaces the port the playbook forwarded
@@ -552,7 +552,7 @@ def build_result_payload(result: VmPlaybookOutput) -> dict:
 #: ``mismatch`` names how a fact differs from its job, when it does.
 VM_CREATE_DETAIL = (
     "action", "status", "vm_name", "vm_state", "host", "timestamp", "tenant_user",
-    "host_ip", "ssh_port", "vm_ip_internal", "gpu", "network", "frp",
+    "host_ip", "ssh_port", "vm_ip_internal", "gpu", "network", "relay",
     "result_message", "note", "operation_initiated", "mismatch",
 )
 
@@ -581,12 +581,12 @@ def create_fact_mismatch(payload: Mapping[str, Any], params: VmJobParams) -> str
 
 
 def _relay_reported(payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
-    frp = payload.get("frp")
-    if not isinstance(frp, Mapping):
+    relay = payload.get("relay")
+    if not isinstance(relay, Mapping):
         return None
-    enabled = frp.get("enabled")
+    enabled = relay.get("enabled")
     if enabled is True or str(enabled).lower() == "true":
-        return frp
+        return relay
     return None
 
 

@@ -1100,26 +1100,103 @@ Delivers D3 for VM, D12, and the codec half of 28 F3: "A relayed create reports 
 relay under one block". Replanned against the reviewed design only in its references
 to section 5's tasks.
 
-- [ ] 7.1 `roles/vm-setup` includes `relay-client` in place of `frp-client.yml`;
+- [x] 7.1 `roles/vm-setup` includes `relay-client` in place of `frp-client.yml`;
       `vm-create.yml`, `vm-undefine.yml`, and `vm-remove.yml` call `relay-proxy` with
       the guest's proxy and the job's grant; the old frp tasks, templates, and
       `restart frpc-vms` handler go, and VM's download of frpc with them (D22). (D3)
-- [ ] 7.2 Both create-fact variants print their relay block as `relay`; the codec
+- [x] 7.2 Both create-fact variants print their relay block as `relay`; the codec
       (`domains/vms/provisioning/adapter/src/vm_provisioning_adapter/codec.py`) reads
       `relay`, its variables carry the grant (5.5), and its secret fields come from the
       family set (5.7); the mock output (`services/mock_output.py`) and the codec's
       tests (`tests/unit/test_vm_codec.py`, `test_vm_mock_output.py`) follow the
       shipped fact. (D12, 28 F3)
-- [ ] 7.3 Both domains' playbooks pass `ansible-playbook --syntax-check` under their
+- [x] 7.3 Both domains' playbooks pass `ansible-playbook --syntax-check` under their
       own configuration and the image's environment (`make test-provisioning-iac-native`).
       (28 F5)
-- [ ] 7.4 Verify. `make test-provisioning-iac`, `make test-provisioning-adapter`,
+- [x] 7.4 Verify. `make test-provisioning-iac`, `make test-provisioning-adapter`,
       `make test-provisioning`; `make test-provisioning-iac-native` against a built
       provisioning image; `make test`. End-to-end: the VM lane (`e2e_deal`) exercises the codec
       through the mock profile's default output; no pipeline scenario runs a relayed
       create.
       Owed by validation: `tests.yml`, job `test · test-provisioning-iac` — the family
       project's and VM's IaC tests pass.
+
+  Section 7 evidence and handoff:
+  - VM host preparation includes `relay-client`; create includes `relay-proxy`
+    with the exact name `vm-<guest>`, guest address, allocated port and the job's
+    existing `relay_grant`. VM's duplicate binary download, baseline/proxy edits,
+    status wait, templates, handler and overriding defaults are removed. The
+    family owns the frp pin, privileged admin port and authenticated requests.
+  - Create and remove install the family's `helper` task entry, exposing
+    `relay_proxy_teardown_library` and the family configuration default. Generated
+    cleanup scripts and the partial-create removal shell source that installed
+    path, never a repository-relative family asset. They use the full proxy name
+    and read the admin port from the root-only configuration, so standalone
+    retries use the configured endpoint. Undefine calls the ordinary family remove
+    role after its running-guest refusal. Failed proxy removal stops all three
+    paths; pending records use `frpc-buyers.toml.reload-pending.vm-<guest>`.
+  - Partial-create removal now applies proxy removal before undefining the domain
+    or deleting storage. It still refuses an unattributable firewall rule before
+    removing anything. Shell integration uses the shipped installed library with
+    stateful process-boundary stand-ins: failed reloads retain pending evidence,
+    retries reload even with no proxy block or domain, missing required helpers
+    fail cleanup, and neighbouring guests, management configuration, shared NAT
+    and unrelated rules remain. The existing undefine running-guest refusal is
+    checked structurally for ordering; these tests do not create real guests or
+    establish real SSH sessions.
+  - Both create facts, the codec's result/detail and evidence reader, and the mock
+    output now use `relay`. Codec unit coverage follows that contract. Historical
+    migration fixtures retain their legacy `frp` key: those migrations read the
+    old persisted format independently of the current codec. The existing execution-time grant
+    resolution and `VM_SECRET_FIELDS` union with `RELAY_SECRET_VARIABLES` are
+    unchanged and covered by the adapter suite. Shell tasks that invoke the
+    credential-reading helper set `no_log`.
+  - Default `make test-provisioning-iac` passed: family 13 tests with 10 native
+    skips, VM 165 tests and 2 subtests with 3 native skips. Native evidence comes
+    separately from `make test-provisioning-iac-native` against a freshly built
+    provisioning image: all 3 VM native tests and all 10 family native tests
+    passed with no skips. The VM native cases render both shipped relay fact
+    variants and exercise the shipped family-role include with a controlled role
+    at that boundary; they do not install a real client or carry traffic.
+  - The native aggregate now consumes the image's packaged trees, not checkout
+    bind mounts. It parsed all six VM playbooks under VM's configuration and the
+    image's shared service configuration, both family playbooks, and bare metal's
+    existing node-access playbook under its own and shared configurations. The
+    shared configuration remains free of domain paths. To satisfy 7.3 before 8,
+    bare metal gains its minimal role-search configuration now; other Ansible
+    defaults, including host-key checking, are unchanged. Section 8 still owns
+    bare-metal relay runtime/host-preparation wiring. The built image's actual
+    ansible-core 2.19.14 and ansible.posix 1.5.4 passed; no collection pin changed.
+  - `make test-provisioning-adapter` passed 222 tests. The provisioning service
+    unit suite passed 609 tests. The application integration run passed 527
+    tests and failed the historical relay-result migration fixture after that
+    fixture was mistakenly renamed to `relay`. Restoring its original `frp`
+    format left the fixture unchanged from HEAD, and the affected migration
+    module then passed all 15 tests. The unaffected passing cases are reused;
+    the broad service command's initial nonzero exit is not relabelled a clean
+    full rerun. `make check-packaging`, `make check-comment-hygiene` and
+    `make check-change` passed. The first focused IaC attempt caught an overly broad deletion of the
+    UFW helper while extracting proxy code; the UFW helper was restored before
+    the passing run. No dependency or lock changed. The full `make test` and
+    independent combined compliance/implementation review remain the single
+    frozen sections 6–9 round checks under the accepted cadence.
+  - Deployment prerequisite: the source rename does not retire an already
+    installed `frpc-vms` unit or convert its proxy markers/cleanup scripts. On a
+    previously prepared host, drain and inspect owned buyer state, retire that
+    old buyer unit/configuration, and prepare `frpc-buyers` before new buyer
+    qualification. Preserve the separate management client. No production host,
+    relay or service was changed by this section's checks.
+  - The inherited extra-variable reservation gap described in section 5 remains:
+    unresolved parameters do not reserve late relay credentials. This section
+    changes no pool-variable policy; the combined review should assess the new
+    family-role input names alongside that existing guard.
+  - End-to-end scenarios confirmed: `e2e_deal` exercises the codec through default
+    mock output; no pipeline scenario runs a relayed create. Section 16 owes real
+    buyer traffic, session survival and management-tunnel preservation. Owed by
+    validation: `tests.yml`, job `test · test-provisioning-iac` — both the family
+    and VM IaC projects must run and pass. The existing VM pipeline's native gate
+    additionally exercises the built image. This section claims no deployed or
+    pipeline evidence.
 
 ## 8. Bare-metal relay access and host preparation
 
