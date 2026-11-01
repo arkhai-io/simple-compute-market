@@ -35,7 +35,15 @@ from sqlalchemy.orm import Session, sessionmaker
 from .connection import ConnectionCodecs, ConnectionEnvelope
 from .db import Host
 from .execution import ExecutionHost
-from compute_provisioning_contracts import ConnectionSubmission, ConnectionView, HostCreate, HostResponse, HostUpdate
+from compute_provisioning_contracts import (
+    ConnectionSubmission,
+    ConnectionView,
+    HostCreate,
+    HostDefinition,
+    HostDefinitionConnection,
+    HostResponse,
+    HostUpdate,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +139,8 @@ def _view(host: Host) -> HostResponse:
 
 
 class HostAuthority:
-    """CRUD, lookup, and inventory application for the ``hosts`` registry."""
+    """CRUD, lookup, inventory application, and the session-scoped write a host
+    definitions document applies through, for the ``hosts`` registry."""
 
     def __init__(
         self,
@@ -180,18 +189,44 @@ class HostAuthority:
                 host_id=host.host_id, pool_id=host.pool_id, connection=host.connection()
             )
 
-    def serves_connection(self, kind: str, version: int) -> bool:
-        """Whether a composed codec serves connections of ``kind`` at ``version``.
-
-        A host stored under a kind or version no codec serves runs no work
-        until it is submitted again at a served one.
-        """
-        return self._codecs.serves(kind, version)
-
     @staticmethod
     def host_ids_in_session(db: Session) -> list[str]:
         """Every registered host's id, in the caller's session, ordered."""
         return [host_id for (host_id,) in db.query(Host.host_id).order_by(Host.host_id)]
+
+    def host_definitions(self) -> list[HostDefinition]:
+        """Every host a host definitions entry can state, ordered by ``host_id``.
+
+        An entry states the host's pool, enabled state, and its connection's
+        kind, version, and canonical public fields, never a protected value: a
+        host whose key is protected states no key path, which an entry reads as
+        keeping the stored key. A host whose connection kind no codec serves, or
+        whose stored version its codec does not serve, cannot be stated at a
+        version this service would accept, so it is left out; a document built
+        from these entries then does not name it, and leaves it as it is.
+
+        Every other host is stated as stored, even where an import would refuse
+        the entry, such as a connection its codec now refuses: the entries are
+        constructed without validation, so one such host neither fails the
+        export nor goes missing from it, and importing the export reports it.
+        """
+        definitions: list[HostDefinition] = []
+        with self._session_factory() as db:
+            for host in db.query(Host).order_by(Host.host_id):
+                canonical = self._codecs.canonical(host.connection())
+                if canonical is None:
+                    continue
+                definitions.append(
+                    HostDefinition.model_construct(
+                        host_id=host.host_id,
+                        pool_id=host.pool_id,
+                        enabled=host.enabled,
+                        connection=HostDefinitionConnection.model_construct(
+                            kind=canonical.kind, version=canonical.version, public=dict(canonical.public)
+                        ),
+                    )
+                )
+        return definitions
 
     # ------------------------------------------------------------------
     # Writes
@@ -251,7 +286,11 @@ class HostAuthority:
         built = self._build(connection, previous=stored)
         target_pool = pool_id if stated else existing.pool_id
         target_enabled = existing.enabled if enabled is None else enabled
-        same_connection = _same_connection(built, stored)
+        # The stored side is compared in its codec's canonical form too, so a
+        # row stored before its codec's current normalization still equals an
+        # entry stating it.
+        canonical = self._codecs.canonical(stored)
+        same_connection = canonical is not None and _same_connection(built, canonical)
         if (
             same_connection
             and target_pool == existing.pool_id

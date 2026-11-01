@@ -254,7 +254,7 @@ existing suites test it (section 1 notes). Each task here reviews that code
 against its own text, completes it, and gives it the tests the task names; none
 is checked until then.
 
-- [ ] 2.1 Structural validation (D2, D7, D9). A new `hosts/definitions.py` parses
+- [x] 2.1 Structural validation (D2, D7, D9). A new `hosts/definitions.py` parses
   a document's text into entries, reporting every structural problem with its
   location, as `market_site`'s capacity documents do
   (`kit/site/src/market_site/capacity_definitions.py`): unparseable YAML; a root
@@ -267,7 +267,17 @@ is checked until then.
   problem, a document with several problems reporting all of them with their
   paths, and the delta's scenarios "A document has several structural problems",
   "A document has no hosts list", and "An entry carries key material".
-- [ ] 2.2 Session-scoped writes in the host authority (D5, D8). Give
+  *Done.* `parse_host_definitions` validates each entry with the contracts'
+  strict `HostDefinition` and maps pydantic's error types to the contracts'
+  codes: `missing` → `required_field`, `extra_forbidden` → `unknown_field`
+  (`connection_secrets` at `connection.secrets`, with a message that never
+  echoes the material), `string_too_short` and `greater_than_equal` →
+  `invalid_value`, anything else → `invalid_type`. A missing root `hosts` is
+  `required_field`, a non-list one `invalid_type`, an empty document a root that
+  is no mapping. Unit (`provisioning/compute/tests/unit/test_host_definitions.py`):
+  one case per problem, the three delta scenarios, and a rendered document
+  parsing back — passed in the kit suite.
+- [x] 2.2 Session-scoped writes in the host authority (D5, D8). Give
   `HostAuthority` a form of its writes that joins a caller's session and never
   commits, through the same codecs and pool-change hooks as today; keep
   `apply_inventory` and the single-host writes behaving as they do now, built on
@@ -277,7 +287,22 @@ is checked until then.
   `test_host_route_service.py` composes the authority): a write in a caller's
   session is invisible until the caller commits, and a hook's refusal in it
   raises `PoolChangeRefusedError` without committing.
-- [ ] 2.3 Stored-state evaluation, equality, and apply (D4, D5, D7). For a
+  *Done*, reviewing the first run's `put_host_in_session` against this text:
+  it joins the caller's session, never commits, builds through the codecs with
+  the stored connection as `previous`, and moves through `_move_to_pool`, so
+  every hook runs as for an update. `apply_inventory` is built on it;
+  `register_host` and `update_host` are not, since a duplicate create answers
+  409 and an update leaves an omitted connection alone, so neither duplicates
+  its path. The first run's unused `serves_connection` was removed (the export
+  asks the codecs directly). Library integration
+  (`tests/integration/test_host_authority.py`): against a file-backed SQLite with
+  separate connections, a session-scoped create is unseen by another session
+  until committed; a hook refusing a session-scoped move raises
+  `PoolChangeRefusedError` and leaves the session's other write and the moved
+  host uncommitted; `enabled` and the pool change only when stated, and an equal
+  host is `unchanged` with no hook run — passed. The existing `apply_inventory`
+  cases pass on the rebuilt path, as do the Ansible distribution's 134.
+- [x] 2.3 Stored-state evaluation, equality, and apply (D4, D5, D7). For a
   structurally valid document, evaluate every entry in the caller's session:
   refuse an unknown pool; build the connection through its kind's codec with the
   stored connection as `previous` and report a codec refusal (an unknown kind, a
@@ -302,7 +327,32 @@ is checked until then.
   problems"; a hook refusal and an unknown pool in one document both reported; and
   the `resource-pool-management` scenario "A host definitions entry omits the pool
   of a placed host" with a refusing hook leaving every host unchanged.
-- [ ] 2.4 Export (D12). Render every registered host as a host document: entries
+  *Done.* `reconcile_host_definitions_in_session(db, hosts, yaml_text)` reads
+  the registered ids before writing, applies each entry through
+  `put_host_in_session` with its `pool_id` (an omission is `None`, so it
+  unplaces) and its `enabled`, and records `unknown_pool` and
+  `pool_change_refused` at `hosts[i].pool_id` and a codec refusal as
+  `invalid_connection` at `hosts[i].connection`, each message naming the host.
+  It returns a `HostDefinitionsOutcome` (diff, `not_named`, problems) and never
+  commits. Library integration (`tests/integration/test_host_definitions.py`,
+  the kit's authority on in-memory SQLite with a fake codec carrying the `ssh`
+  rules equality and keys turn on — `port` and `user` filled in its canonical
+  form, key file or protected token, a kept token, no key refused; it stores a
+  null `key_path` as `ssh` does but none of `ssh`'s other optional fields):
+  every listed scenario, with "writes nothing" observed as no `INSERT`/`UPDATE`
+  of `hosts` issued (the recorder is shown to see both), plus `updated_at`
+  unchanged and no hook run; a new host registered as stated; an unserved kind
+  or version refused as `invalid_connection`; a stored row in an older normal
+  form unchanged by an entry stating it and by its export — passed. The three
+  structural scenarios of 2.1 are proved at parse level, and one structural
+  document through reconciliation. The real `ssh` codec is exercised through
+  the service in 3.4.
+  *Amended after the fresh-context check:* the stored side of the equality is
+  now read in its codec's canonical form (`ConnectionCodecs.canonical`, which
+  replaces the first run's `serves`), so a row stored before its codec's current
+  normalization equals an entry stating it; D5 compares "canonical public
+  fields".
+- [x] 2.4 Export (D12). Render every registered host as a host document: entries
   ordered by `host_id`, stating `pool_id` and `enabled` always and the
   connection's kind, version, and canonical public fields, with no secret; a host
   holding a protected key states no `key_path`. Omit a host whose connection kind
@@ -311,7 +361,20 @@ is checked until then.
   unedited" (every host unchanged, nothing written), "A host holds a protected
   key", "A host is stored at an unserved connection version" (no entry; importing
   the export reports it not named), and "A host's connection kind is not served".
-- [ ] 2.5 Route-service operations (D12, D14). `HostRouteService` gains
+  *Done.* `HostAuthority.host_definitions()` reads every host ordered by
+  `host_id` and leaves out only those `ConnectionCodecs.canonical` cannot
+  state, an unserved kind or version (D12's two omissions); an entry carries
+  the canonical public fields and no protected value. A host stored at a served
+  version its codec now refuses, or under an id no entry can name, is stated as
+  stored — the entries are built with `model_construct` — so the export never
+  fails on one host or silently drops it, and importing it reports the entry.
+  `render_host_definitions` writes `pool_id` and `enabled` always and drops a
+  public field whose value is null, so a protected-key host states no
+  `key_path`. Library integration (same file): the four scenarios, the unserved
+  hosts stored directly as rows no current write can produce; a stored row its
+  codec refuses, exported and reported `invalid_connection` on import; a host
+  registered under an empty id, exported and reported `invalid_value` — passed.
+- [x] 2.5 Route-service operations (D12, D14). `HostRouteService` gains
   `export_definitions()`, returning the document text, and
   `import_definitions(body)`, which opens its own session, evaluates the
   document, commits only an applying request with no problem, and returns the
@@ -320,7 +383,29 @@ is checked until then.
   applying request with a problem applies nothing and reports `applied: false`;
   validate-only applies nothing and reports the planned diff; a clean applying
   request commits.
-- [ ] 2.6 **Verification checkpoint.** Unit and library integration: the family
+  *Done, departing from the plan in two ways.* `export_definitions()` renders
+  `host_definitions()`; `import_definitions(body)` opens a session through the
+  authority's `session()`, commits only an applying request with a valid
+  outcome, and rolls back any other.
+  - It raises, against this task's "raises no error for a problem":
+    `ARCHITECTURE.md`, "Route contracts and their HTTP binding", has the route
+    service report a refusal as `ProvisioningRouteError` and the binding only
+    translate it. So an applying request with any problem raises
+    `ProvisioningRouteError(422, <the response as JSON>)`, and 3.2's binding is
+    `routed(...)` like every host route; the wire answer is D14's, a 422
+    carrying the response (under `detail`, as capacity's import carries it).
+    Validate-only returns the response, problems included, as 200.
+  - A commit failing on a host another request created first (`IntegrityError`)
+    is rolled back and refused 409, as a duplicate `POST /api/v1/hosts` is;
+    nothing in the plan covered it, and it would otherwise answer 500.
+
+  Whether a request commits is a transaction boundary, which `TESTING.md` gives
+  to library integration, and a mocked authority could not show it, so the
+  applying, refused (422), validate-only (with and without a problem), and
+  export-then-import cases are in `tests/integration/test_host_definitions.py`.
+  Unit (`test_host_route_service.py`): the 409 on a commit's `IntegrityError`,
+  with a rollback. Both passed.
+- [x] 2.6 **Verification checkpoint.** Unit and library integration: the family
   kit's suite (`make test-compute-provisioning`), including
   `test_host_definitions.py` and `test_host_route_service.py`; the Ansible
   distribution's suite (`make test-compute-provisioning-ansible`), since
@@ -329,6 +414,55 @@ is checked until then.
   the `pyyaml` that 1.2 declared. `make check-comment-hygiene`.
   End-to-end: none — the document reaches no deployed surface until section 3.
   None is owed.
+  *Run.* Unit and library integration, the kit's suite (`make
+  test-compute-provisioning`): 335 passed. The Ansible distribution's suite,
+  against the rebuilt kit wheel: 134 passed. The service's suite against it:
+  595 unit and 500 integration passed. `make test` on the final code, wheels
+  rebuilt: every suite passed, up to `test-deployment-packaging`'s `make -C helm
+  test-render`, which cannot start without a `helm` binary, as in section 1;
+  this section touches nothing under `helm/`. `make check-packaging`: passed,
+  the kit now importing the `yaml` its `pyyaml` declaration names. `make
+  check-change` (comment hygiene among its checks): passed.
+
+Section 2 notes:
+
+- **The kit's `tests/integration` is now a package** (an empty `__init__.py`),
+  as `TESTING.md`'s "Test File Layout" describes and the other kits' are, so
+  `test_host_definitions.py` exists in both `unit/` and `integration/`.
+- **For section 3.** The import's refusal reaches the binding as
+  `ProvisioningRouteError(422, detail)`, so the binding is `routed(lambda:
+  service.import_definitions(body))` with `response_model=
+  HostDefinitionsImportResponse`, and the 422 body is `{"detail": <response>}`:
+  the client's `import_host_definitions` reads `body["detail"]` for 422 and the
+  body itself for 200. The export route must answer `application/yaml`: the
+  service's response signer signs a non-JSON body over its decoded text
+  (`middleware/auth.py`, `_response_body`), and the client's `finish` falls back
+  to `response.text` when the body is not JSON, which a block-style YAML
+  document never is; the client method should still not rely on that guess
+  where the content type says YAML.
+- **A section-1 note overstated "no change of behaviour"** in `apply_inventory`
+  on the session-scoped write. Two things differ, neither against a scenario:
+  an INI entry equal to its stored host now writes nothing, so its `updated_at`
+  is no longer bumped; and on a move, the hooks run before the connection is
+  replaced rather than after, both inside the one transaction.
+- **Fresh-context check.** No layering, import, packaging, or placement break.
+  Fixed: 2.6 checked without its results (now recorded); the route service
+  leaving the 422 to the binding (now raised, see 2.5); an `IntegrityError` at
+  commit answering 500 (now 409); equality against raw rather than canonical
+  stored fields (now canonical, see 2.3); test docstrings citing "the delta"
+  (now the `physical-provisioning` scenario); the fake codec's description and
+  two thin assertions (no hook run in the defaults case). Declined: none.
+  Still open from section 1: the `ssh` codec coerces a quoted number in
+  `public`.
+- **Second fresh-context check, on those fixes.** No layering, import, comment,
+  or test-level break; the 422/409 handling and canonical equality hold. Fixed:
+  `canonical` had widened the export's omissions to a stored connection its
+  codec refuses, beyond D12's two (now stated as stored; see 2.4), with a
+  docstring claiming such a host runs no work, which holds only for an unserved
+  kind or version; a host with an empty id, which `POST /api/v1/hosts` accepts,
+  failed the whole export (now stated, and refused on import); an ambiguous
+  scenario citation in a test docstring (now names its requirement). Declined:
+  none.
 
 ## 3. Host definitions routes and typed client
 

@@ -107,10 +107,22 @@ class ConnectionCodecs:
             by_kind[codec.kind] = codec
         self._codecs = by_kind
 
-    def serves(self, kind: str, version: int) -> bool:
-        """Whether a codec of ``kind`` is composed and serves ``version``."""
-        codec = self._codecs.get(kind)
-        return codec is not None and codec.version == version
+    def canonical(self, envelope: ConnectionEnvelope) -> ConnectionEnvelope | None:
+        """A stored envelope in its codec's canonical form.
+
+        ``None`` when no composed codec serves the envelope's kind at its
+        version: such a connection cannot be stated at a version this
+        deployment accepts. An envelope its codec refuses has no canonical
+        form, so it is returned as stored, and a caller comparing or stating it
+        meets the refusal when it next builds through the codec.
+        """
+        codec = self._codecs.get(envelope.kind)
+        if codec is None or codec.version != envelope.version:
+            return None
+        try:
+            return codec.validate(envelope)
+        except ValueError:
+            return envelope
 
     def codec(self, kind: str) -> ConnectionCodec:
         try:
