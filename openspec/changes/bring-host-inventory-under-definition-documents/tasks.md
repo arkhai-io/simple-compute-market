@@ -489,7 +489,7 @@ client.py`; `provisioning/compute/client/tests/`;
 `provisioning/compute/service/tests/unit/{test_route_table_composition.py,
 test_provisioning_client_contract.py}` as the route table requires.
 
-- [ ] 3.1 Add the two route contracts to `routes.py` (D12, D14), in this
+- [x] 3.1 Add the two route contracts to `routes.py` (D12, D14), in this
   section's commit beside 3.2's binding:
   - `GET /api/v1/hosts/definitions/export`
     (`provisioning_host_definitions_export`);
@@ -509,7 +509,10 @@ test_provisioning_client_contract.py}` as the route table requires.
 
   The first implementation run wrote and tested exactly these, at commit
   `1164438`; 1.3 removes them from section 1 so that this task restores them.
-- [ ] 3.2 Bind the routes (D12, D14). `GET /api/v1/hosts/definitions/export`
+  *Done*, restored from `1164438` unchanged. Unit, the contracts suite (`make
+  test-compute-provisioning-contracts`): 135 passed, the three listed cases
+  among them.
+- [x] 3.2 Bind the routes (D12, D14). `GET /api/v1/hosts/definitions/export`
   answers the document as `application/yaml`; `POST
   /api/v1/hosts/definitions/import` answers 422 with the response model for an
   applying request with any problem, and 200 otherwise, validate-only included.
@@ -519,14 +522,37 @@ test_provisioning_client_contract.py}` as the route table requires.
   - route table composition holds the two contracts once each;
   - `test_route_binding.py::test_every_contract_resolves_to_a_mounted_route`
     passes with them.
-- [ ] 3.3 Typed client methods (D12, D14). `compute_provisioning_client`'s async
+  *Done* in `hosts_controller.py`, declared before the `/{host}` routes though
+  FastAPI would not shadow them (one segment against two). The export returns a
+  `Response` with media type `application/yaml`; the import is
+  `routed(lambda: service.import_definitions(body))`, the route service raising
+  the 422 with the response as its detail (see the 2.5 note), so the binding
+  holds no outcome logic. Unit (`test_route_table_composition.py`): each
+  contract composed exactly once and resolving to itself; the generic
+  `test_route_binding.py` and `test_every_assembled_route_resolves_to_itself`
+  cases cover both — passed in the service suite. The single-host `PUT` is
+  unchanged (its 409 test in `test_host_pool_moves_api.py` passes).
+- [x] 3.3 Typed client methods (D12, D14). `compute_provisioning_client`'s async
   and sync clients gain `export_hosts()`, returning the document's text, and
   `import_host_definitions(yaml_text, *, validate_only=False)`, returning the
   response model for 200 and for 422 alike, so a caller reads `applied` and
   `problems` rather than catching an error. Client unit tests cover both
   methods' requests and their 200 and 422 parsing; the endpoint-coverage test
   names both routes.
-- [ ] 3.4 Application integration through the typed client
+  *Done.* `export_hosts()` returns the body as text and raises if it is not
+  text; `import_host_definitions` accepts 422 and reads the response from
+  `detail` for it, raising `ComputeProvisioningError` for a 422 whose detail is
+  not that response — not a mapping, or one without `applied` (the service
+  refusing the request body itself). Unit (`client/tests/unit/test_client.py`,
+  async and sync): the export's request and text; the import's request body and
+  its parsing of an applied 200, a 200 carrying problems, and a 422; a 422 whose
+  detail is a list or another mapping raised — 86 passed. The
+  service's parity unit test (`test_provisioning_client_contract.py`) holds the
+  two variants' signatures equal. *Departure:* the endpoint-coverage test does
+  not name the routes. Its module covers "endpoints not exercised elsewhere",
+  and 3.4's `test_host_definitions_api.py` exercises both through the typed
+  client, so naming them there would duplicate it.
+- [x] 3.4 Application integration through the typed client
   (`test_host_definitions_api.py`, D12, D14): a document registering two hosts
   applies and reports them created; re-importing it reports them unchanged;
   "An operator explicitly imports an unchanged document" (reconciled, and no
@@ -536,7 +562,28 @@ test_provisioning_client_contract.py}` as the route table requires.
   stored-state problem" (422, both reported); "An operator validates a document"
   (200, planned diff, nothing applied); export then unedited import reporting
   every host unchanged; an unauthenticated request to either route refused.
-- [ ] 3.5 **Verification checkpoint.** Unit: the contracts suite (`make
+  *Done.* Application integration (`service/tests/integration/
+  test_host_definitions_api.py`, the composed app with the real `ssh` codec,
+  through `ComputeProvisioningClient`): two hosts created then unchanged on
+  reimport; an unchanged document under a recorded `hosts` digest (seeded as the
+  row startup would write, since no startup step records one until section 4)
+  reconciled — an API disable restored — with the digest row untouched; VM's
+  relay hook refusing a move, `pool_change_refused`, the new host absent and the
+  moved one unchanged; an unknown pool and a hook refusal both reported; for
+  those two, and validate-only, the status read on a transport recording each
+  response under the typed method (422, 422, 200), since the typed method reads
+  both alike; validate-only reporting created, updated, unchanged, and a problem
+  with nothing applied; the export answering `application/yaml`; API-registered hosts (codec-defaulted
+  port and user, a `public_host`, a disabled host, an unplaced one) exported and
+  reimported unchanged with every `updated_at` kept; a seller refused by the
+  client for both routes; an unsigned request to either route answered 401
+  (rejection path, status only). Passed in the service suite. The seller case
+  there is the typed client refusing to sign; the server's own refusal is
+  proved in the middleware's unit tests (`tests/unit/middleware/test_auth.py`,
+  which check admin-only routes one by one): a seller-signed request to either
+  route answered 403, under either seller signature scheme, and the
+  administrator's (Ed25519) 200.
+- [x] 3.5 **Verification checkpoint.** Unit: the contracts suite (`make
   test-compute-provisioning-contracts`) for 3.1, the client's suite (`make
   test-compute-provisioning-client`), and the service's route unit tests.
   Application integration: `test_host_definitions_api.py` and the endpoint
@@ -545,6 +592,54 @@ test_provisioning_client_contract.py}` as the route table requires.
   End-to-end: none — no lane calls the routes, and the application-integration
   cases prove them through the typed client against the composed app. None is
   owed.
+  *Run.* Contracts suite: 135 passed. Client suite (`make
+  test-compute-provisioning-client`): 86 passed. Service suite (`make
+  test-provisioning`), wheels rebuilt: 606 unit and 510 integration passed,
+  `test_host_definitions_api.py`, the route-table, route-binding, parity, and
+  middleware cases among them. `make test` on the final code, wheels rebuilt:
+  every suite passed up to `test-deployment-packaging`'s `make -C helm
+  test-render`, which cannot start without `helm`, as in sections 1 and 2;
+  nothing under `helm/` changed. `make check-packaging` and `make check-change`
+  (comment hygiene among its checks): passed. A search of `e2e-tests/` finds nothing calling either route, so
+  the end-to-end "none" holds.
+
+Section 3 notes:
+
+- **Status observed at a transport seam.** The typed import reads a 422 and a
+  200 alike by design (D14), so the status a scenario names cannot be seen
+  through it. `test_host_definitions_api.py` builds the administrator's client
+  on `_Recording`, an `httpx` transport over the in-process app that records
+  each response's status and content type, and reads them there; no test sends
+  a hand-built request except the 401 rejection-path case.
+- **The export's body is read as text by the shared transport's fallback.**
+  `SigningBase.finish` parses JSON and falls back to text, so `export_hosts`
+  receives the YAML as signed only because a block-style document is never
+  JSON; `_text` refuses anything else. Making `finish` choose by content type,
+  as the service's signer does, would change every client's reading of every
+  response, so it is left for a change that wants it; the integration test
+  proves the route answers `application/yaml`.
+- **Fresh-context check.** No layering, import, packaging, or placement break;
+  the controller is thin and D12 and D14 hold in the code. Fixed: a status test
+  that called the client's transport with a hand-written route and body,
+  against the "no raw calls" rule (replaced by the recording transport, which
+  now also shows the 422 for both hook scenarios); the module docstring that
+  claimed every import went through the typed method; a 422 with a mapping
+  detail of another shape raising a pydantic error rather than the client's
+  (now `ComputeProvisioningError`); the export's content type unproved (now
+  asserted); validate-only never asserting `unchanged` (now does); docstrings
+  saying the import reconciles "whatever startup last applied", which no
+  startup step records yet (now "regardless of any document applied before");
+  the middleware note's "both schemes" (only the seller's varies). Declined:
+  the client still relies on `finish`'s text fallback for the export, as the
+  note above says; and importing the pool-move module's private helpers, which
+  has precedent (`test_capacity_definitions_api.py` imports from
+  `test_capacity_api`) and keeps one copy of the relay fixture.
+- **For section 4.** The kit's `reconcile_host_definitions_in_session(db,
+  hosts, yaml_text)` is what the importer's `hosts` applier calls inside its own
+  session; it returns `HostDefinitionsOutcome` with `valid`, `diff`,
+  `not_named`, and `problems`, and never commits, so the importer raises on an
+  invalid outcome and its transaction rolls back with no digest. The host
+  authority is `container.resolved_host_authority`.
 
 ## 4. Startup reconciliation and the retired inventory settings
 

@@ -1,8 +1,9 @@
-"""The host definitions wire models.
+"""The host definitions wire models and their two route contracts.
 
 An entry states its whole host with the registration contract's field names and
 refuses what it does not define; the import's response carries whether it
-applied, its diff, the hosts it does not name, and every problem.
+applied, its diff, the hosts it does not name, and every problem; and the export
+and import paths resolve to their own contracts, never to a single host's.
 """
 
 from __future__ import annotations
@@ -11,12 +12,15 @@ import pytest
 from pydantic import ValidationError
 
 from compute_provisioning_contracts import (
+    ADMIN_PROVISIONING_OPERATIONS,
+    PROVISIONING_ROUTE_TABLE,
     HostDefinition,
     HostDefinitionProblem,
     HostDefinitionProblemCode,
     HostDefinitionsDiff,
     HostDefinitionsImportRequest,
     HostDefinitionsImportResponse,
+    resolve_provisioning_route,
 )
 
 _ENTRY = {
@@ -163,3 +167,33 @@ def test_a_problem_code_the_reader_does_not_know_still_parses() -> None:
 
     assert problem.code == "a_newer_code"
     assert HostDefinitionProblemCode.POOL_CHANGE_REFUSED == "pool_change_refused"
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "operation"),
+    [
+        ("GET", "/api/v1/hosts/definitions/export", "provisioning_host_definitions_export"),
+        ("POST", "/api/v1/hosts/definitions/import", "provisioning_host_definitions_import"),
+    ],
+)
+def test_each_definitions_route_resolves_to_its_own_contract(method, path, operation) -> None:
+    assert resolve_provisioning_route(method, path, {}) == (operation, "")
+    contract, _ = PROVISIONING_ROUTE_TABLE.resolve(method, path, {})
+    assert contract.allowed_roles == ("admin",)
+    assert operation in ADMIN_PROVISIONING_OPERATIONS
+
+
+def test_a_single_host_route_claims_neither_definitions_path() -> None:
+    """``/hosts/{host}`` matches one segment, and the definitions paths have two,
+    so no host name is reserved by them and a host named ``definitions`` stays
+    readable."""
+    contracts = {contract.operation: contract for contract in PROVISIONING_ROUTE_TABLE.contracts}
+
+    for operation in ("provisioning_host_get", "provisioning_host_update"):
+        single_host = contracts[operation]
+        for path in ("/api/v1/hosts/definitions/export", "/api/v1/hosts/definitions/import"):
+            assert single_host.pattern.fullmatch(path) is None
+    assert resolve_provisioning_route("GET", "/api/v1/hosts/definitions", {}) == (
+        "provisioning_host_get",
+        "definitions",
+    )

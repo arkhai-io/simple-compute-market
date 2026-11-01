@@ -26,11 +26,13 @@ from market_identity import (
 from compute_provisioning_client import (
     ComputeProvisioningClient,
     ComputeProvisioningAuthenticationError,
+    ComputeProvisioningError,
     ComputeProvisioningUnauthenticatedResponseError,
     SyncComputeProvisioningClient,
 )
 from compute_provisioning_contracts import (
     ConvergenceCycleResponse,
+    HostDefinitionsImportResponse,
     HostUpdate,
     LeaseCheckResponse,
     PrincipalRotationResponse,
@@ -694,3 +696,123 @@ async def test_a_host_update_sends_exactly_the_fields_its_caller_set(variant, up
     await _close(client)
 
     assert sent == [body]
+
+
+_AUTHORITY = Ed25519Signer(b"\x72" * 32)
+
+
+def _answering(status, *, json_body=None, text=None, sent=None):
+    """An authority answering every request with ``status`` and one signed body,
+    JSON or YAML text, recording each request it is sent."""
+    authority = _AUTHORITY
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content) if request.content else EMPTY_BODY
+        authenticated = _authenticated_request(request, body)
+        if sent is not None:
+            sent.append((request.method, request.url.path, body))
+        answer = text if text is not None else json_body
+        signed = sign_response(
+            signer=authority,
+            envelope=ResponseEnvelope(
+                role="service",
+                principal=authority.identity,
+                method=request.method,
+                operation=authenticated.operation,
+                resource=authenticated.resource,
+                request_id=authenticated.request_id,
+                timestamp=int(time.time()),
+                status=status,
+                body_hash=canonical_body_hash(answer),
+            ),
+        )
+        headers = _identity_headers(signed)
+        if text is not None:
+            return httpx.Response(
+                status, text=text, headers={**headers, "content-type": "application/yaml"}
+            )
+        return httpx.Response(status, json=json_body, headers=headers)
+
+    return httpx.MockTransport(handler)
+
+
+async def _as_admin(variant, transport, method, *args, **kwargs):
+    """``method`` called as the administrator, whose routes these are."""
+    client_type = ComputeProvisioningClient if variant == "async" else SyncComputeProvisioningClient
+    client = client_type(
+        "http://provisioner",
+        signer=Ed25519Signer(b"\x71" * 32),
+        caller_role="admin",
+        expected_authorities=TrustedIdentitySet(identities=(_AUTHORITY.identity,)),
+        transport=transport,
+    )
+    try:
+        result = getattr(client, method)(*args, **kwargs)
+        if variant == "async":
+            result = await result
+    finally:
+        await _close(client)
+    return result
+
+
+_REFUSED = {
+    "applied": False,
+    "diff": {"created": ["kvm2"], "updated": [], "unchanged": []},
+    "not_named": ["legacy"],
+    "problems": [{"path": "hosts[1].pool_id", "code": "pool_change_refused", "message": "relay"}],
+}
+
+
+@pytest.mark.parametrize("variant", ("async", "sync"))
+@pytest.mark.asyncio
+async def test_the_host_export_is_the_document_s_text(variant):
+    sent: list = []
+    document = "hosts:\n- host_id: kvm1\n"
+
+    exported = await _as_admin(variant, _answering(200, text=document, sent=sent), "export_hosts")
+
+    assert exported == document
+    assert sent == [("GET", "/api/v1/hosts/definitions/export", EMPTY_BODY)]
+
+
+@pytest.mark.parametrize("variant", ("async", "sync"))
+@pytest.mark.parametrize(
+    ("status", "answer"),
+    [(200, {**_REFUSED, "problems": []}), (200, _REFUSED), (422, {"detail": _REFUSED})],
+    ids=["applied", "validated-with-problems", "refused"],
+)
+@pytest.mark.asyncio
+async def test_a_host_definitions_import_answers_its_response_for_200_and_422(variant, status, answer):
+    """A refused document is a response, not an error: the caller reads
+    ``applied`` and ``problems`` whichever status carried them."""
+    sent: list = []
+
+    response = await _as_admin(
+        variant,
+        _answering(status, json_body=answer, sent=sent),
+        "import_host_definitions",
+        "hosts: []\n",
+        validate_only=True,
+    )
+
+    assert response == HostDefinitionsImportResponse.model_validate(answer.get("detail", answer))
+    assert sent == [
+        ("POST", "/api/v1/hosts/definitions/import", {"yaml_text": "hosts: []\n", "validate_only": True})
+    ]
+
+
+@pytest.mark.parametrize("variant", ("async", "sync"))
+@pytest.mark.parametrize(
+    "detail", [[{"loc": ["body"], "msg": "bad"}], {"message": "refused"}], ids=["list", "mapping"]
+)
+@pytest.mark.asyncio
+async def test_a_422_that_is_not_an_import_response_is_raised(variant, detail):
+    with pytest.raises(ComputeProvisioningError) as refused:
+        await _as_admin(
+            variant,
+            _answering(422, json_body={"detail": detail}),
+            "import_host_definitions",
+            "hosts: []\n",
+        )
+
+    assert refused.value.status_code == 422

@@ -102,7 +102,7 @@ class HostRouteService:
         return render_host_definitions(self._hosts.host_definitions())
 
     def import_definitions(self, body: HostDefinitionsImportRequest) -> HostDefinitionsImportResponse:
-        """Reconcile a submitted document, whatever was last applied at startup.
+        """Reconcile a submitted document, whatever document was applied before.
 
         Commits only an applying request whose document has no problem; any
         other is rolled back, so a validate-only request reports the changes it
