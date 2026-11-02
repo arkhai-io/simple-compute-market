@@ -139,7 +139,8 @@ def test_hosted_commit_delivers_after_a_verified_receipt(
     provisioning_test_client.drain(timeout=30)
     advance_fulfillment_to(provisioning_client, status.fulfillment_id, "active")
     ready = storefront_admin_client.wait_for_settlement(negotiation_id, timeout=30)
-    assert ready.ready and ready.status == "ready" and ready.tenant_credentials, ready
+    assert ready.ready and ready.status == "ready", ready
+    assert storefront_client.get_settle_status(negotiation_id).tenant_credentials
     lease = DealLease(provisioning_client, site_capacity, negotiation_id=negotiation_id)
     assert lease.refresh()["status"] == "leased"
     purchase = LifecyclePurchase(negotiation_id, status.fulfillment_id, lease.lease_id)
