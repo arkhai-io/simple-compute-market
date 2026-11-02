@@ -294,7 +294,7 @@ async def test_an_uncollected_settlement_ends_the_lease_once_delivery_began(
     await runtime.obligation_servicing["alkahest.v1"].terminal(record, state, None)
 
     assert site.terminations == (
-        [("reservation-a", stable_ref(record.negotiation_id, "terminate", "terminate"))] if terminated else []
+        [("reservation-a", stable_ref("neg-accepted", "terminate", "terminate"))] if terminated else []
     )
 
 
