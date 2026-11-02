@@ -3,7 +3,14 @@
 import asyncio
 
 import pytest
-from market_deal_lifecycle.adapters import DisputeAdapterTable, InterfaceRequest, PaymentAdapterTable, PaymentSelector
+import httpx
+from market_arkhai_mediation.adapter import MediationAdapter
+from market_arkhai_mediation.client import MediationClient, MediationCredential
+from market_arkhai_mediation.fixtures.authority import MediationContractFake
+from market_deal_lifecycle.adapters import (
+    DeliveryEndIntent, DisputeAdapterTable, DisputeBinding, InterfaceRequest,
+    PaymentAdapterTable, PaymentSelector, submit_dispute,
+)
 from market_deal_lifecycle.terms import DisputeAuthority
 from market_deal_lifecycle_contracts.models import (
     Accepted, AuthorityView, EndDeliveryMessage, LifecycleCommand, Rejected,
@@ -11,6 +18,7 @@ from market_deal_lifecycle_contracts.models import (
 from market_identity import Ed25519Signer, RequestEnvelope, canonical_body_hash, canonical_json, sign_request
 from market_deal_servicing import (
     DealWatch, DeliveryIngress, DeliveryRecord, EndSession, SellerDeal, SellerServicing, SellerSession,
+    SQLiteOperationStore, create_schema,
 )
 from market_deal_servicing.evidence import transaction
 from market_deal_servicing.journal import Classification, FinalRequest
@@ -87,6 +95,48 @@ def test_site_echo_adopts_the_controlling_failure_filing(tmp_path, delivered):
                        classification=Classification(kind="unentitled_withdrawal", evidence_refs=["site:event"]))
         assert len(end.requests("deal")) == 2
         assert len([intent for intent in end.intents("deal") if intent.kind == "filing"]) == 1
+
+
+def test_semantic_adoption_coordinates_reconstructed_durable_callers(tmp_path):
+    async def drive():
+        path = tmp_path / "operations.sqlite"
+        with transaction(path) as conn:
+            create_schema(conn)
+        peer = MediationContractFake()
+        entered, proceed = asyncio.Event(), asyncio.Event()
+        async def handle(request):
+            if request.method == "POST":
+                entered.set()
+                await proceed.wait()
+            return peer.handle(request)
+        authority = DisputeAuthority.model_validate(peer.authority)
+        filing = peer.data["filing"]["request"]
+        binding = DisputeBinding("deal", filing["transaction"], authority)
+        async with MediationClient(authority, MediationCredential(authority.identity, "FIXTURE_TOKEN"),
+            environ={"FIXTURE_TOKEN": "fixture-payee"}, transport=httpx.MockTransport(handle)) as client:
+            table = DisputeAdapterTable([(authority.interface, lambda _: MediationAdapter(binding, filing["agreement"],
+                                                                                       client, clock=lambda: 1800001800))])
+            async def submit(key):
+                return await submit_dispute(LifecycleCommand(negotiation_id="deal", kind="delivery_end", operation_key=key,
+                    payload=DeliveryEndIntent(ended_at=1800000000, delivered=False, cause="payee").model_dump(mode="json")),
+                    binding, table, SQLiteOperationStore(path))
+            first = asyncio.create_task(submit("online"))
+            try:
+                await entered.wait()
+                concurrent = await asyncio.wait_for(submit("operator"), timeout=5)
+                assert concurrent.status == "rejected" and "repair required" in concurrent.reason
+                proceed.set()
+                accepted = await first
+                adopted = await submit("operator")
+                assert accepted.status == adopted.status == "accepted"
+                assert accepted.filing.case_ref == adopted.filing.case_ref
+                assert len(peer.cases) == 1
+            finally:
+                proceed.set()
+                if not first.done():
+                    first.cancel()
+                await asyncio.gather(first, return_exceptions=True)
+    asyncio.run(drive())
 
 
 def test_late_recorded_prestart_failure_keeps_agreement_start_basis(tmp_path):
