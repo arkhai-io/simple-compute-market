@@ -212,9 +212,11 @@ class Stage12c_CapacityReleasedOnce:
         provisioning_test_client.drain(timeout=30)
         advance_fulfillment_to(provisioning_client, purchase.fulfillment_id, "torn_down")
         assert vm_lifecycle_buyer.read(purchase)["progress"] == "tearing_down"
+        existing = storefront_admin_client.get_events(stage="fulfillment", limit=500)
+        since_id = max((event.id for event in existing.events), default=0)
         provisioning_client.check_leases()
         wait_for_stage_event(storefront_admin_client, "fulfillment", "capacity_released",
-                             negotiation_id=purchase.negotiation_id, timeout=10)
+                             since_id=since_id, timeout=10)
         # A repeated cycle and surrender cannot release or terminate again.
         provisioning_client.check_leases()
         delivery = vm_lifecycle_buyer.read(purchase)
@@ -224,7 +226,9 @@ class Stage12c_CapacityReleasedOnce:
         site = provisioning_client.get_lease(purchase.reservation_id)
         assert site.status == "released" and len(site.end_reports) == 1, site
         assert site.release_job_id == purchase.fulfillment_id, site
+        # VM release events are reservation-scoped, not negotiation-scoped.
         released = [e for e in storefront_admin_client.get_events(
-            stage="fulfillment", negotiation_id=purchase.negotiation_id).events if e.event == "capacity_released"]
+            stage="fulfillment", limit=500).events if e.event == "capacity_released"
+            and e.data.get("capacity_reservation_id") == purchase.reservation_id]
         assert len(released) == 1, released
         assert released[0].data["capacity_reservation_id"] == purchase.reservation_id
