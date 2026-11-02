@@ -404,7 +404,7 @@ settle by negotiation". Files: `kit/arkhai-payments/schema/`, `src/market_arkhai
 `buyer.py`, `seller.py`, `test-vectors/`, the VM, bare-metal and API-credit storefronts'
 `settlement_composition.py`, and the API-credit buyer.
 
-- [ ] 8.1 Derive seller stop entries only for entitlements (such as spot's notice entry), with
+- [x] 8.1 Derive seller stop entries only for entitlements (such as spot's notice entry), with
       existing reverse authority and no notice waiver, early release or restitution entry.
       Confirm that a payer stop retried under one key after an outage lands once with its notice.
       Spot implements rate commands; this foundation supplies the protocol and coherent vendoring.
@@ -422,6 +422,18 @@ settle by negotiation". Files: `kit/arkhai-payments/schema/`, `src/market_arkhai
       Both consume the same vectors; no second authority algorithm or
       kit-to-tooling dependency. Verify: `test_receipt_fixture.py` and the
       vector conformance tests pass against the new content hash.
+      Implemented: coherent published schema/vectors and generated wheel resources;
+      `contracts.get_contract` exposes selected bytes/models/publication hashes.
+      One clock-injected `fixtures.PaymentsAuthority` backs the fake and the
+      installed conformance replay (four signed snapshots, nine scenario steps).
+      No payments candidate is required; unavailable proposed selection refuses.
+      The existing once derivation only migrates to per-part reverse authorities,
+      empty stop/extend lists and a zero extension cap; lifecycle derivation remains
+      in 8.2. Producer integration evidence and provenance: payments `schema/SOURCE.md`.
+      Focused verification: 92 tests, typing, model/resource drift and all vectors
+      pass; installed-wheel first use, architecture, packaging, comment hygiene and
+      strict OpenSpec validation pass. Evidence and aggregate-run disposition:
+      `docs/attachments/payments-contract-foundation/index.md`.
 - [ ] 8.2 Derive each part's authorities and holds from the terms: prepaid `once` end at term end,
       setup `once` end at the later of the Agreement start and approval, hold `{afterStop: dispute_window}`;
       each party's stop notice exactly its entitlement's notice_seconds; derive the dispute
@@ -800,5 +812,6 @@ The remaining D1–D15 destinations are listed in proposal.md and task 16.9.
 | D8 receipt-embedded SignedDeliveryEndClaim, buyer concurrence/stop retry and both CLI paths | `openspec/specs/buyer-orchestration/spec.md` and `architecture.md` |
 | D5 premature-stop penalty codec and D10 capped held-earnings remedy; D10 one payee-agreed delivery_end rule for either filer, receipt concurrence and durable respondent sign-or-contest; D8 delivery_end filing and stable keys; D9 retained signed evidence; D10 case-carried Agreement and human triage | New `deal-lifecycle` capability's spec and architecture companion (created at archive/closeout) |
 | D8 site-signed intended-end report, transactional event/outbox and recovery | `openspec/specs/site-capacity/spec.md`, `openspec/specs/physical-provisioning/spec.md` and their architecture companions |
+| D5 coherent hosted contract selection and generated installed resources; one shared clock-injected payments fixture engine | `kit/arkhai-payments/README.md` (current API); settlement-servicing spec/architecture and `docs/development/TESTING.md` at closeout |
 | D8 intended end versus proven release; terminate versus future truncate | `docs/development/ARCHITECTURE.md`, "Site authority", "Fulfillment status and results", "Release"; `openspec/specs/site-capacity/architecture.md` |
 | D8 VM buyer end and second-precision lease effects | `openspec/specs/vm-storefront-fulfillment/spec.md` |
