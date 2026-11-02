@@ -148,6 +148,118 @@ qualify them. Permanent promotion remains closeout work.
 - [ ] 4.3 Before destructive deployed checks, freeze the integrated source revision and obtain independent implementation review and validation; run `make test`, `make check-packaging`, relevant native gates, `make -C e2e-tests test-e2e-bare-metal`, and the full end-to-end pipeline with matching revision evidence through `make run-e2e` / `make fetch-e2e-logs`. Execute 4.1–4.2 against that accepted revision. Reuse its source review/full-suite evidence when unchanged; obtain pre-closeout review and remaining validation per workflow. Resolve accepted findings and rerun affected checks; freeze a new source round if code changes. Reuse passing unchanged evidence with its revision and scope explicitly recorded.
 - [ ] 4.4 Before pre-closeout review, fix comments/docstrings to describe current invariants and inspect every added/touched local import, moving it to module level unless a verified reason justifies it. Run real affected suites after moves, comment hygiene and packaging. Complete the classification/promotion map in `design.md`; current-state permanent prose is written in closeout only.
 
+### Section 4 source preparation
+
+Source preparation extends the real bare-metal module supplied by the relay
+work. Additional owned modules are
+`e2e-tests/tests/e2e/roles/scenarios/bare_metal/working_data_qualification.py`,
+`e2e-tests/tests/e2e/roles/scenarios/bare_metal/working_data_probe.py` and
+`e2e-tests/tests/unit/test_working_data_qualification.py`. The typed target in
+`e2e-tests/src/e2e_harness/real_provisioning_target.py` gains an optional explicit
+operator-observation connection, whose key path is local to the harness rather
+than the provisioning service. The shared SSH helper remains the sole command
+builder and pins the physical host key. The protected installed policy supplies
+cleanup roots; the observer does not invoke the cleanup helper as evidence.
+
+Configured qualification runs two complete ordinary lifecycles, retaining the
+first observed UID to require a fresh successor. The second introduces one
+nonce-scoped foreign-owned fixture child, requires actual retry metadata and
+held capacity, then removes only that child before the ordinary job retries.
+A dedicated bounded-cleanup marker requires explicit configuration. The shared setup-plan guard in
+`e2e-tests/tests/unit/test_scenario_cleanup_order.py` normalizes pytest
+parameter labels to the underlying fixture name; a direct regression preserves
+its early-finalizer detection. The bare-metal real driver declares the new
+seed-observed state flag. Baseline
+real-lane execution without it remains a single lifecycle. Source checks do not
+check 4.1 or 4.2: deployed qualification and the frozen source gates remain owed.
+
+### Section 4 source handoff
+
+The source extension adds marker `e2e_bare_metal_bounded_cleanup` to the real
+bare-metal module. Invoke `make -C e2e-tests test-module
+MODULE=e2e_bare_metal_bounded_cleanup
+ACTIVE_PROFILES=local,real-provisioning-target` against an existing controlled
+stack, with the external operator configuration selected through
+`CONFIG_DIRECTORY` as needed. This command requires explicit
+`cleanup_qualification` in the bare-metal target; missing input is an error,
+not a baseline pass. The committed example shows only commented deterministic
+placeholder metadata and a harness-local key reference. Marketplace identities
+and TEST-chain wallet remain independent profile inputs.
+
+Normal qualification and refusal/successor qualification are module-scoped pytest
+parameters. Each uses a fresh generated buyer SSH key and fresh deal state; the
+UID history spans both. The successor preflight refuses until the first
+independent cleanup observation passed, before any successor purchase. It also
+requires only its one remaining unused UID/GID pair; the first preflight requires
+two. The bare-metal publisher reopens its reconciliation-closed listing through
+the ordinary publication stage; no database or host consumption history resets.
+
+Both cycles seed home and selected scratch/path-backed roots, FIFOs, three real
+System V IPC families, a detached process, a crontab and an open heartbeat SSH
+session. Normal reclaim remains the only cleanup authority. Independent root
+observations check NSS/account/private-group/home absence, every covered root,
+all four process UID fields, owner/creator IPC attribution, login sessions/user
+manager/lingering, cron and at state, plus unchanged inode/content-bound synthetic
+operator/service sentinels. The deliberate unsafe child sits inside the selected
+tenant-owned scratch directory. Recovery requires its actual foreign-descendant
+refusal in the job logs and queued retry metadata, with the lease releasing and
+capacity still consumed through the existing site view; only the exact fixture
+child is removed before the normal scheduler retries. Exhausted/terminal jobs
+are failures and remain held. No policy/ledger reset, helper bypass or force
+release occurs. Public buyer admission must remain gated during these failure
+drills; an observation failure is not readiness.
+
+Source verification: the focused E2E unit suite passed 496 tests, including
+configuration/marker guards, private-key reference refusal, missing predecessor
+refusal, retry/capacity gating and real temporary-filesystem/procfs-format/IPC
+inventory parsing. A configured `pytest --setup-plan` selected both complete
+normal/refusal cycles and preserved recovery-before-hold-release ordering; it
+executed no services. The generic setup-plan parser now normalizes pytest's
+parameter suffix before resolving a fixture's finalizer; a direct regression
+preserves its original early-cleanup check.
+
+A disposable private-container component check used the retained provisioning
+image, actual packaged access/cleanup roles and the new observer. It passed real
+NSS/account/grant, actual UID-owned files/FIFOs, all three real System V IPC
+families, a detached process killed/reaped by reclaim, unsafe-child refusal,
+fixture-only repair, ordinary role replay, independent absence and surviving
+sentinels. Systemd/loginctl and cron/at command boundaries were explicit standins;
+this proves component behavior, not a real scheduler, SSH server, deployed retry
+scheduler or hardware qualification. Initial diagnostics correctly refused a
+writable fixture ancestor and a container lacking the existing native gate's IPC
+removal capability. The corrected container used that gate's protected tmpfs and
+private IPC/capability boundary. A later nonmutating UID-count preflight correction
+is checked separately against actual protected policy/ledger files rather than
+repeating the unchanged destructive component check. Packaging and owned change,
+comment-hygiene and privacy checks are recorded before commit. The accepted
+cadence leaves one combined source review/full validation with the lead; no extra
+broad section review, personal owner reading or formal join is claimed.
+
+Tasks 4.1–4.3 remain unchecked. Neither the mocked typed-boundary tests nor the
+disposable component check qualifies a physical target. The dedicated real marker
+belongs to no pipeline lane and must execute on the reviewed, frozen integration
+candidate. Owed by validation: `tests.yml`'s `test · test-e2e-unit` job must run
+the harness unit suite; the full pipeline and physical-marker evidence remain
+separate obligations under 4.3. Permanent policy/qualification promotion remains
+closeout work.
+
+### Shared lane lease-correlation correction
+
+The combined reviewer identified an existing real bare-metal stage reading
+`provisioning_job_id` from `DealLease.refresh()`, whose normalized contract instead
+returns `create_job_id`. The lead accepted correction to that canonical key;
+the provider-job correlation assertion remains required. A regression constructs
+the actual typed family `LeaseView`, passes it through the real `DealLease`
+normalization, then invokes the real stage: matching grant identity passes and
+another grant identity fails. No API or normalization change is made. The same continuous review found that the two configured cycles shared the
+module SSH session but reused the unrelated-key filename, which the helper
+correctly refuses through exclusive creation. The unrelated-key stage now uses
+the cycle in its key name. A regression invokes the actual stage twice with one
+actual `SshSession` and a controlled refusing SSH process, verifies distinct keys,
+and confirms duplicate-name creation still fails. No SSH key protection is
+weakened. These are separate source corrections before the frozen combined
+candidate, not deployed qualification or formal review advancement.
+
 ## 5. Closeout (eleven parts, in this order)
 
 - [ ] 5.1 **Comment hygiene:** confirm `make check-comment-hygiene` and review touched comments for current-state rationale. Any code correction returns the change to implementation; closeout edits documentation only.

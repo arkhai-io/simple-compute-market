@@ -51,6 +51,9 @@ def module_plans(plan: str) -> dict[str, dict]:
             pending = []
         elif match := _FIXTURE_LINE.match(line):
             phase, name, used = match.groups()
+            # pytest labels parametrized fixtures with their selected value.
+            # Their finalizer behavior belongs to the underlying fixture.
+            name = name.split("[", 1)[0]
             if phase == "SETUP":
                 pending.append((name, [u.strip() for u in (used or "").split(",") if u.strip()]))
             else:
@@ -295,3 +298,11 @@ def test_real_bare_metal_validates_before_holds_and_recovers_only_own_lease(plan
     assert "recover_failed_run" in order
     assert "release_reserved_resources" not in order
     assert "provisioning_test_client" not in order
+
+
+def test_setup_plan_parameter_values_do_not_become_unknown_finalizers():
+    plan = _planted(["cycle['first']", "storefront_loops_held"],
+                    ["storefront_loops_held", "cycle['first']"])
+    parsed = module_plans(plan)["tests/m.py"]
+    assert parsed["setup"][0][0] == "cycle"
+    assert released_too_early(parsed, {"cycle": False, "storefront_loops_held": True}) == []

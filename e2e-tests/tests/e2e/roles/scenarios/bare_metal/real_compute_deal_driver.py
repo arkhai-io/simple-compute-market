@@ -39,6 +39,7 @@ class RealBareMetalDealState(ComputeDealState):
     create_job_id: str | None = None
     delivered_access: SshEndpoint | None = None
     _access_ended: bool = False
+    _working_data_seeded: bool = False
 
 
 def bare_metal_executor_is_real(execution: Any) -> Any:

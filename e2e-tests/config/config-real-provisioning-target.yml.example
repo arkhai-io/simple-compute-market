@@ -33,3 +33,14 @@ REAL_PROVISIONING_TARGET:
       # RFC8032 TEST1 public key: deterministic offline fixture, never use on any network.
       # Replace with the operator-verified machine key before running a real lane.
       ssh_host_public_key: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINdamAGCsQq31Uv+08lkBzoO4XLz2qYjJa8CGmj3B1Ea'
+      # Optional destructive cleanup qualification. The key path below is
+      # harness-local, separate from connection.ssh_key_path inside the service.
+      # Select e2e_bare_metal_bounded_cleanup only after reviewing the configured
+      # disposable host, established bounded policy and operator route.
+      # cleanup_qualification:
+      #   policy_id: example-bounded-policy
+      #   operator:
+      #     host: 192.0.2.20
+      #     port: 22
+      #     user: operator
+      #     key_path: /run/secrets/example-observer-key

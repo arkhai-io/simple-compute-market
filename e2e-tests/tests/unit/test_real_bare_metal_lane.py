@@ -11,13 +11,15 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import yaml
 from compute_provisioning_client import ComputeProvisioningError
+from compute_provisioning_contracts import LeaseView
 from market_resource_pools_client import SyncResourcePoolClient
 from storefront_client.models import ListingSummary
 
 from e2e_harness.real_provisioning_target import BareMetalHost, TargetInvalid, load_real_provisioning_target
 from e2e_harness.ssh_host_key import canonical_host_public_key
+from tests.e2e.roles.helpers.compute_deal import DealLease
 from tests.e2e.roles.helpers.real_provisioning import JobWatch
-from tests.e2e.roles.helpers.ssh_access import SshEndpoint
+from tests.e2e.roles.helpers.ssh_access import SshEndpoint, ssh_session
 from tests.e2e.roles.scenarios.bare_metal.real_compute_deal_driver import (
     REAL_POOL_ID, REAL_REGION, REAL_RESOURCE_ID, RealBareMetalComputeDealDriver,
     RealBareMetalDealState, bare_metal_executor_is_real, target_connection,
@@ -300,3 +302,49 @@ def test_failed_run_recovers_only_its_lease_through_real_convergence_helper():
 
 def test_host_key_comments_carry_no_trust_authority():
     assert canonical_host_public_key(TARGET.ssh_host_public_key + " operator-☃") == TARGET.ssh_host_public_key
+
+
+@pytest.mark.parametrize("observed_job,accepted", [("observed-grant", True), ("another-grant", False)])
+def test_grant_job_stage_uses_actual_normalized_deal_lease(observed_job, accepted):
+    end = datetime.now(timezone.utc) + timedelta(hours=1)
+    response = LeaseView(
+        capacity_reservation_id="development-reservation", deal_ref={"escrow_uid": "development-escrow"},
+        offering_mode="bare_metal", executor_target=TARGET.physical_host_id,
+        lease_end_utc=end, create_job_id=observed_job, status="active",
+    )
+    provider = SimpleNamespace(get_lease=MagicMock(return_value=response))
+    site = SimpleNamespace(
+        list_reservations=MagicMock(return_value=[{
+            "capacity_reservation_id": "development-reservation", "lease_end_utc": end.isoformat(),
+        }]),
+        get_reservation=MagicMock(return_value={"escrow_uid": "development-escrow", "resource_id": REAL_RESOURCE_ID}),
+    )
+    view = DealLease(provider, site, escrow_uid="development-escrow")
+    state = RealBareMetalDealState(deal_lease=view, create_job_id="observed-grant")
+    stage = lane.TestStage09c3_LeaseNamesTheGrantJob()
+    if accepted:
+        stage.test_09c3_lease_names_the_observed_grant(state)
+    else:
+        with pytest.raises(AssertionError):
+            stage.test_09c3_lease_names_the_observed_grant(state)
+    provider.get_lease.assert_called_once_with("development-reservation")
+    site.list_reservations.assert_called_once_with(escrow_uid="development-escrow")
+
+
+def test_two_cleanup_cycles_use_distinct_unrelated_keys_in_one_real_ssh_session(tmp_path):
+    # Controlled SSH process: the documentation address is a development fixture
+    # and must never be used on a public network. No network is contacted here.
+    executable = tmp_path / "refuse-public-key"
+    executable.write_text("#!/bin/sh\nprintf 'Permission denied (publickey).\\n' >&2\nexit 255\n")
+    executable.chmod(0o700)
+    state = RealBareMetalDealState(delivered_access=SshEndpoint("192.0.2.100", 6300, "tenant"))
+    stage = lane.TestStage09e_UnrelatedKeyRefused()
+    with ssh_session(ssh=str(executable), host_key=TARGET.ssh_host_public_key) as session:
+        stage.test_09e_unrelated_key_is_refused(state, session, "normal")
+        stage.test_09e_unrelated_key_is_refused(state, session, "refusal")
+        normal = session.directory / "unrelated-normal"
+        successor = session.directory / "unrelated-refusal"
+        assert normal.is_file() and successor.is_file()
+        assert normal.read_bytes() != successor.read_bytes()
+        with pytest.raises(FileExistsError):
+            session.new_key("unrelated-normal")
