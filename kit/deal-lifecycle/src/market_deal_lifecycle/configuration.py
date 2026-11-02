@@ -36,7 +36,7 @@ class AuthorityAdvertisement(BaseModel):
 
     mechanisms: list[Annotated[str, Field(min_length=1)]] = Field(min_length=1)
     minimum_dispute_window_seconds: NonnegativeSeconds
-    minimum_case_hold_seconds: NonnegativeSeconds | None
+    minimum_case_hold_seconds: NonnegativeSeconds | None = None
 
 
 class DisputeEntry(DisputeAuthority):

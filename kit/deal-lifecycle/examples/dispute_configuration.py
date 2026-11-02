@@ -21,6 +21,12 @@ authority = {
     },
 }
 entry = DisputeEntry.model_validate(authority)
+# TOML has no null literal; omission expresses an unbounded case hold.
+toml_authority = authority | {
+    "advertisement": {key: value for key, value in authority["advertisement"].items()
+                      if key != "minimum_case_hold_seconds"}
+}
+assert DisputeEntry.model_validate(toml_authority).advertisement.minimum_case_hold_seconds is None
 buyer = dispute_config({}, role="buyer")
 seller = dispute_config({}, role="seller")
 assert buyer.authorities([entry], role="buyer") == ()
