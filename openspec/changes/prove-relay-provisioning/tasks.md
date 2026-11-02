@@ -2020,6 +2020,16 @@ lane behavior only when configured with real targets. Section 16 still owes the
 deployed ungranted-proxy refusal plus both real lanes and management-client
 observations. No new push-only workflow/job obligation is added.
 
+### Shared-machine drain checklist correction
+
+The combined implementation review found the force-release checklist named a
+stale tunnel configuration and omitted the proxy-name prefix. It now names
+`frpc-buyers.toml.reload-pending.vm-<guest>`, matching the family client default
+and VM teardown's `vm-<guest>` proxy. The existing checked section remains intact.
+This changes documentation only; unchanged packaging inputs reuse the section's
+passing packaging evidence. The correction passes change/citation, privacy and
+diff checks; deployed force-release verification remains an operator obligation.
+
 ## 16. Live verification [log]
 
 Requires a VM host and a bare-metal host (which may be a virtual machine), prepared
