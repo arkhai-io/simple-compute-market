@@ -17,4 +17,4 @@ packages = ["src/market_deal_servicing"]
 allowed-dependencies = ["arkhai-kit-deal-lifecycle", "arkhai-kit-deal-lifecycle-contracts", "arkhai-kit-identity", "pydantic"]
 
 [dependency-groups]
-dev = ["arkhai-kit-arkhai-mediation>=0.1.0", "arkhai-kit-arkhai-payments>=0.1.0"]
+dev = ["arkhai-kit-arkhai-mediation>=0.1.0", "arkhai-kit-arkhai-payments>=0.1.0", "mypy>=1.15,<2"]

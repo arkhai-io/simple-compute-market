@@ -2,7 +2,7 @@ export UV_PYTHON := $(or $(shell cat ../../.python-version 2>/dev/null),$(error 
 
 DIST_DIR ?= ../../.dist
 
-.PHONY: build reinit first-use
+.PHONY: build reinit first-use typecheck
 
 build:
 	uv build --wheel --out-dir $(DIST_DIR)
@@ -10,6 +10,10 @@ build:
 reinit:
 	python3 ../../scripts/uv_project.py reinit
 
+typecheck: reinit
+	uv run --find-links $(DIST_DIR) mypy src --check-untyped-defs
+
 first-use: reinit
 	uv run --find-links $(DIST_DIR) python examples/first_use.py
 	uv run --find-links $(DIST_DIR) python examples/end_first_use.py
+	uv run --find-links $(DIST_DIR) python examples/watch_first_use.py

@@ -14,6 +14,7 @@ from .composition import (
     build_composed_storefront_app,
     build_storefront_lifespan,
     get_storefront_container,
+    register_deal_watch,
 )
 from .lifecycle import (
     CYCLE_STAGES,
@@ -86,6 +87,7 @@ __all__ = [
     "build_composed_storefront_app",
     "build_storefront_lifespan",
     "get_storefront_container",
+    "register_deal_watch",
     "parse_timestamp",
     "refuse_introduction_fulfillment",
     "refuse_introduction_settle",

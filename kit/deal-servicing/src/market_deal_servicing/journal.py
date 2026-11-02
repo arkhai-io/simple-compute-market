@@ -457,7 +457,7 @@ class EndSession:
         if selected is None:
             return None
         terminate = selected.ended_at <= now
-        kind = "terminate" if terminate else "truncate"
+        kind: IntentKind = "terminate" if terminate else "truncate"
         key = "terminate" if terminate else f"truncate:{selected.ended_at}"
         # A termination is independent of later earlier evidence; never restart it.
         old = self.intent(stable_ref(negotiation_id, kind, key))
@@ -471,7 +471,9 @@ class EndSession:
         with atomic(self.conn):
             record = self.read(negotiation_id)
             if record.progress == "released" and progress != "released":
-                raise ValueError("physical recovery cannot regress")
+                return
+            if record.progress == "tearing_down" and progress in {"unstarted", "active", "end_recorded"}:
+                return
             self._write(record.model_copy(update={"progress": progress}))
 
     def check_and_record(self, negotiation_id: str, operation_key: str, digest: str) -> bool:

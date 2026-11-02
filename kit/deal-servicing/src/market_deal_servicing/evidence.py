@@ -94,7 +94,8 @@ class EvidenceSession:
             (negotiation_id, item.evidence_id),
         ).fetchone()
         if existing:
-            if EvidenceItem.model_validate_json(existing[0]) != item:
+            previous = EvidenceItem.model_validate_json(existing[0])
+            if previous.model_dump(exclude={"recorded_at"}) != item.model_dump(exclude={"recorded_at"}):
                 raise ValueError("evidence ID retry changes content")
             return
         self.conn.execute(
@@ -116,7 +117,7 @@ class EvidenceSession:
         self, negotiation_id: str, *, message_id: str, accepted_by: Identity,
         expires_at: int, terms: LifecycleTerms | None = None,
     ) -> None:
-        if expires_at < 0 or isinstance(expires_at, bool):
+        if not isinstance(expires_at, int) or isinstance(expires_at, bool) or expires_at < 0:
             raise ValueError("acceptance expiry must be nonnegative Unix seconds")
         if not self.conn.execute(
             "SELECT 1 FROM servicing_evidence_items WHERE negotiation_id=? AND evidence_id=?",
@@ -222,7 +223,7 @@ class EvidenceSession:
     def delete(self, negotiation_id: str) -> None:
         for table in (
             "servicing_evidence_items", "servicing_evidence_commitments", "servicing_evidence_deals",
-            "servicing_final_requests", "servicing_intents", "servicing_delivery",
+            "servicing_final_requests", "servicing_intents", "servicing_delivery", "servicing_watch",
         ):
             if not self.conn.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,),

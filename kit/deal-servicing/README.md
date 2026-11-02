@@ -53,6 +53,31 @@ results remain pending for same-key adapter resolution and block disclosure;
 a validated once-only adapter can return an accepted no-op. Delivery retains
 only the returned intent reference.
 
+## Watch
+
+`DealWatch.poll` performs one bounded observation cycle through injected payment
+and dispute adapters. Dispute bindings include the Agreement-pinned record key;
+the owning adapter verifies signed records before observation. Configure the
+client's capture callback to keep exact transport responses as well as projected
+signed entries. `WatchSession` retains independent payment/dispute cursors and
+latest views; extensions remain identified by their own references, not cases.
+
+Every delivery-end effect is journaled before its record cursor advances. A
+counterparty case journals a stable append built by the dispute adapter from
+ordered evidence. Never-attempted appends to confirmed closed cases are skipped;
+uncertain attempts replay the original key first so an earlier acknowledgement
+survives a closed-case race. Payment-stop classification is an injected,
+evidence/entitlement-based hook: without it the correction remains pending,
+never inferred lawful from event kind. A complete retention projection can also
+be injected; a failed authority read never supplies a new pruning observation.
+
+`peer_hint` preserves evidence and reads authorities, not peer-asserted state.
+`watch` yields current views and newly journaled events for one cycle. Compose
+its repeated bounded step through `register_deal_watch` in the storefront kit,
+which supplies pause, serialization and operator-step semantics rather than a
+second timer in this library. Drain physical intents separately through end
+service. Domain registration of that step belongs to the domain composition.
+
 ## First use
 
 From a clean repository checkout:
@@ -60,6 +85,7 @@ From a clean repository checkout:
 ```sh
 make dist-ci
 make -C kit/deal-servicing first-use
+make -C kit/deal-servicing typecheck
 ```
 
 The example uses only public deterministic development identities and the

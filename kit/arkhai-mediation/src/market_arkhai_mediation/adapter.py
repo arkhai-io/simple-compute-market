@@ -96,6 +96,28 @@ class MediationAdapter:
             raise ValueError(refusal.reason)
         return request
 
+    def build_append(self, case_ref: str, items: list[EvidenceItem]) -> dict[str, JsonValue] | Rejected:
+        """Package exact bodies with their proof headers and verification context.
+
+        The outer evidence is a seller-produced export, not a new signature on
+        the inner bytes. Its original body and authentication context remain
+        available together for the authority to verify independently.
+        """
+        producer = Identity.model_validate(self._agreement["seller"])
+        value = {"case_ref": case_ref, "items": [
+            {
+                "kind": "arkhai.market-evidence.v1",
+                "producer": f"{producer.scheme.value}:{producer.identifier}",
+                "at": item.recorded_at,
+                "sha256": hashlib.sha256(canonical_json(item)).hexdigest(),
+                "bytes": base64.urlsafe_b64encode(canonical_json(item)).decode().rstrip("="),
+            } for item in items
+        ]}
+        try:
+            return validate("Append", value)
+        except (ValueError, ValidationError, SchemaValidationError):
+            return Rejected(reason="case append requires valid evidence")
+
     def validate_request(self, request: InterfaceRequest) -> Rejected | None:
         try:
             self._filing(request)

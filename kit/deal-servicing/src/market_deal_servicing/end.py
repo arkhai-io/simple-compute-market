@@ -123,7 +123,10 @@ class EndService:
             })
         if phase == DeliveryPhase.DISCLOSE and financial.status == "allow":
             billing = [item for item in session.intents(evidence.negotiation_id) if item.kind == "billing"]
-            if not billing or billing[0].state != "done" or billing[0].result["outcome"]["status"] != "accepted":
+            if (
+                not billing or billing[0].state != "done" or billing[0].result is None
+                or billing[0].result["outcome"]["status"] != "accepted"
+            ):
                 financial = financial.model_copy(update={
                     "status": "pending", "reason": "billing start requires same-key resolution",
                 })

@@ -578,7 +578,7 @@ market-composition's "Marketplace roles hold no payment ledger". Files: new `kit
       billing. Seventeen temporary diagnostic checks cover rollback, equal-time ordering,
       stale authorization, non-delivery despite a later lawful stop and unknown billing
       resolution. Packaging/architecture, hygiene and strict validation pass.
-- [ ] 10.3 Implement `watch`: one durable cursor per record (payment authority, dispute
+- [x] 10.3 Implement `watch`: one durable cursor per record (payment authority, dispute
       authority), advancing after the effect is journaled; delivery ends to end service once per
       effect ID; a counterparty's case journaled as the seller's append with an idempotency key
       and skipped for a confirmed closed case; record entries verified against the Agreement's
@@ -587,6 +587,15 @@ market-composition's "Marketplace roles hold no payment ledger". Files: new `kit
       adapters for every `watch` and append scenario of the deal-lifecycle delta, including
       "A ruling is read while partly applied", "Two cases overlap", "The storefront crashes
       before appending" and "A case is filed and closed while the storefront is down" and "A forged hint arrives".
+      Durable independent cursors and cached views retain extension references; effects
+      and interface-built appends precede cursor advancement. The mediation adapter
+      packages exact stored evidence, and uncertain appends replay their original key
+      before closed-case skipping. A committed example uses the vendored mediation
+      fake for lost responses, prepared/applied effects and a case closed during downtime;
+      temporary diagnostics cover overlapping extensions and false hints. Foundation
+      (62), mediation (40, including contract/generated/typing checks) and storefront
+      (131) regressions pass. Shared storefront composition exposes controller-owned
+      watch registration; domain composition remains in sections 14 and 15.
 - [ ] 10.4 Implement the seller half's `submit`, `read` and `list` (bounded pages, lifecycle
       states, open extensions and cases, repair required for a missing authority credential) and
       the delivery_end filing, journaled with an immediate attributed end and dispatched
@@ -633,6 +642,38 @@ market-composition's "Marketplace roles hold no payment ledger". Files: new `kit
 
 Verification point: unit and library-integration suites of `kit/deal-servicing`; `make
 check-architecture`; `make test`. End-to-end: none; no storefront composes the kit yet.
+
+### Section 10 implementation checkpoint (2026-11-02)
+
+- Whole tasks 10.1–10.3 are implemented and checked above. Reproduce library first
+  use from committed setup with `make dist-ci && make -C kit/deal-servicing first-use`.
+  Each example owns a temporary SQLite database and public deterministic fixture
+  principals; no deployment, credentials, seed files or resident service are required.
+- Remaining: 10.4's seller submit/read/list and durable filing dispatcher; 10.5's
+  authenticated site-report ingestion, receipt-time buyer surrender and combined
+  lifecycle views; all of 10.6's site/provisioning contract, transactional event,
+  separate signed outbox and authenticated lease-read recovery. The journal already
+  provides their admission, attribution, pending-classification and fixed-basis filing
+  primitives, but a journaled filing is not yet sent by the seller half. No site or
+  provisioning sender/receiver changes have been made.
+- Adapter integration: the neutral dispute protocol now exposes build_append; the
+  mediation kit owns its evidence packaging. Domain compositions must still bind
+  verified payment-stop classification, complete retention observations, exact client
+  response capture and the shared storefront watch-step registration. These hooks
+  fail conservatively when absent; no payment ledger or mechanism-specific parsing
+  was added to the servicing kit. No public option bytes or IDs changed.
+- Focused regressions pass: foundation 62, contracts 37, mediation 40 and storefront
+  131. The servicing kit's source typing check also passes. Existing acceptance
+  tests were not added/edited under the worker's testing
+  boundary; first-use examples and temporary diagnostics exercised the new library.
+  Architecture, packaging, comment hygiene and pinned strict OpenSpec validation pass.
+- Full `make test` was attempted with the prescribed proxy environment and stopped
+  after 9m46s at release-tooling's Docker Compose prerequisite: `docker` is absent,
+  so test_storefront_authorities_are_isolated raises FileNotFoundError. That target
+  reported 1 failed, 1809 passed and 18 skipped. Aggregate completion remains unproven;
+  evidence was added to existing [#324](https://github.com/arkhai-io/simple-compute-market/issues/324#issuecomment-6570225578),
+  not treated as a product regression or silently skipped. No browser/end-to-end
+  run was attempted because no domain composes this kit yet.
 
 ## 11. Hosted payment adapter for once parts
 
