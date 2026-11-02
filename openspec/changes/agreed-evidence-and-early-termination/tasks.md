@@ -344,10 +344,19 @@ template writer), and `docs/development/DEPLOYMENT_AND_CONFIG.md`.
     comment hygiene and strict OpenSpec validation pass. Existing fixture bodies
     were adapted, with no assertions weakened and no test functions added.
     Full aggregate and end-to-end validation are recorded with the final checkpoint.
-- [ ] 3.5 Document `[[Dispute]]`, `[[DisputeCredential]]`, `use_registry_dispute_authorities`,
+- [x] 3.5 Document `[[Dispute]]`, `[[DisputeCredential]]`, `use_registry_dispute_authorities`,
       the descriptor list and the retired key in `docs/development/DEPLOYMENT_AND_CONFIG.md`.
       Verify: `make check-doc-citations CHANGE=agreed-evidence-and-early-termination` reports
       nothing for the section.
+  - The deployment guide now owns role defaults, full-identity ordering/vetoes,
+    per-registry signed reads, empty-list diagnostics, advertisement minima,
+    identity-bound credential references and retirement of the payments key.
+    Payment/seller/e2e guides and release dependency cells agree. Documented TOML
+    snippets parse and resolve their exact credential binding.
+  - The scoped citation command reports only the three pre-existing future
+    lifecycle spec/architecture destinations tracked by #325; no new citation
+    is unresolved. No placeholder spec was created. Normative promotion remains
+    the reviewed closeout work at 16.9.
 
 Verification point: unit suites of `kit/deal-lifecycle` and `kit/arkhai-payments`; the registry
 descriptor suites (unit and library integration); the Helm render check; `make test`.
@@ -390,6 +399,26 @@ passing (they start roles from rendered configuration); none exercises the new l
   all Helm structural/render assertions. No container daemon, deployment or
   end-to-end scenario is started. The aggregate was exercised in segments after
   repairs; there is no single all-green `make test` invocation.
+
+### Role integration checkpoint (2026-11-02)
+
+- Supersedes the remaining-work list in the earlier sections 3/5 checkpoint:
+  3.2, 3.4 and 3.5 are implemented; 3.1, 3.3 and 5.1 remain complete.
+- Reproducible owned-target setup, first-use observations and exact limitations
+  are in `docs/attachments/aeet-sections-3-5/index.md`. The configuration example,
+  signed registry application integration and local VM payment smoke pass.
+- Existing test fixtures were adapted, without weakening assertions or adding
+  permanent test functions. Generated storefront/umbrella schemas and release
+  dependency documentation reflect the changed configuration and imports.
+- Final full `make test` passes in one invocation (2026-11-02, 7m 2s), with
+  the per-shell Podman shim and #323's proxy environment. This includes 1,843
+  release-tooling tests and Helm render/structural checks. Locks, packaging,
+  architecture, comment hygiene, strict OpenSpec validation and focused role
+  suites also pass.
+- The scoped citation check has only #325's three future lifecycle-document
+  matches. End-to-end lanes and independent acceptance are unrun by this worker;
+  hosted option construction and exact authority admission remain section 8.
+  No shared deployment or resident external resource was created.
 
 ## 4. Alkahest release models
 

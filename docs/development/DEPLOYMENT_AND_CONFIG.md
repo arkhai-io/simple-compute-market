@@ -559,6 +559,17 @@ the descriptor values in ordinary values while mounting the signer credential
 from a Secret. Compose wrappers likewise carry public descriptor values beside
 public identity pins and keep signer credentials in role-owned file mounts.
 
+An operator may also supply `REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES`
+(a JSON array), or Helm `descriptor.recommendedDisputeAuthorities`. Each item has
+an authority's full identity, interface-owned `params`, and an `advertisement`
+copy as described under [Dispute authority preferences](#dispute-authority-preferences).
+The signed descriptor exposes them in preference order as
+`recommendedDisputeAuthorities`; an empty or unconfigured list is omitted.
+No registry code or chart ships an authority. Recommendations are public
+operator assertions, not credentials and not an instruction to override a role's
+local policy. Roles verify the descriptor under that registry URL's configured
+identity pins before using it.
+
 The umbrella chart enables the compute registry by default and keeps the
 `api-credits-registry` alias disabled. Enabling the alias instantiates the same
 schema-opaque registry chart a second time. The compute instance selects
@@ -1426,7 +1437,7 @@ error's type.
 Marketplace roles resolve one strict `[Settlement]` root. `schema_version`
 selects the configuration contract, `priority` orders mechanism IDs, and peer
 `[Settlement.alkahest]`, `[Settlement.arkhai_payments]`, and `[Settlement.contact]` tables contain only
-mechanism-owned consumer settings. Arkhai payments resolves trusted service origin, Ed25519 receipt identity, fee/dispute policy, and an `api_key_env` reference through the shared kit's `settlement_config.py`. The owner-scoped WorkOS credential reaches only its consuming process; HTTPS is required outside loopback. Buyer `payer_account` is separate domain input (`[vms].payer_account` or `[apicredits].payer_account`), carried in selection params and the accepted Agreement, not inferred from marketplace identity. API-credit sellers supply `payee_account` and `asset` in each payment publication clause; the accepted option determines the seller client's owner. Local development uses `development_auth = true` with a loopback service origin instead of `api_key_env`; the two modes are mutually exclusive. Buyer marketplace identity comes only from
+mechanism-owned consumer settings. Arkhai payments resolves trusted service origin, Ed25519 receipt identity, fee policy, and an `api_key_env` reference through the shared kit's `settlement_config.py`. The owner-scoped WorkOS credential reaches only its consuming process; HTTPS is required outside loopback. Buyer `payer_account` is separate domain input (`[vms].payer_account` or `[apicredits].payer_account`), carried in selection params and the accepted Agreement, not inferred from marketplace identity. API-credit sellers supply `payee_account` and `asset` in each payment publication clause; the accepted option determines the seller client's owner. Local development uses `development_auth = true` with a loopback service origin instead of `api_key_env`; the two modes are mutually exclusive. Buyer marketplace identity comes only from
 the selected durable profile referenced by `[BuyerProfile]`; storefront and
 service-role principals retain their role-owned public identity configuration.
 EVM credentials and networks remain in `[Wallet]` and `[Chains]`.
@@ -1553,6 +1564,95 @@ sequence:
    artifacts together. After effects resume, recover forward from accepted
    settlement plans and operation identities; never change mechanism priority
    to redirect an accepted deal.
+
+### Dispute authority preferences
+
+Dispute preferences are role-owned root configuration, independent of
+`[Settlement.arkhai_payments]`. VM and API-credit buyers and storefronts read
+these entries from their normal public TOML overlays. The bare-metal buyer reads
+them at the root of its file selected by `BARE_METAL_BUYER_CONFIG`, beside
+`[bare_metal]`; its storefront reads them through the normal storefront loader.
+
+`use_registry_dispute_authorities` defaults to `true` for a storefront and
+`false` for a buyer. Shipped buyer profiles and development fixtures state their
+consent explicitly. Put this scalar before any TOML table header:
+
+```toml
+use_registry_dispute_authorities = true
+```
+
+With the setting enabled, each role resolves its ordered local `[[Dispute]]`
+entries first, followed by the recommendations from the registry it works
+through. Descriptors are fetched through the signed, pinned registry client at
+buyer bootstrap and storefront startup. Multiple registries keep independent
+lists: a recommendation from one is not a default for another, and work with no
+source registry uses local entries only. A failed descriptor read contributes
+no recommendations; local preferences remain usable. Disabling recommendations
+does not disable local entries or resolve any authority credential.
+
+A local entry names one authority by all four of `interface`, `origin`,
+`account`, and `record_key`. `params` belongs to that interface. The
+`advertisement` copy states the supported payment mechanisms and minimum
+dispute/case-hold windows; extra interface-owned advertisement fields are
+retained. For example, this uses reserved example data, not a live authority or
+a shipped role template:
+
+```toml
+[[Dispute]]
+interface = "example.dispute.v1"
+origin = "https://dispute.example"
+account = "example-authority-account"
+record_key = "example-public-record-key"
+params = {}
+not_offered = false
+not_accepted = false
+
+[Dispute.advertisement]
+mechanisms = ["example.payment.v1"]
+minimum_dispute_window_seconds = 60
+minimum_case_hold_seconds = 3600
+```
+
+An omitted `minimum_case_hold_seconds` means the authority requires an unbounded
+case hold; JSON descriptors may express that as `null`. TOML has no null literal.
+An entry marked `not_offered` is excluded from the seller's offered list; one
+marked `not_accepted` is excluded from the buyer's accepted list. Deduplication
+uses full identity **before** those marks: a local veto cannot be undone by the
+registry repeating that authority, and a registry copy cannot replace locally
+accepted parameters. A different origin or record key is a different authority,
+even when its payment account matches.
+
+A role with an empty resolved list logs **No dispute authority is available**,
+naming both remedies: configure `[[Dispute]]`, or enable
+`use_registry_dispute_authorities` and arrange a registry recommendation. Merely
+configuring a payments service chooses no dispute authority. The selected
+option names its authority under `lifecycle.adjudication.dispute`; mandate
+derivation reads that accepted authority, not a service-wide default.
+`[Settlement.arkhai_payments].dispute_authority` is rejected, including when its
+value is null in a JSON overlay. Remove it and configure preferences instead;
+the bare-metal buyer's `[bare_metal.arkhai_payments]` uses the same validation.
+No template supplies an authority's account, origin or record key.
+
+Credentials are separate, identity-bound references:
+
+```toml
+[[DisputeCredential]]
+interface = "example.dispute.v1"
+origin = "https://dispute.example"
+account = "example-authority-account"
+record_key = "example-public-record-key"
+api_key_env = "EXAMPLE_DISPUTE_API_KEY"
+```
+
+The binding must match all four identity fields. Credential resolution reads the
+named environment variable only when the authority is used; absence or an empty
+value fails with the variable's name, never its value. Duplicate bindings for an
+identity are refused at lookup. A resolved credential is a secret wrapper and
+is not stored in the preference model. Public authority projections contain
+neither credential references nor secret values; neither belongs in options,
+Agreements, status or run logs. See the runnable
+[configuration example](../../kit/deal-lifecycle/examples/dispute_configuration.py)
+for ordered resolution, local vetoes, per-registry isolation and secret handling.
 
 ### Contact-exchange contacts
 

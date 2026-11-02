@@ -63,10 +63,13 @@ The API-credit payment scenario reads the `PAYMENTS` section (environment
 prefix `ARKHAI_PAYMENTS__`) through `tests/e2e/roles/helpers/payments.py`, which
 other payment scenarios may reuse. SERVICE_URL names the payments target; leave
 it blank and the scenario reports `blocked` and skips. With it set, supply the
-other five: SERVICE_IDENTITY (public Ed25519 receipt signer), DISPUTE_AUTHORITY,
-BUYER_ACCOUNT, BUYER_MARKETPLACE_CREDENTIAL and SELLER_MARKETPLACE_CREDENTIAL;
+other four: SERVICE_IDENTITY (public Ed25519 receipt signer), BUYER_ACCOUNT,
+BUYER_MARKETPLACE_CREDENTIAL and SELLER_MARKETPLACE_CREDENTIAL;
 a missing one fails the scenario, naming it. Marketplace credentials are
-independent of payment account IDs.
+independent of payment account IDs. Dispute authorities are role preferences
+or signed registry recommendations, not a payments-helper setting; configure the
+seller and the buyer's registry accordingly. The shared buyer profile writer
+explicitly opts into registry recommendations.
 
 FEE_BPS defaults to 250. LIVEMODE and DEVELOPMENT_AUTH default to false and
 must be `true` or `false`; generated buyer tables explicitly pin the receipt

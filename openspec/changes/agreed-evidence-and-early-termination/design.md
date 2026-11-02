@@ -524,6 +524,17 @@ wire convention; an unconfigured or empty list is omitted. Core carries the
 interface-owned copy without interpreting it, and the registry validates its
 operator configuration with the foundation's entry model.
 
+Role composition reads signed descriptors under URL-specific registry pins,
+keeps each registry's resolved list separate, and retains local-only policy for
+work with no source registry. Descriptor-read failures contribute no registry
+defaults. Empty lists are reported at buyer bootstrap and storefront startup.
+Public buyer context carries only resolved authority projections; credential
+bindings remain in role configuration. The payments authority account is read
+from the accepted option's lifecycle terms, including on stored-mandate checks;
+only fee policy is recovered from an accepted mandate rather than current config.
+TOML has no null literal, so omitting the advertisement's minimum case-hold field
+represents an unbounded minimum, just as a JSON recommendation's null does.
+
 Common query projections live in the lifecycle codec. The generic core parser
 needs no lifecycle vocabulary: settlement-runtime composes descriptors and the
 registry advertises them through its filter specification. Penalty comparisons

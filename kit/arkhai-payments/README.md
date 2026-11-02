@@ -28,9 +28,14 @@ option = PaymentsOptionParams(
 
 The payments service URL is operator configuration on `PaymentsClient`, not a
 listing field. A listing-selected URL could redirect the buyer's bearer key to
-an attacker. Keep `fee_bps` and `dispute_authority` in the caller's trusted
-service policy. Authorities are explicit per-part permissions; the service has
-no implicit privileged dispute account.
+an attacker. Keep `fee_bps` in the caller's trusted service policy. The dispute
+authority comes from the selected option's `lifecycle.adjudication.dispute`;
+`[Settlement.arkhai_payments].dispute_authority` is rejected with a diagnostic
+naming root `[[Dispute]]` preferences. See
+[dispute authority preferences](../../docs/development/DEPLOYMENT_AND_CONFIG.md#dispute-authority-preferences)
+for local preferences, registry recommendations and identity-bound credentials.
+Authorities are explicit per-part permissions; the service has no implicit
+privileged dispute account.
 
 Receipts carry a signed `livemode`, true only from a live payments service.
 `verify_receipt` takes the mode the caller expects, and `ArkhaiPaymentsConfig.livemode`
@@ -43,7 +48,7 @@ commits to the exact JSON object using RFC 8785, creates one `once` part, and
 returns a generated `Mandate`. The generated models also carry the contract's
 `rate` parts; the once-only builder does not derive them. Every part carries its
 own authorities and hold-extension cap. A once-only mandate has no start or stop
-permission, and preserves the seller and configured dispute authority as reverse
+permission, and preserves the seller and accepted option's dispute authority as reverse
 authorities. The hold is the time from
 acceptance to start, plus the service duration and the option window. The fixed
 nonce is `arkhai.payments.v1`; repeated derivation for the same inputs gives the
