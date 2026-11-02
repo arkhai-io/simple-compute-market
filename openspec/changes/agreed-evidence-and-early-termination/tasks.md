@@ -1692,6 +1692,10 @@ check-locks`, `make check-comment-hygiene`, strict OpenSpec validation and full
 shim). The preceding complete chain also passed. No hosted mediation deployment
 or deployed monetary-ruling qualification is claimed by this kit repair.
 
+## Re-review 21/22 disposition — buyer and servicing kit
+
+- **S-N1:** Both lazy buyer mediation ports forward `case` without eager credential resolution. Each buyer package now drives lost-filing-response recovery through its real port and reconstructed evidence store, asserting one signed authority case. Before the repair both tests failed at the missing `case` operation.
+
 ### Parallel repair integration checkpoint
 
 - `7fb2dae69` merges the lifecycle repair into `8b1a5cfb5`, preserving the
