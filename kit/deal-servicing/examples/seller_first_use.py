@@ -11,7 +11,7 @@ from market_arkhai_mediation.fixtures.authority import MediationContractFake
 from market_deal_lifecycle.adapters import DisputeAdapterTable, PaymentAdapterTable, PaymentSelector
 from market_deal_lifecycle.terms import DisputeAuthority
 from market_deal_lifecycle_contracts.models import LifecycleCommand, ListDealsRequest
-from market_identity import Identity
+from market_identity import Ed25519Signer, Identity
 
 from market_deal_servicing import (
     DealWatch, DeliveryRecord, EndService, EndSession, PhysicalResult,
@@ -76,6 +76,7 @@ async def main():
                     ))
                     SellerSession(conn).register(SellerDeal(
                         negotiation_id=name, commitment_ref=commitment, domain="fixture-compute",
+                        buyer=Ed25519Signer(bytes([1]) * 32).identity,
                         payment=PaymentSelector("arkhai.payments.v1"), dispute=authority, once_only=True,
                     ))
             first = await api.list(ListDealsRequest(limit=1))

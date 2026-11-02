@@ -99,6 +99,24 @@ atomically records the end and the payee filing before any I/O. Drain
 and reuses the original key after lost responses. Filing acknowledgement is not a
 ruling; physical end work never waits for it and sends no payment stop or reverse.
 
+## Delivery ingress
+
+`DeliveryIngress.end_delivery` verifies the accepted buyer's market envelope and
+rejects any supplied instant. Receipt and final request commit together before
+returning an acknowledgement for the route to sign; a retry retains the receipt.
+No payment or dispute read is needed, so surrender works during authority outages.
+The route owns the seller response signature and contract-owned claim embedding.
+
+`site_report` accepts exact bytes only through an injected domain verifier that
+checks the reservation's configured site identity and event binding. The same
+method handles push and authenticated pull recovery. Its classification hook
+uses verified entitlement evidence; without it, the correction stays pending.
+An unentitled classification journals the fixed-basis filing in the end
+transaction, including pre-start failure deferred until the Agreement start.
+Duplicate events preserve their original observation and bytes. Neither ingress
+path claims physical recovery or sends financial commands. Source/effect evidence
+is pruned only under the Agreement's evidence-retention rule, not a fixed timer.
+
 ## First use
 
 From a clean repository checkout:

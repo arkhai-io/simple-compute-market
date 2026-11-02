@@ -694,7 +694,7 @@ market-composition's "Marketplace roles hold no payment ledger". Files: new `kit
       and mediation regressions, source typing, architecture, packaging, locks,
       hygiene and strict change validation pass. Domain route binding remains in 13–15.
 
-- [ ] 10.5 Persist final-request identities, actors, causes, instants and evidence references,
+- [x] 10.5 Persist final-request identities, actors, causes, instants and evidence references,
       including superseded requests and administrator identity/reason for operator ends,
       and expose earliest-end attribution and current physical
       progress through `read`. Accept verified site reports as final requests; journal required
@@ -713,6 +713,18 @@ market-composition's "Marketplace roles hold no payment ledger". Files: new `kit
       duplicate report delivery, pre-start failure/deferred filing across restart, and crash between
       end recording and filing intent; assert no
       repeated physical work and no storefront-owned financial end.
+      Delivery ingress verifies the accepted buyer's envelope and atomically
+      retains receipt time, exact request evidence and lawful surrender before
+      returning, without authority I/O. Site ingress requires an injected domain
+      verifier of the configured reservation/site binding, retains exact report
+      bytes and journals a classified filing or pending slot in the same transaction.
+      Existing journal attribution, fixed-basis/deferred filing, correlation and
+      D9 pruning are reused. The committed ingress example exercises duplicate
+      site delivery, exact-byte readback, restart-stable surrender, pre-start failure
+      and one physical effect per deal. All first-use examples, source typing,
+      architecture/packaging/locks, hygiene and strict change validation pass.
+      Compute's concrete report codec/sender is 10.6; response signing/claim
+      embedding and authenticated HTTP binding remain in 13–15.
 - [ ] 10.6 Implement the site report's independent acceptance boundary first: immutable event
       recording in the lease-ending transaction and a separate event-keyed outbox; signing,
       retry and authenticated lease-read recovery of the stored report. Park push on

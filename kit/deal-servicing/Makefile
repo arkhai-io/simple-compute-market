@@ -18,3 +18,4 @@ first-use: reinit
 	uv run --find-links $(DIST_DIR) python examples/end_first_use.py
 	uv run --find-links $(DIST_DIR) python examples/watch_first_use.py
 	uv run --find-links $(DIST_DIR) python examples/seller_first_use.py
+	uv run --find-links $(DIST_DIR) python examples/ingress_first_use.py

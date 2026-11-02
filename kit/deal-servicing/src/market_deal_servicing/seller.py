@@ -31,6 +31,7 @@ class SellerDeal(WireModel):
     negotiation_id: Reference
     commitment_ref: Reference
     domain: Reference
+    buyer: Identity
     payment: PaymentSelector
     dispute: DisputeAuthority | None = None
     entitlements: dict[str, JsonValue] = Field(default_factory=dict)
