@@ -28,7 +28,7 @@ from market_alkahest import (
     ALKAHEST_CONFIG_KEY,
     ORACLE_GATED_RELEASE,
     RECIPIENT_RELEASE,
-    configured_release_model,
+    require_deliverable_release_models,
     create_alkahest_registration,
     escrow_release_conditions,
 )
@@ -123,10 +123,11 @@ class BareMetalStorefrontSettlementComposition:
         ):
             raise ValueError("enabled settlement mechanism has no seller stage")
         self.registry.validate(self.config, role="seller")
-        # A section selecting contradictory release models is incoherent and
-        # refused here; a coherent model bare metal cannot deliver is an
-        # Alkahest readiness blocker, given the deliverable models as a resource.
-        configured_release_model(self.config.mechanisms.get(ALKAHEST_CONFIG_KEY))
+        stage = self.seller_stages.get(ALKAHEST_MECHANISM)
+        require_deliverable_release_models(
+            self.config.mechanisms.get(ALKAHEST_CONFIG_KEY),
+            getattr(stage, "release_models", ()),
+        )
         object.__setattr__(self, "resources", MappingProxyType(dict(self.resources)))
         # Accepted payment deals are serviced whether or not new payment options
         # are published, so the stage follows the servicing fields, not `enabled`.

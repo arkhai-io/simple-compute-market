@@ -348,7 +348,7 @@ def _build_vm_services(
             "VM service composition must use the exact registry-owned domain contract"
         )
     # Before anything is constructed: a configured default the storefront
-    # cannot read, a contradictory Alkahest release model, or a configuration
+    # cannot read, an unsupported Alkahest release model, or a configuration
     # under which it could never publish stops startup rather than running
     # without it. An Alkahest section that is coherent but cannot settle makes
     # Alkahest unready instead. A retired address-book key is refused before

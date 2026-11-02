@@ -16,6 +16,7 @@ from market_alkahest import (
     wallet_account_address,
 )
 from market_alkahest.dev_chain import anvil_address_book_path
+from market_alkahest.alkahest import get_recipient_arbiter
 from market_alkahest.settlement_config import alkahest_preflight
 from market_core.schemas import SettlementOption
 from market_settlement_runtime import (
@@ -743,7 +744,7 @@ async def test_alkahest_option_builder_emits_canonical_buyer_choice() -> None:
     publication = registration.option_builder(
         config,
         readiness,
-        {"accepted_escrows": [escrow]},
+        {**resources, "accepted_escrows": [escrow]},
         "seller",
     )
 
@@ -751,7 +752,13 @@ async def test_alkahest_option_builder_emits_canonical_buyer_choice() -> None:
     option = publication["settlement_options"][0]
     assert option["settlement"]["schema"] == ALKAHEST_MECHANISM_ID
     assert len(option["option_id"]) == 64
-    assert option["settlement"]["accepted_escrow"] == escrow
+    assert option["settlement"]["accepted_escrow"] == {
+        **escrow, "demand": {
+            "chain_name": "ethereum_sepolia",
+            "arbiter": get_recipient_arbiter("ethereum_sepolia").lower(),
+            "demand_data": {"recipient": resources["wallet"]["address"]},
+        },
+    }
     assert registration.buyer_compatibility(
         config,
         option,
@@ -775,6 +782,7 @@ async def test_alkahest_clause_projection_is_public_pure_and_identity_preserving
         config,
         readiness,
         {
+            **resources,
             "accepted_escrows": [
                 {
                     "chain_name": "base_sepolia",
@@ -872,6 +880,7 @@ def test_alkahest_publication_clause_builds_exact_scaled_option(monkeypatch) -> 
         readiness,
         {
             "publication_clause": clause,
+            "wallet": {"address": WALLET},
             "chains": {
                 "base_sepolia": {
                     "rpc_url": "https://rpc.example",
@@ -895,7 +904,14 @@ def test_alkahest_publication_clause_builds_exact_scaled_option(monkeypatch) -> 
     assert option.get("price", {}).get("rates", []) == escrow["rates"]
     assert option["settlement"] == {
         "schema": ALKAHEST_MECHANISM_ID,
-        "accepted_escrow": escrow,
+        "accepted_escrow": {
+            **escrow,
+            "demand": {
+                "chain_name": "base_sepolia",
+                "arbiter": get_recipient_arbiter("base_sepolia").lower(),
+                "demand_data": {"recipient": WALLET},
+            },
+        },
     }
 
 
@@ -933,6 +949,7 @@ def _build_alkahest_option(monkeypatch, rate: str, decimals: int) -> dict:
         readiness,
         {
             "publication_clause": clause,
+            "wallet": {"address": WALLET},
             "chains": {
                 "base_sepolia": {
                     "rpc_url": "https://rpc.example",

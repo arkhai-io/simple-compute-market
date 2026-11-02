@@ -601,9 +601,8 @@ def buyer_cli(buyer_cli_binary: Path, tmp_path_factory) -> BuyerCli:
         # The anvil chain's address book, which every Alkahest read on that
         # chain resolves through this table.
         f"address_books = {{ anvil = {_toml_quote(alkahest_path)} }}",
-        "oracle_gated = false",
+        'release_models = ["recipient"]',
         "trusted_oracle_addresses = []",
-        "interruptible = false",
         "interruptible_oracle_addresses = []",
         "",
     )

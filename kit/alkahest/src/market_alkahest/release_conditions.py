@@ -75,7 +75,7 @@ def release_conditions(
     oracle-gated or interruptible model with no oracle of its own or whose
     oracle is the seller wallet: the party collecting cannot also decide
     collection, so no condition stands in for a missing oracle. Raises
-    ``ReleaseModelError`` for a contradictory model, which startup refuses.
+    ``ReleaseModelError`` for a requested model the section does not offer.
     Alkahest readiness reports each oracle case as a blocker, so a caller that
     derives only for a ready mechanism, as :func:`escrow_release_conditions`
     does, never meets them.

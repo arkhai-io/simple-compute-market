@@ -387,10 +387,19 @@ bare-metal storefronts' publication and migration modules
     nonempty unique model lists, rejects obsolete flags and oracle-address lists
     for unoffered models, and derives separate chain conditions for each model.
     Domain composition and option materialization follow in 4.2.
-- [ ] 4.2 Publish one Alkahest option per listed model in the VM and bare-metal storefronts, with
+- [x] 4.2 Publish one Alkahest option per listed model in the VM and bare-metal storefronts, with
       no lifecycle terms (no Alkahest lifecycle adapter exists). Verify: application-integration
       test for `release_models = ["recipient", "interruptible"]` publishing two options without
       `adjudication` ("Builders emit terms only where they bind").
+  - Verified: kit unit suite (447), VM unit/integration suites (1,189/501;
+    corrected duplicate-list diagnostic re-drive passes), bare-metal storefront
+    (522), and API-credit storefront (248). The VM application journey publishes
+    recipient and interruptible options and negotiates the second through the
+    real buyer plan validator; bare metal publishes recipient and oracle-gated
+    choices. Each option pins its demand under settlement.accepted_escrow and
+    has no lifecycle. Undeliverable models now refuse startup, as designed.
+    Existing test intent follows that deliberate refusal change; no new test
+    functions were added. Templates and generated Helm schemas use the list.
 - [ ] 4.3 Extend the dry-run and write migration to map the old flags to `release_models` and
       remove them. Verify: migration unit tests for each flag and for both flags absent.
 - [ ] 4.4 Document `release_models` in `DEPLOYMENT_AND_CONFIG.md`. Verify: doc citations check.

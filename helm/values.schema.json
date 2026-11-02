@@ -400,7 +400,14 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["interface", "origin", "account", "record_key", "params", "advertisement"]
+            "required": [
+              "interface",
+              "origin",
+              "account",
+              "record_key",
+              "params",
+              "advertisement"
+            ]
           }
         },
         "accessAcquisitionPointer": {
@@ -1428,9 +1435,17 @@
                     "null"
                   ]
                 },
-                "^[oO][rR][aA][cC][lL][eE]_[gG][aA][tT][eE][dD]$": {
+                "^[rR][eE][lL][eE][aA][sS][eE]_[mM][oO][dD][eE][lL][sS]$": {
+                  "items": {
+                    "enum": [
+                      "recipient",
+                      "oracle_gated",
+                      "interruptible"
+                    ],
+                    "type": "string"
+                  },
                   "type": [
-                    "boolean",
+                    "array",
                     "null"
                   ]
                 },
@@ -1440,12 +1455,6 @@
                   },
                   "type": [
                     "array",
-                    "null"
-                  ]
-                },
-                "^[iI][nN][tT][eE][rR][rR][uU][pP][tT][iI][bB][lL][eE]$": {
-                  "type": [
-                    "boolean",
                     "null"
                   ]
                 },

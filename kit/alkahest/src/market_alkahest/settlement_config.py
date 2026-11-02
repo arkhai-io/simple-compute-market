@@ -230,6 +230,8 @@ def require_deliverable_release_models(
     config: AlkahestSettlementConfig | None, deliverable: Any
 ) -> None:
     """Refuse startup when the domain cannot deliver an offered release model."""
+    if config is None:
+        return
     unsupported = set(configured_release_models(config)) - set(deliverable)
     if unsupported:
         raise ReleaseModelError(
@@ -811,8 +813,24 @@ def alkahest_option_builder(
             else dict(value)
             for value in accepted
         ]
+    # Release-condition derivation reads this module's configuration model, so
+    # import it after configuration initialization rather than forming a cycle.
+    from .release_conditions import release_conditions
+
+    chains = resources.get("chains")
+    conditions = release_conditions(
+        config,
+        chain_names={str(escrow["chain_name"]) for escrow in escrow_wires},
+        chains=chains if isinstance(chains, Mapping) else {},
+        wallet_address=wallet_account_address(resources.get("wallet")),
+    )
     options: list[dict[str, Any]] = []
-    for escrow in escrow_wires:
+    for escrow, condition in (
+        (escrow, condition)
+        for escrow in escrow_wires
+        for condition in conditions
+        if condition["chain_name"] == escrow["chain_name"]
+    ):
         literals = escrow.get("literal_fields")
         if not isinstance(literals, Mapping):
             literals = {}
@@ -832,7 +850,7 @@ def alkahest_option_builder(
             if "value" in rate:
                 rate["value"] = str(rate["value"])
             rates.append(rate)
-        params = {"accepted_escrow": escrow}
+        params = {"accepted_escrow": {**escrow, "demand": condition}}
         identity_payload = {
             "price": {"asset": str(asset), "rates": rates},
             "settlement": {"schema": ALKAHEST_MECHANISM_ID, **(params or {})},

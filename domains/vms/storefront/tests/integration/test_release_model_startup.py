@@ -1,19 +1,11 @@
-"""The VM storefront refuses to start with a contradictory Alkahest release model.
-
-The real app and lifespan compose the storefront from configuration, its signer
-from a development credential supplied as the Secret boundary supplies it, so
-nothing but the refusal stops startup from opening the storefront's database.
-A section stating both the oracle-gated and the interruptible model names two
-arbiters for one escrow, so startup refuses it, enabled or not, before it opens
-that database, builds its signer's services, or starts any loop.
-"""
+"""Invalid Alkahest model lists refuse startup before persistence or workers."""
 
 from __future__ import annotations
 
 import base64
 
 import pytest
-from market_alkahest import ReleaseModelError
+from market_settlement_runtime import SettlementConfigurationError
 from market_identity import Ed25519Signer
 
 import market_storefront.server as server
@@ -31,7 +23,7 @@ SIGNER = Ed25519Signer(SEED)
 
 
 @pytest.mark.parametrize("enabled", [True, False])
-async def test_both_oracle_gated_and_interruptible_refuse_startup(
+async def test_duplicate_release_models_refuse_startup(
     tmp_path, monkeypatch, enabled
 ):
     monkeypatch.setenv(
@@ -49,10 +41,8 @@ async def test_both_oracle_gated_and_interruptible_refuse_startup(
         "priority": ["alkahest.v1"] if enabled else [],
         "alkahest": {
             "enabled": enabled,
-            "oracle_gated": True,
+            "release_models": ["recipient", "recipient"],
             # A development address; never used on a public network.
-            "trusted_oracle_addresses": ["0x" + "cd" * 20],
-            "interruptible": True,
         },
     }
     with (
@@ -62,7 +52,7 @@ async def test_both_oracle_gated_and_interruptible_refuse_startup(
             "identity.principal", SIGNER.identity.model_dump(mode="json")
         ),
     ):
-        with pytest.raises(ReleaseModelError, match="mutually exclusive"):
+        with pytest.raises(SettlementConfigurationError, match="Settlement.alkahest"):
             async with app.router.lifespan_context(app):
                 pass
 
