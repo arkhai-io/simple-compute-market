@@ -141,14 +141,15 @@ by dispute interface", "Evidence is keyed by negotiation" and "A dispute is one 
       application-integration suites; a client that does not recognize the shape refuses at
       selection, before approval or escrow funding, never during fulfillment; `e2e_deal`,
       `e2e_bare_metal_mock_deal` and `e2e_credits_payment_deal` pass on republished listings.
-  - [ ] 2.5a Add internal price, settlement-schema/parameter and lifecycle accessors
+  - [x] 2.5a Add internal price, settlement-schema/parameter and lifecycle accessors
         without changing serialized options or IDs. Route buyer admission and acceptance,
         negotiation policies, pricing and mechanism projections, fulfillment dispatch and
         persisted Agreement queries through the accessors. Files: core carriers and buyer;
         settlement-runtime, policy, Alkahest and contact-exchange adapters; VM, bare-metal
         and API-credit consumers. Keep the concurrently owned payments kit unchanged.
-        The payments kit's own option readers remain for its owner to move onto these
-        accessors before 2.5b. No permanent wire documentation changes in this step.
+        The payments kit's Agreement and public-carrier readers also use the accessors;
+        mandates consume the typed mechanism parameters. No permanent wire documentation
+        changes in this step.
   - [ ] 2.5b Flip the wire model and identity payload to optional `price`, `settlement`
         and optional `lifecycle`; update all builders, selection mirrors, the registry
         carrier, Agreement queries and fixtures together, including the payments kit once
@@ -164,47 +165,18 @@ on the republished listings of 2.5; nothing composes the kits yet.
 
 ### Settlement-option accessor checkpoint (2026-11-02)
 
-- Added read-only model accessors for price (absent when rateless), asset/rates,
-  settlement schema/parameters and lifecycle, plus core-owned public-carrier
-  readers and a persisted-Agreement JSON path. VM, bare-metal and API-credit
-  admission, exact acceptance, pricing, projections, dispatch and recovery now
-  use them. VM concept modules use the existing policy-owned selection lookup
-  rather than importing core. Policy and Alkahest declare their core dependency,
-  and consuming locks were refreshed through the wheelhouse tooling. The current
-  dependency matrix in `docs/development/RELEASING.md` names both new edges.
-- Serialized options, ID payloads, buyer selections and Agreements remain
-  unchanged. The existing API-credit buyer policy double now exposes the
-  accessor used by production; every kept assertion is preserved. The asset accessor retains the nominal introduction tag for existing
-  rateless Agreement/obligation bytes; the price view itself is absent. Lifecycle
-  is not yet carried. No new permanent tests or weakened assertions were added.
-- The parallel-owned payments kit is untouched. Its remaining option readers in
-  `agreement.py`, `mandates.py` and `settlement_config.py` must use the accessors
-  before the wire flip. Steps 2.5b and 2.5c are unstarted; 2.5 remains unchecked.
-  The intermediate accessor layer must not ship independently.
-- Focused suites pass: core/carrier and role suites (572), settlement-runtime
-  (175), policy (97), Alkahest (442), contact exchange (141). A diagnostic
-  round-trip confirmed unchanged rated and rateless option dumps and IDs.
-  Architecture, packaging, comment hygiene and strict OpenSpec validation pass.
-  `make test` passes in full, including application integration, release tooling
-  and Helm structural checks. The full run needed the temporary Docker/Compose
-  config-render prerequisite below, plus two separately committed repairs:
-  distinct query-validation loop variables for core typing (24 query tests and
-  core mypy pass), and the known proxy-sensitive unreachable-storefront fixture
-  from [#323](https://github.com/arkhai-io/simple-compute-market/issues/323)
-  (all 454 provisioning integration tests pass with assertions unchanged).
-- The additional scoped citation check still reports the already accepted future
-  lifecycle architecture destination in the active design/closeout plan. No
-  placeholder permanent document was created before reviewed promotion; the
-  workflow friction is recorded in [#325](https://github.com/arkhai-io/simple-compute-market/issues/325).
-- End-to-end runs are unrun: there is no wire cutover, republished listing or
-  owned scenario stack. The host lacked a Docker CLI; a temporary isolated CLI
-  and Compose plugin supply only config rendering for the aggregate's release
-  tooling (tracked in [#324](https://github.com/arkhai-io/simple-compute-market/issues/324)),
-  not a running daemon or deployment. Those temporary tools were removed after
-  validation. No external credentials, containers or resident servers were prepared.
-  Reproduce the current library/role surface with `make dist && make -C core test`
-  and the existing mechanism targets; use `env -u ALL_PROXY -u all_proxy
-  NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,127.0.0.1` before validation.
+- All option readers, including the integrated payments kit, use core accessors.
+  Mandate derivation consumes typed mechanism parameters, not the public carrier.
+  Serialized options and IDs remain unchanged; no permanent wire docs are promoted.
+- Steps 2.5b and 2.5c remain unstarted, and 2.5 remains unchecked.
+  Payments typing, generated models, contract vectors and 92 tests pass. The full
+  `make test`, architecture, packaging, comment hygiene and strict OpenSpec checks
+  pass. Validation uses ALL_PROXY/all_proxy unset and
+  NO_PROXY=no_proxy=localhost,127.0.0.1 (#323).
+- End-to-end remains unrun: no wire cutover or republished deployment, and no Docker
+  daemon (#324). The temporary user-space Docker/Compose config-render tools used
+  for the aggregate release-tooling checks were removed after validation.
+  The active plan's future lifecycle architecture citation is tracked in #325.
 
 ### Implementation checkpoint (2026-11-02)
 
