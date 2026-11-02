@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 
 import httpx
 import pytest
+from market_deal_servicing.journal import stable_ref
 from market_identity import Eip191Signer, TrustedIdentitySet
 from market_settlement_runtime import (
     FULFILLMENT_REFERENCE_KEY,
@@ -293,7 +294,7 @@ async def test_an_uncollected_settlement_ends_the_lease_once_delivery_began(
     await runtime.obligation_servicing["alkahest.v1"].terminal(record, state, None)
 
     assert site.terminations == (
-        [("reservation-a", f"settlement_{state}")] if terminated else []
+        [("reservation-a", stable_ref(record.negotiation_id, "terminate", "terminate"))] if terminated else []
     )
 
 

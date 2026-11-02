@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from arkhai_compute.end_classification import CommandEnd, classify_site_end
 from compute_provisioning_contracts import LeaseEndedEvent, SignedLeaseEndedReport
 from market_deal_servicing.evidence import EvidenceSession
 from market_deal_servicing.journal import Classification, EndSession, stable_ref
@@ -26,52 +27,30 @@ def site_classification(
     remain separate sources, even when this report confirms a lawful command.
     """
     record = end.read(negotiation_id)
-    ref = "site-event:" + event.event_id
-    requests = end.requests(negotiation_id)
-    intents = end.intents(negotiation_id)
-    for intent in intents:
-        commanded = (
-            intent.kind == "terminate" and event.reason == intent.intent_ref
-            and (event.caller == record.seller or (
-                event.caller is None and event.cause == "release"
-                and event.source_state in {"reserved", "leased"} and record.available_at is None
-            )) and intent.payload["at"] <= event.effective_at
-        ) or (
-            intent.kind == "truncate" and event.deadline_phase == "lease"
-            and event.claimed_deadline == event.effective_at == intent.payload["at"]
-        )
-        if not commanded:
+    commands = []
+    for intent in end.intents(negotiation_id):
+        if intent.kind not in {"terminate", "truncate"}:
             continue
-        for request in requests:
+        for request in end.requests(negotiation_id):
             if request.ended_at != intent.payload["at"]:
                 continue
-            controlling = classification_for(end, negotiation_id, request.source_ref)
-            if controlling is not None:
-                return Classification(
-                    kind=controlling.kind,
-                    evidence_refs=[ref, request.source_ref, *controlling.evidence_refs],
-                ), request.source_ref if controlling.lawful else None
-
-    # Only an exact accepted term deadline is a lawful clock end. An arbitrary
-    # earlier site deadline is not allowed to shorten the commercial Agreement.
-    if (
-        event.deadline_phase == "lease"
-        and event.claimed_deadline == event.effective_at == record.term_end
-    ):
-        return Classification(kind="terms", evidence_refs=[ref]), None
-    if (
-        event.deadline_phase == "reservation"
-        and event.claimed_deadline == event.effective_at
-        and record.available_at is None
-    ):
-        return Classification(kind="provisioning_failure", evidence_refs=[ref]), None
-    if event.reason == stable_ref(negotiation_id, "terminate", "terminate"):
-        return None, None
-    if event.cause in {"termination", "force_release"}:
-        return Classification(kind="unentitled_withdrawal", evidence_refs=[ref]), None
-    # Release and teardown failures may be consequences of an authority end not
-    # observed yet. Keep the correction open until its controlling evidence lands.
-    return None, None
+            classification = classification_for(end, negotiation_id, request.source_ref)
+            if classification is None:
+                continue
+            commands.append(CommandEnd(
+                intent.intent_ref, intent.kind, intent.payload["at"], request.source_ref,
+                classification.kind if classification else None,
+                classification.evidence_refs if classification else [],
+            ))
+    result = classify_site_end(
+        event, seller=record.seller, term_end=record.term_end,
+        available=record.available_at is not None, commands=commands,
+        termination_ref=stable_ref(negotiation_id, "terminate", "terminate"),
+    )
+    return (
+        Classification(kind=result.kind, evidence_refs=result.evidence_refs) if result.kind else None,
+        result.controlling_source_ref,
+    )
 
 
 def resolve_site_corrections(end: EndSession, negotiation_id: str, *, now: int) -> None:
@@ -83,14 +62,14 @@ def resolve_site_corrections(end: EndSession, negotiation_id: str, *, now: int) 
         item = items[request.source_ref]
         report = SignedLeaseEndedReport.model_validate_json(item.body)
         event = LeaseEndedEvent.model_validate_json(report.payload)
-        classification, _ = site_classification(end, negotiation_id, event)
+        classification, controlling = site_classification(end, negotiation_id, event)
         if classification is None:
             continue
         record = end.read(negotiation_id)
         end.resolve_correction(
             negotiation_id, request.source_ref, record.revision,
             evidence=classification.evidence_refs, classification=classification,
-            filing_intent=None if classification.lawful else end.failure_filing(
+            filing_intent=None if classification.lawful or controlling else end.failure_filing(
                 request, now=now, delivered=record.available_at is not None,
             ),
         )

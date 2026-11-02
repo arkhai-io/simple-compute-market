@@ -30,6 +30,7 @@ from loopback import serving
 from market_arkhai_payments import PaymentSettlementData
 from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt, dispute_lifecycle
 from market_core.schemas import RateValue, SettlementOption, derive_settlement_option_id
+from market_deal_servicing.journal import stable_ref
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from source_sites import SourceSite, listing_source_projection, source_projections
 from storefront_client import StorefrontClient, StorefrontClientError
@@ -666,4 +667,4 @@ async def test_the_buy_command_settles_over_a_run_log_a_later_command_reloads(
     assert teardown["delivery"]["status"] == "accepted"
     assert teardown["acknowledgement"]["delivery"]["progress"] == "tearing_down"
     assert teardown["payment"]["status"] == "rejected"
-    assert provisioning.terminated == [("reservation-pay", "buyer-surrender:" + teardown["acknowledgement"]["operation_key"])]
+    assert provisioning.terminated == [("reservation-pay", stable_ref(teardown["negotiation_id"], "terminate", "terminate"))]

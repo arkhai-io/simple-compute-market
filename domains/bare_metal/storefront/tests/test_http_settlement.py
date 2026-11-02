@@ -13,6 +13,7 @@ from market_core.schemas import RateValue, SettlementOption, derive_settlement_o
 from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt, dispute_lifecycle
 from arkhai_bare_metal_storefront.models import BareMetalSettleRequest
 from arkhai_bare_metal_storefront.fulfillment_service import BareMetalFulfillmentError
+from market_deal_servicing.journal import stable_ref
 from market_identity import Ed25519Signer
 from arkhai_bare_metal_storefront.settlement_composition import (
     BareMetalStorefrontSettlementComposition,
@@ -879,7 +880,7 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
     assert capacity.reserve_calls[0]["claim"]["gpu_model"] == LISTING_HARDWARE["gpu_model"]
     assert capacity.reserve_calls[0]["claim"]["dimensions"] == {"units": 1}
     assert len(provisioning.begin_calls) == 1
-    assert provisioning.terminations == [("reservation-a", "buyer-surrender:" + tearing_down["operation_key"])]
+    assert provisioning.terminations == [("reservation-a", stable_ref(negotiation_id, "terminate", "terminate"))]
     assert provisioning.teardown_calls == []
     # The storefront never releases capacity itself.
     assert restarted_capacity.site_client.releases == []

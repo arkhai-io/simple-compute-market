@@ -630,7 +630,7 @@ class BareMetalFulfillmentService:
         materialization = await self.db.load_bare_metal_materialization(negotiation_id=negotiation_id)
         if materialization is None:
             await self._effect(lambda effects, binding: effects.release(
-                binding, capacity_reservation_id=reservation,
+                binding, capacity_reservation_id=reservation, failure_reason=operation_key,
             ), context)
             await self.db.update_bare_metal_fulfillment_lifecycle(negotiation_id=negotiation_id, state="released")
             return PhysicalResult(progress="released", done=True)

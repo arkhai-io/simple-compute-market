@@ -176,6 +176,7 @@ version = "0.24.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-bare-metal" },
+    { name = "arkhai-compute" },
     { name = "arkhai-compute-provisioning-client" },
     { name = "arkhai-compute-provisioning-contracts" },
     { name = "arkhai-core" },
@@ -226,6 +227,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "arkhai-bare-metal", specifier = ">=0.14.0" },
+    { name = "arkhai-compute", specifier = ">=0.2.0" },
     { name = "arkhai-compute-provisioning-client", specifier = ">=0.7.0" },
     { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.11.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },

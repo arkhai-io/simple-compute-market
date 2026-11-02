@@ -10,6 +10,7 @@ fulfillment, one evidence submission, one lease termination.
 from __future__ import annotations
 
 from dataclasses import replace
+from market_deal_servicing.journal import stable_ref
 
 from settlement_compositions import ChainClient, EscrowOnChain, StringObligations
 from loopback import serving
@@ -103,7 +104,7 @@ async def test_a_restart_after_teardown_ends_the_lease_once(tmp_path) -> None:
     # second.
     for name in ("negotiation_id", "operation_key", "receipt_at", "selected_end", "delivery"):
         assert retried[name] == first[name], name
-    assert site.terminations == [("reservation-a", "buyer-surrender:" + first["operation_key"])]
+    assert site.terminations == [("reservation-a", stable_ref(first["negotiation_id"], "terminate", "terminate"))]
 
 
 async def _settle_status(app) -> dict:

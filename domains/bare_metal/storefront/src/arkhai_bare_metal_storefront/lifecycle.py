@@ -10,7 +10,8 @@ import sqlite3
 import time
 from datetime import datetime, timezone
 
-from compute_provisioning_contracts.lease_ends import SignedLeaseEndedReport, verify_lease_end
+from arkhai_compute.end_classification import CommandEnd, classify_site_end
+from compute_provisioning_contracts.lease_ends import LeaseEndedEvent, SignedLeaseEndedReport, verify_lease_end
 
 from market_arkhai_mediation.adapter import MediationAdapter
 from market_arkhai_mediation.claims import sign_claim
@@ -25,7 +26,8 @@ from market_deal_servicing import (
     FinalRequest, LifecycleRouteBinding, LifecycleRouteServices, RespondentPoller,
     PhysicalResult, SellerDeal, SellerServicing, SellerSession, SQLiteEvidenceStore, VerifiedSiteEnd,
 )
-from market_deal_servicing.evidence import transaction
+from market_deal_servicing.evidence import EvidenceSession, transaction
+from market_deal_servicing.journal import stable_ref
 from market_identity import Identity, canonical_json
 
 from .lifecycle_records import register_agreement
@@ -169,11 +171,9 @@ class BareMetalLifecycle:
         # The end is already durable; begin's finally and the recovery loop retry it.
         if self.lock(negotiation_id).locked():
             return PhysicalResult(progress="end_recorded", done=False)
-        with transaction(self.path) as conn:
-            selected = EndSession(conn).selected_end(negotiation_id)
         return await self.runtime.fulfillment_service().apply_end(
             negotiation_id, terminate=terminate, at=at, operation_key=operation_key,
-            reason=selected.source_ref if selected else "lifecycle_end",
+            reason=operation_key,
         )
 
     async def local_end(self, negotiation_id, *, cause):
@@ -218,23 +218,15 @@ class BareMetalLifecycle:
             report, capacity_reservation_id=row[0], site_id=row[1],
             expected_sites=trust.site_trusted_set(row[1]),
         )
-        controlling = None
         with transaction(self.path) as conn:
             session = EndSession(conn)
-            for request in session.requests(negotiation_id):
-                if (event.cause == "termination" and event.reason == request.source_ref
-                        and event.caller == session.read(negotiation_id).seller
-                        and event.effective_at >= request.ended_at):
-                    classification_row = conn.execute(
-                        "SELECT classification FROM servicing_final_requests WHERE negotiation_id=? AND source_ref=?",
-                        (negotiation_id, request.source_ref),
-                    ).fetchone()
-                    if classification_row[0] is not None and Classification.model_validate_json(classification_row[0]).lawful:
-                        controlling = request.source_ref
-                        break
+            prior = next((request for request in session.requests(negotiation_id)
+                          if request.source_ref == "site-event:" + event.event_id), None)
+            controlling = (prior.controlling_source_ref if prior else
+                           self.site_classification(session, negotiation_id, event).controlling_source_ref)
         return VerifiedSiteEnd(
             event_id=event.event_id, capacity_reservation_id=row[0], ended_at=event.effective_at,
-            actor=report.signer, cause=event.cause, controlling_source_ref=controlling,
+            actor=event.caller or report.signer, cause=event.cause, controlling_source_ref=controlling,
         )
 
     async def recover_site(self, negotiation_id):
@@ -258,22 +250,65 @@ class BareMetalLifecycle:
             "SELECT negotiation_id FROM bare_metal_fulfillment_lifecycle WHERE capacity_reservation_id=?",
             (event.capacity_reservation_id,),
         ).fetchone()
-        record = session.read(row[0])
-        refs = ["site-event:" + event.event_id]
-        if event.controlling_source_ref:
-            classification = session.conn.execute(
-                "SELECT classification FROM servicing_final_requests WHERE negotiation_id=? AND source_ref=?",
-                (record.negotiation_id, event.controlling_source_ref),
-            ).fetchone()[0]
-            return Classification.model_validate_json(classification)
-        earlier = session.selected_end(record.negotiation_id)
-        if (record.committed_at is not None and record.delivery_deadline_seconds is not None
-                and event.ended_at > record.deadline and record.available_at is None
-                and (earlier is None or earlier.ended_at > record.deadline)):
-            return Classification(kind="non_delivery", evidence_refs=refs)
-        if event.cause == "expiry" and event.ended_at == record.term_end:
-            return Classification(kind="terms", evidence_refs=refs)
-        return Classification(kind="unentitled_withdrawal", evidence_refs=refs)
+        negotiation_id = row[0]
+        item = next(item for item in EvidenceSession(session.conn).read(negotiation_id).items
+                    if item.evidence_id == "site-event:" + event.event_id)
+        report = LeaseEndedEvent.model_validate_json(SignedLeaseEndedReport.model_validate_json(item.body).payload)
+        record = session.read(negotiation_id)
+        session.admit(negotiation_id, record.phase, record.revision, now=self.clock())
+        result = self.site_classification(session, negotiation_id, report)
+        return Classification(kind=result.kind, evidence_refs=result.evidence_refs) if result.kind else None
+
+    @staticmethod
+    def classification_for(session, negotiation_id, source_ref):
+        row = session.conn.execute(
+            "SELECT classification FROM servicing_final_requests WHERE negotiation_id=? AND source_ref=?",
+            (negotiation_id, source_ref),
+        ).fetchone()
+        return Classification.model_validate_json(row[0]) if row and row[0] else None
+
+    def site_classification(self, session, negotiation_id, event):
+        record = session.read(negotiation_id)
+        commands = []
+        for intent in session.intents(negotiation_id):
+            if intent.kind not in {"terminate", "truncate"}:
+                continue
+            for request in session.requests(negotiation_id):
+                if request.ended_at != intent.payload["at"]:
+                    continue
+                classification = self.classification_for(session, negotiation_id, request.source_ref)
+                if classification is None:
+                    continue
+                commands.append(CommandEnd(
+                    intent.intent_ref, intent.kind, intent.payload["at"], request.source_ref,
+                    classification.kind if classification else None,
+                    classification.evidence_refs if classification else [],
+                ))
+        return classify_site_end(
+            event, seller=record.seller, term_end=record.term_end,
+            available=record.available_at is not None, commands=commands,
+            termination_ref=stable_ref(negotiation_id, "terminate", "terminate"),
+        )
+
+    def resolve_site_corrections(self, session, negotiation_id, *, now):
+        items = {item.evidence_id: item for item in EvidenceSession(session.conn).read(negotiation_id).items}
+        for request in session.requests(negotiation_id):
+            if request.source != "lease_ended" or self.classification_for(session, negotiation_id, request.source_ref) is not None:
+                continue
+            report = SignedLeaseEndedReport.model_validate_json(items[request.source_ref].body)
+            event = LeaseEndedEvent.model_validate_json(report.payload)
+            result = self.site_classification(session, negotiation_id, event)
+            if result.kind is None:
+                continue
+            record = session.read(negotiation_id)
+            classification = Classification(kind=result.kind, evidence_refs=result.evidence_refs)
+            session.resolve_correction(
+                negotiation_id, request.source_ref, record.revision,
+                evidence=result.evidence_refs, classification=classification,
+                filing_intent=None if classification.lawful or result.controlling_source_ref else session.failure_filing(
+                    request, now=now, delivered=record.available_at is not None,
+                ),
+            )
 
     def reconcile_local(self, negotiation_id):
         now = self.clock()
@@ -374,6 +409,8 @@ class BareMetalLifecycle:
                 await self.end.drive_physical(deal.negotiation_id)
                 if self.reconcile_local(deal.negotiation_id):
                     await self.seller.read(deal.negotiation_id)
+                    with transaction(self.path) as conn:
+                        self.resolve_site_corrections(EndSession(conn), deal.negotiation_id, now=self.clock())
                     await self.seller.dispatch_filings(deal.negotiation_id)
             except Exception:
                 logger.exception("bare-metal lifecycle recovery failed for %s", deal.negotiation_id)

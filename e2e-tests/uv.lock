@@ -219,6 +219,7 @@ version = "0.24.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-bare-metal" },
+    { name = "arkhai-compute" },
     { name = "arkhai-compute-provisioning-client" },
     { name = "arkhai-compute-provisioning-contracts" },
     { name = "arkhai-core" },
@@ -967,6 +968,7 @@ dependencies = [
     { name = "alkahest-py" },
     { name = "arkhai-bare-metal" },
     { name = "arkhai-bare-metal-storefront" },
+    { name = "arkhai-compute" },
     { name = "arkhai-compute-provisioning-client" },
     { name = "arkhai-compute-provisioning-contracts" },
     { name = "arkhai-core" },
