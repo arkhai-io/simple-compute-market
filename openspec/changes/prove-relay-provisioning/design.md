@@ -874,6 +874,41 @@ in the role (the one requirement every relay must meet, D19, without tooling); a
 throwaway VPS relay in the live run to exercise the role (declined by the owner: the
 role's tests are its evidence).
 
+#### Native admission program publication
+
+The supplied wheel and requirements identify an installation release by their
+content fingerprints. The role creates that release under
+`/opt/frp-grant-admission/releases/`, completing dependency hash checks and the
+wheel installation before writing its success receipt. These fingerprints select
+and reuse the operator's input; they add no independent authenticity guarantee.
+The candidate program checks a private staged configuration, and the role publishes
+those exact checked bytes before switching `current`. An invalid candidate leaves
+the active configuration and program selection unchanged; incomplete releases are
+retried without a success receipt. Old releases are retained, not automatically
+removed.
+
+The daemon uses a dedicated non-root account and group. A changed program release
+restarts the plugin; an issuer/key/range-only configuration change reloads an
+already-running unchanged program. Initial startup and program restart do not
+immediately send SIGHUP, since the program installs its signal handler late in
+startup. frps wants the plugin and starts after it, while the role waits for its
+listener before preparing frps; a plugin restart does not stop existing frps
+connections through a hard service requirement.
+
+The plugin's HUP reload retains its bound listening socket. Therefore an existing
+native listener may not be relocated by an ordinary role run: the role compares
+the canonical old and candidate listeners and refuses a change before publishing
+configuration or switching the program. Listener relocation requires separate,
+explicit drained maintenance/reinstallation. No automatic drain or rebind API is
+introduced. This does not change the container path, whose listener is configured
+in its own network namespace.
+
+Promotion: native release/configuration publication and the fixed-listener reload
+limitation belong in `openspec/specs/physical-provisioning/architecture.md`; the
+native installation and drained listener-maintenance procedure belong in
+`docs/development/VALIDATION_RUNBOOK.md`. Operator documentation must use
+`frp-grant-admission check <path>` (a positional path); only `serve` uses `--config`.
+
 ### D15. Every reclaim policy ends the tenant's activity
 
 Where the tenant account exists, every policy removes the lease's key, ends the

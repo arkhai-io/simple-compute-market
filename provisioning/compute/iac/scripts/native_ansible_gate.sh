@@ -13,7 +13,7 @@ ansible-playbook -i localhost, ansible/playbooks/relay-task-files.yaml --syntax-
 import sys
 import unittest
 
-NATIVE = ["test_frp_proxy_wait.py", "test_frp_binary.py", "test_reclaim_barriers.py"]
+NATIVE = ["test_frp_proxy_wait.py", "test_frp_binary.py", "test_reclaim_barriers.py", "test_admission_installer.py"]
 suite = unittest.TestSuite(
     unittest.defaultTestLoader.discover("tests", pattern=name, top_level_dir="tests")
     for name in NATIVE
