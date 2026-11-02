@@ -615,7 +615,8 @@ async def client_and_queue(
         database_url=str(session_factory.kw["bind"].url),
         lease_watchdog_grace_period_seconds=300,
         lease_watchdog_enabled=False,
-        storefront_url="http://test-storefront:8001",
+        # An unreachable loopback target keeps the status probe off ambient proxies.
+        storefront_url="http://127.0.0.1:0",
         storefront_site_id="default",
         resolved_bare_metal_playbook_path=Path(
             "/fake/bare-metal-node-access.yml"
