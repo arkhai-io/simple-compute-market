@@ -289,7 +289,11 @@ class VmDealLifecycle:
             with transaction(self.path) as conn, atomic(conn):
                 end = EndSession(conn)
                 record = end.read(deal.negotiation_id)
-                end.admit(deal.negotiation_id, record.phase, record.revision, now=self.clock())
+                # A recovery sweep observes missed delivery, not a new admission.
+                # Re-admitting an unchanged phase invalidates concurrent CAS readers.
+                now = self.clock()
+                if now > record.deadline and (record.available_at is None or record.available_at > record.deadline):
+                    end.admit(deal.negotiation_id, record.phase, record.revision, now=now)
             try:
                 await self.recover_site_reports(deal.negotiation_id)
             except Exception:
@@ -346,6 +350,12 @@ class VmDealLifecycle:
         return rows[0][0]
 
     async def recover_site_reports(self, negotiation_id):
+        with transaction(self.path) as conn:
+            view = EndSession(conn).view(negotiation_id)
+        # Release may arrive before the end report. Keep recovering that lost
+        # proof, but a released reservation with retained proof needs no polling.
+        if view.progress == "released" and view.site_reports:
+            return
         delivery = await self.db.load_vm_delivery(negotiation_id=negotiation_id)
         hold = await self.db.load_capacity_hold(negotiation_id=negotiation_id)
         reservation = (delivery or {}).get("capacity_reservation_id") or (hold or {}).get("capacity_reservation_id")
