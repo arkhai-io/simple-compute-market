@@ -53,11 +53,16 @@ reads as written:
   call is denied, finish every part of the work that does not depend on it. If the
   step cannot complete without it, end with `stopped`, `reason` naming that exact
   call and why the step needed it, and `denials` listing the calls as you saw them.
-  A call a deny rule refused is forbidden: no other tool does it. A call denied
-  because no rule allows it may be done instead by a tool this step's rules allow
-  for the same work, such as the Edit tool for a shell write or Read for a shell
-  read; name the substitute in your message. Never ask about a denial as a
-  question.
+  A call a deny rule refused is forbidden: no other tool does it, except where the
+  rule exists only to keep file writes on the Edit and Write tools — the step
+  table's comments name those rules: sed's in-place forms, find's deleting,
+  running, and writing actions, and the diff family's output-to-file forms —
+  whose refused shell write may be made with the Edit or Write tool this step's
+  rules allow. A call denied because no rule allows it — the harness reports it
+  as don't ask mode — may be done instead by a tool this step's rules allow for
+  the same work, such as the Edit tool for a shell write or Read or Grep for a
+  shell read. Either way, name the substitute in your message. Never ask about a
+  denial as a question.
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop — a
   repository guard refusing, `HEAD` moving under you — end with `stopped`, `reason`
   saying why, and `denials` empty.

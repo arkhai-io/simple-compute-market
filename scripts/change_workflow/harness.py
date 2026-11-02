@@ -49,11 +49,16 @@ UNATTENDED = (
     "complete without that call, end with a `stopped` outcome whose `reason` names that exact "
     "call, and otherwise go on and end as the step ends, since the denial is recorded on the "
     "outcome whatever it is. One denied call is not a denied tool. A call a deny rule refused "
-    "is forbidden: no other tool does it. A call denied because no rule allows it, which the "
+    "is forbidden: no other tool does it, except where the rule exists only to keep file "
+    "writes on the Edit and Write tools (the step table's comments name those rules: sed's "
+    "in-place forms, find's deleting, running, and writing actions, and the diff family's "
+    "output-to-file forms), whose refused shell write may be made with the Edit or Write tool "
+    "your step's rules allow. A call denied because no rule allows it, which the "
     "harness reports as don't ask mode, may be done instead by a tool your step's rules allow "
     "for the same work, such as the Edit tool for a shell write or Read or Grep for a shell "
-    "read; name the substitute in your message. Never ask about a denial as a question. Never "
-    "end your turn, schedule a wake-up, or start a monitor to wait for a background command or "
+    "read. Either way, name the substitute in your message. Never ask about a denial as a "
+    "question. Never end your turn, schedule a wake-up, or start a monitor to wait for a "
+    "background command or "
     "subagent: run a subagent in the foreground, and wait for a command as your skill says. A turn that starts after you have reported ends the run in your report's place.")
 
 # Set in the environment of every run the wrapper starts on Claude, so a command

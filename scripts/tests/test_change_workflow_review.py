@@ -193,6 +193,31 @@ def test_rejected_output_is_kept_with_its_transcript(tmp_path: Path) -> None:
     assert rejected.read_text("utf-8") == "ERROR: refused\n"
 
 
+def test_a_review_preceded_by_narration_is_published_from_its_title(tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    narrated = "I have read the change and will now write the review.\n\n" + review_text()
+
+    path = run_review(CHANGE, "design", root=root, runner=writing(narrated), head=lambda _: HEAD)
+
+    published = path.read_text("utf-8")
+    assert "I have read the change" not in published
+    assert published.startswith(review_text().rstrip("\n"))
+    assert not (reviews_of(root) / "transcripts" / "01-design.rejected.md").exists()
+
+
+def test_output_with_no_title_line_is_rejected_and_kept(tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    untitled = "Here are my findings.\n\n" + review_text().split("\n", 1)[1]
+
+    with pytest.raises(ReviewError, match="not the title of a design review"):
+        run_review(CHANGE, "design", root=root, runner=writing(untitled), head=lambda _: HEAD)
+
+    # Nothing is published: the reviews directory holds only the transcripts.
+    assert [entry.name for entry in reviews_of(root).iterdir()] == ["transcripts"]
+    rejected = reviews_of(root) / "transcripts" / "01-design.rejected.md"
+    assert rejected.read_text("utf-8") == untitled
+
+
 @pytest.mark.parametrize("change,kind", [("missing", "design"), ("archive", "design"),
                                          ("../x", "design"), (CHANGE, "triage")])
 def test_unknown_change_or_kind_is_refused(tmp_path: Path, change: str, kind: str) -> None:

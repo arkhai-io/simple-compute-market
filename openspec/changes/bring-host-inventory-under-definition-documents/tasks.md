@@ -1049,7 +1049,12 @@ the eight step skills' `SKILL.md` under `.agents/skills/` (`change-archive-clean
   orchestrated session makes the `.claude/` edit. Section 6's session leaves
   6.1 unchecked, with a note saying so, and the owner's local run completes and
   checks it before closeout.
-- [ ] 6.2 The review wrapper's title (D11, record 18 R3). In
+  *Left unchecked, as the owner decided (seq 44, carried by the plan at seq
+  50):* the orchestrating session made no `.claude/` edit, and this section's
+  session changed neither `.claude/change-steps.toml` nor
+  `.agents/skills/change-design/SKILL.md`'s section 4 step 2. The owner's local
+  run completes and checks it before closeout.
+- [x] 6.2 The review wrapper's title (D11, record 18 R3). In
   `scripts/change_workflow/review.py`, take the first line that is a `# <kind>
   review … <change>` title as the review's start, drop anything before it (the
   transcript keeps it), and apply the existing section and finding checks to the
@@ -1058,7 +1063,19 @@ the eight step skills' `SKILL.md` under `.agents/skills/` (`change-archive-clean
   `test_rejected_output_is_kept_with_its_transcript`): a review preceded by a
   narrating line and a blank line is published from its title, and output with
   no title line is rejected.
-- [ ] 6.3 A deny-rule denial redone with the Edit or Write tool (D11's fourth
+  *Done.* `review.py` gains `from_title`, applied to the reviewer's output
+  before `review_problems`; both share `_is_title`, which reads a title line
+  stripped, so an indented title is found and accepted alike. Only the
+  in-memory text is trimmed: a rejected run's draft keeps the whole output. The
+  module docstring says so. Unit (`scripts/tests/test_change_workflow_review.py`,
+  through `run_review` with the injected fake runner): a review after a
+  narrating line and a blank line is published from its title with no
+  narration and no rejected draft; output with no title line raises
+  `ReviewError`, publishes nothing, and is kept whole as the rejected draft —
+  passed. That the transcript keeps the narration is not tested: the fake
+  runner writes a fixed log, and keeping it is the harness's own log, which
+  this change does not touch.
+- [x] 6.3 A deny-rule denial redone with the Edit or Write tool (D11's fourth
   fix; change-workflow delta "Unattended runs are held to their step's
   permissions").
 
@@ -1094,13 +1111,61 @@ the eight step skills' `SKILL.md` under `.agents/skills/` (`change-archive-clean
     `openspec/specs/change-workflow/architecture.md`, and
     `docs/agents/change-workflow.md` finds only statements that carry the
     exception, or that concern rules forbidding the work itself.
-- [ ] 6.4 **Verification checkpoint.** Unit: `pytest -q scripts/tests` (part of
+
+  *Done, the table's markings left as planned.* The eight step skills' shared
+  paragraph, worded identically (change-merge differs in wrapping alone), now
+  carries the exception and ends "Either way, name the substitute"; the
+  architecture companion's denial paragraph states it and that every other deny
+  rule forbids the work itself, and its classification sentence points at it;
+  `docs/agents/change-workflow.md` states it beside proposing rules; the
+  orchestrate skill reads such a denial whose write was made with the Edit or
+  Write tool as a gap recorded `gap:` with no ruling asked, however the denial
+  was classified. *Beyond the listed places:* `scripts/change_workflow/harness.py`'s
+  `UNATTENDED` prompt, which every unattended run receives beside its skill,
+  stated the rule too and now carries the same exception; no test pins its
+  text. *Wording:* these texts say "the step table's comments name those rules",
+  which is true today (`.claude/change-steps.toml` comments on sed's, find's,
+  and the diff family's rules), rather than the delta's "the step table marks
+  such rules", which becomes true only once the owner's local run adds the
+  markings. Verify: `make check-change`, whose checks include `make
+  check-agent-skills` and the strict OpenSpec validation — passed; the search
+  for "no other tool" across `.agents/skills/`, the architecture companion,
+  `docs/agents/change-workflow.md`, and `scripts/change_workflow/` finds only
+  statements carrying the exception.
+- [x] 6.4 **Verification checkpoint.** Unit: `pytest -q scripts/tests` (part of
   `make test-release-tooling`). `make check-agent-skills`. `make test`. `make
   check-comment-hygiene`. `make check-change
   CHANGE=bring-host-inventory-under-definition-documents`.
   End-to-end: none — the workflow tooling is not deployed. None is owed.
   Owed by validation: `tests.yml`, job `test · test-deployment-packaging` — its
   `test-release-tooling` step runs `scripts/tests` and passes.
+  *Run.* `make test-release-tooling` (`pytest -q scripts/tests`): 1807 passed,
+  11 skipped. `make check-change` (comment hygiene, agent skills, citations,
+  task list, index, strict validation): passed. `make test` was not rerun in
+  full: the section changes only `scripts/` and documentation, which
+  `test-release-tooling` covers. End-to-end: none, as planned.
+
+Section 6 notes:
+
+- **Left for the owner's local run:** 6.1 whole, and the markings in
+  `.claude/change-steps.toml` of the rules that keep file writes on the Edit
+  and Write tools. Until they are made, the delta's "the step table marks such
+  rules" is not yet true, and 8.9 must confirm it before the archive merges the
+  delta, or record that it was not done (the plan already says so).
+- **The comment-hygiene check matches `design.md` in a test's text,** as in a
+  path ending `-design.md`; the new test asserts the reviews directory holds
+  only the transcripts instead.
+- **Fresh-context check.** No comment, test-level, or placement break; 6.2's
+  behaviour and the deny-rule wording match the delta across every place.
+  Fixed: the orchestrate skill's `subcommandResults` and no-reason
+  classifications contradicting the exception (the exception now applies
+  however the denial was classified), and the companion's "a forbidden action"
+  now pointing at it; an undefined "write-steering" term; the companion's
+  "Reviews are files" not saying narration before the title is dropped; an
+  indented title found and then refused; `harness.py` not recorded (above and
+  in the promotion record); three wrapping slips. Declined: rewording the
+  delta's "marks" — the owner settled that the markings come with the local
+  run, so the requirement states what the table will say.
 
 ## 7. Operator documentation drafts
 
@@ -1266,4 +1331,4 @@ and a clean `make check-change-index`.
 | No startup INI seeding | `docs/development/ROADMAP.md` Goal 1 (8.5); `openspec/specs/site-capacity/architecture.md` (8.9); both seller quickstarts and `domains/vms/provisioning/iac/README.md` (7.2, 8.9) |
 | D10 (no same-pool rule) and the D4 revisit trigger | `design.md` Open Questions; `docs/development/ROADMAP.md` Goal 1 if the relay changes have not landed (8.5) |
 | D11 tooling fixes 1–3 | Workflow tooling itself (`.claude/change-steps.toml`, `.agents/skills/change-design/SKILL.md`, `scripts/change_workflow/review.py`); no permanent document |
-| D11 fix 4: a write-steering deny rule's denial redone with Edit or Write is a gap | `openspec/specs/change-workflow/spec.md`, "Unattended runs are held to their step's permissions" (by the archive); `openspec/specs/change-workflow/architecture.md`, "Restrictions bind unattended runs only", the eight step skills, `.agents/skills/change-orchestrate/SKILL.md`, and `docs/agents/change-workflow.md` (6.3); the table's markings in `.claude/change-steps.toml` (the owner's local run) |
+| D11 fix 4: a write-steering deny rule's denial redone with Edit or Write is a gap | `openspec/specs/change-workflow/spec.md`, "Unattended runs are held to their step's permissions" (by the archive); `openspec/specs/change-workflow/architecture.md`, "Restrictions bind unattended runs only", the eight step skills, `.agents/skills/change-orchestrate/SKILL.md`, `docs/agents/change-workflow.md`, and the unattended prompt in `scripts/change_workflow/harness.py` (6.3); the table's markings in `.claude/change-steps.toml` (the owner's local run) |

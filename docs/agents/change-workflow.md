@@ -251,7 +251,13 @@ commit, or which the orchestrating session commits on your word in the change's
 clone.
 The orchestrating session reads each run's denials from its log line
 (`python3 scripts/run_change_step.py denials <change> <seq>`) and proposes the
-narrowest rule for a gap, either granted for one run or as a table edit. A
+narrowest rule for a gap, either granted for one run or as a table edit. After a
+deny-rule denial no other tool may do the work, except where the rule exists only
+to keep file writes on the Edit and Write tools — the table's comments name those
+rules: sed's in-place forms, find's deleting, running, and writing actions, and
+the diff family's output-to-file forms. A shell write such a rule refuses, made
+with the Edit or Write tool the step's rules allow, is read as a gap and needs no
+ruling from you; every other deny rule forbids the work itself. A
 row never names a Fable or Astra model, nor two models of one vendor. `REVIEW_MODEL`
 and `REVIEW_EFFORT` (below) are yours for a review run by hand, not the table's.
 
