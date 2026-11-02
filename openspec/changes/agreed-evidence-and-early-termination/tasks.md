@@ -1744,3 +1744,25 @@ or deployed monetary-ruling qualification is claimed by this kit repair.
   The shared correction result preserves controlling source and evidence; its
   nonlawful adoption still relies on the parallel S-N2 journal repair. Existing
   section 16 compute/lifecycle architecture promotion owns this factoring.
+- S-N4 / O-F1 producer remainder: task 10.6 now has permanent site integration
+  checks for atomic transition/event/borrowed-outbox rollback and deduplication,
+  and compute-service application checks for all five end causes, pre-send crash
+  reconstruction, lost acknowledgement, original signed push/pull bytes after
+  signer rotation, unsupported-peer parking (including unsigned HTTP 404),
+  transient HTTP retry, peer reconfiguration and explicit resumption. Failure
+  reports retain held capacity. The site gate fails all four cases when report
+  reservation is temporarily disabled; that diagnostic mutation was restored.
+  The defect was missing verification, not a newly found producer algorithm bug:
+  the permanent checks pass the existing producer. Normal `kit/site` and
+  `provisioning/compute/service` test discovery runs these checks through root
+  `test-kits` / `test-provisioning`, already present in the CI matrix; no optional
+  example or separate CI-only command is required. Focused service lease/outbox
+  suites: 24 pass; signed refusal/parking extension: four pass. Section 16 retains
+  site-capacity/physical-provisioning promotion and end-to-end qualification.
+- Aggregate encounter: the first full run reached compute-service integration
+  (457 passed) but its existing retired-setting startup case exhausted recursion.
+  Isolated replay passed. The integration fixture's top-level route guard missed
+  FastAPI's lazy included routers and repeatedly stacked their lifespans. The
+  separate fixture repair uses public OpenAPI paths and invalidates schema cache
+  only when mounting. This is repaired and re-driven (all 458 service integration
+  tests pass), not accepted as unrelated.
