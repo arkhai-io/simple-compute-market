@@ -84,6 +84,7 @@ class RespondentPoller:
                 intent is not None and record.available_at <= intent.ended_at
             )
             matching = False
+            selected = end.selected_end(negotiation_id)
             if intent is not None and intent.delivered == delivered:
                 if intent.cause == "payer":
                     for request in end.requests(negotiation_id):
@@ -92,7 +93,7 @@ class RespondentPoller:
                             (negotiation_id, request.source_ref),
                         ).fetchone()
                         classification = Classification.model_validate_json(row[0]) if row and row[0] else None
-                        if (request.ended_at == intent.ended_at and request.actor == deal.buyer
+                        if (request == selected and request.ended_at == intent.ended_at and request.actor == deal.buyer
                                 and classification is not None
                                 and classification.kind in {"buyer_surrender", "entitled_stop"}):
                             matching = True
