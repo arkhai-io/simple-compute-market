@@ -273,13 +273,18 @@ template writer), and `docs/development/DEPLOYMENT_AND_CONFIG.md`.
       Verify: `kit/arkhai-payments/tests/test_settlement_config.py` covers "The retired dispute
       authority key is set"; a template-writer test per role asserts no `[[Dispute]]` entry and
       no authority account, origin or key ("A template is written").
-- [ ] 3.3 Add the optional recommended-authorities list to the registry descriptor carrier and
+- [x] 3.3 Add the optional recommended-authorities list to the registry descriptor carrier and
       its operator configuration, built from configuration only, with Helm values and render
       checks. Verify: the descriptor unit and integration suites named in
       `openspec/specs/registry-discovery/spec.md` ("Strict descriptor carriers…") gain "An
       operator recommends an authority" and "A registry recommends none" (library integration
       against the real registry app); `helm/scripts/test-render.sh` passes with and without the
       list.
+  - Verified: descriptor unit/library-integration suites (9 tests), including
+    configured recommendations through the signed typed client and omission
+    when unconfigured; Helm render checks with and without recommendations;
+    architecture, packaging, comment hygiene and strict OpenSpec pass.
+
 - [ ] 3.4 Fetch a registry's recommendations where roles already read its descriptor (buyer
       bootstrap and storefront publication), and report at startup when a role's list is empty.
       Verify: application-integration tests through the typed client: "A buyer uses its

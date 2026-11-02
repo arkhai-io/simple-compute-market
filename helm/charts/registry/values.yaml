@@ -37,6 +37,8 @@ descriptor:
   operatorIdentity: "Arkhai local development"
   # Required only when config.requireReadApiKey is true.
   accessAcquisitionPointer: ""
+  # Public advertisement copies, in preference order; no authority is built in.
+  recommendedDisputeAuthorities: []
 
 service:
   type: ClusterIP

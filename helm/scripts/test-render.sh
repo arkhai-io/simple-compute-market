@@ -41,7 +41,8 @@ render "$DEFAULT_RENDERED" "$RELEASE" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml"
 render "$PAYMENTS_RENDERED" "$RELEASE-payments" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" \
-    --values "$CHART_DIR/fixtures/payments-ed25519-values.yaml"
+    --values "$CHART_DIR/fixtures/payments-ed25519-values.yaml" \
+    --set-json 'registry.descriptor.recommendedDisputeAuthorities=[{"interface":"example.dispute.v1","origin":"https://dispute.example","account":"acct_example","record_key":"example-public-key","params":{},"advertisement":{"mechanisms":["example.payment.v1"],"minimum_dispute_window_seconds":60,"minimum_case_hold_seconds":null}}]'
 render "$EVM_RENDERED" "$RELEASE-evm" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" \
     --values "$CHART_DIR/fixtures/eip191-evm-values.yaml"
@@ -205,6 +206,9 @@ expect_present "$DEFAULT_REGISTRY" 'name: +REGISTRY_DESCRIPTOR_BASE_URL' "regist
 expect_present "$DEFAULT_REGISTRY" 'value: +"?Local VM Compute Registry"?' "registry renders its descriptor display name"
 expect_present "$DEFAULT_REGISTRY" 'value: +"?Arkhai local development"?' "registry renders its operator identity"
 expect_absent "$DEFAULT_REGISTRY" 'REGISTRY_DESCRIPTOR_ACCESS_ACQUISITION_POINTER' "public registry omits an acquisition pointer"
+expect_absent "$DEFAULT_REGISTRY" 'REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES' "registry ships no dispute authority"
+expect_present "$PAYMENTS_REGISTRY" 'REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES' "registry renders operator recommendations"
+expect_present "$PAYMENTS_REGISTRY" 'https://dispute.example' "registry retains the configured recommendation origin"
 expect_present "$DEFAULT_REGISTRY" 'value: +"?/app/filter-spec\.yaml"?' "default registry selects the compute filter specification"
 expect_absent "$DEFAULT_RENDERED" 'api-credits-registry' "default render omits the API-credits registry"
 expect_present "$DEFAULT_PROVISIONING_CONFIGMAP" '"identifier": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"' "provisioning keeps EIP-191 identifiers as strings"
