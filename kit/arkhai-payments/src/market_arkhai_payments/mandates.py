@@ -222,7 +222,8 @@ def check(
     actual_values = actual.model_dump(mode="json", by_alias=True, exclude_none=True)
     expected_values = expected.model_dump(mode="json", by_alias=True, exclude_none=True)
     mismatched = sorted(
-        key for key in expected_values if actual_values.get(key) != expected_values[key]
+        key for key in actual_values.keys() | expected_values.keys()
+        if actual_values.get(key) != expected_values.get(key)
     )
     if mismatched:
         raise MandatePolicyError(

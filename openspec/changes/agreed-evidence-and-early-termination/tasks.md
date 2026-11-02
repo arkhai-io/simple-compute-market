@@ -701,9 +701,14 @@ settle by negotiation". Files: `kit/arkhai-payments/schema/`, `src/market_arkhai
       92 tests, mypy, model/resource drift and producer vectors pass. A temporary
       diagnostic exercised zero/bounded/unbounded caps, setup end, and payer/payee/
       dispute rate entries with exact notice/treatment. Promotion remains closeout.
-- [ ] 8.3 Extend the buyer's mandate check to the derived authorities, holds and dispute
+- [x] 8.3 Extend the buyer's mandate check to the derived authorities, holds and dispute
       authority. Verify:
       `test_buyer.py` cases including the payee-as-stop-authority refusal.
+      Implemented: buyer re-derivation checks the complete per-part lifecycle
+      policy, including option-owned authority identity/account, hold, cap and
+      permissions. The kept buyer-policy assertion now exercises seller stop,
+      shortened hold, cap and reverse/extend substitutions as well as fee changes;
+      all 97 payments tests, typing, vectors and generated-resource checks pass.
 - [ ] 8.4 Emit `adjudication` from the storefront's first offered authority advertising the
       option's mechanism (or one option per offered authority), publish nothing hosted with an
       empty list, and refuse incompatible authorities at publication, in the VM, bare-metal and
