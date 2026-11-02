@@ -612,12 +612,13 @@ and the bare-metal buyer's counterparts.
       mechanism, and prefer options in list order. Verify: unit tests for "A seller pairs the
       real account with its own origin", "A buyer meets an authority it has not accepted", "A
       seller offers two dispute authorities" and "A buyer prefers one authority".
-- [ ] 7.4 Compose the buyer half, its evidence store and the lifecycle client in the VM and
+- [x] 7.4 Compose the buyer half, its evidence store and the lifecycle client in the VM and
       bare-metal buyer stages; compute deals send `commit` after settlement instead of the seller
       settlement handoff where the mechanism has a lifecycle adapter, and Alkahest and API-credit
       paths are unchanged. Verify: application-integration tests through the typed client per
       domain that a hosted-mechanism deal stage reaches `commit` (with kit-owned vector-derived in-process payments and mediation contract fakes; no runnable tooling dependency)
       and an Alkahest deal stage is unchanged.
+      Done in both domains: the bare-metal half under 15.2 (e2e_bare_metal_payment_deal reaches the canonical commit; e2e_bare_metal_mock_deal is unchanged) and the VM half under 14.5 (e2e_deal and e2e_deal_buyer_cli; Alkahest delivery is unchanged). Evidence: docs/attachments/bare-metal-lifecycle/index.md and docs/attachments/vm-end-classification/index.md.
 
 - [x] 7.5 **Round 2, after 12.3 and 13.3:** add canonical client end_delivery(negotiation_id)
       and buyer-half end verification/capture. Round-1 dispatch remains fake-adapter work in 7.2.
