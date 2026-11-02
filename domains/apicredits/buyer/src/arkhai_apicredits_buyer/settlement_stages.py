@@ -113,7 +113,7 @@ class AlkahestBuyerStage:
         options = [
             option
             for _registration, option in settlement_policy.compatible_options(
-                listing.get("settlement_options") or (),
+                listing.get("settlement_options") or (), listing=listing,
             )
             if option.settlement_schema == selected.selection.settlement_schema
         ]

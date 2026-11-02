@@ -607,7 +607,7 @@ and the bare-metal buyer's counterparts.
       with fake adapters for "A filed case requests a reverse", "The authority cannot complete an
       extension", "Parts differ", "A buyer reads a deal with no lifecycle adapter", "A buyer
       files after the window" and "A filing's response is lost".
-- [ ] 7.3 Refuse options at selection whose authority fails exact identity match, whose
+- [x] 7.3 Refuse options at selection whose authority fails exact identity match, whose
       interface has no adapter, or whose authority does not advertise the option's payment
       mechanism, and prefer options in list order. Verify: unit tests for "A seller pairs the
       real account with its own origin", "A buyer meets an authority it has not accepted", "A
@@ -633,6 +633,14 @@ Verification point: unit and library-integration suites of the client and buyer 
 bare-metal buyer application-integration suites; `make test`. End-to-end: `e2e_deal`,
 `e2e_deal_buyer_cli` and `e2e_bare_metal_mock_deal` must keep passing; none exercises a hosted
 lifecycle deal.
+
+### Lifecycle buyer foundation checkpoint (2026-11-02)
+
+- 7.1 provides the signed, publisher-pinned async lifecycle client for commit, hint and delivery reads, using the shared route declarations and exact-envelope capture. 7.2 provides injected buyer payment/dispute dispatch, durable same-key/content guards, interface-owned append packaging, separate hint observation and merged direct-authority/delivery reads. No payment remedy is applied by the buyer half.
+- 7.3 composes exact authority admission in VM, bare-metal and API-credit fresh selection. The neutral core buyer receives only an option-preference callback; it does not bind a lifecycle kit. Registry-specific policy is preserved through compatibility/explain paths, explicit bare-metal option IDs cannot bypass admission, and preference precedes option-ID ordering within the selected mechanism and clause.
+- Client and buyer first-use examples pass, as does the production VM authority-selection example. Existing suites pass: lifecycle 62, buyer evidence 18, core buyer 159, storefront client 68, VM buyer 213, bare-metal buyer 16 and API-credit buyer 35. Existing negotiation fixtures now supply accepted lifecycle authorities; no permanent test function was added or assertion weakened.
+- Fresh wheel builds, dependency-closure relocks, architecture, packaging, lock currency, comment hygiene and pinned strict OpenSpec validation pass. Aggregate and deployment limitations are recorded in `docs/attachments/lifecycle-buyer-foundation/index.md`.
+- 7.4–7.5 remain deferred pending section 13: no compute lifecycle-stage handoff, canonical end-delivery verb, stop/outage journal or live lifecycle authority is claimed. Permanent contract/rationale promotion remains 16.9, to `openspec/specs/deal-lifecycle/spec.md`, its architecture companion and the buyer-orchestration documents.
 
 ## 8. Hosted mandates, buyer mandate check and hosted option builders
 

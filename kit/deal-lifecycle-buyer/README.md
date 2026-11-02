@@ -56,6 +56,28 @@ The composed command accepts `export NEGOTIATION_ID --claim TEXT
 --requested-outcome JSON [--commitment-ref REF]` and emits one JSON bundle with
 base64 bodies, not re-serialized originals.
 
+## Authority selection
+
+The foundation's `market_deal_lifecycle.selection.AuthoritySelection` is a
+resource-free option-preference callback. The composition passes registry-local
+resolved `DisputeEntry` lists and installed `TermContext` capabilities. It checks
+the full authority identity and params, installed interface, advertised payment
+mechanism and lifecycle timing/capability rules before commitment. Unknown
+mechanisms cannot carry lifecycle terms. A missing authority list refuses hosted
+options with the diagnostic naming local entries and registry opt-in.
+
+VM and API-credit policies inject it into `BuyerSettlementPolicy`; bare-metal
+validates its explicit option ID through the same helper. Core receives only a
+callback returning a rank or refusal, not a lifecycle implementation. Mechanism
+and explicit clause priority remain primary; authority preference precedes the
+option-ID tie-break within them, including across listings. Compatibility and
+explanation callers pass the listing so another registry's recommendations never
+broaden admission. Exact params equality is the conservative default; there is no
+interface-specific relaxation.
+
+The VM buyer's committed `examples/authority_selection.py` exercises this path
+without a wallet, registry connection, service credential or deployment.
+
 ## Buyer half
 
 `BuyerLifecycle` receives a resolver for immutable `BuyerDeal` projections from

@@ -22,6 +22,7 @@ import pytest
 from arkhai_bare_metal_buyer import cli
 from arkhai_bare_metal_buyer.config import BareMetalBuyerConfig
 from market_arkhai_payments import ArkhaiPaymentsConfig
+from market_deal_lifecycle.configuration import DisputeConfig, DisputeEntry
 from core_buyer.negotiation_client import NegotiationOutcome
 from market_core.schemas import (
     RateValue,
@@ -38,6 +39,14 @@ from typer.testing import CliRunner
 _BUYER = Ed25519Signer(bytes([1]) * 32)
 _SELLER = Ed25519Signer(bytes([2]) * 32)
 
+_DISPUTE = {
+    "interface": "arkhai.mediation.v1", "origin": "https://dispute.example",
+    "account": "11111111-1111-4111-8111-111111111111",
+    "record_key": "example-record-key", "params": {},
+    "advertisement": {"mechanisms": ["arkhai.payments.v1"],
+                      "minimum_dispute_window_seconds": 60, "minimum_case_hold_seconds": None},
+}
+
 _ACCEPTED_TERMS = {
     "domain": "bare_metal",
     "payload": {"duration_seconds": 3600, "access_method": "ssh"},
@@ -46,15 +55,13 @@ _ACCEPTED_TERMS = {
 
 def _option(mechanism: str, asset: str, rates: list[dict[str, Any]]) -> SettlementOption:
     values = [RateValue.model_validate(rate) for rate in rates]
-    option_id = derive_settlement_option_id(
-        price={"asset": asset, "rates": values},
-        settlement={"schema": mechanism, **({} or {})},
-    )
-    return SettlementOption(
-        option_id=option_id,
-        price={"asset": asset, "rates": values},
-        settlement={"schema": mechanism, **({} or {})},
-    )
+    body = {"price": {"asset": asset, "rates": values}, "settlement": {"schema": mechanism}}
+    if mechanism == "arkhai.payments.v1":
+        body["lifecycle"] = {"adjudication": {
+            "version": 1, "dispute": {key: _DISPUTE[key] for key in ("interface", "origin", "account", "record_key", "params")},
+            "dispute_window_seconds": 120, "case_hold_max_seconds": None,
+        }, "delivery_deadline_seconds": 60}
+    return SettlementOption(option_id=derive_settlement_option_id(**body), **body)
 
 
 _PAYMENT = _option(
@@ -92,6 +99,7 @@ def _compose(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, option: Settlement
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     config = BareMetalBuyerConfig(
         payer_account="11111111-1111-4111-8111-111111111111",
+        disputes=DisputeConfig(entries=[DisputeEntry.model_validate(_DISPUTE)]),
         arkhai_payments=ArkhaiPaymentsConfig(enabled=True),
         registry_principals=(_SELLER.identity,),
         registry_url="https://registry.example",

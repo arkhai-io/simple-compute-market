@@ -54,7 +54,7 @@ def payment_selection_for_listing(
             (
                 option
                 for registration, option in policy.compatible_options(
-                    listing.get("settlement_options") or ()
+                    listing.get("settlement_options") or (), listing=listing,
                 )
                 if registration.mechanism_id == ARKHAI_PAYMENTS_MECHANISM
             ),
