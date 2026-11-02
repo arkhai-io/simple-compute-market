@@ -453,7 +453,8 @@ class EndSession:
                 return Admission(status="ended", revision=record.revision, ended_at=record.term_end)
             phases = list(DeliveryPhase)
             latest_phase = max((record.phase, phase), key=phases.index)
-            record = self._write(record.model_copy(update={"phase": latest_phase}))
+            if latest_phase != record.phase:
+                record = self._write(record.model_copy(update={"phase": latest_phase}))
             return Admission(
                 status="admitted", revision=record.revision,
                 ended_at=selected.ended_at if selected else None,
