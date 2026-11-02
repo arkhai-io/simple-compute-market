@@ -36,11 +36,11 @@ class MediationAdapter:
     supported_intents = frozenset({"delivery_end"})
 
     def __init__(
-        self, binding: DisputeBinding, agreement: dict, client: MediationClient, *,
+        self, binding: DisputeBinding, agreement: dict, client: MediationClient | None = None, *,
         clock: Callable[[], int] = lambda: int(time.time()),
         concurrence: SignedDeliveryEndClaim | None = None,
     ):
-        if client.authority != binding.authority:
+        if client is not None and client.authority != binding.authority:
             raise ValueError("client does not address the Agreement's authority")
         selected = agreement.get("settlement", {})
         authorities = [
@@ -54,9 +54,15 @@ class MediationAdapter:
         self.binding = binding
         self._agreement = json.loads(canonical_json(agreement))
         self.agreement_digest = hashlib.sha256(canonical_json(agreement)).hexdigest()
-        self.client = client
+        self._client = client
         self.clock = clock
         self._concurrence = concurrence.model_copy(deep=True) if concurrence is not None else None
+
+    @property
+    def client(self) -> MediationClient:
+        if self._client is None:
+            raise MediationError("Agreement mediation client is unavailable; receipt claims remain local")
+        return self._client
 
     def sign_delivery_end(self, intent: DeliveryEndIntent, signer: Signer) -> dict[str, JsonValue]:
         if signer.identity != Identity.model_validate(self._agreement["seller"]):
@@ -241,41 +247,73 @@ class MediationAdapter:
             if request is None:
                 return Rejected(reason="mediation filing request is missing")
             filing = self._filing(request)
+            filing_key = keys.filing()
+            if wire(filing)["request"]["kind"] == "delivery_end":
+                identity = hashlib.sha256(canonical_json({
+                    "commitment": self.binding.commitment_ref, "agreement": self.agreement_digest,
+                    "authority": self.binding.authority.model_dump(mode="json"),
+                })).hexdigest()
+                view = await self.read()
+                if not isinstance(view.outcome, Accepted):
+                    return view.outcome
+                originals = [event for event in view.disputes if event.kind == "filed" and
+                             json.loads(event.items[0].body)["entry"]["filing"]["request"]["kind"] == "delivery_end"]
+                if originals:
+                    fixed = wire(filing)["request"]
+                    if len(originals) != 1 or json.loads(originals[0].items[0].body)["entry"]["filing"]["request"] != fixed:
+                        return Rejected(reason="repair required: delivery-end revision requires resolved prior rulings and effects")
+                    case = wire(await self.client.case(
+                        originals[0].case_ref, agreement=self.agreement_digest,
+                        transaction=self.binding.commitment_ref,
+                    ))
+                    return await self._filing_answer(case)
+                # Only the original caller may write while its result is uncertain.
+                # Other callers adopt a signed equivalent above, or fail closed.
+                owner = hashlib.sha256(canonical_json({
+                    "operation_key": command.operation_key, "filing": wire(filing),
+                })).hexdigest()
+                if keys.store is None or not await keys.store.check_and_record(
+                    command.negotiation_id, "mediation-delivery-end:" + identity, owner,
+                ):
+                    return Rejected(reason="repair required: original delivery-end filing must resolve before adoption or revision")
+                filing_key = hashlib.sha256(canonical_json([identity, wire(filing)["request"]])).hexdigest()
             sent = True
-            answer = wire(await self.client.file(filing, idempotency_key=keys.filing()))
+            answer = wire(await self.client.file(filing, idempotency_key=filing_key))
             if answer["status"] != "accepted":
                 return _failure(answer)
-            case = answer["case"]
-            if case["agreement"] != self.agreement_digest or case["transaction"] != self.binding.commitment_ref:
-                raise MediationProtocolError("filing answer names another deal")
-            # A filing answer has no signed record reference. Obtain it from the
-            # authority record before returning a usable lifecycle acknowledgement.
-            view = await self.read()
-            if not isinstance(view.outcome, Accepted):
-                return Pending(reason=f"case {case['case_ref']} accepted; signed record unavailable")
-            filed = next((
-                event for event in view.disputes
-                if event.case_ref == case["case_ref"] and event.kind == "filed"
-            ), None)
-            if filed is None:
-                return Pending(reason=f"case {case['case_ref']} accepted; filed record pending")
-            return Accepted(
-                filing=LifecycleFilingAnswer(
-                    case_ref=case["case_ref"], record_ref=filed.record_ref,
-                    parts=[PartHold(
-                        part=str(part["part"]), status=part["status"],
-                        reason=part.get("reason", "extension accepted"),
-                        extension_ref=str(part["extension_ref"]) if part["status"] == "held" else None,
-                    ) for part in case["parts"]],
-                ),
-                records=[filed],
-            )
+            return await self._filing_answer(answer["case"])
         except (ValueError, ValidationError, SchemaValidationError) as exc:
             if sent:
                 return Unknown(reason="mediation write response failed verification; read before acting")
             return Rejected(reason=f"invalid mediation command: {type(exc).__name__}")
         except MediationError as exc:
             return _boundary_failure(exc)
+
+    async def _filing_answer(self, case: dict) -> LifecycleOutcome:
+        if case["agreement"] != self.agreement_digest or case["transaction"] != self.binding.commitment_ref:
+            raise MediationProtocolError("filing answer names another deal")
+        # A filing answer has no signed record reference. Obtain it from the
+        # authority record before returning a usable lifecycle acknowledgement.
+        view = await self.read()
+        if not isinstance(view.outcome, Accepted):
+            return Pending(reason=f"case {case['case_ref']} accepted; signed record unavailable")
+        filed = next((
+            event for event in view.disputes
+            if event.case_ref == case["case_ref"] and event.kind == "filed"
+        ), None)
+        if filed is None:
+            return Pending(reason=f"case {case['case_ref']} accepted; filed record pending")
+        return Accepted(
+            filing=LifecycleFilingAnswer(
+                case_ref=case["case_ref"], record_ref=filed.record_ref,
+                parts=[PartHold(
+                    part=str(part["part"]), status=part["status"],
+                    reason=part.get("reason", "extension accepted"),
+                    extension_ref=str(part["extension_ref"]) if part["status"] == "held" else None,
+                ) for part in case["parts"]],
+            ),
+            records=[filed],
+        )
 
     async def read(self) -> AuthorityView:
         try:

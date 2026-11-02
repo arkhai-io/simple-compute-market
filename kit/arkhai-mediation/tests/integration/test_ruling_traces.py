@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import hashlib
 from copy import deepcopy
 
 import pytest
@@ -85,8 +86,13 @@ def test_published_ruling_trace(trace, surface):
         if surface == "adapter":
             for i, item in enumerate(trace["inputs"]):
                 keys = OperationKeys(trace["name"], str(i))
-                input_keys[item["idempotency_key"]] = (keys.filing() if item["operation"] == "file"
-                    else keys.append(item["request"]["case_ref"]))
+                identity = hashlib.sha256(canonical_json({
+                    "commitment": payments.transaction, "agreement": trace["mandate"]["deal"],
+                    "authority": trace["agreement"]["settlement"]["lifecycle"]["adjudication"]["dispute"],
+                })).hexdigest()
+                input_keys[item["idempotency_key"]] = (
+                    hashlib.sha256(canonical_json([identity, item["request"]["request"]])).hexdigest()
+                    if item["operation"] == "file" else keys.append(item["request"]["case_ref"]))
         peer = RulingTraceFake(trace, payments, input_keys=input_keys)
         authority = DisputeAuthority.model_validate(peer.authority)
         binding = DisputeBinding(trace["name"], payments.transaction, authority)
@@ -155,6 +161,17 @@ def test_published_ruling_trace(trace, surface):
                         command = LifecycleCommand(negotiation_id=binding.negotiation_id, kind=kind,
                                                    operation_key=str(i), payload=command_payload)
                         table = DisputeAdapterTable([(INTERFACE, lambda _: adapter)])
+                        if item["operation"] == "file" and any(
+                            prior["operation"] == "file" for prior in trace["inputs"][:i]
+                        ):
+                            # Lifecycle cannot map linked revisions safely. The raw
+                            # client still replays the producer's operator workflow.
+                            refused = await submit_dispute(command, binding, table, operations)
+                            assert isinstance(refused, Rejected) and "repair required" in refused.reason
+                            answer = await client.file(Filing.model_validate(payload),
+                                idempotency_key=input_keys[item["idempotency_key"]])
+                            identical(wire(answer), item["response"])
+                            continue
                         peer.lose_next_response = True
                         unknown = await submit_dispute(command, binding, table, operations)
                         assert isinstance(unknown, Unknown), unknown
