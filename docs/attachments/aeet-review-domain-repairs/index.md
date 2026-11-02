@@ -77,14 +77,96 @@ repairs those rows, and both focused release tooling and the full re-drive pass.
 No deployed VM hosted-servicing end-to-end result is claimed by these in-process
 observations. No owned runtime remains.
 
+## Actor, retention and VM-cycle continuation
+
+Starting revision: `8b1a5cfb5`. Implemented as whole findings:
+
+- **O-F8 — `6172aaac0`:** VM maps the accepted opaque payer/payee accounts to
+  buyer/seller; both domains map the dispute account to its pinned record signer.
+  The shared kit supplies ruling attribution independently of that account map.
+  Unknown accounts fail closed. No account syntax implies a marketplace role.
+- **O-F9 — `d9e4ddfa2`:** both domain watch factories compose the kit's
+  `seller_retention` observer. Bare-metal settlement verification records its
+  evidence commitment in the same transaction, so a committed deal uses the
+  completion boundary rather than acceptance expiry. Pruning through the seller
+  API refreshes required authorities before applying the frozen Agreement window.
+- **O-F16 — `ba051e273`:** VM recovery does not re-admit an unchanged phase on
+  each sweep. It still delegates missed availability deadlines to end service.
+  A released reservation without its end report remains recoverable; with retained
+  proof, site polling stops.
+
+These are in-process consumer observations, not a new authority algorithm or
+live rate-stop qualification. The synthetic neutral stop observations exercise
+actor mapping for a future supported rate adapter; the once adapter still sends
+no stops. No deployed service or private runtime artifact was used.
+
+### Reproduce the prepared first-use surface
+
+After `make dist-ci` and each storefront's `make reinit`, run from the repository
+root with the proxy exclusions above:
+
+```sh
+(cd domains/vms/storefront && uv run --find-links ../../../.dist pytest -q \
+  tests/integration/test_servicing_composition.py \
+  tests/integration/test_lifecycle_cycle.py)
+(cd domains/bare_metal/storefront && uv run --find-links ../../../.dist pytest -q \
+  tests/integration/test_servicing_composition.py)
+```
+
+This directly opens the hosted-deal setup in invocation-owned real SQLite and
+in-process storefront applications. The existing signed typed clients verify
+payment commitment before observation; public deterministic buyer/seller/site
+personas and kit-owned payment fixtures are the only authentication/seed state.
+The commands need no secret or ignored local setup and clean up their own state.
+No HTTP server, container, browser, tunnel or remote target was started.
+
+### Regression observations
+
+| Finding | Before repair | Re-drive |
+| --- | --- | --- |
+| O-F8 | VM payer and authority stops and bare-metal authority stop are attributed to the seller. | All five actor sources per domain retain actor, cause and source: 10 passed. |
+| O-F9 | Complete authority/recovery observations still cannot prune in either domain; bare metal also has no evidence commitment. | Held/unknown funds, open cases, unrecovered capacity, unavailable mediation and missing credentials retain evidence; complete observations prune at the frozen window: 2 passed. |
+| O-F16 | Two unchanged cycles alter admission revision; three recovery calls make three lease reads even with released proof. | Revision remains stable; released-without-proof still reads, the first report is retained once, and the third call performs no lease read: 2 passed. |
+
+The first bare-metal retention setup attempted to re-accept a real existing
+acceptance with a different author/expiry; its rejection was correct. The kept
+regression uses that original accepted envelope and terms instead. No acceptance
+criterion or production authorization was relaxed. All 14 focused continuation
+cases pass.
+
+The required validation sequence, including the full **`make test`**, passes in
+**8m34s** at `ba051e273` with the prescribed proxy exclusions and Podman shim.
+Architecture, packaging (fresh wheelhouse), lock currency, comment hygiene and
+pinned strict OpenSpec validation all pass. The aggregate includes VM storefront
+**1,189 unit passed** (one optional collection skip) and **509 integration passed**,
+bare-metal storefront **533 passed**, VM buyer **213 passed**, bare-metal buyer
+**16 passed**, e2e harness **316 passed**, release tooling **1,858 passed**, and Helm
+structural/render checks. No dependency declaration or lock changed; no relock
+was needed. This is not a deployed e2e run. No resident process or owned external
+resource remains.
+
 ## Continuation boundary
 
-Still owed: O-F8 domain actor attribution, O-F9 seller retention composition,
-O-F16 cycle churn/report polling, the remaining permanent domain tests named by
-sections 14/15 under O-F1, and O-F18's fresh-stack VM hosted payment/mediation
-journey. The shared retention factory and no-op phase-write guard belong to the
-parallel servicing-kit repairs; the domains consume those seams rather than
-introducing a second retention algorithm or copying journal code. Receipt-claim
-signing through the dispute adapter (O-F12, delegated by its owner) must remain
-credential-independent; eager authority-client construction cannot replace the
-current receipt-only surrender behavior.
+Still owed: the remaining permanent domain tests named by sections 14/15 under
+O-F1 and O-F18's fresh-stack VM hosted payment/mediation journey. These remain
+implementation/qualification work, not waived tasks. The already-authorized
+application cases should replace the remaining temporary-only verification:
+hosted commit/list/acceptance capture, VM hardware failure and buyer tear-down,
+VM second-precision lease ends, entitled/unentitled admin dispatch, signed site
+report push/retry/pull and capacity proof, buyer dispatch/evidence capture, and
+bare-metal create-in-flight/owner-refusal/repeated teardown. Existing permanent
+cases can be cited where they already prove the named property.
+
+O-F18 must extend the VM e2e surface, build a fresh owned branch stack through
+the Podman shim, and gate payment/mediation health and dispute-bearing hosted
+publication before pytest, as described in the existing hosted-policy and VM
+qualification packets. No deployment attempt or hosted end-to-end pass is
+claimed at this checkpoint. Source checkouts supplying those services were
+inspected read-only; no external runtime or configuration was changed.
+
+Receipt-claim signing through the dispute adapter (O-F12, delegated by its owner)
+must remain credential-independent; eager authority-client construction cannot
+replace the receipt-only surrender behavior. The independent off-loop ingress
+continuation (O-F10) remains with its assigned owner. Permanent-document
+promotion stays in reviewed closeout to the existing lifecycle, settlement,
+VM-fulfillment and compute/site authority destinations.

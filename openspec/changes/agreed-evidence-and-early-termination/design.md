@@ -641,6 +641,27 @@ verification requirement and the deployment guide's settlement configuration.
 
 VM and bare-metal interpret signed site ends through the compute-family vocabulary's pure `arkhai_compute.end_classification` semantics. Domain wrappers supply retained command/classification facts and keep reservation lookup, signature verification, persistence and physical effects. This avoids putting storefront dependencies in the thin provisioning contract package. Direct release echoes the physical intent identity, just like termination; exact truncation expiry inherits its source, ambiguous release remains pending, and independent earlier failures remain separate correction sources. Correlated failure echoes retain their controlling source rather than filing the same failure again. Durable promotion destination: the deal-lifecycle architecture companion and physical-provisioning specification during reviewed closeout.
 
+## Domain actor, retention and recovery composition
+
+- Payment account attribution remains a domain composition seam: compare only the
+  accepted opaque accounts, map them to the Agreement buyer/seller, and map the
+  accepted dispute account to its pinned record signer. Never infer identity
+  from account syntax. Ruling attribution remains kit-owned.
+- Both compute storefronts use the servicing kit's seller-retention observer,
+  with verified commitment recorded atomically beside settlement evidence. The
+  observer consumes adapter-owned payout completion, signed case closes and
+  proven physical recovery; the domain adds no completion or money algorithm.
+- The VM recovery sweep is a deadline observer, not a fresh delivery admission.
+  It delegates missed availability deadlines to end service without invalidating
+  admission revisions on unchanged cycles. Released reservations continue report
+  recovery only until their signed end proof is retained.
+
+These decisions preserve D8/D9 and promote with the existing reviewed closeout
+work to the deal-lifecycle and settlement-servicing specifications/architecture,
+plus VM fulfillment recovery rationale. They add no owner decision or rate
+capability. Remaining domain application tests and hosted deployed qualification
+remain explicit in the domain task disposition.
+
 ## Status
 
 **One change, two rounds.** The plan's sixteen sections are implemented and reviewed one at a time and merge to `dev` as they land, so round 1's code — the kits, the codec and option shape, the evidence store, the buyer half, hosted mandates — is on `dev` before round 2 starts. The change is not split at that boundary: archiving round 1 alone would merge into `openspec/specs` a buyer half that files cases no kit yet speaks to and an `end_delivery` no end service yet honours, so the deal-lifecycle contract archives whole, when the seller half, end service and the mediation adapter give it its meaning (decided 2026-10-29).
