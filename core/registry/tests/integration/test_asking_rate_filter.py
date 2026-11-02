@@ -165,11 +165,9 @@ async def test_a_rateless_introduction_listing_is_found_by_its_asking_rate(
     (option,) = fetched.settlement_options
     assert option.get("price", {}).get("rates", []) == []
     assert fetched.listing_resource["asking_rate"]["amount"] == "4.00"
-    # An option without lifecycle terms grants no stop and has zero penalty.
-    assert await _ids(
-        registry_client,
-        "asset=introduction early_termination.payer=false early_termination.premature_stop_penalty<=0",
-    ) == {"intro-1"}
+    # An option without lifecycle terms grants no stop. A rateless option has
+    # no asset, so no asset-correlated penalty comparison can match it.
+    assert await _ids(registry_client, "early_termination.payer=false") == {"intro-1"}
     assert await _ids(
         registry_client, "early_termination.payer=true",
     ) == set()
@@ -200,7 +198,17 @@ async def test_a_rateless_introduction_listing_is_found_by_its_asking_rate(
         "delivery_deadline_seconds": 30,
     }
     row = db_session.query(Listing).filter_by(listing_id="intro-1").one()
-    row.settlement_options = [dict(option) | {"lifecycle": lifecycle}]
+    def priced(asset: str) -> dict:
+        return {
+            "option_id": f"priced-{asset}",
+            "price": {"asset": asset, "rates": []},
+            "settlement": {"schema": "arkhai.payments.v1"},
+        }
+
+    row.settlement_options = [
+        priced("USD/2"),
+        priced("USD/6") | {"lifecycle": lifecycle},
+    ]
     db_session.commit()
     assert await _ids(registry_client, "early_termination.payer=true") == {"intro-1"}
     assert await _ids(
@@ -208,7 +216,10 @@ async def test_a_rateless_introduction_listing_is_found_by_its_asking_rate(
     ) == {"intro-1"}
     assert await _ids(
         registry_client,
-        "asset=introduction early_termination.premature_stop_penalty>=100",
+        "asset=USD/6 early_termination.premature_stop_penalty>=100",
+    ) == {"intro-1"}
+    assert await _ids(
+        registry_client, "asset=USD/2 early_termination.premature_stop_penalty<=0",
     ) == {"intro-1"}
     assert await _ids(
         registry_client,
