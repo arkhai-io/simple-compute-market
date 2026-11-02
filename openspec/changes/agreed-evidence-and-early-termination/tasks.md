@@ -91,7 +91,7 @@ dispute authority", "Malformed terms are refused", "Dispute timing terms are bou
 writes are idempotent", "Adapters resolve per mechanism and arbiter", "Dispute adapters resolve
 by dispute interface", "Evidence is keyed by negotiation" and "A dispute is one case payload".
 
-- [ ] 2.1 Create `kit/deal-lifecycle-contracts` (contracts kind): commands
+- [x] 2.1 Create `kit/deal-lifecycle-contracts` (contracts kind): commands
       `{negotiation_id, kind, operation_key, at, payload}`, outcomes (`accepted`, `rejected`,
       `pending`, `unknown`), per-part payment events including `extend` and `lift` with
       `extension_ref` and `case_ref`, per-agreement dispute events, the filing answer with
