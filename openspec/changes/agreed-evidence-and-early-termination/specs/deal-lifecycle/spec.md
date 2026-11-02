@@ -645,7 +645,7 @@ End service MUST journal a required delivery_end filing with its final request a
 
 ### Requirement: Dispute writes are idempotent
 
-A `dispute` and an `append` MUST carry an idempotency key derived from the command's operation key, so a retry returns the one case or item recorded.
+A `dispute` and an `append` MUST carry stable idempotency keys, so a retry returns the one case or item recorded. Delivery-end filings MUST use the semantic identity and original-writer reservation; other filings and appends MUST derive keys from the command's operation key. Caller keys MUST still reject changed command content.
 
 #### Scenario: A filing's response is lost
 
@@ -672,7 +672,12 @@ When the mechanism has no adapter the buyer half's `read` MUST return the author
 
 ### Requirement: The seller half lists deals
 
-The seller half MUST offer `submit`, `read`, `list`, and `watch`. `list` MUST return bounded pages with a continuation token. Each deal MUST carry its negotiation ID, commitment reference, domain, mechanism, entitlements, lifecycle state (unstarted, running, ending, ended, repair required), current deadline, whether any part has an open extension, and its open cases. A deal with only `once` parts MUST be running from its verified commitment until delivery ends.
+The seller half MUST offer `submit`, `read`, `list`, and `watch`. `list` MUST return bounded pages with a continuation token. Each deal MUST carry its negotiation ID, commitment reference, domain, mechanism, entitlements, lifecycle state (unstarted, running, ending, ended, repair required), current deadline, whether any part has an open extension, and its open cases. A deal with only `once` parts MUST be running from its verified commitment until delivery ends. A rejected required filing MUST remain terminal, mark the deal repair required, and be exposed with every filing's outcome in `read` and `list`; it MUST NOT be resubmitted automatically.
+
+#### Scenario: A rejected filing is visible after restart
+
+- **WHEN** the authority rejects a required seller filing and servicing restarts
+- **THEN** the rejection remains visible under repair required, every filing outcome is returned, and the refused filing is not sent again
 
 #### Scenario: A seller lists its deals
 

@@ -105,7 +105,10 @@ view. It ignores the storefront's financial interpretation. With no payment
 adapter the authority view is explicitly rejected, naming the mechanism, but the
 delivery view remains available. `commit(message)` checks the retained reference
 before sending the peer message. Canonical surrender and outage journaling are
-separate from filing a delivery-end intent.
+separate from filing a delivery-end intent. A lost surrender response is retried
+under the original key before fixing a case claim; a transient loss does not
+commit the buyer to contested observation time. When the acknowledgement selects
+an earlier non-surrender end, the half skips automatic payer filing.
 
 Reproduce the injected first-use journey after rebuilding wheels:
 
