@@ -117,7 +117,10 @@ async def end_delivery(lifecycle: BuyerLifecycle, negotiation_id: str) -> EndDel
                 raise ValueError("peer acknowledgement differs from its exact signed receipt")
             intent = DeliveryEndIntent(ended_at=verified.receipt_at, delivered=True, cause="payer")
             adapter = lifecycle.disputes.resolve(deal.dispute) if deal.dispute else None
-            if verified.signed_delivery_end_claim is not None and (
+            # The exact seller-signed receipt acknowledges surrender even when
+            # no dispute adapter is installed. That absence cannot confer a
+            # refund; concurrence is interpreted only by an installed adapter.
+            if verified.signed_delivery_end_claim is not None and adapter is not None and (
                 not isinstance(adapter, DeliveryEndClaims)
                 or not adapter.verify_delivery_end(verified.signed_delivery_end_claim, intent)
             ):

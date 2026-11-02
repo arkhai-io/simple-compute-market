@@ -75,11 +75,21 @@ class DeliveryIngress:
                 controlling_source_ref=verified.controlling_source_ref,
             )
             # Retain the original envelope, not a reconstruction from parsed fields.
-            EvidenceSession(conn).put(negotiation_id, EvidenceItem(
-                evidence_id=ref, kind="lease_ended", classification="independent", recorded_at=now,
-                body=base64.b64encode(body), headers=headers,
-                context={"capacity_reservation_id": verified.capacity_reservation_id},
-            ))
+            evidence = EvidenceSession(conn)
+            kept = next((item for item in evidence.read(negotiation_id).items
+                         if item.evidence_id == ref), None)
+            if kept is not None:
+                # Push retries refresh transport proofs; pull has no push
+                # headers. Preserve the first exact report without conflating
+                # either transport with the site's immutable signed statement.
+                if json.loads(kept.body) != json.loads(body):
+                    raise ValueError("site event identity changes its signed report")
+            else:
+                evidence.put(negotiation_id, EvidenceItem(
+                    evidence_id=ref, kind="lease_ended", classification="independent", recorded_at=now,
+                    body=base64.b64encode(body), headers=headers,
+                    context={"capacity_reservation_id": verified.capacity_reservation_id},
+                ))
             if prior is not None:
                 if prior != request:
                     raise ValueError("site event identity changes its final request")
