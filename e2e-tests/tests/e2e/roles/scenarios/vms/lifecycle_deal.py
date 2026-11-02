@@ -78,7 +78,8 @@ class TypedLifecycleBuyer:
         assert status.fulfillment_id, status
         test_client.drain(timeout=30)
         advance_fulfillment_to(provisioning, status.fulfillment_id, "active")
-        assert self.client.get_settle_status(uid).ready
+        ready = self.admin.wait_for_settlement(uid, timeout=30)
+        assert ready.ready and ready.status == "ready", ready
         return LifecyclePurchase(negotiation_id, status.fulfillment_id,
                                  DealLease(provisioning, self.site_capacity, negotiation_id=negotiation_id).lease_id)
 
