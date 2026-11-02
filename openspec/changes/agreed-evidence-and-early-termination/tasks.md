@@ -1460,7 +1460,7 @@ documentation only; a part needing code returns the change to implementation.
 
 - [x] 16.1 **Comment hygiene.** Run `make check-comment-hygiene` and read the comments the change
       added for provenance; anything found returns the change to implementation.
-- [ ] 16.2 **Import placement.** Confirm the imports each section added are at module level
+- [x] 16.2 **Import placement.** Confirm the imports each section added are at module level
       unless a recorded reason keeps one local; one that should move returns the change to
       implementation.
 - [ ] 16.3 **Documentation compliance.** Re-check D1–D15 against the placement rules, in
@@ -1600,6 +1600,14 @@ documentation only; a part needing code returns the change to implementation.
   Reviewed added production comments and docstrings against the implementation
   diff from `c7dd275c5`; they describe current invariants, not change provenance.
   No code edit is needed or made by closeout.
+
+- 16.2: AST/diff inspection finds one added function-local production import:
+  `alkahest_option_builder` imports `release_conditions` after configuration
+  initialization. The latter imports `AlkahestSettlementConfig` and constants
+  from `settlement_config`; module-level relocation would close that cycle.
+  Its local rationale is explicit. Other added production imports are at module
+  level; implementation review and the full-suite evidence cover execution.
+  No import relocation is needed at documentation-only closeout.
 
 ## Design promotion record
 
