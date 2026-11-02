@@ -1160,6 +1160,16 @@ provision stages". Files: `domains/vms/storefront/src/market_storefront/`
       buyer application-integration targets for canonical client dispatch and evidence capture.
       Extend `e2e_deal`/`e2e_deal_buyer_cli` buyer-end stages to read signed site bytes and await
       proven capacity release, readiness-gated through the existing lane tooling.
+  - [x] 14.5a Application wiring: mount and authenticate site reports, recover through
+        the signed typed lease read, retain exact proof and connect capacity-return
+        callback progress. Preserve immediate physical dispatch from 14.2.
+  - [x] 14.5b Buyer wiring: compose retained evidence and the buyer half/client, use
+        canonical commit for hosted settlement, and expose receipt-time `market end`
+        with separate financial, receipt, case and proven-capacity progress.
+  - [ ] 14.5c End-to-end wiring/qualification: extend the VM end/report stages in
+        `e2e_deal` and `e2e_deal_buyer_cli`; run the fresh branch-built stack through
+        the Podman shim with real local payments and mediation. Keep 14.5 unchecked
+        until this acceptance boundary is observed; 7.4 remains parent-owned.
 
 Verification point: the VM storefront's unit and application-integration suites; `make test`.
 End-to-end: `e2e_deal`, `e2e_deal_buyer_cli` and `e2e_vm_introduction` must keep passing;
@@ -1262,6 +1272,44 @@ the first two gain delivery-only end/report stages, not hosted rate-part stop qu
   or end/report stage extension is claimed. Shared-kit/client and provisioning
   sources are unchanged; no sibling-domain work was touched. Promotion remains
   16.9 to the lifecycle spec/architecture and VM fulfillment documents.
+
+### VM site/buyer application-wiring checkpoint (2026-11-02)
+
+- 14.5a mounts the compute callback contract under site-bound service-peer
+  authentication, verifies the inner site proof against the durable reservation
+  and accepted site, and preserves immutable site payloads through push and
+  signed typed lease-read recovery. Capacity-return callbacks alone advance a
+  delivered deal to released; intended ends stay distinct from proven return.
+- 14.5b composes the VM buyer half with the canonical lifecycle client, profile-
+  local evidence/end journal and Agreement-bound payment/mediation adapters.
+  Hosted approval now hands off with commit; Alkahest settlement is unchanged.
+  `market end --from <run>` has no supplied instant, retries stable commands,
+  preserves receipt time and reports payment/case/delivery/capacity separately.
+  Signed site reports are retained without pretending independent site trust.
+  Removed financial configuration cannot prevent receipt-only surrender.
+- Application first-use and runnable setup: `docs/attachments/vm-site-report/index.md`.
+  It uses signed HTTP, SQLite, vector-derived payments, controlled physical work
+  and the actual buyer CLI/stage with injected recovered run context. Missing
+  mediation authentication remains explicitly unknown, not accepted mediation.
+  The 213 existing buyer cases and 74 focused callback/payment cases pass after
+  their peer setup follows commit; no new permanent test or weakened assertion.
+  Fresh wheels, architecture, packaging, locks and comments pass. Full
+  `make test` passes in 7m15s with the shell-local Podman shim; the final
+  application/packaging re-drive passes after recovery-policy hardening too.
+  Dependency closure was relocked for buyer/storefront/e2e and the existing release row updated.
+  Pinned strict validation passes; scoped citations report only the three known
+  future lifecycle spec/architecture references in #325.
+- Preparation failures were corrected: rebuild/reinit supplied the new client
+  dependency; acceptance artifacts use their wire codec, not alias-free model
+  output; the updated HTTP fixture replaces rather than duplicates transport.
+  Parent integration supplied the shared report-retry fix, so no overlapping
+  kit change was kept. This continuation changes no sibling-domain source.
+- Remaining: 14.5c end/report e2e stages and fresh-stack real-authority
+  qualification; verified failure-source classification/correlation, pending-
+  slot resolution and direct failure-policy release dispatch. Site reports
+  currently retain pending classification without blocking physical work.
+  Keep 14.5 and 7.4 unchecked. Permanent promotion remains 16.9, to the lifecycle
+  spec/architecture, VM fulfillment and buyer-orchestration documents.
 
 ## 15. Bare-metal wiring
 

@@ -44,6 +44,7 @@ from market_identity import Identity, canonical_json
 from market_storefront import container
 from market_storefront.delivery_lifecycle import VmPhysicalEnd
 from market_storefront.settlement_stages import PaymentSettlementError
+from market_storefront.services.capacity_client import build_capacity_runtime, build_fulfillment_client
 
 logger = logging.getLogger(__name__)
 
@@ -53,13 +54,14 @@ def instant(value: str) -> int:
 
 
 class VmDealLifecycle:
-    def __init__(self, db, signer, payments, disputes, *, clock=lambda: int(time.time())):
+    def __init__(self, db, signer, payments, disputes, *, clock=lambda: int(time.time()), fulfillment=None):
         self.db = db
         self.path = Path(db.db_path)
         self.signer = signer
         self.payments_coordinator = payments
         self.dispute_config = disputes.config
         self.clock = clock
+        self.fulfillment = fulfillment
         self.evidence = SQLiteEvidenceStore(self.path)
         with transaction(self.path) as conn:
             create_watch_schema(conn)
@@ -272,6 +274,10 @@ class VmDealLifecycle:
                 logger.exception("VM respondent discovery awaits recovery")
         for deal in deals:
             try:
+                await self.recover_site_reports(deal.negotiation_id)
+            except Exception:
+                logger.exception("VM site-report recovery awaits retry for %s", deal.negotiation_id)
+            try:
                 await self.end.drive_physical(deal.negotiation_id)
             except Exception:
                 logger.exception("VM physical end awaits recovery for %s", deal.negotiation_id)
@@ -293,15 +299,55 @@ class VmDealLifecycle:
             return None
         if terms.adjudication.dispute.interface != INTERFACE:
             raise ValueError("accepted receipt claim interface is unavailable")
-        # The ingress caller already holds the delivery write transaction;
-        # a read-only connection borrows its immutable accepted snapshot.
-        with sqlite3.connect(self.path) as conn:
-            delivered = EndSession(conn).read(negotiation_id).available_at is not None
+        # Surrender acknowledges access relinquished at receipt, not a buyer
+        # claim about when delivery first became available. Earlier non-delivery
+        # remains independently disputable from the retained delivery evidence.
         return sign_claim(
             agreement=hashlib.sha256(canonical_json(agreement)).hexdigest(),
-            claim=DeliveryEndClaim(kind="delivery_end", ended_at=at, delivered=delivered, cause="payer"),
+            claim=DeliveryEndClaim(kind="delivery_end", ended_at=at, delivered=True, cause="payer"),
             signer=self.signer,
         ).model_dump(mode="json")
+
+    def reservation_deal(self, capacity_reservation_id, site_id):
+        with sqlite3.connect(self.path) as conn:
+            rows = conn.execute(
+                """SELECT DISTINCT t.negotiation_id,t.site_id FROM negotiation_threads t
+                   LEFT JOIN vm_delivery_records d USING(negotiation_id)
+                   LEFT JOIN capacity_holds h USING(negotiation_id)
+                   WHERE d.capacity_reservation_id=? OR h.capacity_reservation_id=?""",
+                (capacity_reservation_id, capacity_reservation_id),
+            ).fetchall()
+        if not rows:
+            raise KeyError(capacity_reservation_id)
+        if len(rows) != 1 or rows[0][1] != site_id:
+            raise ValueError("site report differs from durable reservation binding")
+        return rows[0][0]
+
+    async def recover_site_reports(self, negotiation_id):
+        delivery = await self.db.load_vm_delivery(negotiation_id=negotiation_id)
+        hold = await self.db.load_capacity_hold(negotiation_id=negotiation_id)
+        reservation = (delivery or {}).get("capacity_reservation_id") or (hold or {}).get("capacity_reservation_id")
+        if not reservation:
+            return
+        thread = await self.db.load_thread_binding(negotiation_id=negotiation_id)
+        fulfillment = self.fulfillment or build_fulfillment_client(build_capacity_runtime(lambda: self.db).client())
+        lease = await fulfillment.get_lease(reservation, site_id=thread.site_id)
+        for report in lease.end_reports:
+            self.ingress.site_report(negotiation_id, body=canonical_json(report), headers={})
+
+    def capacity_released(self, capacity_reservation_id, site_id):
+        try:
+            negotiation_id = self.reservation_deal(capacity_reservation_id, site_id)
+        except KeyError:
+            # Capacity can be reserved administratively, outside a committed deal.
+            return
+        with transaction(self.path) as conn, atomic(conn):
+            end = EndSession(conn)
+            try:
+                end.read(negotiation_id)
+            except KeyError:
+                return
+            end.physical_progress(negotiation_id, "released")
 
     def verify_site(self, negotiation_id, body, headers):
         report = SignedLeaseEndedReport.model_validate_json(body)

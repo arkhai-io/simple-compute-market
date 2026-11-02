@@ -26,6 +26,8 @@ from unittest.mock import patch
 from urllib.request import Request
 
 import pytest
+import httpx
+from market_deal_lifecycle_client import LifecycleClient
 from arkhai_vms import VmProvisionTerms, make_vm_provision_terms
 from core_buyer.registry_config import RegistryAuthority
 from core_buyer.buyer_config import ResolvedBuyerIdentity
@@ -802,7 +804,22 @@ def test_payment_dispatch_and_run_recovery_ignore_stray_escrow(tmp_path, monkeyp
         settlement_poll_interval=0, settlement_total_timeout=1, sleep=lambda _s: None,
         settlement_policy=settlement_composition.resolve_buyer_settlement_policy(),
     )
-    responses = [{"status": "provisioning"}, {"status": "ready"}] * 2
+    def peer(request):
+        submitted = json.loads(request.content)
+        assert submitted["kind"] == "commit"
+        assert submitted["commitment_ref"] == transaction_id(mandate)
+        body = {"outcome": {"status": "accepted"}}
+        legacy_request = Request(str(request.url), data=request.content, headers=dict(request.headers), method="POST")
+        return httpx.Response(200, json=body, headers=signed_response_headers(legacy_request, body))
+
+    original_client = LifecycleClient.__init__
+
+    def peer_transport(self, *args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(peer)
+        return original_client(self, *args, **kwargs)
+
+    monkeypatch.setattr(LifecycleClient, "__init__", peer_transport)
+    responses = [{"status": "ready"}] * 2
     with _patched_transport(_urlopen_sequence(responses)):
         result = hook(NegotiationResult(match=match, outcome=outcome, attempts=[]), lambda stage, body: log.event(stage, **body))
         # New admission changes cannot redirect this accepted operation.

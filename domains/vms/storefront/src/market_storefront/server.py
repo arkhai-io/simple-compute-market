@@ -61,6 +61,7 @@ from market_storefront.contact_exchange import (
     build_vm_contact_exchange,
     build_vm_introduction_delivery,
 )
+from market_storefront.controllers.lease_reports import router as lease_reports_router
 from market_storefront.domain_runtime import validate_vm_storefront_domain
 from market_storefront.middleware.admin_identity import (
     administrator_identity_middleware,
@@ -636,6 +637,7 @@ def build_vm_storefront_app(
                     deals_router,
                     admin_settle_router,
                     introductions_router,
+                    lease_reports_router,
                     create_lifecycle_router(lambda _: _container.resolved_settlement_composition.lifecycle.routes(
                         TrustedIdentitySet(identities=tuple(_active_administrators(
                             _container.resolved_sqlite_client.db_path,

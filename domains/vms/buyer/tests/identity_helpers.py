@@ -123,6 +123,9 @@ def signed_response_headers(
     elif url.endswith("/status") and "/settle/" in url:
         operation = "settle_status"
         resource = url.rsplit("/", 2)[-2]
+    elif url.endswith("/lifecycle"):
+        operation = "lifecycle_peer" if request.get_method() == "POST" else "lifecycle_buyer_read"
+        resource = url.rsplit("/", 2)[-2]
     elif "/settle/" in url:
         operation = "settle_escrow"
         resource = url.rsplit("/", 1)[-1]

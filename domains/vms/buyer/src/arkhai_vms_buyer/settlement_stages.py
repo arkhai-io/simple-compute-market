@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -37,6 +38,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from .evidence import evidence_store
+from .lifecycle import buyer_lifecycle, run_sync
 from . import common
 from .arkhai_payments import (
     AgreedTerms,
@@ -244,6 +246,9 @@ class AlkahestBuyerStage:
     def resume(self, context):
         return _resume_alkahest(context)
 
+    def lifecycle(self, context):
+        return _buyer_lifecycle(context)
+
 
 @dataclass(frozen=True)
 class PaymentsBuyerStage:
@@ -288,6 +293,15 @@ class PaymentsBuyerStage:
             confirm_settlement=context.confirm,
         )(negotiation, on_event)
 
+    def lifecycle(self, context):
+        try:
+            approval = payment_buyer(context.resolve_policy())
+        except ValueError:
+            # A removed payment configuration removes financial capability,
+            # not the committed buyer's receipt-only surrender capability.
+            approval = None
+        return _buyer_lifecycle(context, payment=True, approval=approval)
+
     def resume(self, context):
         deal, log = context.deal, context.log
         if deal.agreement_bytes is None or deal.settlement_data is None:
@@ -307,6 +321,27 @@ class PaymentsBuyerStage:
         if final.get("status") != "ready":
             raise typer.Exit(7)
         return final
+
+
+def _buyer_lifecycle(context, *, payment=False, approval=None):
+    deal = context.deal
+    if not deal.agreement_bytes:
+        raise ValueError("delivery lifecycle requires retained accepted Agreement bytes")
+    if payment:
+        data = PaymentSettlementData.parse(deal.settlement_data)
+        retained = evidence_store()
+        # Approval records a verified commitment before the peer handoff; an
+        # accepted but unfunded negotiation is not a delivery-stage command.
+        record = run_sync(lambda: retained.read(deal.negotiation_id))
+        if not any(item.commitment_ref == data.transaction_id and not item.superseded for item in record.commitments):
+            raise ValueError("delivery lifecycle requires a retained verified payment commitment")
+    return buyer_lifecycle(
+        agreement_bytes=base64.b64decode(deal.agreement_bytes, validate=True),
+        settlement_data=deal.settlement_data, seller_url=deal.seller_url,
+        signer=context.signer, publishers=context.resolve_seller_principals(),
+        commitment_ref=deal.settlement_ref or deal.escrow_uid,
+        approval=approval, timeout=context.timeout,
+    )
 
 
 def _chain_name_from_run_log(run_id: str, *, signer) -> str | None:

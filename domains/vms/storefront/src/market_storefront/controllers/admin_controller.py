@@ -801,6 +801,10 @@ class AdminController:
             site_id=event["site_id"],
             provider_resource_id=event.get("resource_id"),
         )
+        composition = _container.resolved_settlement_composition
+        lifecycle = getattr(composition, "lifecycle", None)
+        if lifecycle is not None:
+            lifecycle.capacity_released(event["capacity_reservation_id"], event["site_id"])
         return applied.model_dump(mode="python")
 
     async def _open_bound_vm_listing_ids(self) -> set[str]:
