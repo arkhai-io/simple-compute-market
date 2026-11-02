@@ -7,6 +7,21 @@
       "dist": "arkhai-kit-identity"
     },
     {
+      "key": "kit-deal-lifecycle-contracts",
+      "path": "kit/deal-lifecycle-contracts",
+      "dist": "arkhai-kit-deal-lifecycle-contracts"
+    },
+    {
+      "key": "kit-deal-lifecycle",
+      "path": "kit/deal-lifecycle",
+      "dist": "arkhai-kit-deal-lifecycle"
+    },
+    {
+      "key": "kit-deal-lifecycle-buyer",
+      "path": "kit/deal-lifecycle-buyer",
+      "dist": "arkhai-kit-deal-lifecycle-buyer"
+    },
+    {
       "key": "core",
       "path": "core",
       "dist": "arkhai-core"
