@@ -1,0 +1,15 @@
+# The frp release the plugin is tested against, and where its archives come from.
+#
+# Each archive's sha256 was computed from a download of that archive and recorded
+# here. The real-frp tests verify an archive against it before extracting anything,
+# and never read the checksums file published beside the release: a checksum served
+# from the same place as the archive proves nothing about the archive.
+#
+# This format is published. A platform is added as another [archives.<os>_<arch>]
+# table, named as frp names its release archives; nothing else changes shape.
+
+version = "0.61.1"
+
+[archives.linux_amd64]
+url = "https://github.com/fatedier/frp/releases/download/v0.61.1/frp_0.61.1_linux_amd64.tar.gz"
+sha256 = "bff260b68ca7b1461182a46c4f34e9709ba32764eed30a15dd94ac97f50a2c40"

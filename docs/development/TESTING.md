@@ -96,6 +96,21 @@ library, which remain the tests of that service's wire contract. A library
 test that exercises a real database but still sits in `unit/` moves to
 `integration/` when it is next touched.
 
+**Registration and traffic are different proofs:** a test that a
+connection, proxy, or route was admitted also carries traffic through
+it. A peer can report a registration it cannot serve — a tunnel listed
+as running whose remote port reaches nothing, an address delivered that
+routes elsewhere — and only bytes sent end to end show the admission
+did what it claims. The frps admission plugin's real-frp tests
+(`tools/frp-grant-admission/tests/frp/`) hold to this: an admitted proxy
+carries bytes from frps's remote port to a listener behind frpc, and a
+proxy that outlives a reload carries traffic on a held connection and a
+new one. Those tests are a third flavour of integration test, beside the
+in-process and library ones: real external processes started by the
+test, skipped in the default suite without their binaries and run in a
+gate that fails on a skip, as the native Ansible checks are
+([Ansible Syntax and Native Checks](#ansible-syntax-and-native-checks)).
+
 **Test setup pattern:** Use `httpx.AsyncClient` with `ASGITransport`
 against the real application instance, injected via the service's
 canonical typed-client constructor (`FooClient(transport=...)`).

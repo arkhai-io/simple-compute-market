@@ -1,0 +1,12 @@
+# The image needs only the project, its lock, its README (the project's readme,
+# which building the project reads), its licence, its source, and the example
+# configuration; nothing else of the directory enters the build context, in
+# particular no environment, frp download, or build output.
+*
+!pyproject.toml
+!uv.lock
+!README.md
+!LICENSE
+!src/
+!examples/config.toml
+**/__pycache__

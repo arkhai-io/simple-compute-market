@@ -19,6 +19,7 @@ An architecture companion does not replace a normative requirement. When explana
 | CLI query language | [Spec](cli-query-language/spec.md) | [Architecture](cli-query-language/architecture.md) |
 | Compute provisioning contract | [Spec](compute-provisioning-contract/spec.md) | — |
 | Deployment and state | [Spec](deployment-state/spec.md) | [Architecture](deployment-state/architecture.md) |
+| frp grant admission | [Spec](frp-grant-admission/spec.md) | [Architecture](frp-grant-admission/architecture.md) |
 | Fulfillment | [Spec](fulfillment/spec.md) | [Architecture](fulfillment/architecture.md) |
 | Introduction delivery | [Spec](introduction-delivery/spec.md) | [Architecture](introduction-delivery/architecture.md) |
 | Market composition | [Spec](market-composition/spec.md) | [Architecture](market-composition/architecture.md) |

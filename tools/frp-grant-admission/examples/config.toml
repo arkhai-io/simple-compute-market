@@ -1,0 +1,27 @@
+# An example frp-grant-admission configuration.
+#
+# The public keys below are RFC 8032's TEST 1 and TEST 2 keys: published,
+# deterministic test values whose private keys anyone can read. Never use them on any
+# network; replace each with a signer's own public key, written as
+# `openssl pkey -pubout -outform DER | base64` prints it.
+
+# The plugin listens on loopback only: an IPv4 address in 127.0.0.0/8, or [::1].
+listen = "127.0.0.1:7300"
+
+[[issuers]]
+name = "issuer-a"
+audience = "relay-1"
+ports = { start = 6100, end = 6199 }
+keys = [
+  # RFC 8032 TEST 1 public key; a test value, never to be used on any network.
+  { public_key = "MCowBQYDK2VwAyEA11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=" },
+]
+
+[[issuers]]
+name = "issuer-b"
+audience = "relay-1"
+ports = { start = 6200, end = 6249 }
+keys = [
+  # RFC 8032 TEST 2 public key; a test value, never to be used on any network.
+  { public_key = "MCowBQYDK2VwAyEAPUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=" },
+]
