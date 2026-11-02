@@ -14,15 +14,14 @@ from pathlib import Path
 
 from compute_provisioning_contracts import LeaseEndedEvent, SignedLeaseEndedReport, verify_lease_end
 from market_arkhai_mediation.adapter import MediationAdapter
-from market_arkhai_mediation.claims import sign_claim
 from market_arkhai_mediation.client import MediationClient, MediationCredential
 from market_arkhai_mediation.contract import INTERFACE
-from market_arkhai_mediation.models import DeliveryEndClaim
 from market_arkhai_payments import PaymentSettlementData
 from market_core.schemas import Agreement
 from market_deal_lifecycle.adapters import (
-    DisputeAdapterTable, PaymentAdapterTable, PaymentBinding, PaymentSelector,
+    DeliveryEndIntent, DisputeAdapterTable, PaymentAdapterTable, PaymentBinding, PaymentSelector,
 )
+from market_deal_lifecycle.claims import DeliveryEndClaims
 from market_deal_lifecycle.evidence import CommitmentAttempt
 from market_deal_lifecycle.terms import decode_terms
 from market_deal_lifecycle_contracts.models import (
@@ -160,7 +159,8 @@ class VmDealLifecycle:
 
     def dispute_adapter(self, binding):
         agreement, _ = self.accepted(binding.negotiation_id)
-        return MediationAdapter(binding, agreement, self.client(binding.authority), clock=self.clock)
+        client = self.client(binding.authority) if self.credential_available(binding.authority) else None
+        return MediationAdapter(binding, agreement, client, clock=self.clock)
 
     def watch(self, deal, payment, dispute):
         agreement, raw = self.accepted(deal.negotiation_id)
@@ -304,20 +304,16 @@ class VmDealLifecycle:
         return len(deals)
 
     def receipt_claim(self, negotiation_id, at):
-        agreement, _ = self.accepted(negotiation_id)
-        terms = decode_terms(agreement["settlement"].get("lifecycle"))
-        if terms is None:
+        # Ingress holds its write transaction; this immutable binding read
+        # must not open a competing writer while building a local claim.
+        with sqlite3.connect(self.path) as conn:
+            binding = SellerSession(conn).read(negotiation_id).dispute_binding
+        adapter = self.seller.disputes.resolve(binding) if binding else None
+        if not isinstance(adapter, DeliveryEndClaims):
             return None
-        if terms.adjudication.dispute.interface != INTERFACE:
-            raise ValueError("accepted receipt claim interface is unavailable")
-        # Surrender acknowledges access relinquished at receipt, not a buyer
-        # claim about when delivery first became available. Earlier non-delivery
-        # remains independently disputable from the retained delivery evidence.
-        return sign_claim(
-            agreement=hashlib.sha256(canonical_json(agreement)).hexdigest(),
-            claim=DeliveryEndClaim(kind="delivery_end", ended_at=at, delivered=True, cause="payer"),
-            signer=self.signer,
-        ).model_dump(mode="json")
+        return adapter.sign_delivery_end(
+            DeliveryEndIntent(ended_at=at, delivered=True, cause="payer"), self.signer,
+        )
 
     def reservation_deal(self, capacity_reservation_id, site_id):
         with sqlite3.connect(self.path) as conn:
