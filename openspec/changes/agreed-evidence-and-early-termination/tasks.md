@@ -1170,6 +1170,15 @@ provision stages". Files: `domains/vms/storefront/src/market_storefront/`
         `e2e_deal` and `e2e_deal_buyer_cli`; run the fresh branch-built stack through
         the Podman shim with real local payments and mediation. Keep 14.5 unchecked
         until this acceptance boundary is observed; 7.4 remains parent-owned.
+  - [x] 14.5d Failure-source continuation: classify verified VM site evidence against
+        accepted timing and recorded physical commands, correlate lawful ends, re-drive
+        pending correction slots in the same journal, and route committed-deal failure
+        release through end service. Files: `end_classification.py`, `deal_lifecycle.py`,
+        `delivery_lifecycle.py` and `failure_actions.py` under the VM storefront.
+        Verify with the existing VM regressions and committed first-use encounters for
+        delayed lawful evidence, signed withdrawal, direct failure-policy dispatch and
+        callback-only delivered-capacity progress. Deployed end/report acceptance stays
+        in 14.5c; no rate/funding-timer classification is claimed.
 
 Verification point: the VM storefront's unit and application-integration suites; `make test`.
 End-to-end: `e2e_deal`, `e2e_deal_buyer_cli` and `e2e_vm_introduction` must keep passing;
@@ -1310,6 +1319,41 @@ the first two gain delivery-only end/report stages, not hosted rate-part stop qu
   currently retain pending classification without blocking physical work.
   Keep 14.5 and 7.4 unchecked. Permanent promotion remains 16.9, to the lifecycle
   spec/architecture, VM fulfillment and buyer-orchestration documents.
+
+### VM failure-source continuation checkpoint (2026-11-02)
+
+- 14.5d connects verified site evidence to accepted deadline/availability facts
+  and recorded physical intent keys. Known lawful ends retain both sources;
+  unentitled withdrawal and provisioning failure journal their corrections.
+  Pending site slots are revisited after authority observation without replacing
+  their immutable requests or fixed basis. The lifecycle cycle establishes missed
+  delivery deadlines even without a further fulfillment attempt.
+- Committed-deal failure-policy release now uses end service. Undispatched
+  guarded releases echo their operation key; delivered leases always use lease
+  termination and await the separate capacity-return callback, never direct release.
+  Capacity held outside committed delivery keeps its existing guarded path.
+- Evidence and clean-checkout first use: `docs/attachments/vm-end-classification/index.md`.
+  Three in-process encounters cover delayed lawful classification, signed site
+  withdrawal and direct failure-policy release through the actual physical port
+  with injected site transport. No permanent acceptance test was added.
+  The kept release assertion now expects the correlation key, not the former
+  generic reason; no release or no-truncation assertion was weakened.
+- VM unit/application regressions and both first-use entry points pass. Fresh
+  wheels, architecture, packaging, locks, comment hygiene and strict validation
+  pass. Full `make test` passes in 7m41s on the final source with the prescribed
+  proxy exclusions and shell-local Podman shim, including release tooling and
+  Helm checks. An earlier aggregate was stopped before the final physical guard
+  and is not counted as passing. Scoped citations report only the three known
+  future lifecycle destinations in #325. Initial
+  self-check preparation supplied missing public SLA/region fields to the reused
+  payment fixture; production listing validation remains unchanged.
+- Remaining: 14.5c end/report stages in both VM e2e modules, then fresh branch-built
+  qualification through the Podman shim with real local payments and mediation,
+  hosted dispute terms, and a real CLI subprocess. No deployed lifecycle scenario
+  has run here; 14.5 and parent-owned 7.4 remain unchecked. Unknown site causes
+  without controlling evidence remain pending by design; renewable/funding-timer
+  and rate execution stay outside this foundation. No external resource is left up.
+  Permanent documentation promotion remains 16.9 at reviewed closeout.
 
 ## 15. Bare-metal wiring
 

@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from market_capacity_publication import PublicationBinding
+from market_deal_servicing.journal import stable_ref
 
 from market_storefront.domain_runtime import (
     build_vm_storefront_domain,
@@ -120,7 +121,9 @@ async def test_an_uncommitted_hold_is_released_not_truncated(db):
 
     assert released is not None
     row = fake.reservations[reservation_id]
-    assert (row["state"], row["failure_reason"]) == ("released", "delivery_ended")
+    assert (row["state"], row["failure_reason"]) == (
+        "released", stable_ref(f"negotiation-{pool_id}", "terminate", "terminate"),
+    )
     assert not any(path.endswith("/truncate-lease") for _, path in fake.requests)
 
 

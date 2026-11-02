@@ -70,9 +70,15 @@ class VmPhysicalEnd:
                 lease_end_utc=datetime.fromtimestamp(at, timezone.utc).isoformat(),
             )
             return PhysicalResult(progress="end_recorded", done=True)
-        released = await capacity.release(
-            binding, capacity_reservation_id=reservation_id, failure_reason="delivery_ended",
-        )
+        with transaction(self.db.db_path) as conn:
+            available = EndSession(conn).read(negotiation_id).available_at is not None
+        # Delivered leases must use lease lifecycle, whose separate callback
+        # proves capacity return. A direct guarded release has no such receipt.
+        released = None
+        if not available:
+            released = await capacity.release(
+                binding, capacity_reservation_id=reservation_id, failure_reason=operation_key,
+            )
         if released is not None:
             return PhysicalResult(progress="released", done=True)
         fulfillment = self.fulfillment or build_fulfillment_client(capacity.client())
