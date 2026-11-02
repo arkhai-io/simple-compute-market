@@ -6,7 +6,6 @@ from tempfile import TemporaryDirectory
 
 from market_arkhai_mediation.adapter import MediationAdapter
 from market_arkhai_mediation.client import MediationClient, MediationCredential
-from market_arkhai_mediation.contract import wire
 from market_arkhai_mediation.fixtures import record_signer
 from market_arkhai_mediation.fixtures.authority import MediationContractFake
 from market_arkhai_mediation.models import Filing, RespondentAfter

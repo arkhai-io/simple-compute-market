@@ -15,7 +15,7 @@ from market_deal_lifecycle.adapters import (
     DeliveryEndIntent, DisputeAdapterTable, DisputeBinding, PaymentAdapterTable, PaymentSelector,
 )
 from market_deal_lifecycle.terms import DisputeAuthority
-from market_deal_lifecycle_contracts.models import EndDeliveryAcknowledgement, SubmitResponse, Accepted
+from market_deal_lifecycle_contracts.models import SubmitResponse, Accepted
 from market_deal_lifecycle_client import LifecycleClient
 from market_identity import Ed25519Signer, TrustedIdentitySet
 
@@ -88,7 +88,6 @@ async def main():
                     "http://fixture", buyer, TrustedIdentitySet(identities=(seller.identity,)),
                     transport=httpx.ASGITransport(app=app),
                 ) as client:
-                    body = {"kind": "end_delivery", "negotiation_id": "example", "operation_key": "end-now"}
                     first = await client.end_delivery("example", operation_key="end-now")
                     second = await client.end_delivery("example", operation_key="end-now")
                     assert first.signed_delivery_end_claim == second.signed_delivery_end_claim

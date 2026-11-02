@@ -1113,6 +1113,13 @@ seller's budget". Files: `kit/deal-servicing` (router factory),
 
 Verification point: application-integration suites; `make test`. End-to-end: none.
 
+### Lifecycle route and cooperative ending checkpoint (2026-11-02)
+
+- 13.1–13.3 provide the mountable, signed role-authenticated router, non-gating seller budget diagnostics, receipt-time surrender and owner-only exact site-report reads. The composition injects the accepted Agreement binding, its seller signer, the administrator trust set and its existing authority-verifying commit/hint implementation. No domain mounting is included.
+- 12.4 provides bounded respondent discovery bound to signed filing records, persisted pages/cursors, exact journaled sign-or-contest answers and lost-append recovery. Compose one poller per accepted authority/account with payee credentials before deal watch; both adopt the same case-keyed append journal.
+- 12.5 stores the owning adapter's reusable SignedDeliveryEndClaim atomically with receipt/end recording. 7.5 adds canonical client end_delivery and buyer stop/surrender/filing progress with durable same-key retries, offline Agreement-bound receipt verification, exact concurrence and contested observed-time fallback. Compose FileEvidenceStore.end_journal and the exact Agreement principals into the buyer half; authorized pruning clears its retained plans.
+- Focused suites, source typing, built-wheel first-use examples, architecture, packaging, locks, comment hygiene and pinned strict validation pass. The old null-only claim test now preserves the available interface-owned claim; no permanent test was added. The full `make test` aggregate also passes in 7m54s with the prescribed proxy settings and shell-local Podman shim, including release tooling and Helm render/structural checks. Citation checking reports only the three known #325 destinations. First-use setup and boundaries: `docs/attachments/lifecycle-routes/index.md`. Sections 7.4, 14 and 15 still own domain stages/CLI/wiring; rate execution and live authority qualification remain their owning changes. Permanent promotion remains 16.9 to the lifecycle, buyer-orchestration and market-composition specifications and architecture companions.
+
 ## 14. VM wiring
 
 Delivers the VM storefront's composition of the seller half, evidence store and `watch`, its

@@ -115,8 +115,33 @@ Rate stop/notice execution and hosted qualification are not claimed.
 
 ## Validation
 
-The servicing first-use examples and source typing pass; the existing lifecycle
-suite passes (62 cases). Fresh wheel builds, `make check-packaging`,
-`make check-locks`, architecture, comment hygiene and pinned strict OpenSpec
-validation pass. No permanent acceptance test was added. Domain mounting remains
-sections 14 and 15; permanent contract and rationale promotion remains closeout.
+The production-code head is `5041360c9`; subsequent packet/setup cleanup changes
+no production behavior. The start was `0b6da919a`. Per-task commits preserve the
+requested order and check their task boxes in the same commit.
+
+| Validation | Observation |
+| --- | --- |
+| Lifecycle contracts | 37 existing cases pass |
+| Lifecycle foundation | 62 existing cases pass |
+| Mediation | 40 existing cases pass, generated-model/resource drift and both signature vectors pass; mypy checks 11 files |
+| Buyer evidence/lifecycle | 18 existing cases pass; additional buyer/client typing checks 9 source files |
+| Servicing | All nine first-use examples pass; mypy checks 10 source files |
+| Client transport regression | Existing commit/hint/read example passes, including signature tampering and changed-request-ID rejection |
+| Installed-wheel ending | All four outage/no-adapter scenarios pass after reopening the journal |
+| Packaging | Fresh `.dist` wheels, architecture, `make check-packaging`, lock currency and comment hygiene pass |
+| Active change | Pinned OpenSpec 1.14.0 strict validation passes |
+| Full aggregate | `make test` passes in 7m54s with the shell-local Podman shim and prescribed proxy settings, including 1,858 release-tooling cases and Helm structural/render assertions |
+| Documentation citations | Exactly the three known future lifecycle destinations in [#325](https://github.com/arkhai-io/simple-compute-market/issues/325); no new citation failure |
+
+The aggregate retains the existing optional Torch-dependent VM test collection
+skip. No permanent acceptance test was added. A separate small repair,
+`e39dbe511`, narrows pre-existing evidence retention/export values for static typing
+without changing their behavior. No dependency/version/configuration model was
+changed beyond the servicing router's FastAPI runtime dependency and client
+example dev dependency; its lock was regenerated through `make lock` and all
+locks pass. No new distribution or Helm schema is introduced.
+
+Domain mounting remains sections 14 and 15; permanent contract and rationale
+promotion remains closeout. There is no new live-authority or domain end-to-end
+qualification claim. No server, browser, container, tunnel, remote target or
+outside resource is left running.

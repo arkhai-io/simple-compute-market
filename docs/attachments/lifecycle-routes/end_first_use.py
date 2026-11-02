@@ -15,7 +15,7 @@ from market_deal_lifecycle.adapters import (
     DeliveryEndIntent, DisputeAdapterTable, DisputeBinding, PaymentAdapterTable, PaymentBinding, PaymentSelector,
 )
 from market_deal_lifecycle.terms import DisputeAuthority
-from market_deal_lifecycle_buyer import BuyerDeal, BuyerEndJournal, BuyerLifecycle, FileEvidenceStore
+from market_deal_lifecycle_buyer import BuyerDeal, BuyerLifecycle, FileEvidenceStore
 from market_deal_lifecycle_client import LifecycleClient
 from market_deal_lifecycle_contracts.models import Accepted, SubmitResponse, Unknown
 from market_deal_servicing import (
