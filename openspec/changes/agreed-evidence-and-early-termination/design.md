@@ -700,7 +700,7 @@ Foundation owns common claim/journal/verifier; the double consumes its resources
 Design/specification work only; no runtime code, new test implementation or deployment. Existing completed tasks are preserved. All requirement bodies in the nine touched changes are below 500 characters; retained detailed obligations remain in acceptance scenarios rather than being dropped.
 
 - Installed OpenSpec 1.15.0: openspec validate <change> --strict passes without warnings for foundation, lane double, terms, spot, renewable deadlines, unify, convergence, activation and the deferred lapse proposal. The lapse proposal declares skip_specs and validates with zero deltas.
-- make check-change CHANGE=<change>: all six checks pass for lane double, terms, renewable deadlines, unify, activation and lapse. Foundation, spot and convergence pass five checks and report only the accepted future openspec/specs/deal-lifecycle/architecture.md citation failure.
+- make check-change CHANGE=<change>: all six checks pass for lane double, terms, renewable deadlines, unify, activation and lapse. Foundation, spot and convergence pass five checks and report only the accepted future deal-lifecycle architecture-companion citation failure.
 - make check-change-index, make check-comment-hygiene and git diff --check pass. All nine sequence-diagram XML/SVG pairs parse and embed identical editable source; five pairs update claim labels together.
 - Packaging, typing and runtime/e2e suites are unrun: this revision changes design/specification and roadmap/index text only, without claiming implementation readiness of a deployed product.
 
@@ -711,7 +711,7 @@ On 2026-10-29, all nine Goal 8 changes pass both
 `openspec validate <change> --strict`, without warnings. MODIFIED-target informational
 notices for unify/convergence are covered by foundation-first and activation-change-before-
 unify archive order. `make check-change CHANGE=<change>` passes all checks except
-the expressly accepted future `openspec/specs/deal-lifecycle/architecture.md`
+the expressly accepted future deal-lifecycle architecture-companion
 citation in foundation, spot and convergence. The same strict/check-change runs
 pass for the narrow hardening and kit-owned sibling edits. `make check-change-index`,
 `make check-comment-hygiene` and `git diff --check` pass. This is design validation,
