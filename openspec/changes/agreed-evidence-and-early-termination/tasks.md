@@ -124,7 +124,7 @@ by dispute interface", "Evidence is keyed by negotiation" and "A dispute is one 
       using fake adapters. Include the protocol rule from D5 (a stop only under a stated entitlement entry; no notice waiver or
       early release), with fail-before-I/O refusal until vendored; no extra entitlement.
 
-- [ ] 2.4 Extend peer/route/read contracts with receipt-only end_delivery (no at), signed
+- [x] 2.4 Extend peer/route/read contracts with receipt-only end_delivery (no at), signed
       acknowledgement binding request identity, seller-recorded receipt, selected end,
       progress and verbatim site reports. In kit/deal-lifecycle implement the shared binding
       and verifier over kit/identity v2, usable by buyer/client/dispute kits without servicing

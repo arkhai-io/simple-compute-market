@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from market_identity import Identity
+from market_identity import AuthenticatedRequest, AuthenticatedResponse, Identity
 from pydantic import Base64Bytes, BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 Reference = Annotated[str, Field(min_length=1)]
@@ -179,7 +179,15 @@ class HintMessage(WireModel):
     payload: dict[str, JsonValue] = Field(default_factory=dict)
 
 
-PeerMessage = Annotated[CommitMessage | HintMessage, Field(discriminator="kind")]
+class EndDeliveryMessage(WireModel):
+    """Surrender at durable receipt, never at a buyer-supplied instant."""
+
+    kind: Literal["end_delivery"] = "end_delivery"
+    negotiation_id: Reference
+    operation_key: Reference
+
+
+PeerMessage = Annotated[CommitMessage | HintMessage | EndDeliveryMessage, Field(discriminator="kind")]
 
 
 class OpenExtension(WireModel):
@@ -211,6 +219,32 @@ class DeliveryView(WireModel):
     recorded_end: RecordedEnd | None = None
     progress: Literal["unstarted", "active", "end_recorded", "tearing_down", "released", "repair_required"]
     site_reports: list[EvidenceItem] = Field(default_factory=list)
+
+
+class EndDeliveryAcknowledgement(WireModel):
+    negotiation_id: Reference
+    operation_key: Reference
+    receipt_at: Instant
+    selected_end: RecordedEnd
+    delivery: DeliveryView
+    # The owning dispute kit supplies SignedDeliveryEndClaim only after its
+    # contract is published and vendored. Non-null claims fail closed here.
+    signed_delivery_end_claim: None = None
+
+    @model_validator(mode="after")
+    def selected_end_matches_delivery(self) -> EndDeliveryAcknowledgement:
+        if self.delivery.recorded_end != self.selected_end:
+            raise ValueError("acknowledgement must return its selected end in the delivery view")
+        if self.selected_end.ended_at > self.receipt_at:
+            raise ValueError("selected end cannot be later than surrender receipt")
+        return self
+
+
+class SignedEndDeliveryReceipt(WireModel):
+    request: AuthenticatedRequest
+    request_body: Base64Bytes
+    response: AuthenticatedResponse
+    response_body: Base64Bytes
 
 
 class LifecycleRead(WireModel):
