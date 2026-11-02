@@ -13,7 +13,9 @@ installed by `uv run --no-project`, not an editable source import or resident
 service. Rebuild/replay from the repository root:
 
 ```sh
-make dist && env -u ALL_PROXY -u all_proxy NO_PROXY=localhost,127.0.0.1 \
+env -u ALL_PROXY -u all_proxy NO_PROXY=localhost,127.0.0.1 \
+  no_proxy=localhost,127.0.0.1 make dist
+env -u ALL_PROXY -u all_proxy NO_PROXY=localhost,127.0.0.1 \
   no_proxy=localhost,127.0.0.1 uv run --no-project --find-links .dist \
   --with .dist/arkhai_kit_arkhai_payments-0.3.0-py3-none-any.whl \
   python -m market_arkhai_payments.fixtures.conformance
@@ -69,7 +71,23 @@ Commands use `ALL_PROXY`/`all_proxy` unset and both `NO_PROXY`/`no_proxy` equal 
   **all 454 provisioning integration tests pass** with the same assertions.
   This narrow fixture fix is a separate commit and is recorded on
   [#323](https://github.com/arkhai-io/simple-compute-market/issues/323).
-- The aggregate rerun is recorded below after it completes.
+- The aggregate `make test` rerun passed the package suites (including the
+  payments kit's **92 tests** and provisioning's **454 integration tests**) and
+  reached release-tooling, which reported **1 failed, 1809 passed, 18 skipped**.
+  Its sole failure was
+  `scripts/tests/test_multi_storefront_compose.py::test_storefront_authorities_are_isolated`:
+  `FileNotFoundError: [Errno 2] No such file or directory: 'docker'`.
+  `command -v docker` confirms that the Docker CLI is unavailable on this host.
+  This environment prerequisite is recorded in
+  [#324](https://github.com/arkhai-io/simple-compute-market/issues/324).
+  The aggregate is **not green**; rerun it with Docker Compose v2 installed.
+  No Docker-dependent assertion was skipped or weakened for this run.
+- Verification used `env -u ALL_PROXY -u all_proxy
+  NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,127.0.0.1` before each command.
+  The strict specification command was
+  `bunx @fission-ai/openspec@1.14.0 validate agreed-evidence-and-early-termination --strict`.
+  Environment setup's lockfile-format-only revisions were restored; no dependency
+  or architecture-rule changes were required.
 
 ## Boundary and cleanup
 
