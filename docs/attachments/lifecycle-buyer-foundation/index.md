@@ -7,8 +7,9 @@ acceptance. It is a nonvisual library/CLI journey; no screenshots apply.
 
 The required target is the injected foundation and fresh buyer-selection paths,
 not a hosted deployment. The prepared target is this branch's checkout-owned
-Python 3.13 environments installed from freshly built `.dist` wheels. No inherited
-deployment selector, shared database or external account is used. The signed
+Python 3.13 environments with their own package installed editable and internal
+dependencies installed from freshly built `.dist` wheels. No inherited deployment
+selector, shared database or external account is used. The signed
 client example uses deterministic public development Ed25519 buyer/seller
 personas, never public-network credentials. The buyer-half example creates and
 removes its own temporary SQLite evidence/operation store. Selection uses only
@@ -48,7 +49,7 @@ signed HTTP seam, not a deployed storefront or authority.
 ## Validation
 
 The client commit is `834b38979`; buyer-half dispatch is `c7b8dcc7a`.
-The selection commit is the commit introducing this packet. Existing suites pass:
+Authority selection is `60c9a57b6`. Existing suites pass:
 lifecycle 62, buyer evidence 18, core buyer 159, storefront client 68, VM buyer
 213, bare-metal buyer 16 and API-credit buyer 35. Existing fixture setup was
 updated to state accepted lifecycle authorities; no test function was added and
@@ -60,6 +61,35 @@ client publication metadata and the mediation dependency are declared once in
 the manifest/workflow; affected buyer and dependent storefront/e2e locks were
 regenerated through `make lock`, not hand edited. Configuration models are
 unchanged, so no Helm schema regeneration is needed.
+
+The complete `make test` aggregate passes in 7m20s with the prescribed environment
+and a Docker-compatible runtime; this run opted into the local Podman shim:
+
+```sh
+unset ALL_PROXY all_proxy
+export NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,127.0.0.1
+make test
+```
+
+The initial aggregate found a bare-metal buyer integration fixture without an
+accepted dispute authority. The same setup omission was reproduced in the two
+API-credit CLI integration files. Commit `2db61c3e5` supplies compatible public
+fixture terms and accepted authority configuration without changing assertions.
+The bare-metal payment integration file now passes all 16 cases; API-credit
+buy/negotiation integration passes all 3 cases. The subsequent complete aggregate
+includes those suites, release tooling and Helm structural/render checks.
+
+Commit `7434287e8` retains signed lifecycle acknowledgements by their signed route
+resource even when the payload omits `negotiation_id`. A temporary diagnostic
+captured such a response before its request and observed the evidence after
+reopening the SQLite store; all 18 existing buyer evidence tests pass.
+`make -C core typecheck` passes both configured typing targets. The three committed
+first-use entry points were rerun successfully after these repairs.
+
+The documentation citation check reports exactly the three known future
+lifecycle-specification citations tracked by #325, explicitly waived for this
+assignment. No additional unresolved citation was found. Commit `8f0200189`
+removes the two inherited duplicate lifecycle rows in the release guide.
 
 ## Limits and cleanup
 
