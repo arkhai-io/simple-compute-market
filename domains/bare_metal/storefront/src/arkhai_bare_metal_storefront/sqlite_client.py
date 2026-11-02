@@ -39,6 +39,7 @@ from market_core import (
 )
 from market_core.schemas import AGREEMENT_SETTLEMENT_SCHEMA_PATH, Agreement
 from market_identity import Identity
+from market_deal_servicing import EndSession
 from market_pool_overrides import pool_override_migrations
 from market_settlement_runtime import settlement_migrations
 from pydantic import BaseModel
@@ -981,6 +982,14 @@ class SQLiteClient(CoreSQLiteClient):
                     raise RuntimeError(
                         "settlement evidence is bound to another Agreement"
                     )
+                session = EndSession(conn)
+                delivery = session.read(evidence.negotiation_id)
+                committed_at = (
+                    payload.source["receipt"]["receipt"]["approvedAt"]
+                    if evidence.mechanism == "arkhai.payments.v1"
+                    else delivery.committed_at or int(conn.execute("SELECT unixepoch()").fetchone()[0])
+                )
+                session.confirm_commitment(evidence.negotiation_id, committed_at=committed_at)
                 conn.execute(
                     "UPDATE bare_metal_settlement_records SET settlement_ref = ?, status = ?, "
                     "evidence_json = ?, updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') "

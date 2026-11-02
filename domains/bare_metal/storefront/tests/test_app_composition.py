@@ -161,7 +161,7 @@ async def test_lifespan_exposes_exact_bare_metal_runtime_without_global_lookup(
         assert app.state.storefront_container.domain is runtime.domain
         started = runtime.loops.registered_loop_names()
     assert app.state.storefront_container is None
-    assert started == ["negotiation_watchdog", "publication"]
+    assert started == ["delivery_recovery", "negotiation_watchdog", "publication"]
     assert runtime.loops.registered_loop_names() == []
 
 

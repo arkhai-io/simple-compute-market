@@ -72,12 +72,16 @@ class SellerSession:
             raise KeyError(negotiation_id)
         return SellerDeal.model_validate_json(row[0])
 
-    def page(self, request: ListDealsRequest) -> tuple[list[SellerDeal], str | None]:
+    def page(self, request: ListDealsRequest, *, committed_only: bool = True) -> tuple[list[SellerDeal], str | None]:
         # The opaque token is the last immutable ID, not an offset into a mutable set.
         after = request.continuation or ""
         rows = self.conn.execute(
-            """SELECT deal FROM servicing_seller_deals WHERE negotiation_id > ? COLLATE BINARY
-               ORDER BY negotiation_id COLLATE BINARY LIMIT ?""", (after, request.limit + 1),
+            """SELECT s.deal FROM servicing_seller_deals s
+               JOIN servicing_delivery d USING (negotiation_id)
+               WHERE s.negotiation_id > ? COLLATE BINARY
+                 AND (? = 0 OR json_extract(d.record, '$.committed_at') IS NOT NULL)
+               ORDER BY s.negotiation_id COLLATE BINARY LIMIT ?""",
+            (after, int(committed_only), request.limit + 1),
         ).fetchall()
         deals = [SellerDeal.model_validate_json(row[0]) for row in rows[:request.limit]]
         return deals, deals[-1].negotiation_id if len(rows) > request.limit else None

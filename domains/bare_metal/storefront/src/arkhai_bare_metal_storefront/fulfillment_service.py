@@ -599,6 +599,7 @@ class BareMetalFulfillmentService:
         materialization = await self.db.load_bare_metal_materialization(
             negotiation_id=negotiation_id
         )
+        self._admit(negotiation_id, DeliveryPhase.DISCLOSE)
         return {
             "negotiation_id": negotiation_id,
             "method": "ssh",

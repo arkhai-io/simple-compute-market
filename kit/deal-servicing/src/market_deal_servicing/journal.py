@@ -59,7 +59,7 @@ class DeliveryRecord(WireModel):
     commitment_ref: Reference
     start_at: Instant
     term_end: Instant
-    committed_at: Instant
+    committed_at: Instant | None = None
     delivery_deadline_seconds: Annotated[int, Field(strict=True, gt=0)] | None = None
     available_at: Instant | None = None
     phase: DeliveryPhase = DeliveryPhase.RESERVE
@@ -74,7 +74,7 @@ class DeliveryRecord(WireModel):
 
     @property
     def deadline(self) -> int:
-        if self.delivery_deadline_seconds is None:
+        if self.delivery_deadline_seconds is None or self.committed_at is None:
             return self.term_end
         return min(self.term_end, max(self.start_at, self.committed_at) + self.delivery_deadline_seconds)
 
@@ -174,7 +174,9 @@ class EndSession:
             ).fetchone()
             if old:
                 previous = DeliveryRecord.model_validate_json(old[0])
-                fields = {"seller", "commitment_ref", "start_at", "term_end", "committed_at", "delivery_deadline_seconds"}
+                fields = {"seller", "commitment_ref", "start_at", "term_end", "delivery_deadline_seconds"}
+                if record.committed_at is not None and previous.committed_at != record.committed_at:
+                    raise ValueError("delivery registration changes verified commitment time")
                 if previous.model_dump(include=fields) != record.model_dump(include=fields):
                     raise ValueError("delivery registration changes accepted timing or identity")
                 return
@@ -182,6 +184,16 @@ class EndSession:
                 "INSERT INTO servicing_delivery VALUES (?,?,?)",
                 (record.negotiation_id, record.revision, record.model_dump_json()),
             )
+
+    def confirm_commitment(self, negotiation_id: str, *, committed_at: int) -> DeliveryRecord:
+        """Bind authority-verified timing without discarding pre-dispatch ends."""
+        with atomic(self.conn):
+            record = self.read(negotiation_id)
+            if record.committed_at is not None:
+                if record.committed_at != committed_at:
+                    raise ValueError("verified commitment time cannot change")
+                return record
+            return self._write(record.model_copy(update={"committed_at": committed_at}))
 
     def read(self, negotiation_id: str) -> DeliveryRecord:
         row = self.conn.execute(
@@ -426,7 +438,7 @@ class EndSession:
                 return Admission(status="retry", revision=record.revision)
             selected = self.selected_end(negotiation_id)
             missed_deadline = (
-                record.delivery_deadline_seconds is not None and now > record.deadline
+                record.committed_at is not None and record.delivery_deadline_seconds is not None and now > record.deadline
                 and (record.available_at is None or record.available_at > record.deadline)
             )
             if selected is not None and selected.ended_at <= now and (

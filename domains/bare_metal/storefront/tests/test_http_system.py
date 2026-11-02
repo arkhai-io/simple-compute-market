@@ -774,6 +774,7 @@ async def test_status_reports_a_held_pools_reason_from_the_latest_cycle_only(
     (hold,) = status.publication_derivation["site-a"]["holds"]
     assert hold == {"pool_id": "pool-1", "reason": "pool_lease_bound_missing"}
     assert {name: loop["state"] for name, loop in status.lifecycle.items()} == {
+        "delivery_recovery": "paused",
         "negotiation_watchdog": "paused",
         "publication": "paused",
         "settlement_servicing": "paused",
@@ -954,6 +955,7 @@ async def test_the_pause_holds_every_loop_and_each_step_runs_while_held(tmp_path
             paused = await admin.admin_pause_lifecycle_loops()
             assert paused["paused"] is True
             assert paused["loops"] == {
+                "delivery_recovery": "paused",
                 "negotiation_watchdog": "paused",
                 "publication": "paused",
                 "settlement_servicing": "paused",
@@ -972,6 +974,7 @@ async def test_the_pause_holds_every_loop_and_each_step_runs_while_held(tmp_path
             assert resumed == {
                 "paused": False,
                 "loops": {
+                    "delivery_recovery": "running",
                     "negotiation_watchdog": "running",
                     "publication": "running",
                     "settlement_servicing": "running",
@@ -1024,6 +1027,7 @@ async def test_startup_starts_every_loop_on_the_controllers_timer(tmp_path) -> N
 
     assert started == [
         "alkahest_chain_probe",
+        "delivery_recovery",
         "negotiation_watchdog",
         "publication",
         "settlement_servicing",
@@ -1031,6 +1035,7 @@ async def test_startup_starts_every_loop_on_the_controllers_timer(tmp_path) -> N
     ]
     assert routes == {
         "alkahest-chain-probe": "alkahest_chain_probe",
+        "delivery-recovery": "delivery_recovery",
         "negotiation-watchdog": "negotiation_watchdog",
         "publication": "publication",
         "settlement-servicing": "settlement_servicing",
@@ -1045,7 +1050,7 @@ async def test_a_storefront_without_settlement_servicing_steps_no_such_loop(tmp_
     app = _app(runtime)
 
     async with app.router.lifespan_context(app):
-        assert runtime.loops.registered_loop_names() == ["negotiation_watchdog", "publication"]
+        assert runtime.loops.registered_loop_names() == ["delivery_recovery", "negotiation_watchdog", "publication"]
         async with _admin_client(app) as admin:
             with pytest.raises(StorefrontClientError) as refused:
                 await admin.admin_run_lifecycle_cycle("settlement-servicing")
