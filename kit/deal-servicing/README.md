@@ -38,8 +38,11 @@ atomically journals either the required filing or a pending-classification slot.
 `resolve_correction` discharges that slot, records the required filing, or adopts
 an explicitly named verified controlling source under the same revision and fixed
 basis without rewriting the original request. Both paths preserve the controlling
-classification and reuse its filing. Only a selected end creates a new filing;
-later superseded sources remain evidence, not financial revisions.
+classification and reuse its filing. A classified selected end suppresses new
+filings from later superseded sources. A pending selected site report cannot
+discharge an independently established seller failure: its filing is retained in
+either arrival order and exposed on seller reads. Later resolution requiring an
+unsupported financial revision is visible repair state, never a silent lost filing.
 `failure_filing` fixes never-delivered claims at the Agreement start/failure basis
 and defers future-start filing until start.
 It never computes a monetary remedy. The seller half dispatches these intents.
