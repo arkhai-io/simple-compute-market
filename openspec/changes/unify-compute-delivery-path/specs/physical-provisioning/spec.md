@@ -2,11 +2,12 @@
 
 ### Requirement: Bare-metal evidence is independent of escrow rows
 
-Bare-metal stages MUST persist accepted-Agreement-bound SettlementEvidence by negotiation ID. Fulfillment/status MUST read its verified status/reference, never an escrow fallback or chain-name sentinel. Established identity/source evidence MUST be conflict-protected. Before protected recovery, the selected stage MUST revalidate authoritative source evidence; Alkahest materialization identity alone MUST NOT authorize delivery.
+Bare-metal delivery MUST persist and revalidate accepted-Agreement-bound SettlementEvidence by negotiation ID, without escrow fallback. Shared delivery cutover MUST preserve exact requests, windows, resource identities and verified evidence; ambiguous rows MUST remain repair-required. Live disclosure guards and a writer-floor bridge MUST precede legacy cleanup.
 
-Verified lifecycle cutover MUST adopt exact requests/windows and recorded reservation/fulfillment IDs into shared delivery; legacy progress MUST become read-only projections. Ambiguous rows MUST remain repair-required with their resource. Credentials or provider-active state MUST NOT imply activation, billing start or availability. Live guarded reads MUST precede credential purge. The mandatory writer-floor bridge MUST precede migration and refuse unsupported rollback.
+#### Scenario: Bare-metal delivery crosses the cutover
 
-Malformed historical evidence and receipt-only or escrow-sentinel schemas MUST NOT be silently copied or used as fallback. Incompatible unverified schemas MUST require explicit owned-database reset with effects/recovery quiesced, not fabricated evidence or a replacement resource.
+- **WHEN** a bare-metal deal is delivered or recovered across the shared-path cutover
+- **THEN** Bare-metal stages MUST persist accepted-Agreement-bound SettlementEvidence by negotiation ID. Fulfillment/status MUST read its verified status/reference, never an escrow fallback or chain-name sentinel. Established identity/source evidence MUST be conflict-protected. Before protected recovery, the selected stage MUST revalidate authoritative source evidence; Alkahest materialization identity alone MUST NOT authorize delivery. Verified lifecycle cutover MUST adopt exact requests/windows and recorded reservation/fulfillment IDs into shared delivery; legacy progress MUST become read-only projections. Ambiguous rows MUST remain repair-required with their resource. Credentials or provider-active state MUST NOT imply activation, billing start or availability. Live guarded reads MUST precede credential purge. The mandatory writer-floor bridge MUST precede migration and refuse unsupported rollback. Malformed historical evidence and receipt-only or escrow-sentinel schemas MUST NOT be silently copied or used as fallback. Incompatible unverified schemas MUST require explicit owned-database reset with effects/recovery quiesced, not fabricated evidence or a replacement resource.
 
 #### Scenario: A legacy payment sentinel is presented
 

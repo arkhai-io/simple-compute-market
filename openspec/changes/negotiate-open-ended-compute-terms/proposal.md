@@ -43,7 +43,7 @@ do not express these products across mechanisms or bound them by an absolute dat
   partial period disclosed in the option.
   Buyer guarantees rest on authority records and kept signed bytes.
 - Drop bare metal's minimum-spend gate. Presets use an honestly named setup `once`
-  part beside the rate by default; sellers may refuse churners in negotiation policy.
+  part beside the rate by default once foundation 12.1 vendors the delivery_end revision and vectors; before then setup-bearing presets remain disabled, without a new payments wire gate. Sellers may refuse churners in negotiation policy.
 
 ## Capabilities
 
@@ -64,7 +64,7 @@ None. The lifecycle codec and its common semantics belong to the foundation chan
 - Rate settlement, payment/dispute adapters and notice-stop commands: the reconciled
   rate-servicing change, named `spot-deals-through-arkhai-payments` at integration.
 - End service, `end_delivery`, buyer end commands and signed end evidence: the
-  lifecycle foundation. Unentitled seller withdrawal uses the `exceptional_end(at)`
+  lifecycle foundation. Unentitled seller withdrawal uses the `delivery_end(cause=payee)`
   dispute filing; unused prepaid service is reversed by its standard ruling, not a compensation enum.
 - Delivery admission/window derivation: `unify-compute-delivery-path`; activation
   deadlines: `renewable-compute-lease-deadlines`.

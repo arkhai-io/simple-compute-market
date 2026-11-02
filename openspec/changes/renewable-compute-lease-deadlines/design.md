@@ -166,9 +166,9 @@ classified failure evidence to the foundation's single end-plus-optional-filing
 operation. The foundation owns cause classification and the financial intent's
 fixed timing basis. Consume D8's pre-start exception (journal now, act at accepted
 start), never a future-dated command. The final owner supersession restores
-exceptional_end as the seller's dispute-adapter filing, journaled with the end;
+delivery_end as the seller's dispute-adapter filing, journaled with the end;
 the seller sends no stop/reverse. Mediation alone mechanically rules its standard-
-or-stronger self-penalty request, not buyer_end, which goes to human triage. The site
+delivery_end claim with payee agreement and mapping/time/replay guards; receipt-backed payer claims qualify too. The site
 computes no financial instant/amount and its report is not a refund prerequisite.
 The caller supplies verified buyer/ruling/payment evidence for classification;
 term clock or payee stop alone does not erase established non-delivery. Rate billing
@@ -200,7 +200,7 @@ Retained option for that future design:
 
 **Cost of active reclaim:** `reclaim` can destroy a working VM merely because the
 storefront crashed. Billing does not stop on site silence or on that reclaim.
-Honest recovery files `exceptional_end(at)` at the physical end through the dispute
+Honest recovery files `delivery_end(cause=payee)` at the physical end through the dispute
 adapter: mediation rules the self-penalty, including the premature-stop penalty
 capped by earned amounts still held after refunds; bond award is reserved for hosted bonds, even though the original failure was only bookkeeping.
 `grace` only delays that cost; `continue` leaves unpaid-service exposure with the
@@ -312,13 +312,13 @@ remains false; its resource-pool requirement is amended by unify after qualifica
 Unify 03 F2 / 04 F8 strengthens the hardening slice to normalized exact-request/state
 reconciliation; expired unresolved reserve effects cannot silently create a hold.
 The final owner decision supersedes E-A/E-C/E-E as amended and the restitution-entry/
-favourable-stop notes: activation lapse is evidence for journaled exceptional_end
+favourable-stop notes: activation lapse is evidence for journaled delivery_end
 filing through the dispute adapter, not seller payment self-correction. Mediation
 alone mechanically rules the standard-or-stronger seller self-penalty. No site payment
 logic or new buyer guarantee is introduced. "Won't preempt" is enforced by remedy
 over held money plus the premature-stop penalty, not the mandate. end_delivery has no at and gives signed
 receipt evidence only; the buyer half owns payment-stop retry while billing continues
-until it lands, with optional buyer_end human triage. Restitution stop entries,
+until it lands, with optional delivery_end with receipt concurrence or unsigned-case human triage. Restitution stop entries,
 notice waiver/early release and multiple-stop-entry gates were removed; seller stops
 are entitlements only, and a spot seller's emergency exit is a filing. The focused
 cross-change re-check settled the design; the campaign index's row is the authoritative

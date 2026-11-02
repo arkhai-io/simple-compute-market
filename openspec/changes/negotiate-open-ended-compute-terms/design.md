@@ -101,13 +101,12 @@ A payee entitlement means the seller may interrupt; the payment authority enforc
 its notice as a pending stop on that stop authority, not a local schedule.
 On-demand has no payee stop entry. The mandate therefore does not enforce that the seller
 won't preempt; that is enforced by the penalty and a buyer's case over held money, not by the mandate.
-The seller's own exit is `exceptional_end(at)`, a dispute filing the seller half journals with
+The seller's own exit is `delivery_end(cause=payee)`, a dispute filing the seller half journals with
 the end and files with the dispute authority; the seller sends no stop or reverse of its own.
-Arkhai mediation rules a payee-filed request at least as strong as the standard
-self-penalty mechanically (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`); the terms this change publishes are what that
+Arkhai mediation rules payee-agreed delivery_end under its mapping/time/replay guards; the cause=payee branch is the standard self-penalty (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`); the terms this change publishes are what that
 ruling reads — the penalty, the on-demand returned treatment, the setup charge — and
 the display explains them against it (D7). A buyer contesting the account files a case;
-mediation triages every other case, including buyer_end, for a person. There is no compensation enum.
+mediation triages claims lacking payee agreement or failing its mapping/time/replay guards; matching receipt-backed payer claims rule automatically. There is no compensation enum. Setup-bearing presets wait for foundation 12.1 to vendor the proposed delivery_end signature/concurrence revision and vectors, not another payments wire change; setup-free presets remain independently eligible.
 Entitled rate stops follow the committed per-stopper `settles_through`, computed by the
 payment authority, not a later storefront refund or promise to prorate every end.
 
@@ -265,12 +264,11 @@ recovers within the dispute window returns everything since the loss, and a case
 remedy after that.
 Holds last through stop plus dispute window and accepted case extensions. Keep
 signed evidence through at least the window after the latest delivery end, last
-payout or case close. Sellers file exceptional_end for failed/non-started delivery;
+payout or case close. Sellers file delivery_end for failed/non-started delivery;
 the buyer's stop/case is its backstop. The buyer's end — stop first, hint, `end_delivery` as end-now, the journaled retry while
-billing runs, the person-ruled `buyer_end(at)` — is the foundation's (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-buyers-end`); the display
+billing runs, the receipt-backed `delivery_end(cause=payer)` or triage — is the foundation's (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-buyers-end`); the display
 explains each step as that statement gives it. The setup charge is
-owed from approval and kept if the buyer stops; it returns only if the seller never
-delivers.
+owed from approval; a payment stop alone does not reverse it. A qualified delivery_end returns it iff delivered=false for either cause, keeping it iff true.
 
 ### D8. Churn is seller pricing/policy, not a protocol gate
 
@@ -287,7 +285,7 @@ the rate change derives it.
 - A delivery deadline kept seller-internal: the buyer could not compute the runway, and late activation inside a long term was no failure.
 - `interruption {seller_may_interrupt, notice_seconds, compensation}`: duplicates the shared codec.
 - Lifecycle terms inside the settlement mechanism's parameters: the parties' rights read by lifecycle adapters placed in a dictionary the mechanism owns, under a name that says the wrong thing (D4; foundation D5).
-- Payee notice entry on on-demand: grants the seller a priced reclaim. On-demand carries no seller stop entry, so won't-preempt is enforced by remedy, a buyer case and the bond, and the seller's exit is the mechanically ruled exceptional_end filing.
+- Payee notice entry on on-demand: grants the seller a priced reclaim. On-demand carries no seller stop entry, so won't-preempt is enforced by remedy, a buyer case and the bond, and the seller's exit is the mechanically ruled delivery_end filing.
 - Bare-metal minimum spend/new payments primitive: churn is seller pricing/refusal policy.
 - Rejecting setup once because it is not minimum spend: name the additive fee honestly.
 - Banning principal-blacklist policy: goodwill is not a decentralized protocol guarantee.
@@ -325,8 +323,7 @@ No standalone review of this terms change was supplied this round. Applied the t
 Second-review triage applies foundation 18 F4/F13/F14 and spot 03 F2: one term-end carrier,
 terms-owned default buyer policy, all interim charged term ends refused by default, and no
 terms-to-materialization/startup closeout cycle. The final owner decision makes the seller's
-exceptional_end a dispute filing, mechanically ruled only when at least the standard
-self-penalty, and keeps buyer_end a buyer-filed case ruled by a person.
+delivery_end a dispute filing using the cause=payee remedy, and makes receipt-backed payer claims mechanical under the same payee-agreement guards.
 The focused cross-change re-check settled the design; the campaign index's row is
 the authoritative status (`in design` until this change's own design review has
 run and its triage advances it), and this section does not restate it.

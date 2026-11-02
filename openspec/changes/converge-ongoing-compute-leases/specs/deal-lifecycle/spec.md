@@ -102,7 +102,7 @@ Rate servicing MUST keep verified funded-through as a replaceable timer, never s
 #### Scenario: An outage concealed a top-up
 
 - **WHEN** a bare timer ended service at T during an outage and verified recovery shows billing continued past T
-- **THEN** foundation's atomic pending-filing resolution journals exceptional_end(T) through the dispute adapter to the Agreement authority; seller sends no stop/reverse and financial work stays unresolved until verified ruling effects complete
+- **THEN** foundation's atomic pending-filing resolution journals delivery_end(cause=payee) through the dispute adapter to the Agreement authority; seller sends no stop/reverse and financial work stays unresolved until verified ruling effects complete
 
 #### Scenario: Classification cannot be verified
 
@@ -134,7 +134,7 @@ Recovery MUST use a seller export, original authority-bound credentials and an i
 
 #### Scenario: Recovery is interrupted before result export
 
-- **WHEN** an entitled notice or exceptional_end filing may have succeeded but no result was saved
+- **WHEN** an entitled notice or delivery_end filing may have succeeded but no result was saved
 - **THEN** the runner consumes the retained envelope and resolves its original operation by read/same-key retry without reconstructing time or payload
 
 #### Scenario: Recovery overlaps online replay

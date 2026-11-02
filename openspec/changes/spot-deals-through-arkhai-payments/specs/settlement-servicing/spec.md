@@ -1,11 +1,13 @@
 ## MODIFIED Requirements
 
 ### Requirement: The payments mandate is derived exactly from the Agreement
-The mandate MUST bind sha256(JCS(agreement)) as deal, sha256(JCS(mandate)) as transaction ID, settlement_params.payer_account as from and selected payee account as to, the published fee policy and nonce arkhai.payments.v1. Once-only options MUST derive one once part for the agreed amount and asset; rate options MUST derive the selected rate and optional setup parts, all with per-part authorities.
 
-Every once hold MUST last at least until its own part end plus adjudication.dispute_window_seconds (prepaid service ends at Agreement term end; setup ends at the later of the Agreement start and approval). Approval MUST expire after approval_window. Hosted options MUST NOT carry bond until seller-funded parts are supported. Once-only mandates without early-termination entitlements MUST authorize no start or stop. Reverse MUST be authorized for seller and the Agreement's dispute authority, whose account MUST come from the option's adjudication.dispute, never Settlement.arkhai_payments configuration. Only that authority MUST be listed under extend, also authorizing lift. Each part MUST carry maxHoldExtension from adjudication.case_hold_max_seconds, null when unbounded. Reverse MAY name a part and an amount up to what it still holds.
+The mandate MUST be derived only from the exact accepted Agreement, binding its JCS hash, deterministic transaction ID, parties, asset, amounts, part shapes, authorities, holds, caps and approval window. Buyer and seller MUST derive the same mandate under the selected mechanism's vendored contract; unsupported bonds or terms MUST refuse.
 
-Rate authorities and term ends MUST use the deal-lifecycle codec. An optional setup_amount MUST derive one ordinary once part for that amount, owed by the buyer from approval, with end the later of the Agreement start and the approval instant and hold afterStop plus the dispute window. A buyer-caused end, before or after activation, MUST leave it with the seller; it MUST return to the buyer only through the seller's self-penalty for non-delivery.
+#### Scenario: The complete mandate is checked
+
+- **WHEN** buyer and seller derive or verify a mandate before approval
+- **THEN** The mandate MUST bind sha256(JCS(agreement)) as deal, sha256(JCS(mandate)) as transaction ID, settlement_params.payer_account as from and selected payee account as to, the published fee policy and nonce arkhai.payments.v1. Once-only options MUST derive one once part for the agreed amount and asset; rate options MUST derive the selected rate and optional setup parts, all with per-part authorities. Every once hold MUST last at least until its own part end plus adjudication.dispute_window_seconds (prepaid service ends at Agreement term end; setup encodes end at Agreement start, clamped effectively to approval if later). Approval MUST expire after approval_window. Hosted options MUST NOT carry bond until seller-funded parts are supported. Once-only mandates without early-termination entitlements MUST authorize no start or stop. Reverse MUST be authorized for seller and the Agreement's dispute authority, whose account MUST come from the option's adjudication.dispute, never Settlement.arkhai_payments configuration. Only that authority MUST be listed under extend, also authorizing lift. Each part MUST carry maxHoldExtension from adjudication.case_hold_max_seconds, null when unbounded. Reverse MAY name a part and an amount up to what it still holds. Rate authorities and term ends MUST use the deal-lifecycle codec. An optional setup_amount MUST derive one ordinary once part for that amount, owed by the buyer from approval, with encoded end at Agreement start, effectively clamped to approval if later and hold afterStop plus the dispute window. A lawful delivered payer end MUST keep setup; a qualified delivery_end with delivered=false MUST return setup for either cause.
 
 #### Scenario: Hold and approval expiry follow the accepted timing
 - **WHEN** a once-only mandate is derived from an Agreement accepted at accepted_at
@@ -24,7 +26,7 @@ Rate authorities and term ends MUST use the deal-lifecycle codec. An optional se
 #### Scenario: A mixed mandate is derived
 - **WHEN** a rate option includes setup_amount
 - **THEN** setup once precedes rate, each with per-part authorities and maxHoldExtension
-- **AND** setup's end is the later of the Agreement start and approval, both holds are afterStop plus dispute window, and approval expiry still uses approval_window
+- **AND** setup's encoded end is Agreement start, effectively clamped to approval if later, both holds are afterStop plus dispute window, and approval expiry still uses approval_window
 
 ## ADDED Requirements
 
@@ -47,7 +49,7 @@ SCM MUST derive time rate parts through the agreed-price accessor and lifecycle 
 - **GIVEN** an accepted spot option with a seller notice entitlement
 - **WHEN** the buyer checks the mandate
 - **THEN** its seller stop entry carries the accepted notice and treatment, without an extra restitution entry
-- **AND** the seller's emergency exit is an exceptional_end filing through the dispute adapter, not its own payment stop
+- **AND** the seller's emergency exit is a delivery_end filing through the dispute adapter, not its own payment stop
 
 #### Scenario: The rate adapter consumes lifecycle treatment
 - **GIVEN** the deal-lifecycle requirements for stop-authority and term-end treatment
@@ -58,12 +60,12 @@ SCM MUST derive time rate parts through the agreed-price accessor and lifecycle 
 #### Scenario: A buyer stops before activation
 - **GIVEN** an approved mandate with a setup part
 - **WHEN** the buyer's stop takes effect before the seller activates the lease
-- **THEN** the setup part stays with the seller and pays out one dispute window after its end
+- **THEN** a lawful buyer surrender keeps setup with delivered=true in its claim, with payout one dispute window after its effective end
 - **AND** no reverse of it is issued and no filing is made
 
 #### Scenario: The seller never delivers
 - **GIVEN** an approved mandate with a setup part
-- **WHEN** the seller files exceptional_end for non-delivery, including a term end that arrives before activation
+- **WHEN** the seller files delivery_end for non-delivery, including a term end that arrives before activation
 - **THEN** the mediation self-penalty returns all of setup to the buyer while it is held
 
 #### Scenario: Provisioning starts late
@@ -97,7 +99,7 @@ The hosted adapter MUST translate lifecycle commands into explicit per-part even
 - **AND** it never reports a later local timestamp as the authority's end
 
 ### Requirement: Rate stops consume authority-priced period treatment
-The hosted rate adapter MUST consume the deal-lifecycle stop-authority mapping and capability refusal rules. It MUST observe the winning authority entry rather than compute cooperative end-price corrections. Seller exceptional_end MUST instead be filed through the dispute adapter, with no seller-side stop or reverse for that filing.
+The hosted rate adapter MUST consume the deal-lifecycle stop-authority mapping and capability refusal rules. It MUST observe the winning authority entry rather than compute cooperative end-price corrections. Seller delivery_end MUST instead be filed through the dispute adapter, with no seller-side stop or reverse for that filing.
 
 #### Scenario: The contract has no partialPeriod field yet
 - **WHEN** an interim spot or on-demand preset is offered against a contract supporting only charged behavior
@@ -119,8 +121,8 @@ The hosted rate adapter MUST consume the deal-lifecycle stop-authority mapping a
 
 #### Scenario: A dispute stop selects its treatment
 - **WHEN** a verified stop is issued under the dispute authority's chosen entry
-- **THEN** its event supplies the ruling's treatment; buyer_end is human-ruled and preserves payer notice and payer treatment
-- **AND** exceptional_end is a dispute intent whose at-least-standard payee self-penalty is mediation's only mechanical ruling
+- **THEN** its event supplies the ruling's treatment; delivery_end is human-ruled and preserves payer notice and payer treatment
+- **AND** delivery_end is a dispute intent whose at-least-standard payee self-penalty is mediation's payee-signed delivery_end ruling
 - **AND** SCM observes the effect without computing a compensating reverse
 
 #### Scenario: The stop crosses a period boundary
@@ -223,7 +225,7 @@ The hosted payment adapter MUST expose no exceptional-end operation and MUST NOT
 - **THEN** recovery remains with the foundation-owned journal and identical-key read/retry, never a direct hosted-payment fallback
 
 #### Scenario: The mediation self-penalty result is observed
-- **GIVEN** Arkhai mediation's published standard mapping for a payee request at least as strong as the standard
+- **GIVEN** the vendored delivery_end mapping for a cause=payee claim meeting payee-agreement and mapping/time/replay guards
 - **WHEN** the adapter observes the resulting verified authority records
 - **THEN** it reports rate stops now with returned and rate earnings since at reversed, including always-returned on-demand treatment
 - **AND** once parts reflect their time-unserved reversal, with setup all if undelivered and none once delivered, then min(premature_stop_penalty, earned amounts still held) reversed to the payer across parts in mandate order; no bond award

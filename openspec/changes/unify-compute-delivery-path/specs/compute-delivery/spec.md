@@ -198,7 +198,7 @@ Before availability, refusal, provisioning failure, elapsed window or activation
 
 - **WHEN** a buyer end_delivery request arrives without at
 - **THEN** delivery consumes the storefront's signed receipt evidence and lifecycle admission result
-- **AND** does not issue a billing stop for the buyer or duplicate buyer-side stop retry or buyer_end triage policy
+- **AND** does not issue a billing stop for the buyer or duplicate buyer-side stop retry or delivery_end triage policy
 
 #### Scenario: An end overlaps dispatch
 

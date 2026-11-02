@@ -23,7 +23,7 @@ added by this reconciliation.
   freeze the injected preset-helper interface (D3), `period`, `reserve_ahead_seconds`, separate setup pricing, accessor unit and
   servicing-declaration contracts. The option carries no maximum term: the horizon
   is resolved into `duration_seconds` at acceptance and the option's ID is unchanged
-  from the registry to the Agreement (D5).
+  from the registry to the Agreement (D5). Setup-bearing preset publication and acceptance wait for foundation 12.1's delivery_end revision and vectors, not another payments wire change; preserve valid setup-free options while it is pending.
 
 ## 2. Quote and capacity terms
 

@@ -7,7 +7,12 @@
 
 ### Requirement: The payments mandate is derived exactly from the Agreement
 
-The mandate's `deal` MUST be `sha256(JCS(agreement))` and its transaction ID `sha256(JCS(mandate))`. It MUST name `settlement_params.payer_account` as `from`, the selected option's payee account as `to`, and, on once-only options, one `once` part for the agreed amount and asset, with per-part authorities. Every `once` hold MUST last no less than its own part end plus the option's `adjudication.dispute_window_seconds` (prepaid service ends at Agreement term end; setup ends at the later of the Agreement start and approval), and approval MUST expire after the option's `approval_window`. A hosted option MUST NOT carry `bond` until the payments service can hold a seller-funded part. It MUST use the service's published fee policy and the fixed nonce `arkhai.payments.v1`. A `once`-only mandate MUST authorize no `start` and no `stop`, and MUST authorize `reverse` for the seller and the agreement's dispute authority, the account its `adjudication.dispute` names, and MUST list only that authority under the one `extend` authorities key, which also authorizes `lift`. The dispute authority's account MUST come from the option, not from `[Settlement.arkhai_payments]`. Each part MUST carry `maxHoldExtension` from `adjudication.case_hold_max_seconds`, `null` when unbounded. A `reverse` MAY name a part and an amount up to what that part still holds.
+The mandate MUST be derived only from the exact accepted Agreement, binding its JCS hash, deterministic transaction ID, parties, asset, amounts, part shapes, authorities, holds, caps and approval window. Buyer and seller MUST derive the same mandate under the selected mechanism's vendored contract; unsupported bonds or terms MUST refuse.
+
+#### Scenario: The complete mandate is checked
+
+- **WHEN** buyer and seller derive or verify a mandate before approval
+- **THEN** The mandate's `deal` MUST be `sha256(JCS(agreement))` and its transaction ID `sha256(JCS(mandate))`. It MUST name `settlement_params.payer_account` as `from`, the selected option's payee account as `to`, and, on once-only options, one `once` part for the agreed amount and asset, with per-part authorities. Every `once` hold MUST last no less than its own part end plus the option's `adjudication.dispute_window_seconds` (prepaid service ends at Agreement term end; setup encodes end at Agreement start, clamped effectively to approval if later), and approval MUST expire after the option's `approval_window`. A hosted option MUST NOT carry `bond` until the payments service can hold a seller-funded part. It MUST use the service's published fee policy and the fixed nonce `arkhai.payments.v1`. A `once`-only mandate MUST authorize no `start` and no `stop`, and MUST authorize `reverse` for the seller and the agreement's dispute authority, the account its `adjudication.dispute` names, and MUST list only that authority under the one `extend` authorities key, which also authorizes `lift`. The dispute authority's account MUST come from the option, not from `[Settlement.arkhai_payments]`. Each part MUST carry `maxHoldExtension` from `adjudication.case_hold_max_seconds`, `null` when unbounded. A `reverse` MAY name a part and an amount up to what that part still holds.
 
 #### Scenario: Hold and approval expiry follow the accepted timing
 
@@ -52,7 +57,7 @@ A refund MUST be seller-initiated through `reverse`. `reverse` is authorized for
 #### Scenario: Only the seller initiates a refund
 
 - **WHEN** delivery fails or the seller voluntarily corrects an unentitled end
-- **THEN** the seller files exceptional_end with the agreement's dispute authority and sends no stop or reverse for it; mediation's standard ruling returns unearned money then applies the capped premature-stop penalty, and a buyer disputing the account files a case
+- **THEN** the seller files delivery_end with the agreement's dispute authority and sends no stop or reverse for it; mediation's standard ruling returns unearned money then applies the capped premature-stop penalty, and a buyer disputing the account files a case
 
 ## ADDED Requirements
 

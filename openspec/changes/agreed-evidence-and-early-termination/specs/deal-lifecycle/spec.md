@@ -43,7 +43,12 @@ A ruling's outcome MUST be a list of consequences, each a payment effect on one 
 
 ### Requirement: Requests are intents or interface requests
 
-A case's requested outcome MUST be either a deal-level intent SCM issues, including the buyer-filed `buyer_end(at)` and the seller-filed `exceptional_end(at)`, or an interface request the dispute adapter built or validated. The dispute adapter MUST map an intent into its interface's request or reject it as unsupported. The generic lifecycle kits MUST NOT contain any interface's request vocabulary, and generic lifecycle callers MUST NOT compute per-part effects for a case request.
+A case's requested outcome MUST be either a deal-level intent SCM issues, including delivery_end with either cause filed by either party, or an interface request the dispute adapter built or validated.
+
+#### Scenario: The full policy is enforced
+
+- **WHEN** the owning component validates or applies this contract
+- **THEN** A case's requested outcome MUST be either a deal-level intent SCM issues, including delivery_end with either cause filed by either party, or an interface request the dispute adapter built or validated. The dispute adapter MUST map an intent into its interface's request or reject it as unsupported. The generic lifecycle kits MUST NOT contain any interface's request vocabulary, and generic lifecycle callers MUST NOT compute per-part effects for a case request.
 
 #### Scenario: A buyer requests a refund for an outage
 
@@ -52,7 +57,7 @@ A case's requested outcome MUST be either a deal-level intent SCM issues, includ
 
 #### Scenario: An interface has no buyer-end request
 
-- **WHEN** a buyer issues `buyer_end(at)` and the dispute interface defines no such request
+- **WHEN** a buyer issues `delivery_end(cause=payer)` and the dispute interface defines no such request
 - **THEN** the dispute adapter rejects it as unsupported before contacting an authority
 
 ### Requirement: Outcome effects are acted on once
@@ -127,7 +132,12 @@ The payment-adapter protocol MUST send a stop only under a stop entry the mandat
 
 ### Requirement: Lifecycle terms are part of the selected option
 
-A settlement option MUST state its `price` (`asset`, `rates`; absent on a rateless option), its `settlement` (a `schema` naming the mechanism, with that schema's own parameters flat beside it, none named `schema`), and optionally its `lifecycle`, which MAY carry adjudication (version, dispute, dispute_window_seconds, case_hold_max_seconds), early_termination (version, payer/payee entitlements with notice_seconds/settles_through, term-end settles_through, premature_stop_penalty), `delivery_deadline_seconds` (a positive integer: the seconds after the later of the commitment instant and the Agreement start within which the resource is available to the buyer, as the storefront's durable `available` record) and reserved bond (version, amount). A compute option whose mechanism has a lifecycle adapter MUST carry the `delivery_deadline_seconds` its site enforces and MUST omit it where the site enforces none; a default buyer MUST refuse such an option without it, with an explicit opt-out. An option whose mechanism has no lifecycle adapter carries no `lifecycle` and so no deadline term; its lease takes the site's own capacity safeguard, and the buyer is shown that the option makes no delivery promise. The option ID MUST be the hash of the canonical payload of `price`, `settlement` and `lifecycle`, omitting `lifecycle` when absent. The shared codec MUST decode `lifecycle` as Agreement bytes and option identity; no settlement mechanism's model may own its keys; bond MUST remain reserved until a mechanism can hold seller-funded stake.
+The shared codec MUST own optional lifecycle terms beside price and schema-owned settlement parameters. The canonical option ID MUST include price, settlement and lifecycle, omitting lifecycle when absent. Compute delivery deadlines MUST follow site policy and default buyer acceptance; bond MUST remain reserved until supported.
+
+#### Scenario: A lifecycle option is encoded
+
+- **WHEN** an option is published or accepted
+- **THEN** A settlement option MUST state its `price` (`asset`, `rates`; absent on a rateless option), its `settlement` (a `schema` naming the mechanism, with that schema's own parameters flat beside it, none named `schema`), and optionally its `lifecycle`, which MAY carry adjudication (version, dispute, dispute_window_seconds, case_hold_max_seconds), early_termination (version, payer/payee entitlements with notice_seconds/settles_through, term-end settles_through, premature_stop_penalty), `delivery_deadline_seconds` (a positive integer: the seconds after the later of the commitment instant and the Agreement start within which the resource is available to the buyer, as the storefront's durable `available` record) and reserved bond (version, amount). A compute option whose mechanism has a lifecycle adapter MUST carry the `delivery_deadline_seconds` its site enforces and MUST omit it where the site enforces none; a default buyer MUST refuse such an option without it, with an explicit opt-out. An option whose mechanism has no lifecycle adapter carries no `lifecycle` and so no deadline term; its lease takes the site's own capacity safeguard, and the buyer is shown that the option makes no delivery promise. The option ID MUST be the hash of the canonical payload of `price`, `settlement` and `lifecycle`, omitting `lifecycle` when absent. The shared codec MUST decode `lifecycle` as Agreement bytes and option identity; no settlement mechanism's model may own its keys; bond MUST remain reserved until a mechanism can hold seller-funded stake.
 
 #### Scenario: A term changes the option ID
 
@@ -179,7 +189,12 @@ An unknown `version`, initiator key, or `settles_through` value, a `dispute` who
 
 ### Requirement: Dispute timing terms are bounded
 
-`case_hold_max_seconds` MUST be a nonnegative integer or `null`. A `dispute_window_seconds` or `case_hold_max_seconds` below the dispute authority's advertised minimum MUST be refused at publication and by the buyer. On a compute option, `dispute_window_seconds` MUST be at least `delivery_deadline_seconds` plus the authority's advertised minimum window, so that no `once` part pays out before non-delivery can be established and filed on; publication and the buyer MUST refuse an option that fails this.
+`case_hold_max_seconds` MUST be a nonnegative integer or `null`.
+
+#### Scenario: The full policy is enforced
+
+- **WHEN** the owning component validates or applies this contract
+- **THEN** `case_hold_max_seconds` MUST be a nonnegative integer or `null`. A `dispute_window_seconds` or `case_hold_max_seconds` below the dispute authority's advertised minimum MUST be refused at publication and by the buyer. On a compute option, `dispute_window_seconds` MUST be at least `delivery_deadline_seconds` plus the authority's advertised minimum window, so that no `once` part pays out before non-delivery can be established and filed on; publication and the buyer MUST refuse an option that fails this.
 
 #### Scenario: A zero case hold is below the minimum
 
@@ -249,7 +264,12 @@ The sole term-end carrier MUST be early_termination.settles_through, distinct fr
 
 ### Requirement: The dispute window sets the earliest payout
 
-Each payment adapter MUST derive holds under which each amount a part holds pays out no earlier than the part's end plus `adjudication.dispute_window_seconds`. A prepaid `once` part MUST end at the Agreement term end; a setup `once` part at the later of the Agreement start and approval; a rate part at its stop or term end. The window MUST NOT be shorter than the dispute authority's advertised minimum. SCM MUST NOT refuse a filing for being after the window; that is the dispute authority's policy.
+Each payment adapter MUST derive holds under which each amount a part holds pays out no earlier than the part's end plus `adjudication.dispute_window_seconds`.
+
+#### Scenario: The full policy is enforced
+
+- **WHEN** the owning component validates or applies this contract
+- **THEN** Each payment adapter MUST derive holds under which each amount a part holds pays out no earlier than the part's end plus `adjudication.dispute_window_seconds`. A prepaid `once` part MUST end at the Agreement term end; a setup once part at Agreement start, effectively clamped to approval if later; a rate part at its stop or term end. The window MUST NOT be shorter than the dispute authority's advertised minimum. SCM MUST NOT refuse a filing for being after the window; that is the dispute authority's policy.
 
 #### Scenario: A once deal's hold is derived
 
@@ -336,9 +356,36 @@ Every derived mandate MUST authorize `extend` and `lift` for the agreement's dis
 - **WHEN** a hosted mandate is derived for a deal
 - **THEN** its `extend` authorities list only the dispute authority's account, and neither the payer nor the payee
 
-### Requirement: Any party may append to a case
+### Requirement: Respondent discovery is durable
 
-A dispute adapter MUST offer `append {case_ref, items}` on an open case to either party, repeatedly, with an idempotency key derived from the command's operation key. The dispute record MUST show each appended item under the actor that sent it. A case the counterparty filed, surfaced through the seller's `watch`, MUST make the seller's append of its evidence a journaled effect keyed by `case_ref`, which the dispute cursor waits for.
+The mediation adapter MUST expose authenticated GET /respondent?after=<cursor>&limit=n and its cases, next_after and has_more result. The listing MUST contain open cases where the account is respondent and has not appended; any append MUST count as an answer. SCM MUST persist respondent cursor and answer intent before advancing, independently of deal watch.
+
+#### Scenario: A seller restarts before answering
+
+- **WHEN** polling found a case but the storefront restarts before its append is acknowledged
+- **THEN** restart retries its journaled answer with the same key, without losing the case
+
+### Requirement: SCM signs matching claims or contests them
+
+The storefront MUST compare ended_at, delivered and cause with durable available/end records. It MUST append SignedDeliveryEndClaim concurrence for a match, and contesting items otherwise, as payee account mandate.to. An append MUST contain items or concurrence. Dead or non-SCM respondents MUST remain triage cases, never a safety dependency.
+
+#### Scenario: A cooperative seller agrees
+
+- **WHEN** a buyer files cause=payee and the seller's durable records match the exact claim
+- **THEN** the storefront signs and appends concurrence; mismatched facts instead receive contesting evidence
+
+### Requirement: Receipts embed reusable signed claims
+
+The storefront end_delivery receipt MUST embed SignedDeliveryEndClaim(cause=payer, delivered=true) at its durable receipt time, signed by Agreement.seller. Same-key retry MUST preserve identical claim/proof. The buyer MUST verify and retain it and MAY file it later in Filing.concurrence. It MUST NOT claim the receipt attests an earlier time.
+
+#### Scenario: Payments is unreachable
+
+- **WHEN** end_delivery returns its signed claim while the buyer's own stop is pending
+- **THEN** the buyer can file receipt concurrence for the mechanical rule without a later seller response, and still reports separate stop/case progress
+
+### Requirement: Case appends follow interface authorization
+
+A dispute adapter MUST follow its interface's append authorization with operation-derived idempotency keys; mediation MUST accept appends only from mandate.to with items or concurrence. The dispute record MUST show each appended item under the actor that sent it. A case the counterparty filed, surfaced through the seller's `watch`, MUST make the seller's append of its evidence a journaled effect keyed by `case_ref`, which the dispute cursor waits for.
 
 #### Scenario: The seller answers a buyer's case
 
@@ -352,8 +399,8 @@ A dispute adapter MUST offer `append {case_ref, items}` on an open case to eithe
 
 #### Scenario: The claimant adds evidence
 
-- **WHEN** a buyer appends a second evidence item to its open case
-- **THEN** the record shows both submissions under the buyer, in order
+- **WHEN** a payee claimant appends a second evidence item to its open case
+- **THEN** the record shows both submissions under the payee, in order
 
 ### Requirement: An append to a closed case is skipped
 
@@ -380,40 +427,104 @@ Filing a case MUST NOT itself change delivery; only a verified ruling's delivery
 
 ### Requirement: A seller's exceptional end is a dispute filing
 
-The seller half MUST journal exceptional_end(at, delivered) with a delivery end and file it only with the agreement's dispute authority through the dispute adapter; `delivered` MUST state whether the resource was ever available to the buyer, false for the never-delivered and past-deadline bases, and the standard self-penalty MUST return a setup part — a `once` part the service clamped to zero length at approval — in full when it is false and not at all when it is true, since a zero-length term has no unserved share of time. It MUST NOT send a stop or reverse of its own for it, and the payments vocabulary MUST NOT contain an exceptional-end event kind or field. Future at MUST refuse, and unknown filing results MUST resolve by the stable key before retry.
+The seller half MUST atomically journal delivery_end {ended_at, delivered, cause: payee} with its delivery end and file through the dispute adapter. It MUST send no stop/reverse for the claim. delivered MUST reflect durable availability, false for never-delivered or past-deadline failure. Future ended_at MUST refuse; unknown results MUST resolve by stable key. Payments MUST gain no claim vocabulary.
 
 #### Scenario: An administrator ends a once-only deal
 
-- **WHEN** the seller administrator issues exceptional_end(now) for a hosted once-only deal
-- **THEN** end service records the attributed delivery end and the dispute adapter files exceptional_end(now) with a stable key; the seller sends no reverse, and delivery does not await the ruling
+- **WHEN** the seller administrator issues delivery_end(cause=payee) for a hosted once-only deal
+- **THEN** end service records the attributed delivery end and the dispute adapter files delivery_end(cause=payee) with a stable key; the seller sends no reverse, and delivery does not await the ruling
 
 #### Scenario: Setup returns by delivery, not by time
 
-- **WHEN** a setup part clamped to approval is in a deal the seller files exceptional_end on with `delivered: false`, and in another with `delivered: true`
+- **WHEN** a setup part clamped to approval is in a deal the seller files delivery_end on with `delivered: false`, and in another with `delivered: true`
 - **THEN** the first ruling returns the setup part in full and the second leaves it whole, whatever share of any term has passed
 
 #### Scenario: Hardware fails on a spot deal
 
 - **WHEN** the seller's hardware fails on a rate deal whose seller holds a notice entry
-- **THEN** the seller files exceptional_end(at) as its emergency exit and sends no stop or reverse, and the payments service receives no cause or exceptional-end field
+- **THEN** the seller files delivery_end(cause=payee) as its emergency exit and sends no stop or reverse, and the payments service receives no cause or exceptional-end field
 
-#### Scenario: A weaker request is triaged
+#### Scenario: An unsupported claim is triaged
 
-- **WHEN** a payee files an exceptional_end request weaker than the standard request
-- **THEN** the authority enters it into triage rather than ruling it mechanically
+- **WHEN** the Agreement cannot map cleanly or the claim predates Agreement start
+- **THEN** the authority sends it to an operator, not a mechanical ruling
 
-### Requirement: The standard seller self-penalty refunds unearned money
+### Requirement: Delivery end is one claim for either party
 
-Arkhai mediation MUST mechanically rule only payee-filed exceptional_end requests at least as strong as standard. Through its own `{account, notice: PT0S, partialPeriod: chosen}` entry it MUST stop rates now returned (always on on-demand), reverse earnings since at, and reverse unserved once shares by time (setup all if undelivered, none once delivered). Weaker requests MUST enter triage.
+The dispute adapter MUST map DeliveryEndClaim {kind: delivery_end, ended_at: int Unix seconds <= now, delivered: bool, cause: payee|payer} for either filer. Its concrete schema and signed payload MUST come from the mediation revision vendored at 12.1. Separate seller-end, buyer-end and end-acknowledgement mediation kinds MUST NOT be emitted.
 
-#### Scenario: The seller files the standard request
+#### Scenario: Buyer files a seller failure
 
-- **WHEN** a payee files the standard exceptional_end request
-- **THEN** mediation applies the returned rate stops and unearned-money reversals, not the seller
+- **WHEN** a seller machine fails without reporting its stop
+- **THEN** the buyer may file cause=payee without seller cooperation; an unanswered case stays triaged
+
+### Requirement: Concurrence binds the exact Agreement and claim
+
+SignedDeliveryEndClaim MUST contain agreement (JCS SHA-256 hex equal to mandate.deal), claim, signer Identity and SignatureProof. Valid concurrence MUST have JCS-equal case claim, signer equal to Agreement.seller and a verified proof. Filing.concurrence and Append.concurrence MUST use this contract-owned model; invalid concurrence MUST remain evidence for an operator.
+
+#### Scenario: A signature covers another claim
+
+- **WHEN** a buyer presents a valid seller signature over a different ended_at or Agreement
+- **THEN** it is not concurrence and the case stays with an operator
+
+### Requirement: Claim signing uses the canonical identity frame
+
+Signing MUST use kit/identity frame_fields(["arkhai.mediation.delivery-end-claim.v1", agreement, signer.scheme, signer.identifier, str(ended_at), "true"|"false", cause]). ed25519 MUST sign those bytes; eip191 MUST personal_sign them. Clients MUST use the vendored vectors for both schemes, not a locally invented frame.
+
+#### Scenario: Both seller identity schemes sign
+
+- **WHEN** the same claim is signed by ed25519 and eip191 seller identities
+- **THEN** each signature verifies against its mediation vector and only its Agreement seller principal
+
+### Requirement: Mechanical claims require payee agreement and guards
+
+Mediation MUST rule mechanically only if payee filed or valid concurrence exists, the Agreement maps cleanly, ended_at is at or after Agreement start, and no earlier mechanical delivery_end ruling exists on that Agreement. All other cases MUST enter human triage, with no respondent-silence default. Ruled/closed signed records MUST carry basis payee_filed, payee_signed or operator; concession MUST NOT bypass these rules.
+
+#### Scenario: A payee-signed buyer claim
+
+- **WHEN** a payer files a matching seller-signed claim and all mechanical guards pass
+- **THEN** mediation rules with basis payee_signed, regardless of which party filed
+
+#### Scenario: A repeated mechanical end
+
+- **WHEN** another delivery_end is filed after an earlier mechanical delivery_end ruling on the Agreement
+- **THEN** it goes to an operator; a new operation key cannot bypass the replay guard
+
+#### Scenario: Respondent stays silent
+
+- **WHEN** a claim has neither payee filing nor valid concurrence and the respondent never answers
+- **THEN** it remains with human triage and no timeout supplies a ruling
+
+### Requirement: Payee-caused ends return held unserved value
+
+For cause=payee, mediation MUST stop rates now returned through its PT0S/chosen entry, reverse held earnings since ended_at and reverse non-setup once parts by unserved time share, then apply the capped premature-stop penalty. The filer MUST NOT compute or apply these effects.
+
+#### Scenario: The seller files its failure
+
+- **WHEN** the payee files delivery_end(cause=payee) and mechanical guards pass
+- **THEN** mediation applies returned stops, reversals and capped penalty, not the seller
+
+### Requirement: Setup returns by delivered for either cause
+
+Mediation MUST identify setup as a once part whose end is at or before Agreement start. It MUST reverse setup in full iff delivered=false and keep it iff true, for either cause. Site activation or elapsed time MUST NOT replace delivered. Setup-bearing presets MUST remain disabled until the delivery_end revision and signature/mapping vectors are vendored.
+
+#### Scenario: Undelivered payer-caused end
+
+- **WHEN** a qualified cause=payer claim states delivered=false
+- **THEN** setup returns in full, non-setup once parts stay kept and no penalty applies
+
+### Requirement: Payer-caused ends preserve priced stop terms
+
+For cause=payer, mediation MUST realize each rate's payer stop as received at ended_at, with E=ended_at+notice and its partialPeriod, net of prior effects and accepted/pending stops. Non-setup once parts MUST stay kept and no penalty MUST apply. A missing or chosen payer entry MUST go to an operator; past corrections MUST use present stop plus held-money adjustment, never backdating.
+
+#### Scenario: A receipt-backed end preserves notice
+
+- **WHEN** a receipt-backed payer claim qualifies and its payer notice has not elapsed
+- **THEN** the authority schedules or awaits E without erasing notice, netting any unknown-but-landed stop
 
 ### Requirement: Premature-stop penalties consume only held earnings
 
-After unearned-money refunds, mediation MUST reverse min(premature_stop_penalty, earned amounts still held) to the payer across parts in mandate order for an unentitled seller end. An entitled notice stop MUST pay none; a spot emergency without notice MUST pay it. In a buyer-filed case alleging that end, a person MUST apply the same cap. Bond award MUST remain reserved for hosted bonds.
+After unearned-money refunds, mediation MUST reverse min(premature_stop_penalty, earned amounts still held) to the payer across parts in mandate order for an unentitled seller end. An entitled notice stop MUST pay none; a spot emergency without notice MUST pay it. A buyer-filed cause=payee claim MUST use the same cap, mechanically when qualified and otherwise through an operator. Bond award MUST remain reserved for hosted bonds.
 
 #### Scenario: Held earnings cap the penalty
 
@@ -431,12 +542,12 @@ The codec MUST include early_termination.premature_stop_penalty in Agreement byt
 
 ### Requirement: The seller files ends its terms do not entitle
 
-For an unentitled site withdrawal or failed/never-started delivery, end service MUST journal `exceptional_end(at)` for filing through the dispute adapter at the actual end. Never-delivered timing MUST follow "Never-delivered correction has a fixed non-future basis". A correlated lawful end MUST NOT create a second seller fault; an established earlier failure MUST remain correctable.
+For an unentitled site withdrawal or failed/never-started delivery, end service MUST journal `delivery_end(cause=payee)` for filing through the dispute adapter at the actual end. Never-delivered timing MUST follow "Never-delivered correction has a fixed non-future basis". A correlated lawful end MUST NOT create a second seller fault; an established earlier failure MUST remain correctable.
 
 #### Scenario: A withdrawal is reported late
 
 - **WHEN** a site reports at 16:01 that service ended at 14:00
-- **THEN** the seller journals exceptional_end(14:00) and files it with the dispute authority, sending no stop or reverse
+- **THEN** the seller journals delivery_end(cause=payee) and files it with the dispute authority, sending no stop or reverse
 
 #### Scenario: An entitled end needs no filing
 
@@ -454,7 +565,12 @@ End service MUST fix min(accepted start, failure-observation time) with never-de
 
 ### Requirement: Cause classification is owned by end service
 
-End service MUST classify evidence as lawful (entitled buyer/payee stop, terms/exhaustion, ruling or surrender), seller failure (unentitled withdrawal, provisioning/start failure, activation lapse or established non-delivery), or pending. Non-delivery MUST be established when `available` is not durably recorded by the earlier of the Agreement's term end and `delivery_deadline_seconds` after the later of the commitment instant and `start_utc`, whether or not the term continues and whatever the site's activation phase; end service MUST refuse a new billing start on such a deal, and a `start` the payment authority accepted before the deadline MUST stand as history, the deal being seller non-delivery whose remedy is the seller's `exceptional_end` filing and the authority's ruling, not a local reversal. It MUST correlate site reports with controlling requests. Classification MUST follow verified evidence and entitlement, not arrival order or event kind; admission refusal or a later clock/payee stop MUST NOT erase earlier non-delivery or alone create a penalty.
+End service MUST classify verified evidence as lawful, seller failure or pending, correlate site reports with controlling requests, and preserve independently established prior non-delivery. Classification MUST follow evidence and entitlements, never event kind or arrival order; physical work MUST NOT wait for classification.
+
+#### Scenario: Delivery deadline passes without availability
+
+- **WHEN** the accepted delivery deadline passes without durable available evidence
+- **THEN** End service MUST classify evidence as lawful (entitled buyer/payee stop, terms/exhaustion, ruling or surrender), seller failure (unentitled withdrawal, provisioning/start failure, activation lapse or established non-delivery), or pending. Non-delivery MUST be established when `available` is not durably recorded by the earlier of the Agreement's term end and `delivery_deadline_seconds` after the later of the commitment instant and `start_utc`, whether or not the term continues and whatever the site's activation phase; end service MUST refuse a new billing start on such a deal, and a `start` the payment authority accepted before the deadline MUST stand as history, the deal being seller non-delivery whose remedy is the seller's `delivery_end` filing and the authority's ruling, not a local reversal. It MUST correlate site reports with controlling requests. Classification MUST follow verified evidence and entitlement, not arrival order or event kind; admission refusal or a later clock/payee stop MUST NOT erase earlier non-delivery or alone create a penalty.
 
 #### Scenario: A site report confirms a lawful end
 
@@ -464,22 +580,22 @@ End service MUST classify evidence as lawful (entitled buyer/payee stop, terms/e
 #### Scenario: The seller activates after the delivery deadline inside a long term
 
 - **WHEN** a thirty-day deal with `delivery_deadline_seconds` 1800 is approved at 12:00 and the resource is not available to the buyer at 12:30
-- **THEN** end service classifies the end as seller non-delivery at 12:30, not a lawful end, and the seller half files `exceptional_end` with that basis although the term continues
+- **THEN** end service classifies the end as seller non-delivery at 12:30, not a lawful end, and the seller half files `delivery_end` with that basis although the term continues
 
 #### Scenario: The site activates in time but the buyer cannot use the resource by the deadline
 
 - **WHEN** the site activates the lease at 12:29 against a 12:30 deadline and the storefront records `available` only after 12:30, or never
-- **THEN** the deal is seller non-delivery, established at 12:30, and the seller half files `exceptional_end(at = 12:00, delivered: false)` — the Agreement start, the never-delivered basis; a `begin_billing` not yet sent is refused and no new rate part starts; the site's activation is a capacity fact the lifecycle does not treat as delivery
+- **THEN** the deal is seller non-delivery, established at 12:30, and the seller half files `delivery_end(cause=payee)` — the Agreement start, the never-delivered basis; a `begin_billing` not yet sent is refused and no new rate part starts; the site's activation is a capacity fact the lifecycle does not treat as delivery
 
 #### Scenario: Billing started seconds before the deadline and availability failed
 
 - **WHEN** the payment authority accepts the payee's `start` at 12:29:58 against a 12:30 deadline and the storefront crashes before recording `available`, recovering at 12:40
-- **THEN** the accepted start stands as history and is not refused after the fact; the deal is seller non-delivery, established at 12:30, access is never granted, the resource is ended through end service, and the seller half files `exceptional_end(at = 12:00, delivered: false)`, whose standard ruling stops the rate part returned and reverses everything it earned since the Agreement start
+- **THEN** the accepted start stands as history and is not refused after the fact; the deal is seller non-delivery, established at 12:30, access is never granted, the resource is ended through end service, and the seller half files `delivery_end(cause=payee)`, whose standard ruling stops the rate part returned and reverses everything it earned since the Agreement start
 
 #### Scenario: Billing ran for many periods before the deadline and availability failed
 
 - **WHEN** a spot deal with a one-minute period, no setup charge and no penalty is approved at 12:00 with a 12:30 deadline, billing starts at 12:01, the storefront crashes before `available` and recovers at 12:40
-- **THEN** the filing is `exceptional_end(at = 12:00, delivered: false)`, the ruling reverses all thirty-nine completed periods, and the buyer's net charge for the deal is zero
+- **THEN** the filing is `delivery_end(cause=payee)`, the ruling reverses all thirty-nine completed periods, and the buyer's net charge for the deal is zero
 
 ### Requirement: Pending correction resolves in the same journal
 
@@ -492,20 +608,25 @@ record_end MUST atomically retain any pending-classification slot beside the end
 
 ### Requirement: Filing identities and revised requests are safe across callers
 
-The dispute adapter MUST bind the semantic filing identity to commitment, Agreement authority, cause/end revision and fixed request. It MUST resolve/adopt the equivalent payee case without a concurrent-writer duplicate. Revised or linked cases MUST carry prior ruling/effect references and net prior authority effects after unknown originals resolve. Unsupported identity/revision mapping MUST report repair required, not allocate another key or use append as amendment.
+The dispute adapter MUST bind the semantic filing identity to commitment, Agreement authority, cause/end revision and fixed request.
+
+#### Scenario: The full policy is enforced
+
+- **WHEN** the owning component validates or applies this contract
+- **THEN** The dispute adapter MUST bind the semantic filing identity to commitment, Agreement authority, cause/end revision and fixed request. It MUST resolve/adopt the equivalent case without a concurrent-writer duplicate. A prior mechanical delivery_end ruling MUST route revision to an operator. Revised or linked cases MUST carry prior ruling/effect references and net prior authority effects after unknown originals resolve. Unsupported identity/revision mapping MUST report repair required, not allocate another key or use append as amendment.
 
 #### Scenario: An operator and online replay submit one intent
 
 - **WHEN** operator recovery and online replay submit the same semantic filing identity concurrently
 - **THEN** both resolve one case, or refuse with repair required if the adapter cannot prove safe adoption
 
-### Requirement: Exceptional-end filings survive a crash
+### Requirement: Delivery-end filings survive a crash
 
-End service MUST journal a required exceptional_end filing with its final request and stable operation key. The dispute adapter MUST resolve an unknown result by that key before replay and MUST NOT file twice; absent sufficient evidence it MUST report repair required.
+End service MUST journal a required delivery_end filing with its final request and stable operation key. The dispute adapter MUST resolve an unknown result by that key before replay and MUST NOT file twice; absent sufficient evidence it MUST report repair required.
 
 #### Scenario: Replay after restart
 
-- **WHEN** the storefront restarts with an unacknowledged exceptional_end filing
+- **WHEN** the storefront restarts with an unacknowledged delivery_end filing
 - **THEN** it resolves the same operation key at the dispute authority before retrying and files no second case
 
 ### Requirement: Lifecycle commands have defined outcomes
@@ -666,7 +787,7 @@ A `watch` cursor MUST advance only after the event's effect is journaled: by end
 
 ### Requirement: Lifecycle routes are authenticated per role
 
-VM and bare-metal storefronts MUST expose seller `submit/read/list` under the administrator-principal contract and buyer `commit/hint/end_delivery` under the negotiation's buyer principal, keyed by negotiation ID with signed responses. Buyer authority commands MUST NOT be relayed. VM admin interrupt MUST submit the notice stop when the accepted option entitles the payee, and journal the exceptional_end filing otherwise.
+VM and bare-metal storefronts MUST expose seller `submit/read/list` under the administrator-principal contract and buyer `commit/hint/end_delivery` under the negotiation's buyer principal, keyed by negotiation ID with signed responses. Buyer authority commands MUST NOT be relayed. VM admin interrupt MUST submit the notice stop when the accepted option entitles the payee, and journal the delivery_end filing otherwise.
 
 #### Scenario: Another principal sends commit
 
@@ -681,7 +802,7 @@ VM and bare-metal storefronts MUST expose seller `submit/read/list` under the ad
 #### Scenario: The admin interrupt route ends a hosted deal
 
 - **WHEN** an administrator interrupts a hosted deal with only `once` parts through the VM admin route
-- **THEN** the route journals an attributed delivery end and exceptional_end(now) filing through the seller half; end service drives the lease without awaiting a ruling
+- **THEN** the route journals an attributed delivery end and delivery_end(cause=payee) filing through the seller half; end service drives the lease without awaiting a ruling
 
 #### Scenario: Another principal ends delivery
 
@@ -709,7 +830,7 @@ End service MUST durably keep final requests with stable source identities, acto
 #### Scenario: A site reports an earlier end late
 
 - **WHEN** a site report for 12:00 arrives after a 12:10 local end has already begun teardown
-- **THEN** the recorded earliest end becomes 12:00 with the site's cause, both source records remain, teardown is not restarted, and any required `exceptional_end(12:00)` filing is journaled
+- **THEN** the recorded earliest end becomes 12:00 with the site's cause, both source records remain, teardown is not restarted, and any required `delivery_end(cause=payee)` filing is journaled
 
 #### Scenario: Two causes have the same instant
 
@@ -810,7 +931,7 @@ End service MUST provide `admit(negotiation_id, phase, expected_revision) → ad
 
 ### Requirement: End recording and required filing are one operation
 
-End service MUST provide `record_end(final_request, filing_intent? | pending_classification?)`, atomically journaling the final request and any required exceptional_end filing in the caller's storefront transaction. An earlier buyer, terms or ruling end MUST NOT cause a seller self-penalty merely because admission is refused.
+End service MUST provide `record_end(final_request, filing_intent? | pending_classification?)`, atomically journaling the final request and any required delivery_end filing in the caller's storefront transaction. An earlier buyer, terms or ruling end MUST NOT cause a seller self-penalty merely because admission is refused.
 
 #### Scenario: A crash separates recording from payment submission
 

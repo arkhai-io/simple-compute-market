@@ -40,12 +40,12 @@ foundation; this design's D1–D7.
       Verify explicit partialPeriod on rate stop entries and rate ends on the
       returned-capable revision and dispute chosen-entry payloads. Once ends have no
       partialPeriod.
-      Confirm exceptional_end remains a dispute intent/request and mediation's
+      Confirm delivery_end remains a dispute intent/request and mediation's
       published standard self-penalty uses its own chosen stop entry with returned.
       Producer evidence gates that package; there is no seller restitution entry
       or several-stop-entries-per-account dependency.
       Record absent treatment fields and fixed charged dispute-stop semantics on
-      the interim revision; it cannot qualify returned exceptional_end. Freeze
+      the interim revision; it cannot qualify returned delivery_end. Freeze
       timestamp precision and per-end partialPeriod/late-start semantics with
       the vendored contract. Unexpressible terms fail closed; never hand-edit
       generated models. The authority, not SCM, computes a returned/prorated
@@ -78,7 +78,7 @@ publication configuration/builders and their focused publication suites.
       representation agreed with discovery task 1.2. Verify once-only, rate and mixed
       setup/rate projection in test_settlement_config.py. Entitled notice pays none;
       emergency without notice pays the capped mediation penalty, never a seller payment-adapter correction.
-      Verify malformed pairs, calendar periods, setup opt-out and insufficient lead.
+      Gate setup-bearing presets on foundation 12.1 vendoring delivery_end and both signature vectors, not another payments wire change; rate-only opt-out remains available. Verify malformed pairs, calendar periods, setup opt-out, the pending-revision refusal and insufficient lead.
 - [ ] 2.2 Derive setup-once then rate deterministically through the accessor and
       codec. Include rate end, afterStop hold, maxHoldExtension and exact per-part
       authorities/notices. On the returned-capable revision require partialPeriod
@@ -88,7 +88,7 @@ publication configuration/builders and their focused publication suites.
       entries only for accepted entitlements: spot notice, none on on-demand.
       Derive no restitution entry or implicit favourable-payee stop privilege;
       once-only options without early-termination entitlements authorize no start/stop.
-      Verify setup's end is the later of the Agreement start and approval, and absolute
+      Verify setup's encoded end is Agreement start, effectively clamped to approval if later, and absolute
       capacity bounds are never extended after late activation/start. Map early_termination.settles_through
       through the foundation codec to end.partialPeriod: preset last_boundary;
       explicitly disclosed started_period for interim spot/on-demand when only charged is expressible.
@@ -169,11 +169,11 @@ Journal persistence itself belongs to convergence.
       returned through mediation's own chosen entry. SCM seller presets
       offer last_boundary, and the terms-owned buyer policy refuses other payee
       or term-end treatments by default, with an explicit buyer override.
-      Verify human rulings state treatment; buyer_end preserves payer notice and
-      treatment. Exceptional_end is the dispute intent for mediation's only
-      mechanical ruling: a payee request at least as strong as the published standard.
+      Verify human rulings state treatment; delivery_end preserves payer notice and
+      treatment. delivery_end is the dispute intent for mediation's only
+      mechanical criterion: payee filing or valid concurrence under mapping/time/replay guards, including receipt-backed payer claims; other cases stay triaged.
 - [ ] 3.5 Verify the hosted adapter against foundation 10.4, 10.5 and 12.3's
-      journaled exceptional_end filing path and qualified mediation mapping. Consume
+      journaled delivery_end filing path and qualified mediation mapping. Consume
       deal-lifecycle's “A seller's exceptional end is a dispute filing”; do not
       reimplement seller filing or journal ownership. Observe filing response-loss/
       read/retry, spot emergency filing, on-demand returned treatment and capped
@@ -214,7 +214,7 @@ second preemption endpoint or a local payment-stop scheduler.
       grant or revoke the accepted permission.
 - [ ] 4.2 Surface verified pendingStop in lifecycle read/list. Preserve an earlier
       buyer stop, immutable retry identity and the authority's notice minimum.
-      On-demand refusal points to exceptional_end only for seller non-delivery,
+      On-demand refusal points to delivery_end only for seller non-delivery,
       not a self-interested override or automatic seller-fault filing after a lawful end.
 - [ ] 4.3 Add the typed notice method and recommended deals preempt CLI verb to
       both domains, taking negotiation ID, operation key and optional --at.
@@ -252,7 +252,7 @@ second preemption endpoint or a local payment-stop scheduler.
       and observes a single buyer stop; and in convergence's rows 1 and 2 as the buyer's
       stop landing with the storefront absent.
 - [ ] 4.6 Verify the foundation-owned VM admin route delegates notice for a lawful
-      entitled stop and files exceptional_end for seller-caused emergency failure,
+      entitled stop and files delivery_end for seller-caused emergency failure,
       including spot hardware failure; request a foundation fix rather than add a
       second classification switch here.
 

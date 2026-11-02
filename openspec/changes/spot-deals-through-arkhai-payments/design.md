@@ -57,23 +57,9 @@ cost churn imposes. VM's preset may default it to zero. Churn beyond the setup
 charge is the seller's to price differently or to refuse through its negotiation
 policy; neither domain has a required minimum spend.
 
-The setup charge is owed by the buyer from approval: it prices the provisioning
-the buyer's commitment triggers, so a buyer who stops — before or after activation,
-seconds after approval or days later — leaves it with the seller, and a lawful
-preemption after delivery leaves it earned. It returns to the buyer on one ground
-only, the seller's own non-delivery: the seller files `exceptional_end` through the
-dispute adapter and the mediation self-penalty package returns all of setup for an
-undelivered deal and none for a delivered one; a term end that arrives before
-activation is non-delivery. A controlling lawful end before disclosure keeps its
-own attribution and is not seller fault, and keeps the setup charge.
+Setup is owed from approval because commitment triggers provisioning. A payment stop alone does not reverse it, and lawful preemption after delivery leaves it earned. A qualified delivery_end reverses setup iff delivered=false, for either cause, and keeps it iff true; site activation is not that fact. Parties file or concur through the dispute adapter, with no seller direct payment correction. A lawful controlling end keeps its attribution rather than becoming seller fault, but the claim's delivered value still governs setup.
 
-The part is an ordinary `once` part with a fixed end, the later of the Agreement's
-`start_utc` and the approval instant, held through the dispute window after it;
-the window, days, covers provisioning, minutes to hours, so the self-penalty's
-reversal reaches it. It needs nothing the published contract lacks: no link to the
-rate part's `start`, no activation-anchored end, no fallback. A `once` end has no
-rate `partialPeriod`. The buyer is told before approval that the setup charge is
-kept if they stop and returned only if the seller never delivers.
+The setup part remains an ordinary once part. Encode its end at Agreement start so mediation recognizes it (once end at or before Agreement start); payments clamps an end at/before approval to approval without changing mandate bytes, so its effective end/payout anchor is max(Agreement start, approval). No activation-anchored end or payments wire revision is required. Enable setup-bearing presets only after foundation 12.1 vendors delivery_end, its signed payload/concurrence mapping and both signature vectors. Until then disable setup-bearing presets, rather than publishing a setup charge without its remedy. Delivery is the signed claim's delivered fact, not activation or a unilateral flag.
 
 | Preset | Parts | Entitlements |
 |---|---|---|
@@ -91,7 +77,7 @@ prices it as a number the buyer sees before accepting. Both recurring presets ca
 the foundation's `early_termination.premature_stop_penalty`; the injected preset
 helper encodes only the penalty the terms change resolves, from its preset default
 and the seller's override. An entitled notice stop pays none; an emergency without
-notice files `exceptional_end` and pays the capped penalty after the refunds. Buyer
+notice files `delivery_end` and pays the capped penalty after the refunds. Buyer
 acceptance and display of the penalty are the terms change's.
 
 No class flag is persisted or used for dispatch. One pool may publish on-demand and
@@ -143,7 +129,7 @@ interim revision these fields are absent and the vector-qualified fixed charged
 semantics apply, dispute stops included; chosen-entry treatment is unavailable.
 Only the dispute authority extends and lifts holds. Reverse permissions remain the
 payee's and the dispute authority's. Setup uses the foundation's `once` permissions
-and its own end, the later of the Agreement start and approval, without rate start
+and its own encoded end at Agreement start, effectively clamped to approval if later, without rate start
 or period arithmetic. Parts are ordered
 deterministically: setup when present, then rate.
 
@@ -174,7 +160,7 @@ reverse authority. The earliest pending stop wins and cannot be withdrawn. The
 adapter sends explicit part IDs even where a whole-transaction shorthand exists.
 
 The seller's emergency exit, a spot hardware failure included, is the journaled
-`exceptional_end` filing, not a payment stop of its own. On-demand's promise not to
+`delivery_end` filing, not a payment stop of its own. On-demand's promise not to
 preempt is enforced by remedy rather than by a mandate guarantee of physical
 service: the buyer may enforce the premature-stop penalty through a case over held
 money, and the seller's own exit is the mechanically ruled self-penalty. Interim
@@ -243,7 +229,7 @@ against the accepted mandate, and missing, malformed or mismatched evidence refu
 durable intent and key, adopts an unknown `start` from authority records on
 recovery, and ends the resource if `start` fails. A verified buyer end, payer stop
 or ruling before disclosure follows the foundation's cause classification; only
-classified seller non-delivery takes the `exceptional_end` handoff. Admission and
+classified seller non-delivery takes the `delivery_end` handoff. Admission and
 disclosure races and the durable journals belong to convergence, not the adapter.
 
 The adapter exports immutable operation descriptors — part, event kind, amount or
@@ -330,9 +316,9 @@ The verified stop record determines treatment:
 | Payer or payee stop | that authority entry's `partialPeriod` |
 | Exhaustion (terms) | the `fundedThrough` boundary; no partial period |
 | Absolute part end (terms) | the end's own `partialPeriod`; compute preset `returned`, interim `charged` |
-| Seller `exceptional_end` | the seller files through the dispute adapter; mediation's mechanical self-penalty stops rates now with `returned` and reverses unserved earnings and `once` shares; no seller payment calls |
+| Seller `delivery_end` | the seller files through the dispute adapter; mediation's mechanical self-penalty stops rates now with `returned` and reverses unserved earnings and `once` shares; no seller payment calls |
 | `end_delivery` receipt | evidence of surrendered service only; the storefront cannot stop the buyer's billing; the buyer half journals and retries its own stop, and billing runs until it lands |
-| Dispute-authority stop or effects | a human ruling states its chosen-entry treatment; `buyer_end` realizes the payer's notice and treatment; only the seller self-penalty is mechanical; the interim fixed charged semantics remain a qualification gate |
+| Dispute-authority stop or effects | a human ruling states its chosen-entry treatment; `delivery_end` realizes the payer's notice and treatment; payee-agreed claims are mechanical under the foundation guards; the interim fixed charged semantics remain a qualification gate |
 | Superseded or equal-time competing request | the authority's recorded winning stop and entry, never local arrival order |
 | Unknown cause or ambiguous winning entry | surface an unsupported or unknown state; no inferred monetary action |
 
@@ -345,7 +331,7 @@ computes a cumulative target, and the absence of such a target also removes the
 cross-actor read, compute and reverse race, not only its duplicate-retry symptom.
 
 Seller-caused unentitled ends and earlier physical failures use a journaled
-`exceptional_end(at)` through the dispute adapter to the Agreement's dispute
+`delivery_end(cause=payee)` through the dispute adapter to the Agreement's dispute
 authority. `at` is never future-dated: a pre-start failure journals immediately
 and files at the Agreement start. The seller sends no stop or reverse of its own
 on this path, so the authority receives the complete self-penalty package without
@@ -354,7 +340,7 @@ journal, the evidence store retains the cause and the kept evidence, and an
 uncertain filing outcome uses the same operation identity and read-and-retry
 contract rather than a second correction journal.
 
-Arkhai mediation's only mechanical ruling is the standard self-penalty
+Arkhai mediation's mechanical delivery-end rule is payee agreement under the foundation's guards; its cause=payee branch is the standard self-penalty
 (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`); its amounts and effects belong to mediation's published mapping, not to
 this payment adapter, which derives the parts and terms the ruling reads — the rate
 part it stops returned, the setup part it returns only for non-delivery, the penalty it
@@ -363,7 +349,7 @@ package of stop, refunds and the capped penalty, bond reserved; a partial seller
 path would still need a dispute. Arkhai mediation records disputes so it can act
 on bad sellers, banning included, and the buyer may still bring its own case.
 
-The adapter consumes the foundation's `exceptional_end` dispute intent and
+The adapter consumes the foundation's `delivery_end` dispute intent and
 mediation's request vocabulary and published mapping (foundation section 12.3). No
 exceptional-end event kind or field enters the payments vocabulary: the authority
 applies ordinary stop and reverse ruling effects. Missing `returned` or
@@ -394,11 +380,11 @@ invented local deadline. No bespoke preemption route exists. Lifecycle `read` an
 `list` expose `pendingStop` during the notice. A seller may hint after acting, but
 a push notice and a live storefront are not safety dependencies.
 
-An on-demand refusal of `notice` identifies `exceptional_end` as the path for actual
+An on-demand refusal of `notice` identifies `delivery_end` as the path for actual
 seller non-delivery, not a self-interested override or an automatic filing on
 refusal; a lawful end before disclosure keeps its cause without a seller-fault
 filing. The foundation-owned VM admin interrupt route uses `notice` for a lawful
-entitled stop and files `exceptional_end` through the dispute adapter for a
+entitled stop and files `delivery_end` through the dispute adapter for a
 seller-caused emergency failure, spot hardware failure included. Alkahest splitter
 execution and its defects remain outside this work.
 
@@ -418,7 +404,7 @@ stop and retries it under the same operation key; billing runs until the stop
 lands. The outage is not a backdated stop, and the storefront has no authority to
 stop billing for the buyer. `end_delivery` carries no `at`: the storefront signs
 its receipt time as evidence of immediate surrender, not as authority to issue a
-cooperative payment stop. The buyer's `buyer_end(at)` case and its handling are the foundation's
+cooperative payment stop. The buyer's `delivery_end(cause=payer)` case and its handling are the foundation's
 (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-buyers-end`); this change supplies the stop-then-hint rate sequence it starts with.
 Both-authorities-down recovery keeps the journal and retry path. The terms change owns the display of a normal stop against
 an immediate surrender, and of billing that continues while a stop is pending.
@@ -544,7 +530,7 @@ satisfy none of them and enable no published production servicing.
 - A backdated or effective-time payee stop: a past exceptional end is filed through the dispute adapter and mediation applies the standard self-penalty package.
 - Local notice-stop scheduling: it dies with the storefront; pending stops belong at the authority.
 - Claiming the on-demand mandate prevents physical seller preemption: the premature-stop penalty and the buyer's case over held money are the remedy, and the seller's own exit is the mechanically ruled self-penalty.
-- A seller-side exceptional-end stop or reverse, explicit restitution entries, implicit favourable-payee stop privileges, a payee notice waiver, or a payer early release: `exceptional_end` is a dispute filing, not a partial payment path.
+- A seller-side exceptional-end stop or reverse, explicit restitution entries, implicit favourable-payee stop privileges, a payee notice waiver, or a payer early release: `delivery_end` is a dispute filing, not a partial payment path.
 - A compound termination authority at payments — a transaction-level event ending billing at an authorized past time, settling rates `returned`, refunding `once` parts by unserved share and forfeiting a bond: deferred until hosted bonds are designed, and it would also need dispute-authority recording so terminations inform action against bad sellers. The foundation owns this record.
 - A payer `start`, or a start at approval: `start` is the payee's responsibility after provisioning, and an early start is disputable.
 - Reverse-before-stop as a safety rule: `afterStop` holds preserve reversal after a stop.
@@ -608,8 +594,7 @@ Design, reconciled onto the lifecycle foundation on 2026-10-29 from the earlier
 rounds shaped it: the first fixed the whole-second start rule, the activated
 evidence envelope's contents and the caller-owned journal comparison; the second
 removed the seller
-restitution entries and the cooperative storefront payment stop, kept `buyer_end`
-as a person-ruled case and `end_delivery` as receipt-only evidence, and deferred a
+restitution entries and the cooperative storefront payment stop. The owner revision supersedes the human-only buyer-end rule: end_delivery embeds the signed claim for receipt concurrence, and delivery_end uses payee agreement under mapping/time/replay guards, otherwise triage, and deferred a
 compound payment termination until hosted bonds exist. The option shape,
 zero-notice presets and the bare-metal setup rule follow Goal 8's fourth review
 round with the owner.

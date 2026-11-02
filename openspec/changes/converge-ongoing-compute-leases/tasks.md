@@ -8,9 +8,8 @@ revisions before code starts; `unify-compute-delivery-path` lands before this ch
 
 - [ ] 1.1 Confirm `agreed-evidence-and-early-termination` supplies lifecycle commands,
       read/list/watch, per-record cursors, evidence stores, end-service admission,
-      buyer stop/end_delivery/buyer_end and dispute adapter exceptional_end intents,
-      mediation request vocabulary and published mapping. Verify only qualifying
-      payee self-penalty is mechanical; buyer_end is human triage. Consume the atomic
+      buyer stop/end_delivery/delivery_end and dispute adapter delivery_end intents,
+      mediation request vocabulary and published mapping. Verify one payee-agreed delivery_end rule under mapping/time/replay guards; other claims stay triaged without silence defaults. Consume the atomic
       end/filing journal with none/intent/pending-classification and later filing
       resolution, never-future timing and pre-start filing at Agreement start.
       Buyer half journals/retries its payment stop under the same key; storefront
@@ -21,7 +20,7 @@ revisions before code starts; `unify-compute-delivery-path` lands before this ch
       per-stopper and term-end partialPeriod mapping without term rounding, afterStop holds
       and rotation re-anchoring. Foundation supplies the neutral adapter protocol
       and source-classified self-penalty filing. Confirm seller stop entries exist
-      only for entitlements such as spot notice; emergencies file exceptional_end.
+      only for entitlements such as spot notice; emergencies file delivery_end.
       Verify mediation's PT0S/chosen stop entry, standard returned rate stops, rate
       reversals since at, once unserved shares, then the premature-stop penalty capped by
       earned amounts still held across parts in mandate order; bond award stays reserved.
@@ -58,7 +57,7 @@ revisions before code starts; `unify-compute-delivery-path` lands before this ch
       verified exhaustion supplies an authority end without classification. Only an
       unreachable/unverifiable read journals a bare-timer end with pending
       classification through foundation record_end. Later atomic filing resolution
-      discharges exhaustion at/before T or journals exceptional_end(T) if billing
+      discharges exhaustion at/before T or journals delivery_end(cause=payee) if billing
       continued. No synthetic final request or second journal.
       Unverifiable classification stays pending. Preserve future effective notice times
       from authority records and compose earliest-final-request semantics.
@@ -96,7 +95,7 @@ revisions before code starts; `unify-compute-delivery-path` lands before this ch
       the delivery path under the rate hook, run in task 4.1 here.
 - [ ] 3.2 Consume foundation's classified end/self-penalty filing journal for
       unentitled site/operator/failed delivery, never future-dated; pre-start failure
-      journals immediately and files at Agreement start. Route exceptional_end only
+      journals immediately and files at Agreement start. Route delivery_end only
       through the dispute adapter to the Agreement authority; seller sends no stop
       or reverse. Qualify mediation's sole mechanical ruling for a payee request at
       least as strong as standard, using its own PT0S/chosen entry for returned rate
@@ -110,7 +109,7 @@ revisions before code starts; `unify-compute-delivery-path` lands before this ch
       adapter's qualified revision mapping and prior-ruling netting, not local
       monetary deltas or append-as-amendment. Adopt equivalent runner cases under
       shared original identities without duplicate filings. Missing safe coverage
-      is repair required. Buyer_end stays human triage, carries exact Agreement
+      is repair required. delivery_end uses receipt concurrence or later payee agreement for mechanical ruling under the foundation guards, otherwise human triage, carries exact Agreement
       verified against mandate deal hash and uses payer notice/partialPeriod.
       end_delivery signs receipt evidence only; buyer half stops first or journals
       and retries the same payment stop key during outage, with billing until landing.
@@ -118,7 +117,7 @@ revisions before code starts; `unify-compute-delivery-path` lands before this ch
 - [ ] 3.3 Consume foundation site-report ingestion as a final-request source and
       attribution evidence, not completion proof; use capacity-release proof for that.
       Exercise, do not reimplement, its buyer evidence projection, stop-plus-hint for
-      nonzero notice, explicit end-now and buyer_end fallback. Verify outage and
+      nonzero notice, explicit end-now and delivery_end fallback. Verify outage and
       late-evidence paths with injected payment and mediation adapters in library/service integration coverage.
 - [ ] 3.4 Add stateless recovery runner in kit/deal-servicing and domain CLI adapter
       composition. Add seller-authenticated read-only evidence export through
@@ -155,7 +154,7 @@ revisions before code starts; `unify-compute-delivery-path` lands before this ch
         start refusal and the started-but-undisclosed failure, filed at the deal
         start with the buyer-case backstop (formerly unify's task 4.4).
       Record maximum
-      term plus on-demand/spot emergency exceptional_end filings, sole mechanical
+      term plus on-demand/spot emergency delivery_end filings, sole mechanical
       payee self-penalty and on-demand returned treatment. Record buyer case/held
       money plus premature-stop-penalty remedy, not mandate-enforced non-preemption. Record
       rows 12, 12a, 12b and 13: the seller that never files, remedied by the buyer's stop and case

@@ -157,7 +157,7 @@ authority outcome stays pending. Prepaid and current Alkahest deals compose an
 explicit no-financial-action implementation that allows only after the selected
 stage's typed, versioned evidence validates and local admission passes. A missing
 adapter-table entry never implies allow; a missing required rate adapter blocks
-composition; an unsupported `watch` or `exceptional_end` reports unsupported.
+composition; an unsupported `watch` or `delivery_end` reports unsupported.
 
 Every protected transition, activation included, rechecks the foundation's
 admission and its revision; a financial allow never overrides a local due end. D7
@@ -213,21 +213,21 @@ reimplementing it.
 
 Delivery supplies the cause, actor, source, accepted start, observed failure time,
 identities and evidence to the foundation's `record_end` operation, with the
-optional `exceptional_end` filing through the agreement's dispute adapter. That
+optional `delivery_end` filing through the agreement's dispute adapter. That
 owner selects and records the earliest final request and journals the command
 atomically. Delivery writes no second end log and computes no amounts or payment
 corrections.
 
 `end_delivery` carries no `at`; the storefront signs its receipt time as evidence.
 It grants the storefront no authority to stop billing for the buyer; the buyer's stop,
-retry and `buyer_end` case are the foundation's (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-buyers-end`). Delivery consumes the
+retry and `delivery_end` case are the foundation's (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-buyers-end`). Delivery consumes the
 foundation's evidence and admission result, not a second policy.
 
 | Observed evidence before availability | Authority-backed cause input | Caller handoff |
 |---|---|---|
 | Buyer `end_delivery`, verified payer stop or ruling | Signed request or authority record and instant | Supply the existing final request and evidence for the foundation to compare with the non-delivery basis |
 | Start refused | Verified refusal reason or payment record: payer stop, mandate state, exhaustion, seller fault or unknown | Pass the reason and record; never classify by event name; missing pre-start funding is not exhaustion |
-| Site commit refused for the accepted delivery deadline | The site's refusal: the accepted `delivery_deadline_seconds` exceeds the pool's current policy or the pool enforces none | Seller failure before dispatch; no provisioning occurs, but the reservation already made is held: `record_end` with the seller-failure classification and the `exceptional_end` filing at the Agreement start, and the reservation released through the foundation's no-dispatch path, its unknown release acknowledgement retried under the same key and never replaced by a new reservation; supply the refusal with the accepted terms |
+| Site commit refused for the accepted delivery deadline | The site's refusal: the accepted `delivery_deadline_seconds` exceeds the pool's current policy or the pool enforces none | Seller failure before dispatch; no provisioning occurs, but the reservation already made is held: `record_end` with the seller-failure classification and the `delivery_end` filing at the Agreement start, and the reservation released through the foundation's no-dispatch path, its unknown release acknowledgement retried under the same key and never replaced by a new reservation; supply the refusal with the accepted terms |
 | Provisioning failure or activation lapse | Fixed observation and any earlier buyer or ruling record | Supply seller non-delivery evidence for the foundation's classification |
 | Window elapsed or payee stopped before availability | Start basis and never-delivered evidence, unserved setup included | The clock or the seller's own stop never erases non-delivery |
 | Late settlement with no independently established cause | No proof of buyer fault | Do not dispatch; supply never-delivered evidence without inventing an exemption |
@@ -249,13 +249,13 @@ No-dispatch proof permits end service's release without teardown; dispatched wor
 is adopted and ended, not replaced. The site report is end intent and evidence,
 not proof of hardware release; proven release is a separate completion fact.
 Physical recovery does not wait for authorities. The seller half files
-`exceptional_end(at, delivered)` with the Agreement's dispute authority through the
+`delivery_end(cause=payee)` with the Agreement's dispute authority through the
 dispute adapter, journaled with the end, and sends no stop or reverse of its own, so the
 authority never reconciles seller-side effects; delivery supplies the `delivered` fact
 from its own durable `available` record, false on every never-delivered and
 past-deadline basis.
 
-Arkhai mediation's only mechanical ruling is the standard self-penalty
+Arkhai mediation's mechanical delivery-end rule is payee agreement under the foundation's guards; its cause=payee branch is the standard self-penalty
 (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`): dispute-authority rules the foundation and mediation own, never amounts or
 payment operations for delivery to implement. The package needs one ruling; a partial
 seller-direct path would still need a dispute, and the authority records disputes so
@@ -263,7 +263,7 @@ it can act on bad sellers. On-demand's "won't preempt" is enforced by remedy —
 held money and the premature-stop penalty — not by mandate restriction; the seller's
 own exit is this mechanically ruled self-penalty. Seller stop entries represent
 entitlements only, such as spot's notice entry; a spot seller's emergency exit is
-the `exceptional_end` filing. No exceptional-end self-correction through the payment
+the `delivery_end` filing. No exceptional-end self-correction through the payment
 adapter exists.
 
 An Alkahest deal with no exceptional-end dispute adapter reports an unsupported
@@ -363,7 +363,7 @@ ordering, not another cache.
 - `add-arkhai-payments-lane-double`: HTTP lane qualification in the plan's tasks
   3.3 and 4.3. Library integration uses the clock-injected payments engine in
   `kit/arkhai-payments` fixtures directly, which the lane double wraps; the
-  mediation fake keeps triage plus the sole qualifying seller self-penalty ruling.
+  mediation fake keeps triage plus the payee-agreed delivery_end rule with cause-specific remedies.
   No kit depends on runnable tooling.
 - This change lands before `converge-ongoing-compute-leases`, which depends on it
   as a whole change, implements the rate hook against its seam, and owns the whole

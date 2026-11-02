@@ -81,13 +81,13 @@ The target payment double MUST model per-part authorities, payee-only rate start
 
 - **WHEN** a seller requests a payment stop
 - **THEN** the double requires an entitlement entry, such as spot's notice entry, and refuses a stop without authorization regardless of asserted favour
-- **AND** no seller restitution entry or several-stop-entries-per-account dependency is added; spot emergency exit is an exceptional_end dispute filing
+- **AND** no seller restitution entry or several-stop-entries-per-account dependency is added; spot emergency exit is a delivery_end dispute filing
 
 #### Scenario: On-demand non-preemption is remedy-enforced
 
 - **WHEN** an on-demand seller preempts delivery
 - **THEN** the buyer's remedy is the premature-stop penalty and a case over held money, not a mandate prohibition
-- **AND** the seller's own exit is exceptional_end, the qualifying mechanically ruled self-penalty, always returned on-demand
+- **AND** the seller's own exit is delivery_end, the qualifying mechanically ruled self-penalty, always returned on-demand
 
 #### Scenario: A stopped part still holds reversible earnings
 
@@ -128,7 +128,7 @@ The double MUST implement its selected contract's notice, partialPeriod, earning
 - **WHEN** the buyer half cannot reach payments before sending end_delivery without at
 - **THEN** it journals its payment stop and retries under the same key; billing runs until the stop lands under its notice and partialPeriod
 - **AND** the storefront signs its receipt time as evidence but has no authority to stop buyer billing
-- **AND** the buyer may additionally file buyer_end with signed request and receipt, remaining in triage
+- **AND** the buyer may additionally file delivery_end with signed request and receipt, mechanical with valid receipt concurrence and guards, otherwise remaining in triage
 
 #### Scenario: No implicit waiver or early release exists
 
@@ -137,7 +137,7 @@ The double MUST implement its selected contract's notice, partialPeriod, earning
 
 ### Requirement: Mediation double records party cases and authority holds
 
-The mediation double MUST authenticate file and append as agreement parties, and serve a resumable per-agreement read/watch record signed by the named authority key across all cases. Filing MUST report each part held only after the payment authority accepts its extension, or report not-held, pending or an interface error. Appends MUST be repeatable, actor-attributed and idempotent; closed cases MUST refuse new appends.
+The mediation double MUST authenticate file as either Agreement party and append only as payee mandate.to, and serve a resumable per-agreement read/watch record signed by the named authority key across all cases. Filing MUST report each part held only after the payment authority accepts its extension, or report not-held, pending or an interface error. Appends MUST contain items or concurrence and be repeatable, actor-attributed and idempotent; closed cases MUST refuse new appends.
 
 #### Scenario: Payout wins the filing race
 
@@ -162,26 +162,26 @@ The mediation double MUST authenticate file and append as agreement parties, and
 - **THEN** the double returns a signed empty record at cursor zero and watch can discover later entries
 - **AND** an unknown agreement or unauthorized party receives the selected contract's refusal, not a fabricated empty record
 
-### Requirement: Mediation mechanically rules only qualifying seller self-penalties
+### Requirement: Mediation mechanically rules only payee-agreed delivery ends
 
-The double MUST expose exceptional_end and its pinned mapping. Only payee requests at least as strong as standard self-penalty MAY be mechanically ruled. Other claims, including buyer_end, MUST enter visible triage with an operator outbox. Stop rulings MUST state partialPeriod. Effects MUST derive from the exact case Agreement verified against the mandate deal hash, not an attachment or trusted caller-computed remedies.
+The double MUST consume the vendored delivery_end mapping, signed payload and vectors. Mechanical ruling MUST require payee filing or valid concurrence, clean Agreement mapping, ended_at >= Agreement start and no earlier mechanical end ruling. Other claims MUST enter visible triage with no silence default. Effects MUST derive from the exact Agreement verified against mandate.deal, not an attachment or caller-computed remedies.
 
 #### Scenario: Buyer kept a signed end acknowledgement
 
-- **WHEN** buyer_end includes a storefront acknowledgement at filing or in a seller append
-- **THEN** the case remains in visible triage for a person to rule
-- **AND** the acknowledgement is evidence, not an automatic ruling input
+- **WHEN** delivery_end includes a storefront acknowledgement at filing or in a seller append
+- **THEN** a matching embedded SignedDeliveryEndClaim is valid concurrence and enables mechanical ruling if all guards pass
+- **AND** invalid concurrence stays evidence for an operator
 
 #### Scenario: Operator realizes a buyer end
 
-- **WHEN** an operator rules buyer_end for a past requested end
-- **THEN** the remedy realizes the payer's own stop at that instant, including payer notice and committed partialPeriod, leaving once parts untouched
+- **WHEN** an operator rules delivery_end for a past requested end
+- **THEN** the remedy realizes the payer's own stop at that instant, including payer notice and committed partialPeriod, keeping non-setup once parts and returning setup iff delivered=false
 - **AND** it uses a present stop plus the net held-money adjustment, never a backdated stop or a way to bypass priced notice
 - **AND** a stop ruling omitting partialPeriod refuses before applying effects
 
 #### Scenario: Seller files the standard exceptional end
 
-- **WHEN** the seller half journals exceptional_end(at) with the end and files through the Agreement's dispute adapter and authority
+- **WHEN** the seller half journals delivery_end(cause=payee) with the end and files through the Agreement's dispute adapter and authority
 - **THEN** the seller sends no stop or reverse of its own and the qualifying payee self-penalty is mechanically ruled through mediation's own `{account, notice: PT0S, partialPeriod: chosen}` stop entry
 - **AND** it stops rate parts now returned, always returned for on-demand, reverses earnings since at and reverses unserved once share by time
 - **AND** setup is owed from approval, so all of it is reversed if the seller never delivered and none once it has
@@ -192,25 +192,34 @@ The double MUST expose exceptional_end and its pinned mapping. Only payee reques
 
 - **WHEN** a spot seller uses its entitled notice and a separate seller ends without that notice
 - **THEN** the entitled stop pays no penalty and the emergency self-penalty pays the configured amount capped by earned amounts still held after refunds
-- **AND** a buyer case alleging an unentitled seller end goes to a person applying that same cap
+- **AND** a buyer cause=payee case uses that same cap, mechanically with payee agreement and guards, otherwise through an operator
 
 #### Scenario: A request does not qualify for mechanical self-penalty
 
-- **WHEN** the filer is not the payee or its request is weaker than standard self-penalty
-- **THEN** the double does not mechanically grant the self-penalty and leaves nonqualifying claims in triage
-- **AND** no buyer_end request is mechanically ruled, with or without a signed acknowledgement
+- **WHEN** concurrence is invalid or missing, mapping fails, ended_at predates Agreement start or an earlier mechanical delivery_end exists
+- **THEN** the double leaves the claim with an operator, with basis operator if ruled
+- **AND** respondent silence never supplies concurrence or a ruling
 
 #### Scenario: A seller fails before Agreement start
 
 - **WHEN** the seller's end precedes Agreement start
-- **THEN** it journals immediately and files exceptional_end at Agreement start
-- **AND** future-dated exceptional_end requests refuse
+- **THEN** it journals immediately and files delivery_end at Agreement start
+- **AND** future-dated delivery_end requests refuse
 
 #### Scenario: A case supplies its own Agreement
 
 - **WHEN** a case carries the exact Agreement and no attachment is stored
 - **THEN** the authority verifies its hash against the committed mandate before deriving dispute effects
 - **AND** a mismatching Agreement is refused
+
+### Requirement: Mediation exposes unanswered respondents and concurrence
+
+The double MUST implement the vendored respondent listing, payee-only append authorization, items-or-concurrence requirement and SignedDeliveryEndClaim validation. Any append MUST answer the listing. Invalid concurrence MUST remain evidence for an operator; ruled/closed entries MUST carry the correct basis. Both signature schemes MUST use kit-owned vectors.
+
+#### Scenario: The storefront answers after restart
+
+- **WHEN** a respondent poll is interrupted before its answer is acknowledged
+- **THEN** the same journaled concurrence or contesting evidence is appended once after restart, and the case no longer lists as unanswered
 
 ### Requirement: Only the mediation authority double applies dispute effects
 
@@ -230,7 +239,7 @@ The mediation double MUST apply ruling effects through authenticated payment HTT
 
 ### Requirement: Mediation nets revised remedies across an agreement
 
-The double MUST use the pinned mapping to net confirmed remedies per part across revised exceptional_end and operator cases. It MUST serialize application per agreement, resolve uncertain effects before computing the remainder, apply only additional amounts and preserve case/effect provenance. Missing mapping or vectors MUST leave revised remedies in explicit repair/triage, not report completion.
+The double MUST use the pinned mapping to net confirmed remedies per part across revised delivery_end and operator cases. It MUST serialize application per agreement, resolve uncertain effects before computing the remainder, apply only additional amounts and preserve case/effect provenance. Missing mapping or vectors MUST leave revised remedies in explicit repair/triage, not report completion.
 
 #### Scenario: Earlier evidence follows a prior remedy
 
@@ -240,7 +249,12 @@ The double MUST use the pinned mapping to net confirmed remedies per part across
 
 ### Requirement: Lane authority controls are deterministic and isolated
 
-Doubles MUST offer versioned typed lane controls for funding/exhaustion, snapshot faults (including labelled livemode corruption), delay/drop/refusal, outages, key rotation and triage/effect progress. Controls MUST require an owned run and explicit nonempty targets, refuse unknown scope/versions without mutation, stay off host ports and be unavailable outside lane profiles. Reset MUST name only its owned run. Lost responses MUST preserve idempotent results. Controls MUST NOT change client trust.
+Doubles MUST offer versioned typed lane controls for funding/exhaustion, snapshot faults (including labelled livemode corruption), delay/drop/refusal, outages, key rotation and triage/effect progress.
+
+#### Scenario: The full policy is enforced
+
+- **WHEN** the owning component validates or applies this contract
+- **THEN** Doubles MUST offer versioned typed lane controls for funding/exhaustion, snapshot faults (including labelled livemode corruption), delay/drop/refusal, outages, key rotation and triage/effect progress. Controls MUST require an owned run and explicit nonempty targets, refuse unknown scope/versions without mutation, stay off host ports and be unavailable outside lane profiles. Reset MUST name only its owned run. Lost responses MUST preserve idempotent results. Controls MUST NOT change client trust.
 
 #### Scenario: An authority response is lost after commit
 

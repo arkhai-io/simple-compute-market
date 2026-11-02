@@ -12,8 +12,7 @@ production adapters and their contract/fixture prerequisites remain in
   and the one clock-injected payments fixture engine; 9.1 supplies snapshot framing;
   12.1 supplies mediation contracts, installed resources, mapping/netting vectors,
   models and record-signing fixtures. Confirm each prerequisite before its surface.
-  No mediation acknowledgement-verifier gate remains: buyer_end goes to triage;
-  only qualifying payee exceptional_end self-penalties are mechanical.
+  The mediation baseline is published; delivery_end/signature/concurrence/respondent resources and both signature vectors wait on the unpublished revision at foundation 12.1. Receipt-backed scenarios remain proposed-only until it is vendored.
   Foundation 2.4 supplies the buyer-usable acknowledgement model/verifier, 13.1 the
   storefront signer, and 7.5 consumes it. Bare-metal porting waits for 7.4, 13.x/15.x.
 - Foundation 7.4/11.1/12.2/14.2 and spot kit tests use in-process contract fakes
@@ -134,22 +133,7 @@ without sibling source trees and fake/HTTP engine parity (03 F2 / 04 F3). No hos
       production-party client. Take the exact Agreement from the case, verify its
       hash against the committed mandate, and derive dispute effects in the tool;
       do not require an attachment or trust marketplace-computed remedies (E-F).
-- [ ] 3.3 Restore exceptional_end to dispute adapter intents and mediation request
-      vocabulary/published mapping through the foundation producer gate. Accept a
-      journaled seller-half dispute filing only, never seller direct stop/reverse.
-      Never future-date; pre-start failures journal immediately and file at Agreement
-      start. Mechanically rule only a payee-filed request at least as strong as the
-      standard self-penalty: through mediation's PT0S/chosen entry stop rate parts now
-      returned (always returned on-demand), reverse earnings since at, reverse unserved
-      once share by time, setup all before activation and none after; then reverse
-      min(premature_stop_penalty, earned amounts still held) across parts in mandate order.
-      Entitled notice pays none; spot emergency pays it. In a buyer case a person applies
-      the same cap. Bond award stays reserved for hosted bonds. Unsupported bond effects refuse, not fabricated completion. Queue
-      buyer_end and all other nonqualifying claims for visible triage/outbox regardless
-      of acknowledgements. Realize buyer_end as payer stop submitted at at with notice
-      and committed partialPeriod, leaving once parts untouched. Present stop plus
-      net held-money adjustment realizes a past remedy without backdating. All stop
-      rulings, mechanical or operator, state partialPeriod explicitly.
+- [ ] 3.3 Consume the delivery_end revision from foundation 12.1, not a second schema. Implement both cause mappings and mechanical guards from foundation D10; either party can file, payee filing or valid concurrence qualifies only with clean Agreement mapping, ended_at >= Agreement start and no previous mechanical ruling. Verify Agreement digest, exact JCS claim, seller Identity/proof and canonical ed25519/eip191 vectors. The shipped end_delivery receipt embeds SignedDeliveryEndClaim and buyer filing carries Filing.concurrence; a later Append.concurrence is payee-authenticated. Invalid/unsigned/contested claims stay triaged, never ruled by silence. Expose the respondent listing and answer semantics. Setup returns iff delivered=false for either cause; payer cause keeps non-setup once, preserves notice/treatment and pays no penalty; missing/chosen payer entries go to an operator. Payee cause uses returned rate stops, held-earnings/unserved-once refunds and capped penalty, with no seller direct effects or invented bond support.
 - [ ] 3.4 Apply effects as the dispute authority with stable IDs/case refs, record
       applied state, resume partial outcomes and lift only this case's refs. Keep
       a delivery end distinct from a discount. Make case discovery/record watch work
@@ -157,7 +141,7 @@ without sibling source trees and fake/HTTP engine parity (03 F2 / 04 F3). No hos
 - [ ] 3.5 Implement revision-bound case references and agreement-wide remedy netting
       from the pinned foundation mapping/vectors (03 F1 / 04 F9). Serialize remedy
       application per agreement, resolve uncertain prior effects, net confirmed
-      authority reversals and awards across revised exceptional_end and operator
+      authority reversals and awards across revised delivery_end and operator
       cases, and apply only the additional remedy.
       Preserve prior provenance across open/closed cases, partial application and
       append/close races. Unsupported netting remains explicit repair/triage.
@@ -165,12 +149,7 @@ without sibling source trees and fake/HTTP engine parity (03 F2 / 04 F3). No hos
 Verification: foundation 12.2 uses its kit contract fake. The tool's required
 `tests/test_mediation.py` library integration drives real clients for two cases,
 mixed held/not-held, lost filing response, closed-before-append, empty record and
-repeated evidence. Required `tests/test_triage_rulings.py` coverage proves only
-qualifying payee exceptional_end is mechanical, weaker/non-payee requests do not get
-that rule, buyer_end remains triaged regardless of acknowledgement, and all stop
-rulings state partialPeriod. Cover on-demand returned, setup before/after activation,
-pre-start/future-time filing boundaries, no seller direct effects, preserved buyer
-notice and optional signed end_delivery evidence.
+repeated evidence. Required `tests/test_triage_rulings.py` coverage proves payee filing, valid receipt/later concurrence, signature/claim/digest mismatch, pre-start and replay guards, operator basis and no silence default. Cover both causes/delivered values, setup identification independent of activation, preserved payer notice/treatment, missing/chosen payer entries, no seller effects and no penalty for payer cause. Drive respondent pagination, answer/restart recovery and sign-or-contest from durable storefront records.
 HTTP integration files cases with the exact Agreement and no attachment, verifies
 hash mismatch refusal, and applies operator rulings through the authority path. Required `tests/test_effect_recovery.py` interrupts effect application
 and proves resume without duplicates or another case's lift (02 F10), plus a

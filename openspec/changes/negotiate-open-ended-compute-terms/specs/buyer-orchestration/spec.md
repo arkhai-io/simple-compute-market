@@ -12,13 +12,13 @@ before approval.
 
 - **WHEN** a buyer approves a payer-only recurring option with a setup once part
 - **THEN** the display says on-demand, separately shows setup and recurring charge, and states payer notice and started-period treatment without granting the payee an entitled reclaim right; the display does not claim the mandate enforces that the seller will not preempt, since on-demand gives the seller no stop entry and the buyer's remedy is the penalty and a case over held money
-- **AND** it explains stop-then-hint with service through the effective stop, receipt-only immediate surrender, that the storefront cannot stop billing and the buyer's journaled, retried authority stop does, and the optional buyer_end case for human triage
+- **AND** it explains stop-then-hint with service through the effective stop, receipt-only immediate surrender, that the storefront cannot stop billing and the buyer's journaled, retried authority stop does, and the optional delivery_end case, automatic with matching receipt concurrence and guards, otherwise triaged
 
 #### Scenario: Payee treatment is displayed faithfully
 
 - **WHEN** a buyer selects an interim spot option with `settles_through: started_period` for both parties
 - **THEN** the display says both stops charge the started period, not that seller preemption returns it
-- **AND** the display states that the setup charge is owed from approval, kept if the buyer stops, and returned only if the seller never delivers
+- **AND** the display states that the setup charge is owed from approval, not reversed by a payment stop alone, and returned iff delivered=false for either cause in a qualified delivery_end claim
 
 ### Requirement: Buyer display separates billing guarantees from cooperation
 
@@ -45,7 +45,12 @@ The buyer's acceptance policy MUST by default refuse an option whose payee entit
 
 ### Requirement: Default acceptance requires an on-demand seller penalty
 
-Buyer acceptance policy SHOULD refuse an on-demand option without positive early_termination.premature_stop_penalty and a compute option whose mechanism has a lifecycle adapter without `delivery_deadline_seconds`, and SHOULD expose explicit buyer opt-out for each; an option without a lifecycle adapter MUST be shown as making no delivery promise rather than refused for lacking one. It MUST display the selected value as a ceiling and explain that an unentitled seller end forfeits at most earned amounts still held after unearned-money refunds — at the start of a deal the setup charge, and nothing when nothing is earned and held; it MUST NOT present the penalty as an assured amount; an entitled notice stop pays none. In a buyer case a person applies the remedy.
+Buyer acceptance policy SHOULD refuse an on-demand option without positive early_termination.premature_stop_penalty and a compute option whose mechanism has a lifecycle adapter without `delivery_deadline_seconds`, and SHOULD expose explicit buyer opt-out for each; an option without a lifecycle adapter MUST be shown as making no delivery promise rather than refused for lacking one.
+
+#### Scenario: The full policy is enforced
+
+- **WHEN** a default buyer evaluates the on-demand option before approval
+- **THEN** Buyer acceptance policy SHOULD refuse an on-demand option without positive early_termination.premature_stop_penalty and a compute option whose mechanism has a lifecycle adapter without `delivery_deadline_seconds`, and SHOULD expose explicit buyer opt-out for each; an option without a lifecycle adapter MUST be shown as making no delivery promise rather than refused for lacking one. It MUST display the selected value as a ceiling and explain that an unentitled seller end forfeits at most earned amounts still held after unearned-money refunds — at the start of a deal the setup charge, and nothing when nothing is earned and held; it MUST NOT present the penalty as an assured amount; an entitled notice stop pays none. A buyer claim uses the same remedy, mechanically with payee agreement and guards, otherwise through an operator.
 
 #### Scenario: An on-demand option has no penalty
 

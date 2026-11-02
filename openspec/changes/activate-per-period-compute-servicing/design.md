@@ -33,22 +33,22 @@ does not close this change: closeout requires the `partialPeriod` revision deplo
 and a default buyer taking an on-demand offer live on the shipped presets. Absolute term ends have their
 own partialPeriod without rounding; exhaustion is period-boundary aligned.
 
-Requalify foundation's exceptional_end dispute intent, mediation request vocabulary
+Requalify foundation's delivery_end dispute intent, mediation request vocabulary
 and published mapping. The seller half files with the Agreement dispute authority,
 journaled with the end, never future-dated. Pre-start failure journals immediately
 and files at Agreement start. Seller sends no stop/reverse for this path.
-Arkhai mediation's only mechanical ruling is the standard self-penalty
+Arkhai mediation's mechanical delivery-end rule is payee agreement under the foundation's guards; its cause=payee branch is the standard self-penalty
 (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`), requalified here against the hosted authority step by step and never
 restated; seller exit requires that complete dispute-recorded package, not direct
 partial restitution, and the authority records disputes to act on bad sellers,
 including bans.
 
 Seller stop entries exist only for entitlements such as spot notice; spot emergency
-exit files exceptional_end. No seller PT0S/returned restitution entry, implicit
+exit files delivery_end. No seller PT0S/returned restitution entry, implicit
 favourable-stop permission, payee notice waiver, payer early release or several-
 stop-entries dependency remains. On-demand non-preemption is remedied by buyer case
 over held money plus the premature-stop penalty, not by mandate enforcement. The buyer's end and its
-`buyer_end` case are requalified exactly as the foundation states them (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-buyers-end`).
+`delivery_end` case are requalified exactly as the foundation states them (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-buyers-end`).
 
 A deployment must demonstrate semantics, not merely advertise a version. Check
 vendored schema/proof/vectors through the existing SOURCE record and reuse current
@@ -94,18 +94,9 @@ is an internal product prerequisite, not a request for another payments capabili
 Missing credentials or an unavailable target block the live checks; they are not
 passing double evidence.
 
-The hosted dispute authority is qualified against the foundation's published
-description (D13), not only against its vectors: its policy on repeated and
-concurrent cases on one agreement and on closing a case nobody advances — adequate
-meaning a published dismissal procedure for ungrounded cases, exercised by the
-authority's triage, and a published response bound in days, however large, within
-which the authority reads a case; Arkhai mediation's qualified policy has the first
-and not yet the second, which is the foundation's open question — and its
-key-retention and origin-continuity commitment for the life of a deal plus its
-dispute window and open cases, must be published. An authority whose description
-lacks either blocks activation however its doubles behave: the architecture rests
-on this authority's fairness and continuity, and the code neither limits filings
-nor follows a rotated key.
+The hosted dispute authority is qualified against the foundation's published description: repeated/concurrent-case and dismissal policy, plus key-retention and origin-continuity through deal life, window and open cases. Missing these blocks activation. A mediation response bound is an EULA/advertising matter with no code consequence, not an activation gate or open question.
+
+The baseline arkhai.mediation.v1 is published on arkhai-payments main b98fed26 (payments 3be127e4). Its delivery_end revision is proposed and not yet published. Foundation 12.1 gates its signed payload, concurrence, respondent read, mapping and ed25519/eip191 vectors; live claim qualification and setup-bearing presets wait for that revision, not another payments wire change.
 
 After hosted checks pass, both production compositions declare servicing against
 the published revision. The same declaration is checked at publication, acceptance
@@ -130,7 +121,7 @@ are published-contract qualification, not live evidence. Hosted runs exercise th
 same payment-boundary transitions with real authority responses: activation then start,
 payer stop with priced notice and hint (delivery continues until effective stop),
 per-stopper partial-period billing, seller notice surviving storefront absence, exhaustion,
-seller exceptional_end filing and sole mechanical payee self-penalty, human-triaged buyer_end with signed acknowledgement, case
+seller delivery_end filing and payee-signed delivery_end rule with cause-specific remedies, payee-signed delivery_end or human triage with signed acknowledgement, case
 extension/lift and partial reverse after stop, including restart and lost-response
 recovery where the target's supported test controls allow it.
 
@@ -152,7 +143,7 @@ renewal replaces timer, verified exhaustion is an authority end, and only
 unreachable/unverifiable evidence permits bare-timer end and later self-penalty filing.
 
 For nonzero notice, end_delivery is explicit end-now or outage fallback, not normal
-follow-up to payer stop. Operator VM emergency files exceptional_end in on-demand
+follow-up to payer stop. Operator VM emergency files delivery_end in on-demand
 and spot; entitled spot notice remains a separate path. Observe qualifying payee
 mechanical ruling through mediation's PT0S/chosen entry and verify no seller stop/
 reverse before filing. Setup-part and earlier-evidence checks observe authority
@@ -186,7 +177,7 @@ Internal gates are the foundation, spot mechanics/publication, servicing,
 discovery and the delivery-deadline change, whose site enforcement of the published
 term is part of what this change qualifies. Scenario tooling comes from the payment/mediation double.
 The external payments capability gate is the hosted revision in D1; no several-
-stop-entries dependency remains. Mediation self-penalty and human buyer_end mapping
+stop-entries dependency remains. Mediation self-penalty and receipt-backed delivery_end or triage mapping
 are internal prerequisites, not extra payments primitives. Activation must not wait on the
 superseded settle or publish/preempt change directories.
 Implementation tasks distinguish the actual prepared target and readiness from

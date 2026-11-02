@@ -51,12 +51,12 @@ servicing dependency. No dependency remains on the superseded settle or publish/
 preempt changes.
 
 The external payments capability gate is hosted deployment of that revision.
-Internal dispute-adapter/mediation readiness includes exceptional_end filings and
+Internal dispute-adapter/mediation readiness includes delivery_end filings and
 the sole qualifying mechanical payee self-penalty, not seller-direct correction.
 Seller stop entries are only entitlements such as spot notice; spot emergency
-files exceptional_end. No seller restitution entry or several-stop-entries gate
+files delivery_end. No seller restitution entry or several-stop-entries gate
 remains. end_delivery supplies receipt evidence only; buyer half owns payment stop,
-same-key outage retry and optional human-triaged buyer_end. Schema/vector checks,
+same-key outage retry and optional payee-signed delivery_end or human triage. Schema/vector checks,
 credentials, target readiness and live execution verify/use the gate; they do not
 introduce extra payment primitives.
 This change does not redesign product terms, servicing, adjudication or site policy.

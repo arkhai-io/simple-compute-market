@@ -1,7 +1,7 @@
 # Tasks — activate deployment-qualified per-period servicing
 
 Pending implementation plan. Hosted deployment must support per-part authorities,
-hold extensions and every required stop term. Seller exceptional_end is a journaled
+hold extensions and every required stop term. Seller delivery_end is a journaled
 dispute filing with a qualifying mechanical payee self-penalty, never seller payment
 correction. On-demand always returns its partial period in the seller self-penalty ruling. No seller restitution
 entry or several-stop-entries payments dependency remains. Product implementation
@@ -33,27 +33,21 @@ stays with its owners.
       only until vendored and only with explicit buyer policy opt-in), absolute maximum
       terms with their own partialPeriod and no rounding, chosen dispute-stop entry,
       period-end/part-stop earning and {for} payout anchoring, activation-before-start,
-      setup once end at the later of the Agreement start and approval, and the
+      setup once encoded end at Agreement start, effectively clamped to approval if later, and the
       full-undelivered/zero-delivered self-penalty. Record the hosted authority's published
       description against D1: repeat/concurrent-case and dismissal policy, key-retention and
       origin-continuity commitment; a missing item is a blocker, not a caveat.
-      Requalify foundation's exceptional_end dispute-adapter intent and mediation
+      Requalify foundation's delivery_end dispute-adapter intent and mediation
       published mapping; journal with end, never future-date and file pre-start
-      failure at Agreement start. Seller sends no stop/reverse. Verify mediation's
-      only mechanical ruling: payee request at least as strong as standard, through
-      its PT0S/chosen entry for returned rates, rate earnings since at, once unserved
-      shares by time, then min(premature_stop_penalty, earned amounts still held) across
-      parts in mandate order; bond award stays reserved for hosted bonds. On-demand
-      always returns its partial period in the seller self-penalty ruling. buyer_end is human triage using payer stop at at with payer notice and
-      partialPeriod; cases carry exact Agreement verified against mandate deal hash.
+      failure at Agreement start. Seller sends no stop/reverse. Verify payee filing or valid concurrence, clean Agreement mapping, ended_at at/after Agreement start and no previous mechanical delivery_end ruling. Qualify both causes/delivered values, SignedDeliveryEndClaim canonical frame and ed25519/eip191 vectors, receipt embedding and Filing.concurrence, and respondent sign-or-contest polling. Invalid/unsigned/contested/repeat claims stay with operators, never silence defaults. Use foundation D10's cause=payee returned stops/refunds/capped penalty and cause=payer notice/partialPeriod netting with no penalty; setup returns iff delivered=false for either cause. Missing/chosen payer entries go to operators. Cases carry exact Agreement verified against mandate.deal. Foundation 12.1 must vendor the unpublished delivery_end revision before these live checks or setup-bearing preset enablement; baseline mediation publication is already confirmed. A response bound is EULA/advertising only, not a code/activation gate.
       Verify seller stop entries only for entitlements such as spot notice; spot
-      emergency files exceptional_end. On-demand non-preemption remedy is buyer case/
+      emergency files delivery_end. On-demand non-preemption remedy is buyer case/
       held money plus the premature-stop penalty, not mandate prevention. Verify no seller
       stop entry beyond entitlements is derived, and no implicit favourable stop,
       notice waiver, early release or multi-entry gate remains.
       Verify storefront signs end_delivery receipt (request has no at), never stops
       buyer billing; buyer half stops first, journals/retries same key through
-      outage with billing until landing, and may additionally file buyer_end.
+      outage with billing until landing, and may additionally file delivery_end.
       Never add storefront monetary corrections. Return product decisions to owners.
       Kit tests use the kit-owned clock-injected authority engine directly; HTTP
       doubles wrap it with controls and mediation, with no kit-to-tooling dependency.
@@ -85,9 +79,9 @@ stays with its owners.
 - [ ] 3.1 Run both-domain live complete deals and the hosted payment/dispute matrix
       in design D4: activation then start, priced payer stop plus hint, authority
       partialPeriod billing, setup once, seller notice surviving storefront
-      absence, exhaustion/read-before-timer-end, exceptional_end dispute filing and
+      absence, exhaustion/read-before-timer-end, delivery_end dispute filing and
       sole qualifying mechanical payee ruling, buyer-half same-key outage stop retry
-      with billing until landing, receipt evidence and human buyer_end, case extend/lift
+      with billing until landing, receipt evidence and receipt-backed delivery_end or triage, case extend/lift
       and partial reverse after stop. Use supported test controls for uncertainty/
       restart; annotate races/outages qualified only in the double. Every required
       live scenario must pass or remain explicitly blocking activation.

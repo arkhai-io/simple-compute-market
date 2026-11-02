@@ -2,7 +2,12 @@
 
 ### Requirement: Payment buyers approve and settle by negotiation
 
-The buyer MUST supply its Arkhai account as `payer_account`, verify that the mandate is the mechanism's derivation of the negotiated Agreement, including its authorities, the dispute authority's account from the option, each part's holds and terms, validate it against local payment policy, approve with owner-scoped WorkOS credentials, and poll the deterministic transaction ID. On VM and bare-metal deals it MUST then send `commit` through the buyer half with the negotiation ID and transaction ID; on API-credit deals it MUST settle with `settle_agreement`. Marketplace requests MUST use the recorded profile signer and storefront trust, independently of payment credentials.
+The buyer MUST supply its Arkhai account as `payer_account`, verify that the mandate is the mechanism's derivation of the negotiated Agreement, including its authorities, the dispute authority's account from the option, each part's holds and terms, validate it against local payment policy, approve with owner-scoped WorkOS credentials, and poll the deterministic transaction ID.
+
+#### Scenario: The full policy is enforced
+
+- **WHEN** a buyer approves and hands off a negotiated payment deal
+- **THEN** The buyer MUST supply its Arkhai account as `payer_account`, verify that the mandate is the mechanism's derivation of the negotiated Agreement, including its authorities, the dispute authority's account from the option, each part's holds and terms, validate it against local payment policy, approve with owner-scoped WorkOS credentials, and poll the deterministic transaction ID. On VM and bare-metal deals it MUST then send `commit` through the buyer half with the negotiation ID and transaction ID; on API-credit deals it MUST settle with `settle_agreement`. Marketplace requests MUST use the recorded profile signer and storefront trust, independently of payment credentials.
 
 #### Scenario: Payment and marketplace credentials stay separate
 
@@ -16,7 +21,12 @@ The buyer MUST supply its Arkhai account as `payer_account`, verify that the man
 
 ### Requirement: The typed client settles Agreement deals apart from EVM deals
 
-The typed storefront client MUST settle an Agreement-settled deal with `settle_agreement(negotiation_id)` only where the domain has no buyer lifecycle route, which sends only the negotiation ID and the signer's principal; where the route exists the lifecycle client's `commit` replaces it. EVM settlement is the separate `settle_evm`, so EVM arguments never appear on the agreement path. Both settle calls use the settle route contract, and the storefront dispatches on the accepted Agreement's mechanism.
+The typed storefront client MUST settle an Agreement-settled deal with `settle_agreement(negotiation_id)` only where the domain has no buyer lifecycle route, which sends only the negotiation ID and the signer's principal; where the route exists the lifecycle client's `commit` replaces it.
+
+#### Scenario: The full policy is enforced
+
+- **WHEN** the typed client settles an accepted Agreement
+- **THEN** The typed storefront client MUST settle an Agreement-settled deal with `settle_agreement(negotiation_id)` only where the domain has no buyer lifecycle route, which sends only the negotiation ID and the signer's principal; where the route exists the lifecycle client's `commit` replaces it. EVM settlement is the separate `settle_evm`, so EVM arguments never appear on the agreement path. Both settle calls use the settle route contract, and the storefront dispatches on the accepted Agreement's mechanism.
 
 #### Scenario: A buyer settles a payments deal through the typed client
 
@@ -32,12 +42,12 @@ The typed storefront client MUST settle an Agreement-settled deal with `settle_a
 
 ### Requirement: The buyer's end is backed by its own stop or a case
 
-The buyer half MUST stop at the payment authority first through the payment adapter. If payments is unknown/unreachable, it MUST journal its stop and retry under the same key, and billing runs until the stop lands. The storefront MUST NOT be relied on to stop billing. It MAY additionally file buyer_end(at) with the signed request, receipt and any seller acknowledgement. Rate stop sequencing MUST follow canonical rate buyer-end servicing.
+The buyer half MUST stop at the payment authority first through the payment adapter. If payments is unknown/unreachable, it MUST journal its stop and retry under the same key, and billing runs until the stop lands. The storefront MUST NOT be relied on to stop billing. It MAY additionally file delivery_end(cause=payer) with the signed request and receipt's SignedDeliveryEndClaim as concurrence, retaining any other evidence. Rate stop sequencing MUST follow canonical rate buyer-end servicing.
 
 #### Scenario: The payment authority is down
 
 - **WHEN** a buyer requests an end while payments is unreachable
-- **THEN** the buyer journals its stop and retries it under the same key, sends end_delivery without at, retains the signed receipt if obtained, and may file a buyer_end case for human triage without claiming billing has stopped
+- **THEN** the buyer journals its stop and retries it under the same key, sends end_delivery without at, retains the signed receipt if obtained, and may file a delivery_end case with receipt concurrence for automatic ruling under the mapping/time/replay guards, or triage without it, without claiming billing has stopped
 
 #### Scenario: Both authorities are down
 
@@ -46,20 +56,20 @@ The buyer half MUST stop at the payment authority first through the payment adap
 
 ### Requirement: Buyer end claims preserve their evidence basis
 
-The buyer half MUST use acknowledged receipt when available, otherwise retain its observed time as a contested claim. It MUST NOT claim automatic buyer_end adjudication or rely on surrender to erase priced notice.
+The buyer half MUST use acknowledged receipt when available, otherwise retain its observed time as a contested claim. It MUST put a matching receipt's SignedDeliveryEndClaim in Filing.concurrence. Without valid payee agreement it MUST report triage; receipt-backed claims MUST follow the authority's mapping/time/replay guards. Surrender MUST NOT erase priced notice.
 
 #### Scenario: No receipt is available
 
-- **WHEN** the buyer files buyer_end without a seller acknowledgement
+- **WHEN** the buyer files delivery_end without a seller acknowledgement
 - **THEN** its kept observation is a contested claim for a person to rule
 
 ### Requirement: A buyer end filing survives an absent dispute authority
 
-A `buyer_end` filing the dispute authority cannot receive MUST be journaled and retried under its idempotency key.
+A `delivery_end` filing the dispute authority cannot receive MUST be journaled and retried under its idempotency key.
 
 #### Scenario: A retry after restart
 
-- **WHEN** the buyer half restarts with a journaled, unacknowledged `buyer_end` filing
+- **WHEN** the buyer half restarts with a journaled, unacknowledged `delivery_end` filing
 - **THEN** it files under the same idempotency key and the authority records one case
 
 ### Requirement: Compute buyers end delivery through the canonical lifecycle client

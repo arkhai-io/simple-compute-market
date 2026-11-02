@@ -2,7 +2,12 @@
 
 ### Requirement: Full settlement convergence ownership
 
-The VM storefront MUST own capacity reservation, physical fulfillment, credential delivery, and listing/delivery progress. It MUST commit the deal's reservation before the fulfillment begins, which begins the lease; afterwards only end service writes to the lease. The selected settlement stage MUST own mechanism-specific attestation, readiness and claim binding; the claims engine retains submission/collection, not physical recovery. Common delivery MUST consume evidence and MUST NOT compare mechanism IDs. The VM storefront MUST hold and commit site capacity under the deal's negotiation (`deal_ref.negotiation_id`) whatever the settlement mechanism, so a deal's site reservation is found by its negotiation and carries no settlement reference.
+The VM storefront MUST own capacity reservation, physical fulfillment, credential delivery, and listing/delivery progress.
+
+#### Scenario: The full policy is enforced
+
+- **WHEN** the owning component validates or applies this contract
+- **THEN** The VM storefront MUST own capacity reservation, physical fulfillment, credential delivery, and listing/delivery progress. It MUST commit the deal's reservation before the fulfillment begins, which begins the lease; afterwards only end service writes to the lease. The selected settlement stage MUST own mechanism-specific attestation, readiness and claim binding; the claims engine retains submission/collection, not physical recovery. Common delivery MUST consume evidence and MUST NOT compare mechanism IDs. The VM storefront MUST hold and commit site capacity under the deal's negotiation (`deal_ref.negotiation_id`) whatever the settlement mechanism, so a deal's site reservation is found by its negotiation and carries no settlement reference.
 
 #### Scenario: An escrow-settled deal's reservation is looked up
 

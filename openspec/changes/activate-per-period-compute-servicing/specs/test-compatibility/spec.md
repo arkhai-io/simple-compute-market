@@ -16,7 +16,7 @@ Reports MUST follow "Lane qualification identifies readiness and evidence class"
 
 #### Scenario: Hosted effects are observed
 
-- **WHEN** live activation-before-start, priced payer stop plus hint, per-stopper partial-period billing, setup once, seller notice, exhaustion/read-before-timer-end, exceptional_end filing and sole mechanical payee self-penalty, buyer-half same-key stop retry through outage with billing until landing, receipt evidence and human-triaged buyer_end, case extension/lift and partial reversal after stop are exercised
+- **WHEN** live activation-before-start, priced payer stop plus hint, per-stopper partial-period billing, setup once, seller notice, exhaustion/read-before-timer-end, delivery_end filing and payee-signed delivery_end rule with cause-specific remedies, buyer-half same-key stop retry through outage with billing until landing, receipt evidence and payee-signed delivery_end or human triage, case extension/lift and partial reversal after stop are exercised
 - **THEN** the report records actual authority effects, physical recovery and kept evidence, identifies the deployed revision using public-safe provenance, and names any controlled outage/race that was tested only in the double
 
 #### Scenario: Required live target is unavailable

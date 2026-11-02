@@ -25,7 +25,7 @@ The seller half MUST admit a negotiation-keyed notice command only under the acc
 - **GIVEN** an accepted option without payee entitlement
 - **WHEN** the seller submits notice
 - **THEN** the command is refused before sending a payment event
-- **AND** the response identifies exceptional_end as the dispute-filing path for a seller-caused failure
+- **AND** the response identifies delivery_end as the dispute-filing path for a seller-caused failure
 
 ### Requirement: Compute operator preemption delegates through the typed lifecycle client
 Both compute storefront operator CLIs MUST provide deals preempt by negotiation ID, using the lifecycle client's notice method and seller authentication. The command MUST preserve its operation key and optional at and display the authority's status and effective time without claiming a local timestamp is authoritative.
@@ -36,7 +36,7 @@ Both compute storefront operator CLIs MUST provide deals preempt by negotiation 
 - **AND** displays pending, unknown or accepted authority state without bypassing notice
 
 ### Requirement: Canonical rate buyer end preserves service during notice
-The buyer half MUST normally submit rate stop at the payment authority and send hint, allowing delivery until effective stop reaches end service through watch. It MUST reserve end_delivery for explicit immediate surrender or the unreachable-payment-authority buyer_end(at) case path. Immediate surrender MUST disclose that paid notice may outlast service.
+The buyer half MUST normally submit rate stop at the payment authority and send hint, allowing delivery until effective stop reaches end service through watch. It MUST reserve end_delivery for explicit immediate surrender or the unreachable-payment-authority delivery_end(cause=payer) case path. Immediate surrender MUST disclose that paid notice may outlast service.
 
 #### Scenario: A payer has nonzero notice
 - **GIVEN** an accepted rate option with payer notice 300 seconds

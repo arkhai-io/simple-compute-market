@@ -15,7 +15,7 @@ One compute-family path removes those divergences without making the market-neut
 fulfillment kit own commercial deal state. It builds on the lifecycle and end-service
 boundary of `agreed-evidence-and-early-termination`: money moves at authorities, end
 service orders delivery admission, and a seller that fails to deliver files
-`exceptional_end` through the dispute adapter, whose self-penalty mediation rules.
+`delivery_end` through the dispute adapter, whose self-penalty mediation rules.
 This is the delivery portion of Goal 8 in
 [`docs/development/ROADMAP.md`](../../../docs/development/ROADMAP.md#goal-8--sell-compute-by-the-period-until-either-party-stops).
 
@@ -61,7 +61,7 @@ This is the delivery portion of Goal 8 in
   self-penalty. `end_delivery` carries no `at`, yields signed receipt evidence only
   and grants no billing authority: the buyer half stops at payments, journaling and
   retrying under one key if the authority is unreachable while billing continues
-  until the stop lands; an optional `buyer_end` is human triage. The path implements
+  until the stop lands; an optional `delivery_end` is mechanical with payee agreement and guards, otherwise triaged. The path implements
   no refund, stop, second filing journal or end-deal route.
 - Credential reads enforce the delivery checkpoint and end service's recorded end,
   ordered with local end admission. They fetch access material live and recheck

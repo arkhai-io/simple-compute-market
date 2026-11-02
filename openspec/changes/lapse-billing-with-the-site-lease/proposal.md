@@ -1,14 +1,13 @@
 ## Why
 
 A per-period compute deal is kept honest after commitment by actions at the
-authorities: the buyer's own stop at the payment authority, a seller's self-filed
-exceptional end, a case over held money (`agreed-evidence-and-early-termination`).
+authorities: the buyer's own stop at the payment authority, delivery_end filed by either party with payee agreement, or human triage without it, a case over held money (`agreed-evidence-and-early-termination`).
 Two things that model does not provide are worth having on their own terms:
 
 - **A bound on billing that needs nobody to notice.** When the resource is lost
   while the seller's storefront is down, the buyer is charged until its own stop
   lands, and the money is returned only if the seller recovers within the dispute
-  window or a person rules a case. A storefront that vouches for billing only as far
+  window or the buyer files a payee-agreed claim or a person rules its contested case. A storefront that vouches for billing only as far
   ahead as it has verified the lease is alive turns that into a bound the payment
   authority enforces by itself: billing lapses when the vouch does.
 - **A site's protection from a storefront that is not its own business.** The

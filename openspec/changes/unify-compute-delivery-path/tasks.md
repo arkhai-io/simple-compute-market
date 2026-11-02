@@ -19,7 +19,7 @@ are later amended.
 - Tasks 3.3/4.3's HTTP lane drives wait for
   `add-arkhai-payments-lane-double`. Library integration uses the shared clock-injected
   payments authority engine in kit/arkhai-payments fixtures directly; HTTP wraps
-  that engine. Mediation's in-process fake keeps triage plus the sole qualifying seller self-penalty ruling;
+  that engine. Mediation's in-process fake keeps triage plus the payee-agreed delivery_end rule with cause-specific remedies;
   kits never import runnable tooling.
 - This change lands before `converge-ongoing-compute-leases`, which depends on it
   and owns every rate scenario, including the activate/start/disclose race and the
@@ -196,17 +196,17 @@ implement its internals in this change. No edits to the payment authority contra
       `provisioning/compute/tests/integration/test_release.py`, plus application
       drive after the storefront restarts with a due site-end report.
 - [ ] 3.3 Reuse the joint end/filing journal across a crash, retaining the same command
-      key. Submit exceptional_end through the Agreement's dispute adapter; the seller
+      key. Submit delivery_end through the Agreement's dispute adapter; the seller
       sends no payment stop/reverse. Display pending/unsupported/repair-required honestly;
       an Alkahest deal without that dispute adapter retains accepted failure/reclaim.
       Verify: library integration uses shared kit-owned clock-injected fixtures; HTTP
       application/lane qualification waits for runnable payments/mediation doubles.
       Observe that delivery supplies an intent, not correction amounts, direct stop or
       alternate refund log. Filing retries belong to the lifecycle owner; mediation's
-      only mechanical ruling is the payee-filed standard-or-stronger self-penalty.
+      mechanical rule is payee agreement under mapping/time/replay guards, including receipt-backed payer claims.
       Confirm end_delivery has no at and yields signed receipt evidence, not a storefront
       billing stop. Buyer-side unreachable-authority retry keeps the same key and billing
-      continues until it lands; optional buyer_end goes to human triage with the exact
+      continues until it lands; optional delivery_end uses matching receipt concurrence for mechanical ruling under the foundation guards, otherwise triage with the exact
       Agreement checked against the mandate's deal hash. Keep these lifecycle scenarios
       with their owning foundation/spot suites, consuming their outcomes here.
 

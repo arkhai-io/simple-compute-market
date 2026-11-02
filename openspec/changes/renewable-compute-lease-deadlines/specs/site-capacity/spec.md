@@ -2,7 +2,12 @@
 
 ### Requirement: Commit snapshots an activation deadline when the pool resolves a delivery deadline
 
-On first commit, the site MUST set renew_by_utc to max(committed_at_utc, lease_start_utc) plus the deal's accepted delivery_deadline_seconds supplied with the commit, and renewal_phase to awaiting_activation; committed_at_utc is the deal's commitment instant supplied with the commit and MUST NOT be later than the site's commit time. The site MUST refuse a commit whose accepted deadline exceeds the pool's current effective delivery deadline or carries one where the pool resolves none. A commit supplying no accepted deadline MUST take the pool's current effective deadline when one resolves. Such a commit MUST require a finite end. Recommit MUST preserve both fields. No effective delivery deadline MUST leave the phase and due instant as the activation change's migration left them: null, with end-only expiry.
+On first commit, the site MUST set renew_by_utc to max(committed_at_utc, lease_start_utc) plus the deal's accepted delivery_deadline_seconds supplied with the commit, and renewal_phase to awaiting_activation; committed_at_utc is the deal's commitment instant supplied with the commit and MUST NOT be later than the site's commit time.
+
+#### Scenario: The full policy is enforced
+
+- **WHEN** the site first commits a reservation with effective pool deadline policy
+- **THEN** On first commit, the site MUST set renew_by_utc to max(committed_at_utc, lease_start_utc) plus the deal's accepted delivery_deadline_seconds supplied with the commit, and renewal_phase to awaiting_activation; committed_at_utc is the deal's commitment instant supplied with the commit and MUST NOT be later than the site's commit time. The site MUST refuse a commit whose accepted deadline exceeds the pool's current effective delivery deadline or carries one where the pool resolves none. A commit supplying no accepted deadline MUST take the pool's current effective deadline when one resolves. Such a commit MUST require a finite end. Recommit MUST preserve both fields. No effective delivery deadline MUST leave the phase and due instant as the activation change's migration left them: null, with end-only expiry.
 
 #### Scenario: A compute reservation is committed
 

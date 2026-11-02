@@ -2,7 +2,12 @@
 
 ### Requirement: Deals compose negotiate, settle, and provision stages
 
-Negotiation MUST pass its exact accepted Agreement to the domain's selected settlement stage. The settle stage MUST be the post-commitment handoff by which the seller learns of the mechanism's commitment and verifies it; it is not a protocol step. Protected delivery MUST consume that stage's verified SettlementEvidence rather than compare mechanism IDs or infer payment from an escrow's presence. Core MUST NOT prescribe the actors' order or require separate buyer-confirm and seller-verify steps. Domains MUST compose only supported stages; settlement and delivery MAY be fused.
+Negotiation MUST pass its exact accepted Agreement to the domain's selected settlement stage.
+
+#### Scenario: The full policy is enforced
+
+- **WHEN** the owning component validates or applies this contract
+- **THEN** Negotiation MUST pass its exact accepted Agreement to the domain's selected settlement stage. The settle stage MUST be the post-commitment handoff by which the seller learns of the mechanism's commitment and verifies it; it is not a protocol step. Protected delivery MUST consume that stage's verified SettlementEvidence rather than compare mechanism IDs or infer payment from an escrow's presence. Core MUST NOT prescribe the actors' order or require separate buyer-confirm and seller-verify steps. Domains MUST compose only supported stages; settlement and delivery MAY be fused.
 
 #### Scenario: Arkhai payment gates domain provisioning
 
@@ -25,7 +30,12 @@ Marketplace roles MUST NOT own ledger state or implement cash movement, Stripe t
 
 ### Requirement: Arkhai payments authority remains external
 
-`kit/arkhai-payments` MUST consume the payments service's published HTTP and JSON Schema contract, vendored with its conformance vectors and identified by content hash rather than by source location, and generate its Python wire models from it, rather than importing the service implementation or copying a TypeScript contract. The payments service MUST remain the authority for its ledger, account credentials, fees, hold release and hold extensions, and payment-provider operations. Cases and their outcomes MUST belong to the agreement's dispute authority, an independent party that acts at the payments service only through its own authorities and answers parties in its own protocol.
+`kit/arkhai-payments` MUST consume the payments service's published HTTP and JSON Schema contract, vendored with its conformance vectors and identified by content hash rather than by source location, and generate its Python wire models from it, rather than importing the service implementation or copying a TypeScript contract.
+
+#### Scenario: The full policy is enforced
+
+- **WHEN** the owning component validates or applies this contract
+- **THEN** `kit/arkhai-payments` MUST consume the payments service's published HTTP and JSON Schema contract, vendored with its conformance vectors and identified by content hash rather than by source location, and generate its Python wire models from it, rather than importing the service implementation or copying a TypeScript contract. The payments service MUST remain the authority for its ledger, account credentials, fees, hold release and hold extensions, and payment-provider operations. Cases and their outcomes MUST belong to the agreement's dispute authority, an independent party that acts at the payments service only through its own authorities and answers parties in its own protocol.
 
 #### Scenario: Payments service owns the ledger
 

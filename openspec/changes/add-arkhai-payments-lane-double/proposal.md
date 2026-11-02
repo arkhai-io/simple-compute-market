@@ -29,11 +29,11 @@ lane, not a cooperative storefront masquerading as an authority.
   early release, multi-entry spot dependency, backdated stop or released-funds refund.
 - Add the dispute authority's file, append and read/watch boundary with signed
   per-agreement records. It verifies the case's exact Agreement against the mandate
-  hash without requiring an attachment and extends holds. Exceptional_end(at) is a
+  hash without requiring an attachment and extends holds. delivery_end(at) is a
   journaled seller-half dispute filing, never seller stop/reverse calls. Its sole
   mechanical rule is the foundation's standard self-penalty
   (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`), applied as stated there.
-  Buyer_end remains a person's triage case with payer notice/treatment; signed
+  delivery_end remains a person's triage case with payer notice/treatment; signed
   acknowledgements never trigger a mechanical buyer ruling. Only the authority
   applies dispute effects and nets agreement-wide prior remedies. Filings never
   future-date; pre-start failures journal immediately and file at Agreement start.

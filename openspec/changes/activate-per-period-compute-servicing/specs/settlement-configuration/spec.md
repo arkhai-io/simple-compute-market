@@ -16,7 +16,12 @@ Production compositions MUST NOT declare rate servicing until the hosted deploym
 
 ### Requirement: Activation requalifies the owned payment and lifecycle contracts
 
-Activation MUST requalify foundation/spot's payment and dispute contracts, not implement pricing. Observations MUST cover per-stopper/term-end treatment, fail-closed terms, activation-before-start, the setup once end at the later of the Agreement start and approval, exceptional_end filing and sole mechanical payee self-penalty. Buyer_end MUST remain human-triaged; buyer half MUST own payment stops and outage retry. No storefront end-pricing correction MAY replace an unsupported term.
+Activation MUST requalify foundation/spot's payment and dispute contracts, not implement pricing.
+
+#### Scenario: The full policy is enforced
+
+- **WHEN** the owning component validates or applies this contract
+- **THEN** Activation MUST requalify foundation/spot's payment and dispute contracts, not implement pricing. Observations MUST cover per-stopper/term-end treatment, fail-closed terms, activation-before-start, the setup once encoded end at Agreement start, effectively clamped to approval if later, delivery_end filing and payee-signed delivery_end rule with cause-specific remedies. delivery_end MUST use the payee-agreement mechanical guards; otherwise it MUST stay triaged; buyer half MUST own payment stops and outage retry. No storefront end-pricing correction MAY replace an unsupported term.
 
 #### Scenario: Published schema cannot express returned
 
@@ -32,7 +37,7 @@ Activation MUST requalify foundation/spot's payment and dispute contracts, not i
 #### Scenario: On-demand non-preemption is remedied
 
 - **WHEN** qualification exercises seller emergency exit in on-demand or spot
-- **THEN** seller entries exist only for entitlements such as spot notice; emergency uses exceptional_end filing, with no seller restitution entry or several-stop-entries dependency
+- **THEN** seller entries exist only for entitlements such as spot notice; emergency uses delivery_end filing, with no seller restitution entry or several-stop-entries dependency
 - **AND** on-demand always returns the partial period under its self-penalty contract; non-preemption is remedied by the premature-stop penalty and buyer case over held money, not enforced by the mandate
 
 #### Scenario: Buyer stop is journaled while payments is down

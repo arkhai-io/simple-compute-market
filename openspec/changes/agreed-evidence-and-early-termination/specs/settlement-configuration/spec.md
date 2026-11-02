@@ -2,7 +2,12 @@
 
 ### Requirement: Payments configuration separates accounts and credentials
 
-Shared Arkhai payments registration, typed configuration, and owner-scoped client provision MUST live in `kit/arkhai-payments`'s `settlement_config.py`. `[Settlement.arkhai_payments]` MUST contain the trusted service origin, Ed25519 receipt identity, fee policy, and an API-key environment-variable reference, not the resolved credential; the dispute authority is named per option. A configuration that still sets `dispute_authority` MUST be rejected with a diagnostic naming `[[Dispute]]`. Payment credentials MUST NOT appear in public options, Agreement bytes, run logs, or status.
+Shared Arkhai payments registration, typed configuration, and owner-scoped client provision MUST live in `kit/arkhai-payments`'s `settlement_config.py`.
+
+#### Scenario: The full policy is enforced
+
+- **WHEN** the owning component validates or applies this contract
+- **THEN** Shared Arkhai payments registration, typed configuration, and owner-scoped client provision MUST live in `kit/arkhai-payments`'s `settlement_config.py`. `[Settlement.arkhai_payments]` MUST contain the trusted service origin, Ed25519 receipt identity, fee policy, and an API-key environment-variable reference, not the resolved credential; the dispute authority is named per option. A configuration that still sets `dispute_authority` MUST be rejected with a diagnostic naming `[[Dispute]]`. Payment credentials MUST NOT appear in public options, Agreement bytes, run logs, or status.
 
 #### Scenario: The retired dispute authority key is set
 
@@ -21,7 +26,12 @@ Shared Arkhai payments registration, typed configuration, and owner-scoped clien
 
 ### Requirement: Mechanism clause fields stay in their namespace
 
-Mechanism-contributed clause fields MUST live under the mechanism's configuration-key namespace and declare their applicable roles, operators, and value types. The lifecycle term codec's common fields (`adjudication.*`, `early_termination.*`) are the one exception: the codec owns them for every mechanism. The shared foundation MUST own registration, grammar integration, ordering, common status, exact option correlation, and composition, and MUST NOT interpret chain-, arbiter-, condition-, or financial-authority fields.
+Mechanism-contributed clause fields MUST live under the mechanism's configuration-key namespace and declare their applicable roles, operators, and value types.
+
+#### Scenario: The full policy is enforced
+
+- **WHEN** the owning component validates or applies this contract
+- **THEN** Mechanism-contributed clause fields MUST live under the mechanism's configuration-key namespace and declare their applicable roles, operators, and value types. The lifecycle term codec's common fields (`adjudication.*`, `early_termination.*`) are the one exception: the codec owns them for every mechanism. The shared foundation MUST own registration, grammar integration, ordering, common status, exact option correlation, and composition, and MUST NOT interpret chain-, arbiter-, condition-, or financial-authority fields.
 
 #### Scenario: A mechanism contributes a clause field
 
@@ -35,7 +45,12 @@ Mechanism-contributed clause fields MUST live under the mechanism's configuratio
 
 ### Requirement: Explicit atomic configuration migration
 
-Each affected role MUST provide dry-run and write modes that map still-supported legacy Alkahest settlement settings to the typed hierarchy, derive canonical priority, leave identity/wallet/chains in their owning namespaces, preserve unrelated configuration, redact secrets, refuse conflicting old/new values, validate the complete result, write and back up with restrictive permissions, and replace atomically. Repeating migration MUST be a no-op. Legacy `fiat.stripe.v1` or `[Settlement.stripe]` settings MUST be rejected with an actionable removal diagnostic and MUST NOT be converted to `arkhai.payments.v1`. `[Settlement.alkahest].oracle_gated = true` MUST be mapped to `release_models = ["oracle_gated"]`, `interruptible = true` to `["interruptible"]`, and neither to `["recipient"]`.
+Each affected role MUST provide dry-run and write modes that map still-supported legacy Alkahest settlement settings to the typed hierarchy, derive canonical priority, leave identity/wallet/chains in their owning namespaces, preserve unrelated configuration, redact secrets, refuse conflicting old/new values, validate the complete result, write and back up with restrictive permissions, and replace atomically.
+
+#### Scenario: The full policy is enforced
+
+- **WHEN** an operator dry-runs or applies a configuration migration
+- **THEN** Each affected role MUST provide dry-run and write modes that map still-supported legacy Alkahest settlement settings to the typed hierarchy, derive canonical priority, leave identity/wallet/chains in their owning namespaces, preserve unrelated configuration, redact secrets, refuse conflicting old/new values, validate the complete result, write and back up with restrictive permissions, and replace atomically. Repeating migration MUST be a no-op. Legacy `fiat.stripe.v1` or `[Settlement.stripe]` settings MUST be rejected with an actionable removal diagnostic and MUST NOT be converted to `arkhai.payments.v1`. `[Settlement.alkahest].oracle_gated = true` MUST be mapped to `release_models = ["oracle_gated"]`, `interruptible = true` to `["interruptible"]`, and neither to `["recipient"]`.
 
 #### Scenario: Migration preview is requested
 
@@ -75,7 +90,12 @@ Alkahest options MUST carry their escrow policy in mechanism-owned parameters; l
 
 ### Requirement: Dispute authorities are configured as preferences
 
-`[[Dispute]]` entries MUST be ordered by preference, each naming one authority by `interface`, `origin`, `account` and `record_key`, with interface-owned `params` and a copy of its advertisement (payment mechanisms, minimum dispute window and case hold); an entry MAY be marked not offered or not accepted. `use_registry_dispute_authorities` MUST append the registry descriptor's recommended authorities after the entries when true; it MUST default to true for a storefront and to false for a buyer, and a buyer with no entries and the setting false MUST refuse every hosted option with a diagnostic naming both remedies. Shipped buyer profiles and development fixtures MUST set it explicitly.
+`[[Dispute]]` entries MUST be ordered by preference, each naming one authority by `interface`, `origin`, `account` and `record_key`, with interface-owned `params` and a copy of its advertisement (payment mechanisms, minimum dispute window and case hold); an entry MAY be marked not offered or not accepted.
+
+#### Scenario: The full policy is enforced
+
+- **WHEN** a role resolves its offered or accepted dispute authorities
+- **THEN** `[[Dispute]]` entries MUST be ordered by preference, each naming one authority by `interface`, `origin`, `account` and `record_key`, with interface-owned `params` and a copy of its advertisement (payment mechanisms, minimum dispute window and case hold); an entry MAY be marked not offered or not accepted. `use_registry_dispute_authorities` MUST append the registry descriptor's recommended authorities after the entries when true; it MUST default to true for a storefront and to false for a buyer, and a buyer with no entries and the setting false MUST refuse every hosted option with a diagnostic naming both remedies. Shipped buyer profiles and development fixtures MUST set it explicitly.
 
 #### Scenario: A buyer prefers one authority
 

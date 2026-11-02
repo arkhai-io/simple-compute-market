@@ -59,7 +59,7 @@ admission rule MUST remain intact.
 Publication MUST omit recurring candidates when composition does not declare
 compatible rate servicing. It MUST derive the declaration from composition, not
 listing terms; if no option remains it MUST use existing no-settlement-option
-diagnostics. There MUST NOT be a bare-metal minimum-spend publication gate.
+diagnostics. There MUST NOT be a bare-metal minimum-spend publication gate. Setup-bearing presets MUST also wait for the vendored delivery_end mediation revision and vectors, not another payments wire change.
 
 #### Scenario: Dark recurring product
 

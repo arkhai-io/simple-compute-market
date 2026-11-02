@@ -21,7 +21,12 @@ Composition MUST declare a positive integer delivery deadline default for VM/bar
 
 ### Requirement: Activation safeguards are explicitly enabled by composition
 
-The compute composition MUST expose activation_deadlines_enabled: false until every delivery and recovery caller `unify-compute-delivery-path` wired is qualified in explicitly enabled owned lanes, then true as the repository default for new commits, with hosted operators gating enablement on their own caller readiness. While false, the pool-facts port MUST supply no effective delivery deadline without disabling provider support or pool validation. Enablement MUST affect only new commits; disabling MUST NOT clear snapshotted deadlines.
+The compute composition MUST expose activation_deadlines_enabled: false until every delivery and recovery caller `unify-compute-delivery-path` wired is qualified in explicitly enabled owned lanes, then true as the repository default for new commits, with hosted operators gating enablement on their own caller readiness.
+
+#### Scenario: The full policy is enforced
+
+- **WHEN** the compute composition changes its activation safeguard setting
+- **THEN** The compute composition MUST expose activation_deadlines_enabled: false until every delivery and recovery caller `unify-compute-delivery-path` wired is qualified in explicitly enabled owned lanes, then true as the repository default for new commits, with hosted operators gating enablement on their own caller readiness. While false, the pool-facts port MUST supply no effective delivery deadline without disabling provider support or pool validation. Enablement MUST affect only new commits; disabling MUST NOT clear snapshotted deadlines.
 
 #### Scenario: Site code lands before caller qualification
 

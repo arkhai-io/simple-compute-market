@@ -27,7 +27,7 @@ continuation is a separate, dependent change.
   for entitlements, such as spot's notice; on-demand has none, and its no-preemption
   promise is enforced by remedy — the premature-stop penalty and a buyer case over
   held money, with a bond reserved — not by the mandate. The seller's emergency
-  exit is an `exceptional_end` dispute filing, on spot too. There is no restitution
+  exit is an `delivery_end` dispute filing, on spot too. There is no restitution
   entry, implicit favourable stop privilege, multiple-entry gate, notice waiver or
   payer early release. Parts carry their `end`, `{afterStop: dispute_window}` and
   `maxHoldExtension`. The shipped presets price the payer's notice at zero.
@@ -57,8 +57,7 @@ continuation is a separate, dependent change.
   adapters. A preset is a combination of parts and terms, not a runtime class.
   Setup is an ordinary `once` part owed by the buyer from approval, ending at the
   later of the Agreement start and approval; a buyer's stop before or after
-  activation leaves it with the seller, and only the seller's self-penalty for
-  non-delivery returns it.
+  activation leaves it with the seller, and delivery_end with delivered=false for either cause returns it.
 - The hosted rate `authorize` hook for commit, dispatch, start and disclose
   consumes the foundation's versioned activation envelope; convergence composes it.
   Delivery authorization is pure. The separate post-activation `start_billing`
@@ -70,14 +69,13 @@ continuation is a separate, dependent change.
   unreachable; it carries no `at`, the storefront signs its receipt time as
   evidence, and the storefront cannot stop the buyer's billing. When payments is
   unreachable the buyer half journals its stop and retries it under the same key,
-  and billing runs until the stop lands. An optional `buyer_end` case goes to human
-  triage with the signed request, the receipt and the exact Agreement verified
+  and billing runs until the stop lands. An optional delivery_end case is mechanical with matching receipt concurrence and the foundation guards, otherwise triaged, carrying the signed request, the receipt and the exact Agreement verified
   against the mandate's deal hash; its ruling preserves the payer's notice and
   `partialPeriod`.
-- A seller's `exceptional_end(at)` is journaled and filed through the dispute
+- A seller's `delivery_end(cause=payee)` is journaled and filed through the dispute
   adapter to the Agreement's dispute authority, never future-dated: a pre-start
   failure journals at once and files at the Agreement start, and the seller sends
-  no stop or reverse. Mediation's one mechanical ruling, the standard self-penalty
+  no stop or reverse. Mediation's payee-agreed rule, whose cause=payee branch is the standard self-penalty
   (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`), applies. The adapter consumes the
   foundation's dispute intent, request vocabulary and published mapping, and
   neither calculates nor partially applies the package.

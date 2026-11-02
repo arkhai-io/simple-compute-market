@@ -147,7 +147,7 @@ rate-part behavior owned by `spot-deals-through-arkhai-payments`:
   interest a stop serves. There is no implicit favourable stop, payee notice waiver
   or payer early release. On-demand's "won't preempt" is enforced by the buyer's
   remedy through the premature-stop penalty and a case over held money, not by the mandate. A seller's
-  emergency exit, including spot's, is an exceptional_end dispute filing.
+  emergency exit, including spot's, is a delivery_end dispute filing.
 - An entitled `stop {part, at?}` is never backdated: effective time is the later of the requested
   time (or now) and receipt time plus that sender's notice. The earliest pending
   stop wins, cannot be withdrawn, and fires at the authority without another
@@ -185,14 +185,14 @@ rate-part behavior owned by `spot-deals-through-arkhai-payments`:
 Consumers preserve the other settled delivery boundaries: rate `start` is issued
 only after activation (D-F); a buyer's nonzero-notice stop sends a hint and delivery
 continues until watch observes effectiveness, while explicit end-now/unreachable-
-authority paths retain `end_delivery` and `buyer_end(at)` (D-C). The VM admin route
-uses an entitled notice stop or otherwise exceptional_end (D-E). Physical completion
+authority paths retain `end_delivery` and `delivery_end(cause=payer)` (D-C). The VM admin route
+uses an entitled notice stop or otherwise delivery_end (D-E). Physical completion
 requires proven release, never a `lease_ended` intent report (D-G). These behaviors
 are owned by their foundation/rate/servicing changes, not reimplemented in the double.
 
-Under the final owner decision, exceptional_end(at) is a seller-half dispute
+Under the final owner decision, delivery_end(cause=payee) is a seller-half dispute
 filing through the Agreement's dispute adapter/authority, journaled with the end.
-The seller sends no stop or reverse of its own. A self-penalty is one package of
+The seller sends no stop or reverse of its own. The cause=payee remedy is one package of
 stop, refunds and bond; a partial direct path would still require a dispute, and
 Arkhai records disputes to act on bad sellers. The filing is never future-dated;
 pre-start failures journal immediately and file at the Agreement start. Foundation
@@ -202,8 +202,8 @@ End_delivery carries no at. The storefront signs its receipt time as evidence an
 has no authority to stop billing for the buyer. The buyer half stops at payments
 first; if payments is unreachable it journals the stop and retries under the same
 key. Billing runs until the stop lands, subject to its notice and partialPeriod.
-The buyer may additionally file buyer_end(at), with signed request and receipt as
-evidence; it remains a person's triage case. End service never substitutes a seller
+The buyer may additionally file delivery_end(cause=payer), with signed request and receipt as
+concurrence; a matching embedded SignedDeliveryEndClaim enables mechanical ruling under the foundation guards, otherwise triage. End service never substitutes a seller
 stop or waives the buyer's notice.
 
 This model must make explicit mandate authorization and authority-hosted seller notice
@@ -230,7 +230,7 @@ authority identity. Knowing a transaction or case ref grants no permission.
   each part's `held` with ref or `not_held` with reason. Unreachable/uncertain
   extensions stay pending or return the interface's error, not fictional acceptance.
   Payout can win the race; a late case is recordable but cannot recover paid-out funds.
-- Either party appends items/statements repeatedly to an open case, under its actor
+- The payee appends items/statements or concurrence repeatedly to an open case, under its actor
   and idempotency key. A closed case refuses new appends. One per-agreement signed
   sequence spans all its cases: filing, append, ruling, close, extension refs and
   effects with stable IDs and applied state. Read/watch supports resumable cursors
@@ -240,24 +240,10 @@ authority identity. Knowing a transaction or case ref grants no permission.
   unknown agreement or unauthorized reader receives the pinned contract's refusal,
   not a fabricated empty record. Sign with the Agreement's `record_key` through the
   shared kit fixture (02 F12).
-- The only mechanical ruling is a payee-filed exceptional_end(at, delivered) request at
-  least as strong as the standard self-penalty, which the mediation double applies exactly as
-  `openspec/changes/agreed-evidence-and-early-termination/design.md#the-standard-self-penalty` states, step by step, from the kit's contract vectors; the double does not
-  restate or vary the rule, invents no bond support and reports no unsupported effect
-  complete; the setup part returns by the filing's `delivered` flag, and the vectors carry
-  both values. A person applies the same cap in a buyer's unentitled-seller-end case, and
-  non-payee or weaker requests do not receive the mechanical ruling.
-- Buyer_end(at) and every other nonqualifying claim enter visible triage. A signed
-  storefront acknowledgement at filing or later append is evidence for a person,
-  never an automatic buyer_end ruling input. **Recommendation:** use a local
-  operator-notification outbox visible to controls, not real email. Operator and
-  mechanical rulings feed the same authority effect path; every stop ruling states
-  partialPeriod explicitly and omission refuses without mutation.
-- A buyer_end ruling realizes the payer's own stop submitted at at: its effective
-  billing end includes the payer's priced notice and its committed partialPeriod.
-  It cannot skip notice via mediation. A past remedy uses a present stop and only
-  the held-money adjustment needed to realize that target, never a backdated stop.
-  Future requested end times refuse. Once parts remain untouched by buyer_end.
+- Consume the proposed delivery_end revision from foundation 12.1: DeliveryEndClaim, SignedDeliveryEndClaim, canonical frame/vectors, Filing/Append.concurrence, respondent listing and signed ruling basis. Either party files either cause. Payee filing or valid concurrence enables mechanical ruling only with clean Agreement mapping, ended_at at/after Agreement start and no prior mechanical delivery_end ruling. Verify Agreement digest, JCS-equal claim, seller principal and proof; invalid concurrence stays evidence for an operator. Receipt-backed payer claims qualify automatically under those guards.
+- Apply the cause=payee and cause=payer mappings exactly as foundation D10 states, not a second policy. Setup is once with end at/before Agreement start, reversed iff delivered=false for either cause. Payer cause keeps non-setup once and pays no penalty, preserving payer notice/treatment; missing/chosen payer entries go to an operator. Payee cause uses returned rates, held-money refunds and capped penalty. Both signature schemes need producer vectors.
+- Expose authenticated GET /respondent?after=<cursor>&limit=n with the vendored response. It lists open unanswered respondent cases; any append answers. Appends require mandate.to and items or concurrence. Exercise SCM's durable-record sign-or-contest poll, restart, append-close races and buyer filing from a shipped receipt, not locally framed substitutes.
+- All other cases remain visibly triaged with a local operator-notification outbox. Silence never rules a case. An optional authority-side LLM only suggests to its operator and is outside SCM. Operator and mechanical rulings share one effect path and state partialPeriod explicitly.
 - Only the authority double applies dispute effects over authenticated payment HTTP
   calls with case refs and stable effect keys, then lifts that case's extensions.
   Delivery end is in the signed ruling for end service to observe; a discount need
@@ -271,7 +257,7 @@ authority identity. Knowing a transaction or case ref grants no permission.
   Preserve provenance across open/closed cases, partial application and append/close
   races. Serialize competing remedy application per agreement. Missing contract or
   netting vectors leaves the revision in explicit repair/triage, never fabricated
-  completion. Revised exceptional_end cases and operator cases net prior authority
+  completion. Revised delivery_end cases and operator cases net prior authority
   remedies. There is no seller exceptional-end payment-adapter self-correction to
   reconcile; mechanical self-penalty effects are authority-owned like operator effects.
 
@@ -409,8 +395,7 @@ and the production adapters. Work can proceed in this order:
    adapter verification uses kit fakes, with no library-test dependency back here.
 2. Foundation 2.4 supplies the buyer-usable acknowledgement model/verifier in a
    permitted shared library; 13.1 supplies storefront signing and 7.5 consumes it.
-   Mediation takes no acknowledgement-verifier dependency: buyer_end is always
-   triaged and the sole mechanical seller self-penalty does not classify acknowledgements. Bare-metal scenario porting waits for foundation 7.4, 13.x and 15.x.
+   Mediation consumes the contract-owned claim verifier and receipt concurrence from foundation 12.1/12.3/12.5. Bare-metal scenario porting waits for foundation 7.4, 13.x and 15.x.
 3. Build the corresponding HTTP surfaces and lane wiring here. Missing publication
    or producer vectors permits pinned proposed-only work, not published claims.
 4. Later rate and compute lane scenarios consume the services. Kit unit/library
@@ -442,8 +427,7 @@ requirement name, not an active change ID, and do not duplicate its scenarios.
 - Separate images for each contract mode: one pinned mode selector per service keeps packaging and controls shared.
 - In-process fake as lane authority: it cannot exercise HTTP authentication, retries and signed records through real clients.
 - Cross-mechanism payment imports in the dispute kit: authority-side composition belongs in tooling, not a single-interface kit.
-- Mechanical buyer_end: only qualifying payee exceptional_end self-penalties are
-  mechanical; buyer_end remains a person's triage case.
+- Separate seller-only and buyer-only ruling mechanisms: one payee-agreed delivery_end rule covers both; unsigned or contested claims stay with triage.
 - Direct seller exceptional-end stop/reverse, implicit favourable stops, explicit
   seller restitution entries, waivers, early release and multi-entry spot gates:
   superseded by the final owner decision; the complete self-penalty belongs to mediation.
@@ -490,23 +474,7 @@ index/roadmap edits.
 
 ## Second-review disposition and coordination
 
-Reviews 03 F1–F3 and 04 F1–F13 have dispositions in their triage records. Owner
-E-H replaces the dual-engine design with a shared payments-kit fixture engine.
-The final owner decision supersedes E-A/E-C/E-E and both interim corrections:
-exceptional_end is a journaled seller dispute filing and the sole mechanical ruling;
-buyer_end remains triaged. There is no direct seller self-correction, restitution
-entry, waiver, early release or multi-entry spot dependency. End_delivery is signed
-receipt evidence only; buyer-half payment stop/retry owns billing. E-F still requires
-the exact case Agreement verified against the mandate hash. E-G remains servicing's
-authority-read rule, supported by the double's funding/read controls; E-I retains
-the single term-end settles_through.
-
-Applied: 03 F1/F2/F3; 04 F1/F2/F3/F5/F6/F7/F9/F10/F11/F12/F13, with coordination
-outside this directory listed below. Rejected: 04 F4's automatic reclassification
-(buyer_end stays in triage), and 04 F8's proposed term-end fallback (on-demand
-self-penalty is always returned through mediation's own chosen-treatment entry).
-04 F9's exceptional_end revision cases apply again: net prior authority remedies,
-not seller exceptional-end direct effects.
+The owner revision of 2026-11-02 supersedes earlier separate seller/buyer claim kinds and human-only acknowledged buyer-end dispositions. D4 consumes one payee-agreed delivery_end rule, receipt concurrence and the unanswered respondent read. No seller direct stop/reverse, restitution entry, notice waiver or multi-entry dependency is reintroduced. Earlier review records remain historical; final rule and dependency ownership are D4/D7.
 
 **Recommendations supplied:** foundation 8.1 owns the shared payments fixture
 engine and payments candidate/resource seam; 12.1 owns mediation resources/netting
@@ -525,20 +493,18 @@ Edits required outside this owned directory (parent coordination, not performed 
 | Owner | Required coordination |
 |---|---|
 | Foundation 8.1 / 9.1 | Supply the shared payments fixture engine/fake, installed resource/model metadata API, candidate and snapshot/start/reversal vectors, including partial reversal before/after stop. Seller entries are entitlement-only; no restitution entry or multi-entry spot gate. |
-| Foundation dispute adapter / 12.1 | Restore exceptional_end intent and published mapping as journaled seller filing, never future-dated; pre-start filing is at Agreement start. Supply installed mediation resources, exact Agreement/hash verification, sole mechanical payee self-penalty through mediation's PT0S/chosen entry, person-triaged buyer_end with payer notice/treatment, and revised-remedy netting vectors. No seller direct stop/reverse. |
-| Foundation end service / buyer half | End_delivery has no at; storefront signs receipt evidence only and cannot stop buyer billing. Buyer half stops first, journals/retries under the same key during outage; billing runs until stop lands. Optional buyer_end stays triaged. Record deferred compound payments termination authority and its bond/dispute-recording prerequisites. |
-| Foundation 2.4 / 7.5 / 13.1 | Put acknowledgement model/verification in a buyer-permitted shared library in round 1 (2.4); leave signing at 13.1. Mediation no longer depends on this verifier. |
+| Foundation dispute adapter / 12.1 | Restore delivery_end intent and published mapping as journaled seller filing, never future-dated; pre-start filing is at Agreement start. Supply installed mediation resources, exact Agreement/hash verification, payee-signed delivery_end rule with cause-specific remedies through mediation's PT0S/chosen entry, receipt-backed payer concurrence or triage, preserving payer notice/treatment, and revised-remedy netting vectors. No seller direct stop/reverse. |
+| Foundation end service / buyer half | End_delivery has no at; storefront signs receipt evidence only and cannot stop buyer billing. Buyer half stops first, journals/retries under the same key during outage; billing runs until stop lands. Optional delivery_end is mechanical with valid receipt concurrence and guards, otherwise triaged. Record deferred compound payments termination authority and its bond/dispute-recording prerequisites. |
+| Foundation 2.4 / 7.5 / 13.1 | Put acknowledgement model/verification in a buyer-permitted shared library in round 1 (2.4); leave signing at 13.1. The receipt embeds the contract-owned SignedDeliveryEndClaim and mediation verifies its concurrence. |
 | Foundation test-compatibility delta | Reference the permanent requirement name "Lane qualification identifies readiness and evidence class", remove duplicate mixed-contract scenario and stale change-ID citation; archive that target-naming modification before this change. |
-| Spot and convergence | Consume the shared engine/typed controls; classify by the single lane requirement. Seller exceptional_end is a dispute filing and sole qualifying mechanical self-penalty, including spot emergency exit. On-demand non-preemption is remedy-enforced by the premature-stop penalty and a buyer case over held money. Revised authority remedies net prior effects; remove interim restitution-entry/multi-entry gates and direct seller self-correction. Convergence reads authority at funding-timer expiry (E-G), compares exposed current instants and removes lane clock-jump wording. |
+| Spot and convergence | Consume the shared engine/typed controls; classify by the single lane requirement. Seller delivery_end is a dispute filing and cause=payee branch of the payee-agreed mechanical rule, including spot emergency exit. On-demand non-preemption is remedy-enforced by the premature-stop penalty and a buyer case over held money. Revised authority remedies net prior effects; remove interim restitution-entry/multi-entry gates and direct seller self-correction. Convergence reads authority at funding-timer expiry (E-G), compares exposed current instants and removes lane clock-jump wording. |
 | Terms | Lane-only proposed declarations select installed candidate expressibility for publication, acceptance and mandate derivation; draft identities/contracts remain refused outside lanes. |
 | Activation | Reference the class rule conditionally, include mediation publication when Agreement terms name it, and identify exactly which consumer declaration/artifact is retired, never the tool's proposed selector. |
-| Campaign index / roadmap | Parent updates status/dependencies to the final owner decision (mechanical seller self-penalty only, triaged buyer_end); these files remain outside this worker's authority. |
+| Campaign index / roadmap | Parent updates status/dependencies to the final owner decision (payee-signed delivery_end, other cases triaged); these files remain outside this worker's authority. |
 
 **Coordinated status:** the campaign index's row is the authoritative status, `in
 design` until this change's own design review has run. The published payments
-partialPeriod revision is ready for foundation 8.1 vendoring; whether the mediation
-contract is published is the foundation's open question, and until it is confirmed the
-mediation double is proposed-only. Exact producer revisions are
+partialPeriod revision is ready for foundation 8.1 vendoring; the mediation baseline is published on arkhai-payments main b98fed26 (payments 3be127e4). delivery_end and its canonical payload/concurrence/respondent read are a later proposed, unpublished revision gated at foundation 12.1, so those scenarios remain proposed-only. Exact producer revisions are
 recorded only in each kit's schema/SOURCE.md at vendoring. The producer's own acknowledgement fixture is a
 locally framed v2 exchange, so this change's lanes must exercise acknowledgements from shipped SCM traffic. No further full design round is recommended: the central
 changes are settled owner decisions and the remaining choices above are explicit.

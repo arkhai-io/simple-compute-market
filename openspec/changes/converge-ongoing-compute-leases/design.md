@@ -172,29 +172,26 @@ filing journal; this change adds one source, the funding timer. After the expiry
 of D3 fails at *T*, the final request is recorded atomically with a pending filing
 classification in the same journal. A later verified exhaustion stop at or before *T*
 discharges it; billing that continued beyond *T* resolves it into the fixed
-`exceptional_end(T)` filing intent; inconclusive evidence leaves it pending. The same
+`delivery_end(cause=payee)` filing intent; inconclusive evidence leaves it pending. The same
 atomic resolution covers earlier evidence that arrives after an end. There is no
 synthetic final request and no second journal, and physical work never waits for a
 classification.
 
-The seller half files `exceptional_end(at)` with the Agreement's dispute authority
+The seller half files `delivery_end(cause=payee)` with the Agreement's dispute authority
 through the dispute adapter, journaled with the end. It is never future-dated: a
 pre-start failure journals immediately and files at the Agreement start. The seller
 sends no stop or reverse of its own for a self-penalty. The dispute adapter maps the
-intent to its interface's request; the foundation supplies `exceptional_end` among its
+intent to its interface's request; the foundation supplies `delivery_end` among its
 intents together with mediation's request vocabulary and published mapping.
 
-Arkhai mediation's only mechanical ruling is the standard self-penalty
+Arkhai mediation's mechanical delivery-end rule is payee agreement under the foundation's guards; its cause=payee branch is the standard self-penalty
 (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`); this change proves its financial consequences in both lanes (rows 5, 8 and
-10) and restates none of its steps. A person applies the same capped remedy to a
-buyer's case alleging an unentitled seller end; every other request, `buyer_end`
-included, goes to human triage. The authority never reconciles direct seller
-restitution, because there is none.
+10) and restates none of its steps. A buyer-filed cause=payee claim receives the same cap: automatically with payee agreement and the mapping/time/replay guards, otherwise through an operator. A matching receipt-backed cause=payer claim also rules automatically, preserving payer notice/treatment and paying no penalty. No response or invalid concurrence stays with triage; no silence default exists. SCM's respondent poll signs durable-record matches or contests them; final wire/vectors wait at foundation 12.1. The authority never reconciles direct seller restitution because there is none.
 
 A self-penalty is one package — stop, refunds and bond — and a partial direct path
 would still need a dispute. The authority records disputes so it can act on bad
 sellers, banning included. Seller stop entries therefore exist only for entitlements,
-such as spot's notice entry; a spot emergency files `exceptional_end`, not a
+such as spot's notice entry; a spot emergency files `delivery_end`, not a
 notice-only fallback or an immediate seller stop. On-demand's promise not to preempt
 is remedied by the premature-stop penalty and a buyer's case over held money, not
 enforced by the mandate; the seller's own exit is the mechanically ruled self-penalty.
@@ -227,7 +224,7 @@ and billing runs until the stop lands. `end_delivery` is the explicit end-now-re
 command: it carries no `at`, and the storefront signs its own receipt time as evidence.
 The storefront has no authority to stop billing for the buyer and journals no
 cooperative payment stop. The exact signed request, receipt and site reports are kept
-through the foundation's ingestion and read. The buyer's `buyer_end(at)` case is the foundation's (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-buyers-end`); this change proves it
+through the foundation's ingestion and read. The buyer's `delivery_end(cause=payer)` case is the foundation's (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-buyers-end`); this change proves it
 in row 1 and assumes no payee notice waiver and no payer early release.
 
 Operator recovery is stateless and runs through the injected adapters from a
@@ -243,7 +240,7 @@ Before any I/O the runner durably writes an immutable operation envelope: the ke
 fixed kind, time and payload, the commitment and authority binding, the principal and
 reason, the evidence digests and references, and the exact adapter command and request
 descriptors. Replay reads first and retries identical descriptors; it never issues
-`exceptional_end(now)` or a new key. Results are exported separately, so an
+`delivery_end(cause=payee)` or a new key. Results are exported separately, so an
 interruption before the export is recoverable. For a self-penalty the descriptors
 target the dispute adapter only; an entitled notice targets the payment adapter only.
 
@@ -291,16 +288,16 @@ under a rate hook, are this change's.
 | # | Scenario | Required observation |
 |---|---|---|
 | 0 | On-demand baseline | setup once + rate, provision/activate/start/disclose, priced payer stop + hint, both facts |
-| 1 | Buyer end with payments down | pre/during/post dispatch, receipt-timed end_delivery evidence, buyer-half same-key stop retry with billing until it lands; buyer_end triage and both-down replay |
+| 1 | Buyer end with payments down | pre/during/post dispatch, receipt-timed end_delivery evidence, buyer-half same-key stop retry with billing until it lands; receipt concurrence, unsigned-case triage and both-down replay |
 | 2 | Site withdraws with storefront absent | buyer independent stop/case; late report, classified seller self-penalty filing; release proven separately |
 | 3 | Interrupted authority effects | same case/effect-key resolution, partial reverse after stop; earlier evidence during partial correction or append/close race remains unresolved until verified revision effects |
 | 4 | Stop between start and disclosure | activate/start/disclose races in both domains; no start before activation or duplicate start key across crashes; local admission blocks disclosure; measured remote observation windows |
-| 5 | Rate deal activation deadline expires | no-dispatch proof or adoption/release; exceptional_end at start, setup entirely returned |
+| 5 | Rate deal activation deadline expires | no-dispatch proof or adoption/release; delivery_end at start, setup entirely returned |
 | 6 | Funding expiry and last-poll top-up | read before end; reachable renewal replaces timer and verified exhaustion is an authority end; only outage/unverifiable state ends on bare timer, with hidden top-up requiring later self-penalty filing |
 | 7 | Spot notice then earlier payer stop | authority hosts pending stop during absence; earliest wins, authority partial-period terms |
-| 8 | Activated but never disclosed | post-activation start refusal and started-but-undisclosed failure in both domains; no start before activation or duplicate start key across crashes; classified exceptional_end filing at deal start, buyer-case backstop; the deadline variants, both orders: `start` not yet sent at the deadline, refused, no rate started; and `start` accepted by the authority before the deadline with `available` never recorded — seconds before, and thirty periods before with no setup and no penalty — the start standing as history, non-delivery established at the deadline, `exceptional_end(at = Agreement start, delivered: false)` and the ruling returning every period the rate earned, the buyer's net charge zero |
-| 9 | Maximum term | absolute authority end with its own partialPeriod, including late start and a mid-period end; physical recovery, no exceptional_end |
-| 10 | Seller emergency | on-demand and spot file exceptional_end; mediation mechanically rules only qualifying payee self-penalty through its chosen entry; seller sends no stop/reverse; on-demand emergency pays premature_stop_penalty capped by earned amounts still held after refunds in mandate order, shown at both ends of the cap: late in a deal, the stated amount; minutes after activation with the started period returned, the setup charge alone, and zero with no setup charge; entitled spot notice pays none |
+| 8 | Activated but never disclosed | post-activation start refusal and started-but-undisclosed failure in both domains; no start before activation or duplicate start key across crashes; classified delivery_end filing at deal start, buyer-case backstop; the deadline variants, both orders: `start` not yet sent at the deadline, refused, no rate started; and `start` accepted by the authority before the deadline with `available` never recorded — seconds before, and thirty periods before with no setup and no penalty — the start standing as history, non-delivery established at the deadline, `delivery_end(cause=payee)` and the ruling returning every period the rate earned, the buyer's net charge zero |
+| 9 | Maximum term | absolute authority end with its own partialPeriod, including late start and a mid-period end; physical recovery, no delivery_end |
+| 10 | Seller emergency | on-demand and spot file delivery_end; mediation mechanically rules payee-agreed delivery_end with mapping/time/replay guards through its chosen entry; seller sends no stop/reverse; on-demand emergency pays premature_stop_penalty capped by earned amounts still held after refunds in mandate order, shown at both ends of the cap: late in a deal, the stated amount; minutes after activation with the started period returned, the setup charge alone, and zero with no setup charge; entitled spot notice pays none |
 | 11 | Identity rotation overlap | old receipt verified during overlap, current snapshot re-anchors the running rate deal before retirement, exact old bytes retained; once-only dependencies drain; revoked/stale anchors and livemode changes refused |
 | 12 | Seller never files | an unentitled end the storefront never reports and never files; the buyer's own stop and a case filed from the exact accepted Agreement and kept evidence alone, with the storefront absent throughout, are the whole remedy; the ruling rests on the buyer's record |
 | 12a | Late anchor | the storefront commits with a later, non-future anchor than the approval the payment authority recorded; the site enforces the longer physical deadline; the buyer's case from its kept approval record is ruled non-delivery at the accepted deadline regardless |
@@ -343,7 +340,7 @@ controls and the mediation composition. No kit depends on runnable tooling.
 Rejected: a seller-advanced horizon or vouch; locally scheduled payment stops; a
 required minimum spend; backdated stops; mandatory reverse-before-stop; a parallel
 financial-end log; one completion fact; end intent as release proof; seller-direct
-exceptional-end payment correction; mechanical `buyer_end` rulings; append as
+exceptional-end payment correction; mechanical `delivery_end` rulings; append as
 amendment; an offline second database writer. None strengthens the buyer's
 authority-backed guarantees.
 
@@ -386,7 +383,7 @@ Reconciled onto the foundation on 2026-10-29 from the Goal 8 design groomed on
   and rows 4 and 8 are this change's; the option's shape is `price`, `settlement` and
   `lifecycle` (foundation D5).
 - Owner direction, 2026-10-29: the seller's exceptional end is a dispute filing with
-  no seller stop or reverse; `buyer_end` is a buyer-filed, person-ruled case; the
+  no seller stop or reverse; `delivery_end` is one claim for either filer, mechanical with payee agreement and guards, otherwise triaged; the
   storefront signs receipt evidence only.
 
 Next: design review of the reconciled change; its triage amends the drafted plan.
