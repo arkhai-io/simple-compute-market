@@ -216,3 +216,32 @@ home symlinks on both grant retry and reclaim, preserving outside sentinels and
 then using ordinary repaired retry. This correction is bounded-policy-only;
 legacy key-path behavior is not represented as corrected by these tests. The
 current-state authority rationale and operator limits promote with D2–D7.
+
+
+## Deployed observation seam
+
+The real bare-metal target may explicitly opt into bounded-cleanup qualification
+with a separate operator observation connection and the expected policy identity.
+Its harness-local private key is referenced by path; the existing physical host
+public key pins both operator and buyer SSH. The preflight authenticates that
+route, verifies the protected established policy/ledger, and requires the Linux
+observation utilities before any service hold or supply/purchase write. The
+observer reads independent NSS, procfs, kernel IPC, scheduler/session and covered
+filesystem state; it never calls the cleanup helper to establish absence.
+
+The dedicated `e2e_bare_metal_bounded_cleanup` marker refuses missing explicit
+configuration. A configured run executes a normal lifecycle followed by a second
+full lifecycle with another UID. Both seed synthetic home/scratch/path-backed
+IPC, three System V IPC families, cron activity, a detached process and one open
+SSH session. The refusal fixture is a root-owned child inside a tenant-owned
+nonce-scoped scratch directory: that selected tree must fail the helper's foreign
+descendant invariant. A foreign top-level file would be preserved and would not
+exercise refusal. Recovery requires that exact refusal in job logs, a queued
+failed attempt with a scheduled remaining retry, a releasing lease and capacity
+still consumed through the canonical site view. It removes only the unchanged
+nonce/inode/content-bound foreign child, then observes the normal job scheduler.
+No job is resubmitted and no terminal failure is rewritten. Distinct synthetic
+operator/service sentinels must survive unchanged; only after successful independent
+observations does the observer remove its own sentinel files. Missing utilities,
+unknown output and inaccessible state fail qualification rather than imply absence.
+This source seam does not establish live readiness without actual deployed runs.

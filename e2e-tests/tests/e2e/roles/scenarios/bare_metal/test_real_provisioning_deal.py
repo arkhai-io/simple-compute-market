@@ -43,6 +43,9 @@ from tests.e2e.roles.scenarios.bare_metal.conftest import buyer_wallet_config, l
 from tests.e2e.roles.scenarios.bare_metal.publication_stages import (
     BareMetalPublicationClosesListing, BareMetalEvidencePublished,
 )
+from tests.e2e.roles.scenarios.bare_metal.working_data_qualification import (
+    WorkingDataQualification, qualification_cycles, qualification_requested,
+)
 from tests.e2e.roles.scenarios.bare_metal.real_compute_deal_driver import (
     RealBareMetalComputeDealDriver, RealBareMetalDealState, bare_metal_executor_is_real,
 )
@@ -50,10 +53,54 @@ from tests.e2e.roles.scenarios.bare_metal.real_compute_deal_driver import (
 pytestmark = [
     pytest.mark.usefixtures(
         "real_bare_metal_execution", "storefront_loops_held", "fulfillment_convergence_held",
-        "lease_watchdog_held", "recover_failed_run",
+        "lease_watchdog_held", "cleanup_qualification", "recover_failed_run",
     ),
     pytest.mark.e2e_bare_metal_real_provisioning,
+    pytest.mark.e2e_bare_metal_bounded_cleanup,
 ]
+
+
+def pytest_generate_tests(metafunc):
+    if "cleanup_cycle" not in metafunc.fixturenames:
+        return
+    target = load_real_provisioning_target(settings)
+    host = None if isinstance(target, TargetNotConfigured) else target.host_for("bare_metal")
+    required = qualification_requested(metafunc.config.option.markexpr or "")
+    cycles = qualification_cycles(host, required=required)
+    metafunc.parametrize("cleanup_cycle", cycles, scope="module", indirect=True)
+
+
+@pytest.fixture(scope="module")
+def cleanup_cycle(request):
+    return request.param
+
+
+@pytest.fixture(scope="module")
+def cleanup_history():
+    return []
+
+
+@pytest.fixture(scope="module")
+def cleanup_preflight(real_bare_metal_target, cleanup_cycle, cleanup_history):
+    if cleanup_cycle == "baseline":
+        return None
+    if cleanup_cycle == "refusal":
+        assert len(cleanup_history) == 1, "successor purchase requires independently verified predecessor cleanup"
+    # Finish the temporary local SSH context before taking any service hold.
+    # Authentication, sudo and host-key failures cannot trigger a purchase.
+    with ssh_session(host_key=real_bare_metal_target.ssh_host_public_key) as session:
+        observer = WorkingDataQualification(real_bare_metal_target, session, [], cleanup_cycle)
+        observer.preflight()
+        return observer.state
+
+
+@pytest.fixture(scope="module")
+def cleanup_qualification(real_bare_metal_target, cleanup_preflight, cleanup_cycle,
+                          cleanup_history, ssh):
+    if cleanup_cycle == "baseline":
+        return None
+    return WorkingDataQualification(real_bare_metal_target, ssh, cleanup_history,
+                                    cleanup_cycle, state=dict(cleanup_preflight))
 
 
 @pytest.fixture(scope="module")
@@ -69,7 +116,7 @@ def real_bare_metal_target():
 
 
 @pytest.fixture(scope="module")
-def real_bare_metal_execution(real_bare_metal_target, provisioning_client):
+def real_bare_metal_execution(real_bare_metal_target, provisioning_client, cleanup_preflight):
     executor = bare_metal_executor_is_real(provisioning_client.get_system_status().execution)
     configured_relay(provisioning_client, real_bare_metal_target)
     return executor
@@ -81,7 +128,7 @@ def _ensure_provisioning_host_registered():
 
 
 @pytest.fixture(scope="module")
-def deal_state():
+def deal_state(cleanup_cycle):
     return RealBareMetalDealState()
 
 
@@ -92,8 +139,8 @@ def ssh(real_bare_metal_target):
 
 
 @pytest.fixture(scope="module")
-def buyer_key(ssh):
-    return ssh.new_key("buyer")
+def buyer_key(ssh, cleanup_cycle):
+    return ssh.new_key("buyer-" + cleanup_cycle)
 
 
 @pytest.fixture(scope="module")
@@ -282,6 +329,18 @@ class TestStage09e_UnrelatedKeyRefused:
         ssh.assert_key_refused(deal_state.delivered_access, ssh.new_key("unrelated"))
 
 
+class TestStage09f_BoundedWorkingDataSeeded:
+    def test_09f_seed_bounded_working_data(self, cleanup_qualification, deal_driver,
+                                         deal_state, ssh, buyer_key):
+        if cleanup_qualification is None:
+            pytest.skip("bounded cleanup qualification was not requested")
+        require_state(deal_state, "delivered_access", "fulfillment_id", "create_job_id")
+        reservation, _state = deal_driver.reservation_of(deal_state.fulfillment_id)
+        cleanup_qualification.seed(ssh=ssh, endpoint=deal_state.delivered_access,
+                                   key=buyer_key, reservation_id=reservation)
+        deal_state._working_data_seeded = True
+
+
 class TestStage10a_LeaseExpirySetup(Stage10a_LeaseExpirySetup):
     pass
 
@@ -291,13 +350,29 @@ class TestStage10b_LeaseCycleBeginsTeardown(Stage10b_LeaseCycleBeginsTeardown):
 
 
 class TestStage10b2_ManagementBeforeReclaim:
-    def test_10b2_management_connected_before_reclaim(self, deal_driver, deal_state):
+    def test_10b2_management_connected_before_reclaim(self, deal_driver, deal_state, cleanup_qualification):
         require_state(deal_state, "teardown_fulfillment_id")
+        if cleanup_qualification is not None:
+            require_state(deal_state, "_working_data_seeded")
+            cleanup_qualification.heartbeat.assert_alive()
         deal_driver.assert_management_connected()
 
 
 class TestStage11a_TeardownDispatch(Stage11a_TeardownDispatch):
     pass
+
+
+class TestStage11a2_RefusedCleanupKeepsCapacity:
+    def test_11a2_refusal_and_fixture_only_repair(self, cleanup_qualification,
+                                               deal_driver, deal_state,
+                                               storefront_admin_client):
+        if cleanup_qualification is None:
+            pytest.skip("bounded cleanup qualification was not requested")
+        require_state(deal_state, "_working_data_seeded", "teardown_fulfillment_id", "create_job_id")
+        cleanup_qualification.observe_refusal_and_repair(
+            driver=deal_driver, deal_state=deal_state,
+            storefront_admin_client=storefront_admin_client,
+        )
 
 
 class TestStage11a3_ReclaimJobSucceeded:
@@ -318,3 +393,13 @@ class TestStage11c_DeliveredAccessEnded:
         ssh.assert_refused(deal_state.delivered_access, buyer_key)
         deal_driver.assert_relay_released(deal_state.fulfillment_id, deal_state.delivered_access)
         deal_state._access_ended = True
+
+
+class TestStage11d_BoundedWorkingDataAbsent:
+    def test_11d_independent_cleanup_observations(self, cleanup_qualification,
+                                               deal_driver, deal_state):
+        if cleanup_qualification is None:
+            pytest.skip("bounded cleanup qualification was not requested")
+        require_state(deal_state, "_working_data_seeded", "_access_ended")
+        cleanup_qualification.verify()
+        deal_driver.assert_management_connected()

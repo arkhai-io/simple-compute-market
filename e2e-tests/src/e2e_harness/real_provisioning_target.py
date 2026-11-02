@@ -82,9 +82,33 @@ class VmHost(_Host):
         return shape
 
 
+class CleanupOperator(_Section):
+    """Harness-local observation route; its key is referenced, never copied."""
+
+    host: _Text
+    port: Annotated[int, Field(strict=True, ge=1, le=65535)]
+    user: _Text
+    key_path: _Text
+
+    @field_validator("key_path")
+    @classmethod
+    def absolute_key_path(cls, value: str) -> str:
+        if not value.startswith("/") or ".." in value.split("/"):
+            raise ValueError("key_path must be an absolute harness-local path")
+        return value
+
+
+class CleanupQualification(_Section):
+    """Explicit opt-in to disposable tenant fixtures and independent observations."""
+
+    policy_id: _Text
+    operator: CleanupOperator
+
+
 class BareMetalHost(_Host):
     domain: Literal["bare_metal"]
     physical_host_id: _Text
+    cleanup_qualification: CleanupQualification | None = None
     ssh_host_public_key: _Text
 
     @field_validator("ssh_host_public_key")
