@@ -32,16 +32,21 @@
         "caller_not_authorized",
         "account_not_found",
         "transaction_not_found",
+        "approval_pending",
         "part_not_found",
         "mandate_expired",
+        "invalid_mandate",
         "fee_mismatch",
-        "dispute_authority_missing",
+        "unsupported_asset",
         "deal_mismatch",
         "attachment_not_found",
         "invalid_event",
         "request_id_reused",
         "hold_matured",
         "hold_not_reversible",
+        "hold_not_extendable",
+        "extension_not_found",
+        "extension_closed",
         "insufficient_held_funds",
         "insufficient_funds",
         "card_debt",
@@ -85,36 +90,14 @@
       "pattern": "^[A-Z][A-Z0-9]{0,16}(\\/\\d{1,6})?$"
     },
     "Authorities": {
-      "type": "object",
-      "properties": {
-        "start": {
-          "maxItems": 16,
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/AccountId"
-          }
+      "anyOf": [
+        {
+          "$ref": "#/$defs/OnceAuthorities"
         },
-        "stop": {
-          "maxItems": 16,
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/AccountId"
-          }
-        },
-        "reverse": {
-          "maxItems": 16,
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/AccountId"
-          }
+        {
+          "$ref": "#/$defs/RateAuthorities"
         }
-      },
-      "required": [
-        "start",
-        "stop",
-        "reverse"
-      ],
-      "additionalProperties": false
+      ]
     },
     "AutoRechargeDisabled": {
       "type": "object",
@@ -150,8 +133,7 @@
       "required": [
         "enabled",
         "threshold",
-        "amountCents",
-        "paymentMethod"
+        "amountCents"
       ],
       "additionalProperties": false
     },
@@ -175,8 +157,7 @@
       },
       "required": [
         "enabled",
-        "amountCents",
-        "paymentMethod"
+        "amountCents"
       ],
       "additionalProperties": false
     },
@@ -227,13 +208,15 @@
           },
           "additionalProperties": {
             "$ref": "#/$defs/BalanceAvailable"
-          }
+          },
+          "description": "Spendable balances by asset; outgoing escrow has already left available."
         },
         "held": {
           "type": "array",
           "items": {
             "$ref": "#/$defs/BalanceHold"
-          }
+          },
+          "description": "Unreleased incoming holds where this account is the payee. Outgoing payer escrow is excluded and appears only in that transaction's signed snapshot."
         }
       },
       "required": [
@@ -257,8 +240,36 @@
         },
         {
           "$ref": "#/$defs/UntilStopBalanceHold"
+        },
+        {
+          "$ref": "#/$defs/UntilLiftBalanceHold"
         }
-      ]
+      ],
+      "description": "Incoming money held for the payee until release."
+    },
+    "BillingPortalRequest": {
+      "type": "object",
+      "properties": {
+        "returnUrl": {
+          "$ref": "#/$defs/HttpUrl"
+        }
+      },
+      "required": [
+        "returnUrl"
+      ],
+      "additionalProperties": false
+    },
+    "BillingPortalSession": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "$ref": "#/$defs/HttpUrl"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "additionalProperties": false
     },
     "CheckoutTopUpRequest": {
       "type": "object",
@@ -366,6 +377,27 @@
         "amount": {
           "$ref": "#/$defs/Amount"
         },
+        "until": {
+          "description": "Extension deadline in Unix seconds, strictly after receipt; absent freezes until lift or the cap.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "ref": {
+          "description": "Sequence of the extend event to lift on this part.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "at": {
+          "description": "Requested stop time in Unix seconds; the sender’s notice may move it later.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "partialPeriod": {
+          "$ref": "#/$defs/PartialPeriod"
+        },
         "payload": {
           "description": "Opaque JSON, recorded and never interpreted."
         }
@@ -467,10 +499,42 @@
           "$ref": "#/$defs/HoldFor"
         },
         {
-          "$ref": "#/$defs/HoldUntilStop"
+          "$ref": "#/$defs/HoldAfterStop"
         }
       ],
       "description": "How long a part's money stays reversible and uncollectable by the payee."
+    },
+    "HoldAfterStop": {
+      "type": "object",
+      "properties": {
+        "afterStop": {
+          "$ref": "#/$defs/Duration"
+        }
+      },
+      "required": [
+        "afterStop"
+      ],
+      "additionalProperties": false,
+      "description": "Collectable this long after this part stops."
+    },
+    "HoldExtension": {
+      "type": "object",
+      "properties": {
+        "ref": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "until": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "additionalProperties": false
     },
     "HoldFor": {
       "type": "object",
@@ -483,21 +547,7 @@
         "for"
       ],
       "additionalProperties": false,
-      "description": "Collectable once this long has passed since approval."
-    },
-    "HoldUntilStop": {
-      "type": "object",
-      "properties": {
-        "until": {
-          "type": "string",
-          "const": "stop"
-        }
-      },
-      "required": [
-        "until"
-      ],
-      "additionalProperties": false,
-      "description": "Collectable once the transaction is stopped."
+      "description": "Collectable this long after earning: approval for once, period end or stop for rate."
     },
     "HttpUrl": {
       "type": "string",
@@ -536,6 +586,27 @@
         "amount": {
           "$ref": "#/$defs/Amount"
         },
+        "until": {
+          "description": "Extension deadline in Unix seconds, strictly after receipt; absent freezes until lift or the cap.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "ref": {
+          "description": "Sequence of the extend event to lift on this part.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "at": {
+          "description": "Requested stop time in Unix seconds; the sender’s notice may move it later.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "partialPeriod": {
+          "$ref": "#/$defs/PartialPeriod"
+        },
         "payload": {
           "description": "Opaque JSON, recorded and never interpreted."
         }
@@ -550,7 +621,9 @@
       "enum": [
         "start",
         "stop",
-        "reverse"
+        "reverse",
+        "extend",
+        "lift"
       ]
     },
     "Mandate": {
@@ -576,9 +649,6 @@
         "fee": {
           "$ref": "#/$defs/Fee"
         },
-        "authorities": {
-          "$ref": "#/$defs/Authorities"
-        },
         "nonce": {
           "type": "string",
           "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
@@ -596,7 +666,6 @@
         "parts",
         "deal",
         "fee",
-        "authorities",
         "nonce",
         "expires"
       ],
@@ -643,6 +712,38 @@
       ],
       "additionalProperties": false
     },
+    "OnceAuthorities": {
+      "type": "object",
+      "properties": {
+        "stop": {
+          "maxItems": 16,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StopAuthority"
+          }
+        },
+        "reverse": {
+          "maxItems": 16,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AccountId"
+          }
+        },
+        "extend": {
+          "maxItems": 16,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AccountId"
+          }
+        }
+      },
+      "required": [
+        "stop",
+        "reverse",
+        "extend"
+      ],
+      "additionalProperties": false
+    },
     "OncePart": {
       "type": "object",
       "properties": {
@@ -658,13 +759,31 @@
         },
         "hold": {
           "$ref": "#/$defs/Hold"
+        },
+        "authorities": {
+          "$ref": "#/$defs/OnceAuthorities"
+        },
+        "maxHoldExtension": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "end": {
+          "$ref": "#/$defs/PartEnd"
         }
       },
       "required": [
         "kind",
         "asset",
         "amount",
-        "hold"
+        "hold",
+        "authorities",
+        "maxHoldExtension"
       ],
       "additionalProperties": false,
       "description": "A fixed amount, debited and credited (held) at approval."
@@ -679,6 +798,33 @@
         }
       ]
     },
+    "PartEnd": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "partialPeriod": {
+          "$ref": "#/$defs/PartialPeriod"
+        }
+      },
+      "required": [
+        "at",
+        "partialPeriod"
+      ],
+      "additionalProperties": false,
+      "description": "Automatic terms-stop deadline and cut-period rule. Execution uses max(at, approvedAt); stored mandate bytes stay unchanged."
+    },
+    "PartialPeriod": {
+      "type": "string",
+      "enum": [
+        "charged",
+        "returned",
+        "prorated"
+      ]
+    },
     "PartSnapshot": {
       "type": "object",
       "properties": {
@@ -691,7 +837,7 @@
           "$ref": "#/$defs/Asset"
         },
         "gross": {
-          "$ref": "#/$defs/Amount"
+          "$ref": "#/$defs/MinorUnits"
         },
         "held": {
           "$ref": "#/$defs/MinorUnits"
@@ -711,14 +857,36 @@
         "rate": {
           "$ref": "#/$defs/RateProgress"
         },
+        "started": {
+          "description": "The rate part’s first start, in Unix seconds.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "end": {
+          "description": "Effective terms end: max(mandate end.at, approval instant), with the mandate's partial-period rule. The stored mandate is unchanged.",
+          "$ref": "#/$defs/PartEnd"
+        },
+        "stop": {
+          "$ref": "#/$defs/PartStop"
+        },
+        "pendingStop": {
+          "$ref": "#/$defs/PendingStop"
+        },
         "feePaid": {
           "$ref": "#/$defs/MinorUnits"
         },
         "hold": {
           "$ref": "#/$defs/Hold"
         },
+        "extensions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HoldExtension"
+          }
+        },
         "releaseAt": {
-          "description": "UTC instant when a timed hold becomes releasable.",
+          "description": "Effective UTC maturity, including open extensions and the cap; absent while unbounded or awaiting stop.",
           "type": "string"
         },
         "status": {
@@ -734,6 +902,7 @@
         "reversed",
         "feePaid",
         "hold",
+        "extensions",
         "status"
       ],
       "additionalProperties": false
@@ -746,6 +915,38 @@
         "reversed",
         "settled"
       ]
+    },
+    "PartStop": {
+      "type": "object",
+      "properties": {
+        "effectiveAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "cause": {
+          "$ref": "#/$defs/StopCause"
+        },
+        "partialPeriod": {
+          "$ref": "#/$defs/PartialPeriod"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "settled": {
+          "$ref": "#/$defs/SettledPart"
+        }
+      },
+      "required": [
+        "effectiveAt",
+        "cause",
+        "partialPeriod",
+        "sequence",
+        "settled"
+      ],
+      "additionalProperties": false
     },
     "PaymentMethodId": {
       "type": "string",
@@ -776,10 +977,78 @@
       ],
       "additionalProperties": false
     },
+    "PendingStop": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "cause": {
+          "$ref": "#/$defs/StopCause"
+        },
+        "partialPeriod": {
+          "$ref": "#/$defs/PartialPeriod"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "at",
+        "cause",
+        "partialPeriod",
+        "sequence"
+      ],
+      "additionalProperties": false
+    },
     "ProviderObjectId": {
       "type": "string",
       "minLength": 1,
       "maxLength": 255
+    },
+    "RateAuthorities": {
+      "type": "object",
+      "properties": {
+        "stop": {
+          "maxItems": 16,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StopAuthority"
+          }
+        },
+        "reverse": {
+          "maxItems": 16,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AccountId"
+          }
+        },
+        "extend": {
+          "maxItems": 16,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AccountId"
+          }
+        },
+        "start": {
+          "maxItems": 16,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AccountId"
+          }
+        }
+      },
+      "required": [
+        "stop",
+        "reverse",
+        "extend",
+        "start"
+      ],
+      "additionalProperties": false
     },
     "RatePart": {
       "type": "object",
@@ -802,6 +1071,22 @@
         },
         "hold": {
           "$ref": "#/$defs/Hold"
+        },
+        "authorities": {
+          "$ref": "#/$defs/RateAuthorities"
+        },
+        "maxHoldExtension": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "end": {
+          "$ref": "#/$defs/PartEnd"
         }
       },
       "required": [
@@ -810,10 +1095,12 @@
         "amount",
         "period",
         "reserveAhead",
-        "hold"
+        "hold",
+        "authorities",
+        "maxHoldExtension"
       ],
       "additionalProperties": false,
-      "description": "A per-period amount reserved ahead and charged for each started period."
+      "description": "A per-period amount reserved ahead and earned at each period end or the part's stop."
     },
     "RateProgress": {
       "type": "object",
@@ -920,7 +1207,8 @@
           "$ref": "#/$defs/Asset"
         },
         "gross": {
-          "$ref": "#/$defs/Amount"
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,37})$"
         },
         "fee": {
           "type": "string",
@@ -974,6 +1262,9 @@
           "type": "integer",
           "minimum": 2000,
           "maximum": 9999
+        },
+        "isDefault": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -981,7 +1272,8 @@
         "brand",
         "last4",
         "expMonth",
-        "expYear"
+        "expYear",
+        "isDefault"
       ],
       "additionalProperties": false
     },
@@ -1093,6 +1385,46 @@
       ],
       "additionalProperties": false
     },
+    "StopAuthority": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "$ref": "#/$defs/AccountId"
+        },
+        "notice": {
+          "$ref": "#/$defs/Duration"
+        },
+        "partialPeriod": {
+          "$ref": "#/$defs/StopPartialPeriod"
+        }
+      },
+      "required": [
+        "account",
+        "notice",
+        "partialPeriod"
+      ],
+      "additionalProperties": false
+    },
+    "StopCause": {
+      "type": "string",
+      "enum": [
+        "payer",
+        "payee",
+        "authority",
+        "terms"
+      ]
+    },
+    "StopPartialPeriod": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PartialPeriod"
+        },
+        {
+          "type": "string",
+          "const": "chosen"
+        }
+      ]
+    },
     "StoredDealAttachment": {
       "type": "object",
       "properties": {
@@ -1192,6 +1524,11 @@
             "kind": {
               "type": "string",
               "const": "stop"
+            },
+            "part": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
             }
           },
           "required": [
@@ -1396,9 +1733,6 @@
           "minimum": 0,
           "maximum": 9007199254740991
         },
-        "stop": {
-          "$ref": "#/$defs/TransactionStop"
-        },
         "attachments": {
           "type": "array",
           "items": {
@@ -1421,47 +1755,58 @@
       ],
       "additionalProperties": false
     },
-    "TransactionStop": {
-      "type": "object",
-      "properties": {
-        "effectiveAt": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "cause": {
-          "type": "string",
-          "enum": [
-            "payer",
-            "payee",
-            "authority",
-            "terms"
-          ]
-        },
-        "sequence": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 9007199254740991
-        },
-        "settled": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/SettledPart"
-          }
-        }
-      },
-      "required": [
-        "effectiveAt",
-        "cause",
-        "sequence",
-        "settled"
-      ],
-      "additionalProperties": false
-    },
     "UnixSeconds": {
       "type": "integer",
       "minimum": 0,
       "maximum": 9007199254740991
+    },
+    "UntilLiftBalanceHold": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": "string",
+          "minLength": 1
+        },
+        "transaction": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "part": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "from": {
+          "$ref": "#/$defs/AccountId"
+        },
+        "to": {
+          "$ref": "#/$defs/AccountId"
+        },
+        "asset": {
+          "$ref": "#/$defs/Asset"
+        },
+        "balance": {
+          "$ref": "#/$defs/BalanceAmount"
+        },
+        "fee": {
+          "$ref": "#/$defs/Fee"
+        },
+        "until": {
+          "type": "string",
+          "const": "lift"
+        }
+      },
+      "required": [
+        "address",
+        "transaction",
+        "part",
+        "from",
+        "to",
+        "asset",
+        "balance",
+        "fee",
+        "until"
+      ],
+      "additionalProperties": false
     },
     "UntilStopBalanceHold": {
       "type": "object",

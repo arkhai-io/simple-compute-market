@@ -2,7 +2,7 @@
 
 `arkhai-kit-arkhai-payments` is a stateless Python client for the external
 `arkhai.payments.v1` HTTP service. The payments service owns the ledger,
-credential validation, fee policy, hold release, disputes, and cash operations;
+credential validation, fee policy, hold release and cash operations;
 this kit persists no settlement state and runs no background worker.
 
 The JSON Schema and test vectors are the payments service's published wire
@@ -28,8 +28,8 @@ option = PaymentsOptionParams(
 The payments service URL is operator configuration on `PaymentsClient`, not a
 listing field. A listing-selected URL could redirect the buyer's bearer key to
 an attacker. Keep `fee_bps` and `dispute_authority` in the caller's trusted
-service policy: the HTTP service validates both against its own current
-configuration.
+service policy. Authorities are explicit per-part permissions; the service has
+no implicit privileged dispute account.
 
 Receipts carry a signed `livemode`, true only from a live payments service.
 `verify_receipt` takes the mode the caller expects, and `ArkhaiPaymentsConfig.livemode`
@@ -40,7 +40,10 @@ Receipts carry a signed `livemode`, true only from a live payments service.
 or parsing a shared Agreement model. `derive_mandate(agreement_json, policy)`
 commits to the exact JSON object using RFC 8785, creates one `once` part, and
 returns a generated `Mandate`. The generated models also carry the contract's
-`rate` parts, which the kit never derives or settles. The hold is the time from
+`rate` parts; the once-only builder does not derive them. Every part carries its
+own authorities and hold-extension cap. A once-only mandate has no start or stop
+permission, and preserves the seller and configured dispute authority as reverse
+authorities. The hold is the time from
 acceptance to start, plus the service duration and the option window. The fixed
 nonce is `arkhai.payments.v1`; repeated derivation for the same inputs gives the
 same transaction ID. Mandate approval expires at `accepted_at + window`.
@@ -161,7 +164,59 @@ make build
 verification, client response handling, the seller stage, buyer approval,
 settlement configuration, and the receipt fixture; and the upstream mandate,
 receipt, attachment, and approval vectors.
-The vector runner is also available as `python scripts/check_vectors.py`.
+The vector runner is also available as `uv run python scripts/check_vectors.py`
+or `uv run python -m market_arkhai_payments.fixtures.conformance`.
+From the repository root, this builds and drives the installed wheel rather than
+an editable/source import (no services, seed files or credentials required):
+
+```sh
+make dist && env -u ALL_PROXY -u all_proxy NO_PROXY=localhost,127.0.0.1 \
+  no_proxy=localhost,127.0.0.1 uv run --no-project --find-links .dist \
+  --with .dist/arkhai_kit_arkhai_payments-0.3.0-py3-none-any.whl \
+  python -m market_arkhai_payments.fixtures.conformance
+```
+It replays the producer's signed snapshots and both partial-reversal and
+lost-response stop-retry scenarios through the shared fixture authority, comparing
+the complete signed bytes. This is offline conformance, not HTTP or live evidence.
+
+### Installed contract and authority fixture
+
+`market_arkhai_payments.contracts.get_contract("published")` returns one immutable
+selection with `schema_bytes`, `vector_bytes`, `models` and `metadata` (publication
+status, schema ID, schema/vector SHA-256). These resources ship in the wheel from
+the canonical inputs by `make generate-models`; `check-generated` rejects drift
+between those inputs and the packaged bytes. No network or
+sibling checkout is required. There is no missing payments capability requiring an
+unpublished candidate, so `"proposed"` refuses by name rather than broadening the
+published model. Mediation contracts are not payments resources.
+
+`market_arkhai_payments.fixtures.PaymentsAuthority` is the single clock-injected
+authority used by `FakePaymentsClient` and available for an HTTP double to wrap.
+Inject a signer and integer-second `clock`, explicitly `fund(account, asset,
+amount)`, then `approve(mandate, account=payer)` and `submit(transaction,
+{account, requestId, event})`. `snapshot(transaction)` signs the published frame.
+`advance(transaction)` performs due stops, maturity and reservation refill;
+reads/commands apply due stops without driving the refill scheduler, matching the
+producer's read boundary. The caller owns HTTP, authentication, controls and
+mediation composition; the kit imports none of that tooling.
+
+The fixture applies only the permissions encoded in each part: no favourable
+stop, notice waiver, seller restitution entry or payer early release is inferred.
+It supports notice deadlines, chosen/event and term-end partial-period rules,
+funding exhaustion, repeated partial reversals, extension refs, independent lifts
+and capped/unbounded holds. Rate earnings are earned at period end or stop;
+partial-period prorating rounds down in the payer's favour. A same-key retry returns
+the original event even after its notice deadline; changed content refuses before
+effects. These are deterministic contract semantics, not external ledger evidence.
+
+`FakePaymentsClient.engine` exposes this same authority. Its convenience approval
+and `serve(receipt)` controls seed immutable approvals without exercising admission,
+expiry or funding; use the authority directly for those scenarios. Receipt-only
+seeding is once-only; use `serve(receipt, mandate=mandate)` (or `engine.load`)
+for exact fees and lifecycle terms, including every rate fixture.
+Snapshot proofs are real fixture signatures, not placeholders. Default fixture
+identities are public deterministic development values and must never be used on
+a public network. Production clients and transport/authentication checks are unchanged.
 
 ## Local first use
 

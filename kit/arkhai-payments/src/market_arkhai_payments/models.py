@@ -9,7 +9,8 @@ from __future__ import annotations
 from enum import Enum
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel
+from market_arkhai_payments.wire import WireModel
+from pydantic import ConfigDict, Field, RootModel
 
 
 class ArkhaiPaymentsWireContract(RootModel[Any]):
@@ -36,16 +37,21 @@ class ApiErrorCode(Enum):
     caller_not_authorized = 'caller_not_authorized'
     account_not_found = 'account_not_found'
     transaction_not_found = 'transaction_not_found'
+    approval_pending = 'approval_pending'
     part_not_found = 'part_not_found'
     mandate_expired = 'mandate_expired'
+    invalid_mandate = 'invalid_mandate'
     fee_mismatch = 'fee_mismatch'
-    dispute_authority_missing = 'dispute_authority_missing'
+    unsupported_asset = 'unsupported_asset'
     deal_mismatch = 'deal_mismatch'
     attachment_not_found = 'attachment_not_found'
     invalid_event = 'invalid_event'
     request_id_reused = 'request_id_reused'
     hold_matured = 'hold_matured'
     hold_not_reversible = 'hold_not_reversible'
+    hold_not_extendable = 'hold_not_extendable'
+    extension_not_found = 'extension_not_found'
+    extension_closed = 'extension_closed'
     insufficient_held_funds = 'insufficient_held_funds'
     insufficient_funds = 'insufficient_funds'
     card_debt = 'card_debt'
@@ -70,16 +76,7 @@ class Asset(RootModel[str]):
     root: Annotated[str, Field(pattern='^[A-Z][A-Z0-9]{0,16}(\\/\\d{1,6})?$')]
 
 
-class Authorities(BaseModel):
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    start: Annotated[list[AccountId], Field(max_length=16)]
-    stop: Annotated[list[AccountId], Field(max_length=16)]
-    reverse: Annotated[list[AccountId], Field(max_length=16)]
-
-
-class AutoRechargeDisabled(BaseModel):
+class AutoRechargeDisabled(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -125,7 +122,7 @@ class FaucetAmountCents(RootModel[str]):
     root: Annotated[str, Field(max_length=16, pattern='^[1-9][0-9]*$')]
 
 
-class FaucetCredit(BaseModel):
+class FaucetCredit(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -134,46 +131,54 @@ class FaucetCredit(BaseModel):
     ledger: Annotated[str, Field(min_length=1)]
 
 
-class FaucetRequest(BaseModel):
+class FaucetRequest(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
     amountCents: FaucetAmountCents
 
 
-class Fee(BaseModel):
+class Fee(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
     bps: Annotated[int, Field(ge=0, le=10000)]
 
 
-class Health(BaseModel):
+class Health(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
     status: Literal['ok']
 
 
-class HoldFor(BaseModel):
+class HoldAfterStop(WireModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    afterStop: Duration
+
+
+class HoldExtension(WireModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    ref: Annotated[int, Field(ge=1, le=9007199254740991)]
+    until: Annotated[int | None, Field(ge=0, le=9007199254740991)] = None
+
+
+class HoldFor(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
     for_: Annotated[Duration, Field(alias='for')]
 
 
-class HoldUntilStop(BaseModel):
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    until: Literal['stop']
-
-
 class HttpUrl(RootModel[str]):
     root: Annotated[str, Field(pattern='^https?:\\/\\/[^\\s]+$')]
 
 
-class Identity(BaseModel):
+class Identity(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -185,18 +190,26 @@ class LifecycleKind(Enum):
     start = 'start'
     stop = 'stop'
     reverse = 'reverse'
+    extend = 'extend'
+    lift = 'lift'
 
 
 class MinorUnits(RootModel[str]):
     root: Annotated[str, Field(pattern='^(0|[1-9][0-9]{0,37})$')]
 
 
-class OnboardingRequest(BaseModel):
+class OnboardingRequest(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
     refreshUrl: HttpUrl
     returnUrl: HttpUrl
+
+
+class PartialPeriod(Enum):
+    charged = 'charged'
+    returned = 'returned'
+    prorated = 'prorated'
 
 
 class PartState(Enum):
@@ -214,7 +227,7 @@ class PayoutAmount(RootModel[str]):
     root: Annotated[str, Field(pattern='^(0|[1-9][0-9]{0,37})$')]
 
 
-class PayoutBalance(BaseModel):
+class PayoutBalance(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -227,7 +240,7 @@ class ProviderObjectId(RootModel[str]):
     root: Annotated[str, Field(max_length=255, min_length=1)]
 
 
-class RateProgress(BaseModel):
+class RateProgress(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -236,7 +249,7 @@ class RateProgress(BaseModel):
     reservedThrough: Annotated[int | None, Field(ge=0, le=9007199254740991)] = None
 
 
-class RateReservation(BaseModel):
+class RateReservation(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -249,7 +262,7 @@ class RequestId(RootModel[str]):
     root: Annotated[str, Field(pattern='^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$')]
 
 
-class SavedCard(BaseModel):
+class SavedCard(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -258,13 +271,14 @@ class SavedCard(BaseModel):
     last4: Annotated[str, Field(pattern='^\\d{4}$')]
     expMonth: Annotated[int, Field(ge=1, le=12)]
     expYear: Annotated[int, Field(ge=2000, le=9999)]
+    isDefault: bool
 
 
 class SavedCards(RootModel[list[SavedCard]]):
     root: list[SavedCard]
 
 
-class SettledPart(BaseModel):
+class SettledPart(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -279,7 +293,7 @@ class Sha256Hex(RootModel[str]):
     root: Annotated[str, Field(pattern='^[0-9a-f]{64}$')]
 
 
-class SignatureProof(BaseModel):
+class SignatureProof(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -287,7 +301,18 @@ class SignatureProof(BaseModel):
     value: Annotated[str, Field(pattern='^[A-Za-z0-9_-]{85}[AQgw]$')]
 
 
-class StoredDealAttachment(BaseModel):
+class StopCause(Enum):
+    payer = 'payer'
+    payee = 'payee'
+    authority = 'authority'
+    terms = 'terms'
+
+
+class StopPartialPeriod(RootModel[PartialPeriod | Literal['chosen']]):
+    root: PartialPeriod | Literal['chosen']
+
+
+class StoredDealAttachment(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -312,14 +337,15 @@ class StripeObjectId(RootModel[str]):
     root: Annotated[str, Field(max_length=255, min_length=1)]
 
 
-class Event(BaseModel):
+class Event(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
     kind: Literal['stop']
+    part: Annotated[int | None, Field(ge=0, le=9007199254740991)] = None
 
 
-class TermsStopEvent(BaseModel):
+class TermsStopEvent(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -330,7 +356,7 @@ class TermsStopEvent(BaseModel):
     sequence: Annotated[int, Field(ge=1, le=9007199254740991)]
 
 
-class TimedBalanceHold(BaseModel):
+class TimedBalanceHold(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -363,28 +389,26 @@ class TopUpState(Enum):
     canceled = 'canceled'
 
 
-class Cause(Enum):
-    payer = 'payer'
-    payee = 'payee'
-    authority = 'authority'
-    terms = 'terms'
-
-
-class TransactionStop(BaseModel):
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    effectiveAt: Annotated[int, Field(ge=0, le=9007199254740991)]
-    cause: Cause
-    sequence: Annotated[int, Field(ge=1, le=9007199254740991)]
-    settled: list[SettledPart]
-
-
 class UnixSeconds(RootModel[int]):
     root: Annotated[int, Field(ge=0, le=9007199254740991)]
 
 
-class UntilStopBalanceHold(BaseModel):
+class UntilLiftBalanceHold(WireModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    address: Annotated[str, Field(min_length=1)]
+    transaction: Sha256Hex
+    part: Annotated[int, Field(ge=0, le=9007199254740991)]
+    from_: Annotated[AccountId, Field(alias='from')]
+    to: AccountId
+    asset: Asset
+    balance: BalanceAmount
+    fee: Fee
+    until: Literal['lift']
+
+
+class UntilStopBalanceHold(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -403,7 +427,7 @@ class WithdrawalId(RootModel[str]):
     root: Annotated[str, Field(pattern='^[0-9a-f]{64}$')]
 
 
-class WithdrawalRequest(BaseModel):
+class WithdrawalRequest(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -420,31 +444,31 @@ class WithdrawalState(Enum):
     failed = 'failed'
 
 
-class ApiError(BaseModel):
+class ApiError(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
     error: ApiErrorCode
 
 
-class AutoRechargeEnabled(BaseModel):
+class AutoRechargeEnabled(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
     enabled: Literal[True]
     threshold: Annotated[str, Field(pattern='^(0|[1-9]\\d*)$')]
     amountCents: TopUpAmountCents
-    paymentMethod: PaymentMethodId
+    paymentMethod: PaymentMethodId | None = None
 
 
-class AutoRechargeEnabledInput(BaseModel):
+class AutoRechargeEnabledInput(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
     enabled: Literal[True]
     threshold: Annotated[str | None, Field(pattern='^(0|[1-9]\\d*)$')] = None
     amountCents: TopUpAmountCents
-    paymentMethod: PaymentMethodId
+    paymentMethod: PaymentMethodId | None = None
 
 
 class AutoRechargeInput(RootModel[AutoRechargeDisabled | AutoRechargeEnabledInput]):
@@ -455,11 +479,30 @@ class AutoRechargeSettings(RootModel[AutoRechargeDisabled | AutoRechargeEnabled]
     root: AutoRechargeDisabled | AutoRechargeEnabled
 
 
-class BalanceHold(RootModel[TimedBalanceHold | UntilStopBalanceHold]):
-    root: TimedBalanceHold | UntilStopBalanceHold
+class BalanceHold(
+    RootModel[TimedBalanceHold | UntilStopBalanceHold | UntilLiftBalanceHold]
+):
+    root: Annotated[
+        TimedBalanceHold | UntilStopBalanceHold | UntilLiftBalanceHold,
+        Field(description='Incoming money held for the payee until release.'),
+    ]
 
 
-class CheckoutTopUpRequest(BaseModel):
+class BillingPortalRequest(WireModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    returnUrl: HttpUrl
+
+
+class BillingPortalSession(WireModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    url: HttpUrl
+
+
+class CheckoutTopUpRequest(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -468,7 +511,7 @@ class CheckoutTopUpRequest(BaseModel):
     cancelUrl: HttpUrl
 
 
-class ConnectStatus(BaseModel):
+class ConnectStatus(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -478,7 +521,7 @@ class ConnectStatus(BaseModel):
     detailsSubmitted: bool
 
 
-class DealAttachment(BaseModel):
+class DealAttachment(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -491,40 +534,90 @@ class DealCommitment(RootModel[Sha256Hex]):
     root: Sha256Hex
 
 
-class EventCommand(BaseModel):
+class EventCommand(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
     kind: LifecycleKind
     part: Annotated[int | None, Field(ge=0, le=9007199254740991)] = None
     amount: Amount | None = None
+    until: Annotated[
+        int | None,
+        Field(
+            description='Extension deadline in Unix seconds, strictly after receipt; absent freezes until lift or the cap.',
+            ge=0,
+            le=9007199254740991,
+        ),
+    ] = None
+    ref: Annotated[
+        int | None,
+        Field(
+            description='Sequence of the extend event to lift on this part.',
+            ge=1,
+            le=9007199254740991,
+        ),
+    ] = None
+    at: Annotated[
+        int | None,
+        Field(
+            description='Requested stop time in Unix seconds; the sender’s notice may move it later.',
+            ge=0,
+            le=9007199254740991,
+        ),
+    ] = None
+    partialPeriod: PartialPeriod | None = None
     payload: Annotated[
         Any | None, Field(description='Opaque JSON, recorded and never interpreted.')
     ] = None
 
 
-class Hold(RootModel[HoldFor | HoldUntilStop]):
+class Hold(RootModel[HoldFor | HoldAfterStop]):
     root: Annotated[
-        HoldFor | HoldUntilStop,
+        HoldFor | HoldAfterStop,
         Field(
             description="How long a part's money stays reversible and uncollectable by the payee."
         ),
     ]
 
 
-class LifecycleEvent(BaseModel):
+class LifecycleEvent(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
     kind: LifecycleKind
     part: Annotated[int | None, Field(ge=0, le=9007199254740991)] = None
     amount: Amount | None = None
+    until: Annotated[
+        int | None,
+        Field(
+            description='Extension deadline in Unix seconds, strictly after receipt; absent freezes until lift or the cap.',
+            ge=0,
+            le=9007199254740991,
+        ),
+    ] = None
+    ref: Annotated[
+        int | None,
+        Field(
+            description='Sequence of the extend event to lift on this part.',
+            ge=1,
+            le=9007199254740991,
+        ),
+    ] = None
+    at: Annotated[
+        int | None,
+        Field(
+            description='Requested stop time in Unix seconds; the sender’s notice may move it later.',
+            ge=0,
+            le=9007199254740991,
+        ),
+    ] = None
+    partialPeriod: PartialPeriod | None = None
     payload: Annotated[
         Any | None, Field(description='Opaque JSON, recorded and never interpreted.')
     ] = None
 
 
-class OnboardingLink(BaseModel):
+class OnboardingLink(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -533,63 +626,48 @@ class OnboardingLink(BaseModel):
     expiresAt: UnixSeconds
 
 
-class OncePart(BaseModel):
+class PartEnd(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    kind: Literal['once']
-    asset: Asset
-    amount: Amount
-    hold: Hold
+    at: Annotated[int, Field(ge=0, le=9007199254740991)]
+    partialPeriod: PartialPeriod
 
 
-class PartSnapshot(BaseModel):
+class PartStop(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    part: Annotated[int, Field(ge=0, le=9007199254740991)]
-    asset: Asset
-    gross: Amount
-    held: MinorUnits
-    released: MinorUnits
-    reversed: MinorUnits
-    reserved: MinorUnits | None = None
-    refunded: MinorUnits | None = None
-    rate: RateProgress | None = None
-    feePaid: MinorUnits
-    hold: Hold
-    releaseAt: Annotated[
-        str | None,
-        Field(description='UTC instant when a timed hold becomes releasable.'),
-    ] = None
-    status: PartState
+    effectiveAt: Annotated[int, Field(ge=0, le=9007199254740991)]
+    cause: StopCause
+    partialPeriod: PartialPeriod
+    sequence: Annotated[int, Field(ge=1, le=9007199254740991)]
+    settled: SettledPart
 
 
-class RatePart(BaseModel):
+class PendingStop(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    kind: Literal['rate']
-    asset: Asset
-    amount: Amount
-    period: Duration
-    reserveAhead: Duration
-    hold: Hold
+    at: Annotated[int, Field(ge=0, le=9007199254740991)]
+    cause: StopCause
+    partialPeriod: PartialPeriod
+    sequence: Annotated[int, Field(ge=1, le=9007199254740991)]
 
 
-class ReceiptPart(BaseModel):
+class ReceiptPart(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
     asset: Asset
-    gross: Amount
+    gross: Annotated[str, Field(pattern='^(0|[1-9][0-9]{0,37})$')]
     fee: Annotated[str, Field(pattern='^(0|[1-9][0-9]{0,37})$')]
     net: Annotated[str, Field(pattern='^(0|[1-9][0-9]{0,37})$')]
     hold: Hold
     rate: RateReservation | None = None
 
 
-class SavedCardTopUpRequest(BaseModel):
+class SavedCardTopUpRequest(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -597,7 +675,16 @@ class SavedCardTopUpRequest(BaseModel):
     paymentMethod: PaymentMethodId | None = None
 
 
-class StoredEvent(BaseModel):
+class StopAuthority(WireModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    account: AccountId
+    notice: Duration
+    partialPeriod: StopPartialPeriod
+
+
+class StoredEvent(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -622,7 +709,7 @@ class StoredEvent(BaseModel):
     ] = None
 
 
-class TopUp(BaseModel):
+class TopUp(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -644,7 +731,7 @@ class TransactionEvent(RootModel[StoredEvent | TermsStopEvent]):
     root: StoredEvent | TermsStopEvent
 
 
-class Withdrawal(BaseModel):
+class Withdrawal(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -663,7 +750,7 @@ class Withdrawal(BaseModel):
     paidAt: UnixSeconds | None = None
 
 
-class AutoRechargeResponse(BaseModel):
+class AutoRechargeResponse(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -671,15 +758,25 @@ class AutoRechargeResponse(BaseModel):
     recommendedThreshold: Annotated[str, Field(pattern='^(0|[1-9]\\d*)$')]
 
 
-class Balance(BaseModel):
+class Balance(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    available: dict[Asset, BalanceAvailable]
-    held: list[BalanceHold]
+    available: Annotated[
+        dict[Asset, BalanceAvailable],
+        Field(
+            description='Spendable balances by asset; outgoing escrow has already left available.'
+        ),
+    ]
+    held: Annotated[
+        list[BalanceHold],
+        Field(
+            description="Unreleased incoming holds where this account is the payee. Outgoing payer escrow is excluded and appears only in that transaction's signed snapshot."
+        ),
+    ]
 
 
-class EventRequest(BaseModel):
+class EventRequest(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -688,11 +785,95 @@ class EventRequest(BaseModel):
     event: LifecycleEvent
 
 
-class Part(RootModel[OncePart | RatePart]):
-    root: OncePart | RatePart
+class OnceAuthorities(WireModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    stop: Annotated[list[StopAuthority], Field(max_length=16)]
+    reverse: Annotated[list[AccountId], Field(max_length=16)]
+    extend: Annotated[list[AccountId], Field(max_length=16)]
 
 
-class Receipt(BaseModel):
+class OncePart(WireModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    kind: Literal['once']
+    asset: Asset
+    amount: Amount
+    hold: Hold
+    authorities: OnceAuthorities
+    maxHoldExtension: Duration | None
+    end: PartEnd | None = None
+
+
+class PartSnapshot(WireModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    part: Annotated[int, Field(ge=0, le=9007199254740991)]
+    asset: Asset
+    gross: MinorUnits
+    held: MinorUnits
+    released: MinorUnits
+    reversed: MinorUnits
+    reserved: MinorUnits | None = None
+    refunded: MinorUnits | None = None
+    rate: RateProgress | None = None
+    started: Annotated[
+        int | None,
+        Field(
+            description='The rate part’s first start, in Unix seconds.',
+            ge=0,
+            le=9007199254740991,
+        ),
+    ] = None
+    end: Annotated[
+        PartEnd | None,
+        Field(
+            description="Effective terms end: max(mandate end.at, approval instant), with the mandate's partial-period rule. The stored mandate is unchanged."
+        ),
+    ] = None
+    stop: PartStop | None = None
+    pendingStop: PendingStop | None = None
+    feePaid: MinorUnits
+    hold: Hold
+    extensions: list[HoldExtension]
+    releaseAt: Annotated[
+        str | None,
+        Field(
+            description='Effective UTC maturity, including open extensions and the cap; absent while unbounded or awaiting stop.'
+        ),
+    ] = None
+    status: PartState
+
+
+class RateAuthorities(WireModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    stop: Annotated[list[StopAuthority], Field(max_length=16)]
+    reverse: Annotated[list[AccountId], Field(max_length=16)]
+    extend: Annotated[list[AccountId], Field(max_length=16)]
+    start: Annotated[list[AccountId], Field(max_length=16)]
+
+
+class RatePart(WireModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    kind: Literal['rate']
+    asset: Asset
+    amount: Amount
+    period: Duration
+    reserveAhead: Duration
+    hold: Hold
+    authorities: RateAuthorities
+    maxHoldExtension: Duration | None
+    end: PartEnd | None = None
+
+
+class Receipt(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -716,7 +897,7 @@ class Receipt(BaseModel):
     issuer: Identity
 
 
-class SignedReceipt(BaseModel):
+class SignedReceipt(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -724,7 +905,7 @@ class SignedReceipt(BaseModel):
     proof: SignatureProof
 
 
-class TransactionSnapshot(BaseModel):
+class TransactionSnapshot(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -748,12 +929,27 @@ class TransactionSnapshot(BaseModel):
     events: list[TransactionEvent]
     latestEventSequence: Annotated[int | None, Field(ge=0, le=9007199254740991)] = None
     fundedThrough: Annotated[int | None, Field(ge=0, le=9007199254740991)] = None
-    stop: TransactionStop | None = None
     attachments: list[StoredDealAttachment]
     issuer: Identity
 
 
-class Mandate(BaseModel):
+class Authorities(RootModel[OnceAuthorities | RateAuthorities]):
+    root: OnceAuthorities | RateAuthorities
+
+
+class Part(RootModel[OncePart | RatePart]):
+    root: OncePart | RatePart
+
+
+class SignedTransactionSnapshot(WireModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    snapshot: TransactionSnapshot
+    proof: SignatureProof
+
+
+class Mandate(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -762,7 +958,6 @@ class Mandate(BaseModel):
     parts: Annotated[list[Part], Field(max_length=64, min_length=1)]
     deal: DealCommitment
     fee: Fee
-    authorities: Authorities
     nonce: Annotated[str, Field(pattern='^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$')]
     expires: Annotated[
         int,
@@ -774,15 +969,7 @@ class Mandate(BaseModel):
     ]
 
 
-class SignedTransactionSnapshot(BaseModel):
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    snapshot: TransactionSnapshot
-    proof: SignatureProof
-
-
-class ApprovalRequest(BaseModel):
+class ApprovalRequest(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )

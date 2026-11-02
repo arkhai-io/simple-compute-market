@@ -4,6 +4,7 @@ The receipt fixture shares the kit verifier's framing and is proven against the
 published conformance vector, so tests never sign receipts any other way.
 """
 
+from market_arkhai_payments.fixtures.authority import PaymentsAuthority, sign_snapshot, snapshot_message
 from market_arkhai_payments.fixtures.payments_client import FakePaymentsClient
 from market_arkhai_payments.fixtures.receipts import (
     build_signed_receipt,
@@ -11,4 +12,7 @@ from market_arkhai_payments.fixtures.receipts import (
     sign_receipt,
 )
 
-__all__ = ["FakePaymentsClient", "build_signed_receipt", "receipt_parts", "sign_receipt"]
+__all__ = [
+    "PaymentsAuthority", "FakePaymentsClient", "build_signed_receipt", "receipt_parts",
+    "sign_receipt", "sign_snapshot", "snapshot_message",
+]

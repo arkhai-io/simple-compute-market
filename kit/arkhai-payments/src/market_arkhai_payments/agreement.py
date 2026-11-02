@@ -148,7 +148,10 @@ class PaymentSettlementData(BaseModel):
 
         wire = self.to_wire()["mandate"]
         payee = selected_payment_option(agreement).payee_account
-        others = [account for account in wire["authorities"]["reverse"] if account != payee]
+        others = list(dict.fromkeys(
+            account for part in wire["parts"]
+            for account in part["authorities"]["reverse"] if account != payee
+        ))
         if len(others) > 1:
             raise MandatePolicyError("stored payment mandate names extra reverse authorities")
         try:
