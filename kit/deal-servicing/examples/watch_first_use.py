@@ -1,4 +1,4 @@
-"""Try a buyer case, lost append response and closed-case replay with vendored peers."""
+"""Try respondent-owned answers and ruling replay with a vendored authority."""
 
 import asyncio
 import base64
@@ -79,8 +79,7 @@ async def main():
                     actor=lambda _: seller, clock=lambda: now,
                 )
 
-            # The next write's response is lost, after the authority stores it.
-            peer.lose_next_response = True
+            # Discovery owns counterparty answers; watch cannot preempt them.
             await watch().poll()
             case = next(iter(peer.cases))
             peer.decide(case, [{
@@ -103,6 +102,11 @@ async def main():
             current_watch = watch()
             with transaction(path) as conn:
                 intents = EndSession(conn).intents(negotiation)
+                assert not [item for item in intents if item.kind == "append"]
+                assert not [record for record in peer.entries if record["entry"]["kind"] == "appended"]
+                assert len(physical.effects) == 1
+                assert EndSession(conn).view(negotiation).recorded_end.ended_at == now - 100
+                assert WatchSession(conn).cursor(negotiation, "payment:" + binding.commitment_ref) == -1
                 print(json.dumps({
                     "append": [item.state for item in intents if item.kind == "append"],
                     "appended_records": sum(record["entry"]["kind"] == "appended" for record in peer.entries),

@@ -102,6 +102,12 @@ async def main():
         with transaction(path) as conn:
             session = EndSession(conn)
             filing = next(intent for intent in session.intents("site") if intent.kind == "filing")
+            assert first.receipt_at == replay.receipt_at == 150
+            assert not any(intent.kind == "filing" for intent in session.intents("surrender"))
+            assert len(session.requests("site")) == 1
+            assert session.view("site").site_reports[0].body == site_body
+            assert filing.payload["payload"]["ended_at"] == filing.not_before == 200
+            assert len(physical.effects) == 2
             print(json.dumps({
                 "receipt_preserved": first.receipt_at == replay.receipt_at == 150,
                 "surrender_progress": replay.delivery.progress,

@@ -18,7 +18,7 @@ def rig(tmp_path):
     buyer, seller, authority_signer = (Ed25519Signer(bytes([n]) * 32) for n in (1, 2, 3))
     authority = DisputeAuthority.model_validate({
         "interface": "fixture.dispute.v1", "origin": "https://dispute.example",
-        "account": "authority", "record_key": authority_signer.identity.identifier, "params": {},
+        "account": "authority", "record_key": "ed25519:" + authority_signer.identity.identifier, "params": {},
     })
     path = tmp_path / "storefront.sqlite"
     clock = [150]

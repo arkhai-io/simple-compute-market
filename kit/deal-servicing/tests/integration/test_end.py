@@ -10,7 +10,7 @@ from market_deal_lifecycle_contracts.models import Accepted, Unknown
 from market_deal_servicing import (
     Classification, EndService, EndSession, FinalRequest, PhysicalResult,
 )
-from market_deal_servicing.evidence import in_transaction, transaction
+from market_deal_servicing.evidence import transaction
 
 
 def end_request(rig, *, at=150, ref="ruling"):

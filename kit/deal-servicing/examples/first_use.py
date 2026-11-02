@@ -60,6 +60,7 @@ async def main():
                     terms=None if route == "counteroffer" else terms,
                 )
             kept = await store.read(route)
+            assert kept.items[0].body == body
             print(json.dumps({
                 "acceptance": route, "kept_exact_body": kept.items[0].body == body,
                 "author": "administrator" if route == "administrative" else "seller",
@@ -71,21 +72,23 @@ async def main():
                 observed_at=200, delivery_ended_at=140, recovered_at=150,
                 payouts={"once": None}, cases={}, open_extensions=[], complete=True,
             ))
-            print(json.dumps({"held_funds_kept": not session.prune(
-                "opening", now=300, has_adapter=True,
-            )}))
+            kept = not session.prune("opening", now=300, has_adapter=True)
+            assert kept
+            print(json.dumps({"held_funds_kept": kept}))
             session.observe("opening", RetentionObservation(
                 observed_at=300, delivery_ended_at=140, recovered_at=150,
                 payouts={"once": 250}, cases={"case": 260}, open_extensions=[], complete=True,
             ))
-            print(json.dumps({"closed_and_paid_pruned": session.prune(
-                "opening", now=320, has_adapter=True,
-            )}))
-            print(json.dumps({"no_lifecycle_kept": not session.prune(
-                "counteroffer", now=9999, has_adapter=False,
-            )}))
+            pruned = session.prune("opening", now=320, has_adapter=True)
+            assert pruned
+            print(json.dumps({"closed_and_paid_pruned": pruned}))
+            kept = not session.prune("counteroffer", now=9999, has_adapter=False)
+            assert kept
+            print(json.dumps({"no_lifecycle_kept": kept}))
         # A fresh object reads the same persisted envelopes after restart.
-        print(json.dumps({"after_restart": await SQLiteEvidenceStore(path).negotiations()}))
+        remaining = await SQLiteEvidenceStore(path).negotiations()
+        assert remaining == ("administrative", "counteroffer")
+        print(json.dumps({"after_restart": remaining}))
 
 
 if __name__ == "__main__":
