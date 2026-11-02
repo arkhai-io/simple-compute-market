@@ -26,6 +26,18 @@ class RegistryDisputePolicy:
     def from_document(cls, document: Mapping[str, Any]) -> RegistryDisputePolicy:
         return cls(dispute_config(document, role="seller"))
 
+    def for_publication(self) -> tuple[DisputeEntry, ...]:
+        """Offer only authorities allowed at every destination of a shared listing.
+
+        Publication stores one option set for all its registries. A registry's
+        recommendations cannot silently become another registry's defaults.
+        """
+        destinations = [entries for url, entries in self.authorities.items() if url]
+        if not destinations:
+            return self.authorities.get("", self.config.authorities(role="seller"))
+        return tuple(entry for entry in destinations[0]
+                     if all(entry in entries for entries in destinations[1:]))
+
     async def refresh(self, client_factory: Callable[[], Any] | None) -> None:
         """Read recommendations under configured registry pins, before publication.
 

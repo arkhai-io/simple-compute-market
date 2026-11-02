@@ -14,6 +14,7 @@ from market_settlement_runtime import (
 from pydantic import BaseModel, ConfigDict
 
 from market_storefront.settlement_composition import VmSettlementComposition
+from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 from market_core import SettlementStageTable
 from market_storefront.settlement_stages import VmAlkahestSellerStage, VmPaymentsSellerStage
 
@@ -144,6 +145,7 @@ def _composition(
             configuration_registry=registry,
             settlement_config=config,
             mechanism_resources={},
+            disputes=RegistryDisputePolicy.from_document({}),
             seller_stages=_STAGES,
         ),
         calls,
@@ -357,6 +359,7 @@ async def test_clause_chain_is_available_during_alkahest_preflight() -> None:
         configuration_registry=registry,
         settlement_config=config,
         mechanism_resources={},
+        disputes=RegistryDisputePolicy.from_document({}),
         seller_stages=_STAGES,
     )
 

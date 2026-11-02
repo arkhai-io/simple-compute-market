@@ -20,6 +20,7 @@ from typer.testing import CliRunner
 from arkhai_apicredits_buyer import common, negotiate_cli, payments, settlement_composition, settlement_stages
 from arkhai_apicredits_buyer.cli import app
 from test_negotiation_flow import _MockResponse, _request_header
+from dispute_terms import lifecycle, authority
 
 _BUYER = Ed25519Signer(bytes.fromhex("11" * 32))
 _SELLER = Ed25519Signer(bytes.fromhex("22" * 32))
@@ -70,6 +71,7 @@ def surface(monkeypatch, tmp_path):
             "arkhai_payments": {"enabled": True},
         },
         "apicredits": {"payer_account": _PAYER},
+        "Dispute": [authority().model_dump(mode="json")],
     }
     monkeypatch.setattr(settlement_composition, "load_user_config", lambda: config)
     monkeypatch.setattr(payments, "load_user_config", lambda: config)
@@ -85,13 +87,16 @@ def surface(monkeypatch, tmp_path):
         )
         asset = _TOKEN if mechanism == "alkahest.v1" else "USD"
         rates = [RateValue(field="amount", per="token", value=100)]
+        terms = lifecycle() if mechanism == "arkhai.payments.v1" else None
         option = SettlementOption(
             option_id=derive_settlement_option_id(
                 price={"asset": asset, "rates": rates},
                 settlement={"schema": mechanism, **(params or {})},
+                lifecycle=terms,
             ),
             price={"asset": asset, "rates": rates},
             settlement={"schema": mechanism, **(params or {})},
+            lifecycle=terms,
         )
         listing = {
             "listing_id": "credits-1", "storefront_url": "http://seller",

@@ -18,6 +18,11 @@ from market_core.schemas import (
     derive_settlement_option_id,
     settlement_option_asset,
     settlement_option_params,
+    settlement_option_lifecycle,
+)
+from market_deal_lifecycle.configuration import DisputeEntry
+from market_deal_lifecycle.terms import (
+    Adjudication, LifecycleTerms, TermContext, encode_terms, validate_terms,
 )
 from market_identity import Identity, IdentityScheme
 from market_settlement_runtime import (
@@ -138,6 +143,14 @@ class ArkhaiPaymentsPublicationInput(PaymentsOptionParams):
     """Public payment parameters accepted by a seller publication clause."""
 
     asset: str
+    dispute_window_seconds: int = Field(ge=0)
+    case_hold_max_seconds: int | None = Field(default=None, ge=0)
+    delivery_deadline_seconds: int | None = Field(default=None, gt=0)
+
+    @field_validator("dispute_window_seconds", "case_hold_max_seconds", "delivery_deadline_seconds", mode="before")
+    @classmethod
+    def parse_seconds_clause(cls, value: Any) -> Any:
+        return int(value) if isinstance(value, str) and value.isdecimal() else value
 
     @field_validator("asset")
     @classmethod
@@ -311,6 +324,31 @@ def arkhai_payments_option_builder(
     if params.asset != clause.asset:
         raise ValueError("payment option asset must match the publication clause")
 
+    authorities = tuple(DisputeEntry.model_validate(item) for item in resources.get("dispute_authorities", ()))
+    if not authorities:
+        return {"accepted_escrows": [], "settlement_options": []}
+    entry = next((item for item in authorities
+                  if ARKHAI_PAYMENTS_MECHANISM in item.advertisement.mechanisms), None)
+    if entry is None:
+        raise ValueError("no offered dispute authority advertises arkhai.payments.v1")
+    AccountId.model_validate(entry.account)
+    lifecycle = LifecycleTerms.model_validate({
+        "adjudication": Adjudication(
+            version=1, dispute=entry.authority,
+            dispute_window_seconds=params.dispute_window_seconds,
+            case_hold_max_seconds=params.case_hold_max_seconds,
+        ),
+        **({"delivery_deadline_seconds": params.delivery_deadline_seconds}
+           if params.delivery_deadline_seconds is not None else {}),
+    })
+    validate_terms(encode_terms(lifecycle), TermContext(
+        mechanism=ARKHAI_PAYMENTS_MECHANISM, has_adapter=True,
+        dispute_interfaces=frozenset(resources.get("dispute_interfaces", ())),
+        authority=entry.requirements, compute=bool(resources.get("compute", False)),
+    ))
+    if resources.get("compute") and lifecycle.delivery_deadline_seconds is None:
+        raise ValueError("compute option requires delivery_deadline_seconds")
+
     rates: list[RateValue] = []
     if clause.rate is not None:
         if clause.per == "hour":
@@ -331,18 +369,40 @@ def arkhai_payments_option_builder(
             value = int(clause.rate)
         rates.append(RateValue(field="amount", per=clause.per, value=value))
 
-    option_params = params.model_dump(mode="json", exclude={"asset"})
+    option_params = params.model_dump(mode="json", exclude={
+        "asset", "dispute_window_seconds", "case_hold_max_seconds", "delivery_deadline_seconds",
+    })
     price = SettlementPrice(asset=params.asset, rates=rates)
     settlement = {"schema": ARKHAI_PAYMENTS_MECHANISM, **option_params}
     option = SettlementOption(
-        option_id=derive_settlement_option_id(price=price, settlement=settlement),
+        option_id=derive_settlement_option_id(
+            price=price, settlement=settlement, lifecycle=encode_terms(lifecycle),
+        ),
         price=price,
         settlement=settlement,
+        lifecycle=encode_terms(lifecycle),
     )
     return {
         "accepted_escrows": [],
         "settlement_options": [option.model_dump(mode="json")],
     }
+
+
+def validate_payment_lifecycle(
+    option: Any, *, authorities: tuple[DisputeEntry, ...],
+    dispute_interfaces: frozenset[str], compute: bool = False,
+) -> LifecycleTerms:
+    """Admit only an exact accepted authority with compatible advertised minima."""
+    terms = LifecycleTerms.model_validate(settlement_option_lifecycle(option))
+    entry = next((item for item in authorities if item.authority == terms.adjudication.dispute), None)
+    validate_terms(encode_terms(terms), TermContext(
+        mechanism=ARKHAI_PAYMENTS_MECHANISM, has_adapter=True,
+        dispute_interfaces=dispute_interfaces, authority=entry.requirements if entry else None,
+        buyer=True, accepted_authorities=tuple(item.authority for item in authorities),
+        compute=compute,
+    ))
+    AccountId.model_validate(terms.adjudication.dispute.account)
+    return terms
 
 
 def arkhai_payments_buyer_compatibility(

@@ -17,12 +17,25 @@ from market_arkhai_payments.settlement_config import (
     payments_client_for_owner,
 )
 from market_identity import Ed25519Signer, Eip191Signer
+from market_deal_lifecycle.configuration import DisputeEntry
+from market_arkhai_payments.fixtures import dispute_lifecycle
 from market_settlement_runtime import SettlementPublicationClause
 
 BUYER = "00000000-0000-4000-8000-000000000011"
 PAYEE = "00000000-0000-4000-8000-000000000012"
 DISPUTE_AUTHORITY = "00000000-0000-4000-8000-000000000013"
 API_KEY_ENV = "ARKHAI_PAYMENTS_TEST_API_KEY"
+
+
+def _resources(clause):
+    authority = DisputeEntry.model_validate({
+        **dispute_lifecycle(DISPUTE_AUTHORITY)["adjudication"]["dispute"],
+        "advertisement": {"mechanisms": [ARKHAI_PAYMENTS_MECHANISM],
+                          "minimum_dispute_window_seconds": 0,
+                          "minimum_case_hold_seconds": None},
+    })
+    return {"publication_clause": clause, "dispute_authorities": (authority,),
+            "dispute_interfaces": frozenset({authority.interface})}
 
 
 def _config(**overrides: Any) -> ArkhaiPaymentsConfig:
@@ -99,6 +112,7 @@ def test_publication_builder_preserves_option_identity_and_rate_units(
                 "asset": "USD/2",
                 "window": "P7D",
                 "deposit_agreement": True,
+                "dispute_window_seconds": 604800,
             },
         }
     )
@@ -106,7 +120,7 @@ def test_publication_builder_preserves_option_identity_and_rate_units(
     built = arkhai_payments_option_builder(
         config,
         readiness,
-        {"publication_clause": clause},
+        _resources(clause),
         "seller",
     )
     registration = create_arkhai_payments_registration()
@@ -121,7 +135,7 @@ def test_publication_builder_preserves_option_identity_and_rate_units(
     for unit in ("unit", "item"):
         unit_clause = clause.model_copy(update={"rate": "125", "per": unit})
         unit_option = arkhai_payments_option_builder(
-            config, readiness, {"publication_clause": unit_clause}, "seller"
+            config, readiness, _resources(unit_clause), "seller"
         )["settlement_options"][0]
         assert unit_option.get("price", {}).get("rates", []) == [
             {"field": "amount", "per": unit, "value": "125"}
@@ -156,6 +170,7 @@ def test_publication_builder_rejects_precision_loss_and_fractional_base_units(
         "asset": "USD/2",
         "window": "P7D",
         "deposit_agreement": False,
+        "dispute_window_seconds": 604800,
     }
 
     for rate, unit in (("1.001", "hour"), ("1.25", "day"), ("1.25", "unit")):
@@ -172,7 +187,7 @@ def test_publication_builder_rejects_precision_loss_and_fractional_base_units(
             arkhai_payments_option_builder(
                 config,
                 readiness,
-                {"publication_clause": clause},
+                _resources(clause),
                 "seller",
             )
 

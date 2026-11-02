@@ -711,13 +711,32 @@ settle by negotiation". Files: `kit/arkhai-payments/schema/`, `src/market_arkhai
       permissions. The kept buyer-policy assertion now exercises seller stop,
       shortened hold, cap and reverse/extend substitutions as well as fee changes;
       all 97 payments tests, typing, vectors and generated-resource checks pass.
-- [ ] 8.4 Emit `adjudication` from the storefront's first offered authority advertising the
+- [x] 8.4 Emit `adjudication` from the storefront's first offered authority advertising the
       option's mechanism (or one option per offered authority), publish nothing hosted with an
       empty list, and refuse incompatible authorities at publication, in the VM, bare-metal and
       API-credit storefronts; the API-credit buyer checks options against its list. Verify:
       application-integration tests per storefront for "An authority does not serve the payment
       mechanism", "A zero case hold is below the minimum", "No authority is available" and "An
       API-credit storefront publishes a hosted option".
+
+Implemented: all three storefront roots supply their offered authority lists and
+installed mediation interface to the shared builder. The first offered authority
+advertising payments supplies adjudication; empty policy emits no hosted option,
+and incompatible interfaces, windows/caps and missing compute deadlines refuse.
+API-credit buy/standalone negotiate filter exact registry-specific authority
+identities/params, and approval rechecks them. Publication clauses explicitly
+supply dispute_window_seconds; omission of case_hold_max_seconds is unbounded.
+Since one listing's option set serves all its destination registries, publication
+uses the ordered intersection of their resolved lists rather than importing one
+registry's defaults into another. A locally configured authority appears in each
+resolved list. The installed-wheel first-use entry point is
+`docs/attachments/hosted-lifecycle-policy/first_use.py`.
+Focused results: payments 97, VM storefront 1,189 unit and 501 integration,
+API-credit storefront 248 and buyer 35 pass. Bare-metal storefront has 521 passing
+cases plus the repaired snapshot-signing fixture case passing on focused rerun.
+All four new mediation dependencies and the e2e consumer were relocked; packaging,
+architecture, locks, hygiene and strict OpenSpec validation pass. Aggregate test
+and final evidence are recorded in the packet below when settled.
 
 Verification point: `kit/arkhai-payments` unit and vector suites; the three storefronts'
 application-integration suites; `make check-packaging` (vendored schema); `make test`.

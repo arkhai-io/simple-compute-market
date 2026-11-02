@@ -36,6 +36,7 @@ from arkhai_apicredits.negotiation import (
 )
 
 from .cli_helpers import resolve_prices_from_matches
+from .payments import admitted_payment_options
 from .settlement_composition import BUYER_STAGES, resolve_buyer_settlement_policy
 from .common import (
     APICREDITS_SCHEMA_ID,
@@ -343,7 +344,8 @@ def register(credits_app: typer.Typer) -> None:
                     identity=identity, registry_urls=registry_urls,
                 )
                 selected_settlement = settlement_policy.select(
-                    listing_dict, expiration_unix=int(time.time()) + 3600,
+                    admitted_payment_options(settlement_policy, listing_dict),
+                    expiration_unix=int(time.time()) + 3600,
                 )
                 if selected_settlement is None:
                     raise ValueError(

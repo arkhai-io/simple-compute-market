@@ -21,6 +21,9 @@ from market_arkhai_payments import (
     PaymentApprovalDeclined,
 )
 from market_config.config_loader import load_user_config
+from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
+from market_arkhai_payments.settlement_config import validate_payment_lifecycle
+from .disputes import buyer_dispute_authorities
 from market_core.schemas import Agreement, SettlementOption, SettlementSelection
 from market_settlement_runtime import SettlementConfig
 
@@ -37,6 +40,26 @@ def configured_payer_account() -> str:
     return validate_payer_account(settings.get("payer_account"))
 
 
+def admitted_payment_options(policy: Any, listing: Mapping[str, Any]) -> dict[str, Any]:
+    """Filter hosted choices under this listing's registry-specific trust policy."""
+    registry = str(listing.get("source_registry_url") or "").rstrip("/")
+    by_registry = policy.public_context.get("dispute_authorities_by_registry", {})
+    authorities = by_registry.get(registry, by_registry.get("", ()))
+    admitted = []
+    for option in listing.get("settlement_options") or ():
+        try:
+            parsed = SettlementOption.model_validate(option)
+            if parsed.settlement_schema == ARKHAI_PAYMENTS_MECHANISM:
+                validate_payment_lifecycle(
+                    parsed, authorities=authorities,
+                    dispute_interfaces=frozenset({MEDIATION_INTERFACE}),
+                )
+            admitted.append(option)
+        except ValueError:
+            continue
+    return {**listing, "settlement_options": admitted}
+
+
 def payment_selection_for_listing(
     policy: Any,
     listing: Mapping[str, Any],
@@ -49,6 +72,7 @@ def payment_selection_for_listing(
     config = policy.config.mechanism_config(ARKHAI_PAYMENTS_CONFIG_KEY)
     if config is None or not getattr(config, "enabled", False):
         return None
+    listing = admitted_payment_options(policy, listing)
     if prefer_payment:
         candidate = next(
             (
@@ -162,6 +186,12 @@ def settle_api_credit_payment(
     config = settlement_config.mechanism_config(ARKHAI_PAYMENTS_CONFIG_KEY)
     if config is None or not getattr(config, "enabled", False):
         raise ValueError("buyer Arkhai payments is not enabled")
+    registry = str(listing.get("source_registry_url") or "").rstrip("/")
+    by_registry = buyer_dispute_authorities(load_user_config(), buyer, (registry,) if registry else ())
+    validate_payment_lifecycle(
+        advertised, authorities=by_registry.get(registry, by_registry.get("", ())),
+        dispute_interfaces=frozenset({MEDIATION_INTERFACE}),
+    )
     # The kit re-derives the mandate under this buyer's policy, checks the
     # seller's transaction ID, attaches only under the buyer's own
     # attach_agreement, and verifies every receipt. Acceptance already bound

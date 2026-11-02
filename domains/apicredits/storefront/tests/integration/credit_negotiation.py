@@ -23,7 +23,8 @@ from market_core.schemas import (
     derive_settlement_option_id,
 )
 from market_identity import Ed25519Signer
-from market_arkhai_payments.fixtures import dispute_lifecycle
+from market_arkhai_payments.fixtures import dispute_lifecycle as _dispute_lifecycle
+from market_arkhai_mediation.contract import INTERFACE
 from tests._settings_overrides import replaced_setting
 from tests.listing_bindings import upsert_bound_listing
 
@@ -62,6 +63,21 @@ def anvil_chain():
 
 PAYER_ACCOUNT = "11111111-1111-4111-8111-111111111111"
 PAYEE_ACCOUNT = "22222222-2222-4222-8222-222222222222"
+
+
+def dispute_lifecycle(account):
+    value = _dispute_lifecycle(account)
+    value["adjudication"]["dispute"]["interface"] = INTERFACE
+    return value
+
+
+def payment_authority():
+    return {
+        **dispute_lifecycle(DISPUTE_ACCOUNT)["adjudication"]["dispute"],
+        "advertisement": {"mechanisms": ["arkhai.payments.v1"],
+                          "minimum_dispute_window_seconds": 0,
+                          "minimum_case_hold_seconds": None},
+    }
 
 
 def payment_option(rate: int = 100) -> SettlementOption:
