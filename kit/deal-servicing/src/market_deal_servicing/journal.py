@@ -141,6 +141,9 @@ def create_schema(conn: sqlite3.Connection) -> None:
         )""",
         """CREATE UNIQUE INDEX IF NOT EXISTS servicing_one_billing_intent
             ON servicing_intents(negotiation_id) WHERE kind='billing'""",
+        """CREATE TABLE IF NOT EXISTS servicing_seller_deals (
+            negotiation_id TEXT PRIMARY KEY, deal TEXT NOT NULL
+        )""",
         """CREATE TABLE IF NOT EXISTS servicing_operations (
             negotiation_id TEXT NOT NULL, operation_key TEXT NOT NULL, digest TEXT NOT NULL,
             PRIMARY KEY (negotiation_id,operation_key)

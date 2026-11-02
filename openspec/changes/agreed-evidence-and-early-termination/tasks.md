@@ -678,12 +678,21 @@ market-composition's "Marketplace roles hold no payment ledger". Files: new `kit
       (62), mediation (40, including contract/generated/typing checks) and storefront
       (131) regressions pass. Shared storefront composition exposes controller-owned
       watch registration; domain composition remains in sections 14 and 15.
-- [ ] 10.4 Implement the seller half's `submit`, `read` and `list` (bounded pages, lifecycle
+- [x] 10.4 Implement the seller half's `submit`, `read` and `list` (bounded pages, lifecycle
       states, open extensions and cases, repair required for a missing authority credential) and
       the delivery_end filing, journaled with an immediate attributed end and dispatched
       to the dispute adapter, with no stop or reverse of its own and no wait for a ruling. Verify:
       unit and library-integration tests for "A seller lists its deals", "An authority's
       credential is missing", "A seller stops offering an authority", "An administrator ends a once-only deal" and "A filing is not ruled".
+      Immutable committed metadata, bounded keyset pages and merged watched views
+      resolve pinned authority credentials independently of offered preferences.
+      Operator ends retain actor/reason and atomically journal an immediate end
+      plus the fixed-basis filing; dispatch replays unknown responses by key without
+      payment commands or a ruling wait. The committed seller first-use example
+      exercises empty/bounded pages, once-only running, credential repair, lost
+      filing acknowledgement and restart with one case/physical effect. Foundation
+      and mediation regressions, source typing, architecture, packaging, locks,
+      hygiene and strict change validation pass. Domain route binding remains in 13–15.
 
 - [ ] 10.5 Persist final-request identities, actors, causes, instants and evidence references,
       including superseded requests and administrator identity/reason for operator ends,
