@@ -7,9 +7,11 @@ plugins and the core generic commands share them.
 """
 
 from __future__ import annotations
+
+import logging
 from dataclasses import dataclass
 
-
+from market_core import RegistryDescriptor
 from market_identity import Identity, Signer, TrustedIdentitySet
 from registry_client import SyncRegistryClient
 
@@ -167,6 +169,43 @@ def registry_schema_id(
         declared = None
     _SCHEMA_ID_CACHE[key] = declared
     return declared
+
+
+def registry_descriptors(
+    *,
+    signer: Signer,
+    urls: list[str] | None = None,
+    authorities: dict[str, RegistryAuthority] | None = None,
+    timeout: float | None = None,
+) -> dict[str, RegistryDescriptor | None]:
+    """Read each configured registry's signed descriptor without sharing trust.
+
+    An unavailable registry contributes no recommendations; local role policy
+    remains usable. Never reuse another registry's descriptor as its answer.
+    """
+    selected = resolve_indexer_urls() if urls is None else urls
+    pins = resolve_registry_authorities(selected) if authorities is None else authorities
+    api_keys = resolve_registry_api_keys()
+    descriptors: dict[str, RegistryDescriptor | None] = {}
+    for url in selected:
+        trust = pins[url]
+        try:
+            with SyncRegistryClient(
+                url,
+                signer=signer,
+                caller_role="buyer",
+                expected_registries=trust.principals,
+                registry_authority=trust.authority,
+                api_key=api_keys.get(url),
+                timeout=timeout if timeout is not None else resolve_discovery_timeout(),
+            ) as client:
+                descriptors[url] = client.get_registry_descriptor()
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "registry descriptor unavailable for %s (%s)", url, type(exc).__name__
+            )
+            descriptors[url] = None
+    return descriptors
 
 
 def resolve_indexer_urls_for_schema(

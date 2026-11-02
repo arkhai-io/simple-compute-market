@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from functools import partial
 from typing import Any
 
+from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 from market_core.schemas import settlement_option_schema
 from arkhai_vms import VmProvisionTerms, normalize_vm_provision_terms
 from core_storefront.domain_lifecycle import (
@@ -92,6 +93,7 @@ class VmSettlementComposition:
     mechanism_resources: Mapping[str, Any] = field(repr=False)
     arkhai_payments_stage: PaymentSellerStage | None = None
     payments_coordinator: VmPaymentsCoordinator | None = None
+    disputes: RegistryDisputePolicy = field(default_factory=lambda: RegistryDisputePolicy.from_document({}), repr=False)
 
     @property
     def seller_stages(self):
@@ -863,7 +865,9 @@ def build_vm_settlement_composition(
     )
     require_coherent_release_model(settlement_config)
     alkahest_section = settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY)
+    disputes = RegistryDisputePolicy.from_document(storefront_config.settings.as_dict())
     mechanism_resources: dict[str, Any] = {
+        "disputes": disputes,
         "marketplace_signer": marketplace_signer,
         "clients": alkahest_clients,
         "get_client": lambda chain: alkahest_clients.get(chain or ""),
@@ -1015,6 +1019,7 @@ def build_vm_settlement_composition(
         settlement_config=settlement_config,
         configuration_registry=registry,
         mechanism_resources=mechanism_resources,
+        disputes=disputes,
         arkhai_payments_stage=payments_stage,
         payments_coordinator=VmPaymentsCoordinator(
             domain=domain, db=sqlite_client, stage=payments_stage

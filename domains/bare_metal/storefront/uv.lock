@@ -156,6 +156,7 @@ dependencies = [
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-arkhai-payments" },
     { name = "arkhai-kit-contact-exchange" },
+    { name = "arkhai-kit-deal-lifecycle" },
     { name = "arkhai-kit-deal-lifecycle-buyer" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-settlement-runtime" },
@@ -665,6 +666,7 @@ dependencies = [
     { name = "arkhai-core" },
     { name = "arkhai-core-storefront" },
     { name = "arkhai-kit-alkahest" },
+    { name = "arkhai-kit-deal-lifecycle" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-negotiation-runtime" },
 ]

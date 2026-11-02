@@ -10,6 +10,7 @@ from typing import Any
 from market_arkhai_payments import ArkhaiPaymentsConfig
 from market_arkhai_payments.models import AccountId
 from market_identity import Identity, TrustedIdentitySet
+from market_deal_lifecycle.configuration import DisputeConfig, DisputeEntry, dispute_config
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 _CONFIG_ENV = "BARE_METAL_BUYER_CONFIG"
@@ -28,6 +29,8 @@ class BareMetalBuyerConfig(BaseModel):
     timeout_seconds: float = Field(default=30.0, gt=0.0, le=600.0)
     payer_account: str | None = None
     arkhai_payments: ArkhaiPaymentsConfig | None = None
+    disputes: DisputeConfig = Field(default_factory=DisputeConfig)
+    dispute_authorities_by_registry: dict[str, tuple[DisputeEntry, ...]] = Field(default_factory=dict)
 
     @field_validator("payer_account")
     @classmethod
@@ -74,6 +77,7 @@ def load_bare_metal_buyer_config(
     if not isinstance(section, dict):
         raise ValueError("bare-metal buyer config requires [bare_metal]")
     section = dict(section)
+    section["disputes"] = dispute_config(payload, role="buyer")
     principals = section.get("registry_principals")
     if isinstance(principals, list):
         section["registry_principals"] = tuple(principals)

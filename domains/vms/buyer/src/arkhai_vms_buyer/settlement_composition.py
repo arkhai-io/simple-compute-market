@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
 import typer
 from core_buyer.buyer_config import ResolvedBuyerIdentity
+from core_buyer.registry_config import registry_descriptors, resolve_indexer_urls
+from market_deal_lifecycle.configuration import authorities_by_registry, dispute_config
 from core_buyer.settlement import BuyerSettlementPolicy, SelectedSettlementOption
 from market_alkahest import create_alkahest_registration
 from market_arkhai_payments import create_arkhai_payments_registration
@@ -147,6 +150,7 @@ def resolve_buyer_settlement_policy(
     *,
     identity: ResolvedBuyerIdentity | None = None,
     action_capable: bool = True,
+    registry_urls: str | None = None,
 ) -> BuyerSettlementPolicy:
     """Strictly resolve the common buyer ``[Settlement]`` hierarchy."""
 
@@ -162,11 +166,28 @@ def resolve_buyer_settlement_policy(
         raise ValueError("[Settlement] must be a table")
     registry = buyer_settlement_registry()
     settlement = registry.resolve(raw, role="buyer")
+    disputes = dispute_config(document, role="buyer")
+    descriptors = (
+        registry_descriptors(
+            signer=identity.signer, urls=resolve_indexer_urls(override=registry_urls)
+        )
+        if identity is not None and action_capable and disputes.use_registry_dispute_authorities
+        else {}
+    )
+    authorities = authorities_by_registry(
+        disputes,
+        {url: descriptor.recommended_dispute_authorities or [] if descriptor else []
+         for url, descriptor in descriptors.items()},
+        role="buyer",
+        report=logging.getLogger(__name__).warning if identity is not None else lambda _: None,
+    )
     return BuyerSettlementPolicy(
         config=settlement,
         registry=registry,
         stages=buyer_settlement_stages(),
-        public_context={},
+        public_context={
+            "dispute_authorities_by_registry": authorities,
+        },
     )
 
 

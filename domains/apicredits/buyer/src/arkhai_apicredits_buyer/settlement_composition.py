@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from typing import Any
 
 from core_buyer.buyer_config import ResolvedBuyerIdentity
+from core_buyer.registry_config import registry_descriptors, resolve_indexer_urls
+from market_deal_lifecycle.configuration import authorities_by_registry, dispute_config
 from core_buyer.settlement import BuyerSettlementPolicy
 from market_config.config_loader import load_user_config
 from market_alkahest.schemas import EscrowProposal
@@ -81,6 +84,7 @@ def resolve_buyer_settlement_policy(
     *,
     identity: ResolvedBuyerIdentity | None = None,
     action_capable: bool = True,
+    registry_urls: str | None = None,
 ) -> BuyerSettlementPolicy:
     """Resolve the shared hierarchy without constructing unused mechanisms."""
     document = dict(load_user_config() if config is None else config)
@@ -95,11 +99,28 @@ def resolve_buyer_settlement_policy(
         raise ValueError("[Settlement] must be a table")
     registry = buyer_settlement_registry()
     settlement = registry.resolve(raw, role="buyer")
+    disputes = dispute_config(document, role="buyer")
+    descriptors = (
+        registry_descriptors(
+            signer=identity.signer, urls=resolve_indexer_urls(override=registry_urls)
+        )
+        if identity is not None and action_capable and disputes.use_registry_dispute_authorities
+        else {}
+    )
+    authorities = authorities_by_registry(
+        disputes,
+        {url: descriptor.recommended_dispute_authorities or [] if descriptor else []
+         for url, descriptor in descriptors.items()},
+        role="buyer",
+        report=logging.getLogger(__name__).warning if identity is not None else lambda _: None,
+    )
     return BuyerSettlementPolicy(
         config=settlement,
         registry=registry,
         stages=BUYER_STAGES,
-        public_context={},
+        public_context={
+            "dispute_authorities_by_registry": authorities,
+        },
     )
 
 

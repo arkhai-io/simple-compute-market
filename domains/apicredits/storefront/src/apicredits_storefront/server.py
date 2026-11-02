@@ -26,6 +26,7 @@ from market_alkahest import (
     ProbedChain,
     json_rpc_call,
 )
+from apicredits_storefront.services.publication_service import _make_registry_client
 from market_core import MarketDomainContract
 from market_settlement_runtime import SettlementJobCoordinator
 from market_storefront_kit import (
@@ -327,6 +328,9 @@ async def _start_api_credit_services(
     loops = api_credit_loop_controller()
     register_api_credit_lifecycle_steps(loops)
     _container.resolved_loop_controller = loops
+    await services.settlement_composition.disputes.refresh(
+        _make_registry_client if settings.enable_registry_discovery else None
+    )
     logger.info("[STARTUP] Singletons initialized")
     await _startup_tasks(domain=services.domain)
     logger.info("[STARTUP] Background tasks started")

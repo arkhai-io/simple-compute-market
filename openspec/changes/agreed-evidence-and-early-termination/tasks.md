@@ -317,11 +317,22 @@ template writer), and `docs/development/DEPLOYMENT_AND_CONFIG.md`.
     when unconfigured; Helm render checks with and without recommendations;
     architecture, packaging, comment hygiene and strict OpenSpec pass.
 
-- [ ] 3.4 Fetch a registry's recommendations where roles already read its descriptor (buyer
+- [x] 3.4 Fetch a registry's recommendations where roles already read its descriptor (buyer
       bootstrap and storefront publication), and report at startup when a role's list is empty.
       Verify: application-integration tests through the typed client: "A buyer uses its
       registry's recommendation", "A buyer has configured no authority" and the startup
       report of "No authority is available".
+  - Buyer bootstrap and storefront startup now read signed, URL-pinned descriptors,
+    retain independently resolved per-registry lists, and report empty lists.
+    Local preferences/vetoes win by full identity; public buyer context contains
+    authority projections only, not credential bindings. Publication resources
+    expose the seller policy for the hosted builders in section 8.
+  - Verified: lifecycle example/suite, storefront kit, core buyer/storefront,
+    registry unit/integration, all three buyer suites, VM storefront unit and
+    bare-metal/API-credit storefront suites; packaging, locks, architecture,
+    comment hygiene and strict OpenSpec validation pass. Existing fixture bodies
+    were adapted, with no assertions weakened and no test functions added.
+    Full aggregate and end-to-end validation are recorded with the final checkpoint.
 - [ ] 3.5 Document `[[Dispute]]`, `[[DisputeCredential]]`, `use_registry_dispute_authorities`,
       the descriptor list and the retired key in `docs/development/DEPLOYMENT_AND_CONFIG.md`.
       Verify: `make check-doc-citations CHANGE=agreed-evidence-and-early-termination` reports

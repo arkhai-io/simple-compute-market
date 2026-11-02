@@ -847,6 +847,32 @@
             }
           }
         },
+        "^[dD][iI][sS][pP][uU][tT][eE]$": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "^[dD][iI][sS][pP][uU][tT][eE][cC][rR][eE][dD][eE][nN][tT][iI][aA][lL]$": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "^[uU][sS][eE]_[rR][eE][gG][iI][sS][tT][rR][yY]_[dD][iI][sS][pP][uU][tT][eE]_[aA][uU][tT][hH][oO][rR][iI][tT][iI][eE][sS]$": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "^[rR][eE][gG][iI][sS][tT][rR][yY]$": {
           "additionalProperties": false,
           "type": [

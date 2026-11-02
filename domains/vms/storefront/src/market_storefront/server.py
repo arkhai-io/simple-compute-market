@@ -88,6 +88,7 @@ from market_storefront.services.vm_pool_override_contribution import (
     VmPoolOverrideContribution,
 )
 from market_storefront.services.publication_loop import wake_publication_loop
+from market_storefront.services.publication_service import _make_registry_client
 from market_storefront.services.publication_terms import (
     compile_publication_clauses,
     parse_configured_admissibility_default,
@@ -500,6 +501,7 @@ async def _start_vm_services(services: VmStorefrontServices) -> None:
         _container.resolved_settlement_composition = services.settlement_composition
         _container.resolved_contact_exchange = services.contact_exchange
         _container.resolved_introduction_delivery = services.introduction_delivery
+        await services.settlement_composition.disputes.refresh(_make_registry_client)
         logger.info("[STARTUP] Singletons initialized")
         await _run_startup_tasks(
             registry=services.registry,

@@ -52,6 +52,10 @@ async def _start_runtime(runtime: BareMetalStorefrontRuntime) -> None:
     records. Every loop then runs on the controller's timer over its
     registered step.
     """
+    if runtime.settlement_composition is not None and runtime.registry_configuration is not None:
+        await runtime.settlement_composition.disputes.refresh(
+            runtime.registry_configuration.client_factory(runtime.marketplace_signer)
+        )
     seed_service_peer_trust(runtime)
     set_stage_event_db_path(runtime.db.db_path)
     if runtime.settlement_runtime is not None:

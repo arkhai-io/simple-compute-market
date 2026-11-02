@@ -52,6 +52,7 @@ from market_settlement_runtime import (
     SettlementServicingWorker,
     SettlementSQLiteRepository,
 )
+from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 from market_storefront_kit import (
     AlkahestChain,
     AlkahestClientPolicy,
@@ -878,6 +879,7 @@ def build_runtime_from_configuration(
         chain_probe = None
     settlement_composition = BareMetalStorefrontSettlementComposition.from_raw_config(
         settlement_config,
+        disputes=RegistryDisputePolicy.from_document(active.model_dump()),
         resources={
             "marketplace_signer": signer,
             "claimant_principal": principal,

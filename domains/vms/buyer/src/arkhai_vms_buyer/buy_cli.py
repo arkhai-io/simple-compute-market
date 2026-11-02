@@ -466,7 +466,7 @@ def register(app: typer.Typer) -> None:
         ssh = None if explain else resolve_ssh_public_key(override=ssh_public_key)
         try:
             settlement_policy = resolve_buyer_settlement_policy(
-                identity=identity,
+                identity=identity, registry_urls=registry_urls,
             )
         except ValueError as exc:
             typer.secho(str(exc), err=True, fg=typer.colors.RED)

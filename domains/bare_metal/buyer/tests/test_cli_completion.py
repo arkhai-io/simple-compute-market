@@ -20,6 +20,8 @@ from typing import Any
 
 import pytest
 from arkhai_bare_metal_buyer import cli
+from arkhai_bare_metal_buyer.config import BareMetalBuyerConfig
+from market_arkhai_payments import ArkhaiPaymentsConfig
 from core_buyer.negotiation_client import NegotiationOutcome
 from market_core.schemas import (
     RateValue,
@@ -88,9 +90,10 @@ def _introduction_plan() -> SettlementPlan:
 def _compose(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, option: SettlementOption,
              outcome: NegotiationOutcome) -> None:
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
-    config = SimpleNamespace(
-        payer_account="buyer-account",
-        arkhai_payments=SimpleNamespace(enabled=True),
+    config = BareMetalBuyerConfig(
+        payer_account="11111111-1111-4111-8111-111111111111",
+        arkhai_payments=ArkhaiPaymentsConfig(enabled=True),
+        registry_principals=(_SELLER.identity,),
         registry_url="https://registry.example",
         registry_authority="registry-test",
         default_max_rounds=3,

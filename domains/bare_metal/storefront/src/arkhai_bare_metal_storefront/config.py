@@ -267,6 +267,9 @@ class BareMetalStorefrontSettings(_Section):
     payment_reconciliation_interval: PositiveSeconds
     identity: StorefrontIdentitySettings = Field(default_factory=StorefrontIdentitySettings)
     settlement: dict[str, Any] = Field(default_factory=dict)
+    dispute: list[dict[str, Any]] = Field(default_factory=list)
+    disputecredential: list[dict[str, Any]] = Field(default_factory=list)
+    use_registry_dispute_authorities: bool = True
     registry: RegistrySettings = Field(default_factory=RegistrySettings)
     capacity: CapacitySettings
     pricing: PricingSettings = Field(default_factory=PricingSettings)
