@@ -223,6 +223,9 @@ def config_migrate(
 
 _INIT_USER_TEMPLATE = """\
 # arkhai buyer config — see `market config path` for this file's location
+# Explicit consent to the configured registry's dispute recommendations.
+use_registry_dispute_authorities = true
+
 # Marketplace signing identity comes only from the selected durable buyer
 # profile. Metadata defaults to $XDG_DATA_HOME/arkhai/buyer/profiles.json;
 # credentials remain in the exact keyring.v1, secret_file.v1, or

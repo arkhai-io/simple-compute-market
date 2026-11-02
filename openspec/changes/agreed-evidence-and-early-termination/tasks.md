@@ -266,7 +266,10 @@ template writer), and `docs/development/DEPLOYMENT_AND_CONFIG.md`.
     `kit/deal-lifecycle/examples/dispute_configuration.py` (ordering, marks,
     opt-in, full-identity credential binding and secret isolation), architecture,
     packaging, comment hygiene and pinned strict OpenSpec validation pass.
-    No new permanent tests added; fresh verification owns acceptance.
+    No new permanent test functions added; fresh verification owns acceptance.
+    Buyer template, committed development profiles and the shared hermetic
+    e2e buyer writer explicitly opt into registry recommendations. Existing VM
+    template tests (2) and parsing of the three committed profiles pass.
 
 - [ ] 3.2 Retire `[Settlement.arkhai_payments].dispute_authority`: validation rejects it with a
       diagnostic naming `[[Dispute]]`, and the VM buyer template loses its commented line.
