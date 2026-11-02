@@ -78,7 +78,6 @@ enabled = true
 service_url = "http://127.0.0.1:9"
 service_identity = {{scheme = "ed25519", identifier = "{PRINCIPAL}"}}
 fee_bps = 250
-dispute_authority = "33333333-3333-4333-8333-333333333333"
 development_auth = true
 {line}""".strip(),
         encoding="utf-8",

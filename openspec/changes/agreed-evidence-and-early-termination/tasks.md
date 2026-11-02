@@ -300,11 +300,22 @@ template writer), and `docs/development/DEPLOYMENT_AND_CONFIG.md`.
     e2e buyer writer explicitly opt into registry recommendations. Existing VM
     template tests (2) and parsing of the three committed profiles pass.
 
-- [ ] 3.2 Retire `[Settlement.arkhai_payments].dispute_authority`: validation rejects it with a
+- [x] 3.2 Retire `[Settlement.arkhai_payments].dispute_authority`: validation rejects it with a
       diagnostic naming `[[Dispute]]`, and the VM buyer template loses its commented line.
       Verify: `kit/arkhai-payments/tests/test_settlement_config.py` covers "The retired dispute
       authority key is set"; a template-writer test per role asserts no `[[Dispute]]` entry and
       no authority account, origin or key ("A template is written").
+  - Retired-key validation names root preferences, including an explicit null.
+    Mandate policy and stored-data binding read the selected lifecycle authority;
+    only acceptance-time fee policy is recovered from stored mandates. No legacy
+    authority fallback remains. Role fixtures, shared e2e policy serialization,
+    the VM template and generated Helm schemas use the new configuration.
+  - Verified: payments suite (92, including typing/generated-contract checks),
+    all buyer suites, e2e unit suite (315), VM payment first-use smoke, both
+    storefront schema suites (33 + 11), Helm rendering, locks, packaging,
+    architecture, comment hygiene and strict OpenSpec validation pass. No new
+    test functions or weakened assertions. The final aggregate result is recorded
+    in the section checkpoint and evidence packet.
 - [x] 3.3 Add the optional recommended-authorities list to the registry descriptor carrier and
       its operator configuration, built from configuration only, with Helm values and render
       checks. Verify: the descriptor unit and integration suites named in
@@ -1064,6 +1075,6 @@ The remaining D1–D15 destinations are listed in proposal.md and task 16.9.
 | D5 coherent hosted contract selection and generated installed resources; one shared clock-injected payments fixture engine | `kit/arkhai-payments/README.md` (current API); settlement-servicing spec/architecture and `docs/development/TESTING.md` at closeout |
 | D8 intended end versus proven release; terminate versus future truncate | `docs/development/ARCHITECTURE.md`, "Site authority", "Fulfillment status and results", "Release"; `openspec/specs/site-capacity/architecture.md` |
 | D8 VM buyer end and second-precision lease effects | `openspec/specs/vm-storefront-fulfillment/spec.md` |
-| Ordered dispute preferences, local identity vetoes, identity-bound credential references and opt-in registry recommendations | `openspec/specs/settlement-configuration/spec.md`, `openspec/specs/registry-discovery/spec.md` and `docs/development/DEPLOYMENT_AND_CONFIG.md` at closeout; role composition remains 3.4 |
+| Ordered dispute preferences, local identity vetoes, identity-bound credential references and opt-in registry recommendations | `docs/development/DEPLOYMENT_AND_CONFIG.md#dispute-authority-preferences` and its registry descriptor section; payment kit README, seller quickstart and e2e runner guide. Normative settlement-configuration/registry-discovery spec deltas and lifecycle architecture promotion remain at reviewed closeout (16.9) |
 | Codec-owned common lifecycle query projections, absent-value semantics and same-option asset correlation | `openspec/specs/cli-query-language/spec.md` and `openspec/specs/settlement-configuration/spec.md` at closeout |
 | Lifecycle distributions participate in public publication with their declared dependency order | `docs/development/RELEASING.md` and `manifests/published-distributions.json` |

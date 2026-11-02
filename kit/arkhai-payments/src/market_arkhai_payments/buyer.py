@@ -49,11 +49,10 @@ class PaymentApproval:
     ) -> None:
         if (
             config.fee_bps is None
-            or config.dispute_authority is None
             or config.service_identity is None
         ):
             raise ArkhaiPaymentsConfigurationError(
-                "payments fee policy, dispute authority, and service identity are required"
+                "payments fee policy and service identity are required"
             )
         self.config = config
         self.payer_account = AccountId.model_validate(payer_account).root

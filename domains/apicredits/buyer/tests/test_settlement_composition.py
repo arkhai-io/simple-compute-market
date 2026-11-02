@@ -26,7 +26,6 @@ def test_payments_only_registry_resolution_does_not_resolve_wallet(monkeypatch) 
         "service_url": "https://payments.example",
         "service_identity": Ed25519Signer(bytes(range(32))).identity.model_dump(mode="json"),
         "fee_bps": 250,
-        "dispute_authority": "33333333-3333-4333-8333-333333333333",
         "api_key_env": "ARKHAI_PAYMENTS_API_KEY",
     }
 

@@ -62,7 +62,6 @@ class ArkhaiPaymentsConfig(BaseModel):
     service_url: str | None = None
     service_identity: Identity | None = None
     fee_bps: int | None = Field(default=None, ge=0, le=10_000)
-    dispute_authority: str | None = None
     api_key_env: str | None = None
     development_auth: bool = False
     # The service mode whose receipts this role accepts. Live payments services
@@ -102,12 +101,15 @@ class ArkhaiPaymentsConfig(BaseModel):
             raise ValueError("payments receipt identity must use Ed25519")
         return value
 
-    @field_validator("dispute_authority")
+    @model_validator(mode="before")
     @classmethod
-    def validate_dispute_authority(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        return AccountId.model_validate(value).root
+    def refuse_retired_dispute_authority(cls, value: Any) -> Any:
+        if isinstance(value, Mapping) and "dispute_authority" in value:
+            raise ValueError(
+                "[Settlement.arkhai_payments].dispute_authority is retired; "
+                "configure [[Dispute]] preferences or use_registry_dispute_authorities instead"
+            )
+        return value
 
     @field_validator("api_key_env")
     @classmethod
@@ -249,13 +251,6 @@ async def arkhai_payments_preflight(
             _blocker(
                 "arkhai_payments.fee_policy_missing",
                 "a payments fee policy is required",
-            )
-        )
-    if config.dispute_authority is None:
-        blockers.append(
-            _blocker(
-                "arkhai_payments.dispute_authority_missing",
-                "the trusted payments dispute authority is required",
             )
         )
     if not config.development_auth:

@@ -400,7 +400,14 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["interface", "origin", "account", "record_key", "params", "advertisement"]
+            "required": [
+              "interface",
+              "origin",
+              "account",
+              "record_key",
+              "params",
+              "advertisement"
+            ]
           }
         },
         "accessAcquisitionPointer": {
@@ -1540,16 +1547,6 @@
                       "maximum": 10000,
                       "minimum": 0,
                       "type": "integer"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "^[dD][iI][sS][pP][uU][tT][eE]_[aA][uU][tT][hH][oO][rR][iI][tT][yY]$": {
-                  "anyOf": [
-                    {
-                      "type": "string"
                     },
                     {
                       "type": "null"

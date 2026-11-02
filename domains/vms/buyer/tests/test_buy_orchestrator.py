@@ -63,6 +63,7 @@ from market_arkhai_payments import (
     transaction_id,
 )
 from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
+from market_arkhai_payments.fixtures import dispute_lifecycle
 
 _ESCROW_ADDR = "0x" + "cd" * 20
 _BUYER_ADDR = "0x" + "cc" * 20
@@ -729,6 +730,7 @@ def test_payment_dispatch_and_run_recovery_ignore_stray_escrow(tmp_path, monkeyp
     option_body = {
         "price": {"asset": "USD/2", "rates": []},
         "settlement": {"schema": "arkhai.payments.v1", **(params or {})},
+        "lifecycle": dispute_lifecycle(payer),
     }
     option = SettlementOption(option_id=derive_settlement_option_id(**option_body), **option_body)
     agreement = Agreement(
@@ -754,7 +756,7 @@ def test_payment_dispatch_and_run_recovery_ignore_stray_escrow(tmp_path, monkeyp
         "Settlement": {"schema_version": 1, "priority": ["arkhai.payments.v1"], "arkhai_payments": {
             "enabled": True, "service_url": "http://127.0.0.1",
             "service_identity": BUYER_SIGNER.identity.model_dump(mode="json"),
-            "fee_bps": 250, "dispute_authority": payer, "development_auth": True,
+            "fee_bps": 250, "development_auth": True,
         }},
         "vms": {"payer_account": payer},
     }

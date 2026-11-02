@@ -78,7 +78,6 @@ async def storefront(db, fake_capacity, key_records, monkeypatch):
             service_url="http://127.0.0.1:9",
             service_identity=PAYMENTS_SERVICE.identity,
             fee_bps=250,
-            dispute_authority=DISPUTE_ACCOUNT,
             development_auth=True,
         ),
         client_for_owner=FakePaymentsClient(),

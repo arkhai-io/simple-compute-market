@@ -28,7 +28,7 @@ from buyer_commands import BuyerCommands
 from held_loops import held_loop_controller
 from loopback import serving
 from market_arkhai_payments import PaymentSettlementData
-from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt
+from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt, dispute_lifecycle
 from market_core.schemas import RateValue, SettlementOption, derive_settlement_option_id
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from source_sites import SourceSite, listing_source_projection, source_projections
@@ -143,9 +143,11 @@ def _option() -> SettlementOption:
         option_id=derive_settlement_option_id(
             price={"asset": "USD/2", "rates": rates},
             settlement={"schema": "arkhai.payments.v1", **(params or {})},
+            lifecycle=dispute_lifecycle(DISPUTE),
         ),
         price={"asset": "USD/2", "rates": rates},
         settlement={"schema": "arkhai.payments.v1", **(params or {})},
+        lifecycle=dispute_lifecycle(DISPUTE),
     )
 
 
@@ -162,7 +164,6 @@ def _composition(
                 "service_url": "http://127.0.0.1:9",
                 "service_identity": SERVICE.identity.model_dump(mode="json"),
                 "fee_bps": 250,
-                "dispute_authority": DISPUTE,
                 "development_auth": True,
             },
         },
@@ -619,7 +620,6 @@ async def test_the_buy_command_settles_over_a_run_log_a_later_command_reloads(
             f'service_identity = {{scheme = "{service["scheme"]}", '
             f'identifier = "{service["identifier"]}"}}\n'
             "fee_bps = 250\n"
-            f'dispute_authority = "{DISPUTE}"\n'
         ),
     )
     buyer.pay_through(payments)

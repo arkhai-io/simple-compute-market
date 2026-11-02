@@ -18,7 +18,6 @@ _TARGET_KEY = "SERVICE_URL"
 # it pins and its parties' accounts and credentials.
 _REQUIRED_KEYS = (
     "SERVICE_IDENTITY",
-    "DISPUTE_AUTHORITY",
     "BUYER_ACCOUNT",
     "BUYER_MARKETPLACE_CREDENTIAL",
     "SELLER_MARKETPLACE_CREDENTIAL",
@@ -77,7 +76,6 @@ def configured_payments(
             identifier=str(payment_setting("SERVICE_IDENTITY")),
         ),
         fee_bps=int(str(payment_setting("FEE_BPS", 250))),
-        dispute_authority=str(payment_setting("DISPUTE_AUTHORITY")),
         development_auth=payment_flag("DEVELOPMENT_AUTH"),
         api_key_env=str(payment_setting("API_KEY_ENV")) or None,
         livemode=payment_flag("LIVEMODE"),
@@ -105,7 +103,6 @@ def payment_config_toml(
         + _toml_quote(identity.identifier)
         + " }",
         f"fee_bps = {config.fee_bps}",
-        f"dispute_authority = {_toml_quote(str(config.dispute_authority))}",
         f"livemode = {str(config.livemode).lower()}",
     )
     if config.development_auth:

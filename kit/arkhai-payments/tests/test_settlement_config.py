@@ -31,7 +31,6 @@ def _config(**overrides: Any) -> ArkhaiPaymentsConfig:
         "service_url": "https://payments.example",
         "service_identity": Ed25519Signer(bytes(range(32))).identity,
         "fee_bps": 250,
-        "dispute_authority": DISPUTE_AUTHORITY,
         "api_key_env": API_KEY_ENV,
     }
     values.update(overrides)
@@ -39,6 +38,9 @@ def _config(**overrides: Any) -> ArkhaiPaymentsConfig:
 
 
 def test_config_requires_tls_for_non_loopback_and_pins_ed25519_identity() -> None:
+    for retired in (DISPUTE_AUTHORITY, None):
+        with pytest.raises(ValueError, match=r"\[\[Dispute\]\]"):
+            _config(dispute_authority=retired)
     with pytest.raises(ValueError, match="HTTPS"):
         _config(service_url="http://payments.example")
     with pytest.raises(ValueError, match="Ed25519"):
