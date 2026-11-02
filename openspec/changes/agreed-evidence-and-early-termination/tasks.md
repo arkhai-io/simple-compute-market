@@ -1550,3 +1550,40 @@ The remaining D1–D15 destinations are listed in proposal.md and task 16.9.
 | Accepted delivery metadata does not establish commitment: the verified-evidence transaction fixes the payment authority's approval instant once, preserves earlier ends and gates seller committed-deal pages; bounded recovery runs independently of payment publication | `openspec/specs/deal-lifecycle/spec.md` and its architecture companion at reviewed closeout |
 | D6 VM administrator dispatch follows accepted payee rights; exceptional ends retain administrator/reason and drive physical teardown independently of the journaled authority filing | `openspec/specs/deal-lifecycle/spec.md` and its architecture companion, with VM fulfillment ownership at reviewed closeout |
 | Lifecycle distributions participate in public publication with their declared dependency order | `docs/development/RELEASING.md` and `manifests/published-distributions.json` |
+
+## Implementation review 19/20 disposition — servicing
+
+- **S-F4, S-F5** — `f0b7f5ce2`: last verified records and current read outcomes
+  are separate; first-read failure, outage, verification rejection, recovery and
+  empty/shorter full-history replays have permanent integration coverage.
+- **O-F3, O-F4, kit O-F8, O-F10** — `243ed8c51`: unresolved respondent cases
+  remain visible/retryable without blocking account discovery; respondent answers
+  cannot be preempted by watch; ruling actors retain the pinned record signer;
+  asynchronous database units run off-loop and admission CAS follows unlocked
+  financial I/O. The same transaction protects the optional local delivery write.
+- **Kit O-F9** — `8bb7bb8eb` and `243ed8c51`: complete adapter-owned financial
+  completion projection, conservative shared seller retention observer, async
+  evidence observe/prune API, and seller refresh-before-prune. Domain observer
+  composition and synchronous ingress-call offloading belong to the domain repair.
+- **O-F1, sections 10 and 13** — `f0b7f5ce2`, `8bb7bb8eb`, `243ed8c51`,
+  `4510feb50`: `kit/deal-servicing` has a normal test target in the repository
+  aggregate (and therefore CI), with 39 permanent tests at the unit/library or
+  mounted-application boundary. Tests cover acceptance authors/exact evidence,
+  retention, admission/end/restart races, journaled billing and physical replay,
+  corrections/deferred filings, independent watch cursors/extensions/append races,
+  seller pages/credentials/operator ends, signed typed-client routes, authentication,
+  relay/backdate/future refusal, authority-outage surrender/retry and exact
+  owner-only report reads; budget warnings do not stop cycles. Every printed
+  first-use outcome now asserts. These tests replace the earlier checkpoint's
+  temporary-only verification, not its implementation history or named criteria.
+
+Validation: 39 servicing tests, 98 payment tests, typing and all asserted first-use
+examples pass. `make lock`, architecture, packaging, locks, comment hygiene and
+strict pinned OpenSpec validation pass. The full `make test` aggregate passes in
+8m19s with the required proxy environment and Podman shim.
+
+Reproducible first use and sensitivity evidence:
+`docs/attachments/aeet-servicing-review-fixes/index.md`. Current API documentation
+is `kit/deal-servicing/README.md`; review implementation rationale is in `design.md`.
+Permanent specification/architecture promotion remains in the existing
+post-code-review closeout, with no owner decision reopened.

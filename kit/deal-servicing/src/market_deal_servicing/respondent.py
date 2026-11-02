@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -14,7 +15,7 @@ from market_deal_lifecycle.terms import DisputeAuthority
 from market_deal_lifecycle_contracts.models import Accepted, EvidenceItem, LifecycleCommand, Rejected
 from market_identity import Signer, canonical_json
 
-from .evidence import EvidenceSession, transaction
+from .evidence import EvidenceSession, in_transaction, transaction
 from .journal import Classification, EndSession, atomic, create_schema, stable_ref
 from .seller import SellerSession
 
@@ -23,8 +24,8 @@ class RespondentPoller:
     """One bounded cycle per accepted authority/account, under the loop controller.
 
     Resolve only exact accepted Agreements at this authority, using payee
-    credentials. Run discovery before deal watches; both adopt the same append
-    journal and operation key. Unknown writes retry even after listing omission.
+    credentials. Discovery owns counterparty answers; watches never preempt
+    concurrence with plain appends. Unknown writes retry after listing omission.
     """
 
     def __init__(
@@ -40,11 +41,30 @@ class RespondentPoller:
         self.signer = signer
         self.clock = clock
         self.record = stable_ref(account, "respondent", canonical_json(authority.identity).decode())
-        with transaction(self.path) as conn:
+
+    async def _database(self, operation):
+        def run(conn):
             create_schema(conn)
             conn.execute("""CREATE TABLE IF NOT EXISTS servicing_respondent (
                 record TEXT PRIMARY KEY, cursor TEXT NOT NULL, page TEXT
             )""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS servicing_respondent_repairs (
+                record TEXT NOT NULL, case_ref TEXT NOT NULL, commitment_ref TEXT NOT NULL,
+                case_json TEXT NOT NULL, reason TEXT NOT NULL,
+                PRIMARY KEY (record,case_ref)
+            )""")
+            return operation(conn)
+        return await in_transaction(self.path, run)
+
+    async def repairs(self, limit: int = 100) -> list[dict]:
+        """Unresolved cases stay visible and retry independently of the listing page."""
+        return await self._database(lambda conn: [
+            {"case": RespondentCase.model_validate_json(row[0]), "reason": row[1]}
+            for row in conn.execute(
+                "SELECT case_json,reason FROM servicing_respondent_repairs WHERE record=? ORDER BY case_ref LIMIT ?",
+                (self.record, limit),
+            ).fetchall()
+        ])
 
     def prepare(self, negotiation_id: str, adapter: DisputeAdapter, case: RespondentCase):
         if not isinstance(adapter, RespondentAdapter) or adapter.binding.authority != self.authority:
@@ -107,29 +127,45 @@ class RespondentPoller:
             )
 
     async def poll(self, limit: int = 100) -> dict[str, int | str]:
-        with transaction(self.path) as conn:
-            row = conn.execute(
-                "SELECT cursor,page FROM servicing_respondent WHERE record=?", (self.record,),
-            ).fetchone()
+        row = await self._database(lambda conn: conn.execute(
+            "SELECT cursor,page FROM servicing_respondent WHERE record=?", (self.record,),
+        ).fetchone())
         cursor, stored = row if row else ("", None)
         page = RespondentPage.model_validate_json(stored) if stored else await self.read(cursor, limit)
-        with transaction(self.path) as conn:
-            conn.execute(
-                "INSERT INTO servicing_respondent VALUES (?,?,?) ON CONFLICT(record) DO UPDATE SET page=excluded.page",
-                (self.record, cursor, page.model_dump_json()),
-            )
-        answered = 0
-        for case in page.cases:
-            resolved = self.resolve(case)
-            if resolved is None:
-                # A missing local Agreement is repair/triage, never concurrence.
-                return {"answered": answered, "cursor": cursor, "pending": len(page.cases) - answered}
-            negotiation_id, adapter = resolved
-            intent = self.prepare(negotiation_id, adapter, case)
+        await in_transaction(self.path, lambda conn: conn.execute(
+            "INSERT INTO servicing_respondent VALUES (?,?,?) ON CONFLICT(record) DO UPDATE SET page=excluded.page",
+            (self.record, cursor, page.model_dump_json()),
+        ).rowcount)
+        repairs = await self.repairs(limit)
+        cases = {case.case_ref: case for case in page.cases}
+        for repair in repairs[:limit]:
+            cases.setdefault(repair["case"].case_ref, repair["case"])
+        answered = skipped = 0
+        for case in cases.values():
+            try:
+                resolved = await asyncio.to_thread(self.resolve, case)
+                if resolved is None:
+                    raise ValueError("accepted Agreement is not held by this storefront")
+                negotiation_id, adapter = resolved
+                intent = await asyncio.to_thread(self.prepare, negotiation_id, adapter, case)
+            except (KeyError, ValueError) as exc:
+                reason = str(exc)
+                await in_transaction(self.path, lambda conn: conn.execute(
+                    """INSERT INTO servicing_respondent_repairs VALUES (?,?,?,?,?)
+                       ON CONFLICT(record,case_ref) DO UPDATE SET reason=excluded.reason""",
+                    (self.record, case.case_ref, case.commitment_ref, case.model_dump_json(), reason),
+                ).rowcount)
+                skipped += 1
+                continue
+            await in_transaction(self.path, lambda conn: conn.execute(
+                "DELETE FROM servicing_respondent_repairs WHERE record=? AND case_ref=?",
+                (self.record, case.case_ref),
+            ).rowcount)
             if intent.state == "pending":
                 command = LifecycleCommand.model_validate(intent.payload)
-                with transaction(self.path) as conn:
-                    EndSession(conn).acknowledge(intent.intent_ref, {"attempted": True}, state="pending")
+                await in_transaction(self.path, lambda conn: EndSession(conn).acknowledge(
+                    intent.intent_ref, {"attempted": True}, state="pending",
+                ))
                 outcome = await adapter.submit(
                     command, None, OperationKeys(negotiation_id, command.operation_key),
                 )
@@ -140,15 +176,14 @@ class RespondentPoller:
                         item.case_ref == case.case_ref and item.state == "closed" for item in view.cases
                     ):
                         state = "skipped"
-                with transaction(self.path) as conn:
-                    EndSession(conn).acknowledge(
-                        intent.intent_ref, outcome.model_dump(mode="json"), state=state,
-                    )
+                await in_transaction(self.path, lambda conn: EndSession(conn).acknowledge(
+                    intent.intent_ref, outcome.model_dump(mode="json"), state=state,
+                ))
                 if state == "pending":
-                    return {"answered": answered, "cursor": cursor, "pending": len(page.cases) - answered}
+                    return {"answered": answered, "cursor": cursor,
+                            "pending": len(cases) - answered - skipped, "skipped": skipped}
             answered += 1
-        with transaction(self.path) as conn:
-            conn.execute(
-                "UPDATE servicing_respondent SET cursor=?,page=NULL WHERE record=?", (page.next_after, self.record),
-            )
-        return {"answered": answered, "cursor": page.next_after, "pending": 0}
+        await in_transaction(self.path, lambda conn: conn.execute(
+            "UPDATE servicing_respondent SET cursor=?,page=NULL WHERE record=?", (page.next_after, self.record),
+        ).rowcount)
+        return {"answered": answered, "cursor": page.next_after, "pending": 0, "skipped": skipped}

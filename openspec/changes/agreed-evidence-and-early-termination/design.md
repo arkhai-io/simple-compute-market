@@ -683,3 +683,32 @@ absent projection. They follow existing amount/identity conventions rather than 
 payment-service capabilities. Owner-recommended defaults remain on-demand 24 periods' price
 and buyer refusal without a positive penalty. Exact producer revision is not
 recorded by this design pass; task 8.1 alone records it in payments schema/SOURCE.md.
+
+## Implementation review 19/20 servicing decisions
+
+- Keep the last verified authority records separately from each refresh outcome.
+  Seller reads use their own poll's outcomes, including unavailable/verification
+  failures; list/offline reads retain the latest recorded observation status.
+  Full-snapshot replay floors include empty histories.
+- Respondent discovery is the single answer writer for authorities supporting it.
+  Watch waits at an unanswered counterparty filing instead of preempting a signed
+  concurrence with plain evidence. A confirmed closed case may advance without a
+  fresh answer. Unresolvable account-wide cases enter a bounded diagnostic/repair
+  queue and do not strand the listing cursor or other deals.
+- Authority I/O precedes delivery admission's transaction. A revision CAS and the
+  optional bounded `apply(session, authorization)` callback keep the protected
+  local write atomic with admission without retaining a SQLite lock across I/O.
+  Async kit operations offload database units; synchronous borrowed-session and
+  ingress seams require a database worker. Constructors perform no database I/O.
+- Ruling ends retain the pinned record-signing principal, not the seller principal.
+  Payment actor mapping remains injected and mechanism-opaque.
+- The payment adapter projects a complete per-part terminal-funds observation via
+  `AuthorityView.payouts`; missing/held state is not a predicted payout. Seller
+  retention combines that projection with signed case closes and proven physical
+  recovery, preserving first observed completion instants. A prune refreshes all
+  required authority records before applying the frozen Agreement window.
+
+Current API documentation: `kit/deal-servicing/README.md`. Durable behavior and
+rationale promote with the existing closeout work to the deal-lifecycle and
+settlement-servicing specifications/architecture companions; these repairs add
+no payment remedy or authority capability and do not change the owner rulings.

@@ -19,7 +19,7 @@ from market_identity import (
 from pydantic import JsonValue
 
 from .evidence import EvidenceSession, transaction
-from .journal import Classification, EndSession, FinalRequest, atomic, create_schema
+from .journal import Classification, EndSession, FinalRequest, atomic
 from .seller import SellerSession
 
 
@@ -58,8 +58,6 @@ class DeliveryIngress:
         self.classify_site = classify_site
         self.max_request_skew = max_request_skew
         self.receipt_claim = receipt_claim
-        with transaction(self.path) as conn:
-            create_schema(conn)
 
     def site_report(self, negotiation_id: str, *, body: bytes, headers: dict[str, str]) -> DeliveryView:
         verified = self.verify_site(negotiation_id, body, headers)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from collections.abc import Callable
 from pathlib import Path
@@ -20,7 +21,7 @@ from market_identity import Identity, canonical_json
 from pydantic import Field, JsonValue
 
 from .end import SQLiteOperationStore
-from .evidence import transaction
+from .evidence import EvidenceSession, in_transaction, transaction
 from .journal import Classification, EndSession, FinalRequest, atomic, create_schema
 from .watch import DealWatch, WatchSession
 
@@ -45,6 +46,7 @@ class SellerDeal(WireModel):
 class SellerSession:
     def __init__(self, conn):
         self.conn = conn
+        create_schema(conn)
 
     def register(self, deal: SellerDeal) -> None:
         """Register in the transaction that records the verified commitment."""
@@ -103,8 +105,6 @@ class SellerServicing:
         self.watch_factory = watch_factory
         self.clock = clock
         self.operations = SQLiteOperationStore(path)
-        with transaction(self.path) as conn:
-            create_schema(conn)
 
     def _deal(self, negotiation_id: str) -> SellerDeal:
         with transaction(self.path) as conn:
@@ -125,31 +125,50 @@ class SellerServicing:
             raise ValueError("watch factory changed the committed bindings or persistence")
         return watch
 
-    def _authority(self, deal: SellerDeal, watch: DealWatch) -> AuthorityView:
+    def _authority(
+        self, deal: SellerDeal, watch: DealWatch, current: list[AuthorityView] | None = None,
+    ) -> AuthorityView:
         with transaction(self.path) as conn:
             session = WatchSession(conn)
             payment = session.view(deal.negotiation_id, watch.payment_record)
+            current_payment = session.observation(deal.negotiation_id, watch.payment_record)
+            current_dispute = session.observation(deal.negotiation_id, watch.dispute_record) if watch.dispute_record else None
             dispute = session.view(deal.negotiation_id, watch.dispute_record) if watch.dispute_record else None
+            repairs = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type=\'table\' AND name=\'servicing_respondent_repairs\'",
+            ).fetchone()
+            repair = conn.execute(
+                "SELECT reason FROM servicing_respondent_repairs WHERE commitment_ref=? LIMIT 1",
+                (deal.commitment_ref,),
+            ).fetchone() if repairs else None
+        if current is not None:
+            observations = iter(current)
+            current_payment = next(observations, None) if watch.payment is not None else None
+            current_dispute = next(observations, None) if watch.dispute is not None else None
         missing = deal.dispute is not None and not self.credential_available(deal.dispute)
         if missing:
             outcome: LifecycleOutcome = Rejected(reason="repair required: Agreement authority credential is missing")
+        elif repair:
+            outcome = Rejected(reason="repair required: respondent case: " + repair[0])
         elif watch.payment is None:
             outcome = Rejected(reason=f"{deal.payment.mechanism} has no lifecycle adapter")
         else:
-            views = [view for view in (payment, dispute) if view is not None]
-            outcome = next((view.outcome for view in views if not isinstance(view.outcome, Accepted)), Accepted())
-            if payment is None:
-                outcome = Pending(reason="payment authority has not been observed")
+            required = [current_payment] + ([current_dispute] if deal.dispute else [])
+            outcome = next(
+                (view.outcome for view in required if view is not None and not isinstance(view.outcome, Accepted)),
+                Pending(reason="required authority has not been observed") if None in required else Accepted(),
+            )
         return AuthorityView(
-            outcome=outcome, state="repair_required" if missing else payment.state if payment else None,
+            outcome=outcome, state="repair_required" if missing or repair else payment.state if payment else None,
+            payouts=payment.payouts if payment else None,
             events=payment.events if payment else [], disputes=dispute.disputes if dispute else [],
             cases=dispute.cases if dispute else [], extensions=payment.extensions if payment else [],
             deadline=payment.deadline if payment else None,
         )
 
     async def watch(self, negotiation_id: str):
-        deal = self._deal(negotiation_id)
-        watch = self._watch(deal)
+        deal = await asyncio.to_thread(self._deal, negotiation_id)
+        watch = await asyncio.to_thread(self._watch, deal)
         await self.dispatch_filings(negotiation_id)
         async for item in watch.watch():
             yield item
@@ -166,12 +185,11 @@ class SellerServicing:
         )
 
     async def read(self, negotiation_id: str) -> LifecycleRead:
-        deal = self._deal(negotiation_id)
-        watch = self._watch(deal)
-        await watch.poll()
-        authority = self._authority(deal, watch)
-        with transaction(self.path) as conn:
-            delivery = EndSession(conn).view(negotiation_id)
+        deal = await asyncio.to_thread(self._deal, negotiation_id)
+        watch = await asyncio.to_thread(self._watch, deal)
+        views, _ = await watch.poll()
+        authority = await asyncio.to_thread(self._authority, deal, watch, views)
+        delivery = await in_transaction(self.path, lambda conn: EndSession(conn).view(negotiation_id))
         return LifecycleRead(
             negotiation_id=negotiation_id, commitment_ref=deal.commitment_ref,
             authority=authority, delivery=delivery,
@@ -179,6 +197,9 @@ class SellerServicing:
 
     async def list(self, request: ListDealsRequest = ListDealsRequest()) -> DealPage:
         """Bounded local views; the registered watch step refreshes authority state."""
+        return await asyncio.to_thread(self._list, request)
+
+    def _list(self, request: ListDealsRequest) -> DealPage:
         with transaction(self.path) as conn:
             deals, continuation = SellerSession(conn).page(request)
         summaries = []
@@ -207,7 +228,7 @@ class SellerServicing:
     async def submit(
         self, command: LifecycleCommand, *, actor: Identity, reason: str | None = None,
     ) -> LifecycleOutcome:
-        deal = self._deal(command.negotiation_id)
+        deal = await asyncio.to_thread(self._deal, command.negotiation_id)
         if command.kind == "delivery_end":
             if not reason or not reason.strip():
                 return Rejected(reason="an operator delivery end requires its administrator reason")
@@ -230,6 +251,12 @@ class SellerServicing:
         digest = hashlib.sha256(canonical_json({
             "command": command.model_dump(mode="json"), "actor": actor.model_dump(mode="json"), "reason": reason,
         })).hexdigest()
+        prepared = await asyncio.to_thread(self._prepare_operator_end, command, actor, reason, digest)
+        if prepared is not None:
+            return prepared
+        return await self.dispatch_filings(command.negotiation_id)
+
+    def _prepare_operator_end(self, command, actor, reason, digest):
         now = self.clock()
         with transaction(self.path) as conn, atomic(conn):
             end = EndSession(conn)
@@ -252,17 +279,31 @@ class SellerServicing:
                         request, now=now, delivered=end.read(command.negotiation_id).available_at is not None,
                     ),
                 )
-        return await self.dispatch_filings(command.negotiation_id)
+        return None
+
+    async def prune(self, negotiation_id: str) -> bool:
+        """Refresh all required records before applying the retained evidence window."""
+        deal = await asyncio.to_thread(self._deal, negotiation_id)
+        watch = await asyncio.to_thread(self._watch, deal)
+        views, _ = await watch.poll()
+        if not views or not all(isinstance(view.outcome, Accepted) for view in views):
+            return False
+        if watch.payment is None or (deal.dispute is not None and watch.dispute is None):
+            return False
+        return await in_transaction(self.path, lambda conn: EvidenceSession(conn).prune(
+            negotiation_id, now=self.clock(), has_adapter=True,
+        ))
 
     async def dispatch_filings(self, negotiation_id: str) -> LifecycleOutcome:
-        deal = self._deal(negotiation_id)
+        deal = await asyncio.to_thread(self._deal, negotiation_id)
         binding = deal.dispute_binding
         if binding is None:
             return Rejected(reason=f"{deal.payment.mechanism} has no Agreement dispute authority")
         if not self.credential_available(binding.authority):
             return Rejected(reason="repair required: Agreement authority credential is missing")
-        with transaction(self.path) as conn:
-            filings = [intent for intent in EndSession(conn).intents(negotiation_id) if intent.kind == "filing"]
+        filings = await in_transaction(self.path, lambda conn: [
+            intent for intent in EndSession(conn).intents(negotiation_id) if intent.kind == "filing"
+        ])
         outcome: LifecycleOutcome = Accepted()
         for intent in filings:
             if intent.state == "done":
@@ -276,9 +317,8 @@ class SellerServicing:
             # The neutral dispatcher builds the interface request and uses this same key
             # after unknown responses; only the authority may apply monetary effects.
             outcome = await submit_dispute(command, binding, self.disputes, self.operations)
-            with transaction(self.path) as conn:
-                EndSession(conn).acknowledge(
-                    intent.intent_ref, outcome.model_dump(mode="json"),
-                    state="done" if isinstance(outcome, Accepted) else "pending",
-                )
+            await in_transaction(self.path, lambda conn: EndSession(conn).acknowledge(
+                intent.intent_ref, outcome.model_dump(mode="json"),
+                state="done" if isinstance(outcome, Accepted) else "pending",
+            ))
         return outcome

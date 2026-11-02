@@ -76,6 +76,10 @@ async def main():
         await service.drive_physical("racing")
         with transaction(path) as conn:
             session = EndSession(conn)
+            assert session.admit("before", DeliveryPhase.ACTIVATE, 0, now=150).status == "retry"
+            assert session.view("before").recorded_end.ended_at == 150
+            assert session.view("racing").progress == "tearing_down"
+            assert len(physical.effects) == 2
             print(json.dumps({
                 "restart_admission": session.admit("before", DeliveryPhase.ACTIVATE, 0, now=150).status,
                 "current_end": session.view("before").recorded_end.ended_at,
@@ -89,12 +93,15 @@ async def main():
                 kind="ruling", evidence_refs=earlier.evidence_refs,
             ))
             pending_filing = next(item for item in session.intents("pending") if item.kind == "filing")
+            assert pending_filing.payload["payload"]["ended_at"] == pending_filing.not_before == 200
+            assert session.view("racing").recorded_end.ended_at == 140
             print(json.dumps({
                 "deferred_filing_at": pending_filing.payload["payload"]["ended_at"],
                 "deferred_not_before": pending_filing.not_before,
                 "earliest_after_late_report": session.view("racing").recorded_end.ended_at,
             }))
         await service.drive_physical("racing")
+        assert len(physical.effects) == 2
         print(json.dumps({"effects_after_earlier_report": len(physical.effects)}))
 
         async def valid(evidence):
@@ -107,6 +114,8 @@ async def main():
                 activated_delivery=ActivatedDeliveryRef(record_ref="activation", activated_at=110),
             )
             result = await service.begin_billing("stable-start", evidence, adapter=adapter)
+            assert result.result.outcome.status == ("accepted" if name == "billing" else "rejected")
+            assert result.result.no_op == (name == "billing")
             print(json.dumps({
                 "deal": name, "billing": result.result.outcome.status,
                 "no_financial_action": result.result.no_op,
@@ -119,6 +128,7 @@ async def main():
                 activated_delivery=ActivatedDeliveryRef(record_ref="activation", activated_at=110),
             ), adapter=adapter,
         )
+        assert result.result.outcome.status == "accepted"
         print(json.dumps({"billing_after_restart": result.result.outcome.status}))
 
 

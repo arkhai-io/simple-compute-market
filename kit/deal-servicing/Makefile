@@ -2,7 +2,10 @@ export UV_PYTHON := $(or $(shell cat ../../.python-version 2>/dev/null),$(error 
 
 DIST_DIR ?= ../../.dist
 
-.PHONY: build reinit first-use typecheck
+.PHONY: build reinit first-use typecheck test
+
+test: reinit
+	uv run --find-links $(DIST_DIR) pytest -q
 
 build:
 	uv build --wheel --out-dir $(DIST_DIR)

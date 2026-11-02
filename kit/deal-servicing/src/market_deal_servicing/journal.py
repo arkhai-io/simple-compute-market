@@ -166,6 +166,7 @@ class EndSession:
 
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
+        create_schema(conn)
 
     def register(self, record: DeliveryRecord) -> None:
         with atomic(self.conn):

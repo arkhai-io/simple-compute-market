@@ -46,9 +46,11 @@ before physical effects. Truncation and termination have distinct keys; late
 earlier evidence changes attribution without repeating termination. Recovery
 remains the domain's assertion, never inferred from an end intent.
 
-`authorize_delivery` combines the payment adapter's evidence decision with
-caller-session admission; an adapter allow cannot override a stale revision or
-end. `begin_billing` owns the immutable billing key/evidence before I/O. Unknown
+`authorize_delivery` reads the payment adapter before opening a database
+transaction, then checks `expected_revision` and admission in a worker thread.
+Its optional `apply(session, authorization)` callback performs the protected local
+write in that same transaction and must not perform I/O. An adapter allow cannot
+override a stale revision or end. `begin_billing` owns the immutable billing key/evidence before I/O. Unknown
 results remain pending for same-key adapter resolution and block disclosure;
 a validated once-only adapter can return an accepted no-op. Delivery retains
 only the returned intent reference.
@@ -60,16 +62,26 @@ and dispute adapters. Dispute bindings include the Agreement-pinned record key;
 the owning adapter verifies signed records before observation. Configure the
 client's capture callback to keep exact transport responses as well as projected
 signed entries. `WatchSession` retains independent payment/dispute cursors and
-latest views; extensions remain identified by their own references, not cases.
+last verified views separately from the current read outcome; extensions remain
+identified by their own references, not cases. Full-history responses, including
+empty ones, cannot regress below the durable cursor. A failed refresh reports its
+own outcome while keeping the last verified records available.
 
 Every delivery-end effect is journaled before its record cursor advances. A
-counterparty case journals a stable append built by the dispute adapter from
-ordered evidence. Never-attempted appends to confirmed closed cases are skipped;
+counterparty case at a respondent-capable authority is left to `RespondentPoller`,
+which signs matching facts or contests them from durable evidence. Its cursor
+waits until that exact answer is journaled or the case is confirmed closed.
+Authorities without respondent discovery use a stable evidence append. Never-attempted appends to confirmed closed cases are skipped;
 uncertain attempts replay the original key first so an earlier acknowledgement
 survives a closed-case race. Payment-stop classification is an injected,
 evidence/entitlement-based hook: without it the correction remains pending,
 never inferred lawful from event kind. A complete retention projection can also
-be injected; a failed authority read never supplies a new pruning observation.
+be injected with `seller_retention(path, negotiation_id, clock=...)`; a failed
+authority read never supplies a new pruning observation. The payment adapter's
+optional `AuthorityView.payouts` maps every part to a verified completion observation
+or `None`; an absent projection keeps evidence. The observer combines this with
+case closes and proven local recovery, preserving first completion observations.
+`SellerServicing.prune` refreshes all required records before applying the window.
 
 `peer_hint` preserves evidence and reads authorities, not peer-asserted state.
 `watch` yields current views and newly journaled events for one cycle. Compose
@@ -88,7 +100,10 @@ the complete authority identity, independently of publication preferences.
 
 `list` returns bounded keyset pages from durable watched views. `read` refreshes
 both records and returns physical progress even without a payment adapter. A
-missing dispute credential marks repair required. Once-only commitments remain
+missing dispute credential or unresolved local respondent case marks repair
+required. `RespondentPoller.repairs()` exposes bounded skipped-case diagnostics;
+unresolvable Agreements do not block later account-wide cases and retry
+independently of the listing cursor. Once-only commitments remain
 running until their delivery end, independently of rate-start events.
 
 `submit` routes explicit financial commands through the payment adapter and cases
@@ -117,12 +132,22 @@ Duplicate events preserve their original observation and bytes. Neither ingress
 path claims physical recovery or sends financial commands. Source/effect evidence
 is pruned only under the Agreement's evidence-retention rule, not a fixed timer.
 
+## Database execution
+
+Constructors do not open databases. Async public operations run bounded database
+units in worker threads and never keep a SQLite transaction across authority or
+physical I/O. The explicit synchronous sessions and `DeliveryIngress` methods
+are composition seams: async callers must use `asyncio.to_thread` (as the router
+does), or an existing database worker. Session schema creation is lazy and shares
+the caller's transaction; no session commits it.
+
 ## First use
 
 From a clean repository checkout:
 
 ```sh
 make dist-ci
+make -C kit/deal-servicing test
 make -C kit/deal-servicing first-use
 make -C kit/deal-servicing typecheck
 ```

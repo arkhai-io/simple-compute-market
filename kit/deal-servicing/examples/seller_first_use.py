@@ -66,7 +66,9 @@ async def main():
                 )
 
             api = service()
-            print(json.dumps({"empty": (await api.list()).model_dump(mode="json")}))
+            empty = await api.list()
+            assert empty.deals == [] and empty.continuation is None
+            print(json.dumps({"empty": empty.model_dump(mode="json")}))
             with transaction(path) as conn:
                 for name in ("once-a", "once-b"):
                     EndSession(conn).register(DeliveryRecord(
@@ -94,6 +96,13 @@ async def main():
             read = await api.read("once-a")
             with transaction(path) as conn:
                 requests = EndSession(conn).requests("once-a")
+            assert [[deal.negotiation_id for deal in page.deals] for page in (first, second)] == [["once-a"], ["once-b"]]
+            assert first.deals[0].state == "running"
+            assert all(deal.state == "repair_required" for deal in repair.deals)
+            assert uncertain.status == "unknown" and replay.status == "accepted"
+            assert len(peer.cases) == len(physical.effects) == 1
+            assert requests[0].actor == seller and requests[0].administrator_reason == "fixture operator maintenance"
+            assert read.delivery.progress == "tearing_down"
             print(json.dumps({
                 "pages": [[deal.negotiation_id for deal in page.deals] for page in (first, second)],
                 "initial_states": [deal.state for deal in first.deals],

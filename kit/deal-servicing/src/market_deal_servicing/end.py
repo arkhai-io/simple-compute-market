@@ -13,9 +13,9 @@ from market_deal_lifecycle.delivery import (
 from market_deal_lifecycle_contracts.models import (
     Accepted, Reference, Rejected, WireModel,
 )
-from .evidence import transaction
+from .evidence import in_transaction, transaction
 from .journal import (
-    EndSession, JournalIntent, PhysicalProgress, create_schema, stable_ref,
+    EndSession, JournalIntent, PhysicalProgress, stable_ref,
 )
 
 
@@ -49,8 +49,6 @@ class EndService:
         self.path = Path(path)
         self.physical = physical
         self.clock = clock
-        with transaction(self.path) as conn:
-            create_schema(conn)
 
     def _prepare_physical(self, negotiation_id: str) -> list[JournalIntent]:
         with transaction(self.path) as conn:
@@ -80,24 +78,27 @@ class EndService:
                 negotiation_id, terminate=intent.kind == "terminate",
                 at=intent.payload["at"], operation_key=intent.intent_ref,
             )
-            with transaction(self.path) as conn:
+            def acknowledge(conn):
                 session = EndSession(conn)
                 session.physical_progress(negotiation_id, result.progress)
                 session.acknowledge(
                     intent.intent_ref, result.model_dump(mode="json"),
                     state="done" if result.done else "pending",
                 )
+            await in_transaction(self.path, acknowledge)
             results.append(result)
         return results
 
     async def authorize_delivery(
         self, phase: DeliveryPhase, evidence: DeliveryEvidence, *,
-        adapter: PaymentAdapter | None, session: EndSession, expected_revision: int,
+        adapter: PaymentAdapter | None, expected_revision: int,
+        apply: Callable[[EndSession, DeliveryAuthorization], None] | None = None,
     ) -> DeliveryAuthorization:
-        """The caller keeps this session through its protected delivery write.
+        """Read finance without a lock, then CAS and apply a bounded local write.
 
-        Financial evidence can only narrow local admission. A stale revision or
-        an end committed while the adapter reads never authorizes the caller.
+        The optional callback shares admission\'s transaction and performs no I/O.
+        Financial evidence only narrows admission; a concurrent end invalidates
+        the expected revision before the protected write can run.
         """
         if adapter is None:
             return DeliveryAuthorization(
@@ -105,6 +106,21 @@ class EndService:
                 operation_id=f"{evidence.negotiation_id}:{phase.value}",
                 evidence_refs=[evidence.commitment_ref],
             )
+        financial = await adapter.authorize(phase, evidence)
+
+        def authorize(conn):
+            session = EndSession(conn)
+            result = self._authorize_delivery(phase, evidence, financial, session, expected_revision)
+            if result.status == "allow" and apply is not None:
+                apply(session, result)
+            return result
+
+        return await in_transaction(self.path, authorize)
+
+    def _authorize_delivery(
+        self, phase: DeliveryPhase, evidence: DeliveryEvidence, financial: DeliveryAuthorization,
+        session: EndSession, expected_revision: int,
+    ) -> DeliveryAuthorization:
         record = session.read(evidence.negotiation_id)
         if record.commitment_ref != evidence.commitment_ref:
             return DeliveryAuthorization(
@@ -118,7 +134,6 @@ class EndService:
                 operation_id=f"{evidence.negotiation_id}:{phase.value}",
                 evidence_refs=[evidence.commitment_ref],
             )
-        financial = await adapter.authorize(phase, evidence)
         admission = session.admit(
             evidence.negotiation_id, phase, expected_revision, now=self.clock(),
         )
@@ -158,7 +173,7 @@ class EndService:
             return self._billing_refusal(evidence, operation_key, "durable activation evidence is required")
         if adapter is None:
             return self._billing_refusal(evidence, operation_key, "selected mechanism has no billing adapter")
-        with transaction(self.path) as conn:
+        def prepare(conn):
             session = EndSession(conn)
             record = session.read(evidence.negotiation_id)
             if record.commitment_ref != evidence.commitment_ref:
@@ -184,14 +199,18 @@ class EndService:
                     evidence.negotiation_id, "billing", operation_key,
                     evidence.model_dump(mode="json"), not_before=self.clock(),
                 )
+            return intent
+
+        intent = await in_transaction(self.path, prepare)
+        if isinstance(intent, BillingIntentResult):
+            return intent
         # A retry of an unknown result uses the adapter's same-key resolution;
         # no generic servicing code guesses from a mechanism snapshot.
         result = await adapter.start_billing(operation_key, evidence)
-        with transaction(self.path) as conn:
-            EndSession(conn).acknowledge(
-                intent.intent_ref, result.model_dump(mode="json"),
-                state="done" if isinstance(result.outcome, (Accepted, Rejected)) else "pending",
-            )
+        await in_transaction(self.path, lambda conn: EndSession(conn).acknowledge(
+            intent.intent_ref, result.model_dump(mode="json"),
+            state="done" if isinstance(result.outcome, (Accepted, Rejected)) else "pending",
+        ))
         return BillingIntentResult(intent_ref=intent.intent_ref, result=result)
 
     @staticmethod
