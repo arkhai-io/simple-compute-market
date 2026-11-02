@@ -127,9 +127,9 @@ def alkahest_opening(listing: Any) -> tuple[dict[str, Any], dict[str, Any]]:
     (option,) = [
         dict(entry)
         for entry in listing.settlement_options
-        if dict(entry)["mechanism"] == "alkahest.v1"
+        if dict(entry)["settlement"]["schema"] == "alkahest.v1"
     ]
-    escrow = option["params"]["accepted_escrow"]
+    escrow = option["settlement"]["accepted_escrow"]
     chain = escrow["chain_name"]
     condition = next(
         dict(demand)

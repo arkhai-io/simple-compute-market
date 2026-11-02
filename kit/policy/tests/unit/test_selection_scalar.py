@@ -25,17 +25,18 @@ from market_policy.scalar_policies import (
 
 _SCALAR_OPTION = {
     "option_id": "aa" * 32,
-    "mechanism": "example.payment.v1",
-    "asset": "usd",
-    "rates": [{"field": "amount", "per": "hour", "value": "100"}],
-    "params": {},
+    "price": {
+        "asset": "usd",
+        "rates": [{"field": "amount", "per": "hour", "value": "100"}],
+    },
+    "settlement": {"schema": "example.payment.v1", **({} or {})},
 }
 _NON_SCALAR_OPTION = {
     "option_id": "bb" * 32,
-    "mechanism": "contact-exchange.v1",
-    "asset": "introduction",
-    "rates": [],
-    "params": {"terms": "weekly rate negotiable on call"},
+    "settlement": {
+        "schema": "contact-exchange.v1",
+        **({"terms": "weekly rate negotiable on call"} or {}),
+    },
 }
 _LISTING = {"settlement_options": [_SCALAR_OPTION, _NON_SCALAR_OPTION]}
 
@@ -46,8 +47,8 @@ def _selection_proposal(
 ) -> dict[str, Any]:
     return {
         "settlement_selection": {
-            "mechanism": option["mechanism"],
             "option_id": option["option_id"],
+            "settlement": {"schema": option["settlement"]["schema"]},
             "expiration_unix": 1_900_000_000,
         },
         "fields": dict(fields or {}),
@@ -81,7 +82,7 @@ def test_selection_proposal_scalarness_follows_matched_option() -> None:
 
 def test_unmatched_selection_stays_scalar() -> None:
     unmatched = _selection_proposal(
-        {"option_id": "cc" * 32, "mechanism": "contact-exchange.v1"}
+        {"option_id": "cc" * 32, "settlement": {"schema": "contact-exchange.v1"}}
     )
     assert proposal_uses_scalar_amount(_LISTING, unmatched) is True
 
@@ -106,7 +107,7 @@ def test_exact_accept_takes_non_scalar_selection_as_proposed() -> None:
 
 def test_exact_accept_rejects_unlisted_selection() -> None:
     proposal = _selection_proposal(
-        {"option_id": "cc" * 32, "mechanism": "contact-exchange.v1"}
+        {"option_id": "cc" * 32, "settlement": {"schema": "contact-exchange.v1"}}
     )
     history = [
         NegotiationRound(
@@ -213,12 +214,17 @@ def test_buyer_counter_guard_reads_scalar_bargaining_from_the_opening() -> None:
 
 _ESCROW_A = {"chain_name": "anvil", "escrow_address": "0x" + "aa" * 20, "rates": []}
 _ESCROW_B = {"chain_name": "anvil", "escrow_address": "0x" + "bb" * 20, "rates": []}
-_OPTION = {"option_id": "o" * 64, "mechanism": "example.rated.v1", "rates": []}
+_OPTION = {"option_id": "o" * 64, "settlement": {"schema": "example.rated.v1"}}
 _TWO_ESCROWS = {"accepted_escrows": [_ESCROW_A, _ESCROW_B], "settlement_options": [_OPTION]}
 
 
 def test_a_settlement_selection_selects_its_option():
-    proposal = {"settlement_selection": {"option_id": "o" * 64, "mechanism": "example.rated.v1"}}
+    proposal = {
+        "settlement_selection": {
+            "option_id": "o" * 64,
+            "settlement": {"schema": "example.rated.v1"},
+        }
+    }
     assert selected_settlement_artifact(_TWO_ESCROWS, proposal) == _OPTION
 
 
@@ -232,10 +238,18 @@ def test_nothing_selected_is_none():
     assert selected_settlement_artifact(
         _TWO_ESCROWS, {"chain_name": "anvil", "escrow_address": "0x" + "cc" * 20}
     ) is None
-    assert selected_settlement_artifact(
-        _TWO_ESCROWS,
-        {"settlement_selection": {"option_id": "x" * 64, "mechanism": "example.rated.v1"}},
-    ) is None
+    assert (
+        selected_settlement_artifact(
+            _TWO_ESCROWS,
+            {
+                "settlement_selection": {
+                    "option_id": "x" * 64,
+                    "settlement": {"schema": "example.rated.v1"},
+                }
+            },
+        )
+        is None
+    )
 
 
 def _opening(proposal: dict[str, Any] | None) -> list[NegotiationRound]:

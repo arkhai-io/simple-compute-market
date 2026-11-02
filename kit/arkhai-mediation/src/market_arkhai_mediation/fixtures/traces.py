@@ -21,7 +21,9 @@ class RulingTraceFake(MediationContractFake):
     ):
         super().__init__()
         self.trace = deepcopy(trace)
-        self.authority = deepcopy(trace["agreement"]["settlement"]["params"]["adjudication"]["dispute"])
+        self.authority = deepcopy(
+            trace["agreement"]["settlement"]["lifecycle"]["adjudication"]["dispute"]
+        )
         self._payments_call = payments_call
         # Lifecycle keys are domain-separated hashes; producer inputs use readable keys.
         # Only this explicit input aliasing differs; payments event keys remain exact.

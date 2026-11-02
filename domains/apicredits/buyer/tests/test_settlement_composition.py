@@ -64,7 +64,8 @@ def test_an_escrow_proposal_records_its_listings_release_conditions() -> None:
 
 def test_a_payment_selection_records_nothing_about_its_listing() -> None:
     selection = SettlementSelection(
-        mechanism=ARKHAI_PAYMENTS_MECHANISM, option_id="a" * 64,
+        option_id="a" * 64,
+        settlement={"schema": ARKHAI_PAYMENTS_MECHANISM},
         expiration_unix=1_800_000_000,
     )
 
@@ -109,6 +110,6 @@ def test_payment_selection_attaches_buyer_account_without_alkahest_resources() -
     )
 
     assert selection is not None
-    assert selection.mechanism == ARKHAI_PAYMENTS_MECHANISM
+    assert selection.settlement_schema == ARKHAI_PAYMENTS_MECHANISM
     assert selection.option_id == option_id
-    assert selection.params == {"payer_account": account}
+    assert selection.settlement_params == {"payer_account": account}

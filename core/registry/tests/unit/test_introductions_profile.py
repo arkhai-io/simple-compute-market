@@ -25,10 +25,10 @@ def _listing(**overrides) -> dict:
         "settlement_options": [
             {
                 "option_id": "aa" * 32,
-                "mechanism": "contact-exchange.v1",
-                "asset": "introduction",
-                "rates": [],
-                "params": {"channel": "telegram", "terms": "prose"},
+                "settlement": {
+                    "schema": "contact-exchange.v1",
+                    **({"channel": "telegram", "terms": "prose"} or {}),
+                },
             }
         ],
     }
@@ -53,10 +53,10 @@ def test_sparse_listings_stay_discoverable(spec) -> None:
         settlement_options=[
             {
                 "option_id": "bb" * 32,
-                "mechanism": "contact-exchange.v1",
-                "asset": "introduction",
-                "rates": [],
-                "params": {"terms": "prose only, no stated channel"},
+                "settlement": {
+                    "schema": "contact-exchange.v1",
+                    **({"terms": "prose only, no stated channel"} or {}),
+                },
             }
         ],
     )

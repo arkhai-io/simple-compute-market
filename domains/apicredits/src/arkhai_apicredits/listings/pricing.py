@@ -65,7 +65,7 @@ def selected_unit_price(
         option
         for option in _settlement_options(order)
         if option.option_id == selection.option_id
-        and option.settlement_schema == selection.mechanism
+        and option.settlement_schema == selection.settlement_schema
     ]
     if len(matches) != 1:
         raise ValueError("settlement selection does not exact-match one listing option")

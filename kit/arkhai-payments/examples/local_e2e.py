@@ -65,7 +65,6 @@ def main() -> int:
     }
     option = PaymentsOptionParams(
         payee_account=PAYEE,
-        asset="USD/2",
         window="P7D",
         deposit_agreement=True,
     )

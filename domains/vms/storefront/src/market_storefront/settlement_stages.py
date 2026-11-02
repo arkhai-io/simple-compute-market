@@ -393,7 +393,10 @@ class VmAlkahestSellerStage:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         selection = proposal.get("settlement_selection")
         mechanism = self.mechanism
-        if isinstance(selection, Mapping) and selection.get("mechanism") != mechanism:
+        if (
+            isinstance(selection, Mapping)
+            and selection.get("settlement", {}).get("schema") != mechanism
+        ):
             raise HTTPException(
                 status_code=400,
                 detail="this route accepts only alkahest.v1",
@@ -794,8 +797,11 @@ def resolve_proposal_stage(
     )
     accepted = agreement.get("settlement") if isinstance(agreement, Mapping) else None
     mechanism = (
-        selection.get("mechanism") if isinstance(selection, Mapping)
-        else settlement_option_schema(accepted) if isinstance(accepted, Mapping) else None
+        selection.get("settlement", {}).get("schema")
+        if isinstance(selection, Mapping)
+        else settlement_option_schema(accepted)
+        if isinstance(accepted, Mapping)
+        else None
     )
     if not isinstance(mechanism, str) or not mechanism:
         raise ValueError("settlement_mechanism_required")

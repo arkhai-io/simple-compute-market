@@ -629,13 +629,15 @@ class TestEvaluateNegotiate:
         c, db = admin_client
         rates = [RateValue(field="amount", per="hour", value=1500)]
         rated = {
-            "mechanism": "example.rated.v1",
-            "asset": "usd",
-            "rates": [rate.model_dump(mode="json") for rate in rates],
-            "params": {},
             "option_id": derive_settlement_option_id(
-                mechanism="example.rated.v1", asset="usd", rates=rates, params={}
+                price={"asset": "usd", "rates": rates},
+                settlement={"schema": "example.rated.v1", **({} or {})},
             ),
+            "price": {
+                "asset": "usd",
+                "rates": [rate.model_dump(mode="json") for rate in rates],
+            },
+            "settlement": {"schema": "example.rated.v1", **({} or {})},
         }
         await _seed_listing(db, "neg-eval-rated", settlement_options=[rated])
         with patch(
@@ -646,8 +648,8 @@ class TestEvaluateNegotiate:
                 "neg-eval-rated",
                 proposal={
                     "settlement_selection": {
-                        "mechanism": rated["mechanism"],
                         "option_id": rated["option_id"],
+                        "settlement": {"schema": rated["settlement"]["schema"]},
                         "expiration_unix": 2000000000,
                     },
                     # Below that rate, so the strategy counters from

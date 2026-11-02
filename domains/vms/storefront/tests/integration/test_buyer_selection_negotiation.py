@@ -61,19 +61,21 @@ async def test_a_buyer_selection_of_a_priced_alkahest_option_reaches_acceptance(
         (raw,) = [
             option
             for option in listing["settlement_options"]
-            if option["mechanism"] == "alkahest.v1"
+            if option["settlement"]["schema"] == "alkahest.v1"
         ]
         option = SettlementOption.model_validate(raw)
-        hourly = int(option.rates[0].value)
+        hourly = int(option.price_rates[0].value)
         selection = SettlementSelection(
-            mechanism=option.mechanism,
             option_id=option.option_id,
+            settlement={"schema": option.settlement_schema},
             expiration_unix=1_900_000_000,
         )
         selected = SelectedSettlementOption(
             option=option,
             selection=selection,
-            registration=buyer_settlement_registry().registration(option.mechanism),
+            registration=buyer_settlement_registry().registration(
+                option.settlement_schema
+            ),
         )
         rounds: list[tuple[int, str | None]] = []
 
@@ -95,12 +97,14 @@ async def test_a_buyer_selection_of_a_priced_alkahest_option_reaches_acceptance(
                         ),
                         settlement_selection=selection,
                         policy_params={
-                            "_selected_settlement_option": option.model_dump(mode="json")
+                            "_selected_settlement_option": option.model_dump(
+                                mode="json"
+                            )
                         },
                         # As `market negotiate` does: the selected entry checks
                         # the plan the seller materializes from its selection.
                         validate_advertised_plan=buyer_stage(
-                            option.mechanism
+                            option.settlement_schema
                         ).plan_validator(listing, selected),
                         max_rounds=10,
                         on_round=lambda number, ours, theirs: rounds.append(

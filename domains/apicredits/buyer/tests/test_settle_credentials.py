@@ -64,8 +64,12 @@ def _run_event(run_id: str, event: str, **fields) -> dict:
     if fields.get("status") == "agreed":
         params = {"accepted_escrow": dict(_PROPOSAL)}
         option = SettlementOption(
-            option_id=derive_settlement_option_id(mechanism="alkahest.v1", asset="token", rates=[], params=params),
-            mechanism="alkahest.v1", asset="token", rates=[], params=params,
+            option_id=derive_settlement_option_id(
+                price={"asset": "token", "rates": []},
+                settlement={"schema": "alkahest.v1", **(params or {})},
+            ),
+            price={"asset": "token", "rates": []},
+            settlement={"schema": "alkahest.v1", **(params or {})},
         )
         agreement = Agreement(
             negotiation_id=fields["negotiation_id"], listing_id="lst-1", listing_hash="0"*64,
@@ -75,8 +79,11 @@ def _run_event(run_id: str, event: str, **fields) -> dict:
         )
         fields["agreement"] = agreement.model_dump(mode="json")
         fields["agreement_bytes"] = base64.b64encode(agreement.model_dump_json().encode()).decode()
-        fields["settlement_selection"] = {"mechanism": option.mechanism, "option_id": option.option_id,
-                                          "expiration_unix": 1_800_000_000}
+        fields["settlement_selection"] = {
+            "option_id": option.option_id,
+            "settlement": {"schema": option.settlement_schema},
+            "expiration_unix": 1_800_000_000,
+        }
     return {
         "event": event,
         "run_id": run_id,
@@ -120,8 +127,8 @@ def agreed_run(tmp_path, monkeypatch):
             agreed_amount=300,
             accepted_escrow_proposal=_PROPOSAL,
             settlement_selection={
-                "mechanism": "alkahest.v1",
                 "option_id": "legacy-alkahest",
+                "settlement": {"schema": "alkahest.v1"},
                 "expiration_unix": 1_800_000_000,
             },
         ),
@@ -254,8 +261,8 @@ def test_settle_without_agreed_proposal_refuses(
                 identities=(_SELLER_SIGNER.identity,),
             ).model_dump(mode="json"),
             settlement_selection={
-                "mechanism": "alkahest.v1",
                 "option_id": "legacy-alkahest",
+                "settlement": {"schema": "alkahest.v1"},
                 "expiration_unix": 1_800_000_000,
             },
         ),
@@ -326,8 +333,8 @@ def test_settle_creates_no_escrow_from_an_accepted_proposal_alone(
             ).model_dump(mode="json"),
             accepted_escrow_proposal=proposal,
             settlement_selection={
-                "mechanism": "alkahest.v1",
                 "option_id": "legacy-alkahest",
+                "settlement": {"schema": "alkahest.v1"},
                 "expiration_unix": 1_800_000_000,
             },
         ),

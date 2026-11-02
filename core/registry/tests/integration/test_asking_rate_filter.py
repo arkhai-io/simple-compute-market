@@ -120,20 +120,17 @@ async def test_the_published_rate_round_trips(registry_client):
 def _introduction_listing(listing_id: str, amount: str) -> ListingRequest:
     """A listing whose only settlement option is a rateless introduction.
 
-    The option is built as the contact-exchange mechanism publishes it: no
-    rates, its identity derived from mechanism, asset, rates, and params. The
-    mechanism's name and asset are stated here rather than imported, because the
-    registry depends on no settlement mechanism.
+    The option is built as contact exchange publishes it: no price, and an
+    identity derived from the settlement envelope. The mechanism's name is
+    stated here rather than imported because the registry depends on no
+    settlement mechanism.
     """
     params = {"profile": "default", "channel": "email", "terms": "introduction only"}
     option = {
         "option_id": derive_settlement_option_id(
-            mechanism="contact-exchange.v1", asset="introduction", rates=[], params=params
+            settlement={"schema": "contact-exchange.v1", **(params or {})}
         ),
-        "mechanism": "contact-exchange.v1",
-        "asset": "introduction",
-        "rates": [],
-        "params": params,
+        "settlement": {"schema": "contact-exchange.v1", **(params or {})},
     }
     return ListingRequest(
         listing_id=listing_id,
@@ -165,5 +162,5 @@ async def test_a_rateless_introduction_listing_is_found_by_its_asking_rate(
 
     assert matched == {"intro-1"}
     (option,) = fetched.settlement_options
-    assert option["rates"] == []
+    assert option.get("price", {}).get("rates", []) == []
     assert fetched.listing_resource["asking_rate"]["amount"] == "4.00"

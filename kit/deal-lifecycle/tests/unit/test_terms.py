@@ -167,10 +167,13 @@ def test_codec_roundtrip_and_term_identity():
     assert encoded == data
     assert decode_terms(encoded) == decode_terms(data)
     changed = change(deepcopy(encoded), "adjudication.dispute_window_seconds", 121)
-    # The existing carrier hashes opaque parameters; the codec supplies stable
-    # bytes to that identity boundary independently of the mechanism's schema.
-    first = derive_settlement_option_id(mechanism="example.v1", asset="USD/6", rates=[], params=encoded)
-    second = derive_settlement_option_id(mechanism="example.v1", asset="USD/6", rates=[], params=changed)
+    # Lifecycle rights participate in identity independently of mechanism parameters.
+    first = derive_settlement_option_id(
+        settlement={"schema": "example.v1"}, lifecycle=encoded
+    )
+    second = derive_settlement_option_id(
+        settlement={"schema": "example.v1"}, lifecycle=changed
+    )
     assert first != second
 
 

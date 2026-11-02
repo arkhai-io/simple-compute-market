@@ -115,8 +115,11 @@ def _config(**overrides) -> ArkhaiPaymentsConfig:
 
 
 def _option(*, deposit: bool) -> SettlementOption:
-    params = {"payee_account": PAYEE, "asset": "USD/2", "window": "P7D", "deposit_agreement": deposit}
-    body = {"mechanism": "arkhai.payments.v1", "asset": "USD/2", "rates": [], "params": params}
+    params = {"payee_account": PAYEE, "window": "P7D", "deposit_agreement": deposit}
+    body = {
+        "price": {"asset": "USD/2", "rates": []},
+        "settlement": {"schema": "arkhai.payments.v1", **(params or {})},
+    }
     return SettlementOption(option_id=derive_settlement_option_id(**body), **body)
 
 
@@ -407,7 +410,7 @@ async def test_a_mechanism_whose_entry_has_no_refund_is_a_conflict(make):
     h.serve()
     thread = await h.db.load_negotiation_thread_row(negotiation_id=NEGOTIATION)
     agreement = json.loads(thread["agreement_bytes"])
-    agreement["settlement"]["mechanism"] = "alkahest.v1"
+    agreement["settlement"]["settlement"]["schema"] = "alkahest.v1"
     with sqlite3.connect(h.db.db_path) as conn:
         conn.execute(
             "UPDATE negotiation_threads SET agreement_bytes=? WHERE negotiation_id=?",

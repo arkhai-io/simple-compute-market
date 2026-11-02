@@ -137,16 +137,15 @@ class Provisioning:
 
 
 def _option() -> SettlementOption:
-    params = {"payee_account": PAYEE, "asset": "USD/2", "window": "P7D", "deposit_agreement": False}
+    params = {"payee_account": PAYEE, "window": "P7D", "deposit_agreement": False}
     rates = [RateValue(field="amount", per="hour", value=100)]
     return SettlementOption(
         option_id=derive_settlement_option_id(
-            mechanism="arkhai.payments.v1", asset="USD/2", rates=rates, params=params
+            price={"asset": "USD/2", "rates": rates},
+            settlement={"schema": "arkhai.payments.v1", **(params or {})},
         ),
-        mechanism="arkhai.payments.v1",
-        asset="USD/2",
-        rates=rates,
-        params=params,
+        price={"asset": "USD/2", "rates": rates},
+        settlement={"schema": "arkhai.payments.v1", **(params or {})},
     )
 
 
@@ -211,10 +210,12 @@ async def _open(buyer: StorefrontClient) -> dict:
             },
         },
         settlement_selection={
-            "mechanism": option.mechanism,
             "option_id": option.option_id,
+            "settlement": {
+                "schema": option.settlement_schema,
+                **({"payer_account": PAYER} or {}),
+            },
             "expiration_unix": 1_900_000_000,
-            "params": {"payer_account": PAYER},
         },
         selection_only=True,
     )

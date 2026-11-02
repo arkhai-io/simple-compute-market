@@ -834,10 +834,8 @@ def alkahest_option_builder(
             rates.append(rate)
         params = {"accepted_escrow": escrow}
         identity_payload = {
-            "mechanism": ALKAHEST_MECHANISM_ID,
-            "asset": str(asset),
-            "rates": rates,
-            "params": params,
+            "price": {"asset": str(asset), "rates": rates},
+            "settlement": {"schema": ALKAHEST_MECHANISM_ID, **(params or {})},
         }
         encoded = json.dumps(
             identity_payload,

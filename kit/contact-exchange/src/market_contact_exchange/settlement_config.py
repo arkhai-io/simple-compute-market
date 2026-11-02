@@ -432,15 +432,9 @@ def contact_option_builder(
         raise ValueError("contact payload must not reach a published option")
     option = {
         "option_id": derive_settlement_option_id(
-            mechanism=MECHANISM,
-            asset=INTRODUCTION_ASSET,
-            rates=[],
-            params=params,
+            settlement={"schema": MECHANISM, **(params or {})}
         ),
-        "mechanism": MECHANISM,
-        "asset": INTRODUCTION_ASSET,
-        "rates": [],
-        "params": params,
+        "settlement": {"schema": MECHANISM, **(params or {})},
     }
     return {"accepted_escrows": [], "settlement_options": [option]}
 
@@ -463,7 +457,7 @@ def contact_buyer_compatibility(
         return False
     return (
         settlement_option_schema(option) == MECHANISM
-        and settlement_option_asset(option) == INTRODUCTION_ASSET
+        and settlement_option_asset(option) is None
         and not settlement_option_rates(option)
     )
 
@@ -526,10 +520,7 @@ def contact_accepted_obligation_builder(
             "claimant": "seller",
             "payer_principal": buyer,
             "claimant_principal": seller,
-            # ``asset`` is the nominal deliverable tag from the advertised
-            # option; the amount stays absent — the deal's value does not
-            # reduce to a number.
-            "asset": selected.price_asset,
+            "asset": INTRODUCTION_ASSET,
             "expiration_unix": expiration_unix,
             "conditions": [],
             "mechanism": MECHANISM,

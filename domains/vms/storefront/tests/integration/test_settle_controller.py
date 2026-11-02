@@ -223,10 +223,11 @@ async def _accepted_deal(db: SQLiteClient, negotiation_id: str, listing_id: str)
         buyer_escrow_proposal=proposal.model_dump(mode="json"),
     )
     option_body = {
-        "mechanism": "alkahest.v1",
-        "asset": _TOKEN,
-        "rates": [],
-        "params": {"accepted_escrow": {"chain_name": "anvil"}},
+        "price": {"asset": _TOKEN, "rates": []},
+        "settlement": {
+            "schema": "alkahest.v1",
+            **({"accepted_escrow": {"chain_name": "anvil"}} or {}),
+        },
     }
     agreement = Agreement(
         negotiation_id=negotiation_id,

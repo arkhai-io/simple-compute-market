@@ -80,7 +80,7 @@ def _registration(
         client_factory=lambda section, resources, role: object(),
         option_builder=lambda section, readiness, resources, role: (),
         buyer_compatibility=lambda section, option, context: (
-            compatible and option.mechanism == mechanism
+            compatible and option.settlement_schema == mechanism
         ),
         clause_fields=fields,
         publication_input_model=_PublicationInput,
@@ -97,11 +97,11 @@ def _registry(*, example_compatible: bool = True) -> SettlementConfigurationRegi
                 (
                     _field(
                         "example.method",
-                        lambda option: option.params.get("methods"),
+                        lambda option: option.settlement_params.get("methods"),
                     ),
                     _field(
                         "example.optional",
-                        lambda option: option.params.get("optional"),
+                        lambda option: option.settlement_params.get("optional"),
                         on_missing=MissingValueRule.PASS,
                     ),
                 ),
@@ -113,7 +113,7 @@ def _registry(*, example_compatible: bool = True) -> SettlementConfigurationRegi
                 (
                     _field(
                         "alkahest.chain",
-                        lambda option: option.params.get("chain"),
+                        lambda option: option.settlement_params.get("chain"),
                     ),
                 ),
             ),
@@ -140,16 +140,13 @@ def _option(
     **params: Any,
 ) -> SettlementOption:
     option_id = derive_settlement_option_id(
-        mechanism=mechanism,
-        asset=asset,
-        rates=[],
-        params=params,
+        price={"asset": asset, "rates": []},
+        settlement={"schema": mechanism, **(params or {})},
     )
     return SettlementOption(
         option_id=option_id,
-        mechanism=mechanism,
-        asset=asset,
-        params=params,
+        price={"asset": asset, "rates": []},
+        settlement={"schema": mechanism, **(params or {})},
     )
 
 

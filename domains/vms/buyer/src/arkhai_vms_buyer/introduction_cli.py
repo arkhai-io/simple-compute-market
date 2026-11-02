@@ -161,8 +161,8 @@ def request_introduction(
             "option is not a rateless introduction; use `buy` for priced options"
         )
     selection = SettlementSelection(
-        mechanism=selected.settlement_schema,
         option_id=selected.option_id,
+        settlement={"schema": selected.settlement_schema},
         expiration_unix=int(time.time()) + expiration_seconds,
     )
     run_log = RunLog.start(

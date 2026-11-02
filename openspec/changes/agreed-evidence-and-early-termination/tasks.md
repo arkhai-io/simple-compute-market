@@ -150,11 +150,11 @@ by dispute interface", "Evidence is keyed by negotiation" and "A dispute is one 
         The payments kit's Agreement and public-carrier readers also use the accessors;
         mandates consume the typed mechanism parameters. No permanent wire documentation
         changes in this step.
-  - [ ] 2.5b Flip the wire model and identity payload to optional `price`, `settlement`
+  - [x] 2.5b Flip the wire model and identity payload to optional `price`, `settlement`
         and optional `lifecycle`; update all builders, selection mirrors, the registry
         carrier, Agreement queries and fixtures together, including the payments kit once
         its parallel work is integrated. Move lifecycle identity coverage to its own key.
-  - [ ] 2.5c Remove obsolete keys and unused transitional accessors, then run the three
+  - [x] 2.5c Remove obsolete keys and unused transitional accessors, then run the three
         named end-to-end suites on republished listings. Promote the wire contract to the
         settlement-configuration and negotiation-protocol specs at reviewed closeout;
         lifecycle ownership goes to the deal-lifecycle spec and architecture companion.
@@ -165,30 +165,53 @@ on the republished listings of 2.5; nothing composes the kits yet.
 
 ### Settlement-option accessor checkpoint (2026-11-02)
 
-- Payments Agreement and public-carrier readers now use core accessors.
-  Mandate derivation consumes typed mechanism parameters, not the public carrier.
-  Serialized options and IDs remain unchanged; no permanent wire docs are promoted.
-- 2.5b is blocked before cutover: the published mediation `AgreementProjection`
-  requires `settlement.mechanism` and `settlement.params`; D5's selected option
-  is refused with `mechanism is a required property`. Both the vendored revision
-  and current producer main have this constraint. A coherent producer schema,
-  mapping and regenerated vectors must first support the D5 shape; tracked in
-  [payments #4](https://github.com/arkhai-io/arkhai-payments/issues/4).
-  The wire experiment was discarded; no partial flip is committed. 2.5b, 2.5c
-  and 2.5 remain unchecked.
-  Payments typing, generated models, contract vectors and 92 tests pass. The full
-  `make test`, architecture, packaging, comment hygiene and strict OpenSpec checks
-  pass. The existing VM `examples/payment_smoke.py` observes pending before
-  approval, provisioning after approval, then ready with one delivery on retry
-  and zero escrow rows. Validation uses ALL_PROXY/all_proxy unset and
-  NO_PROXY=no_proxy=localhost,127.0.0.1 (#323).
-- End-to-end remains unrun: no wire cutover or republished deployment, and no Docker
-  daemon (#324); `unshare -Ur true` also fails with `Operation not permitted`, so
-  user-space rootless containers cannot supply it here. A container-capable runner
-  must start fresh owned mock VM, bare-metal and API-credit lane stacks and
-  republish before the three named suites run. The temporary user-space
-  Docker/Compose config-render tools were removed after validation.
+- At the 2.5a checkpoint, Payments Agreement and public-carrier readers used
+  core accessors while serialized options and IDs stayed unchanged. Mandate
+  derivation consumes typed mechanism parameters, not the public carrier.
+- The producer gate is satisfied by the published `option-envelope-projection`
+  revision, recorded only in `kit/arkhai-mediation/schema/SOURCE.md`. Its schema,
+  mapping and regenerated vectors support the D5 option without rewriting the
+  Agreement. Models are regenerated and contract, drift, typing and all 40
+  mediation integration/trace cases pass; no gate xfail or skip remains.
+- 2.5b and the cleanup portion of 2.5c use optional `price`, required `settlement`
+  with flat `schema`-tagged parameters, and optional `lifecycle`. Selection mirrors
+  the settlement envelope with buyer-owned parameters; registry filters and
+  persisted Agreement queries read the new paths. Lifecycle identity coverage
+  hashes its own key. Alkahest has no lifecycle terms; introductions have no
+  price. All listings must be republished because their option IDs change.
+- The earlier no-runtime blocker (#324) was overcome with the verified Podman
+  shim for owned end-to-end lane runs. Current results are recorded below.
   The active plan's future lifecycle architecture citation is tracked in #325.
+
+### Settlement-option wire cutover verification (2026-11-02)
+
+- 2.5b and 2.5c's wire/cleanup work are implemented. The producer projection
+  gate is satisfied, with no compatibility projection and no gate-related
+  xfail or skip. The exact producer revision is recorded only in the mediation
+  kit's `schema/SOURCE.md`; generated-model drift, contract, typing and all
+  40 mediation cases, including 12.3's 14 ruling-trace replays, pass.
+- Required proxy settings: unset `ALL_PROXY` and `all_proxy`; set `NO_PROXY`
+  and `no_proxy` to `localhost,127.0.0.1`. `make check-architecture`,
+  `make check-packaging`, `make check-comment-hygiene`, full `make test`,
+  core typing and pinned OpenSpec strict validation pass. Aggregate tooling
+  tests used a standalone Docker Compose binary for config rendering, not
+  a daemon or a replacement payment service.
+- Fresh branch-built lane stacks republished their listings. `e2e_deal`:
+  **35 passed**. `e2e_bare_metal_mock_deal`: **39 passed**.
+  `e2e_credits_payment_deal`: invoked on a fresh API-credit stack, but all
+  **3 cases blocked/skipped** because `PAYMENTS.SERVICE_URL` is not configured.
+  This is the existing external-target readiness gate, not a mediation or
+  wire-format skip. No payment e2e success is claimed. **2.5 remains unchecked**
+  until that suite passes with a configured ready payment authority.
+- Every owned lane container, volume and network was removed, and native Anvil
+  children left by scenarios were stopped. No external resource is left running.
+- The payment smoke example reaches provisioning and ready delivery under the
+  new envelope; it is an injected in-process self-check, not a live payment run.
+  Existing test assertions were migrated without dropping acceptance cases;
+  no new acceptance tests were added. Optional section 4 is not included.
+- Evidence and runnable setup: `docs/attachments/settlement-option-envelope/index.md`.
+  Reviewed-closeout promotion remains in the active settlement-configuration
+  and negotiation-protocol deltas, with lifecycle ownership in deal-lifecycle.
 
 ### Implementation checkpoint (2026-11-02)
 
@@ -879,6 +902,7 @@ The remaining D1–D15 destinations are listed in proposal.md and task 16.9.
 | Accepted decision | Permanent location |
 | Mediation owns installed published schema/models/vectors and marketplace claim framing; its stateless adapter only communicates with the exact Agreement authority, preserving aggregate monetary answers without computing remedies | `openspec/specs/deal-lifecycle/spec.md` and `architecture.md`, and `docs/development/ARCHITECTURE.md` kit areas at closeout (16.9) |
 |---|---|
+| D5 price/settlement/lifecycle option envelope, canonical identity, selection mirror and forward-only registry paths | Settlement-configuration and negotiation-protocol spec deltas; lifecycle ownership in deal-lifecycle spec/architecture, promoted at reviewed closeout (16.9) |
 | D6 neutral authorization/evidence envelope, sole end-service billing-start intent; D8 cause classification, pre-start timing exception and revised-remedy netting | New `deal-lifecycle` spec/architecture and settlement-servicing spec/architecture at closeout |
 | D8 receipt-embedded SignedDeliveryEndClaim, buyer concurrence/stop retry and both CLI paths | `openspec/specs/buyer-orchestration/spec.md` and `architecture.md` |
 | D5 premature-stop penalty codec and D10 capped held-earnings remedy; D10 one payee-agreed delivery_end rule for either filer, receipt concurrence and durable respondent sign-or-contest; D8 delivery_end filing and stable keys; D9 retained signed evidence; D10 case-carried Agreement and human triage | New `deal-lifecycle` capability's spec and architecture companion (created at archive/closeout) |

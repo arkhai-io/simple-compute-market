@@ -13,7 +13,11 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from market_core.schemas import settlement_option_params, settlement_option_schema
+from market_core.schemas import (
+    settlement_option_asset,
+    settlement_option_params,
+    settlement_option_schema,
+)
 
 from market_arkhai_payments.errors import MandatePolicyError
 from market_arkhai_payments.mandates import MandatePolicy, PaymentsOptionParams, derive_mandate
@@ -43,6 +47,10 @@ def selected_payment_option(agreement: Mapping[str, Any]) -> PaymentsOptionParam
     selected = agreement.get("settlement")
     if not isinstance(selected, Mapping) or settlement_option_schema(selected) != ARKHAI_PAYMENTS_MECHANISM:
         raise MandatePolicyError(f"Agreement does not select {ARKHAI_PAYMENTS_MECHANISM}")
+    if settlement_option_asset(selected) != agreement.get("asset"):
+        raise MandatePolicyError(
+            "Agreement asset differs from the selected payments price"
+        )
     try:
         return PaymentsOptionParams.model_validate(settlement_option_params(selected))
     except ValidationError as exc:

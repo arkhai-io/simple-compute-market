@@ -45,10 +45,13 @@ _ACCEPTED_TERMS = {
 def _option(mechanism: str, asset: str, rates: list[dict[str, Any]]) -> SettlementOption:
     values = [RateValue.model_validate(rate) for rate in rates]
     option_id = derive_settlement_option_id(
-        mechanism=mechanism, asset=asset, rates=values, params={}
+        price={"asset": asset, "rates": values},
+        settlement={"schema": mechanism, **({} or {})},
     )
     return SettlementOption(
-        option_id=option_id, mechanism=mechanism, asset=asset, rates=values, params={}
+        option_id=option_id,
+        price={"asset": asset, "rates": values},
+        settlement={"schema": mechanism, **({} or {})},
     )
 
 
@@ -119,7 +122,7 @@ def _compose(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, option: Settlement
     )
     monkeypatch.setattr(cli, "registry_client", registry)
     monkeypatch.setattr(cli, "negotiate_with_seller", lambda **_kwargs: outcome)
-    monkeypatch.setattr(cli, "BUYER_STAGES", {_PAYMENT.mechanism: stage})
+    monkeypatch.setattr(cli, "BUYER_STAGES", {_PAYMENT.settlement_schema: stage})
     monkeypatch.setattr(cli, "payment_approval", lambda _config: object())
     monkeypatch.setattr(cli, "BareMetalSettlementTransport", lambda **_kwargs: object())
 
@@ -139,9 +142,11 @@ def test_buy_records_dictionary_terms_when_the_deal_is_agreed(
         agreed_amount=1_000_000,
         accepted_provision_terms=dict(_ACCEPTED_TERMS),
         settlement_selection=SettlementSelection(
-            mechanism=_PAYMENT.mechanism,
             option_id=_PAYMENT.option_id,
-            params={"payer_account": "buyer-account"},
+            settlement={
+                "schema": _PAYMENT.settlement_schema,
+                **({"payer_account": "buyer-account"} or {}),
+            },
         ),
     )
     _compose(monkeypatch, tmp_path, _PAYMENT, outcome)
@@ -167,8 +172,8 @@ def test_request_introduction_records_dictionary_terms_when_the_deal_is_agreed(
         agreed_amount=0,
         accepted_provision_terms=dict(_ACCEPTED_TERMS),
         settlement_selection=SettlementSelection(
-            mechanism=_INTRODUCTION.mechanism,
             option_id=_INTRODUCTION.option_id,
+            settlement={"schema": _INTRODUCTION.settlement_schema},
             expiration_unix=4_000_000_000,
         ),
         settlement_plan=_introduction_plan(),

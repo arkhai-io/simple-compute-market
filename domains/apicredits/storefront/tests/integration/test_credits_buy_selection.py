@@ -103,7 +103,7 @@ async def storefront(db, fake_capacity, key_records, monkeypatch):
         _DOMAIN,
         accepted_obligation_dispatch={ARKHAI_PAYMENTS_MECHANISM: None},
         settlement_artifacts_builder=lambda agreement: SELLER_STAGES[
-            agreement["settlement"]["mechanism"]
+            agreement["settlement"]["settlement"]["schema"]
         ].agreement_artifacts(agreement, composition),
     )
     holds = QuotaHolds()
@@ -215,7 +215,7 @@ async def test_the_opening_is_priced_from_the_selected_payment_option(
     assert thread["terminal_state"] == "success"
     assert int(thread["agreed_price"]) == expected
     agreement = json.loads(thread["agreement_bytes"])
-    assert agreement["settlement"]["mechanism"] == ARKHAI_PAYMENTS_MECHANISM
+    assert agreement["settlement"]["settlement"]["schema"] == ARKHAI_PAYMENTS_MECHANISM
     assert agreement["settlement"]["option_id"] == option.option_id
     assert agreement["amount"] == str(expected)
     messages = await storefront.db.load_negotiation_thread(

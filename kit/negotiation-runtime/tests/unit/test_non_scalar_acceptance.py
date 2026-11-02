@@ -12,8 +12,8 @@ from test_runtime import _BUYER, _SELLER, HookHarness, RecordingRepository, runt
 
 _SELECTION_PROPOSAL: dict[str, Any] = {
     "settlement_selection": {
-        "mechanism": "contact-exchange.v1",
         "option_id": "bb" * 32,
+        "settlement": {"schema": "contact-exchange.v1"},
         "expiration_unix": 1_900_000_000,
     },
     "fields": {},

@@ -76,16 +76,22 @@ def surface(monkeypatch, tmp_path):
     state = SimpleNamespace(config=config, requests=[], opening=None)
 
     def configure(mechanism):
-        params = {"accepted_escrow": _ENTRY} if mechanism == "alkahest.v1" else {
-            "payee_account": "22222222-2222-4222-8222-222222222222", "asset": "USD",
-        }
+        params = (
+            {"accepted_escrow": _ENTRY}
+            if mechanism == "alkahest.v1"
+            else {
+                "payee_account": "22222222-2222-4222-8222-222222222222",
+            }
+        )
         asset = _TOKEN if mechanism == "alkahest.v1" else "USD"
         rates = [RateValue(field="amount", per="token", value=100)]
         option = SettlementOption(
-            mechanism=mechanism, asset=asset, rates=rates, params=params,
             option_id=derive_settlement_option_id(
-                mechanism=mechanism, asset=asset, rates=rates, params=params,
+                price={"asset": asset, "rates": rates},
+                settlement={"schema": mechanism, **(params or {})},
             ),
+            price={"asset": asset, "rates": rates},
+            settlement={"schema": mechanism, **(params or {})},
         )
         listing = {
             "listing_id": "credits-1", "storefront_url": "http://seller",
@@ -128,11 +134,21 @@ def _transport(monkeypatch, state, actions):
             payload["settlement_selection"] = selection
         if action == "accept":
             agreement = Agreement(
-                negotiation_id="neg-1", listing_id="credits-1", listing_hash="0" * 64,
-                buyer=payload["buyer_principal"], seller=payload["seller_principal"],
-                settlement=state.option, settlement_params=selection["params"],
-                amount=proposal["fields"]["amount"], asset=state.option.asset,
-                duration_seconds=0, start_utc="2025-01-01T00:00:00Z",
+                negotiation_id="neg-1",
+                listing_id="credits-1",
+                listing_hash="0" * 64,
+                buyer=payload["buyer_principal"],
+                seller=payload["seller_principal"],
+                settlement=state.option,
+                settlement_params={
+                    key: value
+                    for key, value in selection["settlement"].items()
+                    if key != "schema"
+                },
+                amount=proposal["fields"]["amount"],
+                asset=state.option.price_asset,
+                duration_seconds=0,
+                start_utc="2025-01-01T00:00:00Z",
                 accepted_at="2025-01-01T00:00:00Z",
                 provision_terms=payload["accepted_provision_terms"],
             )
@@ -190,7 +206,10 @@ def test_payment_only_cli_is_wallet_free_and_preserves_accepted_state(surface, m
     assert result.exit_code == 0, (result.output, result.exception)
     opening = state.opening
     assert opening["proposal"]["fields"]["amount"] == str(amount)
-    assert opening["proposal"]["settlement_selection"]["params"] == {"payer_account": _PAYER}
+    assert opening["proposal"]["settlement_selection"]["settlement"] == {
+        "schema": "arkhai.payments.v1",
+        "payer_account": _PAYER,
+    }
     events = read_run(_run_id(result), signer=_BUYER)
     accepted = events[-1]
     assert accepted["settlement_selection"] == opening["proposal"]["settlement_selection"]

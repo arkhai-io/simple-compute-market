@@ -267,7 +267,7 @@ async def _accepted_runtime(
         settlement=settlement,
         settlement_params={},
         amount=100,
-        asset=settlement.asset,
+        asset=settlement.price_asset,
         duration_seconds=3600,
         start_utc=now,
         provision_terms=message.model_dump(mode="json", exclude_none=True),
@@ -1146,21 +1146,15 @@ async def test_payment_evidence_gates_replay_and_rechecks_receipt_after_restart(
         },
         payments_client_for_owner=payments,
     )
-    params = {
-        "payee_account": PAYEE,
-        "asset": "USD/2",
-        "window": "PT1H",
-        "deposit_agreement": False,
-    }
+    params = {"payee_account": PAYEE, "window": "PT1H", "deposit_agreement": False}
     rates = [RateValue(field="amount", per="hour", value=100)]
     option = SettlementOption(
         option_id=derive_settlement_option_id(
-            mechanism="arkhai.payments.v1", asset="USD/2", rates=rates, params=params
+            price={"asset": "USD/2", "rates": rates},
+            settlement={"schema": "arkhai.payments.v1", **(params or {})},
         ),
-        mechanism="arkhai.payments.v1",
-        asset="USD/2",
-        rates=rates,
-        params=params,
+        price={"asset": "USD/2", "rates": rates},
+        settlement={"schema": "arkhai.payments.v1", **(params or {})},
     )
     await db.upsert_bare_metal_listing(
         listing_id="listing-payment",

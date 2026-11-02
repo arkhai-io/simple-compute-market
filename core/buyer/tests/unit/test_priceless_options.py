@@ -10,10 +10,10 @@ def test_non_scalar_option_listing_is_priceless() -> None:
         "settlement_options": [
             {
                 "option_id": "bb" * 32,
-                "mechanism": "contact-exchange.v1",
-                "asset": "introduction",
-                "rates": [],
-                "params": {"terms": "prose"},
+                "settlement": {
+                    "schema": "contact-exchange.v1",
+                    **({"terms": "prose"} or {}),
+                },
             }
         ]
     }

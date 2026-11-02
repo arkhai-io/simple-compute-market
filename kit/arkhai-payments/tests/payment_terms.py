@@ -19,14 +19,14 @@ IMPOSTOR = Ed25519Signer(b"\x08" * 32)
 
 
 def option(*, deposit: bool = False, payee: str = PAYEE, window: str = "P7D") -> SettlementOption:
-    params = {"payee_account": payee, "asset": "USD/2", "window": window, "deposit_agreement": deposit}
+    params = {"payee_account": payee, "window": window, "deposit_agreement": deposit}
     return SettlementOption(
         option_id=derive_settlement_option_id(
-            mechanism=ARKHAI_PAYMENTS_MECHANISM, asset="USD/2", rates=[], params=params
+            price={"asset": "USD/2", "rates": []},
+            settlement={"schema": ARKHAI_PAYMENTS_MECHANISM, **(params or {})},
         ),
-        mechanism=ARKHAI_PAYMENTS_MECHANISM,
-        asset="USD/2",
-        params=params,
+        price={"asset": "USD/2", "rates": []},
+        settlement={"schema": ARKHAI_PAYMENTS_MECHANISM, **(params or {})},
     )
 
 

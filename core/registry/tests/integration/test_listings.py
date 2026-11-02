@@ -94,10 +94,14 @@ class TestPublishOrder:
     async def test_mechanism_options_round_trip(self, registry_client):
         option = {
             "option_id": "a" * 64,
-            "mechanism": "example.payment.v1",
-            "asset": "usd",
-            "rates": [{"field": "amount", "per": "hour", "value": "125"}],
-            "params": {"account_ref": "acct-seller"},
+            "price": {
+                "asset": "usd",
+                "rates": [{"field": "amount", "per": "hour", "value": "125"}],
+            },
+            "settlement": {
+                "schema": "example.payment.v1",
+                **({"account_ref": "acct-seller"} or {}),
+            },
         }
         request = ListingRequest(
             listing_id="pub-mechanism",

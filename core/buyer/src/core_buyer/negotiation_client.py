@@ -407,7 +407,7 @@ def _validate_agreement_acceptance(
         selected = agreement.settlement
         if selected is None or (
             selected.option_id != expected_selection.option_id
-            or selected.settlement_schema != expected_selection.mechanism
+            or selected.settlement_schema != expected_selection.settlement_schema
         ):
             raise RuntimeError("seller Agreement differs from selected settlement option")
         if advertised_option is not None and selected != advertised_option:
@@ -550,7 +550,7 @@ def _validate_settlement_acceptance(
         raise RuntimeError(
             "seller settlement_plan obligation substituted an accepted party"
         )
-    if obligation.mechanism != expected_selection.mechanism:
+    if obligation.mechanism != expected_selection.settlement_schema:
         raise RuntimeError(
             "seller settlement_plan mechanism differs from the selected option"
         )
@@ -592,12 +592,15 @@ def _validate_settlement_acceptance(
     assert advertised_option is not None
     if (
         advertised_option.option_id != expected_selection.option_id
-        or advertised_option.settlement_schema != expected_selection.mechanism
+        or advertised_option.settlement_schema != expected_selection.settlement_schema
     ):
         raise RuntimeError(
             "buyer settlement selection does not identify the advertised option"
         )
-    if obligation.asset != advertised_option.price_asset:
+    if (
+        advertised_option.price is not None
+        and obligation.asset != advertised_option.price_asset
+    ):
         raise RuntimeError(
             "seller settlement_plan asset differs from the advertised option"
         )
@@ -1009,7 +1012,8 @@ def negotiate_with_seller(
     if advertised_option is not None and expected_selection is not None:
         if (
             advertised_option.option_id != expected_selection.option_id
-            or advertised_option.settlement_schema != expected_selection.mechanism
+            or advertised_option.settlement_schema
+            != expected_selection.settlement_schema
         ):
             raise RuntimeError(
                 "buyer settlement selection does not identify the advertised option"

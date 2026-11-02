@@ -2143,7 +2143,7 @@ async def test_an_unreached_mechanism_beside_one_ruled_out_holds_the_listing(
     assert status == "open"
     assert published["accepted_escrows"]
     assert "contact-exchange.v1" not in {
-        option["mechanism"] for option in published["settlement_options"]
+        option["settlement"]["schema"] for option in published["settlement_options"]
     }
     assert storefront.listing("site-a", "pool-1", "r1") == (listing_id, "open", None)
     assert closes(report) == {} and storefront.registries.operations() == []
@@ -2222,7 +2222,10 @@ async def _override_unbacked_pool(db: SQLiteClient, settlements: list[dict[str, 
 
 
 def _mechanisms(body: dict[str, Any]) -> list[str]:
-    return [option["mechanism"] for option in body.get("settlement_options") or []]
+    return [
+        option["settlement"]["schema"]
+        for option in body.get("settlement_options") or []
+    ]
 
 
 async def test_an_override_leaving_no_admissible_clause_closes_the_unbacked_listing(

@@ -66,25 +66,26 @@ PAYEE_ACCOUNT = "22222222-2222-4222-8222-222222222222"
 def payment_option(rate: int = 100) -> SettlementOption:
     """An Arkhai payments option priced per credit, as a seller publishes one."""
     rates = [RateValue(field="amount", per="credit", value=rate)]
-    params = {"payee_account": PAYEE_ACCOUNT, "asset": "USD/2"}
+    params = {"payee_account": PAYEE_ACCOUNT}
     return SettlementOption(
         option_id=derive_settlement_option_id(
-            mechanism="arkhai.payments.v1", asset="USD/2", rates=rates, params=params
+            price={"asset": "USD/2", "rates": rates},
+            settlement={"schema": "arkhai.payments.v1", **(params or {})},
         ),
-        mechanism="arkhai.payments.v1",
-        asset="USD/2",
-        rates=rates,
-        params=params,
+        price={"asset": "USD/2", "rates": rates},
+        settlement={"schema": "arkhai.payments.v1", **(params or {})},
     )
 
 
 def payment_selection(*, expiration_unix: int = 1_900_000_000) -> SettlementSelection:
     option = payment_option()
     return SettlementSelection(
-        mechanism=option.mechanism,
         option_id=option.option_id,
+        settlement={
+            "schema": option.settlement_schema,
+            **({"payer_account": PAYER_ACCOUNT} or {}),
+        },
         expiration_unix=expiration_unix,
-        params={"payer_account": PAYER_ACCOUNT},
     )
 
 

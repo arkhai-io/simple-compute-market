@@ -547,7 +547,9 @@ def register(app: typer.Typer) -> None:
         )
         matches = []
         for match, selected in selected_matches:
-            selected = buyer_stage(selected.selection.mechanism).prepare_selection(selected)
+            selected = buyer_stage(
+                selected.selection.settlement_schema
+            ).prepare_selection(selected)
             normalized = dict(match)
             normalized["_selected_settlement"] = selected
             normalized["settlement_options"] = [selected.option.model_dump(mode="json")]
@@ -667,7 +669,9 @@ def register(app: typer.Typer) -> None:
             selected = match.get("_selected_settlement")
             if selected is None:
                 return None
-            return buyer_stage(selected.selection.mechanism).proposal(match, selected)
+            return buyer_stage(selected.selection.settlement_schema).proposal(
+                match, selected
+            )
 
         run_log = RunLog.start(
             command="market buy",

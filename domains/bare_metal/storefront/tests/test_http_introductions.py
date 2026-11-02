@@ -65,15 +65,11 @@ def _contact_option() -> dict[str, Any]:
     }
     return {
         "option_id": derive_settlement_option_id(
-            mechanism=CONTACT_MECHANISM,
-            asset="introduction",
-            rates=[],
-            params=params,
+            price={"asset": "introduction", "rates": []},
+            settlement={"schema": CONTACT_MECHANISM, **(params or {})},
         ),
-        "mechanism": CONTACT_MECHANISM,
-        "asset": "introduction",
-        "rates": [],
-        "params": params,
+        "price": {"asset": "introduction", "rates": []},
+        "settlement": {"schema": CONTACT_MECHANISM, **(params or {})},
     }
 
 
@@ -176,8 +172,8 @@ def _opening(option: dict) -> dict:
         },
         "proposal": {
             "settlement_selection": {
-                "mechanism": CONTACT_MECHANISM,
                 "option_id": option["option_id"],
+                "settlement": {"schema": CONTACT_MECHANISM},
                 "expiration_unix": 1_900_000_000,
             },
             "fields": {},
@@ -283,8 +279,8 @@ async def test_contact_options_publish_through_the_composition() -> None:
     )
     assert payload.accepted_escrows == ()
     (option,) = payload.settlement_options
-    assert option["mechanism"] == CONTACT_MECHANISM
-    assert option["rates"] == []
+    assert option["settlement"]["schema"] == CONTACT_MECHANISM
+    assert option.get("price", {}).get("rates", []) == []
     assert "@capacity_broker" not in str(payload.settlement_options)
 
 
@@ -585,7 +581,7 @@ async def test_an_unbacked_listing_published_by_the_storefront_reaches_an_introd
     assert published["capacity_backing"] == "unbacked"
     for term in ("host_id", "physical_host_id", "access_methods"):
         assert term not in published
-    assert option["mechanism"] == CONTACT_MECHANISM
+    assert option["settlement"]["schema"] == CONTACT_MECHANISM
     assert accepted["action"] == "accept"
     assert revealed["counterparty_contact"] == _SELLER_CONTACT
     _assert_settled_by_introduction(answers)

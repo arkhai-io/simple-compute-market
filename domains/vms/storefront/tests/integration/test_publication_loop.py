@@ -197,9 +197,9 @@ async def test_an_unready_alkahest_publishes_the_other_options_and_refuses_no_ca
     assert result["counts"] == {"publish": 1}
     assert not listing.get("accepted_escrows")
     assert not listing.get("demands")
-    assert [option["mechanism"] for option in listing["settlement_options"]] == [
-        CONTACT_MECHANISM
-    ]
+    assert [
+        option["settlement"]["schema"] for option in listing["settlement_options"]
+    ] == [CONTACT_MECHANISM]
 
 
 async def test_a_dry_run_reports_the_cycle_and_changes_nothing(world):
@@ -659,12 +659,13 @@ def _vm_provision(duration_seconds: int = 3600) -> dict:
 def _alkahest_selection(listing) -> dict:
     """Fresh acceptance names its settlement option explicitly."""
     (option,) = [
-        option for option in listing["settlement_options"]
-        if option["mechanism"] == "alkahest.v1"
+        option
+        for option in listing["settlement_options"]
+        if option["settlement"]["schema"] == "alkahest.v1"
     ]
     return {
-        "mechanism": "alkahest.v1",
         "option_id": option["option_id"],
+        "settlement": {"schema": "alkahest.v1"},
         "expiration_unix": 1_800_000_000,
     }
 
@@ -1743,9 +1744,9 @@ async def test_an_unreached_mechanism_beside_one_ruled_out_holds_the_listing(tmp
             derivation = await _derivation(world)
 
     (listing,) = before.values()
-    assert [option["mechanism"] for option in listing["settlement_options"]] == [
-        "alkahest.v1"
-    ]
+    assert [
+        option["settlement"]["schema"] for option in listing["settlement_options"]
+    ] == ["alkahest.v1"]
     assert after == before
     assert _closes(report) == {} and _of(report, "refuse") == []
     (hold,) = derivation["holds"]

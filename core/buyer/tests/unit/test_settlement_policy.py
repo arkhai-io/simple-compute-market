@@ -35,14 +35,11 @@ def _option(mechanism: str, asset: str) -> SettlementOption:
     params: dict[str, Any] = {"profile": asset}
     return SettlementOption(
         option_id=derive_settlement_option_id(
-            mechanism=mechanism,
-            asset=asset,
-            rates=[],
-            params=params,
+            price={"asset": asset, "rates": []},
+            settlement={"schema": mechanism, **(params or {})},
         ),
-        mechanism=mechanism,
-        asset=asset,
-        params=params,
+        price={"asset": asset, "rates": []},
+        settlement={"schema": mechanism, **(params or {})},
     )
 
 
@@ -58,7 +55,7 @@ def _registration(
         assert public_context == {"currency": "usd"}
         if compatibility_calls is not None:
             compatibility_calls.append(mechanism)
-        return compatible and option.mechanism == mechanism
+        return compatible and option.settlement_schema == mechanism
 
     return MechanismRegistration(
         mechanism_id=mechanism,
@@ -82,7 +79,7 @@ def _registration(
                     operators=frozenset({ComparisonOperator.EQUAL}),
                 ),
                 roles=frozenset({"buyer"}),
-                projector=lambda option: option.params.get("profile"),
+                projector=lambda option: option.settlement_params.get("profile"),
             ),
         ),
         publication_input_model=_PublicationInput,
@@ -140,7 +137,7 @@ def test_example_first_policy_orders_before_alkahest() -> None:
     )
 
     assert selected is not None
-    assert selected.selection.mechanism == "example.payment.v1"
+    assert selected.selection.settlement_schema == "example.payment.v1"
     assert selected.option == hosted
 
 
@@ -154,7 +151,7 @@ def test_alkahest_first_policy_orders_before_hosted() -> None:
     )
 
     assert selected is not None
-    assert selected.selection.mechanism == "alkahest.v1"
+    assert selected.selection.settlement_schema == "alkahest.v1"
 
 
 def test_incompatible_preferred_mechanism_advances_before_acceptance() -> None:
@@ -172,7 +169,7 @@ def test_incompatible_preferred_mechanism_advances_before_acceptance() -> None:
     )
 
     assert selected is not None
-    assert selected.selection.mechanism == "alkahest.v1"
+    assert selected.selection.settlement_schema == "alkahest.v1"
     assert calls == ["example.payment.v1", "alkahest.v1"]
 
 

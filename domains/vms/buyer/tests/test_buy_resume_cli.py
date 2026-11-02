@@ -494,15 +494,11 @@ class TestBuyFrom:
         listing["settlement_options"] = [
             {
                 "option_id": derive_settlement_option_id(
-                    mechanism="alkahest.v1",
-                    asset="0x" + "bb" * 20,
-                    rates=option_rates,
-                    params=option_params,
+                    price={"asset": "0x" + "bb" * 20, "rates": option_rates},
+                    settlement={"schema": "alkahest.v1", **(option_params or {})},
                 ),
-                "mechanism": "alkahest.v1",
-                "asset": "0x" + "bb" * 20,
-                "rates": option_rates,
-                "params": option_params,
+                "price": {"asset": "0x" + "bb" * 20, "rates": option_rates},
+                "settlement": {"schema": "alkahest.v1", **(option_params or {})},
             }
         ]
         captured = {}
@@ -577,7 +573,7 @@ class TestBuyFrom:
 
         assert captured["config"].principal == BUYER_SIGNER.identity
         assert captured["config"].registry_urls == ["http://reg"]
-        assert captured["proposal"].mechanism == "alkahest.v1"
+        assert captured["proposal"].settlement_schema == "alkahest.v1"
         assert captured["proposal"].option_id == listing["settlement_options"][0]["option_id"]
 
     def test_buy_from_rejects_current_max_price_override(

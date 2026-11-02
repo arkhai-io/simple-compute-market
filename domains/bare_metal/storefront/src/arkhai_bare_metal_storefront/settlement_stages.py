@@ -738,10 +738,9 @@ def legacy_alkahest_option(
     params = proposal.model_dump(mode="json", exclude_none=True)
     return SettlementOption(
         option_id=derive_settlement_option_id(
-            mechanism=ALKAHEST_MECHANISM, asset=asset, rates=[], params=params
+            price={"asset": asset, "rates": []},
+            settlement={"schema": ALKAHEST_MECHANISM, **(params or {})},
         ),
-        mechanism=ALKAHEST_MECHANISM,
-        asset=asset,
-        rates=[],
-        params=params,
+        price={"asset": asset, "rates": []},
+        settlement={"schema": ALKAHEST_MECHANISM, **(params or {})},
     )

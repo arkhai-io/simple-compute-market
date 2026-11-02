@@ -85,7 +85,7 @@ def introduction_transport(base_url: str) -> IntroductionTransport:
 async def accept_introduction(world, listing: dict) -> tuple[str, str]:
     """Negotiate the listing's one introduction option to acceptance."""
     (option,) = listing["settlement_options"]
-    assert option["mechanism"] == CONTACT_MECHANISM
+    assert option["settlement"]["schema"] == CONTACT_MECHANISM
     # Under the storefront's default policy chain; an unpriced option needs no
     # policy override to be accepted.
     payload = await world.buyer.negotiate_new(
@@ -94,8 +94,8 @@ async def accept_introduction(world, listing: dict) -> tuple[str, str]:
         provision_terms=vm_provision(),
         proposal_fields={},
         settlement_selection={
-            "mechanism": CONTACT_MECHANISM,
             "option_id": option["option_id"],
+            "settlement": {"schema": CONTACT_MECHANISM},
             "expiration_unix": 1_900_000_000,
         },
         selection_only=True,

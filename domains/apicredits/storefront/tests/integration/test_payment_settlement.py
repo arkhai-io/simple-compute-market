@@ -83,8 +83,11 @@ class Issuer:
 
 
 def _option() -> SettlementOption:
-    params = {"payee_account": PAYEE, "asset": "USD/2", "window": "P7D", "deposit_agreement": False}
-    body = {"mechanism": "arkhai.payments.v1", "asset": "USD/2", "rates": [], "params": params}
+    params = {"payee_account": PAYEE, "window": "P7D", "deposit_agreement": False}
+    body = {
+        "price": {"asset": "USD/2", "rates": []},
+        "settlement": {"schema": "arkhai.payments.v1", **(params or {})},
+    }
     return SettlementOption(option_id=derive_settlement_option_id(**body), **body)
 
 

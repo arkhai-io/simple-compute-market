@@ -95,15 +95,11 @@ def _example_option() -> SettlementOption:
     }
     return SettlementOption(
         option_id=derive_settlement_option_id(
-            mechanism="alkahest.v1",
-            asset="usd",
-            rates=rates,
-            params=params,
+            price={"asset": "usd", "rates": rates},
+            settlement={"schema": "alkahest.v1", **(params or {})},
         ),
-        mechanism="alkahest.v1",
-        asset="usd",
-        rates=rates,
-        params=params,
+        price={"asset": "usd", "rates": rates},
+        settlement={"schema": "alkahest.v1", **(params or {})},
     )
 
 
@@ -116,7 +112,7 @@ def _example_accept_reply(
 ) -> dict:
     buyer = BUYER_SIGNER.identity
     seller = seller_principals().identities[0]
-    params = dict(option.params)
+    params = dict(option.settlement_params)
     params["payer_principal"] = buyer.model_dump(mode="json")
     params["claimant_principal"] = seller.model_dump(mode="json")
     agreement = Agreement(
@@ -127,7 +123,7 @@ def _example_accept_reply(
         seller=seller.model_dump(mode="json"),
         settlement=option,
         amount=amount,
-        asset=option.asset,
+        asset=option.price_asset,
         duration_seconds=3600,
         start_utc="2025-01-01T00:00:00Z",
         provision_terms=_provision().model_dump(mode="json"),
@@ -154,10 +150,10 @@ def _example_accept_reply(
                     "payer_principal": buyer.model_dump(mode="json"),
                     "claimant_principal": seller.model_dump(mode="json"),
                     "amount": amount,
-                    "asset": option.asset,
+                    "asset": option.price_asset,
                     "expiration_unix": selection.expiration_unix,
-                    "conditions": [dict(option.params["condition"])],
-                    "mechanism": option.mechanism,
+                    "conditions": [dict(option.settlement_params["condition"])],
+                    "mechanism": option.settlement_schema,
                     "params": params,
                 }
             ],
@@ -227,7 +223,10 @@ def _with_accepted_agreement(req, body):
     if isinstance(selection, dict):
         selected = SettlementSelection.model_validate(selection)
         option = _example_option()
-        if selected.option_id == option.option_id and selected.mechanism == option.mechanism:
+        if (
+            selected.option_id == option.option_id
+            and selected.settlement_schema == option.settlement_schema
+        ):
             settlement = option
     if settlement is None:
         settlement = alkahest_option()
@@ -235,8 +234,10 @@ def _with_accepted_agreement(req, body):
     body.setdefault("accepted_escrow_proposal", _escrow_proposal().model_dump(mode="json"))
     buyer = BUYER_SIGNER.identity
     seller = seller_principals().identities[0]
-    asset = settlement.asset if settlement is not None else (
-        fields.get("token") if isinstance(fields, dict) else None
+    asset = (
+        settlement.price_asset
+        if settlement is not None
+        else (fields.get("token") if isinstance(fields, dict) else None)
     )
     agreement = Agreement(
         negotiation_id=negotiation_id,
@@ -327,8 +328,8 @@ def test_round_0_example_selection_is_pinned_and_returned(mock_urlopen):
     seen_body = {}
     option = _example_option()
     selection = SettlementSelection(
-        mechanism=option.mechanism,
         option_id=option.option_id,
+        settlement={"schema": option.settlement_schema},
         expiration_unix=1_800_000_000,
     )
 
@@ -369,22 +370,18 @@ def test_round_0_delegates_domain_plan_semantics_after_universal_checks(
     mock_urlopen,
 ):
     base = _example_option()
-    params = {**base.params, "domain_binding": {"resource": "resource-1"}}
+    params = {**base.settlement_params, "domain_binding": {"resource": "resource-1"}}
     option = SettlementOption(
         option_id=derive_settlement_option_id(
-            mechanism=base.mechanism,
-            asset=base.asset,
-            rates=base.rates,
-            params=params,
+            price={"asset": base.price_asset, "rates": base.price_rates},
+            settlement={"schema": base.settlement_schema, **(params or {})},
         ),
-        mechanism=base.mechanism,
-        asset=base.asset,
-        rates=base.rates,
-        params=params,
+        price={"asset": base.price_asset, "rates": base.price_rates},
+        settlement={"schema": base.settlement_schema, **(params or {})},
     )
     selection = SettlementSelection(
-        mechanism=option.mechanism,
         option_id=option.option_id,
+        settlement={"schema": option.settlement_schema},
         expiration_unix=1_800_000_000,
     )
     reply = _example_accept_reply(
@@ -422,8 +419,8 @@ def test_round_0_delegates_domain_plan_semantics_after_universal_checks(
 def test_round_0_rejects_signed_seller_selection_substitution(mock_urlopen):
     option = _example_option()
     selection = SettlementSelection(
-        mechanism=option.mechanism,
         option_id=option.option_id,
+        settlement={"schema": option.settlement_schema},
         expiration_unix=1_800_000_000,
     )
     substituted = selection.model_copy(update={"option_id": "f" * 64})
@@ -456,8 +453,8 @@ def test_round_0_rejects_signed_seller_selection_substitution(mock_urlopen):
 def test_later_accept_rejects_plan_amount_substitution_before_observer(mock_urlopen):
     option = _example_option()
     selection = SettlementSelection(
-        mechanism=option.mechanism,
         option_id=option.option_id,
+        settlement={"schema": option.settlement_schema},
         expiration_unix=1_800_000_000,
     )
     final_reply = _example_accept_reply(

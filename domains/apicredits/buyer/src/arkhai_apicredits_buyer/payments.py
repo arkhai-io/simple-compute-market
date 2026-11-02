@@ -68,16 +68,18 @@ def payment_selection_for_listing(
         selected = policy.select(listing, expiration_unix=expiration_unix)
         if (
             selected is None
-            or selected.selection.mechanism != ARKHAI_PAYMENTS_MECHANISM
+            or selected.selection.settlement_schema != ARKHAI_PAYMENTS_MECHANISM
         ):
             return None
-        mechanism = selected.selection.mechanism
+        mechanism = selected.selection.settlement_schema
         option_id = selected.selection.option_id
     return SettlementSelection(
-        mechanism=mechanism,
         option_id=option_id,
+        settlement={
+            "schema": mechanism,
+            "payer_account": validate_payer_account(payer_account),
+        },
         expiration_unix=expiration_unix,
-        params={"payer_account": validate_payer_account(payer_account)},
     )
 
 
@@ -105,7 +107,7 @@ def settle_api_credit_payment(
     selected = None
     if settlement_selection is not None:
         selected = SettlementSelection.model_validate(settlement_selection)
-        if selected.mechanism != ARKHAI_PAYMENTS_MECHANISM:
+        if selected.settlement_schema != ARKHAI_PAYMENTS_MECHANISM:
             raise ValueError("accepted settlement selection is not an Arkhai payment")
     if not agreement_bytes:
         raise ValueError("accepted Agreement bytes are required for payment settlement")
@@ -147,10 +149,10 @@ def settle_api_credit_payment(
     advertised = SettlementOption.model_validate(advertised_value)
     if (
         parsed_agreement.settlement != advertised
-        or selected.mechanism != advertised.settlement_schema
+        or selected.settlement_schema != advertised.settlement_schema
     ):
         raise ValueError("accepted Agreement differs from the selected listing option")
-    if selected is not None and dict(selected.params or {}) != dict(
+    if selected is not None and dict(selected.settlement_params or {}) != dict(
         parsed_agreement.settlement_params or {}
     ):
         raise ValueError(

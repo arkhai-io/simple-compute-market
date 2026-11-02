@@ -375,7 +375,9 @@ def register(app: typer.Typer) -> None:
                     "settlement option"
                 )
 
-            selected_stage = buyer_stage(selected_settlement.selection.mechanism)
+            selected_stage = buyer_stage(
+                selected_settlement.selection.settlement_schema
+            )
             try:
                 selected_settlement = selected_stage.prepare_selection(selected_settlement)
                 picked_entry = selected_stage.accepted_entry(selected_settlement)

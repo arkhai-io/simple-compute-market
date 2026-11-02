@@ -14,6 +14,7 @@ from market_core.query_dsl import ComparisonOperator, FieldDescriptor, QueryValu
 from market_core.schemas import (
     RateValue,
     SettlementOption,
+    SettlementPrice,
     derive_settlement_option_id,
     settlement_option_asset,
     settlement_option_params,
@@ -31,7 +32,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from market_arkhai_payments.client import PaymentsClient
 from market_arkhai_payments.mandates import PaymentsOptionParams
-from market_arkhai_payments.models import AccountId
+from market_arkhai_payments.models import AccountId, Asset
 
 ARKHAI_PAYMENTS_MECHANISM = "arkhai.payments.v1"
 ARKHAI_PAYMENTS_CONFIG_KEY = "arkhai_payments"
@@ -133,6 +134,13 @@ class ArkhaiPaymentsConfig(BaseModel):
 
 class ArkhaiPaymentsPublicationInput(PaymentsOptionParams):
     """Public payment parameters accepted by a seller publication clause."""
+
+    asset: str
+
+    @field_validator("asset")
+    @classmethod
+    def validate_asset(cls, value: str) -> str:
+        return Asset.model_validate(value).root
 
     @field_validator("deposit_agreement", mode="before")
     @classmethod
@@ -278,19 +286,12 @@ async def arkhai_payments_preflight(
     )
 
 
-def _value(source: Any, name: str, default: Any = None) -> Any:
-    return (
-        source.get(name, default)
-        if isinstance(source, Mapping)
-        else getattr(source, name, default)
-    )
-
-
 def _option_params(option: Any) -> PaymentsOptionParams | None:
     raw = settlement_option_params(option)
     if not isinstance(raw, Mapping):
         return None
     try:
+        Asset.model_validate(settlement_option_asset(option))
         return PaymentsOptionParams.model_validate(raw)
     except (TypeError, ValueError):
         return None
@@ -335,18 +336,13 @@ def arkhai_payments_option_builder(
             value = int(clause.rate)
         rates.append(RateValue(field="amount", per=clause.per, value=value))
 
-    option_params = params.model_dump(mode="json")
+    option_params = params.model_dump(mode="json", exclude={"asset"})
+    price = SettlementPrice(asset=params.asset, rates=rates)
+    settlement = {"schema": ARKHAI_PAYMENTS_MECHANISM, **option_params}
     option = SettlementOption(
-        option_id=derive_settlement_option_id(
-            mechanism=ARKHAI_PAYMENTS_MECHANISM,
-            asset=params.asset,
-            rates=rates,
-            params=option_params,
-        ),
-        mechanism=ARKHAI_PAYMENTS_MECHANISM,
-        asset=params.asset,
-        rates=rates,
-        params=option_params,
+        option_id=derive_settlement_option_id(price=price, settlement=settlement),
+        price=price,
+        settlement=settlement,
     )
     return {
         "accepted_escrows": [],
@@ -364,7 +360,7 @@ def arkhai_payments_buyer_compatibility(
     if not config.enabled:
         return False
     params = _option_params(option)
-    return params is not None and params.asset == settlement_option_asset(option)
+    return params is not None
 
 
 def _payee_projection(option: Any) -> str | None:

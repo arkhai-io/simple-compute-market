@@ -248,8 +248,8 @@ class TestStage02_Reveal:
                 },
                 proposal_fields={},
                 settlement_selection={
-                    "mechanism": CONTACT_MECHANISM,
                     "option_id": option["option_id"],
+                    "settlement": {"schema": CONTACT_MECHANISM},
                     "expiration_unix": int(time.time()) + 3600,
                 },
                 selection_only=True,

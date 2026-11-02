@@ -725,8 +725,11 @@ def test_payment_dispatch_and_run_recovery_ignore_stray_escrow(tmp_path, monkeyp
     payee = "22222222-2222-4222-8222-222222222222"
     config = _config()
     provision = _provision()
-    params = {"payee_account": payee, "asset": "USD/2", "window": "P7D", "deposit_agreement": False}
-    option_body = {"mechanism": "arkhai.payments.v1", "asset": "USD/2", "rates": [], "params": params}
+    params = {"payee_account": payee, "window": "P7D", "deposit_agreement": False}
+    option_body = {
+        "price": {"asset": "USD/2", "rates": []},
+        "settlement": {"schema": "arkhai.payments.v1", **(params or {})},
+    }
     option = SettlementOption(option_id=derive_settlement_option_id(**option_body), **option_body)
     agreement = Agreement(
         negotiation_id="neg-payment", listing_id="seller-1", listing_hash="0" * 64,

@@ -88,10 +88,14 @@ async def payment_context(tmp_path):
         fulfillment_resource=None, max_duration_seconds=None,
         storefront_url="http://storefront.local", seller_principal=SELLER.identity,
     )
-    params = {"payee_account": PAYEE, "asset": "USD/2", "window": "P7D", "deposit_agreement": True}
+    params = {"payee_account": PAYEE, "window": "P7D", "deposit_agreement": True}
     option = SettlementOption(
-        option_id=derive_settlement_option_id(mechanism=ARKHAI_PAYMENTS_MECHANISM, asset="USD/2", rates=[], params=params),
-        mechanism=ARKHAI_PAYMENTS_MECHANISM, asset="USD/2", rates=[], params=params,
+        option_id=derive_settlement_option_id(
+            price={"asset": "USD/2", "rates": []},
+            settlement={"schema": ARKHAI_PAYMENTS_MECHANISM, **(params or {})},
+        ),
+        price={"asset": "USD/2", "rates": []},
+        settlement={"schema": ARKHAI_PAYMENTS_MECHANISM, **(params or {})},
     )
     terms = make_api_credits_provision_terms(quantity=3, key_mode="new")
     agreement = Agreement(

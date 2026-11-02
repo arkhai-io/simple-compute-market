@@ -271,8 +271,8 @@ async def test_the_vm_buyer_accepts_an_introduction_the_seller_accepts_at_once(
                         duration_seconds=3600, ssh_public_key=""
                     ),
                     settlement_selection=SettlementSelection(
-                        mechanism=option.mechanism,
                         option_id=option.option_id,
+                        settlement={"schema": option.settlement_schema},
                         expiration_unix=1_900_000_000,
                     ),
                     policy_params={

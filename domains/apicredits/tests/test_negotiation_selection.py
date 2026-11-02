@@ -26,7 +26,11 @@ def _context() -> NegotiationContext:
         listing={
             "listing_id": "L-credits",
             "settlement_options": [
-                {"option_id": _OPTION_ID, "mechanism": "arkhai.payments.v1", "asset": "USD/2"}
+                {
+                    "option_id": _OPTION_ID,
+                    "price": {"asset": "USD/2", "rates": []},
+                    "settlement": {"schema": "arkhai.payments.v1"},
+                }
             ],
         },
     )
@@ -36,8 +40,8 @@ def _context() -> NegotiationContext:
 
 def _selection(**extra) -> dict:
     return {
-        "mechanism": "arkhai.payments.v1",
         "option_id": _OPTION_ID,
+        "settlement": {"schema": "arkhai.payments.v1"},
         "expiration_unix": 1_900_000_000,
         **extra,
     }
@@ -49,16 +53,21 @@ def _rejection(decision) -> str | None:
 
 def test_selection_with_payer_params_is_not_refused_as_malformed():
     params = {"payer_account": "11111111-1111-4111-8111-111111111111"}
-    decision, _context_out = api_credits_round_zero_guard(_round(_selection(params=params)), _context())
+    decision, _context_out = api_credits_round_zero_guard(
+        _round(_selection(settlement={"schema": "arkhai.payments.v1", **params})),
+        _context(),
+    )
     assert "selection has invalid fields" not in (_rejection(decision) or "")
 
 
 def test_selection_with_empty_params_is_not_refused_as_malformed():
-    decision, _context_out = api_credits_round_zero_guard(_round(_selection(params=None)), _context())
+    decision, _context_out = api_credits_round_zero_guard(
+        _round(_selection()), _context()
+    )
     assert "selection has invalid fields" not in (_rejection(decision) or "")
 
 
 def test_selection_with_unknown_fields_or_non_mapping_params_is_refused():
-    for selection in (_selection(amount="5"), _selection(params=["payer"])):
+    for selection in (_selection(amount="5"), _selection(settlement=["payer"])):
         decision, _context_out = api_credits_round_zero_guard(_round(selection), _context())
         assert _rejection(decision) == "invalid_settlement_selection:selection has invalid fields"

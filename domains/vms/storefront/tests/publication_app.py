@@ -316,14 +316,19 @@ class SettlementCompositionDouble:
         # Alkahest kit publishes, so a buyer can select it explicitly.
         for escrow in accepted:
             body = {
-                "mechanism": "alkahest.v1",
-                "asset": escrow["literal_fields"]["token"],
-                "rates": [{**rate, "value": str(rate["value"])} for rate in escrow["rates"]],
-                "params": {"accepted_escrow": escrow},
+                "price": {
+                    "asset": escrow["literal_fields"]["token"],
+                    "rates": [
+                        {**rate, "value": str(rate["value"])}
+                        for rate in escrow["rates"]
+                    ],
+                },
+                "settlement": {
+                    "schema": "alkahest.v1",
+                    **({"accepted_escrow": escrow} or {}),
+                },
             }
-            option_id = derive_settlement_option_id(
-                **{**body, "rates": [RateValue.model_validate(rate) for rate in body["rates"]]}
-            )
+            option_id = derive_settlement_option_id(**body)
             options.append({"option_id": option_id, **body})
         # Release conditions are derived only under a ready Alkahest, so the
         # double reports Alkahest ready wherever it builds Alkahest options, as

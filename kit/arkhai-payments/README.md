@@ -12,14 +12,15 @@ is generated from that schema with `python scripts/generate_models.py`.
 
 ## Seller option and mandate
 
-`PaymentsOptionParams` is the public listing `params` object:
+`PaymentsOptionParams` validates the payment-owned fields stored flat beside
+`schema = "arkhai.payments.v1"` in an option's `settlement` envelope. Its asset
+appears only in the option's separate `price`, with its commercial rates:
 
 ```python
 from market_arkhai_payments import PaymentsOptionParams
 
 option = PaymentsOptionParams(
     payee_account="00000000-0000-4000-8000-000000000012",
-    asset="USD/2",
     window="P7D",
     deposit_agreement=True,
 )
