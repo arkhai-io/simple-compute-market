@@ -1142,7 +1142,7 @@ provision stages". Files: `domains/vms/storefront/src/market_storefront/`
       application-integration tests through the typed client with kit-owned vector-derived in-process payments and mediation
       contract fakes (no runnable tooling dependency) for "A seller's hardware fails", "A buyer tears down" scenarios in the VM
       delta, and the admission scenarios on the VM path.
-- [ ] 14.3 Keep the requested instant in VM lease ends (second precision). Verify: unit and
+- [x] 14.3 Keep the requested instant in VM lease ends (second precision). Verify: unit and
       integration tests in the VM fulfillment suites for the delta's scenarios.
 - [ ] 14.4 Route admin interrupts through the seller half: submit notice stop when the accepted
       option grants the payee an entitlement, otherwise journal delivery end and file

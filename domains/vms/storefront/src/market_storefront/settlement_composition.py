@@ -752,7 +752,7 @@ async def truncate_lease_for_terminal_settlement(
                 site=released.get("site"),
             )
             return released
-        lease_end = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+        lease_end = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         truncated = await capacity.truncate_lease(
             binding,
             capacity_reservation_id=reservation_id,

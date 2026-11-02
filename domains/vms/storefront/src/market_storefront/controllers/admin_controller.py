@@ -534,7 +534,7 @@ class AdminController:
                 dt = dt.replace(tzinfo=timezone.utc)
             else:
                 dt = dt.astimezone(timezone.utc)
-        return dt.strftime("%Y-%m-%d %H:%M")
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
 
     def _deal_is_interruptible(self, *, thread: dict[str, Any] | None) -> bool:
         """Whether the deal's committed plan made it interruptible.
