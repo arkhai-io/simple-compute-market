@@ -132,9 +132,8 @@ class BareMetalLifecycle:
             if value == account or value == "terms":
                 return self.runtime.seller_principal
             if deal.dispute and value == deal.dispute.account:
-                # The authority identity remains in the verified event evidence;
-                # the neutral attribution requires a marketplace principal.
-                return self.runtime.seller_principal
+                scheme, separator, key = deal.dispute.record_key.partition(":")
+                return Identity(scheme=scheme if separator else "ed25519", identifier=key if separator else scheme)
             raise ValueError("unrecognized payment actor")
 
         return DealWatch(

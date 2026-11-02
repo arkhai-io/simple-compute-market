@@ -165,11 +165,21 @@ class VmDealLifecycle:
     def watch(self, deal, payment, dispute):
         agreement, raw = self.accepted(deal.negotiation_id)
         data = PaymentSettlementData.parse(raw) if deal.payment.mechanism == "arkhai.payments.v1" else None
+        def actor(value):
+            if data is not None and value == data.mandate.from_.root:
+                return Identity.model_validate(agreement["buyer"])
+            if value == "terms" or data is not None and value == data.mandate.to.root:
+                return Identity.model_validate(agreement["seller"])
+            if deal.dispute is not None and value == deal.dispute.account:
+                scheme, separator, key = deal.dispute.record_key.partition(":")
+                return Identity(scheme=scheme if separator else "ed25519", identifier=key if separator else scheme)
+            raise ValueError("unrecognized payment actor")
+
         return DealWatch(
             self.path, negotiation_id=deal.negotiation_id, commitment_ref=deal.commitment_ref,
             payment=payment, dispute=dispute, dispute_binding=deal.dispute_binding,
             seller_account=data.mandate.to.root if data is not None else "",
-            actor=lambda _: Identity.model_validate(agreement["seller"]), clock=self.clock,
+            actor=actor, clock=self.clock,
         )
 
     async def interrupt(self, negotiation_id, *, actor, operation_key, reason, dry_run=False):

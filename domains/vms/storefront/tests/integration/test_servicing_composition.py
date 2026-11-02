@@ -1,0 +1,56 @@
+"""VM authority observation through the composed watch and durable delivery view."""
+
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+from market_deal_lifecycle_contracts.models import Accepted, AuthorityView, DisputeEvent, PaymentEvent
+from market_deal_servicing import EndSession, SellerSession
+from market_deal_servicing.evidence import transaction
+from market_identity import Identity
+
+from tests.integration.test_payment_settlement import BUYER, SELLER, NEGOTIATION, make
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["payer", "payee", "terms", "authority", "ruling"])
+async def test_recorded_end_retains_the_actual_actor(make, source):
+    h = await make()
+    h.serve()
+    await h.settle()
+    await h.delivered()
+    lifecycle = h.lifecycle
+    with transaction(lifecycle.path) as conn:
+        deal = SellerSession(conn).read(NEGOTIATION)
+    scheme, key = deal.dispute.record_key.split(":", 1)
+    authority = Identity(scheme=scheme, identifier=key)
+    actors = {
+        "payer": (h.data.mandate.from_.root, BUYER.identity),
+        "payee": (h.data.mandate.to.root, SELLER.identity),
+        "terms": ("terms", SELLER.identity),
+        "authority": (deal.dispute.account, authority),
+        "ruling": (deal.dispute.account, authority),
+    }
+    account, expected = actors[source]
+    now = lifecycle.clock()
+    payment_view = AuthorityView(outcome=Accepted())
+    dispute_view = AuthorityView(outcome=Accepted())
+    if source == "ruling":
+        dispute_view = AuthorityView(outcome=Accepted(), disputes=[DisputeEvent(
+            negotiation_id=NEGOTIATION, commitment_ref=deal.commitment_ref,
+            case_ref="case", kind="ruled", actor=account, at=now, sequence=1, record_ref="ruling",
+            outcome=[{"effect_id": "end", "kind": "delivery_end", "at": now, "applied": True}],
+        )])
+    else:
+        payment_view = AuthorityView(outcome=Accepted(), events=[PaymentEvent(
+            negotiation_id=NEGOTIATION, commitment_ref=deal.commitment_ref, part="0",
+            kind="stop", actor=account, at=now, cause=source, sequence=1, authority_record_ref="stop",
+        )])
+    payment = SimpleNamespace(read=AsyncMock(return_value=payment_view))
+    dispute = SimpleNamespace(read=AsyncMock(return_value=dispute_view))
+    await lifecycle.watch(deal, payment, dispute).poll()
+    with transaction(lifecycle.path) as conn:
+        recorded = EndSession(conn).view(NEGOTIATION).recorded_end
+    assert recorded.actor == expected
+    assert recorded.source == ("ruling" if source == "ruling" else "stop")
+    assert recorded.cause == source
