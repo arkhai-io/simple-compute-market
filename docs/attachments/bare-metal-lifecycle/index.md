@@ -217,6 +217,44 @@ Build/lock continuation must use repository-root `make dist` and
 The package Makefiles have neither `build` nor `lock` targets; trying those did not
 regenerate artifacts. The corrected root targets and subsequent checks passed.
 
+## Fresh-stack qualification
+
+At `3876c2295`, fresh checkout-built images and isolated empty lane state reached
+Compose readiness. Real local payments (Formance/Postgres) and mediation HTTP
+were healthy from the host and role namespaces. An authenticated registry read
+confirmed both Alkahest and hosted options; the hosted option pinned the served
+mediation authority, a 300-second delivery deadline, a 1,296,000-second dispute
+window and an unbounded case hold. Payment `window=P7D` remains distinct.
+
+Inside the owned branch-built runner, with the documented lane and payment
+configuration, the direct invocation was:
+
+~~~sh
+.venv/bin/pytest -q --tb=short \
+  tests/e2e/roles/scenarios/bare_metal/test_bare_metal_mock_deal.py
+~~~
+
+All **39 stages passed in 16.56s**, with zero skips. They cover negotiation and
+Alkahest fulfillment, controlled lease expiry, teardown/release, capacity reuse,
+repeated canonical surrender with stable receipt, the verified signed site
+report before physical completion, and exactly one proven capacity release.
+These are implementer observations, not independent acceptance.
+
+The additional hosted-payment scenario stopped before purchase because its
+pool override omitted required lifecycle publication parameters. Its existing
+fixture now supplies and asserts the compute deadline, sufficient dispute window
+and unbounded case hold. The hosted re-drive remains pending at this point.
+
+Initial setup attempts stopped at readiness before pytest: the disposable
+configuration mixed TOML inline and table arrays, then supplied only the
+authority minimum without adding the compute delivery deadline. Correcting the
+configuration, rather than weakening publication validation, reached the ready
+state above. Readiness reads the settlement envelope as documented in
+[#327](https://github.com/arkhai-io/simple-compute-market/issues/327).
+All attempted deployments were removed, including their networks and volumes.
+No external tooling source, raw logs or private runtime artifacts enter this
+packet.
+
 ## Cleanup
 
 No container, HTTP server, browser page, tunnel, remote deployment or external

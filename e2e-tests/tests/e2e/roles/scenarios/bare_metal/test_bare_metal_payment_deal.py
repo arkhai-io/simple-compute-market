@@ -232,6 +232,11 @@ def payment_supply(
                 "mechanism_input": {
                     "payee_account": str(payment_setting("SELLER_ACCOUNT")),
                     "asset": "USD/6", "window": str(payment_setting("DISPUTE_WINDOW")),
+                    # Compute dispute coverage includes delivery latency in
+                    # addition to the authority's minimum filing window.
+                    "dispute_window_seconds": 15 * 86400,
+                    "case_hold_max_seconds": None,
+                    "delivery_deadline_seconds": 300,
                 },
             }],
         })
@@ -311,6 +316,9 @@ def test_payment_deal_delivers_after_a_verified_receipt(
     assert option.settlement_schema == "arkhai.payments.v1"
     assert option.settlement_params["payee_account"] == str(payment_setting("SELLER_ACCOUNT"))
     assert option.settlement_params["window"] == str(payment_setting("DISPUTE_WINDOW"))
+    assert option.lifecycle["adjudication"]["dispute_window_seconds"] == 15 * 86400
+    assert option.lifecycle["adjudication"]["case_hold_max_seconds"] is None
+    assert option.lifecycle["delivery_deadline_seconds"] == 300
     assert option.price_asset == "USD/6"
     assert option.price_rates[0].per == "hour"
     assert compute_rate_total(option.price_rates[0], 3600) == 1000000
