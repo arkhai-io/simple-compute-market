@@ -1795,6 +1795,14 @@ no unreviewed permanent lifecycle document is synthesized to satisfy the check.
   packaging, locks, comment hygiene, strict pinned OpenSpec and full shim-backed
   `make test` pass in 7m53s. The requested parent merge from `49219d221` preserves
   both correction keywords and the shared classifier; focused merged re-drive
-  passes 7 kit correction-adoption, 15 VM and 10 bare-metal cases. The final
-  combined-head aggregate is re-run rather than inferring success from either
-  branch's previous result.
+  passes 7 kit correction-adoption, 15 VM and 10 bare-metal cases. Final combined
+  validation on merge `0143c1ea9` passes in 7m27s: architecture, fresh-wheelhouse
+  packaging, locks, comment hygiene, pinned strict OpenSpec and full shim-backed
+  `make test`. Included suites: compute 14, VM unit 1196 (one existing optional RL
+  skip), VM integration 523, bare-metal storefront 540, compute-service unit 607
+  and integration 458; release tooling and Helm structural/render checks pass.
+  The aggregate includes existing kit typing targets; no standalone domain mypy
+  run is claimed. Reproduction and before/after observations:
+  `docs/attachments/aeet-rereview-domain/index.md`. No resident server or external
+  deployment was started; change-wide review, promotion and archival remain the
+  owner's section 16 closeout, not work completed by this repair assignment.

@@ -86,7 +86,24 @@ This is a separate two-minute fixture repair, not a waived aggregate failure.
 ## Validation
 
 Focused red/green observations above were run with the prescribed proxy exclusions.
-Fresh-wheelhouse packaging passed after each production repair. Final required
-architecture, packaging, locks, comment hygiene, strict OpenSpec and complete
-shim-backed aggregate results are recorded at final validation in the change's
-re-review disposition. No browser, dev server or external deployment was started.
+Fresh-wheelhouse packaging passed after each production repair. Final combined
+validation on merge `0143c1ea9` passed in 7m27s with this root invocation:
+
+```sh
+unset ALL_PROXY all_proxy
+export NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,127.0.0.1
+eval "$(~/.local/share/simple-compute-market/podman-shim/setup)"
+make check-architecture check-packaging check-locks check-comment-hygiene &&
+  bunx @fission-ai/openspec@1.14.0 validate agreed-evidence-and-early-termination --strict &&
+  make test
+```
+
+The prescribed Podman shim is a host prerequisite for the full aggregate; the
+focused API/library replay above does not need it. The result includes compute
+14 passed, VM unit 1196 passed with one existing optional RL skip, VM integration
+523 passed, bare-metal storefront 540 passed, compute-service unit 607 passed and
+integration 458 passed, plus release tooling and Helm structural/render checks.
+The aggregate runs the existing kit typing targets; no standalone domain mypy
+run is claimed. No browser, dev server or external deployment was started.
+Change-wide independent review, documentation promotion and archival remain the
+owning change's closeout rather than this bounded repair assignment.
