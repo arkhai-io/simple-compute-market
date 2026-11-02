@@ -1458,7 +1458,7 @@ must keep passing.
 The closeout task of `openspec/README.md#plan-closeout-requirements`, in its order. It edits
 documentation only; a part needing code returns the change to implementation.
 
-- [ ] 16.1 **Comment hygiene.** Run `make check-comment-hygiene` and read the comments the change
+- [x] 16.1 **Comment hygiene.** Run `make check-comment-hygiene` and read the comments the change
       added for provenance; anything found returns the change to implementation.
 - [ ] 16.2 **Import placement.** Confirm the imports each section added are at module level
       unless a recorded reason keeps one local; one that should move returns the change to
@@ -1593,6 +1593,13 @@ documentation only; a part needing code returns the change to implementation.
   observations and limits are in
   `docs/attachments/aeet-vm-hosted/index.md`; no rate/funding or real-hardware
   result is claimed. Permanent promotion remains reviewed section 16 closeout.
+
+## Closeout validation
+
+- 16.1: `make check-comment-hygiene` passes on the closeout base `64f647d53`.
+  Reviewed added production comments and docstrings against the implementation
+  diff from `c7dd275c5`; they describe current invariants, not change provenance.
+  No code edit is needed or made by closeout.
 
 ## Design promotion record
 
