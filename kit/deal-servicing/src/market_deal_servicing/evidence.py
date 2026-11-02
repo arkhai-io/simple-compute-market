@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from typing import TypeVar
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -13,6 +14,17 @@ from market_deal_lifecycle.evidence import CommitmentAttempt, EvidenceRecord
 from market_deal_lifecycle.terms import LifecycleTerms, encode_terms
 from market_deal_lifecycle_contracts.models import EvidenceItem, Instant, WireModel
 from market_identity import Identity, canonical_json
+
+
+T = TypeVar("T")
+
+
+async def in_transaction(path: str | Path, operation: Callable[[sqlite3.Connection], T]) -> T:
+    """Run a bounded database unit off the event loop; callbacks perform no I/O."""
+    def run() -> T:
+        with transaction(path) as conn:
+            return operation(conn)
+    return await asyncio.to_thread(run)
 
 
 class RetentionObservation(WireModel):
@@ -80,6 +92,7 @@ class EvidenceSession:
 
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
+        create_schema(conn)
 
     def _ensure(self, negotiation_id: str) -> None:
         self.conn.execute(
@@ -224,6 +237,7 @@ class EvidenceSession:
         for table in (
             "servicing_evidence_items", "servicing_evidence_commitments", "servicing_evidence_deals",
             "servicing_final_requests", "servicing_intents", "servicing_delivery", "servicing_watch",
+            "servicing_observations",
         ):
             if not self.conn.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,),
@@ -251,8 +265,6 @@ class SQLiteEvidenceStore:
 
     def __init__(self, path: str | Path):
         self.path = Path(path)
-        with transaction(self.path) as conn:
-            create_schema(conn)
 
     def _call(self, method: str, *args, **kwargs):
         with transaction(self.path) as conn:
@@ -269,6 +281,12 @@ class SQLiteEvidenceStore:
 
     async def negotiations(self) -> tuple[str, ...]:
         return await asyncio.to_thread(self._call, "negotiations")
+
+    async def observe(self, negotiation_id: str, observation: RetentionObservation) -> None:
+        await asyncio.to_thread(self._call, "observe", negotiation_id, observation)
+
+    async def prune(self, negotiation_id: str, *, now: int, has_adapter: bool) -> bool:
+        return await asyncio.to_thread(self._call, "prune", negotiation_id, now=now, has_adapter=has_adapter)
 
     async def delete(self, negotiation_id: str) -> None:
         await asyncio.to_thread(self._call, "delete", negotiation_id)

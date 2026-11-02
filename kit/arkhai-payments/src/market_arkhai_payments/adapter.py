@@ -183,7 +183,12 @@ class PaymentAdapter:
                 ))
         # A refund or discount is not a delivery end. The seller's end journal
         # owns physical state; once commitments have no payment deadline.
-        return AuthorityView(outcome=Accepted(), state="running", events=events, extensions=extensions)
+        return AuthorityView(
+            outcome=Accepted(), state="running", events=events, extensions=extensions,
+            payouts={str(part.part): snapshot.observedAt if (
+                part.held.root == "0" and part.status.value in {"released", "reversed", "settled"}
+            ) else None for part in snapshot.parts},
+        )
 
     async def read(self) -> AuthorityView:
         try:

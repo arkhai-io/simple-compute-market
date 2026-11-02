@@ -199,6 +199,9 @@ class OpenExtension(WireModel):
 
 class AuthorityView(WireModel):
     outcome: LifecycleOutcome
+    # None means the adapter cannot supply a complete payout observation.
+    # Completed parts use their first verified completion observation, not a forecast.
+    payouts: dict[str, Instant | None] | None = None
     state: LifecycleState | None = None
     events: list[PaymentEvent] = Field(default_factory=list)
     disputes: list[DisputeEvent] = Field(default_factory=list)
