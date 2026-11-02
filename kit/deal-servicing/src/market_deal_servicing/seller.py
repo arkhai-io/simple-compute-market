@@ -129,6 +129,8 @@ class SellerServicing:
         with transaction(self.path) as conn:
             session = WatchSession(conn)
             payment = session.view(deal.negotiation_id, watch.payment_record)
+            current_payment = session.observation(deal.negotiation_id, watch.payment_record)
+            current_dispute = session.observation(deal.negotiation_id, watch.dispute_record) if watch.dispute_record else None
             dispute = session.view(deal.negotiation_id, watch.dispute_record) if watch.dispute_record else None
         missing = deal.dispute is not None and not self.credential_available(deal.dispute)
         if missing:
@@ -136,10 +138,11 @@ class SellerServicing:
         elif watch.payment is None:
             outcome = Rejected(reason=f"{deal.payment.mechanism} has no lifecycle adapter")
         else:
-            views = [view for view in (payment, dispute) if view is not None]
-            outcome = next((view.outcome for view in views if not isinstance(view.outcome, Accepted)), Accepted())
-            if payment is None:
-                outcome = Pending(reason="payment authority has not been observed")
+            required = [current_payment] + ([current_dispute] if deal.dispute else [])
+            outcome = next(
+                (view.outcome for view in required if view is not None and not isinstance(view.outcome, Accepted)),
+                Pending(reason="required authority has not been observed") if None in required else Accepted(),
+            )
         return AuthorityView(
             outcome=outcome, state="repair_required" if missing else payment.state if payment else None,
             events=payment.events if payment else [], disputes=dispute.disputes if dispute else [],

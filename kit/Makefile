@@ -2,9 +2,12 @@
 
 DIST_DIR ?= ../.dist
 
-test: dist test-deal-lifecycle-buyer test-arkhai-mediation test-deal-lifecycle test-deal-lifecycle-contracts test-alkahest test-capability-shape test-capability-pricing test-capability-admissibility test-capacity-publication test-pool-overrides test-config test-contact-exchange test-delivery test-delivery-apprise test-identity test-policy test-site test-site-client test-resource-pools-contracts test-resource-pools test-resource-pools-client test-fulfillment test-settlement-runtime test-negotiation-runtime test-storefront test-arkhai-payments
+test: dist test-deal-servicing test-deal-lifecycle-buyer test-arkhai-mediation test-deal-lifecycle test-deal-lifecycle-contracts test-alkahest test-capability-shape test-capability-pricing test-capability-admissibility test-capacity-publication test-pool-overrides test-config test-contact-exchange test-delivery test-delivery-apprise test-identity test-policy test-site test-site-client test-resource-pools-contracts test-resource-pools test-resource-pools-client test-fulfillment test-settlement-runtime test-negotiation-runtime test-storefront test-arkhai-payments
 
-.PHONY: test-deal-lifecycle-buyer dist-deal-lifecycle-buyer
+.PHONY: test-deal-servicing test-deal-lifecycle-buyer dist-deal-lifecycle-buyer
+
+test-deal-servicing:
+	cd deal-servicing && $(MAKE) test
 
 dist-deal-lifecycle-client: dist-deal-lifecycle-contracts
 	cd deal-lifecycle-client && $(MAKE) build DIST_DIR=$(abspath $(DIST_DIR))

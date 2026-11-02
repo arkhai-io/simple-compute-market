@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Literal
@@ -25,6 +26,10 @@ def create_schema(conn) -> None:
             PRIMARY KEY (negotiation_id,record_ref)
         )"""
     )
+    conn.execute("""CREATE TABLE IF NOT EXISTS servicing_observations (
+        negotiation_id TEXT NOT NULL, record_ref TEXT NOT NULL, view TEXT NOT NULL,
+        PRIMARY KEY (negotiation_id,record_ref)
+    )""")
 
 
 class WatchSession:
@@ -44,6 +49,20 @@ class WatchSession:
             (negotiation_id, record_ref),
         ).fetchone()
         return AuthorityView.model_validate_json(row[0]) if row else None
+
+    def observation(self, negotiation_id: str, record_ref: str) -> AuthorityView | None:
+        row = self.conn.execute(
+            "SELECT view FROM servicing_observations WHERE negotiation_id=? AND record_ref=?",
+            (negotiation_id, record_ref),
+        ).fetchone()
+        return AuthorityView.model_validate_json(row[0]) if row else None
+
+    def observe(self, negotiation_id: str, record_ref: str, view: AuthorityView) -> None:
+        self.conn.execute(
+            """INSERT INTO servicing_observations VALUES (?,?,?)
+               ON CONFLICT(negotiation_id,record_ref) DO UPDATE SET view=excluded.view""",
+            (negotiation_id, record_ref, view.model_dump_json()),
+        )
 
     def save(self, negotiation_id: str, record_ref: str, sequence: int, view: AuthorityView) -> None:
         if sequence < self.cursor(negotiation_id, record_ref):
@@ -113,7 +132,7 @@ class DealWatch:
             watch = WatchSession(conn)
             end = EndSession(conn)
             cursor = watch.cursor(self.negotiation_id, record_ref)
-            if events and events[-1].sequence < cursor:
+            if max((event.sequence for event in events), default=-1) < cursor:
                 raise ValueError("authority read regresses below its durable cursor")
             fresh: list[PaymentEvent | DisputeEvent] = []
             for event in events:
@@ -196,17 +215,29 @@ class DealWatch:
             watch.save(self.negotiation_id, record_ref, cursor, view)
             return fresh
 
+    def _refresh(self, record_ref: str, view: AuthorityView, *, dispute: bool):
+        try:
+            fresh = self._observe(record_ref, view, dispute=dispute)
+        except ValueError as exc:
+            view = AuthorityView(outcome=Rejected(reason=str(exc)))
+            fresh = []
+        with transaction(self.path) as conn:
+            WatchSession(conn).observe(self.negotiation_id, record_ref, view)
+        return view, fresh
+
     async def poll(self) -> tuple[list[AuthorityView], list[PaymentEvent | DisputeEvent]]:
         views = []
         fresh: list[PaymentEvent | DisputeEvent] = []
         if self.payment is not None:
             payment = await self.payment.read()
+            payment, events = await asyncio.to_thread(self._refresh, self.payment_record, payment, dispute=False)
             views.append(payment)
-            fresh.extend(self._observe(self.payment_record, payment, dispute=False))
+            fresh.extend(events)
         if self.dispute is not None and self.dispute_record is not None:
             dispute = await self.dispute.read()
+            dispute, events = await asyncio.to_thread(self._refresh, self.dispute_record, dispute, dispute=True)
             views.append(dispute)
-            fresh.extend(self._observe(self.dispute_record, dispute, dispute=True))
+            fresh.extend(events)
         await self.replay_appends()
         if views and all(isinstance(view.outcome, Accepted) for view in views):
             observation = self.observe_retention(views)

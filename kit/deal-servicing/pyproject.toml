@@ -16,5 +16,10 @@ packages = ["src/market_deal_servicing"]
 [tool.arkhai.architecture]
 allowed-dependencies = ["arkhai-kit-deal-lifecycle", "arkhai-kit-deal-lifecycle-contracts", "arkhai-kit-identity", "pydantic", "fastapi"]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
 [dependency-groups]
-dev = ["arkhai-kit-deal-lifecycle-client>=0.1.0", "httpx>=0.27", "arkhai-kit-arkhai-mediation>=0.1.0", "arkhai-kit-arkhai-payments>=0.1.0", "mypy>=1.15,<2"]
+dev = ["pytest>=8.3.4,<9", "pytest-asyncio>=0.25,<1", "arkhai-kit-deal-lifecycle-client>=0.1.0", "httpx>=0.27", "arkhai-kit-arkhai-mediation>=0.1.0", "arkhai-kit-arkhai-payments>=0.1.0", "mypy>=1.15,<2"]
