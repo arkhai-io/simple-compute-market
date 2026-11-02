@@ -40,8 +40,8 @@ class LifecyclePurchase:
     reports: list | None = None
 
 
-def _cli_json(run):
-    assert run.returncode == 0, (run.returncode, run.stdout(), run.stderr())
+def _cli_json(run, *, returncodes=(0,)):
+    assert run.returncode in returncodes, (run.returncode, run.stdout(), run.stderr())
     return json.loads(run.stdout().splitlines()[-1])
 
 
@@ -141,7 +141,13 @@ class CliLifecycleBuyer:
         return result["progress"]["acknowledgement"]
 
     def read(self, purchase):
-        result = _cli_json(self.cli.run(["end", "--from", purchase.run_id]))
+        # A positive bounded wait reads current delivery, rather than merely
+        # returning the immutable acknowledgement from the original surrender.
+        run = self.cli.run(["end", "--from", purchase.run_id,
+                            "--wait-timeout", "0.01", "--poll-interval", "0.01"])
+        result = _cli_json(run, returncodes=(0, 1))
+        assert result["progress"]["delivery"]["status"] == "accepted", result
+        assert run.returncode == (0 if result["capacity_released"] else 1), result
         assert result["capacity_released"] == (result["delivery_view"]["progress"] == "released"), result
         return result["delivery_view"]
 
