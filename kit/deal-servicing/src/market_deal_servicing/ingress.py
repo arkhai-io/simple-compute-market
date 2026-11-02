@@ -16,6 +16,7 @@ from market_deal_lifecycle_contracts.models import (
 from market_identity import (
     AuthenticatedRequest, Identity, TrustedIdentitySet, canonical_json, verify_request,
 )
+from pydantic import JsonValue
 
 from .evidence import EvidenceSession, transaction
 from .journal import Classification, EndSession, FinalRequest, atomic, create_schema
@@ -49,12 +50,14 @@ class DeliveryIngress:
         self, path: str | Path, *, clock: Callable[[], int], verify_site: SiteReportVerifier,
         classify_site: Callable[[VerifiedSiteEnd, EndSession], Classification | None] = lambda *_: None,
         max_request_skew: int = 300,
+        receipt_claim: Callable[[str, int], dict[str, JsonValue] | None] = lambda *_: None,
     ):
         self.path = Path(path)
         self.clock = clock
         self.verify_site = verify_site
         self.classify_site = classify_site
         self.max_request_skew = max_request_skew
+        self.receipt_claim = receipt_claim
         with transaction(self.path) as conn:
             create_schema(conn)
 
@@ -122,6 +125,18 @@ class DeliveryIngress:
                     "INSERT INTO servicing_end_receipts VALUES (?,?,?,?)",
                     (message.negotiation_id, message.operation_key, digest, receipt_at),
                 )
+            claim_row = conn.execute(
+                "SELECT claim FROM servicing_receipt_claims WHERE negotiation_id=? AND operation_key=?",
+                (message.negotiation_id, message.operation_key),
+            ).fetchone()
+            if claim_row is None:
+                claim = self.receipt_claim(message.negotiation_id, receipt_at)
+                conn.execute(
+                    "INSERT INTO servicing_receipt_claims VALUES (?,?,?)",
+                    (message.negotiation_id, message.operation_key, canonical_json(claim).decode()),
+                )
+            else:
+                claim = json.loads(claim_row[0])
             evidence_ref = "buyer-end-envelope:" + envelope.request_id
             EvidenceSession(conn).put(message.negotiation_id, EvidenceItem(
                 evidence_id=evidence_ref, kind="end_delivery", classification="buyer_observation",
@@ -145,5 +160,6 @@ class DeliveryIngress:
             return EndDeliveryAcknowledgement(
                 negotiation_id=message.negotiation_id, operation_key=message.operation_key,
                 receipt_at=receipt_at, selected_end=selected.attribution,
+                signed_delivery_end_claim=claim,
                 delivery=end.view(message.negotiation_id),
             )

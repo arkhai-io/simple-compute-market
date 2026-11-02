@@ -146,6 +146,10 @@ def create_schema(conn: sqlite3.Connection) -> None:
             request_digest TEXT NOT NULL, receipt_at INTEGER NOT NULL,
             PRIMARY KEY (negotiation_id,operation_key)
         )""",
+        """CREATE TABLE IF NOT EXISTS servicing_receipt_claims (
+            negotiation_id TEXT NOT NULL, operation_key TEXT NOT NULL, claim TEXT NOT NULL,
+            PRIMARY KEY (negotiation_id,operation_key)
+        )""",
         """CREATE TABLE IF NOT EXISTS servicing_seller_deals (
             negotiation_id TEXT PRIMARY KEY, deal TEXT NOT NULL
         )""",

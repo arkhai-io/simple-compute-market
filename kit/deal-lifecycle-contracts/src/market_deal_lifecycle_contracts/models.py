@@ -227,9 +227,8 @@ class EndDeliveryAcknowledgement(WireModel):
     receipt_at: Instant
     selected_end: RecordedEnd
     delivery: DeliveryView
-    # The owning dispute kit supplies SignedDeliveryEndClaim only after its
-    # contract is published and vendored. Non-null claims fail closed here.
-    signed_delivery_end_claim: None = None
+    # The selected dispute adapter owns validation and the claim's canonical frame.
+    signed_delivery_end_claim: dict[str, JsonValue] | None = None
 
     @model_validator(mode="after")
     def selected_end_matches_delivery(self) -> EndDeliveryAcknowledgement:

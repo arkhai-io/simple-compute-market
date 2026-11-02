@@ -110,10 +110,12 @@ def test_read_without_adapter_does_not_hide_evidence_or_invent_authority_state()
     assert read.delivery.site_reports[0].body == report
 
 
-def test_concrete_claim_embedding_fails_closed_until_its_owning_contract_is_available():
+def test_claim_embedding_preserves_the_interface_owned_claim_without_rewriting():
     buyer, seller, _ = signers("ed25519")
     receipt, _ = signed_receipt(buyer, seller)
     data = json.loads(receipt.response_body)
-    data["signed_delivery_end_claim"] = {"unpublished": True}
-    with pytest.raises(ValueError):
-        EndDeliveryAcknowledgement.model_validate(data)
+    claim = {"agreement": "0" * 64,
+             "claim": {"kind": "delivery_end", "ended_at": 100, "delivered": True, "cause": "payer"},
+             "signer": seller.identity.model_dump(mode="json"), "proof": receipt.response.proof.model_dump(mode="json")}
+    data["signed_delivery_end_claim"] = claim
+    assert EndDeliveryAcknowledgement.model_validate(data).signed_delivery_end_claim == claim

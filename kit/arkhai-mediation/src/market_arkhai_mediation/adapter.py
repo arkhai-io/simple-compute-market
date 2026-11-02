@@ -58,6 +58,33 @@ class MediationAdapter:
         self.clock = clock
         self._concurrence = concurrence.model_copy(deep=True) if concurrence is not None else None
 
+    def sign_delivery_end(self, intent: DeliveryEndIntent, signer: Signer) -> dict[str, JsonValue]:
+        if signer.identity != Identity.model_validate(self._agreement["seller"]):
+            raise ValueError("delivery claim signer is not the Agreement seller")
+        return wire(sign_claim(
+            agreement=self.agreement_digest, signer=signer,
+            claim=DeliveryEndClaim.model_validate(intent.model_dump(mode="json")),
+        ))
+
+    def verify_delivery_end(self, signed: dict[str, JsonValue], intent: DeliveryEndIntent) -> bool:
+        try:
+            return verify_claim(
+                SignedDeliveryEndClaim.model_validate(signed), agreement=self.agreement_digest,
+                seller=Identity.model_validate(self._agreement["seller"]),
+                claim=DeliveryEndClaim.model_validate(intent.model_dump(mode="json")),
+            )
+        except (ValueError, ValidationError):
+            return False
+
+    def concurrent_request(
+        self, intent: DeliveryEndIntent, signed: dict[str, JsonValue] | None,
+    ) -> InterfaceRequest | Rejected:
+        if signed is not None and not self.verify_delivery_end(signed, intent):
+            return Rejected(reason="concurrence does not bind the Agreement seller and exact claim")
+        return self.delivery_end_request(
+            intent, concurrence=SignedDeliveryEndClaim.model_validate(signed) if signed is not None else None,
+        )
+
     def build_request(self, intent: DeliveryEndIntent) -> InterfaceRequest | Rejected:
         return self.delivery_end_request(intent, concurrence=self._concurrence)
 
@@ -157,11 +184,8 @@ class MediationAdapter:
             return Rejected(reason="respondent answer differs from the exact Agreement or seller")
         if not matching or case.intent is None:
             return self.build_append(case.case_ref, items)
-        signed = sign_claim(
-            agreement=self.agreement_digest, signer=signer,
-            claim=DeliveryEndClaim.model_validate(case.intent.model_dump(mode="json")),
-        )
-        return validate("Append", {"case_ref": case.case_ref, "concurrence": wire(signed)})
+        signed = self.sign_delivery_end(case.intent, signer)
+        return validate("Append", {"case_ref": case.case_ref, "concurrence": signed})
 
     def validate_request(self, request: InterfaceRequest) -> Rejected | None:
         try:

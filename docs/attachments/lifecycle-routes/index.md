@@ -57,6 +57,22 @@ credentials and an exact Agreement resolver. Run it before deal watch: both
 adopt one case-keyed append journal, and watch never replaces a prepared answer.
 Missing local Agreements remain pending for repair/triage, not silent agreement.
 
+## Reusable receipt claims
+
+`examples/receipt_first_use.py` drives the mounted route for both Ed25519 and
+EIP-191 sellers using the producer's public vector signers. The receipt embeds
+the owning adapter's SignedDeliveryEndClaim at durable receipt time. Claim and
+proof are stored atomically with receipt/end recording, not regenerated on retry.
+The adapter verifies the Agreement digest, exact seller and exact claim, maps the
+unchanged claim into Filing.concurrence, and refuses a one-second backdate.
+The neutral receipt verifier continues to verify request/response v2 signatures;
+no competing claim frame or standalone acknowledgement claim is introduced.
+
+The previous neutral test asserted the temporary null-only embedding gate. Its
+expected behavior now follows the available owning contract: preserve the opaque
+claim unchanged. Cryptographic rejection is exercised by the owning mediation
+suite and the shipped mounted-receipt example; no test function was added.
+
 ## Validation
 
 The servicing first-use examples and source typing pass; the existing lifecycle
