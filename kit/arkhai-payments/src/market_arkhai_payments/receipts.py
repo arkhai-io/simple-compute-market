@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from market_identity import (
@@ -24,6 +24,7 @@ from market_arkhai_payments.models import Mandate, SignedReceipt, SignedTransact
 
 RECEIPT_PROTOCOL = "arkhai.payments.receipt.v1"
 SNAPSHOT_PROTOCOL = "arkhai.payments.snapshot.v1"
+SnapshotVerifier = Callable[[SignedTransactionSnapshot, int], bool]
 
 
 class ReceiptIdentity(BaseModel):

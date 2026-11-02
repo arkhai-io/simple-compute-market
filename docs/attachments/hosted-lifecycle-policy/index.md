@@ -80,6 +80,9 @@ setups/assertions were adapted to the deliberate wire behavior.
   an unbounded case hold. Compute publication also requires a delivery deadline.
 - API-credit buy and standalone negotiate filter against the listing's own
   registry policy; approval resolves and checks that authority again.
+- Seller snapshot consumption retains an injectable per-agreement verifier
+  factory, with the shared rotation-aware verifier as its default. A temporary
+  diagnostic confirmed an injected refusal prevents seller admission.
 - `receipt_identities` configures validity-bounded current/retiring pins; a
   retiring pin requires an end to its validity interval. A nonempty set must
   include the current `service_identity`. Existing single-pin configuration
@@ -111,8 +114,12 @@ loopback, as above.
   regenerated from refreshed wheel environments. The release dependency table
   is updated without duplicating publication manifest/workflow entries.
 - The first full `make test` reached API-credit wheel installation and exposed
-  that fixture's missing mediation wheel. After its focused repair, a complete
-  aggregate rerun is in progress; its final disposition is recorded below.
+  that fixture's missing mediation wheel. Its focused repair passes. The next
+  aggregate passed all package suites and reached release-tooling, which exposed
+  the missing mediation distribution in the publication manifest/workflow.
+  Dependency closure is now recorded once in those lists and the release table;
+  release-tooling and deployment packaging pass on focused rerun. A fresh full
+  aggregate is in progress; its final disposition is recorded below.
 - The scoped documentation citation check reports only the three known future
   lifecycle destinations tracked in [#325](https://github.com/arkhai-io/simple-compute-market/issues/325).
 

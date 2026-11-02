@@ -767,7 +767,10 @@ can attest an embedded configured historical receipt, retaining its proof.
 Receipt history is operator-configurable as receipt_identities, with explicit
 current service_identity membership. Buyer approval, seller receipt admission and
 fully-reversed classification verify snapshots before consuming their state;
-HTTP snapshot parsing does not coerce signed values. Receipt fixtures reuse the
+HTTP snapshot parsing does not coerce signed values. Seller consumers preserve
+an injectable per-agreement snapshot-verifier factory, defaulting to the shared
+rotation-aware verifier, so lifecycle adapters can share the same verification
+policy. Receipt fixtures reuse the
 production frame. Helm config schemas are regenerated. Payments' 97 existing
 cases, typing, resource drift and all producer vectors pass; temporary diagnostics
 cover tampered/wrong-key/mode/cursor and rotation paths, and the committed

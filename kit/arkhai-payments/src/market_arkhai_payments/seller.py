@@ -26,7 +26,7 @@ from market_arkhai_payments.errors import (
     PaymentsUnavailable,
 )
 from market_arkhai_payments.models import SignedReceipt, StoredEvent
-from market_arkhai_payments.receipts import verify_receipt, verify_snapshot
+from market_arkhai_payments.receipts import SnapshotVerifier, verify_receipt, verify_snapshot
 from market_arkhai_payments.settlement_config import (
     ArkhaiPaymentsConfig,
     ArkhaiPaymentsConfigurationError,
@@ -172,14 +172,25 @@ class PaymentSellerStage:
         config: ArkhaiPaymentsConfig,
         *,
         client_for_owner: ClientForOwner | None = None,
+        snapshot_verifier: Callable[[Mapping[str, Any], PaymentSettlementData], SnapshotVerifier] | None = None,
     ) -> None:
         if config.service_url is None or config.service_identity is None:
             raise ArkhaiPaymentsConfigurationError(
                 "payments service URL and receipt identity are required for servicing"
             )
         self.config = config
+        self._snapshot_verifier = snapshot_verifier or self._verifier_for
         self._client_for_owner: ClientForOwner = client_for_owner or (
             lambda owner: payments_client_for_owner(config, owner)
+        )
+
+    def _verifier_for(
+        self, agreement: Mapping[str, Any], data: PaymentSettlementData,
+    ) -> SnapshotVerifier:
+        return lambda signed, minimum_sequence: verify_snapshot(
+            signed, self.config.receipt_trust, mandate=data.mandate,
+            agreement_json=agreement, livemode=self.config.livemode,
+            minimum_sequence=minimum_sequence,
         )
 
     def settlement_data(self, agreement: Mapping[str, Any]) -> PaymentSettlementData:
@@ -233,10 +244,7 @@ class PaymentSellerStage:
         if snapshot.snapshot.transaction.root != txid:
             return ReceiptBlocked(txid, "payments service returned another transaction")
         assert self.config.service_identity is not None
-        if not verify_snapshot(
-            snapshot, self.config.receipt_trust, mandate=data.mandate,
-            agreement_json=agreement, livemode=self.config.livemode,
-        ):
+        if not self._snapshot_verifier(agreement, data)(snapshot, 0):
             return ReceiptInvalid(txid, "payments snapshot does not prove the accepted Agreement")
         return ReceiptVerified(txid, snapshot.snapshot.receipt)
 
@@ -318,10 +326,7 @@ class PaymentSellerStage:
         except (PaymentsError, ArkhaiPaymentsConfigurationError):
             return False
         assert self.config.service_identity is not None
-        if not verify_snapshot(
-            signed, self.config.receipt_trust, mandate=data.mandate,
-            agreement_json=agreement, livemode=self.config.livemode,
-        ):
+        if not self._snapshot_verifier(agreement, data)(signed, 0):
             return False
         parts = signed.snapshot.parts
         return bool(parts) and all(part.status.value == "reversed" for part in parts)
