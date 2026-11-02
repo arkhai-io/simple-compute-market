@@ -55,20 +55,39 @@
   `e2e_bare_metal_payment_deal` exercise external payment integration when their
   separately configured authorities are available. No existing VM payment E2E
   marker or provider-funding marker establishes this wire refresh by itself.
-  Exact deployed/selected response compatibility, historical operational receipts,
-  full-suite/independent review and CI/E2E/Helm evidence remain section 2 work.
+  Section 2 now records the typed live compatibility read and frozen validation
+  scopes, including its environment continuations and payment-prerequisite skips.
 - Owed by validation: `tests.yml`, `build · kit-arkhai-payments`, must build the
   portable payment wheel; `test · test-kits`, `test · test-storefront`,
   `test · test-bare-metal` and `test · test-apicredits` must pass the affected
   kit/domain suites; `check · architecture` must confirm dependency boundaries.
   No push-only evidence is claimed by this section.
 
-Independent section-1 source review found no actionable findings; see `reviews/01-implementation.md`. Full frozen-round validation remains outstanding.
+Independent section-1 source review found no actionable findings; see `reviews/01-implementation.md`. Frozen validation was pending at that handoff; section 2 below records its completed results.
 
 ## 2. Frozen candidate validation
 
-- [ ] 2.1 Freeze source and artifact inputs; complete one full suite, combined independent review, CI/E2E and Helm round under the approved cadence, binding evidence to the candidate and disclosing environmental continuations and unrun scenarios.
-- [ ] 2.2 Verify rebuilt consumer response compatibility with BOTH the currently deployed authority contract and selected publication before any consumer/endpoint/server change; prove and record identity if the same check covers both, or establish compatible rollout order if they differ. Separately verify retained historical receipt signatures. Record response scope and immutable evidence privately; no credentials, operational addresses or raw service records enter Git.
+- [x] 2.1 Freeze source and artifact inputs; complete one full suite, combined independent review, CI/E2E and Helm round under the approved cadence, binding evidence to the candidate and disclosing environmental continuations and unrun scenarios. **Evidence:** the independent section-1 source review found no actionable findings; frozen validation records all 20 root prerequisites as composed coverage, all three E2E lanes, Helm and CI. The original aggregate `make test` stopped with an environmental exit 2, so no single successful full-suite invocation is claimed. Payment E2E cases skipped for missing payment-service configuration. The later workflow-only source update passed CI run 41528726254 (all 23 jobs) and its public-content check; runtime and package inputs stayed unchanged.
+- [x] 2.2 Verify rebuilt consumer response compatibility with BOTH the currently deployed authority contract and selected publication before any consumer/endpoint/server change; prove and record identity if the same check covers both, or establish compatible rollout order if they differ. Separately verify retained historical receipt signatures. Record response scope and immutable evidence privately; no credentials, operational addresses or raw service records enter Git. **Evidence:** before rollout, the rebuilt typed 0.5 client read two historical VM and bare-metal transactions from the deployed service. The selected standalone contract and deployed contract identity matched; receipt and snapshot signatures verified. Scope is limited to those historical reads and their signed transaction identity; it does not establish all-endpoint compatibility, new funding or physical delivery.
+
+### Section 2 evidence and scope
+
+The frozen candidate validation in `reviews/02-validation.md` records composed
+coverage of all 20 root prerequisites after an environment-limited aggregate
+invocation, CI run 41402761003 (23 jobs), E2E run 41402755345 (all three lanes),
+and Helm's served scenario (14 passed, 814 deselected). The bare-metal and
+API-credit payment E2E cases each had three payment-prerequisite skips because
+the payment service URL was not configured. Those skips are not passes. A later
+CI run on the workflow-only source update passed all 23 jobs and the public
+content check. Runtime and package inputs were unchanged from the frozen
+candidate; no new full-suite run or single successful `make test` invocation is
+claimed.
+
+The typed live compatibility read occurred before rollout and matched the
+deployed and selected contract identity for the sampled historical transactions.
+It verified their retained receipt and snapshot signatures without financial
+mutation. It does not establish new hosted funding, complete endpoint coverage,
+or hardware qualification. Formal review/triage and closeout remain separate.
 
 No existing E2E marker proves hosted payment-provider funding. Existing Arkhai settlement scenarios cover buyer/seller integration; live funding and physical delivery remain separate acceptance evidence. Record precise exercised markers and push-only workflow/job obligations once implementation identifies the affected suites.
 

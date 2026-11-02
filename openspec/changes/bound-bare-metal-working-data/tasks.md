@@ -170,7 +170,7 @@ used.
 - [x] 4.1 Complete the accepted equivalent normal-cycle observation: the shipped bare-metal buyer completed a real GPU rental and ordinary bounded reclaim; independent operator observations confirmed the tenant session/process/activity, account/home and covered working data/IPC were absent. The successor received a fresh UID and usable access but could not read predecessor data. The literal `e2e_bare_metal_bounded_cleanup` module was not run; raw host evidence and environment identifiers remain private.
 - [x] 4.2 Complete the accepted equivalent refusal/retry observation: a nonce-scoped foreign descendant caused actual cleanup refusal, held capacity and automatic notification. Repairing only that fixture allowed the same ordinary job to retry once and complete; sentinels, management and final inventory were verified. This is deployed observation, not helper/mock inference or force-release.
 - [ ] 4.3 Reconcile the completed frozen-candidate review and validation evidence with the source and deployed observations before pre-closeout: CI's 23 jobs, all three E2E lanes, composed local validation and Helm validation passed with their recorded scopes; the current workflow/Markdown-only revision passed 147 focused tests and packaging/change checks. The deployed 4.1–4.2 observations use the accepted method and are recorded above. Preserve that evidence binding and obtain the remaining formal pre-closeout/source joins per workflow. Resolve accepted findings and rerun affected checks; freeze a new source round if code changes. Do not describe the composed local results as one successful `make test` invocation or treat helper checks as physical evidence.
-- [ ] 4.4 Before pre-closeout review, fix comments/docstrings to describe current invariants and inspect every added/touched local import, moving it to module level unless a verified reason justifies it. Run real affected suites after moves, comment hygiene and packaging. Complete the classification/promotion map in `design.md`; current-state permanent prose is written in closeout only.
+- [x] 4.4 Before pre-closeout review, fix comments/docstrings to describe current invariants and inspect every added/touched local import, moving it to module level unless a verified reason justifies it. Run real affected suites after moves, comment hygiene and packaging. Complete the classification/promotion map in `design.md`; current-state permanent prose is written in closeout only. **Done:** the independent helper and combined integration reviews found no remaining source blocker; helper imports are module-level, and frozen cleanup implementation inputs are unchanged since review. Current `make check-comment-hygiene` passes. The design promotion record maps D1–D8 to the owning specs, architecture, operator documentation, testing guidance and readiness index. No import move or affected-suite rerun was needed. Task 4.3 and formal workflow gates remain open.
 
 ### Section 4 source preparation
 
@@ -262,13 +262,13 @@ comment-hygiene and privacy checks are recorded before commit. The accepted
 cadence leaves one combined source review/full validation with the lead; no extra
 broad section review, personal owner reading or formal join is claimed.
 
-Tasks 4.1–4.3 remain unchecked. Neither the mocked typed-boundary tests nor the
-disposable component check qualifies a physical target. The dedicated real marker
-belongs to no pipeline lane and must execute on the reviewed, frozen integration
-candidate. Owed by validation: `tests.yml`'s `test · test-e2e-unit` job must run
-the harness unit suite; the full pipeline and physical-marker evidence remain
-separate obligations under 4.3. Permanent policy/qualification promotion remains
-closeout work.
+At this earlier source handoff, tasks 4.1–4.3 were unchecked; the mock and
+component evidence alone did not qualify a physical target. Since then, the
+accepted method completed deployed observations 4.1–4.2, while the dedicated
+marker remains unrun and 4.3 remains open for formal source/pre-closeout joins.
+Owed by validation: `tests.yml`'s `test · test-e2e-unit` job must run the harness
+unit suite; pipeline and physical evidence remain separately scoped. Permanent
+policy/qualification promotion remains closeout work.
 
 ### Shared lane lease-correlation correction
 
